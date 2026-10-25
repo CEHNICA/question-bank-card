@@ -18,7 +18,10 @@ def forwards(apps, schema_editor):
         answer = fix_symbols(question.answer)
         analysis = fix_symbols(question.analysis)
         final_changed = (stem, options, answer, analysis) != (
-            question.stem, question.options, question.answer, question.analysis,
+            question.stem,
+            question.options,
+            question.answer,
+            question.analysis,
         )
         if final_changed:
             question.stem, question.options = stem, options
@@ -26,10 +29,9 @@ def forwards(apps, schema_editor):
             question.approved = False
             question.approved_at = None
             question.approved_content_hash = ""
-            update_fields.extend([
-                "stem", "options", "answer", "analysis",
-                "approved", "approved_at", "approved_content_hash",
-            ])
+            update_fields.extend(
+                ["stem", "options", "answer", "analysis", "approved", "approved_at", "approved_content_hash"]
+            )
 
         for field in ("read_a", "read_b", "read_c"):
             old = getattr(question, field)
@@ -43,11 +45,6 @@ def forwards(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+    dependencies = [("core", "0004_approval_content_hash")]
 
-    dependencies = [
-        ("core", "0004_approval_content_hash"),
-    ]
-
-    operations = [
-        migrations.RunPython(forwards, migrations.RunPython.noop),
-    ]
+    operations = [migrations.RunPython(forwards, migrations.RunPython.noop)]

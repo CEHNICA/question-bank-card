@@ -24,6 +24,7 @@ def fake_api(states):
         if path == "file-urls/batch":
             return {"batch_id": "b1", "file_urls": ["https://example.invalid/upload"]}, "t"
         return {"extract_result": [next(answers)]}, "t"
+
     return api
 
 
@@ -33,10 +34,12 @@ class PollingStopsOnRequestTests(SimpleTestCase):
         source = folder / "paper.pdf"
         source.write_bytes(b"%PDF-1.4")
         asked = iter([False, True])
-        with mock.patch.object(mineru, "_api_json", side_effect=fake_api([{"state": "pending"}] * 5)), \
-                mock.patch.object(mineru.requests.Session, "put", return_value=mock.Mock(ok=True)), \
-                mock.patch.object(mineru.time, "sleep"), \
-                self.assertRaises(mineru.MineruRestart):
+        with (
+            mock.patch.object(mineru, "_api_json", side_effect=fake_api([{"state": "pending"}] * 5)),
+            mock.patch.object(mineru.requests.Session, "put", return_value=mock.Mock(ok=True)),
+            mock.patch.object(mineru.time, "sleep"),
+            self.assertRaises(mineru.MineruRestart),
+        ):
             mineru.request_extract_file("token", source, folder / "r.zip", 4, restart=lambda: next(asked))
 
 
@@ -61,9 +64,11 @@ class PipelineSendsAgainTests(v110.TempDataMixin, TestCase):
             archive.write_bytes(b"zip")
 
         blocks = [{"seq": 1, "type": "text", "page_idx": 0, "bbox": [20, 30, 900, 80], "text": "1. 已知"}]
-        with mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=extract), \
-                mock.patch.object(pipeline, "load_blocks", return_value=blocks), \
-                mock.patch.object(pipeline, "_plan_structure", return_value=({}, False)):
+        with (
+            mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=extract),
+            mock.patch.object(pipeline, "load_blocks", return_value=blocks),
+            mock.patch.object(pipeline, "_plan_structure", return_value=({}, False)),
+        ):
             pipeline.parse(self.paper)
         self.assertEqual(calls, [False, False])
         self.assertFalse(restart_file.exists())
@@ -78,9 +83,11 @@ class PipelineSendsAgainTests(v110.TempDataMixin, TestCase):
             seen.append(restart())
             archive.write_bytes(b"zip")
 
-        with mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=extract), \
-                mock.patch.object(pipeline, "load_blocks", return_value=[]), \
-                mock.patch.object(pipeline, "_plan_structure", return_value=({}, False)):
+        with (
+            mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=extract),
+            mock.patch.object(pipeline, "load_blocks", return_value=[]),
+            mock.patch.object(pipeline, "_plan_structure", return_value=({}, False)),
+        ):
             pipeline.parse(self.paper)
         self.assertEqual(seen, [False])
 
@@ -91,8 +98,12 @@ class ReparseApiTests(v110.TempDataMixin, TestCase):
         self.paper = self.make_paper()
 
     def post(self):
-        return Client().post(f"/api/papers/{self.paper.id}/reparse", data=json.dumps({}),
-                             content_type="application/json", HTTP_X_QB_REQUEST="1")
+        return Client().post(
+            f"/api/papers/{self.paper.id}/reparse",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
 
     def test_only_a_paper_waiting_on_minerU_can_be_sent_again(self):
         self.assertEqual(self.post().status_code, 409)  # ready
@@ -120,11 +131,13 @@ class QueueWaitTests(SimpleTestCase):
         def tick(_seconds):
             clock["now"] += minutes_per_poll * 60
 
-        with mock.patch.object(mineru, "_api_json", side_effect=fake_api(states)), \
-                mock.patch.object(mineru.requests.Session, "put", return_value=mock.Mock(ok=True)), \
-                mock.patch.object(mineru, "_download_zip"), \
-                mock.patch.object(mineru.time, "monotonic", side_effect=lambda: clock["now"]), \
-                mock.patch.object(mineru.time, "sleep", side_effect=tick):
+        with (
+            mock.patch.object(mineru, "_api_json", side_effect=fake_api(states)),
+            mock.patch.object(mineru.requests.Session, "put", return_value=mock.Mock(ok=True)),
+            mock.patch.object(mineru, "_download_zip"),
+            mock.patch.object(mineru.time, "monotonic", side_effect=lambda: clock["now"]),
+            mock.patch.object(mineru.time, "sleep", side_effect=tick),
+        ):
             return mineru.request_extract_file("token", source, folder / "r.zip", 4)
 
     def test_a_queued_file_is_waited_for_past_twenty_minutes(self):

@@ -49,8 +49,13 @@ class PaperSpeedTests(v110.TempDataMixin, TestCase):
         now = timezone.now()
         self.cards = []
         for number in range(1, 13):
-            card = self.card(self.paper, number=number, question_type="free_response",
-                             stem=f"第 {number} 题：已知 $x>{number}$，求 $x^2$ 的范围", flags=[])
+            card = self.card(
+                self.paper,
+                number=number,
+                question_type="free_response",
+                stem=f"第 {number} 题：已知 $x>{number}$，求 $x^2$ 的范围",
+                flags=[],
+            )
             if number <= 6:
                 library.approve(card, now=now)
                 card.save()
@@ -90,8 +95,12 @@ class PaperSpeedTests(v110.TempDataMixin, TestCase):
 
         self.assertEqual(counts()["approved"], 6)
         # Through the page: un-tick one.
-        response = Client().post(f"/api/questions/{self.cards[0].id}/approve", data=json.dumps({"approved": False}),
-                                 content_type="application/json", HTTP_X_QB_REQUEST="1")
+        response = Client().post(
+            f"/api/questions/{self.cards[0].id}/approve",
+            data=json.dumps({"approved": False}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
         self.assertEqual(response.json()["paper"]["counts"]["approved"], 5)
         # Behind its back, without touching updated_at: the text of an approved card changes.
         Question.objects.filter(pk=self.cards[1].pk).update(stem="改过的题干")
@@ -101,8 +110,11 @@ class PaperSpeedTests(v110.TempDataMixin, TestCase):
         self.paper.save(update_fields=["task_name"])
         self.paper.refresh_from_db()
         renamed = counts()
-        expected = sum(1 for card in Question.objects.filter(paper=self.paper).select_related("paper", "group")
-                       if library.approval_is_current(card))
+        expected = sum(
+            1
+            for card in Question.objects.filter(paper=self.paper).select_related("paper", "group")
+            if library.approval_is_current(card)
+        )
         self.assertEqual(renamed["approved"], expected)
 
     def test_remembered_and_fresh_verdicts_agree(self):

@@ -43,9 +43,7 @@ _BREAK = re.compile(r"<br\s*/?>", re.I)
 # verbatim — see ``_outside_math``.
 _CJK = "\u3000-\u303f\u4e00-\u9fff\uff00-\uffef"
 _HALF_TO_FULL = {",": "，", ";": "；", ":": "：", "?": "？", "!": "！", ".": "。"}
-_HALF_PUNCT = re.compile(
-    f"(?<=[{_CJK}])[{''.join(_HALF_TO_FULL)}]|[{''.join(_HALF_TO_FULL)}](?=[{_CJK}])"
-)
+_HALF_PUNCT = re.compile(f"(?<=[{_CJK}])[{''.join(_HALF_TO_FULL)}]|[{''.join(_HALF_TO_FULL)}](?=[{_CJK}])")
 _MATH = re.compile(r"(?<!\\)(\${1,2})(.*?)(?<!\\)\1|\\\(.+?\\\)|\\\[.+?\\\]", re.S)
 # A run of half-width stops after Chinese is one sentence, not several: the OCR
 # often leaves “正数..”.  Collapsing keeps the paper from showing “正数。.”
@@ -66,7 +64,7 @@ def _outside_math(text: str, transform) -> str:
     result: list[str] = []
     start = 0
     for match in _MATH.finditer(text):
-        result.append(transform(text[start:match.start()]))
+        result.append(transform(text[start : match.start()]))
         result.append(match.group(0))
         start = match.end()
     result.append(transform(text[start:]))
@@ -82,8 +80,7 @@ def plain_markup(text: str) -> str:
 
 def full_width_punctuation(text: str) -> str:
     """Half-width punctuation standing against Chinese becomes full-width."""
-    widened = _outside_math(str(text or ""),
-                            lambda part: _HALF_PUNCT.sub(_swap, part))
+    widened = _outside_math(str(text or ""), lambda part: _HALF_PUNCT.sub(_swap, part))
     return _DOUBLE_STOP.sub("。", widened)
 
 
@@ -147,8 +144,10 @@ def tidy_reading(reading, *, origin: str = "", switches: dict | None = None):
     changed = dict(reading)
     changed["stem"] = tidy_stem(reading["stem"], origin=origin, switches=switches)[0]
     if isinstance(reading.get("options"), dict):
-        changed["options"] = {key: tidy_value(value, switches=switches) if isinstance(value, str) else value
-                              for key, value in reading["options"].items()}
+        changed["options"] = {
+            key: tidy_value(value, switches=switches) if isinstance(value, str) else value
+            for key, value in reading["options"].items()
+        }
     return changed
 
 

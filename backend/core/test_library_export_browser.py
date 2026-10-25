@@ -28,8 +28,9 @@ from .test_library_export import ExportFixture, math_field, units
 NS = {"m": export.OMML_NS, "a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
 
 
-@unittest.skipUnless(os.environ.get("QB_EXPORT_BROWSER_TEST") == "1",
-                     "set QB_EXPORT_BROWSER_TEST=1 to run the real browser export")
+@unittest.skipUnless(
+    os.environ.get("QB_EXPORT_BROWSER_TEST") == "1", "set QB_EXPORT_BROWSER_TEST=1 to run the real browser export"
+)
 @override_settings(ROOT_URLCONF="core.test_library_export")
 class WordFormulaPictureBrowserTests(ExportFixture, TestCase):
     """Reuses the publication/payload/post fixtures; only the browser is real."""
@@ -37,19 +38,42 @@ class WordFormulaPictureBrowserTests(ExportFixture, TestCase):
     def degraded(self, latex, head="化简 ", tail=" 并写出结果。"):
         # Real KaTeX shapes for the two enclosures Word's equation model drops.
         command, _, rest = latex[1:].partition("{")
-        notation = {"cancel": "updiagonalstrike", "bcancel": "downdiagonalstrike",
-                    "xcancel": "updiagonalstrike downdiagonalstrike"}[command]
+        notation = {
+            "cancel": "updiagonalstrike",
+            "bcancel": "downdiagonalstrike",
+            "xcancel": "updiagonalstrike downdiagonalstrike",
+        }[command]
         variable = rest[:-1]
         body = f'<menclose notation="{notation}"><mi>{variable}</mi></menclose>'
         source = head + "$" + latex + "$" + tail
-        mathml = (f'<math xmlns="{export.MATH_NS}"><semantics>{body}'
-                  f'<annotation encoding="application/x-tex">{latex}</annotation></semantics></math>')
+        mathml = (
+            f'<math xmlns="{export.MATH_NS}"><semantics>{body}'
+            f'<annotation encoding="application/x-tex">{latex}</annotation></semantics></math>'
+        )
         head_units = units(head)
         cut = head_units + units("$" + latex + "$")
-        return {"source": source, "blocks": [{"type": "text", "start": 0, "end": units(source), "segments": [
-            {"type": "text", "start": 0, "end": head_units},
-            {"type": "math", "start": head_units, "end": cut, "latex": latex, "mathml": mathml, "display": False},
-            {"type": "text", "start": cut, "end": units(source)}]}]}
+        return {
+            "source": source,
+            "blocks": [
+                {
+                    "type": "text",
+                    "start": 0,
+                    "end": units(source),
+                    "segments": [
+                        {"type": "text", "start": 0, "end": head_units},
+                        {
+                            "type": "math",
+                            "start": head_units,
+                            "end": cut,
+                            "latex": latex,
+                            "mathml": mathml,
+                            "display": False,
+                        },
+                        {"type": "text", "start": cut, "end": units(source)},
+                    ],
+                }
+            ],
+        }
 
     def test_one_real_browser_renders_two_formulas_into_the_docx(self):
         first = self.publication(stem=self.degraded("\\cancel{x}")["source"])
@@ -79,8 +103,7 @@ class WordFormulaPictureBrowserTests(ExportFixture, TestCase):
                     white = Image.new("RGBA", image.size, (255, 255, 255, 255))
                     flat = Image.alpha_composite(white, image.convert("RGBA")).convert("RGB")
                     colours = flat.getcolors(maxcolors=4)
-                    self.assertTrue(colours is None or len(colours) > 1,
-                                    f"{name} 是一张空图，卷子上会留个洞")
+                    self.assertTrue(colours is None or len(colours) > 1, f"{name} 是一张空图，卷子上会留个洞")
                     # Glyphs have real extent; a one-column strip is not a formula.
                     self.assertGreaterEqual(min(image.size), 24, f"{name} 的尺寸不像一条公式")
                     # No backdrop: the app stylesheet paints the paper colour on
@@ -91,6 +114,7 @@ class WordFormulaPictureBrowserTests(ExportFixture, TestCase):
             self.assertNotEqual(bodies[0], bodies[1], "两条不同的公式截出了同一张图")
 
         from urllib.parse import unquote
+
         warning = unquote(result["X-QB-Layout-Warning"])
         self.assertIn("第 1 题", warning)
         self.assertIn("第 2 题", warning)
@@ -98,8 +122,11 @@ class WordFormulaPictureBrowserTests(ExportFixture, TestCase):
 
     def test_a_convertible_formula_still_comes_out_as_a_native_equation(self):
         """The picture path must not swallow formulas that never needed it."""
-        value = math_field(r"\frac{a}{b}+\sqrt{x}", '<mrow><mfrac><mi>a</mi><mi>b</mi></mfrac><mo>+</mo>'
-                           '<msqrt><mi>x</mi></msqrt></mrow>', display=True)
+        value = math_field(
+            r"\frac{a}{b}+\sqrt{x}",
+            "<mrow><mfrac><mi>a</mi><mi>b</mi></mfrac><mo>+</mo><msqrt><mi>x</mi></msqrt></mrow>",
+            display=True,
+        )
         pub = self.publication(stem=value["source"])
         payload = self.payload([pub])
         payload["rendered_fields"][str(pub.id)]["stem"] = value

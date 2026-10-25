@@ -27,15 +27,13 @@ class _Response:
 def _token_plan_response(message: str = "Token Plan exhausted (2056)") -> _Response:
     response = _Response(429)
     response.content = b'{"error":true}'
-    response.json = mock.Mock(return_value={
-        "type": "error",
-        "request_id": "opaque-request-id",
-        "error": {
-            "http_code": "429",
-            "type": "rate_limit_error",
-            "message": message,
-        },
-    })
+    response.json = mock.Mock(
+        return_value={
+            "type": "error",
+            "request_id": "opaque-request-id",
+            "error": {"http_code": "429", "type": "rate_limit_error", "message": message},
+        }
+    )
     return response
 
 
@@ -44,14 +42,13 @@ class AccountPoolTests(SimpleTestCase):
         account_pool.reset_account_pools()
 
     def test_json_pool_is_ordered_deduplicated_and_legacy_compatible(self):
-        with mock.patch.dict("os.environ", {
-            "MINERU_TOKENS_JSON": json.dumps(["Bearer first", "second", "first"]),
-            "MINERU_TOKEN": "legacy",
-        }, clear=False):
+        with mock.patch.dict(
+            "os.environ",
+            {"MINERU_TOKENS_JSON": json.dumps(["Bearer first", "second", "first"]), "MINERU_TOKEN": "legacy"},
+            clear=False,
+        ):
             self.assertEqual(account_pool.secrets_from_environment("mineru"), ("first", "second"))
-        with mock.patch.dict("os.environ", {
-            "MINERU_TOKENS_JSON": "", "MINERU_TOKEN": "Bearer legacy",
-        }, clear=False):
+        with mock.patch.dict("os.environ", {"MINERU_TOKENS_JSON": "", "MINERU_TOKEN": "Bearer legacy"}, clear=False):
             self.assertEqual(account_pool.secrets_from_environment("mineru"), ("legacy",))
 
     def test_invalid_or_oversized_pool_fails_without_echoing_values(self):
@@ -60,9 +57,11 @@ class AccountPoolTests(SimpleTestCase):
             with self.assertRaises(account_pool.AccountPoolError) as raised:
                 account_pool.secrets_from_environment("minimax")
         self.assertNotIn("not-json", str(raised.exception))
-        with mock.patch.dict("os.environ", {
-            "MINIMAX_API_KEYS_JSON": json.dumps([f"{secret}-{index}" for index in range(9)]),
-        }, clear=False):
+        with mock.patch.dict(
+            "os.environ",
+            {"MINIMAX_API_KEYS_JSON": json.dumps([f"{secret}-{index}" for index in range(9)])},
+            clear=False,
+        ):
             with self.assertRaises(account_pool.AccountPoolError) as raised:
                 account_pool.secrets_from_environment("minimax")
         self.assertNotIn(secret, str(raised.exception))
@@ -167,7 +166,7 @@ class AccountConcurrencyTests(SimpleTestCase):
         for _ in range(3 * account_pool.recover_after(3)):
             with pool.lease():
                 pass
-        self.assertEqual(pool.capacity, 3)          # never above the configured limit
+        self.assertEqual(pool.capacity, 3)  # never above the configured limit
         with pool.lease() as lease:
             lease.cooldown(0)
         self.assertEqual(pool.capacity, 2)
@@ -194,8 +193,10 @@ class AccountConcurrencyTests(SimpleTestCase):
         # An explicit number fixes the level; otherwise MiniMax follows the plan.
         cases = (("", (3, 8)), ("2", (2, 2)), ("0", (1, 1)), ("99", (8, 8)), ("x", (3, 8)))
         for raw, expected in cases:
-            with self.subTest(raw=raw), mock.patch.dict(
-                    "os.environ", {"QB_MINIMAX_ACCOUNT_CONCURRENCY": raw, "QB_MINIMAX_PLAN": ""}):
+            with (
+                self.subTest(raw=raw),
+                mock.patch.dict("os.environ", {"QB_MINIMAX_ACCOUNT_CONCURRENCY": raw, "QB_MINIMAX_PLAN": ""}),
+            ):
                 self.assertEqual(account_pool.concurrency_range("minimax"), expected)
                 self.assertEqual(account_pool.account_concurrency("minimax"), expected[1])
         with mock.patch.dict("os.environ", {"QB_MINERU_ACCOUNT_CONCURRENCY": ""}):
@@ -204,11 +205,21 @@ class AccountConcurrencyTests(SimpleTestCase):
             self.assertEqual(account_pool.concurrency_range("siliconflow"), (2, 2))
 
     def test_minimax_membership_sets_the_start_and_the_ceiling(self):
-        cases = {"plus": (3, 4), "max": (4, 5), "ultra": (6, 7), "payg": (6, 8), "auto": (3, 8),
-                 "": (3, 8), "unknown": (3, 8), "PLUS": (3, 4)}
+        cases = {
+            "plus": (3, 4),
+            "max": (4, 5),
+            "ultra": (6, 7),
+            "payg": (6, 8),
+            "auto": (3, 8),
+            "": (3, 8),
+            "unknown": (3, 8),
+            "PLUS": (3, 4),
+        }
         for plan, expected in cases.items():
-            with self.subTest(plan=plan), mock.patch.dict(
-                    "os.environ", {"QB_MINIMAX_PLAN": plan, "QB_MINIMAX_ACCOUNT_CONCURRENCY": ""}):
+            with (
+                self.subTest(plan=plan),
+                mock.patch.dict("os.environ", {"QB_MINIMAX_PLAN": plan, "QB_MINIMAX_ACCOUNT_CONCURRENCY": ""}),
+            ):
                 self.assertEqual(account_pool.concurrency_range("minimax"), expected)
         with mock.patch.dict("os.environ", {"QB_MINIMAX_PLAN": "plus", "QB_MINIMAX_ACCOUNT_CONCURRENCY": "6"}):
             self.assertEqual(account_pool.concurrency_range("minimax"), (6, 6))
@@ -219,7 +230,7 @@ class AccountConcurrencyTests(SimpleTestCase):
         for _ in range(3):
             with pool.lease():
                 pass
-        self.assertEqual(pool.capacity, 4)          # one full round at 3
+        self.assertEqual(pool.capacity, 4)  # one full round at 3
         for _ in range(4):
             with pool.lease():
                 pass
@@ -246,18 +257,21 @@ class AccountConcurrencyTests(SimpleTestCase):
     def test_the_next_paper_starts_where_each_account_settled(self):
         account_pool.forget_learned_concurrency()
         self.addCleanup(account_pool.forget_learned_concurrency)
-        env = {"MINIMAX_API_KEYS_JSON": json.dumps(["k1", "k2"]), "QB_MINIMAX_PLAN": "auto",
-               "QB_MINIMAX_ACCOUNT_CONCURRENCY": ""}
+        env = {
+            "MINIMAX_API_KEYS_JSON": json.dumps(["k1", "k2"]),
+            "QB_MINIMAX_PLAN": "auto",
+            "QB_MINIMAX_ACCOUNT_CONCURRENCY": "",
+        }
         with mock.patch.dict("os.environ", env):
             pool = account_pool.account_pool("minimax")
-            self.assertEqual(pool.capacity, 6)            # 3 + 3
+            self.assertEqual(pool.capacity, 6)  # 3 + 3
             self.assertEqual(pool.ceiling, 16)
             for _ in range(20):
                 with pool.lease():
                     pass
             climbed = sorted(pool.levels())
             self.assertGreater(sum(climbed), 6)
-            account_pool.reset_account_pools()            # a new paper
+            account_pool.reset_account_pools()  # a new paper
             fresh = account_pool.account_pool("minimax")
             self.assertIsNot(fresh, pool)
             self.assertEqual(sorted(fresh.levels()), climbed)
@@ -272,8 +286,9 @@ class AccountConcurrencyTests(SimpleTestCase):
     def test_a_fixed_number_is_not_carried_between_papers(self):
         account_pool.forget_learned_concurrency()
         self.addCleanup(account_pool.forget_learned_concurrency)
-        with mock.patch.dict("os.environ", {"MINIMAX_API_KEYS_JSON": json.dumps(["k1"]),
-                                            "QB_MINIMAX_ACCOUNT_CONCURRENCY": "3"}):
+        with mock.patch.dict(
+            "os.environ", {"MINIMAX_API_KEYS_JSON": json.dumps(["k1"]), "QB_MINIMAX_ACCOUNT_CONCURRENCY": "3"}
+        ):
             pool = account_pool.account_pool("minimax")
             with pool.lease() as lease:
                 lease.cooldown(0)
@@ -282,21 +297,30 @@ class AccountConcurrencyTests(SimpleTestCase):
             self.assertEqual(account_pool.account_pool("minimax").capacity, 3)
 
     def test_shared_pool_uses_service_concurrency(self):
-        with mock.patch.dict("os.environ", {
-            "MINIMAX_API_KEYS_JSON": json.dumps(["k1", "k2"]),
-            "QB_MINIMAX_ACCOUNT_CONCURRENCY": "3",
-        }):
+        with mock.patch.dict(
+            "os.environ", {"MINIMAX_API_KEYS_JSON": json.dumps(["k1", "k2"]), "QB_MINIMAX_ACCOUNT_CONCURRENCY": "3"}
+        ):
             self.assertEqual(account_pool.account_pool("minimax").capacity, 6)
 
     def test_reading_threads_cover_the_plan_ceiling_not_the_opening_level(self):
         from . import pipeline
+
         account_pool.forget_learned_concurrency()
         self.addCleanup(account_pool.forget_learned_concurrency)
-        with mock.patch.dict("os.environ", {
-            "MINIMAX_API_KEYS_JSON": json.dumps(["k1"]), "QB_MINIMAX_PLAN": "auto",
-            "QB_MINIMAX_ACCOUNT_CONCURRENCY": "", "QB_PARALLEL_EXPLICIT": "0",
-            "QB_PRIMARY_ENGINE": "minimax_m3", "QB_CHECKER_ENGINE": "minimax_m3",
-        }), mock.patch.object(pipeline, "PARALLEL", 4):
+        with (
+            mock.patch.dict(
+                "os.environ",
+                {
+                    "MINIMAX_API_KEYS_JSON": json.dumps(["k1"]),
+                    "QB_MINIMAX_PLAN": "auto",
+                    "QB_MINIMAX_ACCOUNT_CONCURRENCY": "",
+                    "QB_PARALLEL_EXPLICIT": "0",
+                    "QB_PRIMARY_ENGINE": "minimax_m3",
+                    "QB_CHECKER_ENGINE": "minimax_m3",
+                },
+            ),
+            mock.patch.object(pipeline, "PARALLEL", 4),
+        ):
             self.assertEqual(account_pool.account_pool("minimax").capacity, 3)
             self.assertEqual(pipeline._reader_parallelism(), 8)
 
@@ -312,12 +336,11 @@ class VisionPoolTests(SimpleTestCase):
             seen.append(key)
             return _Response(401 if key == "bad-key" else 200, text="【题干】有效结果")
 
-        environment = {
-            "MINIMAX_API_KEYS_JSON": json.dumps(["bad-key", "good-key"]),
-            "MINIMAX_API_KEY": "bad-key",
-        }
-        with mock.patch.dict("os.environ", environment, clear=False), \
-                mock.patch.object(readers, "_post", side_effect=post):
+        environment = {"MINIMAX_API_KEYS_JSON": json.dumps(["bad-key", "good-key"]), "MINIMAX_API_KEY": "bad-key"}
+        with (
+            mock.patch.dict("os.environ", environment, clear=False),
+            mock.patch.object(readers, "_post", side_effect=post),
+        ):
             result = readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
         self.assertEqual(result, "【题干】有效结果")
         self.assertEqual(seen, ["bad-key", "good-key"])
@@ -330,11 +353,11 @@ class VisionPoolTests(SimpleTestCase):
             return _Response(200, text="OK")
 
         environment = {"MINIMAX_API_KEY": "test-key"}
-        with mock.patch.dict("os.environ", environment, clear=False), \
-                mock.patch.object(readers, "_post", side_effect=post):
-            result = readers.chat(
-                readers.Engine("minimax", "MiniMax-Custom-Vision"), "p", [], max_tokens=32,
-            )
+        with (
+            mock.patch.dict("os.environ", environment, clear=False),
+            mock.patch.object(readers, "_post", side_effect=post),
+        ):
+            result = readers.chat(readers.Engine("minimax", "MiniMax-Custom-Vision"), "p", [], max_tokens=32)
 
         self.assertEqual(result, "OK")
         self.assertEqual(payloads[0]["model"], "MiniMax-Custom-Vision")
@@ -347,11 +370,11 @@ class VisionPoolTests(SimpleTestCase):
             return _Response(200, text="OK")
 
         environment = {"SILICONFLOW_API_KEY": "test-key"}
-        with mock.patch.dict("os.environ", environment, clear=False), \
-                mock.patch.object(readers, "_post", side_effect=post):
-            result = readers.chat(
-                readers.Engine("siliconflow", "Qwen/Custom-VL"), "p", [], max_tokens=32,
-            )
+        with (
+            mock.patch.dict("os.environ", environment, clear=False),
+            mock.patch.object(readers, "_post", side_effect=post),
+        ):
+            result = readers.chat(readers.Engine("siliconflow", "Qwen/Custom-VL"), "p", [], max_tokens=32)
 
         self.assertEqual(result, "OK")
         self.assertEqual(payloads[0]["model"], "Qwen/Custom-VL")
@@ -361,8 +384,10 @@ class VisionPoolTests(SimpleTestCase):
             "SILICONFLOW_API_KEYS_JSON": json.dumps(["private-one", "private-two"]),
             "SILICONFLOW_API_KEY": "private-one",
         }
-        with mock.patch.dict("os.environ", environment, clear=False), \
-                mock.patch.object(readers, "_post", return_value=_Response(403)):
+        with (
+            mock.patch.dict("os.environ", environment, clear=False),
+            mock.patch.object(readers, "_post", return_value=_Response(403)),
+        ):
             with self.assertRaises(readers.ReaderError) as raised:
                 readers.chat(readers.Engine("siliconflow", readers.SILICONFLOW_MODEL), "p", [])
         message = str(raised.exception)
@@ -375,31 +400,29 @@ class VisionPoolTests(SimpleTestCase):
 
         def post(_url, key, _payload, timeout=(10, 150)):
             seen.append(key)
-            return _Response(429, headers={"Retry-After": "60"}) if key == "busy-key" else \
-                _Response(200, text="【题干】有效结果")
+            return (
+                _Response(429, headers={"Retry-After": "60"})
+                if key == "busy-key"
+                else _Response(200, text="【题干】有效结果")
+            )
 
-        environment = {
-            "MINIMAX_API_KEYS_JSON": json.dumps(["busy-key", "good-key"]),
-            "MINIMAX_API_KEY": "busy-key",
-        }
-        with mock.patch.dict("os.environ", environment, clear=False), \
-                mock.patch.object(readers, "_post", side_effect=post):
+        environment = {"MINIMAX_API_KEYS_JSON": json.dumps(["busy-key", "good-key"]), "MINIMAX_API_KEY": "busy-key"}
+        with (
+            mock.patch.dict("os.environ", environment, clear=False),
+            mock.patch.object(readers, "_post", side_effect=post),
+        ):
             result = readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
         self.assertEqual(result, "【题干】有效结果")
         self.assertEqual(seen, ["busy-key", "good-key"])
 
     def test_single_rate_limited_key_is_released_then_retried(self):
         secret = "single-private-key"
-        responses = [
-            _Response(429, headers={"Retry-After": "0"}),
-            _Response(200, text="稍后成功"),
-        ]
-        environment = {
-            "MINIMAX_API_KEYS_JSON": json.dumps([secret]),
-            "MINIMAX_API_KEY": secret,
-        }
-        with mock.patch.dict("os.environ", environment, clear=False), \
-                mock.patch.object(readers, "_post", side_effect=responses) as post:
+        responses = [_Response(429, headers={"Retry-After": "0"}), _Response(200, text="稍后成功")]
+        environment = {"MINIMAX_API_KEYS_JSON": json.dumps([secret]), "MINIMAX_API_KEY": secret}
+        with (
+            mock.patch.dict("os.environ", environment, clear=False),
+            mock.patch.object(readers, "_post", side_effect=responses) as post,
+        ):
             result = readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
 
         self.assertEqual(result, "稍后成功")
@@ -409,13 +432,12 @@ class VisionPoolTests(SimpleTestCase):
         secret = "never-print-this-token-plan-key"
         private_message = "private provider detail: Token Plan exhausted (2056)"
         response = _token_plan_response(private_message)
-        environment = {
-            "MINIMAX_API_KEYS_JSON": json.dumps([secret]),
-            "MINIMAX_API_KEY": secret,
-        }
-        with mock.patch.dict("os.environ", environment, clear=False), \
-                mock.patch.object(readers, "_post", return_value=response) as post, \
-                self.assertRaises(readers.ReaderQuotaExhausted) as raised:
+        environment = {"MINIMAX_API_KEYS_JSON": json.dumps([secret]), "MINIMAX_API_KEY": secret}
+        with (
+            mock.patch.dict("os.environ", environment, clear=False),
+            mock.patch.object(readers, "_post", return_value=response) as post,
+            self.assertRaises(readers.ReaderQuotaExhausted) as raised,
+        ):
             readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
 
         self.assertEqual(post.call_count, 1)
@@ -434,8 +456,10 @@ class VisionPoolTests(SimpleTestCase):
             "MINIMAX_API_KEYS_JSON": json.dumps(["exhausted-key", "healthy-key"]),
             "MINIMAX_API_KEY": "exhausted-key",
         }
-        with mock.patch.dict("os.environ", environment, clear=False), \
-                mock.patch.object(readers, "_post", side_effect=post):
+        with (
+            mock.patch.dict("os.environ", environment, clear=False),
+            mock.patch.object(readers, "_post", side_effect=post),
+        ):
             result = readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
 
         self.assertEqual(result, "备用账号成功")
@@ -452,9 +476,11 @@ class VisionPoolTests(SimpleTestCase):
             "MINIMAX_API_KEYS_JSON": json.dumps(["exhausted-one", "exhausted-two"]),
             "MINIMAX_API_KEY": "exhausted-one",
         }
-        with mock.patch.dict("os.environ", environment, clear=False), \
-                mock.patch.object(readers, "_post", side_effect=post), \
-                self.assertRaises(readers.ReaderQuotaExhausted):
+        with (
+            mock.patch.dict("os.environ", environment, clear=False),
+            mock.patch.object(readers, "_post", side_effect=post),
+            self.assertRaises(readers.ReaderQuotaExhausted),
+        ):
             readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
 
         self.assertEqual(seen, ["exhausted-one", "exhausted-two"])
@@ -470,19 +496,18 @@ class VisionPoolTests(SimpleTestCase):
             "MINIMAX_API_KEYS_JSON": json.dumps(["exhausted-key", "invalid-key"]),
             "MINIMAX_API_KEY": "exhausted-key",
         }
-        with mock.patch.dict("os.environ", environment, clear=False), \
-                mock.patch.object(readers, "_post", side_effect=post), \
-                self.assertRaises(readers.ReaderQuotaExhausted):
+        with (
+            mock.patch.dict("os.environ", environment, clear=False),
+            mock.patch.object(readers, "_post", side_effect=post),
+            self.assertRaises(readers.ReaderQuotaExhausted),
+        ):
             readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
 
         self.assertEqual(seen, ["exhausted-key", "invalid-key"])
 
     def test_parallel_waiters_share_confirmed_plan_exhaustion(self):
         secret = "single-exhausted-key"
-        environment = {
-            "MINIMAX_API_KEYS_JSON": json.dumps([secret]),
-            "MINIMAX_API_KEY": secret,
-        }
+        environment = {"MINIMAX_API_KEYS_JSON": json.dumps([secret]), "MINIMAX_API_KEY": secret}
 
         def call(_index):
             try:
@@ -491,8 +516,10 @@ class VisionPoolTests(SimpleTestCase):
                 return "quota"
             return "unexpected"
 
-        with mock.patch.dict("os.environ", environment, clear=False), \
-                mock.patch.object(readers, "_post", return_value=_token_plan_response()) as post:
+        with (
+            mock.patch.dict("os.environ", environment, clear=False),
+            mock.patch.object(readers, "_post", return_value=_token_plan_response()) as post,
+        ):
             with ThreadPoolExecutor(max_workers=2) as executor:
                 results = list(executor.map(call, range(2)))
 
@@ -503,21 +530,22 @@ class VisionPoolTests(SimpleTestCase):
         secret = "single-private-key"
         malformed = _Response(429, headers={"Retry-After": "0"})
         malformed.content = b'{"error":true}'
-        malformed.json = mock.Mock(return_value={
-            "type": "error",
-            "error": {
-                "http_code": "429",
-                "type": "other_error",
-                "message": "not the documented structured error (2056)",
-            },
-        })
+        malformed.json = mock.Mock(
+            return_value={
+                "type": "error",
+                "error": {
+                    "http_code": "429",
+                    "type": "other_error",
+                    "message": "not the documented structured error (2056)",
+                },
+            }
+        )
         responses = [malformed, _Response(200, text="普通限流后成功")]
-        environment = {
-            "MINIMAX_API_KEYS_JSON": json.dumps([secret]),
-            "MINIMAX_API_KEY": secret,
-        }
-        with mock.patch.dict("os.environ", environment, clear=False), \
-                mock.patch.object(readers, "_post", side_effect=responses) as post:
+        environment = {"MINIMAX_API_KEYS_JSON": json.dumps([secret]), "MINIMAX_API_KEY": secret}
+        with (
+            mock.patch.dict("os.environ", environment, clear=False),
+            mock.patch.object(readers, "_post", side_effect=responses) as post,
+        ):
             result = readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
 
         self.assertEqual(result, "普通限流后成功")
@@ -525,14 +553,12 @@ class VisionPoolTests(SimpleTestCase):
 
     def test_persistent_rate_limit_has_bounded_safe_retries(self):
         secret = "never-show-this-rate-limit-key"
-        environment = {
-            "MINIMAX_API_KEYS_JSON": json.dumps([secret]),
-            "MINIMAX_API_KEY": secret,
-        }
-        with mock.patch.dict("os.environ", environment, clear=False), \
-                mock.patch.object(
-                    readers, "_post", return_value=_Response(429, headers={"Retry-After": "0"}),
-                ) as post, self.assertRaises(readers.ReaderError) as raised:
+        environment = {"MINIMAX_API_KEYS_JSON": json.dumps([secret]), "MINIMAX_API_KEY": secret}
+        with (
+            mock.patch.dict("os.environ", environment, clear=False),
+            mock.patch.object(readers, "_post", return_value=_Response(429, headers={"Retry-After": "0"})) as post,
+            self.assertRaises(readers.ReaderError) as raised,
+        ):
             readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [])
 
         # No other service is configured, so it waits longer, but still stops.
@@ -568,15 +594,16 @@ class VisionPoolTests(SimpleTestCase):
             # release a herd.  Multi-slot accounts are covered separately.
             "QB_MINIMAX_ACCOUNT_CONCURRENCY": "1",
         }
-        with mock.patch.dict("os.environ", environment, clear=False), \
-                mock.patch.object(readers, "_post", side_effect=post):
+        with (
+            mock.patch.dict("os.environ", environment, clear=False),
+            mock.patch.object(readers, "_post", side_effect=post),
+        ):
             with ThreadPoolExecutor(max_workers=2) as executor:
-                results = list(executor.map(
-                    lambda _index: readers.chat(
-                        readers.Engine("minimax", readers.MINIMAX_MODEL), "p", [],
-                    ),
-                    range(2),
-                ))
+                results = list(
+                    executor.map(
+                        lambda _index: readers.chat(readers.Engine("minimax", readers.MINIMAX_MODEL), "p", []), range(2)
+                    )
+                )
 
         self.assertEqual(len(results), 2)
         self.assertEqual(call_count, 3)
@@ -584,8 +611,7 @@ class VisionPoolTests(SimpleTestCase):
 
     def test_http_429_is_not_retried_while_holding_one_key(self):
         response = _Response(429)
-        with mock.patch("requests.post", return_value=response) as post, \
-                mock.patch("time.sleep") as sleep:
+        with mock.patch("requests.post", return_value=response) as post, mock.patch("time.sleep") as sleep:
             actual = readers._post("https://example.invalid", "hidden", {})
         self.assertIs(actual, response)
         post.assert_called_once()
@@ -620,9 +646,11 @@ class HedgedRequestTests(SimpleTestCase):
                 return "slow"
             return "fast"
 
-        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.05"}), \
-                mock.patch.object(readers, "_has_spare_slot", return_value=True), \
-                mock.patch.object(readers, "_chat_once", side_effect=once):
+        with (
+            mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.05"}),
+            mock.patch.object(readers, "_has_spare_slot", return_value=True),
+            mock.patch.object(readers, "_chat_once", side_effect=once),
+        ):
             self.assertEqual(readers.chat(self.engine, "p", []), "fast")
         release.set()
         self.assertEqual(len(calls), 2)
@@ -632,14 +660,16 @@ class HedgedRequestTests(SimpleTestCase):
 
         def once(_engine, _prompt, _images, _max_tokens=3000, started=None):
             calls.append(1)
-            time.sleep(0.3)          # queued behind other cards' requests
+            time.sleep(0.3)  # queued behind other cards' requests
             if started is not None:
                 started.set()
             return "answer"
 
-        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.05"}), \
-                mock.patch.object(readers, "_has_spare_slot", return_value=True), \
-                mock.patch.object(readers, "_chat_once", side_effect=once):
+        with (
+            mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.05"}),
+            mock.patch.object(readers, "_has_spare_slot", return_value=True),
+            mock.patch.object(readers, "_chat_once", side_effect=once),
+        ):
             self.assertEqual(readers.chat(self.engine, "p", []), "answer")
         self.assertEqual(len(calls), 1)
 
@@ -654,15 +684,19 @@ class HedgedRequestTests(SimpleTestCase):
             release.wait(0.3)
             return "only"
 
-        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.05"}), \
-                mock.patch.object(readers, "_has_spare_slot", return_value=False), \
-                mock.patch.object(readers, "_chat_once", side_effect=once):
+        with (
+            mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.05"}),
+            mock.patch.object(readers, "_has_spare_slot", return_value=False),
+            mock.patch.object(readers, "_chat_once", side_effect=once),
+        ):
             self.assertEqual(readers.chat(self.engine, "p", []), "only")
         self.assertEqual(len(calls), 1)
 
     def test_fast_answer_sends_no_duplicate(self):
-        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "5"}), \
-                mock.patch.object(readers, "_chat_once", return_value="ok") as once:
+        with (
+            mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "5"}),
+            mock.patch.object(readers, "_chat_once", return_value="ok") as once,
+        ):
             self.assertEqual(readers.chat(self.engine, "p", []), "ok")
         once.assert_called_once()
 
@@ -678,9 +712,11 @@ class HedgedRequestTests(SimpleTestCase):
                 return "late but fine"
             raise readers.ReaderError("MiniMax 接口返回 HTTP 500")
 
-        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.05"}), \
-                mock.patch.object(readers, "_has_spare_slot", return_value=True), \
-                mock.patch.object(readers, "_chat_once", side_effect=once):
+        with (
+            mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.05"}),
+            mock.patch.object(readers, "_has_spare_slot", return_value=True),
+            mock.patch.object(readers, "_chat_once", side_effect=once),
+        ):
             self.assertEqual(readers.chat(self.engine, "p", []), "late but fine")
 
     def test_both_failing_raises_and_zero_disables_hedging(self):
@@ -690,12 +726,16 @@ class HedgedRequestTests(SimpleTestCase):
             time.sleep(0.05)
             raise readers.ReaderError("MiniMax 接口返回 HTTP 500")
 
-        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.01"}), \
-                mock.patch.object(readers, "_has_spare_slot", return_value=True), \
-                mock.patch.object(readers, "_chat_once", side_effect=failing):
+        with (
+            mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0.01"}),
+            mock.patch.object(readers, "_has_spare_slot", return_value=True),
+            mock.patch.object(readers, "_chat_once", side_effect=failing),
+        ):
             with self.assertRaises(readers.ReaderError):
                 readers.chat(self.engine, "p", [])
-        with mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0"}), \
-                mock.patch.object(readers, "_chat_once", return_value="direct") as once:
+        with (
+            mock.patch.dict("os.environ", {"QB_HEDGE_AFTER": "0"}),
+            mock.patch.object(readers, "_chat_once", return_value="direct") as once,
+        ):
             self.assertEqual(readers.chat(self.engine, "p", []), "direct")
         once.assert_called_once()

@@ -19,11 +19,7 @@ from django.conf import settings
 from . import provider_catalog
 from .account_pool import DEFAULT_MINIMAX_PLAN, MINIMAX_PLANS
 
-DEFAULTS = {
-    "primary_engine": "minimax_m3",
-    "checker_engine": "auto",
-    "arbiter_engine": "primary",
-}
+DEFAULTS = {"primary_engine": "minimax_m3", "checker_engine": "auto", "arbiter_engine": "primary"}
 DEFAULT_MODELS = {key: spec["default_model"] for key, spec in provider_catalog.VISION.items()}
 SUGGESTED_MODELS = {key: list(spec["suggested"]) for key, spec in provider_catalog.VISION.items()}
 FREE_MODELS = {key: list(spec["free_models"]) for key, spec in provider_catalog.VISION.items()}
@@ -88,8 +84,7 @@ def normalize_models(values, *, defaults: dict[str, str] | None = None) -> dict[
     result: dict[str, str] = {}
     for provider in DEFAULT_MODELS:
         value = values.get(provider, fallback[provider])
-        if (not isinstance(value, str) or MODEL_ID.fullmatch(value) is None
-                or "://" in value):
+        if not isinstance(value, str) or MODEL_ID.fullmatch(value) is None or "://" in value:
             return None
         result[provider] = value
     return result
@@ -181,8 +176,13 @@ def save_configuration(roles: dict[str, str], models=None, plans=None) -> dict[s
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", newline="\n", prefix="model-preferences-",
-            suffix=".tmp", dir=path.parent, delete=False,
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            prefix="model-preferences-",
+            suffix=".tmp",
+            dir=path.parent,
+            delete=False,
         ) as stream:
             temporary = Path(stream.name)
             stream.write(payload)
@@ -197,9 +197,11 @@ def save_configuration(roles: dict[str, str], models=None, plans=None) -> dict[s
 
 def save_applied_configuration(configuration: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
     """Atomically record the exact non-secret snapshot used by the worker."""
-    normalized = normalize_configuration(
-        configuration.get("roles"), configuration.get("models"), configuration.get("plans"),
-    ) if isinstance(configuration, dict) else None
+    normalized = (
+        normalize_configuration(configuration.get("roles"), configuration.get("models"), configuration.get("plans"))
+        if isinstance(configuration, dict)
+        else None
+    )
     if normalized is None:
         raise PreferenceError("已应用的模型设置格式不正确")
     path = applied_path()
@@ -208,8 +210,13 @@ def save_applied_configuration(configuration: dict[str, dict[str, str]]) -> dict
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", newline="\n", prefix="model-applied-",
-            suffix=".tmp", dir=path.parent, delete=False,
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            prefix="model-applied-",
+            suffix=".tmp",
+            dir=path.parent,
+            delete=False,
         ) as stream:
             temporary = Path(stream.name)
             stream.write(payload)
@@ -238,20 +245,25 @@ def apply_to_environment(configuration: dict[str, dict[str, str]] | None = None)
     # A snapshot written before a service existed lacks its model: use the default.
     models = normalize_models(selected.get("models")) or dict(DEFAULT_MODELS)
     plans = _stored_plans(selected.get("plans"))
-    os.environ.update({
-        "QB_PRIMARY_ENGINE": roles["primary_engine"],
-        "QB_CHECKER_ENGINE": roles["checker_engine"],
-        "QB_ARBITER_ENGINE": roles["arbiter_engine"],
-        **{provider_catalog.model_environment(provider): models[provider] for provider in DEFAULT_MODELS},
-        "QB_MINIMAX_PLAN": plans["minimax"],
-    })
+    os.environ.update(
+        {
+            "QB_PRIMARY_ENGINE": roles["primary_engine"],
+            "QB_CHECKER_ENGINE": roles["checker_engine"],
+            "QB_ARBITER_ENGINE": roles["arbiter_engine"],
+            **{provider_catalog.model_environment(provider): models[provider] for provider in DEFAULT_MODELS},
+            "QB_MINIMAX_PLAN": plans["minimax"],
+        }
+    )
     return {"roles": dict(roles), "models": dict(models), "plans": dict(plans)}
 
 
 def apply_and_record(configuration: dict[str, dict[str, str]] | None = None) -> dict[str, dict[str, str]]:
     """Apply a task snapshot and publish it only if both operations succeed."""
     keys = (
-        "QB_PRIMARY_ENGINE", "QB_CHECKER_ENGINE", "QB_ARBITER_ENGINE", "QB_MINIMAX_PLAN",
+        "QB_PRIMARY_ENGINE",
+        "QB_CHECKER_ENGINE",
+        "QB_ARBITER_ENGINE",
+        "QB_MINIMAX_PLAN",
         *(provider_catalog.model_environment(provider) for provider in DEFAULT_MODELS),
     )
     previous = {key: os.environ.get(key) for key in keys}

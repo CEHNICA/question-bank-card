@@ -24,8 +24,11 @@ from . import features, library, library_drafts, library_export as export
 from .models import Paper, PublishedQuestion, Question
 
 urlpatterns = [path("api/library/export-docx", export.export_docx_view)]
-NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
-      "m": export.OMML_NS, "a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+NS = {
+    "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+    "m": export.OMML_NS,
+    "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+}
 
 
 def units(value):
@@ -33,16 +36,48 @@ def units(value):
 
 
 def field(value):
-    return {"source": value, "blocks": [{"type": "text", "start": 0, "end": units(value),
-            "segments": [{"type": "text", "start": 0, "end": units(value)}]}] if value else []}
+    return {
+        "source": value,
+        "blocks": [
+            {
+                "type": "text",
+                "start": 0,
+                "end": units(value),
+                "segments": [{"type": "text", "start": 0, "end": units(value)}],
+            }
+        ]
+        if value
+        else [],
+    }
 
 
 def math_field(latex, body, *, display=False):
     source = ("$$" if display else "$") + latex + ("$$" if display else "$")
-    mathml = f'<math xmlns="{export.MATH_NS}"><semantics>{body}<annotation encoding="application/x-tex">' \
-             + __import__("html").escape(latex) + '</annotation></semantics></math>'
-    return {"source": source, "blocks": [{"type": "text", "start": 0, "end": units(source), "segments": [
-        {"type": "math", "start": 0, "end": units(source), "latex": latex, "mathml": mathml, "display": display}]}]}
+    mathml = (
+        f'<math xmlns="{export.MATH_NS}"><semantics>{body}<annotation encoding="application/x-tex">'
+        + __import__("html").escape(latex)
+        + "</annotation></semantics></math>"
+    )
+    return {
+        "source": source,
+        "blocks": [
+            {
+                "type": "text",
+                "start": 0,
+                "end": units(source),
+                "segments": [
+                    {
+                        "type": "math",
+                        "start": 0,
+                        "end": units(source),
+                        "latex": latex,
+                        "mathml": mathml,
+                        "display": display,
+                    }
+                ],
+            }
+        ],
+    }
 
 
 def document_xml(data):
@@ -75,34 +110,88 @@ class ExportFixture:
         self.client = Client()
         self.counter = 0
 
-    def publication(self, *, stem="离线合成题", kind="free_response", answer="", analysis="", options=None,
-                    origin="虚构出处", status="published", extras=None, section=""):
+    def publication(
+        self,
+        *,
+        stem="离线合成题",
+        kind="free_response",
+        answer="",
+        analysis="",
+        options=None,
+        origin="虚构出处",
+        status="published",
+        extras=None,
+        section="",
+    ):
         self.counter += 1
         paper = Paper.objects.create(filename="测试合成卷.pdf", kind="pdf", sha256="a" * 64)
-        question = Question.objects.create(paper=paper, number=self.counter, question_type=kind, stem=stem,
-                                           answer=answer, analysis=analysis, options=options or {}, state="green")
-        content = {"stem": stem, "answer": answer, "analysis": analysis, "options": options or {},
-                   "question_type": kind, "origin": origin, "figures": [], "sources": [], "section": section,
-                   "document_id": str(paper.id), "source_filename": paper.filename}
-        return PublishedQuestion.objects.create(paper=paper, question=question, number=self.counter,
-            source_filename=paper.filename, question_type=kind, version=1, status=status,
-            content=content, content_hash=library.content_hash(content), extras=extras or {})
+        question = Question.objects.create(
+            paper=paper,
+            number=self.counter,
+            question_type=kind,
+            stem=stem,
+            answer=answer,
+            analysis=analysis,
+            options=options or {},
+            state="green",
+        )
+        content = {
+            "stem": stem,
+            "answer": answer,
+            "analysis": analysis,
+            "options": options or {},
+            "question_type": kind,
+            "origin": origin,
+            "figures": [],
+            "sources": [],
+            "section": section,
+            "document_id": str(paper.id),
+            "source_filename": paper.filename,
+        }
+        return PublishedQuestion.objects.create(
+            paper=paper,
+            question=question,
+            number=self.counter,
+            source_filename=paper.filename,
+            question_type=kind,
+            version=1,
+            status=status,
+            content=content,
+            content_hash=library.content_hash(content),
+            extras=extras or {},
+        )
 
     def payload(self, pubs, *, print_options=None, output_format="docx", title="单元练习"):
         options = library_drafts._print_options(print_options or {})
         fields = {}
         for publication in pubs:
             content = publication.content
-            selected, _ = export._selected(content, publication.extras, options["ai_answers"] and features.enabled("ai_answer"))
+            selected, _ = export._selected(
+                content, publication.extras, options["ai_answers"] and features.enabled("ai_answer")
+            )
             fields[str(publication.id)] = {name: field(str(content.get(name) or "")) for name in ("stem", "origin")}
-            fields[str(publication.id)].update({f"options.{key}": field(value) for key, value in (content.get("options") or {}).items()})
-            fields[str(publication.id)].update({name: field(str(selected.get(name) or "")) for name in ("answer", "analysis")})
-        return {"ids": [str(pub.id) for pub in pubs], "title": title, "print_options": print_options or {},
-                "rendered_fields": fields, "format": output_format}
+            fields[str(publication.id)].update(
+                {f"options.{key}": field(value) for key, value in (content.get("options") or {}).items()}
+            )
+            fields[str(publication.id)].update(
+                {name: field(str(selected.get(name) or "")) for name in ("answer", "analysis")}
+            )
+        return {
+            "ids": [str(pub.id) for pub in pubs],
+            "title": title,
+            "print_options": print_options or {},
+            "rendered_fields": fields,
+            "format": output_format,
+        }
 
     def post(self, payload, **changes):
-        return self.client.post("/api/library/export-docx", json.dumps(payload), content_type="application/json",
-                                HTTP_X_QB_REQUEST="1", **changes)
+        return self.client.post(
+            "/api/library/export-docx",
+            json.dumps(payload),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+            **changes,
+        )
 
     def figure(self, publication, slot="stem", color="red"):
         folder = self.root / "library" / str(publication.id)
@@ -119,16 +208,25 @@ class ExportFixture:
 class LibraryExportTests(ExportFixture, TestCase):
     def test_docx_is_complete_editable_and_does_not_write_question_data(self):
         first = self.publication(kind="free_response", answer="2", analysis="离线解析")
-        second = self.publication(kind="single_choice", answer="A", options={"A": "甲", "B": "乙", "C": "丙", "D": "丁"})
+        second = self.publication(
+            kind="single_choice", answer="A", options={"A": "甲", "B": "乙", "C": "丙", "D": "丁"}
+        )
         self.figure(first)
         before = list(PublishedQuestion.objects.values())
         questions = list(Question.objects.values())
-        result = self.post(self.payload([first, second], print_options={"document": "combined", "origin": True, "font_size": 14, "answer_space": "large"}))
+        result = self.post(
+            self.payload(
+                [first, second],
+                print_options={"document": "combined", "origin": True, "font_size": 14, "answer_space": "large"},
+            )
+        )
         self.assertEqual(result.status_code, 200, result.content[:300])
         self.assertEqual(result["X-Question-Count"], "2")
         self.assertIn("filename*=UTF-8''", result["Content-Disposition"])
         self.assertEqual(result["Cache-Control"], "no-store")
-        self.assertEqual(result["Content-Type"], "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        self.assertEqual(
+            result["Content-Type"], "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
         xml = document_xml(result.content)
         text = "".join(xml.itertext())
         self.assertIn("姓名", text)
@@ -147,7 +245,9 @@ class LibraryExportTests(ExportFixture, TestCase):
         # 1.26.25：这一行以前印的是原卷那一整行（「一、选择题：本题共 12 小题…」），
         # 屏幕上印的却是「一、选择题」—— 老师核对的是屏幕，拿到手的是文件，两边对不上。
         # 现在两边都印题型名：那一行带着原卷的题数、分值和题号范围，跟老师挑的这几道题对不上。
-        printed = "一、选择题：本题共 12 小题，每小题 5 分，共 60 分，在每小题给出的四个选项中，只有一项是符合题目要求的"
+        printed = (
+            "一、选择题：本题共 12 小题，每小题 5 分，共 60 分，在每小题给出的四个选项中，只有一项是符合题目要求的"
+        )
         first = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"}, section=printed)
         second = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"}, section=printed)
         result = self.post(self.payload([first, second]))
@@ -168,10 +268,12 @@ class LibraryExportTests(ExportFixture, TestCase):
 
     def test_a_mixed_group_falls_back_to_the_generic_heading(self):
         # 组卷可以凑好几份卷子的题，这时原标题互相矛盾，只能用通用说法。
-        first = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"},
-                                 section="一、选择题（每小题4分共40分）")
-        second = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"},
-                                  section="一、选择题（每小题5分共50分）")
+        first = self.publication(
+            kind="single_choice", options={"A": "甲", "B": "乙"}, section="一、选择题（每小题4分共40分）"
+        )
+        second = self.publication(
+            kind="single_choice", options={"A": "甲", "B": "乙"}, section="一、选择题（每小题5分共50分）"
+        )
         third = self.publication(kind="single_choice", options={"A": "甲", "B": "乙"})
         result = self.post(self.payload([first, second, third]))
         self.assertEqual(result.status_code, 200, result.content[:300])
@@ -184,12 +286,21 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertEqual(export._section_heading([{"content": {"section": ""}}], 1, "填空题"), "二、填空题")
         self.assertEqual(export._section_heading([{"content": {"section": "习" * 300}}], 2, "填空题"), "三、填空题")
         # 大题说明和短章节名混在一起：长说明是噪音，不印；一句话说不准，用题型名。
-        self.assertEqual(export._section_heading(
-            [{"content": {"section": "一、选择题：本题共 12 小题"}}, {"content": {"section": "习题 3.1"}}],
-            0, "选择题"), "一、选择题")
+        self.assertEqual(
+            export._section_heading(
+                [{"content": {"section": "一、选择题：本题共 12 小题"}}, {"content": {"section": "习题 3.1"}}],
+                0,
+                "选择题",
+            ),
+            "一、选择题",
+        )
         # 只有一种短章节名时照旧印它。
-        self.assertEqual(export._section_heading(
-            [{"content": {"section": "习题 3.1"}}, {"content": {"section": "习题 3.1"}}], 0, "选择题"), "习题 3.1")
+        self.assertEqual(
+            export._section_heading(
+                [{"content": {"section": "习题 3.1"}}, {"content": {"section": "习题 3.1"}}], 0, "选择题"
+            ),
+            "习题 3.1",
+        )
 
     def test_questions_only_omits_answer_fields_and_answer_pages(self):
         pub = self.publication(answer="不要出现在题目卷")
@@ -249,9 +360,12 @@ class LibraryExportTests(ExportFixture, TestCase):
         # 答案与解析用一句不会出现在题干里的长句：分卷靠 _document 按 document 分流，
         # 题目卷和答案卷读的是同一份 captured，只有一处改错答案就上学生卷了。
         # 原来的断言只查「参考答案与解析」这个标题，答案串又短到两个字，漏了也测不出来。
-        pub = self.publication(stem="离线合成题干甲乙丙", answer="原卷标准答案甲乙丙",
-                               analysis="原卷解析步骤甲乙丙",
-                               extras={"ai_answer": {"answer": "不同AI答案甲乙丙"}})
+        pub = self.publication(
+            stem="离线合成题干甲乙丙",
+            answer="原卷标准答案甲乙丙",
+            analysis="原卷解析步骤甲乙丙",
+            extras={"ai_answer": {"answer": "不同AI答案甲乙丙"}},
+        )
         response = self.post(self.payload([pub], output_format="split", print_options={"document": "questions"}))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/zip")
@@ -344,8 +458,12 @@ class LibraryExportTests(ExportFixture, TestCase):
 
     def test_gaps_and_omitting_non_delimiter_text_are_rejected(self):
         pub = self.publication(stem="测试合成原文")
-        for edit in (lambda seg: seg.update(end=2), lambda seg: seg.update(type="delimiter"),
-                     lambda seg: seg.update(start=1), lambda seg: seg.update(auto=True)):
+        for edit in (
+            lambda seg: seg.update(end=2),
+            lambda seg: seg.update(type="delimiter"),
+            lambda seg: seg.update(start=1),
+            lambda seg: seg.update(auto=True),
+        ):
             payload = self.payload([pub])
             edit(payload["rendered_fields"][str(pub.id)]["stem"]["blocks"][0]["segments"][0])
             self.assertEqual(self.post(payload).status_code, 400)
@@ -353,11 +471,26 @@ class LibraryExportTests(ExportFixture, TestCase):
     def test_special_symbols_and_blank_are_editable_text_and_cover_original(self):
         source = "$▱ABCD$ ___ （ ）"
         pub = self.publication(stem=source)
-        value = {"source": source, "blocks": [{"type": "text", "start": 0, "end": units(source), "segments": [
-            {"type": "delimiter", "start": 0, "end": 1}, {"type": "parallelogram", "start": 1, "end": 2},
-            {"type": "text", "start": 2, "end": 6}, {"type": "delimiter", "start": 6, "end": 7},
-            {"type": "text", "start": 7, "end": 8}, {"type": "blank", "start": 8, "end": 11},
-            {"type": "text", "start": 11, "end": 12}, {"type": "bracket", "start": 12, "end": 15}]}]}
+        value = {
+            "source": source,
+            "blocks": [
+                {
+                    "type": "text",
+                    "start": 0,
+                    "end": units(source),
+                    "segments": [
+                        {"type": "delimiter", "start": 0, "end": 1},
+                        {"type": "parallelogram", "start": 1, "end": 2},
+                        {"type": "text", "start": 2, "end": 6},
+                        {"type": "delimiter", "start": 6, "end": 7},
+                        {"type": "text", "start": 7, "end": 8},
+                        {"type": "blank", "start": 8, "end": 11},
+                        {"type": "text", "start": 11, "end": 12},
+                        {"type": "bracket", "start": 12, "end": 15},
+                    ],
+                }
+            ],
+        }
         payload = self.payload([pub])
         payload["rendered_fields"][str(pub.id)]["stem"] = value
         result = self.post(payload)
@@ -368,7 +501,11 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertNotIn("$", text)
 
     def test_square_root_and_fraction_become_native_editable_omml(self):
-        value = math_field(r"\sqrt{x+1}+\frac{a}{b}", '<mrow><msqrt><mrow><mi>x</mi><mo>+</mo><mn>1</mn></mrow></msqrt><mo>+</mo><mfrac><mi>a</mi><mi>b</mi></mfrac></mrow>', display=True)
+        value = math_field(
+            r"\sqrt{x+1}+\frac{a}{b}",
+            "<mrow><msqrt><mrow><mi>x</mi><mo>+</mo><mn>1</mn></mrow></msqrt><mo>+</mo><mfrac><mi>a</mi><mi>b</mi></mfrac></mrow>",
+            display=True,
+        )
         pub = self.publication(stem=value["source"])
         payload = self.payload([pub])
         payload["rendered_fields"][str(pub.id)]["stem"] = value
@@ -379,31 +516,47 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertEqual(len(xml.findall(".//m:f", NS)), 1)
         rad = xml.find(".//m:rad", NS)
         self.assertIsNotNone(rad.find("m:deg", NS))
-        self.assertEqual(rad.find("m:radPr/m:degHide", NS).get(f'{{{export.OMML_NS}}}val'), "1")
+        self.assertEqual(rad.find("m:radPr/m:degHide", NS).get(f"{{{export.OMML_NS}}}val"), "1")
         self.assertIn("x+1", "".join(rad.itertext()))
         self.assertNotIn("\\sqrt", "".join(xml.itertext()))
 
     def test_stretchy_arrow_known_upstream_schema_typo_is_repaired(self):
-        value = math_field(r"\overrightarrow{AB}", '<mover><mrow><mi>A</mi><mi>B</mi></mrow><mo stretchy="true">→</mo></mover>')
+        value = math_field(
+            r"\overrightarrow{AB}", '<mover><mrow><mi>A</mi><mi>B</mi></mrow><mo stretchy="true">→</mo></mover>'
+        )
         converted = export._field(value, value["source"], "合成公式")
         math = converted[0]["segments"][0]["omml"]
         self.assertTrue(math.findall(".//m:groupChrPr", NS))
         self.assertIn("AB", "".join(math.itertext()))
 
     def test_vector_hat_bar_and_nested_accents_are_native_accents(self):
-        for command, glyph in (("vec", "⃗"), ("hat", "^"), ("bar", "ˉ"), ("dot", "˙"), ("tilde", "~"), ("overrightarrow", "→")):
-            value = math_field("\\" + command + "{AB}", f'<mover accent="true"><mrow><mi>A</mi><mi>B</mi></mrow><mo>{glyph}</mo></mover>')
+        for command, glyph in (
+            ("vec", "⃗"),
+            ("hat", "^"),
+            ("bar", "ˉ"),
+            ("dot", "˙"),
+            ("tilde", "~"),
+            ("overrightarrow", "→"),
+        ):
+            value = math_field(
+                "\\" + command + "{AB}",
+                f'<mover accent="true"><mrow><mi>A</mi><mi>B</mi></mrow><mo>{glyph}</mo></mover>',
+            )
             math = export._field(value, value["source"], "合成重音")[0]["segments"][0]["omml"]
             accents = math.findall(".//m:acc", NS)
             self.assertEqual(len(accents), 1)
-            self.assertEqual(accents[0].find("m:accPr/m:chr", NS).get(f'{{{export.OMML_NS}}}val'), export.ACCENTS[glyph])
+            self.assertEqual(
+                accents[0].find("m:accPr/m:chr", NS).get(f"{{{export.OMML_NS}}}val"), export.ACCENTS[glyph]
+            )
             self.assertFalse(math.findall(".//m:limUpp", NS))
             self.assertIn("AB", "".join(math.itertext()))
-        value = math_field(r"\hat{\vec{x}}", '<mover accent="true"><mover accent="true"><mi>x</mi><mo>⃗</mo></mover><mo>^</mo></mover>')
+        value = math_field(
+            r"\hat{\vec{x}}", '<mover accent="true"><mover accent="true"><mi>x</mi><mo>⃗</mo></mover><mo>^</mo></mover>'
+        )
         math = export._field(value, value["source"], "合成重音")[0]["segments"][0]["omml"]
         self.assertEqual(len(math.findall(".//m:acc", NS)), 2)
         # A genuine overscript is a limit, not an accent.
-        value = math_field(r"\overset{a}{x}", '<mover><mi>x</mi><mi>a</mi></mover>')
+        value = math_field(r"\overset{a}{x}", "<mover><mi>x</mi><mi>a</mi></mover>")
         math = export._field(value, value["source"], "合成重音")[0]["segments"][0]["omml"]
         self.assertTrue(math.findall(".//m:limUpp", NS))
         self.assertFalse(math.findall(".//m:acc", NS))
@@ -414,15 +567,20 @@ class LibraryExportTests(ExportFixture, TestCase):
         不管走哪条路都不能出现那个方框：Word 能转就转原生公式，转不了就降级成
         图片，绝不能悄悄把「划掉」印成「框起来」。
         """
-        for command, notation in (("cancel", "updiagonalstrike"), ("bcancel", "downdiagonalstrike"),
-                                  ("xcancel", "updiagonalstrike downdiagonalstrike")):
+        for command, notation in (
+            ("cancel", "updiagonalstrike"),
+            ("bcancel", "downdiagonalstrike"),
+            ("xcancel", "updiagonalstrike downdiagonalstrike"),
+        ):
             # Exact MathML enclosure shape produced by standard KaTeX.
             value = math_field("\\" + command + "{x}", f'<menclose notation="{notation}"><mi>x</mi></menclose>')
             segment = export._field(value, value["source"], "合成划消公式")[0]["segments"][0]
             self.assertIsNone(segment["omml"], f"{command} 不该被转成一个 Word 公式")
             self.assertIn("合成划消公式", segment["fallback"])
         boxed = math_field(r"\boxed{x}", '<menclose notation="box"><mi>x</mi></menclose>')
-        self.assertTrue(export._field(boxed, boxed["source"], "合成方框")[0]["segments"][0]["omml"].findall(".//m:borderBox", NS))
+        self.assertTrue(
+            export._field(boxed, boxed["source"], "合成方框")[0]["segments"][0]["omml"].findall(".//m:borderBox", NS)
+        )
 
     def test_common_high_school_math_latex_corpus_becomes_native_editable_omml(self):
         r"""常见高中数学公式使用生产版 KaTeX 输出的 MathML 转成可编辑 Word 公式。
@@ -438,9 +596,26 @@ class LibraryExportTests(ExportFixture, TestCase):
             with self.subTest(latex=latex):
                 # 语料存的是 KaTeX 完整的 <math>…</math>，前端就是这样送上来的。
                 source = "$" + latex + "$"
-                value = {"source": source, "blocks": [{"type": "text", "start": 0, "end": units(source),
-                         "segments": [{"type": "math", "start": 0, "end": units(source), "latex": latex,
-                                       "mathml": mathml, "display": False}]}]}
+                value = {
+                    "source": source,
+                    "blocks": [
+                        {
+                            "type": "text",
+                            "start": 0,
+                            "end": units(source),
+                            "segments": [
+                                {
+                                    "type": "math",
+                                    "start": 0,
+                                    "end": units(source),
+                                    "latex": latex,
+                                    "mathml": mathml,
+                                    "display": False,
+                                }
+                            ],
+                        }
+                    ],
+                }
                 segment = export._field(value, source, "语料")[0]["segments"][0]
                 omml = segment["omml"]
                 self.assertIsNotNone(omml, "这条公式没有转成原生公式")
@@ -461,8 +636,13 @@ class LibraryExportTests(ExportFixture, TestCase):
         ``\alpha``，不能把 ``+\cos\beta`` 一起吞进去。
         """
         corpus = json.loads((Path(export.__file__).parent / "test_mathml_corpus.json").read_text(encoding="utf-8"))
-        wanted = {"\\sin\\alpha+\\cos\\beta", "\\ln x", "\\hat{y}=\\ln x",
-                  "\\lim_{x\\to 0}\\frac{\\sin x}{x}", "\\log_{2}8"}
+        wanted = {
+            "\\sin\\alpha+\\cos\\beta",
+            "\\ln x",
+            "\\hat{y}=\\ln x",
+            "\\lim_{x\\to 0}\\frac{\\sin x}{x}",
+            "\\log_{2}8",
+        }
         checked = 0
         for item in corpus:
             latex = item["latex"]
@@ -471,9 +651,26 @@ class LibraryExportTests(ExportFixture, TestCase):
             checked += 1
             with self.subTest(latex=latex):
                 source = "$" + latex + "$"
-                value = {"source": source, "blocks": [{"type": "text", "start": 0, "end": units(source),
-                          "segments": [{"type": "math", "start": 0, "end": units(source), "latex": latex,
-                                        "mathml": item["mathml"], "display": False}]}]}
+                value = {
+                    "source": source,
+                    "blocks": [
+                        {
+                            "type": "text",
+                            "start": 0,
+                            "end": units(source),
+                            "segments": [
+                                {
+                                    "type": "math",
+                                    "start": 0,
+                                    "end": units(source),
+                                    "latex": latex,
+                                    "mathml": item["mathml"],
+                                    "display": False,
+                                }
+                            ],
+                        }
+                    ],
+                }
                 omml = export._field(value, source, "语料")[0]["segments"][0]["omml"]
 
                 functions = omml.findall(".//m:func", NS)
@@ -488,18 +685,18 @@ class LibraryExportTests(ExportFixture, TestCase):
                     argument = function.find("m:e", NS)
                     self.assertIsNotNone(argument, f"{latex} 里 {name} 没有参数")
                     parts = ["".join(node.itertext()) for node in argument]
-                    self.assertTrue(any(part.strip() for part in parts),
-                                    f"{latex} 里 {name} 的参数是空的")
+                    self.assertTrue(any(part.strip() for part in parts), f"{latex} 里 {name} 的参数是空的")
                     # 参数只能取到下一个算符为止，不能把 ``+\cos\beta`` 一起吞进去。
                     self.assertNotIn("+", parts, f"{latex} 里 {name} 的参数吞了后面的加号")
                 # 一个函数名都不该再留在 m:func 外面（m:fName 里当然还有）。
                 # 不能用 id() 比：lxml 每次访问都会新建代理对象，同一个节点的 id 不同。
-                outside = ["".join(node.itertext()).strip()
-                           for node in omml.iter(f"{{{NS['m']}}}r")
-                           if node.find("m:t", NS) is not None
-                           and not any(parent.tag == f"{{{NS['m']}}}func"
-                                       for parent in node.iterancestors())
-                           and (node.find("m:t", NS).text or "").strip() in export._FUNCTION_NAMES]
+                outside = [
+                    "".join(node.itertext()).strip()
+                    for node in omml.iter(f"{{{NS['m']}}}r")
+                    if node.find("m:t", NS) is not None
+                    and not any(parent.tag == f"{{{NS['m']}}}func" for parent in node.iterancestors())
+                    and (node.find("m:t", NS).text or "").strip() in export._FUNCTION_NAMES
+                ]
                 self.assertEqual(outside, [], f"{latex} 里还有函数名没被收进 m:func")
         self.assertGreaterEqual(checked, 4, "语料里没有足够的函数公式，这条闸门没意义")
 
@@ -514,16 +711,32 @@ class LibraryExportTests(ExportFixture, TestCase):
         for item in corpus:
             latex, mathml = item["latex"], item["mathml"]
             source = "$" + latex + "$"
-            value = {"source": source, "blocks": [{"type": "text", "start": 0, "end": units(source),
-                      "segments": [{"type": "math", "start": 0, "end": units(source),
-                                    "latex": latex, "mathml": mathml, "display": False}]}]}
+            value = {
+                "source": source,
+                "blocks": [
+                    {
+                        "type": "text",
+                        "start": 0,
+                        "end": units(source),
+                        "segments": [
+                            {
+                                "type": "math",
+                                "start": 0,
+                                "end": units(source),
+                                "latex": latex,
+                                "mathml": mathml,
+                                "display": False,
+                            }
+                        ],
+                    }
+                ],
+            }
             with self.subTest(latex=latex):
                 omml = export._field(value, source, "语料")[0]["segments"][0]["omml"]
                 self.assertIsNotNone(omml, "这条公式没有转成原生公式")
                 before = "".join(omml.itertext())
                 again = export._field(value, source, "语料")[0]["segments"][0]["omml"]
-                self.assertEqual("".join(again.itertext()), before,
-                                 f"{latex} 跑第二遍文字就变了")
+                self.assertEqual("".join(again.itertext()), before, f"{latex} 跑第二遍文字就变了")
                 if omml.findall(".//m:func", NS):
                     functions += 1
         self.assertGreaterEqual(functions, 5, "语料里一条 m:func 都没写出来，这条闸门没意义")
@@ -531,13 +744,17 @@ class LibraryExportTests(ExportFixture, TestCase):
     def unconvertible_field(self, latex, body, *, head="化简 ", tail=" 并写出结果。"):
         """一条 Word 明确不支持的公式，夹在题干文字中间。"""
         source = head + "$" + latex + "$" + tail
-        mathml = f'<math xmlns="{export.MATH_NS}"><semantics>{body}<annotation encoding="application/x-tex">' \
-                 + __import__("html").escape(latex) + '</annotation></semantics></math>'
+        mathml = (
+            f'<math xmlns="{export.MATH_NS}"><semantics>{body}<annotation encoding="application/x-tex">'
+            + __import__("html").escape(latex)
+            + "</annotation></semantics></math>"
+        )
         cut = units(head) + units("$" + latex + "$")
-        segments = [{"type": "text", "start": 0, "end": units(head)},
-                    {"type": "math", "start": units(head), "end": cut, "latex": latex, "mathml": mathml,
-                     "display": False},
-                    {"type": "text", "start": cut, "end": units(source)}]
+        segments = [
+            {"type": "text", "start": 0, "end": units(head)},
+            {"type": "math", "start": units(head), "end": cut, "latex": latex, "mathml": mathml, "display": False},
+            {"type": "text", "start": cut, "end": units(source)},
+        ]
         return {"source": source, "blocks": [{"type": "text", "start": 0, "end": units(source), "segments": segments}]}
 
     def fake_picture(self):
@@ -583,7 +800,9 @@ class LibraryExportTests(ExportFixture, TestCase):
 
     def test_several_unconvertible_formulas_share_one_rendering_pass(self):
         first = self.unconvertible_field(r"\cancel{x}", '<menclose notation="updiagonalstrike"><mi>x</mi></menclose>')
-        second = self.unconvertible_field(r"\bcancel{y}", '<menclose notation="downdiagonalstrike"><mi>y</mi></menclose>')
+        second = self.unconvertible_field(
+            r"\bcancel{y}", '<menclose notation="downdiagonalstrike"><mi>y</mi></menclose>'
+        )
         one = self.publication(stem=first["source"])
         two = self.publication(stem=second["source"])
         payload = self.payload([one, two])
@@ -599,14 +818,17 @@ class LibraryExportTests(ExportFixture, TestCase):
 
     def test_a_formula_that_drew_nothing_is_refused_instead_of_becoming_a_blank(self):
         """截出来全透明，等于在卷子上挖了个洞 —— 宁可整卷失败也不发。"""
+
         def shot(pixel, *, draw=False):
             buffer = io.BytesIO()
             image = Image.new("RGBA", (120, 40), pixel)
             if draw:
                 from PIL import ImageDraw
+
                 ImageDraw.Draw(image).line((10, 20, 100, 20), fill=(0, 0, 0, 255), width=4)
             image.save(buffer, "PNG")
             return {"data": base64.b64encode(buffer.getvalue()).decode("ascii")}
+
         box = {"x": 0, "y": 0, "width": 120, "height": 40}
         client = mock.Mock()
         client.call.return_value = shot((0, 0, 0, 0))
@@ -615,8 +837,12 @@ class LibraryExportTests(ExportFixture, TestCase):
         client.call.return_value = shot((255, 255, 255, 255), draw=True)
         self.assertEqual(export._formula_png(client, box)["size"], (120, 40))
         # 量不出尺寸的框说明排版没成功，同样不许当成一张空图塞进去。
-        for bad in ({"x": 0, "y": 0, "width": 0, "height": 40}, {"x": 0, "y": 0, "width": 9999, "height": 40},
-                    {"x": 0, "y": 0, "width": 120}, {"x": 0, "y": 0, "width": "120", "height": 40}):
+        for bad in (
+            {"x": 0, "y": 0, "width": 0, "height": 40},
+            {"x": 0, "y": 0, "width": 9999, "height": 40},
+            {"x": 0, "y": 0, "width": 120},
+            {"x": 0, "y": 0, "width": "120", "height": 40},
+        ):
             with self.assertRaises(ValueError):
                 export._formula_png(client, bad)
 
@@ -626,9 +852,11 @@ class LibraryExportTests(ExportFixture, TestCase):
             image = Image.new("RGBA", (120, 40), (0, 0, 0, 0))
             if draw:
                 from PIL import ImageDraw
+
                 ImageDraw.Draw(image).line((10, 20, 100, 20), fill=(0, 0, 0, 255), width=4)
             image.save(buffer, "PNG")
             return {"data": base64.b64encode(buffer.getvalue()).decode("ascii")}
+
         client = mock.Mock()
         client.call.side_effect = [shot(False), {}, shot(True)]
         result = export._formula_png(client, {"x": 0, "y": 0, "width": 120, "height": 40})
@@ -637,10 +865,16 @@ class LibraryExportTests(ExportFixture, TestCase):
 
     def test_without_a_usable_browser_the_whole_download_is_still_refused(self):
         from . import library_pdf
+
         payload, _ = self.post_with_unconvertible_formula()
         # 本机真的没有浏览器时，不许拿一张空白图片去补那个洞。
-        with mock.patch.object(library_pdf, "_browser_path", side_effect=library_pdf.word.ExportError(
-                "导出 PDF 需要本机 Microsoft Edge 或 Google Chrome；仍可导出 Word。", 503)):
+        with mock.patch.object(
+            library_pdf,
+            "_browser_path",
+            side_effect=library_pdf.word.ExportError(
+                "导出 PDF 需要本机 Microsoft Edge 或 Google Chrome；仍可导出 Word。", 503
+            ),
+        ):
             result = self.post(payload)
         # 宁可让用户改用 PDF，也不发一份读不懂的卷子。
         self.assertEqual(result.status_code, 400)
@@ -666,15 +900,24 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.figure(pub, slot="A")
         # Vertical keeps each option in its own body paragraph, which is what
         # this test reads; the two-column grid puts them in table cells.
-        response = self.post(self.payload([pub], print_options={"document": "questions", "student_info": False,
-                                                                "pagination": "keep", "option_layout": "vertical"}))
+        response = self.post(
+            self.payload(
+                [pub],
+                print_options={
+                    "document": "questions",
+                    "student_info": False,
+                    "pagination": "keep",
+                    "option_layout": "vertical",
+                },
+            )
+        )
         self.assertEqual(response.status_code, 200)
         xml = document_xml(response.content)
         paragraphs = xml.find("w:body", NS).findall("w:p", NS)
         question = [paragraph for paragraph in paragraphs if "离线合成题" in "".join(paragraph.itertext())][0]
-        self.assertEqual(question.find("w:pPr/w:keepNext", NS).get(f'{{{NS["w"]}}}val'), "1")
+        self.assertEqual(question.find("w:pPr/w:keepNext", NS).get(f"{{{NS['w']}}}val"), "1")
         last_option = [paragraph for paragraph in paragraphs if "B. 乙" in "".join(paragraph.itertext())][0]
-        self.assertEqual(last_option.find("w:pPr/w:keepNext", NS).get(f'{{{NS["w"]}}}val'), "0")
+        self.assertEqual(last_option.find("w:pPr/w:keepNext", NS).get(f"{{{NS['w']}}}val"), "0")
 
     def test_stale_ai_binding_is_rejected_without_overwriting_original(self):
         features.save({"ai_answer": True})
@@ -689,7 +932,9 @@ class LibraryExportTests(ExportFixture, TestCase):
         payload = self.payload([pub], print_options={"document": "questions"})
         payload["rendered_fields"][str(pub.id)]["stem"] = value
         options = library_drafts._print_options(payload["print_options"], ids=payload["ids"])
-        with mock.patch.object(export, "_convert_math_root", side_effect=AssertionError("Word converter must not run for PDF")):
+        with mock.patch.object(
+            export, "_convert_math_root", side_effect=AssertionError("Word converter must not run for PDF")
+        ):
             captured, use_ai = export._capture(payload["ids"], payload["rendered_fields"], options, "pdf")
         segment = captured[0]["fields"]["stem"][0]["segments"][0]
         self.assertIsNone(segment["omml"])
@@ -702,9 +947,11 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertIsNone(word_segment["omml"])
         self.assertIn("第 1 题", word_segment["fallback"])
         # Skipping OMML compatibility never skips XML, source or annotation checks.
-        for mutation in (lambda raw: raw.replace("<mi>x</mi>", "<unsupported>x</unsupported>"),
-                         lambda raw: raw.replace("<mi>x</mi>", '<mi onclick="bad">x</mi>'),
-                         lambda raw: '<!DOCTYPE math>' + raw):
+        for mutation in (
+            lambda raw: raw.replace("<mi>x</mi>", "<unsupported>x</unsupported>"),
+            lambda raw: raw.replace("<mi>x</mi>", '<mi onclick="bad">x</mi>'),
+            lambda raw: "<!DOCTYPE math>" + raw,
+        ):
             bad = deepcopy(value)
             bad["blocks"][0]["segments"][0]["mathml"] = mutation(bad["blocks"][0]["segments"][0]["mathml"])
             with self.assertRaises(export.ExportError):
@@ -718,16 +965,19 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertEqual(response.status_code, 200)
         xml = document_xml(response.content)
         paragraphs = xml.find("w:body", NS).findall("w:p", NS)
-        question = [paragraph for paragraph in paragraphs if any(word in "".join(paragraph.itertext())
-                    for word in ("合成题开头", "第一小问", "第二小问"))]
+        question = [
+            paragraph
+            for paragraph in paragraphs
+            if any(word in "".join(paragraph.itertext()) for word in ("合成题开头", "第一小问", "第二小问"))
+        ]
         self.assertEqual(len(question), 3)
         for paragraph in question:
-            self.assertEqual(paragraph.find("w:pPr/w:keepLines", NS).get(f'{{{NS["w"]}}}val'), "0")
-            self.assertEqual(paragraph.find("w:pPr/w:keepNext", NS).get(f'{{{NS["w"]}}}val'), "0")
-        self.assertEqual(question[-1].find("w:pPr/w:spacing", NS).get(f'{{{NS["w"]}}}after'), "160")
+            self.assertEqual(paragraph.find("w:pPr/w:keepLines", NS).get(f"{{{NS['w']}}}val"), "0")
+            self.assertEqual(paragraph.find("w:pPr/w:keepNext", NS).get(f"{{{NS['w']}}}val"), "0")
+        self.assertEqual(question[-1].find("w:pPr/w:spacing", NS).get(f"{{{NS['w']}}}after"), "160")
 
     def test_compact_protects_display_formula_and_picture_without_locking_long_prose(self):
-        formula = math_field(r"\frac{a}{b}", '<mfrac><mi>a</mi><mi>b</mi></mfrac>', display=True)
+        formula = math_field(r"\frac{a}{b}", "<mfrac><mi>a</mi><mi>b</mi></mfrac>", display=True)
         before, after = "长段开头" * 40 + "\n", "\n结束文字"
         source = before + formula["source"] + after
         pub = self.publication(stem=source)
@@ -735,38 +985,66 @@ class LibraryExportTests(ExportFixture, TestCase):
         payload = self.payload([pub], print_options={"document": "questions"})
         math = deepcopy(formula["blocks"][0]["segments"][0])
         math.update(start=units(before), end=units(before + formula["source"]))
-        payload["rendered_fields"][str(pub.id)]["stem"] = {"source": source, "blocks": [{"type": "text", "start": 0,
-            "end": units(source), "segments": [{"type": "text", "start": 0, "end": units(before)}, math,
-            {"type": "text", "start": units(before + formula["source"]), "end": units(source)}]}]}
+        payload["rendered_fields"][str(pub.id)]["stem"] = {
+            "source": source,
+            "blocks": [
+                {
+                    "type": "text",
+                    "start": 0,
+                    "end": units(source),
+                    "segments": [
+                        {"type": "text", "start": 0, "end": units(before)},
+                        math,
+                        {"type": "text", "start": units(before + formula["source"]), "end": units(source)},
+                    ],
+                }
+            ],
+        }
         response = self.post(payload)
         self.assertEqual(response.status_code, 200)
         paragraphs = document_xml(response.content).find("w:body", NS).findall("w:p", NS)
         for paragraph in paragraphs:
             if paragraph.find("m:oMath", NS) is not None or paragraph.find(".//w:drawing", NS) is not None:
-                self.assertEqual(paragraph.find("w:pPr/w:keepLines", NS).get(f'{{{NS["w"]}}}val'), "1")
+                self.assertEqual(paragraph.find("w:pPr/w:keepLines", NS).get(f"{{{NS['w']}}}val"), "1")
         prose = next(paragraph for paragraph in paragraphs if "长段开头" in "".join(paragraph.itertext()))
-        self.assertEqual(prose.find("w:pPr/w:keepNext", NS).get(f'{{{NS["w"]}}}val'), "0")
-        self.assertEqual(prose.find("w:pPr/w:keepLines", NS).get(f'{{{NS["w"]}}}val'), "0")
+        self.assertEqual(prose.find("w:pPr/w:keepNext", NS).get(f"{{{NS['w']}}}val"), "0")
+        self.assertEqual(prose.find("w:pPr/w:keepLines", NS).get(f"{{{NS['w']}}}val"), "0")
 
     def test_blank_source_lines_add_spacing_without_empty_word_paragraphs(self):
-        formula = math_field(r"\frac{a}{b}", '<mfrac><mi>a</mi><mi>b</mi></mfrac>', display=True)
+        formula = math_field(r"\frac{a}{b}", "<mfrac><mi>a</mi><mi>b</mi></mfrac>", display=True)
         before, after = "题干开头\n\n  \n(1) 保留答题线________\n\n", "\n\n  \n(2) 保留第二小问\n\n"
         source = before + formula["source"] + after
         pub = self.publication(stem=source)
         payload = self.payload([pub], print_options={"document": "questions", "student_info": False})
         math = deepcopy(formula["blocks"][0]["segments"][0])
         math.update(start=units(before), end=units(before + formula["source"]))
-        payload["rendered_fields"][str(pub.id)]["stem"] = {"source": source, "blocks": [{"type": "text", "start": 0,
-            "end": units(source), "segments": [{"type": "text", "start": 0, "end": units(before)}, math,
-            {"type": "text", "start": units(before + formula["source"]), "end": units(source)}]}]}
+        payload["rendered_fields"][str(pub.id)]["stem"] = {
+            "source": source,
+            "blocks": [
+                {
+                    "type": "text",
+                    "start": 0,
+                    "end": units(source),
+                    "segments": [
+                        {"type": "text", "start": 0, "end": units(before)},
+                        math,
+                        {"type": "text", "start": units(before + formula["source"]), "end": units(source)},
+                    ],
+                }
+            ],
+        }
         response = self.post(payload)
         self.assertEqual(response.status_code, 200, response.content[:200])
         paragraphs = document_xml(response.content).find("w:body", NS).findall("w:p", NS)
         question = paragraphs[2:]  # title, section heading
         self.assertEqual(len(question), 4)
         self.assertEqual(sum(paragraph.find("m:oMath", NS) is not None for paragraph in question), 1)
-        self.assertFalse(any(not "".join(paragraph.itertext()).strip() and paragraph.find("m:oMath", NS) is None
-                             for paragraph in question))
+        self.assertFalse(
+            any(
+                not "".join(paragraph.itertext()).strip() and paragraph.find("m:oMath", NS) is None
+                for paragraph in question
+            )
+        )
         text = "".join(document_xml(response.content).itertext())
         for part in ("题干开头", "(1) 保留答题线________", "(2) 保留第二小问"):
             self.assertIn(part, text)
@@ -783,30 +1061,46 @@ class LibraryExportTests(ExportFixture, TestCase):
         payload = self.payload([short, long, wide_math], print_options={"document": "questions"})
         math = deepcopy(formula["blocks"][0]["segments"][0])
         math.update(start=units(prefix), end=units(prefix + formula["source"]))
-        payload["rendered_fields"][str(wide_math.id)]["stem"] = {"source": wide_math.content["stem"], "blocks": [
-            {"type": "text", "start": 0, "end": units(wide_math.content["stem"]), "segments": [
-                {"type": "text", "start": 0, "end": units(prefix)}, math]}]}
+        payload["rendered_fields"][str(wide_math.id)]["stem"] = {
+            "source": wide_math.content["stem"],
+            "blocks": [
+                {
+                    "type": "text",
+                    "start": 0,
+                    "end": units(wide_math.content["stem"]),
+                    "segments": [{"type": "text", "start": 0, "end": units(prefix)}, math],
+                }
+            ],
+        }
         response = self.post(payload)
         self.assertEqual(response.status_code, 200)
         paragraphs = document_xml(response.content).find("w:body", NS).findall("w:p", NS)
-        short_paragraph = next(paragraph for paragraph in paragraphs if "短图注请看下图" in "".join(paragraph.itertext()))
+        short_paragraph = next(
+            paragraph for paragraph in paragraphs if "短图注请看下图" in "".join(paragraph.itertext())
+        )
         long_paragraph = next(paragraph for paragraph in paragraphs if "多行题干材料" in "".join(paragraph.itertext()))
-        math_paragraph = next(paragraph for paragraph in paragraphs if "短文字与长公式" in "".join(paragraph.itertext()))
-        self.assertEqual(short_paragraph.find("w:pPr/w:keepNext", NS).get(f'{{{NS["w"]}}}val'), "1")
-        self.assertEqual(long_paragraph.find("w:pPr/w:keepNext", NS).get(f'{{{NS["w"]}}}val'), "0")
-        self.assertEqual(math_paragraph.find("w:pPr/w:keepNext", NS).get(f'{{{NS["w"]}}}val'), "0")
+        math_paragraph = next(
+            paragraph for paragraph in paragraphs if "短文字与长公式" in "".join(paragraph.itertext())
+        )
+        self.assertEqual(short_paragraph.find("w:pPr/w:keepNext", NS).get(f"{{{NS['w']}}}val"), "1")
+        self.assertEqual(long_paragraph.find("w:pPr/w:keepNext", NS).get(f"{{{NS['w']}}}val"), "0")
+        self.assertEqual(math_paragraph.find("w:pPr/w:keepNext", NS).get(f"{{{NS['w']}}}val"), "0")
         for paragraph in paragraphs:
             if paragraph.find(".//w:drawing", NS) is not None:
-                self.assertEqual(paragraph.find("w:pPr/w:keepLines", NS).get(f'{{{NS["w"]}}}val'), "1")
+                self.assertEqual(paragraph.find("w:pPr/w:keepLines", NS).get(f"{{{NS['w']}}}val"), "1")
 
     def test_keep_long_question_falls_back_to_breakable_paragraphs(self):
         pub = self.publication(stem="\n".join(f"第 {index} 段合成材料" * 12 for index in range(60)))
         response = self.post(self.payload([pub], print_options={"document": "questions", "pagination": "keep"}))
         self.assertEqual(response.status_code, 200)
         xml = document_xml(response.content)
-        prose = next(paragraph for paragraph in xml.find("w:body", NS).findall("w:p", NS) if "第 1 段合成材料" in "".join(paragraph.itertext()))
-        self.assertEqual(prose.find("w:pPr/w:keepNext", NS).get(f'{{{NS["w"]}}}val'), "0")
-        self.assertEqual(prose.find("w:pPr/w:keepLines", NS).get(f'{{{NS["w"]}}}val'), "0")
+        prose = next(
+            paragraph
+            for paragraph in xml.find("w:body", NS).findall("w:p", NS)
+            if "第 1 段合成材料" in "".join(paragraph.itertext())
+        )
+        self.assertEqual(prose.find("w:pPr/w:keepNext", NS).get(f"{{{NS['w']}}}val"), "0")
+        self.assertEqual(prose.find("w:pPr/w:keepLines", NS).get(f"{{{NS['w']}}}val"), "0")
 
     def test_global_and_per_question_columns_and_font_size_safe_fallback(self):
         first = self.publication(kind="single_choice", options=dict.fromkeys("ABCD", "短选项"))
@@ -824,7 +1118,11 @@ class LibraryExportTests(ExportFixture, TestCase):
         first.save(update_fields=["content"])
         columns = []
         for size in (12, 16):
-            result = self.post(self.payload([first], print_options={"document": "questions", "option_layout": "four", "font_size": size}))
+            result = self.post(
+                self.payload(
+                    [first], print_options={"document": "questions", "option_layout": "four", "font_size": size}
+                )
+            )
             table = document_xml(result.content).find(".//w:tbl", NS)
             columns.append(len(table.findall("w:tblGrid/w:gridCol", NS)) if table is not None else 0)
             self.assertIn(f'w:val="{size * 2}"'.encode(), etree.tostring(document_xml(result.content)))
@@ -840,12 +1138,12 @@ class LibraryExportTests(ExportFixture, TestCase):
             self.assertEqual(response.status_code, 200)
             paragraphs = document_xml(response.content).find("w:body", NS).findall("w:p", NS)
             index = next(i for i, p in enumerate(paragraphs) if stem in "".join(p.itertext()))
-            for paragraph in paragraphs[index + 1:]:
+            for paragraph in paragraphs[index + 1 :]:
                 if "".join(paragraph.itertext()).strip():
                     break
                 spacing = paragraph.find("w:pPr/w:spacing", NS)
-                if spacing is not None and spacing.get(f'{{{NS["w"]}}}after'):
-                    return spacing.get(f'{{{NS["w"]}}}after')
+                if spacing is not None and spacing.get(f"{{{NS['w']}}}after"):
+                    return spacing.get(f"{{{NS['w']}}}after")
             return None
 
         none = {"document": "questions", "answer_space": "none"}
@@ -853,13 +1151,12 @@ class LibraryExportTests(ExportFixture, TestCase):
         only_second = {**none, "answer_space_overrides": {str(second.id): "large"}}
 
         # The override has to print exactly what picking that value globally would.
-        self.assertEqual(writing_space("第二题专用题干标记", only_second),
-                         writing_space("第二题专用题干标记", large))
+        self.assertEqual(writing_space("第二题专用题干标记", only_second), writing_space("第二题专用题干标记", large))
         # And it must not drag the other question along with it.
-        self.assertEqual(writing_space("第一题专用题干标记", only_second),
-                         writing_space("第一题专用题干标记", none))
-        self.assertNotEqual(writing_space("第一题专用题干标记", only_second),
-                            writing_space("第一题专用题干标记", large))
+        self.assertEqual(writing_space("第一题专用题干标记", only_second), writing_space("第一题专用题干标记", none))
+        self.assertNotEqual(
+            writing_space("第一题专用题干标记", only_second), writing_space("第一题专用题干标记", large)
+        )
         # Without a space there is nothing to inherit, so the override must add one.
         self.assertIsNone(writing_space("第二题专用题干标记", none))
         self.assertIsNotNone(writing_space("第二题专用题干标记", only_second))
@@ -873,7 +1170,9 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertIn("E. 短选项", "".join(table.itertext()))
         pub.content["options"] = dict.fromkeys("ABCD", "长选项" * 30)
         pub.save(update_fields=["content"])
-        result = self.post(self.payload([pub], print_options={"document": "questions", "option_layout": "four", "font_size": 16}))
+        result = self.post(
+            self.payload([pub], print_options={"document": "questions", "option_layout": "four", "font_size": 16})
+        )
         xml = document_xml(result.content)
         self.assertIsNone(xml.find(".//w:tbl", NS))
         for key in "ABCD":
@@ -888,8 +1187,7 @@ class LibraryExportTests(ExportFixture, TestCase):
         result = self.post(self.payload([pub]))
         self.assertEqual(result.status_code, 200, result.content[:300])
         self.assertIn("A.", "".join(document_xml(result.content).itertext()))
-        warning = unquote(result.headers["X-QB-Layout-Warning"]) \
-            if "X-QB-Layout-Warning" in result.headers else ""
+        warning = unquote(result.headers["X-QB-Layout-Warning"]) if "X-QB-Layout-Warning" in result.headers else ""
         self.assertIn("第 1 题", warning, "非选择题印出 A. B. C. 时必须有一条能定位到它的提示")
         self.assertIn("不是选择题", warning)
         self.assertIn("(1)(2)(3)(4)", warning)
@@ -922,8 +1220,12 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertEqual(len(breaks), 2)
         self.assertTrue("".join(breaks[0].itertext()).startswith("2."))
         self.assertIn("解答题", "".join(breaks[1].itertext()))
-        answer_index = next(index for index, paragraph in enumerate(paragraphs) if "参考答案与解析" in "".join(paragraph.itertext()))
-        self.assertFalse(any(paragraph.find("w:pPr/w:pageBreakBefore", NS) is not None for paragraph in paragraphs[answer_index:]))
+        answer_index = next(
+            index for index, paragraph in enumerate(paragraphs) if "参考答案与解析" in "".join(paragraph.itertext())
+        )
+        self.assertFalse(
+            any(paragraph.find("w:pPr/w:pageBreakBefore", NS) is not None for paragraph in paragraphs[answer_index:])
+        )
 
     def test_layout_hints_for_unselected_ids_are_rejected_by_export(self):
         pub = self.publication()
@@ -933,11 +1235,13 @@ class LibraryExportTests(ExportFixture, TestCase):
             self.assertIn("当前选中", response.json()["error"])
 
     def test_mathml_annotation_mismatch_external_entities_and_unsupported_nodes_fail(self):
-        value = math_field("x", '<mi>x</mi>')
-        for change in (lambda raw: raw.replace(">x</annotation>", ">z</annotation>"),
-                       lambda raw: '<!DOCTYPE math [<!ENTITY x SYSTEM "file:///private">]>' + raw,
-                       lambda raw: raw.replace("<mi>x</mi>", '<unsupported>x</unsupported>'),
-                       lambda raw: raw.replace('<mi>x</mi>', '<mi>x</mi><mi href="https://invalid">y</mi>')):
+        value = math_field("x", "<mi>x</mi>")
+        for change in (
+            lambda raw: raw.replace(">x</annotation>", ">z</annotation>"),
+            lambda raw: '<!DOCTYPE math [<!ENTITY x SYSTEM "file:///private">]>' + raw,
+            lambda raw: raw.replace("<mi>x</mi>", "<unsupported>x</unsupported>"),
+            lambda raw: raw.replace("<mi>x</mi>", '<mi>x</mi><mi href="https://invalid">y</mi>'),
+        ):
             bad = deepcopy(value)
             segment = bad["blocks"][0]["segments"][0]
             segment["mathml"] = change(segment["mathml"])
@@ -979,15 +1283,16 @@ class LibraryExportTests(ExportFixture, TestCase):
                 cell["segments"] = field(cell["source"])["blocks"][0]["segments"] if cell["source"] else []
         payload = self.payload([pub])
         payload["rendered_fields"][str(pub.id)]["stem"] = {
-            "source": raw, "blocks": [{"type": "table", "start": 0, "end": units(raw), "rows": rows}]}
+            "source": raw,
+            "blocks": [{"type": "table", "start": 0, "end": units(raw), "rows": rows}],
+        }
         result = self.post(payload)
         self.assertEqual(result.status_code, 200)
         return document_xml(result.content)
 
     @staticmethod
     def column_widths_mm(xml):
-        return [int(node.get(f"{{{NS['w']}}}w")) * 25.4 / 1440
-                for node in xml.findall(".//w:tblGrid/w:gridCol", NS)]
+        return [int(node.get(f"{{{NS['w']}}}w")) * 25.4 / 1440 for node in xml.findall(".//w:tblGrid/w:gridCol", NS)]
 
     def test_a_long_header_column_gets_the_width_its_text_needs(self):
         """宽表里每一列都等分的话，长表头会被挤成五行——真库 27 个表格里 11 个这样。
@@ -1001,12 +1306,16 @@ class LibraryExportTests(ExportFixture, TestCase):
         widths = self.column_widths_mm(self.table_export(raw))
 
         self.assertEqual(len(widths), 13)
-        self.assertGreater(widths[0], max(widths[1:]) * 1.8,
-                           f"表头列只有 {widths[0]:.1f}mm，数字列 {max(widths[1:]):.1f}mm，没按内容分")
+        self.assertGreater(
+            widths[0],
+            max(widths[1:]) * 1.8,
+            f"表头列只有 {widths[0]:.1f}mm，数字列 {max(widths[1:]):.1f}mm，没按内容分",
+        )
         # 「12」两个数字是 5.02mm，Word 标称的两侧内边距是 3.8mm。
         # 正好卡在 8.82mm 上就会断成两行——实测就是，所以数字列必须留出余量。
-        self.assertGreaterEqual(max(widths[1:]), 2 * 0.6 * 12 * 25.4 / 72 + 3.8 + 0.8,
-                                f"数字列只有 {max(widths[1:]):.2f}mm，放不下两个数字")
+        self.assertGreaterEqual(
+            max(widths[1:]), 2 * 0.6 * 12 * 25.4 / 72 + 3.8 + 0.8, f"数字列只有 {max(widths[1:]):.2f}mm，放不下两个数字"
+        )
 
     def test_a_table_wider_than_the_page_is_scaled_back_inside_it(self):
         """内容再宽也不能超出 178mm 的版心，超了就整体缩回去。"""
@@ -1035,21 +1344,25 @@ class LibraryExportTests(ExportFixture, TestCase):
         1.9mm 只余 16.2mm，而四个字实测 16.99mm——差 0.79mm，表头就印成
         「开口方 / 向」两行。需求本来放得下的三列全被陪着缩窄了。
         """
-        raw = ("| 性质 二次函数 | 开口方向 | 对称轴 | 顶点坐标 | 取哪些值时，x的值随y值的增大而增大 |\n"
-               "| --- | --- | --- | --- | --- |\n"
-               "| y = 1/2 * x^2 |  |  |  |  |\n"
-               "| y = 1/2 * (x + 2)^2 |  |  |  |  |")
+        raw = (
+            "| 性质 二次函数 | 开口方向 | 对称轴 | 顶点坐标 | 取哪些值时，x的值随y值的增大而增大 |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| y = 1/2 * x^2 |  |  |  |  |\n"
+            "| y = 1/2 * (x + 2)^2 |  |  |  |  |"
+        )
         widths = self.column_widths_mm(self.table_export(raw))
 
         # 「开口方向」四个字：12pt 汉字一个 1em = 4.23mm，加上留白。
         # docx 的列宽存在 twip 里（1 twip = 0.0176mm），比下来会少 0.008mm。
         tolerance = 25.4 / 1440
         self.assertGreaterEqual(
-            widths[1], 4 * 12 * 25.4 / 72 + export.CELL_PADDING_MM - tolerance,
-            f"「开口方向」列只有 {widths[1]:.2f}mm，表头会被顶成「开口方 / 向」两行")
+            widths[1],
+            4 * 12 * 25.4 / 72 + export.CELL_PADDING_MM - tolerance,
+            f"「开口方向」列只有 {widths[1]:.2f}mm，表头会被顶成「开口方 / 向」两行",
+        )
         self.assertGreaterEqual(
-            widths[3], 4 * 12 * 25.4 / 72 + export.CELL_PADDING_MM - tolerance,
-            f"「顶点坐标」列只有 {widths[3]:.2f}mm")
+            widths[3], 4 * 12 * 25.4 / 72 + export.CELL_PADDING_MM - tolerance, f"「顶点坐标」列只有 {widths[3]:.2f}mm"
+        )
         self.assertLessEqual(sum(widths), 178.5)
 
     def test_squeezing_a_wide_table_wraps_fewer_cells_than_scaling_every_column(self):
@@ -1063,10 +1376,13 @@ class LibraryExportTests(ExportFixture, TestCase):
         不写死毫米数：拿九上那两张真的超宽表（五列需求合计 195.2mm、十三列
         244.2mm）当输入。
         """
-        for need in ([48.18, 21.93, 17.70, 21.93, 85.43],
-                     [30.40, 27.86, 10.08, 27.86, 10.08, 10.08, 27.86, 25.32,
-                      8.00, 8.00, 25.32, 8.00, 25.32],
-                     [60.0, 60.0, 60.0, 12.0], [200.0], [90.0, 90.0, 90.0]):
+        for need in (
+            [48.18, 21.93, 17.70, 21.93, 85.43],
+            [30.40, 27.86, 10.08, 27.86, 10.08, 10.08, 27.86, 25.32, 8.00, 8.00, 25.32, 8.00, 25.32],
+            [60.0, 60.0, 60.0, 12.0],
+            [200.0],
+            [90.0, 90.0, 90.0],
+        ):
             budget = 178.0
             fair = export._fair_widths(need, budget)
             squeezed = [got for want, got in zip(need, fair) if got < want - 1e-9]
@@ -1074,12 +1390,15 @@ class LibraryExportTests(ExportFixture, TestCase):
             self.assertTrue(squeezed, f"{need} 本该挤掉几列，却一列没挤")
             level = min(squeezed)
             self.assertAlmostEqual(
-                sum(min(want, level) for want in need), budget, places=6,
-                msg=f"{need} 水位线 {level:.3f}mm 没凑满版心")
+                sum(min(want, level) for want in need), budget, places=6, msg=f"{need} 水位线 {level:.3f}mm 没凑满版心"
+            )
             for index, (want, got) in enumerate(zip(need, fair)):
                 self.assertAlmostEqual(
-                    got, min(want, level), places=6,
-                    msg=f"第 {index} 列拿到 {got:.3f}mm，水位线却是 {min(want, level):.3f}mm")
+                    got,
+                    min(want, level),
+                    places=6,
+                    msg=f"第 {index} 列拿到 {got:.3f}mm，水位线却是 {min(want, level):.3f}mm",
+                )
 
     def test_a_single_wide_column_is_capped_at_the_text_width(self):
         """一列就超出版心时，也不能让它把纸撑出去。"""
@@ -1095,7 +1414,10 @@ class LibraryExportTests(ExportFixture, TestCase):
             for cell in row:
                 cell["segments"] = field(cell["source"])["blocks"][0]["segments"]
         payload = self.payload([pub])
-        payload["rendered_fields"][str(pub.id)]["stem"] = {"source": raw, "blocks": [{"type": "table", "start": 0, "end": units(raw), "rows": rows}]}
+        payload["rendered_fields"][str(pub.id)]["stem"] = {
+            "source": raw,
+            "blocks": [{"type": "table", "start": 0, "end": units(raw), "rows": rows}],
+        }
         result = self.post(payload)
         self.assertEqual(result.status_code, 200)
         xml = document_xml(result.content)
@@ -1103,8 +1425,10 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertIn("& 丙", "".join(xml.itertext()))
 
     def test_table_span_out_of_bounds_and_embedded_image_are_rejected(self):
-        for raw in ('<table><tr><td rowspan="3">甲</td></tr></table>',
-                    '<table><tr><td><img src="https://invalid">甲</td></tr></table>'):
+        for raw in (
+            '<table><tr><td rowspan="3">甲</td></tr></table>',
+            '<table><tr><td><img src="https://invalid">甲</td></tr></table>',
+        ):
             pub = self.publication(stem=raw)
             try:
                 rows = export._table_source(raw, "合成表格")
@@ -1114,15 +1438,21 @@ class LibraryExportTests(ExportFixture, TestCase):
                 for cell in row:
                     cell["segments"] = field(cell["source"])["blocks"][0]["segments"]
             payload = self.payload([pub])
-            payload["rendered_fields"][str(pub.id)]["stem"] = {"source": raw, "blocks": [{"type": "table", "start": 0, "end": units(raw), "rows": rows}]}
+            payload["rendered_fields"][str(pub.id)]["stem"] = {
+                "source": raw,
+                "blocks": [{"type": "table", "start": 0, "end": units(raw), "rows": rows}],
+            }
             self.assertEqual(self.post(payload).status_code, 400)
 
     def test_missing_corrupt_unknown_slot_and_unsafe_image_path_abort(self):
         pub = self.publication()
         target = self.figure(pub)
-        for mutation in (lambda: target.unlink(), lambda: target.write_bytes(b"bad png"),
-                         lambda: pub.content["figures"][0].update(slot="unknown"),
-                         lambda: pub.content["figures"][0].update(file="../private.png")):
+        for mutation in (
+            lambda: target.unlink(),
+            lambda: target.write_bytes(b"bad png"),
+            lambda: pub.content["figures"][0].update(slot="unknown"),
+            lambda: pub.content["figures"][0].update(file="../private.png"),
+        ):
             self.figure(pub)
             mutation()
             pub.save(update_fields=["content"])
@@ -1151,12 +1481,14 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertIsNotNone(table)
         self.assertEqual(len(table.findall("w:tr", NS)), 1)
         self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), 4)
-        self.assertEqual(table.find("w:tblPr/w:tblBorders/w:top", NS).get(f'{{{NS["w"]}}}val'), "nil")
+        self.assertEqual(table.find("w:tblPr/w:tblBorders/w:top", NS).get(f"{{{NS['w']}}}val"), "nil")
         for paragraph in table.findall("w:tr", NS)[-1].findall(".//w:p", NS):
-            self.assertEqual(paragraph.find("w:pPr/w:keepNext", NS).get(f'{{{NS["w"]}}}val'), "0")
+            self.assertEqual(paragraph.find("w:pPr/w:keepNext", NS).get(f"{{{NS['w']}}}val"), "0")
         # Wide, multi-line or diagram options still fall back to one per line.
-        for mutation in (lambda: pub.content["options"].update(A="长" * 37),
-                         lambda: pub.content["options"].update(A="第一行\n第二行")):
+        for mutation in (
+            lambda: pub.content["options"].update(A="长" * 37),
+            lambda: pub.content["options"].update(A="第一行\n第二行"),
+        ):
             pub.content["options"]["A"] = "离线选项"
             mutation()
             pub.save(update_fields=["content"])
@@ -1174,8 +1506,7 @@ class LibraryExportTests(ExportFixture, TestCase):
         for index, key in enumerate("ABCD", 1):
             target = folder / f"figure-{index}.png"
             Image.new("RGB", (240, 120), "red").save(target)
-            pub.content["figures"].append({"slot": key, "file": target.name,
-                                           "page_idx": 0, "bbox": [0, 0, 100, 100]})
+            pub.content["figures"].append({"slot": key, "file": target.name, "page_idx": 0, "bbox": [0, 0, 100, 100]})
         pub.content_hash = library.content_hash(pub.content)
         pub.save(update_fields=["content", "content_hash"])
         response = self.post(self.payload([pub], print_options={"document": "questions"}))
@@ -1212,7 +1543,9 @@ class LibraryExportTests(ExportFixture, TestCase):
             # columns and every label and image survives. Only the explicit "two"
             # and "vertical" reduce.
             with self.subTest(mode=mode):
-                response = self.post(self.payload([pub], print_options={"document": "questions", "option_layout": mode}))
+                response = self.post(
+                    self.payload([pub], print_options={"document": "questions", "option_layout": mode})
+                )
                 self.assertEqual(response.status_code, 200, response.content[:100])
                 tree = document_xml(response.content)
                 table = tree.find(".//w:tbl", NS)
@@ -1220,8 +1553,10 @@ class LibraryExportTests(ExportFixture, TestCase):
                 self.assertEqual(len(tree.findall(".//a:blip", NS)), 4)
                 for letter in "ABCD":
                     self.assertIn(letter + ".", "".join(tree.itertext()))
-                extents = tree.xpath("//*[local-name()='extent' and namespace-uri()='http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx")
-                self.assertTrue(all(abs(int(width) / 36000 - 200 * 25.4 / 150) < .01 for width in extents))
+                extents = tree.xpath(
+                    "//*[local-name()='extent' and namespace-uri()='http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx"
+                )
+                self.assertTrue(all(abs(int(width) / 36000 - 200 * 25.4 / 150) < 0.01 for width in extents))
 
         # A wide image downgrades the requested grid and is never shrunk just
         # to preserve the number of columns. The transport explains the change.
@@ -1270,8 +1605,7 @@ class LibraryExportTests(ExportFixture, TestCase):
             # constant honest.
             ("3 x 335px fills one row by 0.4mm", [(335, 200)] * 3, [3], 56.7),
             # 必修第一册 1-1: four diagrams, two to a line at 150 dpi.
-            ("textbook 4 diagrams", [(340, 354), (347, 360), (336, 360), (326, 357)],
-             [2, 2], [57.6, 58.8, 56.9, 55.2]),
+            ("textbook 4 diagrams", [(340, 354), (347, 360), (336, 360), (326, 357)], [2, 2], [57.6, 58.8, 56.9, 55.2]),
         ):
             with self.subTest(label):
                 count = len(sizes)
@@ -1282,8 +1616,9 @@ class LibraryExportTests(ExportFixture, TestCase):
                 for index, size in enumerate(sizes, start=1):
                     target = folder / f"figure-{index}.png"
                     Image.new("RGB", size, "red").save(target)
-                    pub.content["figures"].append({"slot": "stem", "file": target.name,
-                                                   "page_idx": 0, "bbox": [0, 0, 100, 100]})
+                    pub.content["figures"].append(
+                        {"slot": "stem", "file": target.name, "page_idx": 0, "bbox": [0, 0, 100, 100]}
+                    )
                 pub.content_hash = library.content_hash(pub.content)
                 pub.save(update_fields=["content", "content_hash"])
 
@@ -1295,47 +1630,59 @@ class LibraryExportTests(ExportFixture, TestCase):
                 # diagram in the first column of a table centred on the widest
                 # line, hard against the left of the text area.
                 tables = tree.findall(".//w:tbl", NS)
-                self.assertEqual([len(table.findall("w:tblGrid/w:gridCol", NS)) for table in tables],
-                                 lines, f"{label}: one table per preview line")
+                self.assertEqual(
+                    [len(table.findall("w:tblGrid/w:gridCol", NS)) for table in tables],
+                    lines,
+                    f"{label}: one table per preview line",
+                )
                 for table in tables:
-                    self.assertEqual(len(table.findall("w:tr", NS)), 1,
-                                     f"{label}: a preview line is one row, not a grid")
+                    self.assertEqual(
+                        len(table.findall("w:tr", NS)), 1, f"{label}: a preview line is one row, not a grid"
+                    )
                 # Word folds two w:tbl elements that sit back to back into ONE
                 # table, which would drag the second line's columns back to the
                 # first line's width and undo the per-line centring. The XML
                 # still shows two tables either way, so nothing above would notice
                 # a missing separator — this is the assertion that does.
                 wanted_tables = {id(table) for table in tables}
-                seated = [index for index, child in enumerate(tree.find("w:body", NS))
-                          if child.tag == f'{{{NS["w"]}}}tbl' and id(child) in wanted_tables]
+                seated = [
+                    index
+                    for index, child in enumerate(tree.find("w:body", NS))
+                    if child.tag == f"{{{NS['w']}}}tbl" and id(child) in wanted_tables
+                ]
                 self.assertEqual(len(seated), len(tables), f"{label}: figure tables in the body")
                 for position in range(len(seated) - 1):
                     self.assertGreater(
-                        seated[position + 1] - seated[position], 1,
+                        seated[position + 1] - seated[position],
+                        1,
                         f"{label}: two figure lines sit back to back, so Word merges them "
-                        f"into one table and the second line loses its own width")
+                        f"into one table and the second line loses its own width",
+                    )
                 self.assertEqual(len(tree.findall(".//a:blip", NS)), count)
                 gap_mm = export.PREVIEW_FIGURE_GAP_PX * 25.4 / 96
-                extents = [int(value) / 36000 for value in tree.xpath(
-                    "//*[local-name()='extent' and namespace-uri()="
-                    "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx")]
+                extents = [
+                    int(value) / 36000
+                    for value in tree.xpath(
+                        "//*[local-name()='extent' and namespace-uri()="
+                        "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx"
+                    )
+                ]
                 wanted = width_mm if isinstance(width_mm, list) else [width_mm] * count
                 self.assertEqual([round(value, 1) for value in extents], wanted, f"{label}: mm on paper")
                 cursor = 0
                 for number, columns in enumerate(lines, start=1):
                     table = tables[number - 1]
-                    row = wanted[cursor:cursor + columns]
+                    row = wanted[cursor : cursor + columns]
                     cursor += columns
                     # Borderless, like the preview's plain figure row.
                     for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
                         node = table.find(f"w:tblPr/w:tblBorders/w:{side}", NS)
-                        self.assertEqual(node.get(f'{{{NS["w"]}}}val'), "nil",
-                                         f"{label} line {number}: {side} border")
+                        self.assertEqual(node.get(f"{{{NS['w']}}}val"), "nil", f"{label} line {number}: {side} border")
                     # The preview centres every line on its own; a table left
                     # aligned on an A4 text area is the difference the teacher sees.
                     justification = table.find("w:tblPr/w:jc", NS)
                     self.assertIsNotNone(justification, f"{label} line {number}: has to be centred")
-                    self.assertEqual(justification.get(f'{{{NS["w"]}}}val'), "center")
+                    self.assertEqual(justification.get(f"{{{NS['w']}}}val"), "center")
                     # Centring the table is only half of it. Each column is a gap
                     # wider than its picture, and the picture has to sit in the
                     # middle of that column — a left-aligned cell paragraph puts
@@ -1343,27 +1690,35 @@ class LibraryExportTests(ExportFixture, TestCase):
                     # a gap, about 1.9mm, which is visible on the page.
                     for cell in table.findall(".//w:tc", NS):
                         inner = cell.find("w:p/w:pPr/w:jc", NS)
-                        self.assertIsNotNone(inner,
-                                              f"{label} line {number}: a cell has to centre its picture")
-                        self.assertEqual(inner.get(f'{{{NS["w"]}}}val'), "center",
-                                         f"{label} line {number}: a cell paragraph is not centred")
+                        self.assertIsNotNone(inner, f"{label} line {number}: a cell has to centre its picture")
+                        self.assertEqual(
+                            inner.get(f"{{{NS['w']}}}val"),
+                            "center",
+                            f"{label} line {number}: a cell paragraph is not centred",
+                        )
                     # Word table columns touch, so each column carries the gap the
                     # preview shows — including the last one, which is what keeps
                     # the same space before the first diagram as after the last.
-                    column_mm = [int(column.get(f'{{{NS["w"]}}}w')) * 25.4 / 1440
-                                 for column in table.findall("w:tblGrid/w:gridCol", NS)]
+                    column_mm = [
+                        int(column.get(f"{{{NS['w']}}}w")) * 25.4 / 1440
+                        for column in table.findall("w:tblGrid/w:gridCol", NS)
+                    ]
                     for position in range(columns):
                         slack = column_mm[position] - row[position]
-                        self.assertGreater(slack, 1.5,
-                                           f"{label} line {number}: column {position + 1} "
-                                           f"has no gap ({column_mm[position]} vs {row[position]})")
+                        self.assertGreater(
+                            slack,
+                            1.5,
+                            f"{label} line {number}: column {position + 1} "
+                            f"has no gap ({column_mm[position]} vs {row[position]})",
+                        )
                     # The pictures and the gaps between them must fit the text
                     # area. The columns add one empty gap at each end on top of
                     # that; it is the space that centres the row and may spill
                     # into the A4 margins, which is far better than shrinking
                     # every diagram by a percent and putting it out of step.
-                    self.assertLessEqual(sum(column_mm) - gap_mm, 178,
-                                         f"{label} line {number}: the row runs off the page")
+                    self.assertLessEqual(
+                        sum(column_mm) - gap_mm, 178, f"{label} line {number}: the row runs off the page"
+                    )
 
         # Two pictures too wide to share a row get one paragraph each — the
         # preview wraps them too, and neither side may shrink them to force a
@@ -1384,19 +1739,23 @@ class LibraryExportTests(ExportFixture, TestCase):
                 for index, size in enumerate(sizes, start=1):
                     target = folder / f"figure-{index}.png"
                     Image.new("RGB", size, "red").save(target)
-                    pub.content["figures"].append({"slot": "stem", "file": target.name,
-                                                   "page_idx": 0, "bbox": [0, 0, 100, 100]})
+                    pub.content["figures"].append(
+                        {"slot": "stem", "file": target.name, "page_idx": 0, "bbox": [0, 0, 100, 100]}
+                    )
                 pub.content_hash = library.content_hash(pub.content)
                 pub.save(update_fields=["content", "content_hash"])
                 response = self.post(self.payload([pub], print_options={"document": "questions"}))
                 self.assertEqual(response.status_code, 200)
                 tree = document_xml(response.content)
-                self.assertIsNone(tree.find(".//w:tbl", NS),
-                                  f"{label}: one column must not build a grid")
+                self.assertIsNone(tree.find(".//w:tbl", NS), f"{label}: one column must not build a grid")
                 self.assertEqual(len(tree.findall(".//a:blip", NS)), len(sizes))
-                extents = [round(int(value) / 36000, 1) for value in tree.xpath(
-                    "//*[local-name()='extent' and namespace-uri()="
-                    "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx")]
+                extents = [
+                    round(int(value) / 36000, 1)
+                    for value in tree.xpath(
+                        "//*[local-name()='extent' and namespace-uri()="
+                        "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx"
+                    )
+                ]
                 self.assertEqual(extents, expected, f"{label}: mm on paper")
 
     def test_a_teacher_can_resize_realign_and_reline_their_figures(self):
@@ -1421,33 +1780,43 @@ class LibraryExportTests(ExportFixture, TestCase):
             for index, size in enumerate(sizes[:count], start=1):
                 target = folder / f"figure-{index}.png"
                 Image.new("RGB", size, "red").save(target)
-                pub.content["figures"].append({"slot": "stem", "file": target.name,
-                                               "page_idx": 0, "bbox": [0, 0, 100, 100]})
+                pub.content["figures"].append(
+                    {"slot": "stem", "file": target.name, "page_idx": 0, "bbox": [0, 0, 100, 100]}
+                )
             pub.content_hash = library.content_hash(pub.content)
             pub.save(update_fields=["content", "content_hash"])
             return pub
 
         def widths_mm(tree):
-            return [round(int(value) / 36000, 1) for value in tree.xpath(
-                "//*[local-name()='extent' and namespace-uri()="
-                "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx")]
+            return [
+                round(int(value) / 36000, 1)
+                for value in tree.xpath(
+                    "//*[local-name()='extent' and namespace-uri()="
+                    "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx"
+                )
+            ]
 
         def heights_mm(tree):
-            return [round(int(value) / 36000, 1) for value in tree.xpath(
-                "//*[local-name()='extent' and namespace-uri()="
-                "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cy")]
+            return [
+                round(int(value) / 36000, 1)
+                for value in tree.xpath(
+                    "//*[local-name()='extent' and namespace-uri()="
+                    "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cy"
+                )
+            ]
 
         def line_shapes(tree):
             return [len(table.findall("w:tblGrid/w:gridCol", NS)) for table in tree.findall(".//w:tbl", NS)]
 
         def column_mm(table):
-            return [round(int(column.get(f'{{{NS["w"]}}}w')) * 25.4 / 1440, 2)
-                    for column in table.findall("w:tblGrid/w:gridCol", NS)]
+            return [
+                round(int(column.get(f"{{{NS['w']}}}w")) * 25.4 / 1440, 2)
+                for column in table.findall("w:tblGrid/w:gridCol", NS)
+            ]
 
         # 不动任何东西时，跟没有这个功能之前一模一样。
         pub = build(3)
-        response = self.post(self.payload([pub], print_options={"document": "questions",
-                                                                 "figure_overrides": {}}))
+        response = self.post(self.payload([pub], print_options={"document": "questions", "figure_overrides": {}}))
         self.assertEqual(response.status_code, 200, response.content[:200])
         tree = document_xml(response.content)
         self.assertEqual(line_shapes(tree), [3], "没设置时三张图仍然在一行")
@@ -1457,8 +1826,9 @@ class LibraryExportTests(ExportFixture, TestCase):
         pub = build(3)
         options = {"document": "questions", "figure_overrides": {str(pub.id): {"width": {"0": 100}}}}
         tree = document_xml(self.post(self.payload([pub], print_options=options)).content)
-        self.assertEqual(line_shapes(tree), [2, 1],
-                         "100mm + 40.6mm + 3.7mm 之后第三张放不下了，预览会换行，Word 不能硬塞")
+        self.assertEqual(
+            line_shapes(tree), [2, 1], "100mm + 40.6mm + 3.7mm 之后第三张放不下了，预览会换行，Word 不能硬塞"
+        )
         self.assertEqual(widths_mm(tree), [100.0, 40.6, 40.6], "老师填的 100 就是纸面上的 100 毫米")
 
         # 再宽也不超过一整页：预览那一行本来就是 min(填的, 178mm 版心, 一页高)。
@@ -1468,8 +1838,7 @@ class LibraryExportTests(ExportFixture, TestCase):
         folder = self.root / "library" / str(pub.id)
         folder.mkdir(parents=True, exist_ok=True)
         Image.new("RGB", (100, 2000), "red").save(folder / "figure-1.png")
-        pub.content["figures"] = [{"slot": "stem", "file": "figure-1.png",
-                                   "page_idx": 0, "bbox": [0, 0, 100, 100]}]
+        pub.content["figures"] = [{"slot": "stem", "file": "figure-1.png", "page_idx": 0, "bbox": [0, 0, 100, 100]}]
         pub.content_hash = library.content_hash(pub.content)
         pub.save(update_fields=["content", "content_hash"])
         options = {"document": "questions", "figure_overrides": {str(pub.id): {"width": {"0": 178}}}}
@@ -1482,22 +1851,29 @@ class LibraryExportTests(ExportFixture, TestCase):
         options = {"document": "questions", "figure_overrides": {str(pub.id): {"align": "left"}}}
         tree = document_xml(self.post(self.payload([pub], print_options=options)).content)
         table = tree.find(".//w:tbl", NS)
-        self.assertEqual(table.find("w:tblPr/w:jc", NS).get(f'{{{NS["w"]}}}val'), "left",
-                         "老师选了靠左，整行就得真的靠左")
+        self.assertEqual(
+            table.find("w:tblPr/w:jc", NS).get(f"{{{NS['w']}}}val"), "left", "老师选了靠左，整行就得真的靠左"
+        )
         for cell in table.findall(".//w:tc", NS):
-            self.assertEqual(cell.find("w:p/w:pPr/w:jc", NS).get(f'{{{NS["w"]}}}val'), "left",
-                             "格里的图也要靠左，否则还是居中，行的位置跟着偏")
-        self.assertEqual([round(value - 40.6, 1) for value in column_mm(table)], [3.7, 3.7, 0.0],
-                         "靠左时空隙只留在两张图之间，行末不留，否则整行会右移一个空隙")
+            self.assertEqual(
+                cell.find("w:p/w:pPr/w:jc", NS).get(f"{{{NS['w']}}}val"),
+                "left",
+                "格里的图也要靠左，否则还是居中，行的位置跟着偏",
+            )
+        self.assertEqual(
+            [round(value - 40.6, 1) for value in column_mm(table)],
+            [3.7, 3.7, 0.0],
+            "靠左时空隙只留在两张图之间，行末不留，否则整行会右移一个空隙",
+        )
 
         # 靠右：反过来，行首不留空隙，整行贴着右页边。
         pub = build(3)
         options = {"document": "questions", "figure_overrides": {str(pub.id): {"align": "right"}}}
         tree = document_xml(self.post(self.payload([pub], print_options=options)).content)
         table = tree.find(".//w:tbl", NS)
-        self.assertEqual(table.find("w:tblPr/w:jc", NS).get(f'{{{NS["w"]}}}val'), "right")
+        self.assertEqual(table.find("w:tblPr/w:jc", NS).get(f"{{{NS['w']}}}val"), "right")
         for cell in table.findall(".//w:tc", NS):
-            self.assertEqual(cell.find("w:p/w:pPr/w:jc", NS).get(f'{{{NS["w"]}}}val'), "right")
+            self.assertEqual(cell.find("w:p/w:pPr/w:jc", NS).get(f"{{{NS['w']}}}val"), "right")
         self.assertEqual([round(value - 40.6, 1) for value in column_mm(table)], [0.0, 3.7, 3.7])
 
         # 一张图时走的是段落不是表格，对齐也得跟着变，否则单图永远是居中的。
@@ -1508,7 +1884,7 @@ class LibraryExportTests(ExportFixture, TestCase):
                 tree = document_xml(self.post(self.payload([pub], print_options=options)).content)
                 self.assertIsNone(tree.find(".//w:tbl", NS))
                 picture = tree.xpath("//w:p[w:r/w:drawing]", namespaces=NS)[0]
-                self.assertEqual(picture.find("w:pPr/w:jc", NS).get(f'{{{NS["w"]}}}val'), wanted_jc)
+                self.assertEqual(picture.find("w:pPr/w:jc", NS).get(f"{{{NS['w']}}}val"), wanted_jc)
 
         # 点名换行：预览里插一道占满整行的空隙，Word 里就是多一张表。
         pub = build(3)
@@ -1519,13 +1895,14 @@ class LibraryExportTests(ExportFixture, TestCase):
         pub = build(4)
         options = {"document": "questions", "figure_overrides": {str(pub.id): {"breaks": [1, 3]}}}
         tree = document_xml(self.post(self.payload([pub], print_options=options)).content)
-        self.assertEqual(line_shapes(tree), [1, 2, 1],
-                         "四张图本来挤在一行，点名第 2、第 4 张另起一行，就断成 1+2+1")
+        self.assertEqual(line_shapes(tree), [1, 2, 1], "四张图本来挤在一行，点名第 2、第 4 张另起一行，就断成 1+2+1")
 
         # 三样一起用，也是最像老师真实操作的一种：放大第三张、整行靠左、第二张换行。
         pub = build(3)
-        options = {"document": "questions",
-                   "figure_overrides": {str(pub.id): {"width": {"2": 90}, "align": "left", "breaks": [2]}}}
+        options = {
+            "document": "questions",
+            "figure_overrides": {str(pub.id): {"width": {"2": 90}, "align": "left", "breaks": [2]}},
+        }
         tree = document_xml(self.post(self.payload([pub], print_options=options)).content)
         self.assertEqual(line_shapes(tree), [2, 1])
         self.assertEqual(widths_mm(tree), [40.6, 40.6, 90.0])
@@ -1533,19 +1910,27 @@ class LibraryExportTests(ExportFixture, TestCase):
         # 图被拉扁是最难一眼看出来的错：宽度对得上，比例不对，学生看不出来但一眼就别扭。
         self.assertEqual(heights_mm(tree), [20.3, 20.3, 45.0], "放大后要按图自己的比例长高，不能被压扁")
         tables = tree.findall(".//w:tbl", NS)
-        self.assertEqual([table.find("w:tblPr/w:jc", NS).get(f'{{{NS["w"]}}}val') for table in tables],
-                         ["left", "left"], "两行都要靠左，预览里 justify-content 对每一行都生效")
+        self.assertEqual(
+            [table.find("w:tblPr/w:jc", NS).get(f"{{{NS['w']}}}val") for table in tables],
+            ["left", "left"],
+            "两行都要靠左，预览里 justify-content 对每一行都生效",
+        )
 
         # 别的题的设置不能串到这道题上。
         first, second = build(3), build(3)
-        options = {"document": "questions", "figure_overrides": {str(first.id): {"align": "right", "width": {"0": 100}}}}
+        options = {
+            "document": "questions",
+            "figure_overrides": {str(first.id): {"align": "right", "width": {"0": 100}}},
+        }
         tree = document_xml(self.post(self.payload([first, second], print_options=options)).content)
         tables = tree.findall(".//w:tbl", NS)
         # 第一题放大一张后是 2+1 两行，第二题三张图一行，一共三张表。
         self.assertEqual([len(table.findall("w:tblGrid/w:gridCol", NS)) for table in tables], [2, 1, 3])
-        self.assertEqual([table.find("w:tblPr/w:jc", NS).get(f'{{{NS["w"]}}}val') for table in tables],
-                         ["right", "right", "center"],
-                         "没被调过的那道题仍然是居中，不能被上一道题的设置带跑")
+        self.assertEqual(
+            [table.find("w:tblPr/w:jc", NS).get(f"{{{NS['w']}}}val") for table in tables],
+            ["right", "right", "center"],
+            "没被调过的那道题仍然是居中，不能被上一道题的设置带跑",
+        )
 
     def test_three_side_by_side_diagrams_stay_on_one_row(self):
         """The reported case: 初三「特殊的平行四边形」第 23 题.
@@ -1563,8 +1948,9 @@ class LibraryExportTests(ExportFixture, TestCase):
         for index, size in enumerate(((279, 226), (231, 226), (210, 236)), start=1):
             target = folder / f"figure-{index}.png"
             Image.new("RGB", size, "red").save(target)
-            pub.content["figures"].append({"slot": "stem", "file": target.name,
-                                           "page_idx": 3, "bbox": [500 + index * 10, 228, 612, 334]})
+            pub.content["figures"].append(
+                {"slot": "stem", "file": target.name, "page_idx": 3, "bbox": [500 + index * 10, 228, 612, 334]}
+            )
         pub.content_hash = library.content_hash(pub.content)
         pub.save(update_fields=["content", "content_hash"])
 
@@ -1573,20 +1959,24 @@ class LibraryExportTests(ExportFixture, TestCase):
         tree = document_xml(response.content)
         table = tree.find(".//w:tbl", NS)
         self.assertIsNotNone(table, "three diagrams must share one grid")
-        self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), 3,
-                         "they must stay on one row, not 2+1")
+        self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), 3, "they must stay on one row, not 2+1")
         self.assertEqual(len(table.findall("w:tr", NS)), 1)
         self.assertEqual(len(tree.findall(".//a:blip", NS)), 3)
 
         # 150 dpi, the size the preview writes onto the image itself:
         # 279 / 231 / 210 px × 25.4 / 150 = 47.2 / 39.1 / 35.6 mm.
-        extents = [int(value) / 36000 for value in tree.xpath(
-            "//*[local-name()='extent' and namespace-uri()="
-            "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx")]
+        extents = [
+            int(value) / 36000
+            for value in tree.xpath(
+                "//*[local-name()='extent' and namespace-uri()="
+                "'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx"
+            )
+        ]
         self.assertEqual([round(value, 1) for value in extents], [47.2, 39.1, 35.6])
         # Relative widths survive: the widest diagram is still the widest cell.
-        columns_mm = [int(column.get(f'{{{NS["w"]}}}w')) * 25.4 / 1440
-                      for column in table.findall("w:tblGrid/w:gridCol", NS)]
+        columns_mm = [
+            int(column.get(f"{{{NS['w']}}}w")) * 25.4 / 1440 for column in table.findall("w:tblGrid/w:gridCol", NS)
+        ]
         self.assertEqual(len(columns_mm), 3)
         self.assertGreater(columns_mm[0], columns_mm[1])
         self.assertGreater(columns_mm[1], columns_mm[2])
@@ -1596,11 +1986,13 @@ class LibraryExportTests(ExportFixture, TestCase):
         # left of the row than on the right — Word 16.0 measured that on the
         # real export before the trailing gap was added.
         for position, (column_mm, picture_mm) in enumerate(zip(columns_mm, extents)):
-            self.assertGreater(column_mm - picture_mm, 1.5,
-                               f"column {position + 1} ({column_mm} mm) has no room for "
-                               f"its {picture_mm} mm picture")
+            self.assertGreater(
+                column_mm - picture_mm,
+                1.5,
+                f"column {position + 1} ({column_mm} mm) has no room for its {picture_mm} mm picture",
+            )
         # Centred, like .qb-figures, and still inside the 178mm text area.
-        self.assertEqual(table.find("w:tblPr/w:jc", NS).get(f'{{{NS["w"]}}}val'), "center")
+        self.assertEqual(table.find("w:tblPr/w:jc", NS).get(f"{{{NS['w']}}}val"), "center")
         self.assertLessEqual(sum(columns_mm), 178)
         # The whole point: the pictures and the gaps between them are exactly
         # what the teacher checked on screen. 178.56 + 147.84 + 134.4 px of
@@ -1608,8 +2000,7 @@ class LibraryExportTests(ExportFixture, TestCase):
         # The grid carries one extra gap at each end, which is the empty space
         # that puts the content in the middle.
         content_mm = sum(columns_mm) - export.PREVIEW_FIGURE_GAP_PX * 25.4 / 96
-        self.assertAlmostEqual(content_mm, 129.3, delta=0.2,
-                               msg="the row must be the same width as the preview row")
+        self.assertAlmostEqual(content_mm, 129.3, delta=0.2, msg="the row must be the same width as the preview row")
 
         # Centring only means something with these three in place. Word pads each
         # cell by 1.9mm a side, which measured 4mm of rightward drift, and it
@@ -1618,23 +2009,39 @@ class LibraryExportTests(ExportFixture, TestCase):
         for side in ("top", "left", "bottom", "right"):
             edge = table.find(f"w:tblPr/w:tblCellMar/w:{side}", NS)
             self.assertIsNotNone(edge, f"the grid must declare its own {side} cell padding")
-            self.assertEqual(edge.get(f'{{{NS["w"]}}}w'), "0", f"{side} cell padding")
+            self.assertEqual(edge.get(f"{{{NS['w']}}}w"), "0", f"{side} cell padding")
         declared = table.find("w:tblPr/w:tblW", NS)
-        self.assertEqual(declared.get(f'{{{NS["w"]}}}type'), "dxa",
-                         "the table width must be stated, not left to Word")
-        self.assertAlmostEqual(int(declared.get(f'{{{NS["w"]}}}w')) * 25.4 / 1440,
-                               sum(columns_mm), delta=0.2)
+        self.assertEqual(declared.get(f"{{{NS['w']}}}type"), "dxa", "the table width must be stated, not left to Word")
+        self.assertAlmostEqual(int(declared.get(f"{{{NS['w']}}}w")) * 25.4 / 1440, sum(columns_mm), delta=0.2)
 
         # w:tblPr is a fixed sequence. Borders appended at the end landed after
         # w:tblLook, which is not a valid document; Word then does whatever it
         # likes with the whole block, including the centring.
-        order = ["tblStyle", "tblpPr", "tblOverlap", "bidiVisual", "tblStyleRowBandSize",
-                 "tblStyleColBandSize", "tblW", "jc", "tblCellSpacing", "tblInd",
-                 "tblBorders", "shd", "tblLayout", "tblCellMar", "tblLook",
-                 "tblCaption", "tblDescription"]
+        order = [
+            "tblStyle",
+            "tblpPr",
+            "tblOverlap",
+            "bidiVisual",
+            "tblStyleRowBandSize",
+            "tblStyleColBandSize",
+            "tblW",
+            "jc",
+            "tblCellSpacing",
+            "tblInd",
+            "tblBorders",
+            "shd",
+            "tblLayout",
+            "tblCellMar",
+            "tblLook",
+            "tblCaption",
+            "tblDescription",
+        ]
         positions = [order.index(node.tag.split("}")[1]) for node in table.find("w:tblPr", NS)]
-        self.assertEqual(positions, sorted(positions),
-                         f"w:tblPr children out of order: {[n.tag.split('}')[1] for n in table.find('w:tblPr', NS)]}")
+        self.assertEqual(
+            positions,
+            sorted(positions),
+            f"w:tblPr children out of order: {[n.tag.split('}')[1] for n in table.find('w:tblPr', NS)]}",
+        )
 
     def test_a_single_stem_figure_stays_a_plain_paragraph(self):
         pub = self.publication(kind="free_response")
@@ -1657,8 +2064,9 @@ class LibraryExportTests(ExportFixture, TestCase):
         pub = self.publication(kind="free_response")
         for student_info in (True, False):
             with self.subTest(student_info=student_info):
-                response = self.post(self.payload([pub], print_options={
-                    "document": "questions", "student_info": student_info}))
+                response = self.post(
+                    self.payload([pub], print_options={"document": "questions", "student_info": student_info})
+                )
                 self.assertEqual(response.status_code, 200)
                 line = None
                 for paragraph in tree_paras(document_xml(response.content)):
@@ -1671,8 +2079,11 @@ class LibraryExportTests(ExportFixture, TestCase):
                 self.assertIsNotNone(line, "the 姓名／班级／得分 line is missing")
                 justification = line.find("w:pPr/w:jc", NS)
                 self.assertIsNotNone(justification, "the line carries no alignment at all")
-                self.assertEqual(justification.get(f'{{{NS["w"]}}}val'), "center",
-                                 "姓名／班级／得分 must land in the middle, not against the margin")
+                self.assertEqual(
+                    justification.get(f"{{{NS['w']}}}val"),
+                    "center",
+                    "姓名／班级／得分 must land in the middle, not against the margin",
+                )
 
     def test_a_lone_stem_figure_is_centred_like_the_preview_centres_it(self):
         """A single picture is a .qb-figures row of one, so it is centred.
@@ -1689,11 +2100,10 @@ class LibraryExportTests(ExportFixture, TestCase):
         tree = document_xml(response.content)
         drawing = tree.find(".//w:drawing", NS)
         self.assertIsNotNone(drawing)
-        paragraph = next(node for node in tree.iter(f'{{{NS["w"]}}}p')
-                         if node.find(".//w:drawing", NS) is not None)
+        paragraph = next(node for node in tree.iter(f"{{{NS['w']}}}p") if node.find(".//w:drawing", NS) is not None)
         justification = paragraph.find("w:pPr/w:jc", NS)
         self.assertIsNotNone(justification, "a lone figure must be centred, not left on the margin")
-        self.assertEqual(justification.get(f'{{{NS["w"]}}}val'), "center")
+        self.assertEqual(justification.get(f"{{{NS['w']}}}val"), "center")
 
     def test_a_scanned_page_stays_left_because_the_preview_leaves_it_left(self):
         """The mirror image: .qb-question-images is a column flex box.
@@ -1709,19 +2119,27 @@ class LibraryExportTests(ExportFixture, TestCase):
         for index in (1, 2):
             target = folder / f"question-{index}.png"
             Image.new("RGB", (240, 120), "red").save(target)
-            images.append({"file": target.name, "width": 240, "height": 120,
-                           "page_idx": index - 1, "bbox": [0, 0, 100, 100], "order": index - 1,
-                           "image_sha256": hashlib.sha256(target.read_bytes()).hexdigest()})
+            images.append(
+                {
+                    "file": target.name,
+                    "width": 240,
+                    "height": 120,
+                    "page_idx": index - 1,
+                    "bbox": [0, 0, 100, 100],
+                    "order": index - 1,
+                    "image_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+                }
+            )
         pub.content.update(body_mode="source_image", question_images=images, figures=[])
         pub.content_hash = library.content_hash(pub.content)
         pub.save(update_fields=["content", "content_hash"])
         response = self.post(self.payload([pub], print_options={"document": "questions"}))
         self.assertEqual(response.status_code, 200)
         tree = document_xml(response.content)
-        for paragraph in [node for node in tree.iter(f'{{{NS["w"]}}}p')
-                          if node.find(".//w:drawing", NS) is not None]:
-            self.assertIsNone(paragraph.find("w:pPr/w:jc", NS),
-                              "a scanned page is left in the preview, so it stays left here")
+        for paragraph in [node for node in tree.iter(f"{{{NS['w']}}}p") if node.find(".//w:drawing", NS) is not None]:
+            self.assertIsNone(
+                paragraph.find("w:pPr/w:jc", NS), "a scanned page is left in the preview, so it stays left here"
+            )
 
     def test_source_image_papers_keep_one_picture_per_line(self):
         # A scanned page is not a diagram: the preview stacks those one per line
@@ -1733,9 +2151,17 @@ class LibraryExportTests(ExportFixture, TestCase):
         for index in range(1, 5):
             target = folder / f"question-{index}.png"
             Image.new("RGB", (240, 120), "red").save(target)
-            images.append({"file": target.name, "width": 240, "height": 120,
-                           "page_idx": index - 1, "bbox": [0, 0, 100, 100], "order": index - 1,
-                           "image_sha256": hashlib.sha256(target.read_bytes()).hexdigest()})
+            images.append(
+                {
+                    "file": target.name,
+                    "width": 240,
+                    "height": 120,
+                    "page_idx": index - 1,
+                    "bbox": [0, 0, 100, 100],
+                    "order": index - 1,
+                    "image_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+                }
+            )
         pub.content.update(body_mode="source_image", question_images=images, figures=[])
         pub.content_hash = library.content_hash(pub.content)
         pub.save(update_fields=["content", "content_hash"])
@@ -1755,8 +2181,7 @@ class LibraryExportTests(ExportFixture, TestCase):
         for index, slot in enumerate(["stem"] * 4 + list("ABCD"), 1):
             target = folder / f"figure-{index}.png"
             Image.new("RGB", (240, 120), "red").save(target)
-            pub.content["figures"].append({"slot": slot, "file": target.name,
-                                           "page_idx": 0, "bbox": [0, 0, 100, 100]})
+            pub.content["figures"].append({"slot": slot, "file": target.name, "page_idx": 0, "bbox": [0, 0, 100, 100]})
         pub.content_hash = library.content_hash(pub.content)
         pub.save(update_fields=["content", "content_hash"])
         response = self.post(self.payload([pub], print_options={"document": "questions"}))
@@ -1792,14 +2217,18 @@ class LibraryExportTests(ExportFixture, TestCase):
     def test_change_during_build_never_returns_an_old_or_partial_file(self):
         pub = self.publication(answer="原答案")
         original = export._document
-        for mutation in (lambda: PublishedQuestion.objects.filter(pk=pub.id).update(status="withdrawn"),
-                         lambda: PublishedQuestion.objects.filter(pk=pub.id).update(content={**pub.content, "stem": "另一版"})):
+        for mutation in (
+            lambda: PublishedQuestion.objects.filter(pk=pub.id).update(status="withdrawn"),
+            lambda: PublishedQuestion.objects.filter(pk=pub.id).update(content={**pub.content, "stem": "另一版"}),
+        ):
             pub.status = "published"
             pub.save(update_fields=["content", "status"])
+
             def changed(*args, _mutation=mutation, **kwargs):
                 data = original(*args, **kwargs)
                 _mutation()
                 return data
+
             with mock.patch.object(export, "_document", side_effect=changed):
                 response = self.post(self.payload([pub]))
             self.assertEqual(response.status_code, 409)
@@ -1810,17 +2239,21 @@ class LibraryExportTests(ExportFixture, TestCase):
         pub = self.publication(extras={"ai_answer": {"answer": "参考"}})
         original = export._document
         payload = self.payload([pub], print_options={"ai_answers": True})
+
         def changed(*args, **kwargs):
             result = original(*args, **kwargs)
             features.save({"ai_answer": False})
             return result
+
         with mock.patch.object(export, "_document", side_effect=changed):
             self.assertEqual(self.post(payload).status_code, 409)
         features.save({"ai_answer": True})
+
         def changed_answer(*args, **kwargs):
             result = original(*args, **kwargs)
             PublishedQuestion.objects.filter(pk=pub.id).update(extras={"ai_answer": {"answer": "新参考"}})
             return result
+
         with mock.patch.object(export, "_document", side_effect=changed_answer):
             self.assertEqual(self.post(payload).status_code, 409)
 
@@ -1828,10 +2261,12 @@ class LibraryExportTests(ExportFixture, TestCase):
         pub = self.publication()
         self.figure(pub)
         original = export._document
+
         def changed(*args, **kwargs):
             result = original(*args, **kwargs)
             self.figure(pub, color="blue")
             return result
+
         with mock.patch.object(export, "_document", side_effect=changed):
             self.assertEqual(self.post(self.payload([pub])).status_code, 409)
 
@@ -1839,18 +2274,37 @@ class LibraryExportTests(ExportFixture, TestCase):
         pub = self.publication()
         payload = self.payload([pub], title="CON")
         self.assertEqual(self.client.get("/api/library/export-docx").status_code, 405)
-        self.assertEqual(self.client.post("/api/library/export-docx", json.dumps(payload), content_type="application/json").status_code, 403)
-        self.assertEqual(self.client.post("/api/library/export-docx", json.dumps(payload), content_type="text/plain", HTTP_X_QB_REQUEST="1").status_code, 415)
+        self.assertEqual(
+            self.client.post(
+                "/api/library/export-docx", json.dumps(payload), content_type="application/json"
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/api/library/export-docx", json.dumps(payload), content_type="text/plain", HTTP_X_QB_REQUEST="1"
+            ).status_code,
+            415,
+        )
         self.assertEqual(self.post(payload, REMOTE_ADDR="192.0.2.1").status_code, 403)
         self.assertEqual(self.post(payload, REMOTE_ADDR="::1").status_code, 200)
         self.assertEqual(export.safe_filename("CON"), "练习-CON")
         self.assertEqual(export.safe_filename("练习/一?"), "练习_一_")
-        for change in ({"format": []}, {"ids": []}, {"ids": [str(pub.id), str(pub.id)]},
-                       {"print_options": {"font_size": True}}, {"print_options": {"student_info": 1}},
-                       {"private_key": "synthetic"}):
+        for change in (
+            {"format": []},
+            {"ids": []},
+            {"ids": [str(pub.id), str(pub.id)]},
+            {"print_options": {"font_size": True}},
+            {"print_options": {"student_info": 1}},
+            {"private_key": "synthetic"},
+        ):
             self.assertEqual(self.post({**payload, **change}).status_code, 400)
-        response = self.client.post("/api/library/export-docx", '"' + 'x' * (export.MAX_BODY + 1) + '"',
-                                    content_type="application/json", HTTP_X_QB_REQUEST="1")
+        response = self.client.post(
+            "/api/library/export-docx",
+            '"' + "x" * (export.MAX_BODY + 1) + '"',
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
         self.assertEqual(response.status_code, 413)
 
     def test_invalid_xml_characters_and_malformed_answer_snapshot_are_specific_errors(self):
@@ -1874,15 +2328,27 @@ class DraftPrintCompatibilityTests(TestCase):
         self.assertEqual(library_drafts._print_options({"answers": False})["document"], "questions")
         self.assertEqual(library_drafts._print_options({"answers": True})["document"], "combined")
         self.assertEqual(library_drafts._print_options({"answers": False, "document": "answers"})["answers"], True)
-        for bad in ({"font_size": 13}, {"font_size": True}, {"document": "other"}, {"answer_space": "other"}, {"origin": 1}):
+        for bad in (
+            {"font_size": 13},
+            {"font_size": True},
+            {"document": "other"},
+            {"answer_space": "other"},
+            {"origin": 1},
+        ):
             with self.assertRaises(library_drafts.DraftError):
                 library_drafts._print_options(bad)
 
     def test_old_schema1_is_read_in_memory_without_rewriting_file(self):
         with tempfile.TemporaryDirectory() as directory, override_settings(DATA_ROOT=Path(directory)):
-            record = {"id": str(uuid.uuid4()), "title": "旧草稿", "ids": [],
-                      "print_options": {"answers": False, "origin": True, "ai_answers": False},
-                      "created_at": "2026-01-01T00:00:00+00:00", "updated_at": "2026-01-01T00:00:00+00:00", "revision": 1}
+            record = {
+                "id": str(uuid.uuid4()),
+                "title": "旧草稿",
+                "ids": [],
+                "print_options": {"answers": False, "origin": True, "ai_answers": False},
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-01T00:00:00+00:00",
+                "revision": 1,
+            }
             data = json.dumps({"schema": 1, "drafts": [record]}, ensure_ascii=False).encode("utf-8")
             target = Path(directory) / "library-drafts.json"
             target.write_bytes(data)
@@ -1893,8 +2359,18 @@ class DraftPrintCompatibilityTests(TestCase):
 
     def test_new_print_options_roundtrip_and_partial_update_keep_layout(self):
         with tempfile.TemporaryDirectory() as directory, override_settings(DATA_ROOT=Path(directory)):
-            first = library_drafts._save({"title": "新版草稿", "ids": [], "print_options": {
-                "document": "answers", "font_size": 16, "answer_space": "large", "student_info": False}})
+            first = library_drafts._save(
+                {
+                    "title": "新版草稿",
+                    "ids": [],
+                    "print_options": {
+                        "document": "answers",
+                        "font_size": 16,
+                        "answer_space": "large",
+                        "student_info": False,
+                    },
+                }
+            )
             stored = library_drafts._read()["drafts"][0]
             self.assertEqual(stored["print_options"], first["print_options"])
             second = library_drafts._save({"print_options": {"origin": True}}, first["id"])
@@ -1912,22 +2388,41 @@ class DraftPrintCompatibilityTests(TestCase):
 
     def test_layout_hints_validate_types_membership_duplicates_and_limit(self):
         key, other = str(uuid.uuid4()), str(uuid.uuid4())
-        normalized = library_drafts._print_options({"option_overrides": {key.upper(): "two"}, "question_breaks": [key.upper()]}, ids=[key])
+        normalized = library_drafts._print_options(
+            {"option_overrides": {key.upper(): "two"}, "question_breaks": [key.upper()]}, ids=[key]
+        )
         self.assertEqual(normalized["option_overrides"], {key: "two"})
         self.assertEqual(normalized["question_breaks"], [key])
-        for invalid in ({"pagination": "other"}, {"option_layout": False}, {"option_overrides": []},
-                        {"option_overrides": {key: False}}, {"option_overrides": {key: "three"}},
-                        {"option_overrides": {other: "four"}}, {"option_overrides": {key: "four", key.upper(): "two"}},
-                        {"question_breaks": key}, {"question_breaks": [other]}, {"question_breaks": [key, key]},
-                        {"question_breaks": [str(uuid.uuid4()) for _ in range(501)]}):
+        for invalid in (
+            {"pagination": "other"},
+            {"option_layout": False},
+            {"option_overrides": []},
+            {"option_overrides": {key: False}},
+            {"option_overrides": {key: "three"}},
+            {"option_overrides": {other: "four"}},
+            {"option_overrides": {key: "four", key.upper(): "two"}},
+            {"question_breaks": key},
+            {"question_breaks": [other]},
+            {"question_breaks": [key, key]},
+            {"question_breaks": [str(uuid.uuid4()) for _ in range(501)]},
+        ):
             with self.assertRaises(library_drafts.DraftError):
                 library_drafts._print_options(invalid, ids=[key])
 
     def test_layout_hints_roundtrip_and_removed_question_hints_are_cleaned_atomically(self):
         with tempfile.TemporaryDirectory() as directory, override_settings(DATA_ROOT=Path(directory)):
             first, second = str(uuid.uuid4()), str(uuid.uuid4())
-            record = library_drafts._save({"ids": [first, second], "print_options": {"pagination": "keep", "option_layout": "four",
-                "option_overrides": {second: "two"}, "question_breaks": [second]}})
+            record = library_drafts._save(
+                {
+                    "ids": [first, second],
+                    "print_options": {
+                        "pagination": "keep",
+                        "option_layout": "four",
+                        "option_overrides": {second: "two"},
+                        "question_breaks": [second],
+                    },
+                }
+            )
             self.assertEqual(library_drafts._read()["drafts"][0]["print_options"], record["print_options"])
             changed = library_drafts._save({"print_options": {"font_size": 16}}, record["id"])
             self.assertEqual(changed["print_options"]["option_overrides"], {second: "two"})

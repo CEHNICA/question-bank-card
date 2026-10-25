@@ -34,92 +34,116 @@ LIBRARY_JS = "frontend/library.js"
 LIBRARY_HTML = "frontend/library.html"
 
 COPY_TAG = '<button id="saveDraftAs" class="button button-quiet" type="button" hidden>复制为新草稿</button>'
-SAVE_TAG = ('<button id="saveDraft" class="button" type="button" '
-            'title="把这次组卷存下来，下次从“草稿”里接着改">保存草稿</button>')
+SAVE_TAG = (
+    '<button id="saveDraft" class="button" type="button" '
+    'title="把这次组卷存下来，下次从“草稿”里接着改">保存草稿</button>'
+)
 
-ANSWER_WHY = ('    const answerWhy = answerEmpty ? "输出内容选了「答案与解析」，可这次组卷的题没有答案或解析，'
-              '先改选题目，或去「答案解析」里补上答案" : "";')
-MISSING_WHY = ('    const missingWhy = !printState.items.length ? "先把未载入的选题处理掉，才能导出"\n'
-               '      : printState.missing.length ? `这次有 ${printState.missing.length} 道题没载入，先处理掉才能导出` : "";')
-LAYOUT_WHY = ('    const layoutWhy = printState.layoutError ? `这份卷子有图表排不下：${printState.layoutError}`\n'
-              '      : printState.layoutPending ? "正在量这份卷子的版面，稍等一下"\n'
-              '      : printState.tooWide ? "有图表高于一张 A4，换个排法再导出" : "";')
+ANSWER_WHY = (
+    '    const answerWhy = answerEmpty ? "输出内容选了「答案与解析」，可这次组卷的题没有答案或解析，'
+    '先改选题目，或去「答案解析」里补上答案" : "";'
+)
+MISSING_WHY = (
+    '    const missingWhy = !printState.items.length ? "先把未载入的选题处理掉，才能导出"\n'
+    '      : printState.missing.length ? `这次有 ${printState.missing.length} 道题没载入，先处理掉才能导出` : "";'
+)
+LAYOUT_WHY = (
+    "    const layoutWhy = printState.layoutError ? `这份卷子有图表排不下：${printState.layoutError}`\n"
+    '      : printState.layoutPending ? "正在量这份卷子的版面，稍等一下"\n'
+    '      : printState.tooWide ? "有图表高于一张 A4，换个排法再导出" : "";'
+)
 WORD_TITLE = '    $("exportWord").title = why || "下载可继续编辑的 Word 文档";'
 PDF_TITLE = '    $("exportPdf").title = why || layoutWhy || "下载按预览分页的 A4 PDF";'
 PRINT_TITLE = '    $("printButton").title = why || layoutWhy || "打开系统打印窗口，按预览里看到的分页印";'
 DRAFT_VISIBILITY = "    copy.hidden = !state.draft;"
-DRAFT_SAVE_TITLE = ('    save.title = title ? `保存这次改动，覆盖正在编辑的「${title}」`\n'
-                    '      : "把这次组卷存下来，下次从「草稿」里接着改";')
+DRAFT_SAVE_TITLE = (
+    "    save.title = title ? `保存这次改动，覆盖正在编辑的「${title}」`\n"
+    '      : "把这次组卷存下来，下次从「草稿」里接着改";'
+)
 DRAFT_COPY_TITLE = "    copy.title = `另存一份新草稿，正在编辑的「${title}」保持不动`;"
 DIRTY_HOOK = "  function markDraftDirty() {\n    syncDraftButtons();"
-SAVED_HOOK = " · 有选题需要处理\" : \"\"}`;\n        syncDraftButtons();"
+SAVED_HOOK = ' · 有选题需要处理" : ""}`;\n        syncDraftButtons();'
 
 # (relative, description, original, mutation)
 MUTATIONS = [
-    (LIBRARY_JS,
-     "an answers-only paper with no answers greys the buttons without saying why",
-     ANSWER_WHY,
-     '    const answerWhy = "";'),
-
-    (LIBRARY_JS,
-     "an unloaded question is no longer counted in the reason",
-     MISSING_WHY,
-     '    const missingWhy = !printState.items.length ? "先把未载入的选题处理掉，才能导出" : "";'),
-
-    (LIBRARY_JS,
-     "a figure taller than A4 no longer explains itself on the PDF button",
-     LAYOUT_WHY,
-     '    const layoutWhy = "";'),
-
-    (LIBRARY_JS,
-     "Word and PDF share one hover text again",
-     WORD_TITLE,
-     '    $("exportWord").title = $("exportPdf").title || "导出";'),
-
-    (LIBRARY_JS,
-     "PDF hides the layout problem while the paper cannot be laid out",
-     PDF_TITLE,
-     '    $("exportPdf").title = why || "下载按预览分页的 A4 PDF";'),
-
-    (LIBRARY_JS,
-     "the print button hides the layout problem too",
-     PRINT_TITLE,
-     '    $("printButton").title = why || "打开系统打印窗口，按预览里看到的分页印";'),
-
-    (LIBRARY_JS,
-     "the copy-draft entry shows up again with no draft open — two buttons, one operation",
-     DRAFT_VISIBILITY,
-     "    copy.hidden = false;"),
-
-    (LIBRARY_JS,
-     "saving no longer says it overwrites the draft you have open",
-     DRAFT_SAVE_TITLE,
-     '    save.title = "把这次组卷存下来";'),
-
-    (LIBRARY_JS,
-     "copying no longer says the original stays untouched",
-     DRAFT_COPY_TITLE,
-     '    copy.title = "另存一份新草稿";'),
-
-    (LIBRARY_JS,
-     "deleting the draft you are editing leaves the copy entry on screen",
-     DIRTY_HOOK,
-     "  function markDraftDirty() {"),
-
-    (LIBRARY_JS,
-     "saving a draft leaves the copy entry hidden until the next render",
-     SAVED_HOOK,
-     " · 有选题需要处理\" : \"\"}`;"),
-
-    (LIBRARY_HTML,
-     "the copy entry shows on the very first frame again, before anything syncs it",
-     COPY_TAG,
-     '<button id="saveDraftAs" class="button button-quiet" type="button">复制为新草稿</button>'),
-
-    (LIBRARY_HTML,
-     "the save button has no hover text on the very first frame",
-     SAVE_TAG,
-     '<button id="saveDraft" class="button" type="button">保存草稿</button>'),
+    (
+        LIBRARY_JS,
+        "an answers-only paper with no answers greys the buttons without saying why",
+        ANSWER_WHY,
+        '    const answerWhy = "";',
+    ),
+    (
+        LIBRARY_JS,
+        "an unloaded question is no longer counted in the reason",
+        MISSING_WHY,
+        '    const missingWhy = !printState.items.length ? "先把未载入的选题处理掉，才能导出" : "";',
+    ),
+    (
+        LIBRARY_JS,
+        "a figure taller than A4 no longer explains itself on the PDF button",
+        LAYOUT_WHY,
+        '    const layoutWhy = "";',
+    ),
+    (
+        LIBRARY_JS,
+        "Word and PDF share one hover text again",
+        WORD_TITLE,
+        '    $("exportWord").title = $("exportPdf").title || "导出";',
+    ),
+    (
+        LIBRARY_JS,
+        "PDF hides the layout problem while the paper cannot be laid out",
+        PDF_TITLE,
+        '    $("exportPdf").title = why || "下载按预览分页的 A4 PDF";',
+    ),
+    (
+        LIBRARY_JS,
+        "the print button hides the layout problem too",
+        PRINT_TITLE,
+        '    $("printButton").title = why || "打开系统打印窗口，按预览里看到的分页印";',
+    ),
+    (
+        LIBRARY_JS,
+        "the copy-draft entry shows up again with no draft open — two buttons, one operation",
+        DRAFT_VISIBILITY,
+        "    copy.hidden = false;",
+    ),
+    (
+        LIBRARY_JS,
+        "saving no longer says it overwrites the draft you have open",
+        DRAFT_SAVE_TITLE,
+        '    save.title = "把这次组卷存下来";',
+    ),
+    (
+        LIBRARY_JS,
+        "copying no longer says the original stays untouched",
+        DRAFT_COPY_TITLE,
+        '    copy.title = "另存一份新草稿";',
+    ),
+    (
+        LIBRARY_JS,
+        "deleting the draft you are editing leaves the copy entry on screen",
+        DIRTY_HOOK,
+        "  function markDraftDirty() {",
+    ),
+    (
+        LIBRARY_JS,
+        "saving a draft leaves the copy entry hidden until the next render",
+        SAVED_HOOK,
+        ' · 有选题需要处理" : ""}`;',
+    ),
+    (
+        LIBRARY_HTML,
+        "the copy entry shows on the very first frame again, before anything syncs it",
+        COPY_TAG,
+        '<button id="saveDraftAs" class="button button-quiet" type="button">复制为新草稿</button>',
+    ),
+    (
+        LIBRARY_HTML,
+        "the save button has no hover text on the very first frame",
+        SAVE_TAG,
+        '<button id="saveDraft" class="button" type="button">保存草稿</button>',
+    ),
 ]
 
 
@@ -134,8 +158,9 @@ def apply(source: str, original: str, mutation: str) -> str:
 
 
 def run() -> subprocess.CompletedProcess:
-    return subprocess.run(COMMAND, cwd=str(FRONTEND), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
+    return subprocess.run(
+        COMMAND, cwd=str(FRONTEND), capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
 
 
 def main() -> int:
@@ -164,8 +189,11 @@ def main() -> int:
         if not caught:
             print((broken.stdout or "")[-2000:] + (broken.stderr or "")[-2000:])
     survived = [item for item in results if not item[1]]
-    print(f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住" if not survived
-          else f"\n{len(survived)} 条变异漏过：{survived}")
+    print(
+        f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住"
+        if not survived
+        else f"\n{len(survived)} 条变异漏过：{survived}"
+    )
     return 1 if survived else 0
 
 

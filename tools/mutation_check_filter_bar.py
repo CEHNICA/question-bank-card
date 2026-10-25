@@ -36,66 +36,70 @@ LIBRARY_HTML = "frontend/library.html"
 LIBRARY_CSS = "frontend/library.css"
 LIBRARY_JS = "frontend/library.js"
 
-TYPE_BLOCK = ('<div class="library-facet">\n'
-              '                  <span class="library-facet-label" id="typeFacetLabel">题型</span>\n'
-              '                  <div id="typeFilters" class="draft-filters" role="group" '
-              'aria-labelledby="typeFacetLabel"></div>\n'
-              '                </div>\n')
+TYPE_BLOCK = (
+    '<div class="library-facet">\n'
+    '                  <span class="library-facet-label" id="typeFacetLabel">题型</span>\n'
+    '                  <div id="typeFilters" class="draft-filters" role="group" '
+    'aria-labelledby="typeFacetLabel"></div>\n'
+    "                </div>\n"
+)
 SORT_LABEL = '<label class="library-select"><span>排序</span><select id="sortSelect" aria-label="题目排序">'
 BEFORE_ADV = '            <details id="advancedFilters" class="library-advanced">'
 TOOLS = '<div id="tagQuickTools" class="library-extra-tools" role="group" aria-label="标签待办" hidden></div>'
 HIDE_RULE = "@media (min-width: 980px) { .inspector-toggle { display: none; } }"
-CLOSE_BTN = '<button id="closeInspector" class="button button-quiet button-small inspector-close" type="button">收起</button>'
+CLOSE_BTN = (
+    '<button id="closeInspector" class="button button-quiet button-small inspector-close" type="button">收起</button>'
+)
 CHIP_TYPE = '"type", state.type ? `题型：${QB.TYPE_NAMES[state.type] || state.type}` : ""'
 
 # (relative, description, original, mutation)
 MUTATIONS = [
-    (LIBRARY_HTML,
-     "the type buttons go back to the outer row, one of the three rows comes back",
-     TYPE_BLOCK, ""),
-
-    (LIBRARY_HTML,
-     "sort goes back to the outer row",
-     SORT_LABEL,
-     TYPE_BLOCK + '<label class="library-select"><span>排序</span><select id="sourceSelect"'),
-
-    (LIBRARY_HTML,
-     "the todo entries get pulled into 更多筛选, where an all-empty panel hides them",
-     BEFORE_ADV,
-     '            ' + TOOLS + '\n' + BEFORE_ADV),
-
-    (LIBRARY_CSS,
-     "the redundant 题目详情 button stays on screen again",
-     HIDE_RULE, "/* the button stays */"),
-
-    (LIBRARY_CSS,
-     "the button is hidden on every width, leaving narrow screens no way to open the panel",
-     HIDE_RULE, ".inspector-toggle { display: none; }"),
-
-    (LIBRARY_CSS,
-     "the hiding is flipped to narrow screens, which are the ones that need it",
-     HIDE_RULE, "@media (max-width: 979px) { .inspector-toggle { display: none; } }"),
-
-    (LIBRARY_HTML,
-     "the only remaining way to close the panel is removed as well",
-     CLOSE_BTN,
-     '<button id="closeInspector" class="button button-quiet button-small inspector-close" '
-     'type="button" hidden>收起</button>'),
-
-    (LIBRARY_JS,
-     "an applied type filter no longer shows up as a chip under the toolbar",
-     CHIP_TYPE,
-     '"type", ""'),
-
-    (LIBRARY_CSS,
-     "the rules for the type row come back as dead code",
-     HIDE_RULE,
-     HIDE_RULE + "\n.library-filterbar > .library-facet { flex: 1 1 300px; }"),
-
-    (LIBRARY_CSS,
-     "narrow screens hide the labels of the two dropdowns inside 更多筛选 again",
-     ".library-filterbar > .library-select > span { display: none; }",
-     ".library-filterbar .library-select span { display: none; }"),
+    (LIBRARY_HTML, "the type buttons go back to the outer row, one of the three rows comes back", TYPE_BLOCK, ""),
+    (
+        LIBRARY_HTML,
+        "sort goes back to the outer row",
+        SORT_LABEL,
+        TYPE_BLOCK + '<label class="library-select"><span>排序</span><select id="sourceSelect"',
+    ),
+    (
+        LIBRARY_HTML,
+        "the todo entries get pulled into 更多筛选, where an all-empty panel hides them",
+        BEFORE_ADV,
+        "            " + TOOLS + "\n" + BEFORE_ADV,
+    ),
+    (LIBRARY_CSS, "the redundant 题目详情 button stays on screen again", HIDE_RULE, "/* the button stays */"),
+    (
+        LIBRARY_CSS,
+        "the button is hidden on every width, leaving narrow screens no way to open the panel",
+        HIDE_RULE,
+        ".inspector-toggle { display: none; }",
+    ),
+    (
+        LIBRARY_CSS,
+        "the hiding is flipped to narrow screens, which are the ones that need it",
+        HIDE_RULE,
+        "@media (max-width: 979px) { .inspector-toggle { display: none; } }",
+    ),
+    (
+        LIBRARY_HTML,
+        "the only remaining way to close the panel is removed as well",
+        CLOSE_BTN,
+        '<button id="closeInspector" class="button button-quiet button-small inspector-close" '
+        'type="button" hidden>收起</button>',
+    ),
+    (LIBRARY_JS, "an applied type filter no longer shows up as a chip under the toolbar", CHIP_TYPE, '"type", ""'),
+    (
+        LIBRARY_CSS,
+        "the rules for the type row come back as dead code",
+        HIDE_RULE,
+        HIDE_RULE + "\n.library-filterbar > .library-facet { flex: 1 1 300px; }",
+    ),
+    (
+        LIBRARY_CSS,
+        "narrow screens hide the labels of the two dropdowns inside 更多筛选 again",
+        ".library-filterbar > .library-select > span { display: none; }",
+        ".library-filterbar .library-select span { display: none; }",
+    ),
 ]
 
 
@@ -110,8 +114,9 @@ def apply(source: str, original: str, mutation: str) -> str:
 
 
 def run() -> subprocess.CompletedProcess:
-    return subprocess.run(COMMAND, cwd=str(FRONTEND), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
+    return subprocess.run(
+        COMMAND, cwd=str(FRONTEND), capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
 
 
 def main() -> int:
@@ -140,8 +145,11 @@ def main() -> int:
         if not caught:
             print((broken.stdout or "")[-2000:] + (broken.stderr or "")[-2000:])
     survived = [item for item in results if not item[1]]
-    print(f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住" if not survived
-          else f"\n{len(survived)} 条变异漏过：{survived}")
+    print(
+        f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住"
+        if not survived
+        else f"\n{len(survived)} 条变异漏过：{survived}"
+    )
     return 1 if survived else 0
 
 

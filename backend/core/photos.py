@@ -18,12 +18,13 @@ from . import segment
 
 PHOTO_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 MAX_PHOTOS = 30
-LONG_SIDE = 3000          # 与 imaging.PAGE_LONG_SIDE 一致
-PDF_DPI = 200             # 只决定 PDF 页面的"物理尺寸"，不影响清晰度
-DETECT_SIDE = 400         # 找纸张四角时用的小图边长
+LONG_SIDE = 3000  # 与 imaging.PAGE_LONG_SIDE 一致
+PDF_DPI = 200  # 只决定 PDF 页面的"物理尺寸"，不影响清晰度
+DETECT_SIDE = 400  # 找纸张四角时用的小图边长
 
 
 # ---------------------------------------------------------------- 初始顺序（只是粗排，最终按题号排）
+
 
 def capture_time(path: Path) -> str:
     """照片 EXIF 里的拍摄时间（"2025:10:28 07:00:13"）；没有就返回空串。"""
@@ -53,6 +54,7 @@ def initial_order(files: list[dict]) -> tuple[list[int], str]:
 
 
 # ---------------------------------------------------------------- 拍歪了：找纸张四角并拉正
+
 
 def _otsu(histogram: list[int]) -> int:
     total = sum(histogram)
@@ -154,31 +156,40 @@ def find_page_quad(image: Image.Image) -> list[tuple[float, float]] | None:
     scale = DETECT_SIDE / max(image.size)
     if scale >= 1:
         scale = 1.0
-    small = image.convert("L").resize((max(1, round(image.width * scale)), max(1, round(image.height * scale))),
-                                      Image.Resampling.BOX).filter(ImageFilter.GaussianBlur(1.5))
+    small = (
+        image.convert("L")
+        .resize((max(1, round(image.width * scale)), max(1, round(image.height * scale))), Image.Resampling.BOX)
+        .filter(ImageFilter.GaussianBlur(1.5))
+    )
     threshold = _otsu(small.histogram())
     # 闭运算：把纸上的黑字"填平"，纸成为一整块。
-    mask = small.point(lambda v: 255 if v > threshold else 0).filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.MinFilter(5))
+    mask = (
+        small.point(lambda v: 255 if v > threshold else 0)
+        .filter(ImageFilter.MaxFilter(5))
+        .filter(ImageFilter.MinFilter(5))
+    )
     region = _largest_bright_region(mask)
     width, height = small.size
     if len(region) < 0.2 * width * height:
         return None
     corners = [
-        min(region, key=lambda p: p[0] + p[1]),     # 左上
-        max(region, key=lambda p: p[0] - p[1]),     # 右上
-        max(region, key=lambda p: p[0] + p[1]),     # 右下
-        min(region, key=lambda p: p[0] - p[1]),     # 左下
+        min(region, key=lambda p: p[0] + p[1]),  # 左上
+        max(region, key=lambda p: p[0] - p[1]),  # 右上
+        max(region, key=lambda p: p[0] + p[1]),  # 右下
+        min(region, key=lambda p: p[0] - p[1]),  # 左下
     ]
     margin = 0.012 * max(width, height)
-    touching = sum(1 for x, y in corners if x <= margin or y <= margin or x >= width - 1 - margin or y >= height - 1 - margin)
+    touching = sum(
+        1 for x, y in corners if x <= margin or y <= margin or x >= width - 1 - margin or y >= height - 1 - margin
+    )
     if touching:
-        return None                               # 纸没有完整拍进来（或本来就是扫描件/截图）
+        return None  # 纸没有完整拍进来（或本来就是扫描件/截图）
     area = _polygon_area(corners)
     if area < 0.2 * width * height:
         return None
     filled = _filled_size(region, width, height)
     if not 0.9 * area <= filled <= 1.1 * area:
-        return None                               # 亮区不像一张四边形的纸
+        return None  # 亮区不像一张四边形的纸
     angles = [_angle(corners[i - 1], corners[i], corners[(i + 1) % 4]) for i in range(4)]
     if not all(55 <= a <= 125 for a in angles):
         return None
@@ -224,7 +235,7 @@ def straighten(image: Image.Image, quad: list[tuple[float, float]]) -> Image.Ima
     out_w, out_h = max(1, round(width * ratio)), max(1, round(height * ratio))
     targets = [(0, 0), (out_w, 0), (out_w, out_h), (0, out_h)]
     matrix, values = [], []
-    for (u, v), (x, y) in zip(targets, quad):     # 输出坐标 (u, v) → 原图坐标 (x, y)
+    for (u, v), (x, y) in zip(targets, quad):  # 输出坐标 (u, v) → 原图坐标 (x, y)
         matrix.append([u, v, 1, 0, 0, 0, -u * x, -v * x])
         values.append(x)
         matrix.append([0, 0, 0, u, v, 1, -u * y, -v * y])
@@ -235,19 +246,25 @@ def straighten(image: Image.Image, quad: list[tuple[float, float]]) -> Image.Ima
 
 # ---------------------------------------------------------------- 扫描件效果
 
+
 def enhance(image: Image.Image) -> Image.Image:
     """估计纸张底色并除掉（去阴影、去偏黄、提亮），再拉开对比度。
 
     输出灰度，不做纯黑白：纯黑白会丢掉配图里的细线、虚线和浅色印刷。
     """
-    gray = image.convert("L").filter(ImageFilter.MedianFilter(3))     # 先去拍照噪点，免得提亮后成了麻点
+    gray = image.convert("L").filter(ImageFilter.MedianFilter(3))  # 先去拍照噪点，免得提亮后成了麻点
     width, height = gray.size
     small = gray.resize((max(1, width // 4), max(1, height // 4)), Image.Resampling.BILINEAR)
     # 最大值滤波把字"抹掉"，只剩纸的底色；再模糊得到平滑的光照图。
-    background = small.filter(ImageFilter.MaxFilter(9)).filter(ImageFilter.MaxFilter(9)) \
-        .filter(ImageFilter.GaussianBlur(12)).resize((width, height), Image.Resampling.BILINEAR)
+    background = (
+        small.filter(ImageFilter.MaxFilter(9))
+        .filter(ImageFilter.MaxFilter(9))
+        .filter(ImageFilter.GaussianBlur(12))
+        .resize((width, height), Image.Resampling.BILINEAR)
+    )
     ratio = ImageMath.lambda_eval(
-        lambda args: args["float"](args["g"]) * 255.0 / (args["float"](args["b"]) + 1.0), g=gray, b=background)
+        lambda args: args["float"](args["g"]) * 255.0 / (args["float"](args["b"]) + 1.0), g=gray, b=background
+    )
     normalized = ratio.convert("L")
     histogram = normalized.histogram()
     total = sum(histogram)
@@ -262,11 +279,12 @@ def enhance(image: Image.Image) -> Image.Image:
     table = []
     for value in range(256):
         level = max(0.0, min(1.0, (value - black) / max(1, white - black)))
-        table.append(round(255 * level ** 1.25))
+        table.append(round(255 * level**1.25))
     return normalized.point(table)
 
 
 # ---------------------------------------------------------------- 一张照片的完整处理
+
 
 def load_photo(path: Path) -> Image.Image:
     with Image.open(path) as raw:
@@ -340,6 +358,7 @@ def order_version(photos: dict) -> str:
 
 # ---------------------------------------------------------------- 按卷面题号排页序
 
+
 def page_ranges(pages: list[dict], blocks: list[dict]) -> dict[int, tuple[int, int] | None]:
     """每一页自己找出的印刷题号范围（和页序无关，每页单独判断）。"""
     result: dict[int, tuple[int, int] | None] = {}
@@ -369,8 +388,10 @@ def arrange(ranges: dict[int, tuple[int, int] | None], current: list[int]) -> tu
             low = ranges[following][0]
             high = min(ranges[previous][1], ranges[following][1])
             same = f"第 {low} 题" if low == high else f"第 {low}–{high} 题"
-            return current, (f"有两页的题号重复（都有{same}），可能同一页拍了两次，或者混进了别的卷子。"
-                             "先按拍摄/文件顺序排着，请点“调整页序”确认。")
+            return current, (
+                f"有两页的题号重复（都有{same}），可能同一页拍了两次，或者混进了别的卷子。"
+                "先按拍摄/文件顺序排着，请点“调整页序”确认。"
+            )
     order = list(by_number)
     for page in blank:
         position = current.index(page)

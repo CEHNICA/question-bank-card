@@ -15,6 +15,7 @@ It discovers tools/check_*.py, gives each one its own arguments and server,
 prints one line per script, and exits non-zero if anything failed. Scripts it
 cannot honestly run are printed as SKIP with the reason -- never as ok.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -48,10 +49,19 @@ FIXTURE_ROOT = ROOT / "tmp" / "sweep-ux-fixture"
 
 # 默认只跑没有必填参数的；有 --paper 的按需补给。
 NEEDS_PAPER = {"check_fullscreen_editors", "check_fullscreen_nav", "check_review_restore", "check_tick_roundtrip"}
-RUN_FLAG = {"check_api_setup_browser", "check_edit_assistance_browser", "check_library_counts", "check_library_recovery_browser",
-            "check_model_settings_browser",
-            "check_page_canvas_browser", "check_print_scroll_browser", "check_practice_browser",
-            "check_source_pan_browser", "check_task_delete_after_withdraw", "check_unsaved_browser"}
+RUN_FLAG = {
+    "check_api_setup_browser",
+    "check_edit_assistance_browser",
+    "check_library_counts",
+    "check_library_recovery_browser",
+    "check_model_settings_browser",
+    "check_page_canvas_browser",
+    "check_print_scroll_browser",
+    "check_practice_browser",
+    "check_source_pan_browser",
+    "check_task_delete_after_withdraw",
+    "check_unsaved_browser",
+}
 
 
 def free_port() -> int:
@@ -71,13 +81,16 @@ def reachable(url: str, timeout: float = 3.0) -> bool:
 def start_server(port: int, root: Path, database: Path, log_name: str):
     """Start a Django dev server on its own data root; return the process."""
     root.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ, PYTHONIOENCODING="utf-8",
-               QB_DATA_ROOT=str(root), QB_DATABASE=str(database))
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", QB_DATA_ROOT=str(root), QB_DATABASE=str(database))
     LOGS.mkdir(parents=True, exist_ok=True)
     handle = (LOGS / f"{log_name}.out").open("w", encoding="utf-8")
     process = subprocess.Popen(
         [str(PYTHON), "manage.py", "runserver", str(port), "--noreload"],
-        cwd=str(ROOT / "backend"), env=env, stdout=handle, stderr=subprocess.STDOUT)
+        cwd=str(ROOT / "backend"),
+        env=env,
+        stdout=handle,
+        stderr=subprocess.STDOUT,
+    )
     base = f"http://127.0.0.1:{port}"
     for _ in range(80):
         if reachable(base + "/", timeout=2):
@@ -102,10 +115,16 @@ def first_paper(base: str) -> str | None:
 def run_script(name: str, args: list[str], env: dict | None = None):
     LOGS.mkdir(parents=True, exist_ok=True)
     started = time.time()
-    finished = subprocess.run([str(PYTHON), str(TOOLS / f"{name}.py"), *args],
-                              cwd=str(ROOT), capture_output=True, text=True,
-                              encoding="utf-8", errors="replace",
-                              env=dict(os.environ, PYTHONIOENCODING="utf-8", **(env or {})), timeout=1800)
+    finished = subprocess.run(
+        [str(PYTHON), str(TOOLS / f"{name}.py"), *args],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=dict(os.environ, PYTHONIOENCODING="utf-8", **(env or {})),
+        timeout=1800,
+    )
     output = (finished.stdout or "") + (finished.stderr or "")
     if finished.returncode != 0:
         (LOGS / f"{name}.log").write_text(output, encoding="utf-8")
@@ -137,13 +156,17 @@ def main() -> int:
         if any(name in FIXTURE_SCRIPTS for name in names):
             if FIXTURE_ROOT.exists():
                 import shutil
+
                 shutil.rmtree(FIXTURE_ROOT, ignore_errors=True)
             port = free_port()
             process = start_server(port, FIXTURE_ROOT, FIXTURE_ROOT / "db.sqlite3", "ux-fixture")
             servers.append(("ux-fixture", process))
             fixture_url = f"http://127.0.0.1:{port}"
-            code, output, _ = run_script("check_library_ux_browser", ["--seed"],
-                                         env={"QB_DATA_ROOT": str(FIXTURE_ROOT), "QB_DATABASE": str(FIXTURE_ROOT / "db.sqlite3")})
+            code, output, _ = run_script(
+                "check_library_ux_browser",
+                ["--seed"],
+                env={"QB_DATA_ROOT": str(FIXTURE_ROOT), "QB_DATABASE": str(FIXTURE_ROOT / "db.sqlite3")},
+            )
             if code != 0:
                 print("fixture seed 失败：\n" + output)
                 return 2
@@ -170,11 +193,15 @@ def main() -> int:
                 extra = ["--url", fixture_url]
             elif name in ("check_paper_stale_question", "check_stale_solution_restore"):
                 if review_url != f"http://127.0.0.1:{REVIEW_PORT}":
-                    results.append((name, "SKIP", f"这两个脚本把端口写死在 {REVIEW_PORT}，而那个端口上不是 accept-review 的服务"))
+                    results.append(
+                        (name, "SKIP", f"这两个脚本把端口写死在 {REVIEW_PORT}，而那个端口上不是 accept-review 的服务")
+                    )
                     continue
             elif name == "check_archived_reimport":
-                env = {"QB_DATABASE": str(ROOT / "tmp" / "accept-1133" / "db.sqlite3"),
-                       "QB_DATA_ROOT": str(ROOT / "tmp" / "accept-1133")}
+                env = {
+                    "QB_DATABASE": str(ROOT / "tmp" / "accept-1133" / "db.sqlite3"),
+                    "QB_DATA_ROOT": str(ROOT / "tmp" / "accept-1133"),
+                }
             elif name == "check_assistant_setup":
                 extra = ["--bundle", str(args.bundle)]
             elif name in NEEDS_PAPER:
@@ -205,8 +232,10 @@ def main() -> int:
             print(f"{name.ljust(width)}  {status:5} {note}".rstrip())
         failed = [name for name, status, _ in results if status == "FAIL"]
         skipped = [name for name, status, _ in results if status == "SKIP"]
-        print(f"\n{len(results) - len(failed) - len(skipped)} ok / {len(failed)} 失败 / {len(skipped)} 跳过"
-              + (f"（跳过：{', '.join(skipped)}）" if skipped else ""))
+        print(
+            f"\n{len(results) - len(failed) - len(skipped)} ok / {len(failed)} 失败 / {len(skipped)} 跳过"
+            + (f"（跳过：{', '.join(skipped)}）" if skipped else "")
+        )
         return 1 if failed else 0
     finally:
         for _, process in servers:

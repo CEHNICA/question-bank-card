@@ -61,8 +61,9 @@ def row_extras(raw) -> dict:
 def pick_question():
     c = sqlite3.connect(WORK_DB)
     try:
-        rows = c.execute("select id, extras, content from core_publishedquestion"
-                         " where status = 'published' and withdrawn_at is null").fetchall()
+        rows = c.execute(
+            "select id, extras, content from core_publishedquestion where status = 'published' and withdrawn_at is null"
+        ).fetchall()
     finally:
         c.close()
     for pub, extras, content in rows:
@@ -154,7 +155,8 @@ def main() -> int:
         page.locator("#answerEditorAnalysis").fill(MARK + "解析：从题面条件出发分两种情况讨论。")
         page.locator("#answerEditorSave").click()
         page.wait_for_function(
-            "() => document.querySelector('.answer-editor-status')?.textContent.includes('已保存')", timeout=30000)
+            "() => document.querySelector('.answer-editor-status')?.textContent.includes('已保存')", timeout=30000
+        )
         page.keyboard.press("Escape")
         page.wait_for_selector("#answerEditorDialog", state="hidden")
 
@@ -205,8 +207,10 @@ def main() -> int:
         print(f"   提示：{re.sub(chr(10), ' | ', box.inner_text())[:170]!r}")
         row = page.locator(".print-missing-row").first
         row_text = row.inner_text()
-        check(not re.search(r"\b(superseded|withdrawn|not_found)\b", row_text),
-              f"界面上不出现英文状态枚举（现在写的是 {row_text.strip()[:60]!r}）")
+        check(
+            not re.search(r"\b(superseded|withdrawn|not_found)\b", row_text),
+            f"界面上不出现英文状态枚举（现在写的是 {row_text.strip()[:60]!r}）",
+        )
         check("新版本" in row_text, "说的是「已经有新版本」，老师一眼知道自己该怎么办")
 
         swap = visible_button(row, "换成当前版本")
@@ -227,10 +231,13 @@ def main() -> int:
         if page.locator("#basketList li.basket-row").count() == 1:
             drawer_text = page.locator("#basketList li.basket-row").first.inner_text()
             print(f"   试题篮抽屉里写着：{re.sub(chr(10), ' | ', drawer_text)[:120]!r}")
-            check(not re.search(r"\b(superseded|withdrawn|not_found)\b", drawer_text),
-                  "试题篮抽屉里也不出现英文状态枚举")
-            check(visible_button(page.locator("#basketList li.basket-row").first, "换新版本") is not None,
-                  "抽屉里也有「换新版本」")
+            check(
+                not re.search(r"\b(superseded|withdrawn|not_found)\b", drawer_text), "试题篮抽屉里也不出现英文状态枚举"
+            )
+            check(
+                visible_button(page.locator("#basketList li.basket-row").first, "换新版本") is not None,
+                "抽屉里也有「换新版本」",
+            )
             open_print(page)
         else:
             check(False, "试题篮抽屉里还能看到那一行")
@@ -243,7 +250,8 @@ def main() -> int:
         swap.click()
         page.wait_for_function(
             "() => !document.querySelector('#printMissing') || document.querySelector('#printMissing').hidden",
-            timeout=20000)
+            timeout=20000,
+        )
         page.wait_for_timeout(1500)
         if not check(page.locator("#printPaper .print-question").count() == 1, "换完就载入了"):
             browser.close()
@@ -260,7 +268,8 @@ def main() -> int:
         page.wait_for_timeout(1500)
         aside = page.locator("#answerEditorDialog .answer-set-aside")
         visible = aside.count() == 1 and aside.evaluate(
-            "n => n.checkVisibility({checkVisibilityCSS: true, contentVisibilityAuto: true})")
+            "n => n.checkVisibility({checkVisibilityCSS: true, contentVisibilityAuto: true})"
+        )
         check(visible, "从组卷预览进去，也能看到「题面改过，原来那份解析还留着」")
         if visible:
             aside_text = aside.inner_text()
@@ -270,7 +279,9 @@ def main() -> int:
             if check(rows.count() == 1, f"编辑器列出 {rows.count()} 道题"):
                 # 题号带只有一格宽，完整状态按设计放在 title 里、格子上只留一个色点。
                 # 这里量的就是 title，别拿 inner_text —— 那一格本来就是空的。
-                row_text = re.sub(r"\s+", " ", rows.first.locator("button.answer-list-question").get_attribute("title") or "")
+                row_text = re.sub(
+                    r"\s+", " ", rows.first.locator("button.answer-list-question").get_attribute("title") or ""
+                )
                 print(f"   列表行写着：{row_text[:140]!r}")
                 check("原解析还在" in row_text, "列表行也说了原解析还在、可以填回")
                 state = rows.first.get_attribute("data-state")

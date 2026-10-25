@@ -1,4 +1,5 @@
 """Native export delivery uses private directories and synthetic output only."""
+
 import json
 import os
 import tempfile
@@ -11,11 +12,13 @@ from django.urls import path
 
 from . import export_preferences as preferences, library_export, library_pdf, native_folder_picker
 
-urlpatterns = [path("api/export-preferences", preferences.preferences_view),
-               path("api/export-preferences/select", preferences.select_export_directory_view),
-               path("api/export-preferences/open", preferences.open_export_view),
-               path("api/library/export-pdf", library_pdf.export_pdf_view),
-               path("api/library/export-docx", library_export.export_docx_view)]
+urlpatterns = [
+    path("api/export-preferences", preferences.preferences_view),
+    path("api/export-preferences/select", preferences.select_export_directory_view),
+    path("api/export-preferences/open", preferences.open_export_view),
+    path("api/library/export-pdf", library_pdf.export_pdf_view),
+    path("api/library/export-docx", library_export.export_docx_view),
+]
 
 
 @override_settings(ROOT_URLCONF=__name__)
@@ -39,7 +42,9 @@ class ExportPreferenceTests(SimpleTestCase):
         self.secret.write_bytes(b"opaque-secret-file-do-not-read")
 
     def post(self, value, route="/api/export-preferences", **changes):
-        return self.client.post(route, json.dumps(value), content_type="application/json", **{**self.headers, **changes})
+        return self.client.post(
+            route, json.dumps(value), content_type="application/json", **{**self.headers, **changes}
+        )
 
     def test_default_save_and_clear_are_separate_from_user_data(self):
         self.assertEqual(preferences.describe()["directory"], "")
@@ -52,8 +57,17 @@ class ExportPreferenceTests(SimpleTestCase):
         self.assertEqual(self.post({"directory": ""}).json()["directory"], "")
 
     def test_invalid_directories_and_payload_never_create_paths(self):
-        for value in (str(self.root / "missing"), str(self.secret), "relative", "file:///C:/exports", "\\\\server\\share",
-                      "\\\\?\\C:\\exports", True, 12, None):
+        for value in (
+            str(self.root / "missing"),
+            str(self.secret),
+            "relative",
+            "file:///C:/exports",
+            "\\\\server\\share",
+            "\\\\?\\C:\\exports",
+            True,
+            12,
+            None,
+        ):
             with self.subTest(value=value):
                 self.assertEqual(self.post({"directory": value}).status_code, 400)
         for value in ({}, {"directory": "", "path": str(self.folder)}, {"directory": []}):
@@ -62,8 +76,12 @@ class ExportPreferenceTests(SimpleTestCase):
         self.assertFalse(preferences.preference_path().exists())
 
     def test_guards_reject_cross_site_nonlocal_or_non_desktop_mutations(self):
-        for headers in ({"HTTP_ORIGIN": "http://evil.invalid"}, {"HTTP_ORIGIN": ""},
-                        {"HTTP_X_QB_REQUEST": ""}, {"REMOTE_ADDR": "192.0.2.2"}):
+        for headers in (
+            {"HTTP_ORIGIN": "http://evil.invalid"},
+            {"HTTP_ORIGIN": ""},
+            {"HTTP_X_QB_REQUEST": ""},
+            {"REMOTE_ADDR": "192.0.2.2"},
+        ):
             self.assertEqual(self.post({"directory": str(self.folder)}, **headers).status_code, 403)
         with mock.patch.object(preferences, "desktop_capable", return_value=False):
             self.assertEqual(self.post({"directory": str(self.folder)}).status_code, 409)
@@ -78,8 +96,13 @@ class ExportPreferenceTests(SimpleTestCase):
 
     def request(self, **changes):
         from django.test import RequestFactory
-        return RequestFactory().post("/api/library/export-pdf", "{}", content_type="application/json",
-            **{**self.headers, "HTTP_X_QB_EXPORT_DELIVERY": "configured", **changes})
+
+        return RequestFactory().post(
+            "/api/library/export-pdf",
+            "{}",
+            content_type="application/json",
+            **{**self.headers, "HTTP_X_QB_EXPORT_DELIVERY": "configured", **changes},
+        )
 
     def delivery(self, filename="数学练习.pdf", data=b"%PDF-synthetic-complete", request=None):
         attachment = HttpResponse(data, content_type="application/pdf")
@@ -102,7 +125,9 @@ class ExportPreferenceTests(SimpleTestCase):
 
     def test_no_explicit_header_or_browser_server_never_writes(self):
         preferences.save({"directory": str(self.folder)})
-        self.assertEqual(self.delivery(request=self.request(HTTP_X_QB_EXPORT_DELIVERY=""))["Content-Type"], "application/pdf")
+        self.assertEqual(
+            self.delivery(request=self.request(HTTP_X_QB_EXPORT_DELIVERY=""))["Content-Type"], "application/pdf"
+        )
         with mock.patch.object(preferences, "desktop_capable", return_value=False):
             self.assertEqual(self.delivery()["Content-Type"], "application/pdf")
         self.assertEqual(list(self.folder.iterdir()), [])
@@ -114,7 +139,15 @@ class ExportPreferenceTests(SimpleTestCase):
 
     def test_filename_cannot_supply_path_device_extension_or_stream(self):
         preferences.save({"directory": str(self.folder)})
-        for filename in ("../outside.pdf", "C:\\outside.pdf", "report.pdf:secret", "CON.pdf", "run.exe", "bad\nname.pdf", "a.pdf "):
+        for filename in (
+            "../outside.pdf",
+            "C:\\outside.pdf",
+            "report.pdf:secret",
+            "CON.pdf",
+            "run.exe",
+            "bad\nname.pdf",
+            "a.pdf ",
+        ):
             with self.subTest(filename=filename):
                 response = self.delivery(filename=filename)
                 self.assertEqual(response["Content-Type"], "application/pdf")
@@ -131,7 +164,9 @@ class ExportPreferenceTests(SimpleTestCase):
         with mock.patch.object(preferences.os, "fsync", side_effect=OSError("disk full")):
             response = self.delivery()
         self.assertEqual(response.content, b"%PDF-synthetic-complete")
-        self.assertEqual(list(self.folder.iterdir()), [], "A partial file is removed without changing any existing document")
+        self.assertEqual(
+            list(self.folder.iterdir()), [], "A partial file is removed without changing any existing document"
+        )
 
     def test_open_only_server_issued_unchanged_file_and_token_is_once(self):
         preferences.save({"directory": str(self.folder)})
@@ -140,11 +175,21 @@ class ExportPreferenceTests(SimpleTestCase):
             result = self.post({"target": "file", "file_token": receipt["file_token"]}, "/api/export-preferences/open")
             self.assertEqual(result.status_code, 200)
             opened.assert_called_once_with(receipt["path"])
-            self.assertEqual(self.post({"target": "file", "file_token": receipt["file_token"]}, "/api/export-preferences/open").status_code, 409)
+            self.assertEqual(
+                self.post(
+                    {"target": "file", "file_token": receipt["file_token"]}, "/api/export-preferences/open"
+                ).status_code,
+                409,
+            )
         receipt = json.loads(self.delivery().content)
         Path(receipt["path"]).write_bytes(b"changed document")
         with mock.patch.object(preferences.os, "startfile", create=True) as opened:
-            self.assertEqual(self.post({"target": "file", "file_token": receipt["file_token"]}, "/api/export-preferences/open").status_code, 409)
+            self.assertEqual(
+                self.post(
+                    {"target": "file", "file_token": receipt["file_token"]}, "/api/export-preferences/open"
+                ).status_code,
+                409,
+            )
             opened.assert_not_called()
 
     def test_open_directory_uses_only_saved_choice_and_rejects_arbitrary_path(self):
@@ -152,7 +197,10 @@ class ExportPreferenceTests(SimpleTestCase):
         with mock.patch.object(preferences.os, "startfile", create=True) as opened:
             self.assertEqual(self.post({"target": "directory"}, "/api/export-preferences/open").status_code, 200)
             opened.assert_called_once_with(str(self.folder))
-            self.assertEqual(self.post({"target": "directory", "path": str(self.root)}, "/api/export-preferences/open").status_code, 400)
+            self.assertEqual(
+                self.post({"target": "directory", "path": str(self.root)}, "/api/export-preferences/open").status_code,
+                400,
+            )
             self.assertEqual(self.post({"target": "file"}, "/api/export-preferences/open").status_code, 409)
             self.assertEqual(opened.call_count, 1)
 
@@ -181,8 +229,13 @@ class ExportPreferenceTests(SimpleTestCase):
     def test_native_selection_cancel_and_failure_keep_saved_preference_and_release_lock(self):
         preferences.save({"directory": str(self.folder)})
         saved = preferences.preference_path().read_bytes()
-        for result in (None, str(self.root / "missing"), "\\\\server\\share", "",
-                       native_folder_picker.FolderPickerError("offline native chooser unavailable")):
+        for result in (
+            None,
+            str(self.root / "missing"),
+            "\\\\server\\share",
+            "",
+            native_folder_picker.FolderPickerError("offline native chooser unavailable"),
+        ):
             with self.subTest(result=result), mock.patch.object(native_folder_picker, "choose_directory") as choose:
                 if isinstance(result, Exception):
                     choose.side_effect = result
@@ -211,8 +264,12 @@ class ExportPreferenceTests(SimpleTestCase):
     def test_native_selection_guards_fail_before_showing_any_window(self):
         with mock.patch.object(native_folder_picker, "choose_directory") as choose:
             self.assertEqual(self.client.get("/api/export-preferences/select", **self.headers).status_code, 405)
-            for headers in ({"HTTP_ORIGIN": "http://evil.invalid"}, {"HTTP_ORIGIN": ""},
-                            {"HTTP_X_QB_REQUEST": ""}, {"REMOTE_ADDR": "192.0.2.2"}):
+            for headers in (
+                {"HTTP_ORIGIN": "http://evil.invalid"},
+                {"HTTP_ORIGIN": ""},
+                {"HTTP_X_QB_REQUEST": ""},
+                {"REMOTE_ADDR": "192.0.2.2"},
+            ):
                 self.assertEqual(self.post({}, "/api/export-preferences/select", **headers).status_code, 403)
             for value in ({"directory": str(self.folder)}, {"target": "directory"}, {"initial": "arbitrary"}, []):
                 self.assertEqual(self.post(value, "/api/export-preferences/select").status_code, 400)
@@ -229,16 +286,24 @@ class ExportPreferenceTests(SimpleTestCase):
                 self.assertIn("已经打开", response.json()["error"])
                 another.assert_not_called()
             return
+
         with mock.patch.object(native_folder_picker, "choose_directory", side_effect=while_open) as choose:
             self.assertEqual(self.post({}, "/api/export-preferences/select").status_code, 200)
             choose.assert_called_once_with("")
         self.assertFalse(preferences.preference_path().exists())
 
     def test_native_dialog_always_releases_com_on_cancel_selection_or_exception(self):
-        for result in (None, str(self.folder), native_folder_picker.FolderPickerError("offline COM failed"),
-                       OSError("offline Windows dialog unavailable")):
-            with self.subTest(result=result), mock.patch.object(native_folder_picker.os, "name", "nt"), \
-                    mock.patch.object(native_folder_picker, "_WindowsFolderDialog") as factory:
+        for result in (
+            None,
+            str(self.folder),
+            native_folder_picker.FolderPickerError("offline COM failed"),
+            OSError("offline Windows dialog unavailable"),
+        ):
+            with (
+                self.subTest(result=result),
+                mock.patch.object(native_folder_picker.os, "name", "nt"),
+                mock.patch.object(native_folder_picker, "_WindowsFolderDialog") as factory,
+            ):
                 dialog = factory.return_value
                 if isinstance(result, Exception):
                     dialog.choose.side_effect = result
@@ -249,8 +314,10 @@ class ExportPreferenceTests(SimpleTestCase):
                     self.assertEqual(native_folder_picker.choose_directory("synthetic initial folder"), result)
                 dialog.choose.assert_called_once_with("synthetic initial folder")
                 dialog.release.assert_called_once_with()
-        with mock.patch.object(native_folder_picker.os, "name", "posix"), \
-                mock.patch.object(native_folder_picker, "_WindowsFolderDialog") as factory:
+        with (
+            mock.patch.object(native_folder_picker.os, "name", "posix"),
+            mock.patch.object(native_folder_picker, "_WindowsFolderDialog") as factory,
+        ):
             with self.assertRaises(native_folder_picker.FolderPickerError):
                 native_folder_picker.choose_directory()
             factory.assert_not_called()
@@ -261,20 +328,38 @@ class ExportPreferenceTests(SimpleTestCase):
             self.skipTest("Windows COM capability probe only; no UI is shown")
         dialog = native_folder_picker._WindowsFolderDialog()
         try:
-            dialog._check(dialog._call(9, [native_folder_picker.ctypes.c_uint32], 0x20 | 0x40 | 0x800 | 0x8 | 0x2000000))
+            dialog._check(
+                dialog._call(9, [native_folder_picker.ctypes.c_uint32], 0x20 | 0x40 | 0x800 | 0x8 | 0x2000000)
+            )
             dialog._check(dialog._call(17, [native_folder_picker.ctypes.c_wchar_p], "隔离测试：不打开选择窗口"))
             dialog._check(dialog._call(18, [native_folder_picker.ctypes.c_wchar_p], "选择文件夹"))
         finally:
             dialog.release()
         self.assertFalse(dialog.initialized)
         self.assertFalse(dialog.interface)
-        self.assertNotIn(3, [call.args[1] for call in method.call_args_list], "No IModalWindow.Show call in offline tests")
+        self.assertNotIn(
+            3, [call.args[1] for call in method.call_args_list], "No IModalWindow.Show call in offline tests"
+        )
 
     def test_real_export_handlers_return_native_receipts_for_pdf_word_and_zip(self):
         preferences.save({"directory": str(self.folder)})
-        formats = [(library_pdf, b"%PDF-complete-synthetic", "数学.pdf", "application/pdf", "/api/library/export-pdf"),
-                   (library_export, b"PK\x03\x04complete-synthetic", "数学.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "/api/library/export-docx"),
-                   (library_export, b"PK\x03\x04complete-synthetic", "数学-分卷.zip", "application/zip", "/api/library/export-docx")]
+        formats = [
+            (library_pdf, b"%PDF-complete-synthetic", "数学.pdf", "application/pdf", "/api/library/export-pdf"),
+            (
+                library_export,
+                b"PK\x03\x04complete-synthetic",
+                "数学.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "/api/library/export-docx",
+            ),
+            (
+                library_export,
+                b"PK\x03\x04complete-synthetic",
+                "数学-分卷.zip",
+                "application/zip",
+                "/api/library/export-docx",
+            ),
+        ]
         for module, data, name, mime, route in formats:
             result = (data, name, 4, 2) if module is library_pdf else (data, name, mime, 4)
             with self.subTest(filename=name), mock.patch.object(module, "export", return_value=result):

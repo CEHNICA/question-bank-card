@@ -1,4 +1,5 @@
 """Practice cannot publish, send clouds, mix real questions, or export stale content."""
+
 import json
 import tempfile
 from pathlib import Path
@@ -22,9 +23,16 @@ class PracticeTests(TestCase):
         self.base = f"/api/demo/{self.paper_id}"
         fixture = json.loads((demo.data_root() / "demo-paper.json").read_text(encoding="utf-8"))
         one = next(x for x in fixture["questions"] if x["number"] == 1)
-        result = self.post(f"/api/papers/{self.paper_id}/questions", {"number": 1,
-            "regions": one["regions"], "processing_mode": "manual", "body_mode": "source_image",
-            "question_type": "single_choice"})
+        result = self.post(
+            f"/api/papers/{self.paper_id}/questions",
+            {
+                "number": 1,
+                "regions": one["regions"],
+                "processing_mode": "manual",
+                "body_mode": "source_image",
+                "question_type": "single_choice",
+            },
+        )
         self.assertEqual(result.status_code, 201, result.content)
         self.question = Question.objects.get(pk=result.json()["question"]["id"])
         response = self.post(f"/api/questions/{self.question.pk}/approve", {"approved": True})
@@ -37,7 +45,10 @@ class PracticeTests(TestCase):
         return self.client.post(path, json.dumps(body), content_type="application/json", HTTP_X_QB_REQUEST="1")
 
     def test_basics_waits_for_real_crop_then_has_three_questions(self):
-        self.assertEqual(list(Question.objects.filter(paper_id=self.paper_id).order_by("number").values_list("number", flat=True)), [1, 2, 9])
+        self.assertEqual(
+            list(Question.objects.filter(paper_id=self.paper_id).order_by("number").values_list("number", flat=True)),
+            [1, 2, 9],
+        )
         self.assertEqual(self.post("/api/demo", {"course": "basics"}).json()["paper"]["id"], self.paper_id)
         self.assertEqual(PublishedQuestion.objects.count(), 0)
         self.assertEqual(LibraryJob.objects.count(), 0)
@@ -72,7 +83,10 @@ class PracticeTests(TestCase):
 
     @mock.patch("core.library_pdf._render", return_value=(b"%PDF-practice", 1))
     def test_export_generates_download_without_using_user_export_directory(self, render):
-        with mock.patch("core.export_preferences.deliver", side_effect=AssertionError("Practice must not write user's export location")):
+        with mock.patch(
+            "core.export_preferences.deliver",
+            side_effect=AssertionError("Practice must not write user's export location"),
+        ):
             response = self.post(self.base + "/export-pdf", self.payload)
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response["Content-Type"], "application/pdf")
@@ -85,9 +99,11 @@ class PracticeTests(TestCase):
         self.assertEqual(self.client.get(f"/practice/{real.pk}").status_code, 404)
         self.assertEqual(self.client.get(f"/api/demo/{real.pk}/library").status_code, 404)
         two = Question.objects.get(paper_id=self.paper_id, number=2)
-        for ids, fingerprints in [([str(two.source_key)], {str(two.source_key): ""}),
-                                  ([str(real.pk)], {str(real.pk): "x"}),
-                                  ([self.key, self.key], {self.key: self.question.approved_content_hash})]:
+        for ids, fingerprints in [
+            ([str(two.source_key)], {str(two.source_key): ""}),
+            ([str(real.pk)], {str(real.pk): "x"}),
+            ([self.key, self.key], {self.key: self.question.approved_content_hash}),
+        ]:
             response = self.post(self.base + "/preview", {"ids": ids, "fingerprints": fingerprints})
             self.assertIn(response.status_code, (400, 409))
 
@@ -99,6 +115,7 @@ class PracticeTests(TestCase):
         def changed(_document):
             Question.objects.filter(pk=self.question.pk).update(approved=False)
             return b"%PDF-practice", 1
+
         with mock.patch("core.library_pdf._render", side_effect=changed):
             response = self.post(self.base + "/export-pdf", self.payload)
         self.assertEqual(response.status_code, 409)
@@ -106,7 +123,9 @@ class PracticeTests(TestCase):
 
     def test_all_demo_reading_paths_stay_offline(self):
         with mock.patch("core.views._vision_ready", side_effect=AssertionError("No API probing")):
-            response = self.post(f"/api/papers/{self.paper_id}/read-cut-questions", {"question_ids": [self.question.pk]})
+            response = self.post(
+                f"/api/papers/{self.paper_id}/read-cut-questions", {"question_ids": [self.question.pk]}
+            )
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["queued"], 0)
         self.assertEqual(self.post(f"/api/questions/{self.question.pk}/reread", {}).status_code, 409)

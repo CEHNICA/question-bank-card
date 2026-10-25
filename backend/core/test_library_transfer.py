@@ -8,6 +8,7 @@
 
 还验了：撤销能把这次加进来的东西精确删掉；包里不含密钥和设置。
 """
+
 from __future__ import annotations
 
 import json
@@ -56,9 +57,13 @@ class TransferFixture(TestCase):
         ]
 
     def make_paper(self, filename, *, sha):
-        paper = Paper.objects.create(filename=filename, kind="pdf", sha256=sha,
-                                     status=Paper.Status.READY,
-                                     pages=[{"page_idx": 0, "width": 1684, "height": 1190}])
+        paper = Paper.objects.create(
+            filename=filename,
+            kind="pdf",
+            sha256=sha,
+            status=Paper.Status.READY,
+            pages=[{"page_idx": 0, "width": 1684, "height": 1190}],
+        )
         folder = self.data / str(paper.pk)
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "source.pdf").write_bytes(b"%PDF-1.4 fake")
@@ -70,9 +75,17 @@ class TransferFixture(TestCase):
 
     def make_question(self, paper, number, stem, answer):
         return Question.objects.create(
-            paper=paper, number=number, question_type="single_choice", stem=stem,
-            options={"A": "甲"}, answer=answer, analysis="", state=Question.State.YELLOW,
-            text_source="agree", regions=[{"page_idx": 0, "bbox": [10, 10, 200, 200]}])
+            paper=paper,
+            number=number,
+            question_type="single_choice",
+            stem=stem,
+            options={"A": "甲"},
+            answer=answer,
+            analysis="",
+            state=Question.State.YELLOW,
+            text_source="agree",
+            regions=[{"page_idx": 0, "bbox": [10, 10, 200, 200]}],
+        )
 
     def export(self):
         target = self.work / "backup.zip"
@@ -100,8 +113,7 @@ class ExportTests(TransferFixture):
         with zipfile.ZipFile(bundle) as archive:
             names = archive.namelist()
         for forbidden in ("features.json", "mineru_engine.json"):
-            self.assertFalse(any(name.endswith(forbidden) for name in names),
-                             f"包里不该有 {forbidden}")
+            self.assertFalse(any(name.endswith(forbidden) for name in names), f"包里不该有 {forbidden}")
 
 
 class MergeBehaviourTests(TransferFixture):
@@ -160,7 +172,7 @@ class MergeBehaviourTests(TransferFixture):
         probe = self.work / "probe.sqlite3"
         probe.write_bytes(payload)
         with sqlite3.connect(probe) as reader:
-            for sql in (statement if isinstance(statement, (list, tuple)) else [statement]):
+            for sql in statement if isinstance(statement, (list, tuple)) else [statement]:
                 if sql:
                     reader.execute(sql)
             reader.commit()
@@ -180,23 +192,37 @@ class MergeBehaviourTests(TransferFixture):
         那道题就**悄无声息地没了**。现在撞上就另编一个。
         """
         bundle = self.make_bundle({1: "乙", 2: "丙", 3: "丁"})
-        rebuilt = self._rebuild_bundle(bundle, [
-            "DELETE FROM core_question WHERE id=1",
-            "UPDATE core_question SET id=1, number=99, stem='（虚构）撞号的新题' WHERE number=3",
-        ])
+        rebuilt = self._rebuild_bundle(
+            bundle,
+            [
+                "DELETE FROM core_question WHERE id=1",
+                "UPDATE core_question SET id=1, number=99, stem='（虚构）撞号的新题' WHERE number=3",
+            ],
+        )
         merged = library_transfer.merge_bundle(rebuilt)
-        self.assertTrue(Question.objects.filter(stem="（虚构）撞号的新题").exists(),
-                        "编号撞车的题也要搬过来")
+        self.assertTrue(Question.objects.filter(stem="（虚构）撞号的新题").exists(), "编号撞车的题也要搬过来")
         self.assertEqual(Question.objects.filter(stem="（虚构）第一题").count(), 1, "本机那道不能被覆盖")
         self.assertEqual(Question.objects.filter(stem="（虚构）第一题").first().answer, "甲")
 
     def test_a_paper_the_machine_does_not_have_comes_over_whole(self):
-        other = Paper.objects.create(filename="卷二.pdf", kind="pdf", sha256="b" * 64,
-                                     status=Paper.Status.READY,
-                                     pages=[{"page_idx": 0, "width": 1684, "height": 1190}])
-        Question.objects.create(paper=other, number=1, question_type="single_choice",
-                                stem="（虚构）新卷的题", options={"A": "甲"}, answer="戊",
-                                analysis="", state=Question.State.YELLOW, text_source="agree")
+        other = Paper.objects.create(
+            filename="卷二.pdf",
+            kind="pdf",
+            sha256="b" * 64,
+            status=Paper.Status.READY,
+            pages=[{"page_idx": 0, "width": 1684, "height": 1190}],
+        )
+        Question.objects.create(
+            paper=other,
+            number=1,
+            question_type="single_choice",
+            stem="（虚构）新卷的题",
+            options={"A": "甲"},
+            answer="戊",
+            analysis="",
+            state=Question.State.YELLOW,
+            text_source="agree",
+        )
         bundle = self.export()
         # 本机已经没有这套卷了（模拟"这是另一台电脑的备份"）。
         Paper.objects.filter(sha256="b" * 64).delete()
@@ -242,12 +268,24 @@ class MergeBehaviourTests(TransferFixture):
         self.assertIn("备份包", str(caught.exception))
 
     def test_undo_removes_exactly_what_the_merge_added(self):
-        other = Paper.objects.create(filename="卷二.pdf", kind="pdf", sha256="b" * 64,
-                                     status=Paper.Status.READY,
-                                     pages=[{"page_idx": 0, "width": 1684, "height": 1190}])
-        Question.objects.create(paper=other, number=1, question_type="single_choice",
-                                stem="（虚构）新卷的题", options={"A": "甲"}, answer="戊",
-                                analysis="", state=Question.State.YELLOW, text_source="agree")
+        other = Paper.objects.create(
+            filename="卷二.pdf",
+            kind="pdf",
+            sha256="b" * 64,
+            status=Paper.Status.READY,
+            pages=[{"page_idx": 0, "width": 1684, "height": 1190}],
+        )
+        Question.objects.create(
+            paper=other,
+            number=1,
+            question_type="single_choice",
+            stem="（虚构）新卷的题",
+            options={"A": "甲"},
+            answer="戊",
+            analysis="",
+            state=Question.State.YELLOW,
+            text_source="agree",
+        )
         bundle = self.export()
         # 本机已经没有这套卷了（模拟"这是另一台电脑的备份"）。
         Paper.objects.filter(sha256="b" * 64).delete()
@@ -258,8 +296,7 @@ class MergeBehaviourTests(TransferFixture):
         removed = library_transfer.undo_last_merge()
         self.assertEqual(removed["papers"], 1)
         self.assertEqual(Paper.objects.count(), 1, "撤销只删这次加进来的")
-        self.assertEqual(Question.objects.filter(stem="（虚构）第一题").count(), 1,
-                         "本机原来就有的题不能被撤销掉")
+        self.assertEqual(Question.objects.filter(stem="（虚构）第一题").count(), 1, "本机原来就有的题不能被撤销掉")
 
 
 class ReferencedRowsTests(TransferFixture):
@@ -271,13 +308,17 @@ class ReferencedRowsTests(TransferFixture):
     """
 
     def build_references(self):
-        group = QuestionGroup.objects.create(paper=self.paper, title="第 1 组",
-                                             kind=QuestionGroup.Kind.EXAM, sequence=0)
+        group = QuestionGroup.objects.create(
+            paper=self.paper, title="第 1 组", kind=QuestionGroup.Kind.EXAM, sequence=0
+        )
         self.questions[0].group = group
         self.questions[0].save(update_fields=["group"])
         batch = QuestionDeletionBatch.objects.create(
-            paper=self.paper, question_ids=[str(self.questions[1].pk)],
-            origin=QuestionDeletionBatch.Origin.USER, reason="（虚构）删掉的一道")
+            paper=self.paper,
+            question_ids=[str(self.questions[1].pk)],
+            origin=QuestionDeletionBatch.Origin.USER,
+            reason="（虚构）删掉的一道",
+        )
         self.questions[1].deleted_at = "2026-01-01T00:00:00Z"
         self.questions[1].deletion_batch = batch
         self.questions[1].save(update_fields=["deleted_at", "deletion_batch"])
@@ -285,12 +326,18 @@ class ReferencedRowsTests(TransferFixture):
         tag = LibraryTag.objects.create(name="（虚构）知识点", kind=LibraryTag.Kind.KNOWLEDGE)
         tag.groups.add(tag_group)
         publication = PublishedQuestion.objects.create(
-            question=self.questions[0], paper=self.paper, number=1, version=1,
+            question=self.questions[0],
+            paper=self.paper,
+            number=1,
+            version=1,
             content={"stem": "（虚构）第一题", "answer": "甲"},
-            content_hash="c" * 64, search_text="第一题", source_filename="卷一.pdf",
-            question_type="single_choice", status=PublishedQuestion.Status.PUBLISHED)
-        LibraryTagAssignment.objects.create(publication=publication, tag=tag,
-                                            source=LibraryTagAssignment.Source.HUMAN)
+            content_hash="c" * 64,
+            search_text="第一题",
+            source_filename="卷一.pdf",
+            question_type="single_choice",
+            status=PublishedQuestion.Status.PUBLISHED,
+        )
+        LibraryTagAssignment.objects.create(publication=publication, tag=tag, source=LibraryTagAssignment.Source.HUMAN)
         return group, batch, tag_group, tag, publication
 
     def forget_local_rows(self):
@@ -340,7 +387,6 @@ class ReferencedRowsTests(TransferFixture):
         self.assertEqual(LibraryTagAssignment.objects.count(), 0, "撤销要把标签挂接一起带走")
         self.assertEqual(LibraryTagGroup.objects.count(), 0)
 
-
     def test_a_duplicate_paper_on_this_machine_is_picked_deterministically(self):
         """本机留着好几份一样的卷（老师重录过一次）时，要挑得确定。
 
@@ -349,12 +395,24 @@ class ReferencedRowsTests(TransferFixture):
         """
         from core.models import Paper as PaperModel
 
-        duplicate = PaperModel.objects.create(filename="卷一（重录）.pdf", kind="pdf",
-                                               sha256="a" * 64, status=PaperModel.Status.READY,
-                                               pages=[{"page_idx": 0, "width": 1684, "height": 1190}])
-        Question.objects.create(paper=duplicate, number=9, question_type="single_choice",
-                                stem="（虚构）重录的那道题", options={"A": "甲"}, answer="",
-                                analysis="", state=Question.State.YELLOW, text_source="agree")
+        duplicate = PaperModel.objects.create(
+            filename="卷一（重录）.pdf",
+            kind="pdf",
+            sha256="a" * 64,
+            status=PaperModel.Status.READY,
+            pages=[{"page_idx": 0, "width": 1684, "height": 1190}],
+        )
+        Question.objects.create(
+            paper=duplicate,
+            number=9,
+            question_type="single_choice",
+            stem="（虚构）重录的那道题",
+            options={"A": "甲"},
+            answer="",
+            analysis="",
+            state=Question.State.YELLOW,
+            text_source="agree",
+        )
         bundle = self.export()
         # 本机删掉原来那份卷，只剩重录的这份 → 合并要并进它，而不是新建第三份。
         Question.objects.filter(paper=self.paper).delete()
@@ -368,18 +426,21 @@ class ReferencedRowsTests(TransferFixture):
         """本机那份被归档了 → 另建一份看得见的，别把题塞进看不见的地方。"""
         from core.models import Paper as PaperModel
 
-        archived = PaperModel.objects.create(filename="卷一（归档）.pdf", kind="pdf", sha256="a" * 64,
-                                             status=PaperModel.Status.READY, archived=True,
-                                             pages=[{"page_idx": 0, "width": 1684, "height": 1190}])
+        archived = PaperModel.objects.create(
+            filename="卷一（归档）.pdf",
+            kind="pdf",
+            sha256="a" * 64,
+            status=PaperModel.Status.READY,
+            archived=True,
+            pages=[{"page_idx": 0, "width": 1684, "height": 1190}],
+        )
         Question.objects.filter(paper=self.paper).delete()
         Paper.objects.filter(pk=self.paper.pk).delete()
         bundle = self.export()
         result = library_transfer.merge_bundle(bundle)
         self.assertEqual(result["report"]["新增卷子"], 1, "归档的那份不算数，要另建一份")
         self.assertEqual(Paper.objects.count(), 2)
-        self.assertFalse(Paper.objects.get(pk=archived.pk).questions.exists(),
-                         "题不该并进归档的那份")
-
+        self.assertFalse(Paper.objects.get(pk=archived.pk).questions.exists(), "题不该并进归档的那份")
 
     def test_a_book_where_every_chapter_restarts_the_numbering(self):
         """一本书每章都从第 1 题开始编 —— 认题必须带上"题组"。
@@ -387,25 +448,37 @@ class ReferencedRowsTests(TransferFixture):
         1.26.5 真机上撞过：认题只按 (卷, 题号) 找，第一章的第 1 题就被拿去和
         第二章的第 1 题配对，712 道题被当成"题号一样内容不同"又搬了一遍。
         """
-        book = Paper.objects.create(filename="（虚构）教材.pdf", kind="pdf", sha256="c" * 64,
-                                    status=Paper.Status.READY,
-                                    pages=[{"page_idx": 0, "width": 1684, "height": 1190}])
+        book = Paper.objects.create(
+            filename="（虚构）教材.pdf",
+            kind="pdf",
+            sha256="c" * 64,
+            status=Paper.Status.READY,
+            pages=[{"page_idx": 0, "width": 1684, "height": 1190}],
+        )
         for chapter in range(2):
-            group = QuestionGroup.objects.create(paper=book, title=f"第 {chapter + 1} 章",
-                                                 kind=QuestionGroup.Kind.CHAPTER, sequence=chapter)
+            group = QuestionGroup.objects.create(
+                paper=book, title=f"第 {chapter + 1} 章", kind=QuestionGroup.Kind.CHAPTER, sequence=chapter
+            )
             for number in range(1, 4):
                 Question.objects.create(
-                    paper=book, group=group, number=number, question_type="single_choice",
-                    stem=f"（虚构）第 {chapter + 1} 章第 {number} 题", options={"A": "甲"},
-                    answer="", analysis="", state=Question.State.YELLOW, text_source="agree")
+                    paper=book,
+                    group=group,
+                    number=number,
+                    question_type="single_choice",
+                    stem=f"（虚构）第 {chapter + 1} 章第 {number} 题",
+                    options={"A": "甲"},
+                    answer="",
+                    analysis="",
+                    state=Question.State.YELLOW,
+                    text_source="agree",
+                )
         bundle = self.export()
         Question.objects.filter(paper=book).delete()
         Paper.objects.filter(pk=book.pk).delete()
 
         first = library_transfer.merge_bundle(bundle)
         self.assertEqual(first["report"]["新增题目"], 6)
-        self.assertEqual(first["report"]["题号一样内容不同"], 0,
-                         "各章的题号一样，但不是同一道题，不该判成冲突")
+        self.assertEqual(first["report"]["题号一样内容不同"], 0, "各章的题号一样，但不是同一道题，不该判成冲突")
         # 再合一次同一个包：不能又搬一遍。
         second = library_transfer.merge_bundle(bundle)
         self.assertEqual(second["report"]["新增题目"], 0, "同一个包合两次，不该多出题")
@@ -417,16 +490,24 @@ class SolutionVersionTests(TransferFixture):
 
     def test_two_solutions_stay_two_versions(self):
         publication = PublishedQuestion.objects.create(
-            question=self.questions[0], paper=self.paper, number=1, version=1,
+            question=self.questions[0],
+            paper=self.paper,
+            number=1,
+            version=1,
             content={"stem": "（虚构）第一题", "answer": "甲"},
-            content_hash="a" * 64, search_text="第一题", source_filename="卷一.pdf",
-            question_type="single_choice", status=PublishedQuestion.Status.PUBLISHED)
-        LibrarySolution.objects.create(publication=publication, fingerprint="f" * 64,
-                                       answer="甲", analysis="本机那份解析")
+            content_hash="a" * 64,
+            search_text="第一题",
+            source_filename="卷一.pdf",
+            question_type="single_choice",
+            status=PublishedQuestion.Status.PUBLISHED,
+        )
+        LibrarySolution.objects.create(
+            publication=publication, fingerprint="f" * 64, answer="甲", analysis="本机那份解析"
+        )
         bundle = self.export()
         # 备份包里带上了这一版解析；本机也有一份 —— 合进来应该是两份。
         result = library_transfer.merge_bundle(bundle)
         self.assertGreaterEqual(result["report"]["两版解析都留着"], 1)
-        self.assertEqual(LibrarySolution.objects.filter(publication=publication).count(), 1,
-                         "同一份解析不会被复制成两版")
-
+        self.assertEqual(
+            LibrarySolution.objects.filter(publication=publication).count(), 1, "同一份解析不会被复制成两版"
+        )

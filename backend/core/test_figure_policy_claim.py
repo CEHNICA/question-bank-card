@@ -55,7 +55,7 @@ REAL_STEMS = (
     "交于 A、B 两点，且点 A 的横坐标和点 B 的纵坐标都是 $-2$，求："
     "（1）一次函数的解析式；（2）根据图象写出使一次函数的值大于反比例函数的值",
     "在△ABC中，AB=13cm，AC=20 cm，BC边上的高为12cm，则△ABC的面积为( )cm²。",
-    "在学习\"特殊平行四边形\"时，在平行四边形 $ABCD$ 中，作线段 $AC$ 的垂直平分线，"
+    '在学习"特殊平行四边形"时，在平行四边形 $ABCD$ 中，作线段 $AC$ 的垂直平分线，'
     "分别交 $AD$，$AC$，$BC$ 于点 $M$，$O$，$N$，连接 $AN$，$CM$，得到四边形 $ANCM$．",
 )
 
@@ -63,8 +63,12 @@ REAL_STEMS = (
 class BoundFigureWithoutTextCueIsAReviewConflictTests(SimpleTestCase):
     def review(self, stem, *, assignments, figures, candidates):
         return figure_policy.automatic_review(
-            stem=stem, options={}, candidate_labels=set(candidates),
-            assignments=assignments, figures=figures, reader_missing=False,
+            stem=stem,
+            options={},
+            candidate_labels=set(candidates),
+            assignments=assignments,
+            figures=figures,
+            reader_missing=False,
         )
 
     def test_the_real_stems_really_have_no_cue(self):
@@ -77,16 +81,13 @@ class BoundFigureWithoutTextCueIsAReviewConflictTests(SimpleTestCase):
     def test_readers_claim_alone_does_not_clear_the_conflict(self):
         for stem in REAL_STEMS:
             with self.subTest(stem=stem[:20]):
-                review = self.review(
-                    stem, assignments={"1": "stem"}, figures=[FIGURE], candidates=["1"],
-                )
+                review = self.review(stem, assignments={"1": "stem"}, figures=[FIGURE], candidates=["1"])
                 self.assertEqual(review["status"], figure_policy.CONFLICT)
                 self.assertIn("bound_figure_without_text_cue", review["signals"])
 
     def test_a_cue_still_clears_it(self):
         review = self.review(
-            "如图，阴影部分的面积为（  ）。", assignments={"1": "stem"},
-            figures=[FIGURE], candidates=["1"],
+            "如图，阴影部分的面积为（  ）。", assignments={"1": "stem"}, figures=[FIGURE], candidates=["1"]
         )
         self.assertEqual(review["status"], figure_policy.OK)
 
@@ -96,7 +97,5 @@ class BoundFigureWithoutTextCueIsAReviewConflictTests(SimpleTestCase):
         stem = "请画出下列函数的图象。"
         self.assertTrue(figure_policy.asks_student_to_draw(stem, {}))
         self.assertEqual(figure_policy.cue_matches(stem, {}), [])
-        review = self.review(
-            stem, assignments={"1": "stem"}, figures=[FIGURE], candidates=["1"],
-        )
+        review = self.review(stem, assignments={"1": "stem"}, figures=[FIGURE], candidates=["1"])
         self.assertEqual(review["status"], figure_policy.CONFLICT)

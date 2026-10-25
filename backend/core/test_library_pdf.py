@@ -1,4 +1,5 @@
 """PDF export boundaries; renderer tests use synthesized local documents only."""
+
 import io
 import json
 import re
@@ -31,7 +32,13 @@ class PdfExportTests(TestCase):
     figure = fixtures.LibraryExportTests.figure
 
     def post(self, payload, **changes):
-        return self.client.post("/api/library/export-pdf", json.dumps(payload), content_type="application/json", HTTP_X_QB_REQUEST="1", **changes)
+        return self.client.post(
+            "/api/library/export-pdf",
+            json.dumps(payload),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+            **changes,
+        )
 
     def test_download_counts_filename_and_no_write(self):
         pub = self.publication()
@@ -55,7 +62,9 @@ class PdfExportTests(TestCase):
     def test_combined_without_selected_answers_renders_only_questions(self):
         blank = self.publication(stem="题干必须保留", answer=" \n ", analysis="\t ")
         optional_ai = self.publication(extras={"ai_answer": {"answer": "未选用的 AI 参考"}})
-        payload = self.payload([blank, optional_ai], output_format="pdf", print_options={"document": "combined", "answers": True})
+        payload = self.payload(
+            [blank, optional_ai], output_format="pdf", print_options={"document": "combined", "answers": True}
+        )
         before = deepcopy(payload)
         with mock.patch.object(pdf, "_render", return_value=(COMPLETE, 1)) as renderer:
             response = self.post(payload)
@@ -72,7 +81,9 @@ class PdfExportTests(TestCase):
         missing = self.publication(stem="无答案题")
         explained = self.publication(stem="仅有解析的题", analysis="原卷解析必须保留")
         with mock.patch.object(pdf, "_render", return_value=(COMPLETE, 2)) as renderer:
-            response = self.post(self.payload([missing, explained], output_format="pdf", print_options={"document": "combined"}))
+            response = self.post(
+                self.payload([missing, explained], output_format="pdf", print_options={"document": "combined"})
+            )
         self.assertEqual(response.status_code, 200)
         document = self.rendered_input(renderer)
         self.assertEqual(document["options"]["document"], "combined")
@@ -86,7 +97,9 @@ class PdfExportTests(TestCase):
         for mode in ("combined", "answers"):
             with self.subTest(mode=mode):
                 with mock.patch.object(pdf, "_render", return_value=(COMPLETE, 1)) as renderer:
-                    response = self.post(self.payload([pub], output_format="pdf", print_options={"document": mode, "ai_answers": True}))
+                    response = self.post(
+                        self.payload([pub], output_format="pdf", print_options={"document": mode, "ai_answers": True})
+                    )
                 self.assertEqual(response.status_code, 200)
                 document = self.rendered_input(renderer)
                 self.assertEqual(document["options"]["document"], mode)
@@ -116,17 +129,24 @@ class PdfExportTests(TestCase):
         latex = r"\cancel{x}"
         pub = self.publication(stem="$" + latex + "$")
         payload = self.payload([pub], output_format="pdf")
-        payload["rendered_fields"][str(pub.id)]["stem"] = fixtures.math_field(latex, '<menclose notation="updiagonalstrike"><mi>x</mi></menclose>')
-        with mock.patch.object(pdf, "_render", return_value=(COMPLETE, 1)), mock.patch("core.library_export._convert_math_root", side_effect=AssertionError("Word converter reached")):
+        payload["rendered_fields"][str(pub.id)]["stem"] = fixtures.math_field(
+            latex, '<menclose notation="updiagonalstrike"><mi>x</mi></menclose>'
+        )
+        with (
+            mock.patch.object(pdf, "_render", return_value=(COMPLETE, 1)),
+            mock.patch("core.library_export._convert_math_root", side_effect=AssertionError("Word converter reached")),
+        ):
             response = self.post(payload)
         self.assertEqual(response.status_code, 200, response.content)
 
     def test_changed_publication_during_render_is_not_downloaded(self):
         pub = self.publication()
+
         def change(_):
             pub.status = "withdrawn"
             pub.save(update_fields=["status"])
             return COMPLETE, 1
+
         with mock.patch.object(pdf, "_render", side_effect=change):
             response = self.post(self.payload([pub], output_format="pdf"))
         self.assertEqual(response.status_code, 409)
@@ -135,11 +155,13 @@ class PdfExportTests(TestCase):
     def test_images_come_from_snapshots_and_are_rechecked(self):
         pub = self.publication()
         image = self.figure(pub)
+
         def change(document):
             self.assertIn("data:image/png;base64,", document)
             self.assertNotIn('src="http', document)
             image.write_bytes(b"changed")
             return COMPLETE, 1
+
         with mock.patch.object(pdf, "_render", side_effect=change):
             response = self.post(self.payload([pub], output_format="pdf"))
         self.assertEqual(response.status_code, 409)
@@ -148,7 +170,9 @@ class PdfExportTests(TestCase):
         marker = '</script><script src="https://example.invalid/x">alert(1)</script>'
         pub = self.publication(stem=marker)
         with mock.patch.object(pdf, "_render", return_value=(COMPLETE, 1)) as renderer:
-            response = self.post(self.payload([pub], output_format="pdf", title='</title><img src="https://example.invalid/x">'))
+            response = self.post(
+                self.payload([pub], output_format="pdf", title='</title><img src="https://example.invalid/x">')
+            )
         self.assertEqual(response.status_code, 200)
         document = renderer.call_args.args[0]
         self.assertNotIn(marker, document)
@@ -171,19 +195,25 @@ class PdfExportTests(TestCase):
         self.assertIn("sectionHeadings", document)
         self.assertNotIn("共 60 分", document)
         self.assertEqual(
-            pdf._section_headings([
-                {"type": "single_choice", "content": {"section": printed}},
-                {"type": "single_choice", "content": {"section": printed}},
-                {"type": "fill_blank", "content": {"section": ""}},
-            ]),
-            {"single_choice": "一、选择题", "fill_blank": "二、填空题"})
+            pdf._section_headings(
+                [
+                    {"type": "single_choice", "content": {"section": printed}},
+                    {"type": "single_choice", "content": {"section": printed}},
+                    {"type": "fill_blank", "content": {"section": ""}},
+                ]
+            ),
+            {"single_choice": "一、选择题", "fill_blank": "二、填空题"},
+        )
         # 教材那种短章节名照旧印。
         self.assertEqual(
-            pdf._section_headings([
-                {"type": "single_choice", "content": {"section": "习题 3.1"}},
-                {"type": "single_choice", "content": {"section": "习题 3.1"}},
-            ]),
-            {"single_choice": "习题 3.1"})
+            pdf._section_headings(
+                [
+                    {"type": "single_choice", "content": {"section": "习题 3.1"}},
+                    {"type": "single_choice", "content": {"section": "习题 3.1"}},
+                ]
+            ),
+            {"single_choice": "习题 3.1"},
+        )
 
     def test_request_guard_and_missing_answers(self):
         pub = self.publication()
@@ -191,7 +221,12 @@ class PdfExportTests(TestCase):
         with mock.patch.object(pdf, "_render") as renderer:
             self.assertEqual(self.post(payload, REMOTE_ADDR="203.0.113.1").status_code, 403)
             self.assertEqual(self.client.get("/api/library/export-pdf").status_code, 405)
-            self.assertEqual(self.client.post("/api/library/export-pdf", json.dumps(payload), content_type="application/json").status_code, 403)
+            self.assertEqual(
+                self.client.post(
+                    "/api/library/export-pdf", json.dumps(payload), content_type="application/json"
+                ).status_code,
+                403,
+            )
             payload["print_options"] = {"document": "answers"}
             self.assertEqual(self.post(payload).status_code, 400)
         renderer.assert_not_called()
@@ -233,19 +268,25 @@ class PdfExportTests(TestCase):
 
 
 class PdfBrowserStartupTests(SimpleTestCase):
-    def wait_for_port(self, reads, *, polls=None, deadline=.2):
+    def wait_for_port(self, reads, *, polls=None, deadline=0.2):
         clock = [0.0]
         process = mock.Mock()
         process.poll = mock.Mock(side_effect=polls) if polls is not None else mock.Mock(return_value=None)
+
         def sleep(seconds):
             clock[0] += seconds
-        with mock.patch.object(Path, "read_text", side_effect=reads), \
-                mock.patch.object(pdf.time, "monotonic", side_effect=lambda: clock[0]), \
-                mock.patch.object(pdf.time, "sleep", side_effect=sleep):
+
+        with (
+            mock.patch.object(Path, "read_text", side_effect=reads),
+            mock.patch.object(pdf.time, "monotonic", side_effect=lambda: clock[0]),
+            mock.patch.object(pdf.time, "sleep", side_effect=sleep),
+        ):
             return pdf._wait_debug_port(Path("synthetic-profile"), process, deadline)
 
     def test_brief_windows_writer_lock_can_recover(self):
-        self.assertEqual(self.wait_for_port([PermissionError(13, "writer lock"), "12345\n/devtools/browser/local-id"]), 12345)
+        self.assertEqual(
+            self.wait_for_port([PermissionError(13, "writer lock"), "12345\n/devtools/browser/local-id"]), 12345
+        )
 
     def test_missing_file_can_recover_without_an_exists_read_race(self):
         self.assertEqual(self.wait_for_port([FileNotFoundError(), "12345\n/devtools/browser/local-id"]), 12345)
@@ -255,7 +296,7 @@ class PdfBrowserStartupTests(SimpleTestCase):
 
     def test_persistent_writer_lock_keeps_original_deadline(self):
         with self.assertRaisesMessage(pdf.word.ExportError, "超时") as caught:
-            self.wait_for_port(PermissionError(13, "writer lock"), deadline=.1)
+            self.wait_for_port(PermissionError(13, "writer lock"), deadline=0.1)
         self.assertEqual(caught.exception.status, 504)
 
     def test_browser_exit_while_waiting_reports_startup_failure(self):
@@ -272,30 +313,43 @@ class PdfBrowserStartupTests(SimpleTestCase):
 
 
 class PdfPageStartupTests(SimpleTestCase):
-    target = {"type": "page", "url": "about:blank", "webSocketDebuggerUrl": "ws://127.0.0.1:12345/devtools/page/local-id"}
+    target = {
+        "type": "page",
+        "url": "about:blank",
+        "webSocketDebuggerUrl": "ws://127.0.0.1:12345/devtools/page/local-id",
+    }
 
-    def wait_for_target(self, responses, *, polls=None, deadline=.2):
+    def wait_for_target(self, responses, *, polls=None, deadline=0.2):
         clock = [0.0]
         process = mock.Mock()
         process.poll = mock.Mock(side_effect=polls) if polls is not None else mock.Mock(return_value=None)
         opener = mock.Mock()
+
         def reply(value):
             response = mock.MagicMock()
             response.__enter__.return_value = response
             response.read.return_value = json.dumps(value).encode()
             return response
+
         opener.open.side_effect = [value if isinstance(value, BaseException) else reply(value) for value in responses]
+
         def sleep(seconds):
             clock[0] += seconds
-        with mock.patch.object(pdf.time, "monotonic", side_effect=lambda: clock[0]), \
-                mock.patch.object(pdf.time, "sleep", side_effect=sleep):
+
+        with (
+            mock.patch.object(pdf.time, "monotonic", side_effect=lambda: clock[0]),
+            mock.patch.object(pdf.time, "sleep", side_effect=sleep),
+        ):
             return pdf._wait_page_target(opener, 12345, process, deadline)
 
     def test_real_local_listener_can_publish_page_after_initial_empty_catalog(self):
         requests = []
         target = self.target
+
         class Handler(BaseHTTPRequestHandler):
-            def log_message(self, *args): pass
+            def log_message(self, *args):
+                pass
+
             def do_GET(self):
                 requests.append(self.path)
                 payload = json.dumps([] if len(requests) == 1 else [target]).encode()
@@ -304,19 +358,28 @@ class PdfPageStartupTests(SimpleTestCase):
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
+
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            process = mock.Mock(); process.poll.return_value = None
-            selected = pdf._wait_page_target(pdf.build_opener(pdf.ProxyHandler({})), server.server_port, process, time.monotonic() + 3)
+            process = mock.Mock()
+            process.poll.return_value = None
+            selected = pdf._wait_page_target(
+                pdf.build_opener(pdf.ProxyHandler({})), server.server_port, process, time.monotonic() + 3
+            )
             self.assertEqual(selected, target)
             self.assertEqual(requests, ["/json/list", "/json/list"])
         finally:
-            server.shutdown(); server.server_close(); thread.join(2)
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
 
     def test_only_initial_connection_refusal_recovers_including_urllib_wrapper(self):
-        for error in (ConnectionRefusedError(10061, "not listening yet"), URLError(ConnectionRefusedError(10061, "not listening yet"))):
+        for error in (
+            ConnectionRefusedError(10061, "not listening yet"),
+            URLError(ConnectionRefusedError(10061, "not listening yet")),
+        ):
             with self.subTest(error=type(error).__name__):
                 self.assertEqual(self.wait_for_target([error, [self.target]]), self.target)
         with self.assertRaises(URLError):
@@ -324,7 +387,7 @@ class PdfPageStartupTests(SimpleTestCase):
 
     def test_catalog_without_initial_blank_page_keeps_original_deadline(self):
         with self.assertRaisesMessage(pdf.word.ExportError, "超时") as caught:
-            self.wait_for_target([[], [{"type": "page", "url": "edge://newtab"}]], deadline=.1)
+            self.wait_for_target([[], [{"type": "page", "url": "edge://newtab"}]], deadline=0.1)
         self.assertEqual(caught.exception.status, 504)
 
     def test_browser_exit_between_catalog_queries_stops_waiting(self):
@@ -350,6 +413,7 @@ class PdfCleanupTests(SimpleTestCase):
         process = mock.Mock(pid=987654)
         exited = [False]
         process.poll.side_effect = lambda: 0 if exited[0] else None
+
         def wait(timeout):
             if timeout == 2 and fault in {"process_terminate", "process_final_wait"}:
                 raise pdf.subprocess.TimeoutExpired("synthetic owned process", timeout)
@@ -359,21 +423,26 @@ class PdfCleanupTests(SimpleTestCase):
                 raise pdf.subprocess.TimeoutExpired("synthetic owned process", timeout)
             exited[0] = True
             return 0
+
         process.wait.side_effect = wait
         client = mock.Mock(events=[])
         if fault == "socket_close":
             client.close.side_effect = OSError(10038, self.secret_message)
+
         def call(method, params=None):
             if method == "Page.getFrameTree":
                 return {"frameTree": {"frame": {"id": "owned-frame"}}}
             if method == "Runtime.evaluate":
                 if primary_status == 504:
                     raise pdf.word.ExportError("synthetic primary deadline", 504)
-                status = {"error": "synthetic primary layout"} if primary_status == 422 else {"ready": True, "page_count": 1}
+                status = (
+                    {"error": "synthetic primary layout"} if primary_status == 422 else {"ready": True, "page_count": 1}
+                )
                 return {"result": {"value": status}}
             if method == "Page.printToPDF":
                 return {"data": pdf.base64.b64encode(COMPLETE).decode()}
             return {}
+
         client.call.side_effect = call
         with ExitStack() as stack:
             stack.enter_context(mock.patch.object(pdf.tempfile, "TemporaryDirectory", return_value=directory))
@@ -392,7 +461,9 @@ class PdfCleanupTests(SimpleTestCase):
             validate = stack.enter_context(mock.patch.object(pdf, "_validate_pdf"))
             if log_fails:
                 logs = SimpleNamespace(output=[], records=[])
-                logger_warning = stack.enter_context(mock.patch.object(pdf._logger, "warning", side_effect=OSError(5, self.secret_message)))
+                logger_warning = stack.enter_context(
+                    mock.patch.object(pdf._logger, "warning", side_effect=OSError(5, self.secret_message))
+                )
             else:
                 logs = stack.enter_context(self.assertLogs(pdf._logger, level="WARNING"))
                 logger_warning = None
@@ -401,8 +472,17 @@ class PdfCleanupTests(SimpleTestCase):
                 result = pdf._render("synthetic document with no real questions")
             except pdf.word.ExportError as caught:
                 error, result = caught, None
-        return SimpleNamespace(result=result, error=error, client=client, process=process, directory=directory,
-                               terminator=terminator, validate=validate, logs=logs, logger_warning=logger_warning)
+        return SimpleNamespace(
+            result=result,
+            error=error,
+            client=client,
+            process=process,
+            directory=directory,
+            terminator=terminator,
+            validate=validate,
+            logs=logs,
+            logger_warning=logger_warning,
+        )
 
     def test_cleanup_failures_preserve_already_validated_pdf_without_rerendering(self):
         for fault in self.faults:
@@ -411,8 +491,12 @@ class PdfCleanupTests(SimpleTestCase):
                 self.assertIsNone(outcome.error)
                 self.assertEqual(outcome.result, (COMPLETE, 1))
                 outcome.validate.assert_called_once_with(COMPLETE, 1)
-                self.assertEqual(sum(call.args[0] == "Page.setDocumentContent" for call in outcome.client.call.call_args_list), 1)
-                self.assertEqual(sum(call.args[0] == "Page.printToPDF" for call in outcome.client.call.call_args_list), 1)
+                self.assertEqual(
+                    sum(call.args[0] == "Page.setDocumentContent" for call in outcome.client.call.call_args_list), 1
+                )
+                self.assertEqual(
+                    sum(call.args[0] == "Page.printToPDF" for call in outcome.client.call.call_args_list), 1
+                )
 
     def test_cleanup_failures_preserve_primary_layout_and_deadline_errors(self):
         for status in (422, 504):
@@ -434,11 +518,17 @@ class PdfCleanupTests(SimpleTestCase):
         outcome = self.render_with_cleanup_failure("process_terminate", 504)
         self.assertEqual(outcome.error.status, 504)
         outcome.terminator.assert_called_once_with(
-            ["taskkill", "/PID", "987654", "/T", "/F"], stdout=pdf.subprocess.DEVNULL,
-            stderr=pdf.subprocess.DEVNULL, shell=False, timeout=5, creationflags=0x08000000)
+            ["taskkill", "/PID", "987654", "/T", "/F"],
+            stdout=pdf.subprocess.DEVNULL,
+            stderr=pdf.subprocess.DEVNULL,
+            shell=False,
+            timeout=5,
+            creationflags=0x08000000,
+        )
         self.assertEqual(outcome.process.wait.call_args_list, [mock.call(timeout=2), mock.call(timeout=5)])
         outcome.directory.cleanup.assert_called_once()
-        process = mock.Mock(); process.poll.return_value = 0
+        process = mock.Mock()
+        process.poll.return_value = 0
         with mock.patch.object(pdf.subprocess, "run") as terminate:
             pdf._cleanup_browser(None, process)
         process.wait.assert_not_called()
@@ -454,8 +544,10 @@ class PdfCleanupTests(SimpleTestCase):
         process.poll.return_value = None
         process.wait.side_effect = pdf.subprocess.TimeoutExpired("recycled", 2)
         # 进程号还在，但已经不是自己起的那个浏览器了。
-        with mock.patch.object(pdf, "_process_started_at", return_value=999999), \
-                mock.patch.object(pdf.subprocess, "run") as run:
+        with (
+            mock.patch.object(pdf, "_process_started_at", return_value=999999),
+            mock.patch.object(pdf.subprocess, "run") as run,
+        ):
             pdf._cleanup_browser(None, process)
         self.assertEqual(run.call_args_list, [], "进程号已经换人，绝不能按它连整棵树一起杀")
 
@@ -467,8 +559,10 @@ class PdfCleanupTests(SimpleTestCase):
                 process._qb_started_at = started
                 process.poll.return_value = None
                 process.wait.side_effect = pdf.subprocess.TimeoutExpired("unknown", 2)
-                with mock.patch.object(pdf, "_process_started_at", return_value=None), \
-                        mock.patch.object(pdf.subprocess, "run") as run:
+                with (
+                    mock.patch.object(pdf, "_process_started_at", return_value=None),
+                    mock.patch.object(pdf.subprocess, "run") as run,
+                ):
                     pdf._cleanup_browser(None, process)
                 self.assertEqual(run.call_args_list, [])
 
@@ -494,7 +588,8 @@ class PdfCleanupTests(SimpleTestCase):
                     self.assertEqual(outcome.error.status, primary)
                     outcome.validate.assert_not_called()
                 outcome.logger_warning.assert_called_once_with(
-                    "PDF cleanup step failed: stage=%s error_type=%s", "socket_close", "OSError")
+                    "PDF cleanup step failed: stage=%s error_type=%s", "socket_close", "OSError"
+                )
                 outcome.process.wait.assert_called_once_with(timeout=2)
                 outcome.directory.cleanup.assert_called_once()
 
@@ -513,10 +608,12 @@ class PdfCleanupTests(SimpleTestCase):
         sock = mock.Mock()
         sock.close.side_effect = OSError(10038, self.secret_message)
         error = pdf.word.ExportError("synthetic primary deadline", 504)
-        with mock.patch.object(pdf.socket, "create_connection", return_value=sock), \
-                mock.patch.object(pdf, "_remaining", side_effect=[1, error]), \
-                self.assertLogs(pdf._logger, level="WARNING") as logs, \
-                self.assertRaises(pdf.word.ExportError) as caught:
+        with (
+            mock.patch.object(pdf.socket, "create_connection", return_value=sock),
+            mock.patch.object(pdf, "_remaining", side_effect=[1, error]),
+            self.assertLogs(pdf._logger, level="WARNING") as logs,
+            self.assertRaises(pdf.word.ExportError) as caught,
+        ):
             pdf._CDP(12345, "/devtools/page/local-id", time.monotonic() + 1)
         self.assertIs(caught.exception, error)
         sock.close.assert_called_once()
@@ -527,6 +624,7 @@ class PdfCleanupTests(SimpleTestCase):
 class PdfTransportTests(SimpleTestCase):
     def test_actual_pdf_pages_and_a4_are_checked(self):
         import pymupdf
+
         with pymupdf.open() as doc:
             doc.new_page(width=210 / 25.4 * 72, height=297 / 25.4 * 72)
             data = doc.tobytes()
@@ -566,25 +664,32 @@ class PdfTransportTests(SimpleTestCase):
         client.socket, client.buffer, client.serial, client.events = left, bytearray(), 0, []
         client.deadline = time.monotonic() + 5
         failures = []
+
         def read_exact(stream, count):
             data = bytearray()
             while len(data) < count:
                 piece = stream.recv(count - len(data))
-                if not piece: raise ConnectionError
+                if not piece:
+                    raise ConnectionError
                 data.extend(piece)
             return bytes(data)
+
         def frame(data, opcode, final=True):
             size = len(data)
             header = bytes([(128 if final else 0) | opcode, size if size < 126 else 126 if size < 65536 else 127])
-            if size >= 126: header += struct.pack("!H" if size < 65536 else "!Q", size)
+            if size >= 126:
+                header += struct.pack("!H" if size < 65536 else "!Q", size)
             return header + data
+
         def server():
             try:
                 first, second = read_exact(right, 2)
                 assert first == 129 and second & 128
                 length = second & 127
-                if length == 126: length = struct.unpack("!H", read_exact(right, 2))[0]
-                elif length == 127: length = struct.unpack("!Q", read_exact(right, 8))[0]
+                if length == 126:
+                    length = struct.unpack("!H", read_exact(right, 2))[0]
+                elif length == 127:
+                    length = struct.unpack("!Q", read_exact(right, 8))[0]
                 mask = read_exact(right, 4)
                 data = read_exact(right, length)
                 parsed = json.loads(bytes(c ^ mask[i % 4] for i, c in enumerate(data)))
@@ -593,16 +698,20 @@ class PdfTransportTests(SimpleTestCase):
                 right.sendall(frame(reply[:65_540], 1, False) + frame(b"ping", 9) + frame(reply[65_540:], 0))
                 first, second = read_exact(right, 2)
                 assert first == 138 and second & 128
-                mask = read_exact(right, 4); data = read_exact(right, second & 127)
-                assert bytes(c ^ mask[i % 4] for i,c in enumerate(data)) == b"ping"
+                mask = read_exact(right, 4)
+                data = read_exact(right, second & 127)
+                assert bytes(c ^ mask[i % 4] for i, c in enumerate(data)) == b"ping"
             except BaseException as error:
                 failures.append(error)
             finally:
                 right.close()
-        worker = threading.Thread(target=server, daemon=True);worker.start()
+
+        worker = threading.Thread(target=server, daemon=True)
+        worker.start()
         try:
             result = client.call("Synthetic.large", {"text": "a" * 70_000})
             self.assertEqual(result["text"], "b" * 70_000)
         finally:
-            client.close();worker.join(5)
+            client.close()
+            worker.join(5)
         self.assertFalse(failures, failures)

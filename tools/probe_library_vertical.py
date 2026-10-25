@@ -69,9 +69,18 @@ MEASURE = """() => {
 
 
 def launch(pw, url):
-    executable = next((str(p) for p in (Path(pw.chromium.executable_path),
-        Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-        Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if p.is_file()), None)
+    executable = next(
+        (
+            str(p)
+            for p in (
+                Path(pw.chromium.executable_path),
+                Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+            )
+            if p.is_file()
+        ),
+        None,
+    )
     return pw.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
 
 
@@ -94,8 +103,14 @@ def main():
         for width, height in ((args.width, args.height), (1100, 768), (1001, 768), (979, 768), (820, 768), (390, 780)):
             context = browser.new_context(viewport={"width": width, "height": height})
             context.add_init_script("localStorage.setItem('qb-welcome-seen','1'); localStorage.setItem('qb-lens','0')")
-            context.route("**/*", lambda route: route.continue_() if urlparse(route.request.url).hostname in
-                          ("127.0.0.1", "localhost") else route.abort())
+            context.route(
+                "**/*",
+                lambda route: (
+                    route.continue_()
+                    if urlparse(route.request.url).hostname in ("127.0.0.1", "localhost")
+                    else route.abort()
+                ),
+            )
             page = context.new_page()
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.goto(f"{url}/library")
@@ -122,8 +137,9 @@ def main():
                     failures.append(f"题面宽 {data['stemWidth']}，目标 ≥ 900")
                 if data["overflowingTextBlocks"]:
                     failures.append(f"{data['overflowingTextBlocks']} 块题面出现横向滚动条 = 侧栏挤窄了题目")
-                if data["trigger"] and (data["trigger"]["w"] > 34 or data["trigger"]["h"] > 34
-                                        or data["trigger"]["border"] != "0px"):
+                if data["trigger"] and (
+                    data["trigger"]["w"] > 34 or data["trigger"]["h"] > 34 or data["trigger"]["border"] != "0px"
+                ):
                     failures.append(f"☰ 触发器 {data['trigger']}，要 ≤34px 见方、无边框")
                 if data["scrollX"] > 0:
                     failures.append(f"横向溢出 {data['scrollX']}px")
@@ -192,7 +208,9 @@ def main():
                         # 用脚本派发点击绕过命中测试，验「强行点筛选时导航自己让位」这条守卫。
                         page.evaluate("document.getElementById('libraryFilterToggle').click()")
                         page.wait_for_timeout(350)
-                        both = page.evaluate("({rail: document.body.classList.contains('rail-open'), drawer: window.QBSiteDrawer.isOpen()})")
+                        both = page.evaluate(
+                            "({rail: document.body.classList.contains('rail-open'), drawer: window.QBSiteDrawer.isOpen()})"
+                        )
                         if not both["rail"]:
                             failures.append(f"{width}px 点「筛选」没拉开侧栏：{both}")
                         if both["drawer"]:

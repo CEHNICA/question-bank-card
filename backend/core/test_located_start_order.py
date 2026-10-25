@@ -7,6 +7,7 @@
 ``_inside_previous_opening`` 明写着 ``y < previous.y`` 就放弃——它只管前一题的第
 一行，起点倒退的情况它根本不看。所以这里单独钉住边界。
 """
+
 from types import SimpleNamespace
 from unittest import mock
 
@@ -40,10 +41,8 @@ class LocatedStartOrderTests(SimpleTestCase):
         # or the case falls through both of them.
         blocks = [{"seq": 12, "bbox": [53, 687, 511, 706], "text": "4. 如图"}]
 
-        self.assertFalse(pipeline._inside_previous_opening(
-            blocks, self.previous, 0, 0, 660))
-        self.assertTrue(pipeline._located_before_previous(
-            self.previous, 0, 0, 660))
+        self.assertFalse(pipeline._inside_previous_opening(blocks, self.previous, 0, 0, 660))
+        self.assertTrue(pipeline._located_before_previous(self.previous, 0, 0, 660))
 
 
 class LocateMissingRejectsBackwardsStartTests(SimpleTestCase):
@@ -59,22 +58,24 @@ class LocateMissingRejectsBackwardsStartTests(SimpleTestCase):
         unresolved: list[tuple[int, int]] = []
         placed = [{"page_idx": 0, "bbox": [53, 640, 511, 940]}]
         layout = segment.Layout(page_count=1, splits={0: [511]}, slots=[])
-        with mock.patch.object(pipeline.readers, "primary_engine", return_value=object()), \
-                mock.patch.object(segment, "missing_numbers", return_value=[(5, previous)]), \
-                mock.patch.object(segment, "region_regions_between",
-                                  return_value=[{"page_idx": 0, "bbox": [53, 640, 511, 940]}]), \
-                mock.patch.object(pipeline.imaging, "stack_regions",
-                                  return_value=(SimpleNamespace(height=1200, width=800), placed)), \
-                mock.patch.object(pipeline.imaging, "add_ruler", return_value=(object(), 12)), \
-                mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:url"), \
-                mock.patch.object(pipeline.imaging, "band_to_page",
-                                  return_value=(0, located_y)), \
-                mock.patch.object(pipeline.readers, "locate_band", return_value=6), \
-                mock.patch.object(pipeline, "_snap_located_start", return_value=located_y), \
-                mock.patch.object(pipeline, "_snap_to_gap", side_effect=lambda _i, r, _b: r), \
-                mock.patch.object(pipeline, "_inside_previous_opening", return_value=False):
-            notes = pipeline.locate_missing(mock.Mock(), layout, starts,
-                                             mock.Mock(), blocks=[], unresolved=unresolved)
+        with (
+            mock.patch.object(pipeline.readers, "primary_engine", return_value=object()),
+            mock.patch.object(segment, "missing_numbers", return_value=[(5, previous)]),
+            mock.patch.object(
+                segment, "region_regions_between", return_value=[{"page_idx": 0, "bbox": [53, 640, 511, 940]}]
+            ),
+            mock.patch.object(
+                pipeline.imaging, "stack_regions", return_value=(SimpleNamespace(height=1200, width=800), placed)
+            ),
+            mock.patch.object(pipeline.imaging, "add_ruler", return_value=(object(), 12)),
+            mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:url"),
+            mock.patch.object(pipeline.imaging, "band_to_page", return_value=(0, located_y)),
+            mock.patch.object(pipeline.readers, "locate_band", return_value=6),
+            mock.patch.object(pipeline, "_snap_located_start", return_value=located_y),
+            mock.patch.object(pipeline, "_snap_to_gap", side_effect=lambda _i, r, _b: r),
+            mock.patch.object(pipeline, "_inside_previous_opening", return_value=False),
+        ):
+            notes = pipeline.locate_missing(mock.Mock(), layout, starts, mock.Mock(), blocks=[], unresolved=unresolved)
         return starts, unresolved, notes
 
     def test_the_backwards_start_is_refused_and_reported_as_swallowed(self):

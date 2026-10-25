@@ -1,4 +1,5 @@
 """Local, page-aware inventory of figure use across question cards."""
+
 from __future__ import annotations
 
 import math
@@ -46,8 +47,9 @@ def figure_frames(item: dict) -> list[dict]:
     if not isinstance(parts, (list, tuple)):
         parts = []
     pieces = [item, *parts]
-    return [{"page_idx": piece["page_idx"], "bbox": list(piece["bbox"])}
-            for piece in pieces if frame(piece) is not None]
+    return [
+        {"page_idx": piece["page_idx"], "bbox": list(piece["bbox"])} for piece in pieces if frame(piece) is not None
+    ]
 
 
 def shared_caption(candidate: dict, blocks: list[dict]) -> dict | None:
@@ -71,7 +73,7 @@ def shared_caption(candidate: dict, blocks: list[dict]) -> dict | None:
         overlap = min(x1, bx1) - max(x0, bx0)
         # A declaration must be outside the diagram and next to its edge.
         gap = y0 - by1 if by1 <= y0 else by0 - y1 if by0 >= y1 else -1
-        if overlap < min(x1 - x0, bx1 - bx0) * .5 or not 0 <= gap <= 45:
+        if overlap < min(x1 - x0, bx1 - bx0) * 0.5 or not 0 <= gap <= 45:
             continue
         numbers_text = match.group("numbers")
         numbers = []
@@ -92,8 +94,15 @@ def shared_caption(candidate: dict, blocks: list[dict]) -> dict | None:
             continue
         if len(numbers) < 2 or len(numbers) > 20 or min(numbers) < 1 or len(set(numbers)) != len(numbers):
             continue
-        found.append({"numbers": sorted(numbers), "text": text,
-                      "page_idx": page, "bbox": list(other[1]), "seq": block.get("seq")})
+        found.append(
+            {
+                "numbers": sorted(numbers),
+                "text": text,
+                "page_idx": page,
+                "bbox": list(other[1]),
+                "seq": block.get("seq"),
+            }
+        )
     if not found or len({tuple(item["numbers"]) for item in found}) != 1:
         return None
     return found[0]
@@ -115,9 +124,14 @@ def build_ledger(cards: list[dict], blocks: list[dict] | None = None) -> dict:
             for piece in figure_frames(figure):
                 key = frame_key(piece)
                 entry = inventory.setdefault(key, {"key": key, **piece, "claims": []})
-                claim = {"question_id": card["id"], "group_id": card.get("group_id"),
-                         "number": card.get("number"), "slot": figure.get("slot", "stem"),
-                         "source": figure.get("source", "auto"), "protected": bool(card.get("protected"))}
+                claim = {
+                    "question_id": card["id"],
+                    "group_id": card.get("group_id"),
+                    "number": card.get("number"),
+                    "slot": figure.get("slot", "stem"),
+                    "source": figure.get("source", "auto"),
+                    "protected": bool(card.get("protected")),
+                }
                 if claim not in entry["claims"]:
                     entry["claims"].append(claim)
     declarations = {}
@@ -137,17 +151,23 @@ def build_ledger(cards: list[dict], blocks: list[dict] | None = None) -> dict:
         if declaration:
             entry["shared_caption"] = declaration
         question_ids = {claim["question_id"] for claim in claims}
-        shared = (len(question_ids) > 1 and declaration is not None
-                  and len({claim["group_id"] for claim in claims}) == 1
-                  and all(claim["number"] in declaration["numbers"] and claim["slot"] == "stem"
-                          for claim in claims))
-        slot_conflict = any(len({claim["slot"] for claim in claims if claim["question_id"] == pk}) > 1
-                            for pk in question_ids)
+        shared = (
+            len(question_ids) > 1
+            and declaration is not None
+            and len({claim["group_id"] for claim in claims}) == 1
+            and all(claim["number"] in declaration["numbers"] and claim["slot"] == "stem" for claim in claims)
+        )
+        slot_conflict = any(
+            len({claim["slot"] for claim in claims if claim["question_id"] == pk}) > 1 for pk in question_ids
+        )
         if slot_conflict or (len(question_ids) > 1 and not shared):
             entry["status"] = "conflict"
             for pk in question_ids:
                 conflicts[str(pk)].append(entry["key"])
         else:
             entry["status"] = "shared" if shared else "assigned" if claims else "unassigned"
-    return {"schema": 1, "figures": sorted(inventory.values(), key=lambda item: item["key"]),
-            "conflicts": dict(conflicts)}
+    return {
+        "schema": 1,
+        "figures": sorted(inventory.values(), key=lambda item: item["key"]),
+        "conflicts": dict(conflicts),
+    }

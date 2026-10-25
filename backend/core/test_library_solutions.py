@@ -1,4 +1,5 @@
 """Edited solution overlays, immutable draft choices, and one-off AI boundaries."""
+
 import io
 import json
 import os
@@ -39,11 +40,14 @@ class LibrarySolutionTests(TransactionTestCase):
         state = override_settings(DATA_ROOT=self.root)
         state.enable()
         self.addCleanup(state.disable)
-        env = mock.patch.dict(os.environ, {
-            "QB_FEATURES_FILE": str(self.root / "features.json"),
-            "QB_LIBRARY_AI_SETTINGS_FILE": str(self.root / "ai.json"),
-            "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.root / "key.dat"),
-        })
+        env = mock.patch.dict(
+            os.environ,
+            {
+                "QB_FEATURES_FILE": str(self.root / "features.json"),
+                "QB_LIBRARY_AI_SETTINGS_FILE": str(self.root / "ai.json"),
+                "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.root / "key.dat"),
+            },
+        )
         env.start()
         self.addCleanup(env.stop)
         self.client = Client()
@@ -52,18 +56,47 @@ class LibrarySolutionTests(TransactionTestCase):
     def publication(self, *, stem="合成题甲", answer="原卷 B", analysis="", qtype="single_choice"):
         source = self.root / (uuid.uuid4().hex + ".png")
         Image.new("RGB", (300, 400), "white").save(source)
-        paper = Paper.objects.create(filename="离线合成卷.png", source_path=str(source), sha256="a" * 64,
-                                    kind="image", pages=[{"page_idx": 0, "width": 300, "height": 400}])
-        question = Question.objects.create(paper=paper, number=1, stem=stem, answer=answer, analysis=analysis,
-                                           question_type=qtype, options={"A": "1", "B": "2"}, approved=True, approved_at=timezone.now())
+        paper = Paper.objects.create(
+            filename="离线合成卷.png",
+            source_path=str(source),
+            sha256="a" * 64,
+            kind="image",
+            pages=[{"page_idx": 0, "width": 300, "height": 400}],
+        )
+        question = Question.objects.create(
+            paper=paper,
+            number=1,
+            stem=stem,
+            answer=answer,
+            analysis=analysis,
+            question_type=qtype,
+            options={"A": "1", "B": "2"},
+            approved=True,
+            approved_at=timezone.now(),
+        )
         content = library.final_content(question)
-        return PublishedQuestion.objects.create(paper=paper, question=question, source_filename=paper.filename,
-            number=1, question_type=qtype, version=1, content=content, content_hash=library.content_hash(content))
+        return PublishedQuestion.objects.create(
+            paper=paper,
+            question=question,
+            source_filename=paper.filename,
+            number=1,
+            question_type=qtype,
+            version=1,
+            content=content,
+            content_hash=library.content_hash(content),
+        )
 
     def test_editor_get_exposes_existing_valid_ai_draft_without_saving_overlay(self):
         fingerprint = library.generation_fingerprint(self.pub.content, self.pub.pk)
-        self.pub.extras = {"ai_answer": {"answer": "参考 C", "analysis": "所有小问步骤",
-                                       "fingerprint": fingerprint, "engine": "doubao", "checked": False}}
+        self.pub.extras = {
+            "ai_answer": {
+                "answer": "参考 C",
+                "analysis": "所有小问步骤",
+                "fingerprint": fingerprint,
+                "engine": "doubao",
+                "checked": False,
+            }
+        }
         self.pub.save(update_fields=["extras"])
         data = self.client.get(f"/api/library/{self.pub.pk}/solution").json()
         self.assertEqual(data["ai_answer"]["analysis"], "所有小问步骤")
@@ -83,8 +116,17 @@ class LibrarySolutionTests(TransactionTestCase):
 
     def save(self, pub=None, **changes):
         pub = pub or self.pub
-        return library_solutions.save(pub, {"answer": "C", "analysis": "第一段\n\n第二段", "figures": [],
-                                            "base_revision": None, "sync_library": False, **changes})
+        return library_solutions.save(
+            pub,
+            {
+                "answer": "C",
+                "analysis": "第一段\n\n第二段",
+                "figures": [],
+                "base_revision": None,
+                "sync_library": False,
+                **changes,
+            },
+        )
 
     def asset(self, pub=None, color="red"):
         return library_solutions._store_image(pub or self.pub, Image.new("RGB", (240, 120), color))
@@ -101,9 +143,14 @@ class LibrarySolutionTests(TransactionTestCase):
             fields.update({"options." + k: field(v) for k, v in pub.content["options"].items()})
             fields.update({name: field(str(selected.get(name) or "")) for name in ("answer", "analysis")})
             rendered[str(pub.pk)] = fields
-        return {"ids": [str(pub.pk) for pub in pubs], "title": "离线教师卷", "format": output,
-                "print_options": {"document": mode, "answer_layout": layout, "answer_space": "medium"},
-                "solutions": solutions, "rendered_fields": rendered}
+        return {
+            "ids": [str(pub.pk) for pub in pubs],
+            "title": "离线教师卷",
+            "format": output,
+            "print_options": {"document": mode, "answer_layout": layout, "answer_space": "medium"},
+            "solutions": solutions,
+            "rendered_fields": rendered,
+        }
 
     def test_exam_only_solution_preserves_entire_question_and_original_snapshot(self):
         before = Question.all_objects.filter(pk=self.pub.question_id).values().get()
@@ -142,10 +189,14 @@ class LibrarySolutionTests(TransactionTestCase):
 
     def test_invalid_assets_and_values_never_create_a_solution(self):
         foreign = self.asset(self.publication())
-        cases = [{"figures": [foreign["id"]]}, {"figures": [{"id": "../../private"}]},
-                 {"figures": [{"id": self.asset()["id"], "display_width": float("nan")}]},
-                 {"figures": [{"id": self.asset()["id"], "position": "remote"}]},
-                 {"answer": "", "analysis": "", "figures": []}, {"sync_library": "true"}]
+        cases = [
+            {"figures": [foreign["id"]]},
+            {"figures": [{"id": "../../private"}]},
+            {"figures": [{"id": self.asset()["id"], "display_width": float("nan")}]},
+            {"figures": [{"id": self.asset()["id"], "position": "remote"}]},
+            {"answer": "", "analysis": "", "figures": []},
+            {"sync_library": "true"},
+        ]
         for change in cases:
             with self.subTest(change=change), self.assertRaises(library_solutions.SolutionError):
                 self.save(**change)
@@ -154,8 +205,11 @@ class LibrarySolutionTests(TransactionTestCase):
     def test_upload_normalizes_real_pixels_and_checks_checksum(self):
         output = io.BytesIO()
         Image.new("RGB", (80, 40), "blue").save(output, format="JPEG")
-        response = self.client.post(f"/api/library/{self.pub.pk}/solution-images",
-            {"image": SimpleUploadedFile("图.jpg", output.getvalue(), content_type="image/jpeg")}, HTTP_X_QB_REQUEST="1")
+        response = self.client.post(
+            f"/api/library/{self.pub.pk}/solution-images",
+            {"image": SimpleUploadedFile("图.jpg", output.getvalue(), content_type="image/jpeg")},
+            HTTP_X_QB_REQUEST="1",
+        )
         self.assertEqual(response.status_code, 201, response.content)
         figure = response.json()["figure"]
         view = self.client.get(figure["url"])
@@ -171,11 +225,17 @@ class LibrarySolutionTests(TransactionTestCase):
     def test_upload_requires_explicit_local_header_and_real_image(self):
         url = f"/api/library/{self.pub.pk}/solution-images"
         self.assertEqual(self.client.post(url, {"image": SimpleUploadedFile("a.png", b"bad")}).status_code, 403)
-        self.assertEqual(self.client.post(url, {"image": SimpleUploadedFile("a.png", b"bad")}, HTTP_X_QB_REQUEST="1").status_code, 409)
+        self.assertEqual(
+            self.client.post(url, {"image": SimpleUploadedFile("a.png", b"bad")}, HTTP_X_QB_REQUEST="1").status_code,
+            409,
+        )
 
     def test_invalid_surrogate_and_width_do_not_save_unexportable_content(self):
-        for changes in ({"answer": "\ud800"}, {"analysis": "😀" * 60000},
-                        {"figures": [{"id": self.asset()["id"], "display_width": 4}]}):
+        for changes in (
+            {"answer": "\ud800"},
+            {"analysis": "😀" * 60000},
+            {"figures": [{"id": self.asset()["id"], "display_width": 4}]},
+        ):
             with self.subTest(changes=list(changes)), self.assertRaises(library_solutions.SolutionError):
                 self.save(**changes)
         self.assertEqual(LibrarySolution.objects.count(), 0)
@@ -198,7 +258,9 @@ class LibrarySolutionTests(TransactionTestCase):
     def test_public_listing_uses_metadata_without_decoding_all_solution_images(self):
         self.save(figures=[self.asset()["id"]], sync_library=True)
         self.pub.refresh_from_db()
-        with mock.patch.object(library_solutions.Image, "open", side_effect=AssertionError("listing must not decode full image")):
+        with mock.patch.object(
+            library_solutions.Image, "open", side_effect=AssertionError("listing must not decode full image")
+        ):
             data = library.publication_json(self.pub)
         self.assertEqual(data["solution"]["answer"], "C")
         self.assertTrue(data["solution"]["figures"][0]["url"])
@@ -211,8 +273,12 @@ class LibrarySolutionTests(TransactionTestCase):
         self.assertEqual(response.status_code, 201, response.content)
         self.assertEqual((response.json()["figure"]["width"], response.json()["figure"]["height"]), (150, 200))
         self.assertEqual(source.read_bytes(), original)
-        for data in ({"page_idx": 99, "bbox": [0, 0, 500, 500]}, {"page_idx": 0, "bbox": [0, 0, 1001, 500]},
-                     {"page_idx": True, "bbox": [0, 0, 500, 500]}, {"page_idx": 0, "bbox": [0, 0, 0, 500]}):
+        for data in (
+            {"page_idx": 99, "bbox": [0, 0, 500, 500]},
+            {"page_idx": 0, "bbox": [0, 0, 1001, 500]},
+            {"page_idx": True, "bbox": [0, 0, 500, 500]},
+            {"page_idx": 0, "bbox": [0, 0, 0, 500]},
+        ):
             self.assertEqual(self.post(url, data).status_code, 400)
 
     def test_drafts_store_fixed_solutions_and_old_layout_stays_appendix(self):
@@ -247,7 +313,9 @@ class LibrarySolutionTests(TransactionTestCase):
         self.assertNotIn("后补的 C", text)
         with mock.patch.object(library_pdf, "_render", return_value=(b"offline", 1)) as render:
             library_pdf.export({**payload, "format": "pdf"})
-        body = json.loads(re.search(r'<script[^>]+id="examData"[^>]*>(.*?)</script>', render.call_args.args[0], re.S)[1])
+        body = json.loads(
+            re.search(r'<script[^>]+id="examData"[^>]*>(.*?)</script>', render.call_args.args[0], re.S)[1]
+        )
         self.assertEqual(body["items"][0]["selected"]["answer"], "原卷 B")
         origin = self.client.get(f"/api/library/{self.pub.pk}/solution?revision=origin").json()
         self.assertIsNone(origin["solution"])
@@ -274,7 +342,9 @@ class LibrarySolutionTests(TransactionTestCase):
         self.assertNotIn("参考答案与解析", text)
         self.assertEqual(root.xpath("count(//w:br[@w:type='page'])", namespaces=NS), 0)
         self.assertNotIn("1701", root.xpath("//w:spacing/@w:after", namespaces=NS))
-        data, *_ = library_export.export(self.payload([self.pub, second], {str(self.pub.pk): str(row.pk)}, layout="appendix"))
+        data, *_ = library_export.export(
+            self.payload([self.pub, second], {str(self.pub.pk): str(row.pk)}, layout="appendix")
+        )
         text = "".join(document_xml(data).xpath("//w:t/text()", namespaces=NS))
         self.assertGreater(text.index("第一段"), text.index("合成题乙"))
         self.assertIn("参考答案与解析", text)
@@ -297,7 +367,8 @@ class LibrarySolutionTests(TransactionTestCase):
         # 学生翻开就是现成的解题过程。split 的题目卷要像 questions 模式一样干净。
         row = self.save(answer="C", analysis="第一段", figures=[{"id": self.asset()["id"], "display_width": 40}])
         data, *_ = library_export.export(
-            self.payload(solutions={str(self.pub.pk): str(row.pk)}, mode="questions", output="split"))
+            self.payload(solutions={str(self.pub.pk): str(row.pk)}, mode="questions", output="split")
+        )
         self.assertTrue(zipfile.is_zipfile(io.BytesIO(data)))
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             names = archive.namelist()
@@ -313,9 +384,13 @@ class LibrarySolutionTests(TransactionTestCase):
 
     def test_analysis_images_keep_order_width_and_paragraph_placement(self):
         figures = [self.asset(color=color) for color in ("red", "green", "blue")]
-        row = self.save(figures=[{"id": figures[0]["id"], "display_width": 35, "position": "before"},
-                                {"id": figures[1]["id"], "display_width": 45, "position": "paragraph", "paragraph": 0},
-                                {"id": figures[2]["id"], "display_width": 55, "position": "after"}])
+        row = self.save(
+            figures=[
+                {"id": figures[0]["id"], "display_width": 35, "position": "before"},
+                {"id": figures[1]["id"], "display_width": 45, "position": "paragraph", "paragraph": 0},
+                {"id": figures[2]["id"], "display_width": 55, "position": "after"},
+            ]
+        )
         data, *_ = library_export.export(self.payload(solutions={str(self.pub.pk): str(row.pk)}))
         root = document_xml(data)
         rows = []
@@ -329,7 +404,9 @@ class LibrarySolutionTests(TransactionTestCase):
         self.assertEqual(rows[first + 4], "image")
 
     def test_pdf_input_uses_same_solution_images_and_student_excludes_them(self):
-        row = self.save(figures=[{"id": self.asset()["id"], "display_width": 43, "position": "paragraph", "paragraph": 0}])
+        row = self.save(
+            figures=[{"id": self.asset()["id"], "display_width": 43, "position": "paragraph", "paragraph": 0}]
+        )
         for mode in ("combined", "answers", "questions"):
             with mock.patch.object(library_pdf, "_render", return_value=(b"offline", 1)) as render:
                 library_pdf.export(self.payload(solutions={str(self.pub.pk): str(row.pk)}, mode=mode, output="pdf"))
@@ -352,7 +429,9 @@ class LibrarySolutionTests(TransactionTestCase):
             library_export.export(payload)
         payload = self.payload(solutions={str(self.pub.pk): str(row.pk)})
         target = self.root / "library-solutions" / str(self.pub.pk) / (figure["id"] + ".png")
-        with mock.patch.object(library_export, "_document", side_effect=lambda *args: (target.write_bytes(b"tampered"), b"no-download")[1]):
+        with mock.patch.object(
+            library_export, "_document", side_effect=lambda *args: (target.write_bytes(b"tampered"), b"no-download")[1]
+        ):
             with self.assertRaisesRegex(library_export.ExportError, "校验"):
                 library_export.export(payload)
 
@@ -375,10 +454,19 @@ class LibrarySolutionTests(TransactionTestCase):
         self.assertTrue(job.solution_scope)
         self.assertFalse(features.enabled("ai_answer"))
         before = deepcopy(self.pub.extras)
-        prepared = library_assistant.prepare({"publication_id": str(self.pub.pk), "kinds": ["answer"], "agent": "离线测试助手"})
+        prepared = library_assistant.prepare(
+            {"publication_id": str(self.pub.pk), "kinds": ["answer"], "agent": "离线测试助手"}
+        )
         task = prepared["jobs"][0]
-        result = library_assistant.complete({"job_id": task["id"], "fingerprint": task["fingerprint"], "agent": task["agent"],
-                                             "answer": "2", "analysis": "逐步计算"})
+        result = library_assistant.complete(
+            {
+                "job_id": task["id"],
+                "fingerprint": task["fingerprint"],
+                "agent": task["agent"],
+                "answer": "2",
+                "analysis": "逐步计算",
+            }
+        )
         self.assertEqual(result["job"]["result"]["analysis"], "逐步计算")
         self.pub.refresh_from_db()
         self.assertEqual(self.pub.extras, before)
@@ -396,30 +484,56 @@ class LibrarySolutionTests(TransactionTestCase):
         LibraryJob.objects.update(status="failed", error="离线失败")
         self.assertEqual(self.post("/api/library/jobs", request).status_code, 200)
         self.assertEqual(LibraryJob.objects.count(), 2)
-        self.assertEqual(self.post("/api/library/jobs", {"kind": "answer", "missing": True, "solution_scope": True}).status_code, 400)
-        self.assertEqual(self.post("/api/library/jobs", {"kind": "tags", "ids": [str(self.pub.pk)], "solution_scope": True}).status_code, 400)
+        self.assertEqual(
+            self.post("/api/library/jobs", {"kind": "answer", "missing": True, "solution_scope": True}).status_code, 400
+        )
+        self.assertEqual(
+            self.post(
+                "/api/library/jobs", {"kind": "tags", "ids": [str(self.pub.pk)], "solution_scope": True}
+            ).status_code,
+            400,
+        )
         self.assertEqual(self.post("/api/library/jobs", {"kind": "answer", "ids": [str(self.pub.pk)]}).status_code, 200)
         self.assertFalse(features.enabled("ai_answer"))
 
     def test_scoped_api_result_is_isolated_and_late_withdrawal_still_blocks_it(self):
-        job = LibraryJob.objects.create(publication=self.pub, kind="answer", executor="api", solution_scope=True,
-            fingerprint=library.generation_fingerprint(self.pub.content, self.pub.pk), api_snapshot={"synthetic": True})
-        with mock.patch.object(library_jobs.library_ai_settings, "ensure_ready", return_value={"ready": True}), \
-                mock.patch.object(library_jobs.library_ai_settings, "require_snapshot"), \
-                mock.patch.object(library_jobs, "run_answer", return_value={"answer": "建议", "analysis": "建议过程"}):
+        job = LibraryJob.objects.create(
+            publication=self.pub,
+            kind="answer",
+            executor="api",
+            solution_scope=True,
+            fingerprint=library.generation_fingerprint(self.pub.content, self.pub.pk),
+            api_snapshot={"synthetic": True},
+        )
+        with (
+            mock.patch.object(library_jobs.library_ai_settings, "ensure_ready", return_value={"ready": True}),
+            mock.patch.object(library_jobs.library_ai_settings, "require_snapshot"),
+            mock.patch.object(library_jobs, "run_answer", return_value={"answer": "建议", "analysis": "建议过程"}),
+        ):
             self.assertEqual(library_jobs.process_pending(), 1)
         job.refresh_from_db()
         self.assertEqual(job.status, "done")
         self.assertEqual(job.result["analysis"], "建议过程")
         self.pub.refresh_from_db()
         self.assertEqual(self.pub.extras, {})
-        other = LibraryJob.objects.create(publication=self.pub, kind="answer", executor="api", solution_scope=True,
-            fingerprint=job.fingerprint, api_snapshot={"synthetic": True})
+        other = LibraryJob.objects.create(
+            publication=self.pub,
+            kind="answer",
+            executor="api",
+            solution_scope=True,
+            fingerprint=job.fingerprint,
+            api_snapshot={"synthetic": True},
+        )
+
         def delayed(_publication, **_kwargs):
             PublishedQuestion.objects.filter(pk=self.pub.pk).update(status="withdrawn")
             return {"answer": "迟到结果", "analysis": "不应保存"}
-        with mock.patch.object(library_jobs.library_ai_settings, "ensure_ready", return_value={"ready": True}), \
-                mock.patch.object(library_jobs.library_ai_settings, "require_snapshot"), mock.patch.object(library_jobs, "run_answer", side_effect=delayed):
+
+        with (
+            mock.patch.object(library_jobs.library_ai_settings, "ensure_ready", return_value={"ready": True}),
+            mock.patch.object(library_jobs.library_ai_settings, "require_snapshot"),
+            mock.patch.object(library_jobs, "run_answer", side_effect=delayed),
+        ):
             library_jobs.process_pending()
         other.refresh_from_db()
         self.assertEqual(other.status, "failed")
@@ -431,16 +545,21 @@ class LibrarySolutionTests(TransactionTestCase):
     def replaced_by_new_stem(self):
         """造出「填了解析（带一张图）→ 改题面」的局面。"""
         figure = self.asset()
-        solution = self.save(answer="旧答案", analysis="旧解析过程。",
-                             figures=[{"id": figure["id"], "display_width": 40, "position": "after", "paragraph": 0}],
-                             sync_library=True)
+        solution = self.save(
+            answer="旧答案",
+            analysis="旧解析过程。",
+            figures=[{"id": figure["id"], "display_width": 40, "position": "after", "paragraph": 0}],
+            sync_library=True,
+        )
         old = self.pub
         # 题面编辑器只让「已入库、来源题卡也在可改状态」的题走这条路。
         old.question.state = Question.State.GREEN
         library.approve(old.question, now=timezone.now())
         old.question.save()
         data = editor.editor_data(old)
-        payload = {key: data[key] for key in ("revision", "content_hash", "stem", "options", "question_type", "body_mode")}
+        payload = {
+            key: data[key] for key in ("revision", "content_hash", "stem", "options", "question_type", "body_mode")
+        }
         new, _, _ = editor.save(old, payload | {"stem": "改过的题干 $x+1=0$。"})
         return old, new, solution, figure
 
@@ -463,15 +582,23 @@ class LibrarySolutionTests(TransactionTestCase):
 
     def test_saving_the_stale_solution_carries_its_figure_onto_the_new_version(self):
         old, new, _solution, figure = self.replaced_by_new_stem()
-        fresh = library_solutions.save(new, {"answer": "旧答案", "analysis": "旧解析过程。",
-            "figures": [{"id": figure["id"], "display_width": 40, "position": "after", "paragraph": 0}],
-            "base_revision": None, "sync_library": True})
+        fresh = library_solutions.save(
+            new,
+            {
+                "answer": "旧答案",
+                "analysis": "旧解析过程。",
+                "figures": [{"id": figure["id"], "display_width": 40, "position": "after", "paragraph": 0}],
+                "base_revision": None,
+                "sync_library": True,
+            },
+        )
         self.assertEqual(fresh.publication_id, new.pk)
         # 图落在新版本自己的目录里，不是还指着旧目录的路径。
         _spec, target = library_solutions._asset_spec(new.pk, figure["id"])
         self.assertEqual(target.parent.name, str(new.pk))
-        self.assertEqual(library_solutions._asset(new.pk, figure["id"])[1],
-                         library_solutions._asset(old.pk, figure["id"])[1])
+        self.assertEqual(
+            library_solutions._asset(new.pk, figure["id"])[1], library_solutions._asset(old.pk, figure["id"])[1]
+        )
         new.refresh_from_db()
         self.assertNotIn("solution_needs_review_id", new.extras)
         self.assertEqual(new.extras["solution_id"], str(fresh.pk))
@@ -481,8 +608,16 @@ class LibrarySolutionTests(TransactionTestCase):
         stranger = self.publication(stem="另一道题", answer="B")
         other = self.asset(stranger, "blue")
         with self.assertRaises(library_solutions.SolutionError) as caught:
-            library_solutions.save(new, {"answer": "A", "analysis": "抄别人的图", "base_revision": None,
-                                         "sync_library": False, "figures": [{"id": other["id"]}]})
+            library_solutions.save(
+                new,
+                {
+                    "answer": "A",
+                    "analysis": "抄别人的图",
+                    "base_revision": None,
+                    "sync_library": False,
+                    "figures": [{"id": other["id"]}],
+                },
+            )
         self.assertEqual(caught.exception.status, 409)
         # 搬图这条路不能顺手把别的题的图片也收进来。
         self.assertEqual(LibrarySolution.objects.filter(publication_id=new.pk).count(), 0)
@@ -514,11 +649,16 @@ def create_export_fixture(folder):
     source/MathML contract and four saved immutable synthetic publications.
     """
     from django.conf import settings
+
     folder = Path(folder).resolve()
     actual = Path(os.environ.get("LOCALAPPDATA", "")) / "QuestionBankCard"
-    if (not os.environ.get("QB_DATABASE") or not os.environ.get("QB_DATA_ROOT")
-            or folder != Path(settings.DATA_ROOT).resolve() or folder == actual.resolve()
-            or not Path(os.environ["QB_DATABASE"]).resolve().is_relative_to(folder.parent)):
+    if (
+        not os.environ.get("QB_DATABASE")
+        or not os.environ.get("QB_DATA_ROOT")
+        or folder != Path(settings.DATA_ROOT).resolve()
+        or folder == actual.resolve()
+        or not Path(os.environ["QB_DATABASE"]).resolve().is_relative_to(folder.parent)
+    ):
         raise ValueError("Fixture requires an explicit isolated QA data/database directory")
     folder.mkdir(parents=True, exist_ok=True)
     helper = LibrarySolutionTests()
@@ -536,10 +676,16 @@ def create_export_fixture(folder):
     first.content["options"] = {key: str(index) for index, key in enumerate("ABCD", 1)}
     first.content_hash = library.content_hash(first.content)
     first.save(update_fields=["content", "content_hash"])
-    edited = helper.save(analysis="由条件逐步计算。\n\n第二步：代入数值得到结论。",
-        figures=[{"id": helper.asset()["id"], "display_width": 45, "position": "paragraph", "paragraph": 0}])
+    edited = helper.save(
+        analysis="由条件逐步计算。\n\n第二步：代入数值得到结论。",
+        figures=[{"id": helper.asset()["id"], "display_width": 45, "position": "paragraph", "paragraph": 0}],
+    )
     long = helper.publication(stem="第二题长解析跨页测试", answer="2", qtype="free_response")
-    long_solution = helper.save(pub=long, answer="2", analysis="\n\n".join(f"第 {n} 步：保留这一行详细过程，验证长解析正常跨页。" for n in range(1, 61)))
+    long_solution = helper.save(
+        pub=long,
+        answer="2",
+        analysis="\n\n".join(f"第 {n} 步：保留这一行详细过程，验证长解析正常跨页。" for n in range(1, 61)),
+    )
     image_only = helper.publication(stem="第三题仅图片解析", answer="")
     picture = helper.save(pub=image_only, answer="", analysis="", figures=[helper.asset(image_only, "green")["id"]])
     missing = helper.publication(stem="第四题缺答案解析", answer="")
@@ -547,6 +693,12 @@ def create_export_fixture(folder):
     versions = {str(item.publication_id): str(item.pk) for item in (edited, long_solution, picture)}
     request = helper.payload(pubs, versions)
     request["rendered_fields"][str(first.pk)]["stem"] = math_field("x+1", "<mrow><mi>x</mi><mo>+</mo><mn>1</mn></mrow>")
-    draft = library_drafts._save({"title": "离线教师与学生卷测试", "ids": request["ids"], "solutions": versions,
-                                "print_options": request["print_options"]})
+    draft = library_drafts._save(
+        {
+            "title": "离线教师与学生卷测试",
+            "ids": request["ids"],
+            "solutions": versions,
+            "print_options": request["print_options"],
+        }
+    )
     return {"payload": request, "draft_id": draft["id"], "ids": request["ids"], "solutions": versions}

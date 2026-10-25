@@ -10,6 +10,7 @@
 所以测试一律把 ``DATA_ROOT`` 换成临时目录，跑完删掉。测试自己
 ``override_settings(DATA_ROOT=...)`` 的用例不受影响。
 """
+
 import shutil
 import tempfile
 from pathlib import Path

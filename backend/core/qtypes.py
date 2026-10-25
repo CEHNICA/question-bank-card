@@ -31,17 +31,24 @@ CHOICE_TYPES = frozenset({"single_choice", "multiple_choice"})
 # 词 → 题型。顺序有意义：“多项选择”要先于“选择”，“不定项”是多选。
 # 读题模型写的【题型】、试卷上的大题标题（“三、解答题”）都用这一份。
 TYPE_WORDS: tuple[tuple[str, str], ...] = (
-    ("多选", "multiple_choice"), ("多项选择", "multiple_choice"), ("不定项", "multiple_choice"),
-    ("单选", "single_choice"), ("单项选择", "single_choice"), ("选择", "single_choice"),
+    ("多选", "multiple_choice"),
+    ("多项选择", "multiple_choice"),
+    ("不定项", "multiple_choice"),
+    ("单选", "single_choice"),
+    ("单项选择", "single_choice"),
+    ("选择", "single_choice"),
     ("填空", "fill_blank"),
     ("判断", "true_false"),
-    ("解答", "free_response"), ("计算", "free_response"), ("证明", "free_response"),
-    ("应用", "free_response"), ("简答", "free_response"), ("作图", "free_response"),
+    ("解答", "free_response"),
+    ("计算", "free_response"),
+    ("证明", "free_response"),
+    ("应用", "free_response"),
+    ("简答", "free_response"),
+    ("作图", "free_response"),
 )
 
 FLAG_TYPE_UNKNOWN = "题型没读出来，请在题卡上选一下题型（单选、多选、填空、判断或解答）"
-FLAG_FILL_NO_SLOT = ("题型标成填空题，但题干里没有可填的空格；"
-                     "请对照原卷选一下题型")
+FLAG_FILL_NO_SLOT = "题型标成填空题，但题干里没有可填的空格；请对照原卷选一下题型"
 BLOCK_MESSAGE = "题型还没定，请先在题卡上选题型"
 
 # 小问标号只认行首的 (1)(2)…，“f(1)”“$x(2)$”不算。

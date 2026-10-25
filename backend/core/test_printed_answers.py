@@ -5,6 +5,7 @@
 界面照实写着「原卷未提供答案与解析。」——一句假话。根因是
 readers.TRANSCRIBE_RULES/OUTPUT_FORMAT 只让模型读题面，没有答案这一栏。
 """
+
 from unittest.mock import patch
 
 from django.test import SimpleTestCase, TestCase
@@ -16,8 +17,7 @@ from core.qtypes import CHOICE_TYPES
 
 class PrintedAnswerTests(TestCase):
     def blocks(self, *texts):
-        return [{"page_idx": 0, "bbox": [0, 0, 10, 10], "text": text, "seq": i}
-                for i, text in enumerate(texts)]
+        return [{"page_idx": 0, "bbox": [0, 0, 10, 10], "text": text, "seq": i} for i, text in enumerate(texts)]
 
     def test_the_printed_answer_comes_off_the_page(self):
         # 真卷第 1 题那一行：MinerU 读出来就是「【答案】A」。
@@ -40,11 +40,9 @@ class PrintedAnswerTests(TestCase):
         self.assertEqual(found, ["A"])
 
     def test_a_single_letter_answer_lands_on_a_choice_card(self):
-        self.assertEqual(
-            printed_answers.choice_letter(["C"], "single_choice", CHOICE_TYPES), "C")
+        self.assertEqual(printed_answers.choice_letter(["C"], "single_choice", CHOICE_TYPES), "C")
         # 这道题的选项印在图里，卡上一个选项文字都没有，答案照样是纸上那个。
-        self.assertEqual(
-            printed_answers.choice_letter(["C"], "single_choice", CHOICE_TYPES), "C")
+        self.assertEqual(printed_answers.choice_letter(["C"], "single_choice", CHOICE_TYPES), "C")
 
     def test_prose_answers_are_never_copied_onto_the_card(self):
         # 真卷第 11 题的【答案】被 MinerU 读成了这样：照抄会把乱码印上答案卷。
@@ -55,8 +53,7 @@ class PrintedAnswerTests(TestCase):
         self.assertIsNone(printed_answers.choice_letter(["AB"], "single_choice", CHOICE_TYPES))
 
     def test_two_printed_answers_means_the_range_spans_two_questions(self):
-        self.assertIsNone(
-            printed_answers.choice_letter(["A", "C"], "single_choice", CHOICE_TYPES))
+        self.assertIsNone(printed_answers.choice_letter(["A", "C"], "single_choice", CHOICE_TYPES))
 
     def test_no_marker_means_nothing_to_do(self):
         self.assertEqual(printed_answers.marks(self.blocks("1. 已知…", "解：设 x=1")), [])
@@ -66,15 +63,25 @@ class PrintedAnswerTests(TestCase):
 
 CHOICE_READING = {
     "stem": "下列各式中，$y$ 一定是 $x$ 的反比例函数的是（    ）",
-    "options": {"A": "$y=2x^{-1}$", "B": "$y=\\dfrac{2x}{3}$",
-                "C": "$y=\\dfrac{k}{x}$", "D": "$y=-x^{2}$"},
-    "type": "single_choice", "content_kind": "exercise", "figures": {},
-    "missing_figure": False, "number_seen": 1, "figure_descriptions": [], "unclear": False,
+    "options": {"A": "$y=2x^{-1}$", "B": "$y=\\dfrac{2x}{3}$", "C": "$y=\\dfrac{k}{x}$", "D": "$y=-x^{2}$"},
+    "type": "single_choice",
+    "content_kind": "exercise",
+    "figures": {},
+    "missing_figure": False,
+    "number_seen": 1,
+    "figure_descriptions": [],
+    "unclear": False,
 }
 BLANK_READING = {
-    "stem": "化简：$\\sqrt{9}$ = ______。", "options": {}, "type": "fill_blank",
-    "content_kind": "exercise", "figures": {}, "missing_figure": False,
-    "number_seen": 13, "figure_descriptions": [], "unclear": False,
+    "stem": "化简：$\\sqrt{9}$ = ______。",
+    "options": {},
+    "type": "fill_blank",
+    "content_kind": "exercise",
+    "figures": {},
+    "missing_figure": False,
+    "number_seen": 13,
+    "figure_descriptions": [],
+    "unclear": False,
 }
 
 
@@ -85,33 +92,42 @@ class PrintedAnswerReReadTests(SimpleTestCase):
 
     def snapshot(self, texts, reading, **changes):
         base = {
-            "id": 1, "number": reading.get("number_seen"), "group_id": None,
+            "id": 1,
+            "number": reading.get("number_seen"),
+            "group_id": None,
             "regions": [{"page_idx": 0, "bbox": [58, 117, 932, 357]}],
-            "candidates": [], "question_type": reading["type"], "stem": reading["stem"],
-            "options": reading["options"], "edited": False, "answer": "",
-            "source_kind": Question.SourceKind.UNKNOWN, "source_anchor_seq": None,
-            "segmentation_flags": [], "body_mode": "text", "start_source": "mineru",
+            "candidates": [],
+            "question_type": reading["type"],
+            "stem": reading["stem"],
+            "options": reading["options"],
+            "edited": False,
+            "answer": "",
+            "source_kind": Question.SourceKind.UNKNOWN,
+            "source_anchor_seq": None,
+            "segmentation_flags": [],
+            "body_mode": "text",
+            "start_source": "mineru",
             "witness": "\n".join(texts),
             "witness_blocks": [
-                {"page_idx": 0, "bbox": [58, 117 + 10 * i, 932, 127 + 10 * i],
-                 "text": text, "seq": i, "type": "text"}
-                for i, text in enumerate(texts)],
+                {"page_idx": 0, "bbox": [58, 117 + 10 * i, 932, 127 + 10 * i], "text": text, "seq": i, "type": "text"}
+                for i, text in enumerate(texts)
+            ],
         }
         base.update(changes)
         return base
 
     def run_card(self, texts, reading, **changes):
-        with patch.object(pipeline.readers, "primary_engine", return_value=object()), \
-                patch.object(pipeline.readers, "read_question", return_value=reading), \
-                patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])), \
-                patch.object(pipeline.imaging, "jpeg_data_url",
-                             return_value="data:image/jpeg;base64,x"):
+        with (
+            patch.object(pipeline.readers, "primary_engine", return_value=object()),
+            patch.object(pipeline.readers, "read_question", return_value=reading),
+            patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])),
+            patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:image/jpeg;base64,x"),
+        ):
             return pipeline.read_card(self.snapshot(texts, reading, **changes), self.store)
 
     def test_the_printed_letter_lands_on_the_card(self):
         # 真卷第 1 题：原页上「【答案】A」就在这道题的范围内，识读回来时却是空的。
-        result = self.run_card(["1.下列各式中…", "【答案】A", "【分析】本题考查…"],
-                               CHOICE_READING)
+        result = self.run_card(["1.下列各式中…", "【答案】A", "【分析】本题考查…"], CHOICE_READING)
 
         self.assertEqual(result["answer"], "A")
         self.assertNotIn(pipeline.FLAG_PRINTED_ANSWER, result["flags"])

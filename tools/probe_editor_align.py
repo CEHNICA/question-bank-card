@@ -25,13 +25,25 @@ def main():
 
     OUTPUT.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as pw:
-        executable = next((str(p) for p in (Path(pw.chromium.executable_path),
-            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if p.is_file()), None)
+        executable = next(
+            (
+                str(p)
+                for p in (
+                    Path(pw.chromium.executable_path),
+                    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                )
+                if p.is_file()
+            ),
+            None,
+        )
         browser = pw.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
         context = browser.new_context(viewport={"width": 1600, "height": 1000})
         context.add_init_script("localStorage.setItem('qb-welcome-seen','1')")
-        context.route("**/*", lambda r: r.continue_() if urlparse(r.request.url).hostname in ("127.0.0.1", "localhost") else r.abort())
+        context.route(
+            "**/*",
+            lambda r: r.continue_() if urlparse(r.request.url).hostname in ("127.0.0.1", "localhost") else r.abort(),
+        )
         page = context.new_page()
         page.goto(f"{url}/?paper={args.paper}")
         page.wait_for_load_state("networkidle")
@@ -65,9 +77,11 @@ def main():
             stem, prev = m["stem"], m["preview"]
             gap = (stem["top"] - prev["top"]) if stem and prev else None
             rows.append((label, m, gap))
-            print(f"{label:>8}  题干顶={stem['top']} 高={stem['height']} (内容{m['stemScroll']})  "
-                  f"预览顶={prev['top']} 高={prev['height']}  截图高={m['shot']['height'] if m['shot'] else '-'}  "
-                  f"左栏总高={m['sourceH']}  margin={m['marginTop']}  差={gap}")
+            print(
+                f"{label:>8}  题干顶={stem['top']} 高={stem['height']} (内容{m['stemScroll']})  "
+                f"预览顶={prev['top']} 高={prev['height']}  截图高={m['shot']['height'] if m['shot'] else '-'}  "
+                f"左栏总高={m['sourceH']}  margin={m['marginTop']}  差={gap}"
+            )
             page.screenshot(path=str(OUTPUT / f"align-{index}.png"), full_page=False)
             card.get_by_role("button", name="取消", exact=True).click()
             if page.locator("#confirmDialog").is_visible():

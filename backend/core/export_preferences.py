@@ -5,6 +5,7 @@ write exported documents outside its data directory. Requests never supply a
 destination filename or path: the directory is an explicit saved preference,
 and filenames come from the existing validated export builders.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -100,8 +101,14 @@ def save(payload: object) -> dict:
         target.parent.mkdir(parents=True, exist_ok=True)
         pending = None
         try:
-            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=target.parent,
-                                             prefix=".export-preferences-", suffix=".tmp", delete=False) as stream:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=target.parent,
+                prefix=".export-preferences-",
+                suffix=".tmp",
+                delete=False,
+            ) as stream:
                 pending = Path(stream.name)
                 json.dump({"directory": str(directory) if directory else ""}, stream, ensure_ascii=False)
                 stream.flush()
@@ -119,6 +126,7 @@ def save(payload: object) -> dict:
 
 def _guard(request, *, mutation=False):
     from .views import _guard as page_guard
+
     rejected = page_guard(request, json_body=mutation)
     if rejected:
         return rejected
@@ -144,6 +152,7 @@ def preferences_view(request):
         if not desktop_capable():
             return JsonResponse({"error": "自定义导出目录仅在本机桌面版中可设置；此页面仍可正常下载。"}, status=409)
         from .views import _body
+
         try:
             response = JsonResponse(save(_body(request, limit=10_000)))
         except ExportPreferenceError as error:
@@ -167,9 +176,11 @@ def select_export_directory_view(request):
     if not desktop_capable():
         return JsonResponse({"error": "请选择 Windows 桌面版中的导出文件夹；网页版仍可使用浏览器下载。"}, status=409)
     from .views import _body
+
     if _body(request, limit=1_000) != {}:
         return JsonResponse({"error": "选择文件夹的请求格式不正确。"}, status=400)
     from .native_folder_picker import FolderPickerError, choose_directory
+
     if not _picker_lock.acquire(blocking=False):
         return JsonResponse({"error": "文件夹选择窗口已经打开，请先选择或取消。"}, status=409)
     try:
@@ -209,10 +220,16 @@ def _write(data: bytes, filename: str) -> tuple[Path, str]:
     # A formerly canonical directory must not be redirected after it was saved.
     if directory != Path(value):
         raise ExportPreferenceError("导出目录已变化，请重新确认设置；本次改用浏览器下载。")
-    if (not isinstance(filename, str) or not filename or len(filename) > 200
-            or filename != Path(filename).name or re.search(r'[\\/:*?"<>|\x00-\x1f\x7f]', filename)
-            or filename.endswith((".", " ")) or _RESERVED.match(filename)
-            or Path(filename).suffix.lower() not in {".pdf", ".docx", ".zip"}):
+    if (
+        not isinstance(filename, str)
+        or not filename
+        or len(filename) > 200
+        or filename != Path(filename).name
+        or re.search(r'[\\/:*?"<>|\x00-\x1f\x7f]', filename)
+        or filename.endswith((".", " "))
+        or _RESERVED.match(filename)
+        or Path(filename).suffix.lower() not in {".pdf", ".docx", ".zip"}
+    ):
         raise ExportPreferenceError("导出文件名不正确，未写入指定目录。")
     for number in range(1, 1001):
         name = filename if number == 1 else f"{Path(filename).stem} ({number}){Path(filename).suffix}"
@@ -249,7 +266,9 @@ def _write(data: bytes, filename: str) -> tuple[Path, str]:
                     current = target.stat()
                     if (current.st_dev, current.st_ino) == owned:
                         target.unlink()
-            raise ExportPreferenceError("文件未能保存到指定目录，请检查文件夹权限或磁盘空间；本次改用浏览器下载。") from None
+            raise ExportPreferenceError(
+                "文件未能保存到指定目录，请检查文件夹权限或磁盘空间；本次改用浏览器下载。"
+            ) from None
     raise ExportPreferenceError("指定目录中的同名文件过多；本次改用浏览器下载。")
 
 
@@ -269,8 +288,14 @@ def deliver(request, response, data: bytes, filename: str, *, count: int, pages:
     except ExportPreferenceError as error:
         response["X-QB-Export-Warning"] = quote(str(error), safe="")
         return response
-    receipt = {"saved": True, "filename": target.name, "path": str(target), "directory": str(target.parent),
-               "question_count": count, "file_token": token}
+    receipt = {
+        "saved": True,
+        "filename": target.name,
+        "path": str(target),
+        "directory": str(target.parent),
+        "question_count": count,
+        "file_token": token,
+    }
     if response.get("X-QB-Layout-Warning"):
         receipt["warning"] = unquote(response["X-QB-Layout-Warning"])
     if pages is not None:
@@ -291,9 +316,13 @@ def open_export_view(request):
     if not desktop_capable():
         return JsonResponse({"error": "请在本机桌面版中打开导出文件。"}, status=409)
     from .views import _body
+
     value = _body(request, limit=10_000)
-    if (not isinstance(value, dict) or set(value) - {"target", "file_token"}
-            or value.get("target") not in {"directory", "file"}):
+    if (
+        not isinstance(value, dict)
+        or set(value) - {"target", "file_token"}
+        or value.get("target") not in {"directory", "file"}
+    ):
         return JsonResponse({"error": "打开导出位置的请求格式不正确。"}, status=400)
     try:
         if "file_token" in value:
@@ -316,5 +345,12 @@ def open_export_view(request):
             raise ExportPreferenceError("打开文件需要本次导出的记录。")
         os.startfile(str(target))  # Native association; no shell command or supplied URL.
     except (ExportPreferenceError, OSError, ValueError) as error:
-        return JsonResponse({"error": str(error) if isinstance(error, ExportPreferenceError) else "导出位置无法打开，请检查文件是否仍在原处。"}, status=409)
+        return JsonResponse(
+            {
+                "error": str(error)
+                if isinstance(error, ExportPreferenceError)
+                else "导出位置无法打开，请检查文件是否仍在原处。"
+            },
+            status=409,
+        )
     return JsonResponse({"opened": True})

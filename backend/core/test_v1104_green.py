@@ -19,8 +19,13 @@ from .models import Question
 
 STEM = "写出下列命题的否定，并判断它们的真假：\n(1) 每个正方形都是平行四边形；\n(2) 存在一个四边形，其内角和不等于 $360^\\circ$."
 OLD_REVIEW = {
-    "status": "conflict", "source": "automatic", "reason": "有候选图尚未被现有识读明确分类，请确认是否属于本题",
-    "signals": ["candidate_unclassified"], "cue_matches": [], "excluded_count": 0, "unclassified_count": 1,
+    "status": "conflict",
+    "source": "automatic",
+    "reason": "有候选图尚未被现有识读明确分类，请确认是否属于本题",
+    "signals": ["candidate_unclassified"],
+    "cue_matches": [],
+    "excluded_count": 0,
+    "unclassified_count": 1,
 }
 READING = {"stem": STEM, "type": "free_response", "figures": {}, "missing_figure": False, "figure_descriptions": []}
 
@@ -32,10 +37,18 @@ class StaleYellowGreenTests(v110.TempDataMixin, TestCase):
         self.stale = self.card_with_old_review(7)
 
     def card_with_old_review(self, number):
-        return self.card(self.paper, number=number, question_type="free_response", stem=STEM,
-                         state=Question.State.YELLOW, flags=[FLAG_UNFOUND_FIGURE], figure_review=dict(OLD_REVIEW),
-                         figure_candidates=[{"label": "1", "seq": 5, "page_idx": 0, "bbox": [110, 362, 147, 386]}],
-                         read_a=dict(READING), read_b=dict(READING))
+        return self.card(
+            self.paper,
+            number=number,
+            question_type="free_response",
+            stem=STEM,
+            state=Question.State.YELLOW,
+            flags=[FLAG_UNFOUND_FIGURE],
+            figure_review=dict(OLD_REVIEW),
+            figure_candidates=[{"label": "1", "seq": 5, "page_idx": 0, "bbox": [110, 362, 147, 386]}],
+            read_a=dict(READING),
+            read_b=dict(READING),
+        )
 
     def post(self, url, body=None):
         return Client().post(url, data=json.dumps(body or {}), content_type="application/json", HTTP_X_QB_REQUEST="1")
@@ -65,8 +78,14 @@ class StaleYellowGreenTests(v110.TempDataMixin, TestCase):
         self.assertNotEqual(self.stale.figure_review.get("status"), "conflict")
 
     def test_a_card_still_yellow_after_the_review_is_left_alone(self):
-        yellow = self.card(self.paper, number=8, question_type="free_response", stem="已知 $a>b$，求证 $a+1>b+1$",
-                           state=Question.State.YELLOW, flags=["两次识读不一致，已由第三次识读裁决"])
+        yellow = self.card(
+            self.paper,
+            number=8,
+            question_type="free_response",
+            stem="已知 $a>b$，求证 $a+1>b+1$",
+            state=Question.State.YELLOW,
+            flags=["两次识读不一致，已由第三次识读裁决"],
+        )
         response = self.post(f"/api/papers/{self.paper.id}/approve-green")
         self.assertEqual(response.json()["approved"], 1)
         yellow.refresh_from_db()

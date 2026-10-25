@@ -1,4 +1,5 @@
 """Isolated assistant protocol and optional-API compatibility, with no cloud."""
+
 import json
 import os
 from copy import deepcopy
@@ -22,9 +23,11 @@ from .test_v110_types_origin import TempDataMixin
 
 class AssistantSettingsTests(TestCase):
     """Reuse disposable DPAPI/transport fixtures, not the API test cases."""
+
     setUp = settings_tests.IndependentAISettingsTests.setUp
     configure = settings_tests.IndependentAISettingsTests.configure
     verify = settings_tests.IndependentAISettingsTests.verify
+
     def test_assistant_is_default_ready_but_both_features_and_intake_are_off(self):
         state = service.public_status()
         self.assertEqual(state["mode"], "assistant")
@@ -48,7 +51,10 @@ class AssistantSettingsTests(TestCase):
         self.verify()
         before = service.key_path("doubao").read_bytes()
         config = service._load()
-        legacy = {key: config[key] for key in ("revision", "key_revision", "key_configured", "verified", "verified_at", "resolved_model")}
+        legacy = {
+            key: config[key]
+            for key in ("revision", "key_revision", "key_configured", "verified", "verified_at", "resolved_model")
+        }
         legacy.update(version=1, endpoint_id="ep-offline-pro", thinking=True)
         service._write_settings(legacy)
         self.transform.reset_mock()
@@ -93,9 +99,17 @@ class AssistantSettingsTests(TestCase):
         self.network.assert_not_called()
 
     def test_custom_models_can_be_text_only_and_choose_thinking_explicitly(self):
-        service.save({"mode": "api", "provider": "custom", "base_url": "http://127.0.0.1:9999/v1",
-                      "model": "offline-model", "thinking": False, "supports_images": False,
-                      "key": {"action": "replace", "value": "synthetic-key"}})
+        service.save(
+            {
+                "mode": "api",
+                "provider": "custom",
+                "base_url": "http://127.0.0.1:9999/v1",
+                "model": "offline-model",
+                "thinking": False,
+                "supports_images": False,
+                "key": {"action": "replace", "value": "synthetic-key"},
+            }
+        )
         self.network.side_effect = None
         self.network.return_value = settings_tests.answer_response("【答案】2", model="offline-model", thinking=False)
         state = service.test_connection({"confirm": True})
@@ -106,8 +120,14 @@ class AssistantSettingsTests(TestCase):
         self.assertEqual(len(kwargs["json"]["messages"][0]["content"]), 1)
 
     def test_deepseek_recommendation_does_not_claim_image_capability(self):
-        service.save({"mode": "api", "provider": "deepseek", "features": {"ai_answer": True},
-                      "key": {"action": "replace", "value": "synthetic-key"}})
+        service.save(
+            {
+                "mode": "api",
+                "provider": "deepseek",
+                "features": {"ai_answer": True},
+                "key": {"action": "replace", "value": "synthetic-key"},
+            }
+        )
         self.network.side_effect = None
         self.network.return_value = settings_tests.answer_response("【答案】2", model="deepseek-v4-pro")
         service.test_connection({"confirm": True})
@@ -120,10 +140,16 @@ class AssistantSettingsTests(TestCase):
     def test_invalid_mode_provider_timing_and_url_leave_previous_settings_unchanged(self):
         service.save({"features": {"ai_answer": True}})
         before = service.path().read_bytes()
-        for payload in ({"mode": "desktop"}, {"provider": []}, {"on_intake": {"answer": 1}},
-                        {"on_intake": {"other": True}}, {"provider": "custom", "base_url": "https://[invalid"},
-                        {"provider": "custom", "base_url": "https://user:secret@example.invalid"},
-                        {"provider": "custom", "base_url": "http://example.invalid"}, {"key": {"action": []}}):
+        for payload in (
+            {"mode": "desktop"},
+            {"provider": []},
+            {"on_intake": {"answer": 1}},
+            {"on_intake": {"other": True}},
+            {"provider": "custom", "base_url": "https://[invalid"},
+            {"provider": "custom", "base_url": "https://user:secret@example.invalid"},
+            {"provider": "custom", "base_url": "http://example.invalid"},
+            {"key": {"action": []}},
+        ):
             with self.subTest(payload=payload):
                 with self.assertRaises(service.SettingsError):
                     service.save(payload)
@@ -134,14 +160,19 @@ class AssistantSettingsTests(TestCase):
 class AssistantTaskTests(TempDataMixin, TransactionTestCase):
     def setUp(self):
         self.use_temp_data()
-        environment = mock.patch.dict(os.environ, {
-            "QB_LIBRARY_AI_SETTINGS_FILE": str(self.temp / "settings.json"),
-            "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.temp / "key.dat"),
-            "QB_FEATURES_FILE": str(self.temp / "features.json"),
-        })
+        environment = mock.patch.dict(
+            os.environ,
+            {
+                "QB_LIBRARY_AI_SETTINGS_FILE": str(self.temp / "settings.json"),
+                "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.temp / "key.dat"),
+                "QB_FEATURES_FILE": str(self.temp / "features.json"),
+            },
+        )
         environment.start()
         self.addCleanup(environment.stop)
-        self.network = mock.patch.object(service.requests, "post", side_effect=AssertionError("paid API forbidden")).start()
+        self.network = mock.patch.object(
+            service.requests, "post", side_effect=AssertionError("paid API forbidden")
+        ).start()
         self.addCleanup(mock.patch.stopall)
         self.paper = self.make_paper()
         self.question = self.card(self.paper, question_type="free_response", stem="计算 $1+1$。", answer="原卷答案")
@@ -163,8 +194,12 @@ class AssistantTaskTests(TempDataMixin, TransactionTestCase):
             if kind == "tags":
                 # Simulate a pending assistant task created by an older version.
                 # New tag tasks require a tested API; this task may only become a candidate.
-                job = LibraryJob.objects.create(publication=self.publication, kind="tags", executor="assistant",
-                    fingerprint=library.generation_fingerprint(self.publication.content, self.publication.pk))
+                job = LibraryJob.objects.create(
+                    publication=self.publication,
+                    kind="tags",
+                    executor="assistant",
+                    fingerprint=library.generation_fingerprint(self.publication.content, self.publication.pk),
+                )
                 payload["job_id"] = str(job.pk)
             result = assistant.prepare(payload)
             if combined is None:
@@ -182,7 +217,9 @@ class AssistantTaskTests(TempDataMixin, TransactionTestCase):
         self.assertEqual(len(prepared["jobs"]), 2)
         self.assertEqual(prepared["publication"]["content"], original)
         self.assertEqual(prepared["images"]["crop"], f"/api/library/{self.publication.pk}/crop")
-        self.assertEqual(prepared["images"]["originals"], [{"page_idx": 0, "url": f"/api/library/{self.publication.pk}/pages/0"}])
+        self.assertEqual(
+            prepared["images"]["originals"], [{"page_idx": 0, "url": f"/api/library/{self.publication.pk}/pages/0"}]
+        )
         self.assertEqual(prepared["knowledge"]["points"], [])
         tag_job = next(job for job in prepared["jobs"] if job["kind"] == "tags")
         self.assertIn("new_name", tag_job["prompt"])
@@ -202,16 +239,33 @@ class AssistantTaskTests(TempDataMixin, TransactionTestCase):
         jobs = self.prepare(["answer", "tags"])["jobs"]
         answer = assistant.complete(self.result(jobs[0], answer="2", analysis="相加得 2。"))
         self.assertEqual(answer["job"]["status"], "done")
-        assistant.complete(self.result(jobs[1], tag_result={"status": "ok", "suggestions": [{
-            "kind": "knowledge", "new_name": "基本不等式", "levels": ["高中"],
-            "rationale": "将倒数关系转化为和的下界。", "evidence": "题目要求证明两正数和的最小值。",
-            "scope": {"whole": True}}]}))
+        assistant.complete(
+            self.result(
+                jobs[1],
+                tag_result={
+                    "status": "ok",
+                    "suggestions": [
+                        {
+                            "kind": "knowledge",
+                            "new_name": "基本不等式",
+                            "levels": ["高中"],
+                            "rationale": "将倒数关系转化为和的下界。",
+                            "evidence": "题目要求证明两正数和的最小值。",
+                            "scope": {"whole": True},
+                        }
+                    ],
+                },
+            )
+        )
         self.publication.refresh_from_db()
         self.assertEqual(self.publication.content, before)
         self.assertEqual(self.publication.content["answer"], "原卷答案")
         self.assertEqual(Question.all_objects.filter(pk=self.question.pk).values().get(), before_q)
         generated = self.publication.extras["ai_answer"]
-        self.assertEqual((generated["answer"], generated["agent"], generated["executor"], generated["checked"]), ("2", "离线测试助手", "assistant", False))
+        self.assertEqual(
+            (generated["answer"], generated["agent"], generated["executor"], generated["checked"]),
+            ("2", "离线测试助手", "assistant", False),
+        )
         self.assertNotIn("tags", self.publication.extras)
         proposal = LibraryTagSuggestion.objects.get(job_id=jobs[1]["id"])
         self.assertEqual(proposal.status, LibraryTagSuggestion.Status.PENDING)
@@ -238,22 +292,39 @@ class AssistantTaskTests(TempDataMixin, TransactionTestCase):
         self.assertEqual(self.publication.extras, {})
         again = self.prepare()["jobs"][0]
         self.assertEqual(again["id"], job["id"])
-        done = assistant.complete(self.result(again, answer="$x=1$（其中 $x$ 为正数）", analysis="由 $a+b$ 可得 $x=1$。"))
+        done = assistant.complete(
+            self.result(again, answer="$x=1$（其中 $x$ 为正数）", analysis="由 $a+b$ 可得 $x=1$。")
+        )
         self.assertEqual(done["job"]["status"], "done")
         self.publication.refresh_from_db()
         self.assertEqual(self.publication.extras["ai_answer"]["answer"], "$x=1$（其中 $x$ 为正数）")
         self.network.assert_not_called()
 
     def test_empty_catalogue_can_queue_assistant_suggestions_as_candidates(self):
-        jobs = assistant.prepare({"publication_id": str(self.publication.pk),
-            "kinds": ["tags"], "agent": "空目录测试助手"})["jobs"]
+        jobs = assistant.prepare(
+            {"publication_id": str(self.publication.pk), "kinds": ["tags"], "agent": "空目录测试助手"}
+        )["jobs"]
         self.assertEqual(len(jobs), 1)
         self.assertEqual(jobs[0]["executor"], "assistant")
         self.assertTrue(LibraryJob.objects.get(pk=jobs[0]["id"]).tag_scope)
-        assistant.complete(self.result(jobs[0], tag_result={"status": "ok", "suggestions": [{
-            "kind": "knowledge", "new_name": "新建候选知识点", "levels": ["高中"],
-            "rationale": "根据题目中的函数结构提出候选。", "evidence": "题干给出了函数解析式。",
-            "scope": {"whole": True}}]}))
+        assistant.complete(
+            self.result(
+                jobs[0],
+                tag_result={
+                    "status": "ok",
+                    "suggestions": [
+                        {
+                            "kind": "knowledge",
+                            "new_name": "新建候选知识点",
+                            "levels": ["高中"],
+                            "rationale": "根据题目中的函数结构提出候选。",
+                            "evidence": "题干给出了函数解析式。",
+                            "scope": {"whole": True},
+                        }
+                    ],
+                },
+            )
+        )
         proposal = LibraryTagSuggestion.objects.get(job_id=jobs[0]["id"])
         self.assertEqual(proposal.status, LibraryTagSuggestion.Status.PENDING)
         self.assertEqual(proposal.suggestions[0]["new_name"], "新建候选知识点")
@@ -277,8 +348,14 @@ class AssistantTaskTests(TempDataMixin, TransactionTestCase):
 
     def test_strict_result_fields_limits_and_catalogue(self):
         answer, tags = self.prepare(["answer", "tags"])["jobs"]
-        for data in ({"answer": ""}, {"answer": "x" * 2001}, {"answer": "2", "analysis": "x" * 6001},
-                     {"answer": "2", "extra": "data"}, {"answer": "2", "tags": ["基本不等式"]}, {"analysis": "2"}):
+        for data in (
+            {"answer": ""},
+            {"answer": "x" * 2001},
+            {"answer": "2", "analysis": "x" * 6001},
+            {"answer": "2", "extra": "data"},
+            {"answer": "2", "tags": ["基本不等式"]},
+            {"analysis": "2"},
+        ):
             with self.subTest(data_keys=list(data)), self.assertRaises(assistant.AssistantError) as error:
                 assistant.complete(self.result(answer, **data))
             self.assertEqual(error.exception.status, 400)
@@ -333,7 +410,9 @@ class AssistantTaskTests(TempDataMixin, TransactionTestCase):
     def add_figure(self):
         target = self.temp / "library" / str(self.publication.pk) / "figure-1.png"
         Image.new("RGB", (20, 20), "white").save(target)
-        self.publication.content["figures"] = [{"file": target.name, "slot": "stem", "page_idx": 0, "bbox": [0, 0, 10, 10]}]
+        self.publication.content["figures"] = [
+            {"file": target.name, "slot": "stem", "page_idx": 0, "bbox": [0, 0, 10, 10]}
+        ]
         self.publication.save(update_fields=["content"])
         return target
 
@@ -354,10 +433,12 @@ class AssistantTaskTests(TempDataMixin, TransactionTestCase):
     def test_closed_during_image_validation_blocks_writeback(self):
         job = self.prepare()["jobs"][0]
         real_images = assistant._images
+
         def closed(publication):
             result = real_images(publication)
             features.save({"ai_answer": False})
             return result
+
         with mock.patch.object(assistant, "_images", side_effect=closed), self.assertRaises(assistant.AssistantError):
             assistant.complete(self.result(job, answer="2"))
         self.publication.refresh_from_db()
@@ -387,13 +468,20 @@ class AssistantTaskTests(TempDataMixin, TransactionTestCase):
         self.assertTrue(before.startswith(b"\x89PNG"))
 
     def test_real_urls_allow_offline_prepare_submit_then_show_unchecked_answer(self):
-        prepared = self.client.post("/api/library/assistant/prepare", data=json.dumps({
-            "publication_id": str(self.publication.pk), "kinds": ["answer"], "agent": "离线工具"}),
-            content_type="application/json", HTTP_X_QB_REQUEST="1")
+        prepared = self.client.post(
+            "/api/library/assistant/prepare",
+            data=json.dumps({"publication_id": str(self.publication.pk), "kinds": ["answer"], "agent": "离线工具"}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
         self.assertEqual(prepared.status_code, 200, prepared.content)
         job = prepared.json()["jobs"][0]
-        response = self.client.post("/api/library/assistant/complete", data=json.dumps(self.result(job, answer="2")),
-                                    content_type="application/json", HTTP_X_QB_REQUEST="1")
+        response = self.client.post(
+            "/api/library/assistant/complete",
+            data=json.dumps(self.result(job, answer="2")),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
         self.assertEqual(response.status_code, 200, response.content)
         shown = self.client.get(f"/api/library/{self.publication.pk}").json()["publication"]
         self.assertEqual(shown["ai_answer"]["answer"], "2")
@@ -421,8 +509,11 @@ class AssistantTaskTests(TempDataMixin, TransactionTestCase):
     def test_intake_original_answer_skips_ai_answer_and_api_absence_does_not_undo_publish(self):
         service.save({"on_intake": {"tags": True, "answer": True}})
         _question, publication = self.fresh(3, answer="原卷已有解答")
-        self.assertEqual(list(publication.jobs.values_list("kind", flat=True)), [],
-                         "入库不自动生成知识点标签；原卷已有答案也不排答案任务")
+        self.assertEqual(
+            list(publication.jobs.values_list("kind", flat=True)),
+            [],
+            "入库不自动生成知识点标签；原卷已有答案也不排答案任务",
+        )
         service.save({"mode": "api"})
         _question, publication = self.fresh(4)
         self.assertEqual(publication.status, "published")

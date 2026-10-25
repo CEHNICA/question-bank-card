@@ -18,8 +18,20 @@ class Migration(migrations.Migration):
                 ("analysis", models.TextField(blank=True, default="")),
                 ("figures", models.JSONField(blank=True, default=list)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
-                ("parent", models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to="core.librarysolution")),
-                ("publication", models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name="solutions", to="core.publishedquestion")),
+                (
+                    "parent",
+                    models.ForeignKey(
+                        blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, to="core.librarysolution"
+                    ),
+                ),
+                (
+                    "publication",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="solutions",
+                        to="core.publishedquestion",
+                    ),
+                ),
             ],
             options={"ordering": ["-created_at", "-id"]},
         ),

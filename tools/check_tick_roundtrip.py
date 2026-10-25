@@ -33,13 +33,25 @@ def main():
     from playwright.sync_api import expect, sync_playwright
 
     with sync_playwright() as pw:
-        executable = next((str(p) for p in (Path(pw.chromium.executable_path),
-            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if p.is_file()), None)
+        executable = next(
+            (
+                str(p)
+                for p in (
+                    Path(pw.chromium.executable_path),
+                    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                )
+                if p.is_file()
+            ),
+            None,
+        )
         browser = pw.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
         context = browser.new_context(viewport={"width": 1500, "height": 950})
         context.add_init_script("localStorage.setItem('qb-welcome-seen','1')")
-        context.route("**/*", lambda r: r.continue_() if urlparse(r.request.url).hostname in ("127.0.0.1", "localhost") else r.abort())
+        context.route(
+            "**/*",
+            lambda r: r.continue_() if urlparse(r.request.url).hostname in ("127.0.0.1", "localhost") else r.abort(),
+        )
         page = context.new_page()
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
@@ -73,7 +85,9 @@ def main():
         published_cards = page.locator("#cards .card", has=page.locator(".card-tick.published"))
         if published_cards.count():
             published_tick = published_cards.first.locator(".card-tick")
-            assert published_tick.get_attribute("aria-pressed") == "true", "题库里已有、还没人亲自打过勾的题，对号也要是实心的"
+            assert published_tick.get_attribute("aria-pressed") == "true", (
+                "题库里已有、还没人亲自打过勾的题，对号也要是实心的"
+            )
             print("note   : 这份卷子里有『已入库但没人工打过勾』的题，对号同样是实心的")
         else:
             print("note   : 这份卷子里入库的题都人工打过勾，「published 对号渲染」这一段没测到")
@@ -85,7 +99,10 @@ def main():
         tick.click()
         page.wait_for_timeout(1500)
         print("POSTs           :", posts)
-        print("toast           :", page.locator(".toast").first.inner_text() if page.locator(".toast").count() else "(none)")
+        print(
+            "toast           :",
+            page.locator(".toast").first.inner_text() if page.locator(".toast").count() else "(none)",
+        )
         after_counters, after_total = counters(page), library_total(page, url)
         print("untick  :", after_counters, "library:", after_total)
         assert after_total == before_total - 1, f"题库没少一道：{after_total} vs {before_total}"
@@ -110,7 +127,9 @@ def main():
         print("re-tick :", final, "library:", library_total(page, url))
         assert not errors, errors
         browser.close()
-    print("Tick round trip: an in-library tick is solid and reversible; the library count and both review counters move together and come back: OK")
+    print(
+        "Tick round trip: an in-library tick is solid and reversible; the library count and both review counters move together and come back: OK"
+    )
 
 
 if __name__ == "__main__":

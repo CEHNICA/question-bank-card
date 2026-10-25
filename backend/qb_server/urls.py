@@ -23,7 +23,10 @@ urlpatterns = [
     path("shortcut-help.js", views._frontend("shortcut-help.js", "application/javascript; charset=utf-8")),
     path("review-finder.js", views._frontend("review-finder.js", "application/javascript; charset=utf-8")),
     path("settings", views.index_page),
-    path("app.js", views.app_script),    path("original-paper-layout.js", views._frontend("original-paper-layout.js", "application/javascript; charset=utf-8")),
+    path("app.js", views.app_script),
+    path(
+        "original-paper-layout.js", views._frontend("original-paper-layout.js", "application/javascript; charset=utf-8")
+    ),
     path("browser-interactions.js", views.browser_interactions_script),
     path("site-drawer.js", views.site_drawer_script),
     path("qb-render.js", views.render_script),
@@ -100,10 +103,7 @@ urlpatterns = [
     path("api/papers/<uuid:paper_id>/question-layout/<uuid:operation_id>/undo", views.paper_question_layout_undo),
     path("api/papers/<uuid:paper_id>/questions/delete", views.paper_questions_delete),
     path("api/papers/<uuid:paper_id>/question-trash", views.paper_question_trash),
-    path(
-        "api/papers/<uuid:paper_id>/question-trash/<uuid:batch_id>/restore",
-        views.question_deletion_restore,
-    ),
+    path("api/papers/<uuid:paper_id>/question-trash/<uuid:batch_id>/restore", views.question_deletion_restore),
     # 正式题库页面沿用 M3 的地址查看出处
     path("api/documents/<uuid:paper_id>/pages/<int:page>/preview", views.page_preview),
     path("api/questions/<int:question_id>", views.question_delete),

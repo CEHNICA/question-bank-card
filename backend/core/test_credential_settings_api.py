@@ -32,12 +32,17 @@ class MineruCredentialProbeTests(SimpleTestCase):
 
         import requests
 
-        with mock.patch.object(urllib.request, "urlopen", side_effect=AssertionError("must stay offline")), \
-                mock.patch.object(requests, "Session", side_effect=AssertionError("must not submit a task")):
+        with (
+            mock.patch.object(urllib.request, "urlopen", side_effect=AssertionError("must stay offline")),
+            mock.patch.object(requests, "Session", side_effect=AssertionError("must not submit a task")),
+        ):
             self.assertIsNone(credential_settings._mineru_token_validity("test-token"))
-            self.assertEqual(credential_settings.verify_mineru_replacement({
-                "mineru": {"action": "replace", "accounts": ["test-token"]},
-            }), "unverified")
+            self.assertEqual(
+                credential_settings.verify_mineru_replacement(
+                    {"mineru": {"action": "replace", "accounts": ["test-token"]}}
+                ),
+                "unverified",
+            )
 
 
 class CredentialSettingsApiTests(SimpleTestCase):
@@ -46,23 +51,22 @@ class CredentialSettingsApiTests(SimpleTestCase):
         self.addCleanup(shutil.rmtree, self.temp, ignore_errors=True)
         self.path = self.temp / "nested" / "credentials.dat"
         self.client = Client()
-        self.environment = mock.patch.dict(os.environ, {
-            "QB_CREDENTIAL_FILE": str(self.path),
-            "QB_CREDENTIAL_HOT_RELOAD": "1",
-            "QB_MODEL_PREFERENCES_FILE": str(self.temp / "model-preferences.json"),
-            "QB_MINERU_CONFIGURED": "0",
-            "QB_MINERU_POOL_SIZE": "0",
-            "QB_MINIMAX_CONFIGURED": "0",
-            "QB_MINIMAX_POOL_SIZE": "0",
-            "QB_SILICONFLOW_CONFIGURED": "0",
-            "QB_SILICONFLOW_POOL_SIZE": "0",
-        })
-        self.cipher = mock.patch.object(
-            credential_settings.store, "_transform", side_effect=identity_transform,
+        self.environment = mock.patch.dict(
+            os.environ,
+            {
+                "QB_CREDENTIAL_FILE": str(self.path),
+                "QB_CREDENTIAL_HOT_RELOAD": "1",
+                "QB_MODEL_PREFERENCES_FILE": str(self.temp / "model-preferences.json"),
+                "QB_MINERU_CONFIGURED": "0",
+                "QB_MINERU_POOL_SIZE": "0",
+                "QB_MINIMAX_CONFIGURED": "0",
+                "QB_MINIMAX_POOL_SIZE": "0",
+                "QB_SILICONFLOW_CONFIGURED": "0",
+                "QB_SILICONFLOW_POOL_SIZE": "0",
+            },
         )
-        self.mineru_validity = mock.patch.object(
-            credential_settings, "_mineru_token_validity", return_value=True,
-        )
+        self.cipher = mock.patch.object(credential_settings.store, "_transform", side_effect=identity_transform)
+        self.mineru_validity = mock.patch.object(credential_settings, "_mineru_token_validity", return_value=True)
         self.environment.start()
         self.cipher.start()
         self.mineru_validity.start()
@@ -80,18 +84,23 @@ class CredentialSettingsApiTests(SimpleTestCase):
 
     def test_replace_response_and_get_expose_only_counts(self):
         secrets = ["mineru-secret-one", "mineru-secret-two", "minimax-secret"]
-        response = self.post({
-            "mineru": {"action": "replace", "accounts": secrets[:2]},
-            "minimax": {"action": "replace", "accounts": secrets[2:]},
-            "siliconflow": {"action": "keep"},
-        })
+        response = self.post(
+            {
+                "mineru": {"action": "replace", "accounts": secrets[:2]},
+                "minimax": {"action": "replace", "accounts": secrets[2:]},
+                "siliconflow": {"action": "keep"},
+            }
+        )
         self.assertEqual(response.status_code, 200, response.content)
-        self.assertEqual(response.json()["services"], {
-            "mineru": {"configured": True, "count": 2},
-            "minimax": {"configured": True, "count": 1},
-            "modelscope": {"configured": False, "count": 0},
-            "siliconflow": {"configured": False, "count": 0},
-        })
+        self.assertEqual(
+            response.json()["services"],
+            {
+                "mineru": {"configured": True, "count": 2},
+                "minimax": {"configured": True, "count": 1},
+                "modelscope": {"configured": False, "count": 0},
+                "siliconflow": {"configured": False, "count": 0},
+            },
+        )
         self.assertEqual(response.json()["max_accounts"], 8)
         self.assertFalse(response.json()["restart_required"])
         for secret in secrets:
@@ -110,7 +119,8 @@ class CredentialSettingsApiTests(SimpleTestCase):
         self.assertEqual(list(self.path.parent.glob("credentials-*.tmp")), [])
 
         with mock.patch.object(
-            credential_settings.store, "load_credentials",
+            credential_settings.store,
+            "load_credentials",
             side_effect=AssertionError("GET must not decrypt the credential store"),
         ):
             self.assertEqual(self.client.get("/api/settings/credentials").status_code, 200)
@@ -119,21 +129,25 @@ class CredentialSettingsApiTests(SimpleTestCase):
     def test_mineru_replace_rejects_known_invalid_and_marks_offline_save_unverified(self):
         secret = "mineru-secret-must-not-echo"
         with mock.patch.object(credential_settings, "_mineru_token_validity", return_value=False):
-            invalid = self.post({
-                "mineru": {"action": "replace", "accounts": [secret]},
-                "minimax": {"action": "keep"},
-                "siliconflow": {"action": "keep"},
-            })
+            invalid = self.post(
+                {
+                    "mineru": {"action": "replace", "accounts": [secret]},
+                    "minimax": {"action": "keep"},
+                    "siliconflow": {"action": "keep"},
+                }
+            )
         self.assertEqual(invalid.status_code, 400, invalid.content)
         self.assertFalse(self.path.exists())
         self.assertNotIn(secret, invalid.content.decode("utf-8"))
 
         with mock.patch.object(credential_settings, "_mineru_token_validity", return_value=None):
-            unavailable = self.post({
-                "mineru": {"action": "replace", "accounts": [secret]},
-                "minimax": {"action": "keep"},
-                "siliconflow": {"action": "keep"},
-            })
+            unavailable = self.post(
+                {
+                    "mineru": {"action": "replace", "accounts": [secret]},
+                    "minimax": {"action": "keep"},
+                    "siliconflow": {"action": "keep"},
+                }
+            )
         self.assertEqual(unavailable.status_code, 200, unavailable.content)
         self.assertEqual(unavailable.json()["mineru_verification"], "unverified")
         self.assertIn("尚未核验", unavailable.json()["message"])
@@ -141,16 +155,16 @@ class CredentialSettingsApiTests(SimpleTestCase):
         self.assertNotIn(secret, unavailable.content.decode("utf-8"))
 
     def test_keep_clear_and_replace_are_explicit(self):
-        credential_settings.store.save_credentials({
-            "mineru_tokens": ["old-mineru"],
-            "minimax_keys": ["old-minimax"],
-            "siliconflow_keys": ["old-siliconflow"],
-        })
-        response = self.post({
-            "mineru": {"action": "keep"},
-            "minimax": {"action": "clear"},
-            "siliconflow": {"action": "replace", "accounts": ["new-siliconflow"]},
-        })
+        credential_settings.store.save_credentials(
+            {"mineru_tokens": ["old-mineru"], "minimax_keys": ["old-minimax"], "siliconflow_keys": ["old-siliconflow"]}
+        )
+        response = self.post(
+            {
+                "mineru": {"action": "keep"},
+                "minimax": {"action": "clear"},
+                "siliconflow": {"action": "replace", "accounts": ["new-siliconflow"]},
+            }
+        )
         self.assertEqual(response.status_code, 200, response.content)
         loaded = credential_settings.store.load_credentials()
         self.assertEqual(credential_settings.store.credential_pool(loaded, "mineru"), ["old-mineru"])
@@ -167,11 +181,13 @@ class CredentialSettingsApiTests(SimpleTestCase):
         self.assertEqual(without_guard.status_code, 403)
         self.assertNotIn(secret, without_guard.content.decode("utf-8"))
 
-        invalid = self.post({
-            "mineru": {"action": "replace", "accounts": [f"{secret}-{index}" for index in range(9)]},
-            "minimax": {"action": "keep"},
-            "siliconflow": {"action": "keep"},
-        })
+        invalid = self.post(
+            {
+                "mineru": {"action": "replace", "accounts": [f"{secret}-{index}" for index in range(9)]},
+                "minimax": {"action": "keep"},
+                "siliconflow": {"action": "keep"},
+            }
+        )
         self.assertEqual(invalid.status_code, 400, invalid.content)
         self.assertNotIn(secret, invalid.content.decode("utf-8"))
         self.assertFalse(self.path.exists())
@@ -180,9 +196,7 @@ class CredentialSettingsApiTests(SimpleTestCase):
         self.assertEqual(remote.status_code, 403)
 
     def test_failed_save_preserves_old_file_and_public_environment(self):
-        credential_settings.store.save_credentials({
-            "mineru_tokens": ["old-mineru"], "minimax_keys": ["old-minimax"],
-        })
+        credential_settings.store.save_credentials({"mineru_tokens": ["old-mineru"], "minimax_keys": ["old-minimax"]})
         before = self.path.read_bytes()
         credential_settings.refresh_public_environment()
         self.assertEqual(os.environ["QB_MINIMAX_POOL_SIZE"], "1")
@@ -192,11 +206,13 @@ class CredentialSettingsApiTests(SimpleTestCase):
             "save_credentials",
             side_effect=credential_settings.CredentialStoreError("无法保存当前用户的凭据。"),
         ):
-            response = self.post({
-                "mineru": {"action": "keep"},
-                "minimax": {"action": "replace", "accounts": [secret]},
-                "siliconflow": {"action": "keep"},
-            })
+            response = self.post(
+                {
+                    "mineru": {"action": "keep"},
+                    "minimax": {"action": "replace", "accounts": [secret]},
+                    "siliconflow": {"action": "keep"},
+                }
+            )
         self.assertEqual(response.status_code, 500, response.content)
         self.assertEqual(self.path.read_bytes(), before)
         self.assertEqual(os.environ["QB_MINIMAX_POOL_SIZE"], "1")
@@ -216,12 +232,13 @@ class WorkerCredentialReloadTests(SimpleTestCase):
             "MINERU_TOKEN": "startup-mineru",
             "MINIMAX_API_KEY": "startup-minimax",
         }
-        with mock.patch.dict(os.environ, environment, clear=True), mock.patch.object(
-            credential_settings.store, "_transform", side_effect=identity_transform,
+        with (
+            mock.patch.dict(os.environ, environment, clear=True),
+            mock.patch.object(credential_settings.store, "_transform", side_effect=identity_transform),
         ):
-            credential_settings.store.save_credentials({
-                "mineru_tokens": ["old-mineru"], "minimax_keys": ["old-minimax"],
-            })
+            credential_settings.store.save_credentials(
+                {"mineru_tokens": ["old-mineru"], "minimax_keys": ["old-minimax"]}
+            )
             first = SimpleNamespace(display_name="甲", get_status_display=lambda: "等待")
             second = SimpleNamespace(display_name="乙", get_status_display=lambda: "等待")
             first_query = mock.Mock()
@@ -233,36 +250,31 @@ class WorkerCredentialReloadTests(SimpleTestCase):
             observations: list[tuple[str, str, str]] = []
 
             def process(paper):
-                observations.append((
-                    paper.display_name,
-                    os.environ["MINERU_TOKEN"],
-                    os.environ["MINIMAX_API_KEY"],
-                ))
+                observations.append((paper.display_name, os.environ["MINERU_TOKEN"], os.environ["MINIMAX_API_KEY"]))
                 if paper is first:
-                    credential_settings.store.save_credentials({
-                        "mineru_tokens": ["new-mineru"], "minimax_keys": ["new-minimax"],
-                    })
+                    credential_settings.store.save_credentials(
+                        {"mineru_tokens": ["new-mineru"], "minimax_keys": ["new-minimax"]}
+                    )
                     # Saving cannot mutate an active task's worker snapshot.
                     self.assertEqual(os.environ["MINIMAX_API_KEY"], "old-minimax")
 
-            with mock.patch.object(run_worker, "SingleInstance"), \
-                    mock.patch.object(run_worker, "clean_saved_example_labels"), \
-                    mock.patch.object(run_worker.library_jobs, "recover_interrupted"), \
-                    mock.patch.object(run_worker.region_reads, "recover_interrupted"), \
-                    mock.patch.object(run_worker.library_jobs, "pending", return_value=False), \
-                    mock.patch.object(run_worker.region_reads, "pending", return_value=False), \
-                    mock.patch.object(run_worker.Paper.objects, "filter", side_effect=[first_query, empty_query]), \
-                    mock.patch.object(run_worker, "process_paper", side_effect=process), \
-                    mock.patch.object(run_worker, "rereads_pending", return_value=False), \
-                    mock.patch.object(run_worker, "process_rereads", return_value=0):
+            with (
+                mock.patch.object(run_worker, "SingleInstance"),
+                mock.patch.object(run_worker, "clean_saved_example_labels"),
+                mock.patch.object(run_worker.library_jobs, "recover_interrupted"),
+                mock.patch.object(run_worker.region_reads, "recover_interrupted"),
+                mock.patch.object(run_worker.library_jobs, "pending", return_value=False),
+                mock.patch.object(run_worker.region_reads, "pending", return_value=False),
+                mock.patch.object(run_worker.Paper.objects, "filter", side_effect=[first_query, empty_query]),
+                mock.patch.object(run_worker, "process_paper", side_effect=process),
+                mock.patch.object(run_worker, "rereads_pending", return_value=False),
+                mock.patch.object(run_worker, "process_rereads", return_value=0),
+            ):
                 command = run_worker.Command()
                 command.stdout = mock.Mock()
                 command.handle(once=True)
 
-        self.assertEqual(observations, [
-            ("甲", "old-mineru", "old-minimax"),
-            ("乙", "new-mineru", "new-minimax"),
-        ])
+        self.assertEqual(observations, [("甲", "old-mineru", "old-minimax"), ("乙", "new-mineru", "new-minimax")])
 
     def test_failed_reload_keeps_last_known_good_environment_and_logs_no_value(self):
         environment = {
@@ -270,22 +282,26 @@ class WorkerCredentialReloadTests(SimpleTestCase):
             "MINERU_TOKEN": "old-secret-value",
             "MINERU_TOKENS_JSON": '["old-secret-value"]',
         }
-        with mock.patch.dict(os.environ, environment, clear=True), mock.patch.object(
-            credential_settings.store,
-            "load_credentials",
-            side_effect=credential_settings.CredentialStoreError("已保存的凭据无法读取。"),
-        ), self.assertLogs("core", level="ERROR") as captured:
+        with (
+            mock.patch.dict(os.environ, environment, clear=True),
+            mock.patch.object(
+                credential_settings.store,
+                "load_credentials",
+                side_effect=credential_settings.CredentialStoreError("已保存的凭据无法读取。"),
+            ),
+            self.assertLogs("core", level="ERROR") as captured,
+        ):
             self.assertIsNone(run_worker.apply_saved_credentials())
             self.assertEqual(os.environ.get("MINERU_TOKEN"), "old-secret-value")
             self.assertEqual(os.environ.get("MINERU_TOKENS_JSON"), '["old-secret-value"]')
             self.assertNotIn("old-secret-value", "\n".join(captured.output))
 
     def test_task_boundary_resets_pool_without_desktop_hot_reload(self):
-        with mock.patch.dict(os.environ, {}, clear=True), \
-                mock.patch.object(
-                    credential_settings, "apply_worker_environment", return_value=None,
-                ) as reload_credentials, \
-                mock.patch.object(run_worker, "reset_account_pools") as reset:
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(credential_settings, "apply_worker_environment", return_value=None) as reload_credentials,
+            mock.patch.object(run_worker, "reset_account_pools") as reset,
+        ):
             self.assertIsNone(run_worker.apply_saved_credentials())
 
         reload_credentials.assert_called_once_with()
@@ -298,19 +314,21 @@ class CredentialApiDpapiTests(SimpleTestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "credentials.dat"
             secret = "api-route-private-value-7Qz"
-            with mock.patch.dict(os.environ, {
-                "QB_CREDENTIAL_FILE": str(path),
-                "QB_CREDENTIAL_HOT_RELOAD": "1",
-            }), mock.patch.object(
-                credential_settings, "_mineru_token_validity", return_value=True,
+            with (
+                mock.patch.dict(os.environ, {"QB_CREDENTIAL_FILE": str(path), "QB_CREDENTIAL_HOT_RELOAD": "1"}),
+                mock.patch.object(credential_settings, "_mineru_token_validity", return_value=True),
             ):
                 response = Client().post(
                     "/api/settings/credentials",
-                    data=json.dumps({"services": {
-                        "mineru": {"action": "replace", "accounts": [secret]},
-                        "minimax": {"action": "keep"},
-                        "siliconflow": {"action": "keep"},
-                    }}),
+                    data=json.dumps(
+                        {
+                            "services": {
+                                "mineru": {"action": "replace", "accounts": [secret]},
+                                "minimax": {"action": "keep"},
+                                "siliconflow": {"action": "keep"},
+                            }
+                        }
+                    ),
                     content_type="application/json",
                     HTTP_X_QB_REQUEST="1",
                 )
@@ -319,6 +337,4 @@ class CredentialApiDpapiTests(SimpleTestCase):
             self.assertEqual(response.status_code, 200, response.content)
             self.assertNotIn(secret, response.content.decode("utf-8"))
             self.assertNotIn(secret.encode("utf-8"), path.read_bytes())
-            self.assertEqual(
-                credential_settings.store.credential_pool(loaded, "mineru"), [secret],
-            )
+            self.assertEqual(credential_settings.store.credential_pool(loaded, "mineru"), [secret])

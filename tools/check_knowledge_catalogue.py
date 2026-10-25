@@ -53,8 +53,7 @@ def run(page) -> None:
     # 界面坏了，是这台机器压根没开着这个功能 —— 如实说，别当成缺陷。
     served = page.request.get(f"{BASE}/api/settings/library-ai", headers={"X-QB-Request": "1"}).json()
     if not served.get("features", {}).get("knowledge_tags"):
-        print("     SKIP 本机没开「生成知识点标签」，服务端不读知识点目录，"
-              "这一节量不到（先把功能打开再跑）")
+        print("     SKIP 本机没开「生成知识点标签」，服务端不读知识点目录，这一节量不到（先把功能打开再跑）")
         return
     check(section.count() == 1 and section.is_visible(), "「标签与答案」面板里有知识点目录这一段")
     count_text = page.locator("#libraryAIKnowledgeCount").inner_text()
@@ -81,11 +80,17 @@ def run(page) -> None:
     check(chapters > 0, f"按 {chapters} 个章分组")
     # 目录自己滚动，底栏那句「要增删就用记事本」任何时候都得看得见。
     foot = page.locator(".catalogue-foot")
-    check(foot.is_visible() and foot.bounding_box()["y"] + foot.bounding_box()["height"] <= 1000,
-          "底栏那句改目录的说明在窗口内")
-    check(page.evaluate("() => document.querySelector('#catalogueList').scrollHeight > "
-                        "document.querySelector('#catalogueList').clientHeight"),
-          "73 个知识点放不下，目录自己在滚")
+    check(
+        foot.is_visible() and foot.bounding_box()["y"] + foot.bounding_box()["height"] <= 1000,
+        "底栏那句改目录的说明在窗口内",
+    )
+    check(
+        page.evaluate(
+            "() => document.querySelector('#catalogueList').scrollHeight > "
+            "document.querySelector('#catalogueList').clientHeight"
+        ),
+        "73 个知识点放不下，目录自己在滚",
+    )
     page.screenshot(path=f"{SHOTS}/catalogue_dialog.png")
 
     # 搜章名也要搜得到：椭圆、双曲线、抛物线三个词都不含「圆锥」。

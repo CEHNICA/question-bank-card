@@ -23,8 +23,11 @@ from __future__ import annotations
 # membership plan instead, see account_pool.MINIMAX_PLANS).
 VISION = {
     "minimax": {
-        "label": "MiniMax", "engine": "minimax_m3", "default_model": "MiniMax-M3",
-        "suggested": ["MiniMax-M3"], "free_models": [],
+        "label": "MiniMax",
+        "engine": "minimax_m3",
+        "default_model": "MiniMax-M3",
+        "suggested": ["MiniMax-M3"],
+        "free_models": [],
         "credential": ("minimax_key", "minimax_keys"),
         "environment": ("MINIMAX_API_KEY", "MINIMAX_API_KEYS_JSON"),
         "concurrency": (6, 6),
@@ -32,11 +35,11 @@ VISION = {
         "note": "付费（Token Plan 会员）；读得快、读得准",
     },
     "modelscope": {
-        "label": "魔搭", "engine": "modelscope_qwen", "default_model": "Qwen/Qwen3.5-35B-A3B",
-        "suggested": ["Qwen/Qwen3.5-35B-A3B", "Qwen/Qwen3.5-122B-A10B", "Qwen/Qwen3.5-397B-A17B",
-                      "Qwen/Qwen3.5-27B"],
-        "free_models": ["Qwen/Qwen3.5-35B-A3B", "Qwen/Qwen3.5-122B-A10B", "Qwen/Qwen3.5-397B-A17B",
-                        "Qwen/Qwen3.5-27B"],
+        "label": "魔搭",
+        "engine": "modelscope_qwen",
+        "default_model": "Qwen/Qwen3.5-35B-A3B",
+        "suggested": ["Qwen/Qwen3.5-35B-A3B", "Qwen/Qwen3.5-122B-A10B", "Qwen/Qwen3.5-397B-A17B", "Qwen/Qwen3.5-27B"],
+        "free_models": ["Qwen/Qwen3.5-35B-A3B", "Qwen/Qwen3.5-122B-A10B", "Qwen/Qwen3.5-397B-A17B", "Qwen/Qwen3.5-27B"],
         "credential": ("modelscope_key", "modelscope_keys"),
         "environment": ("MODELSCOPE_API_KEY", "MODELSCOPE_API_KEYS_JSON"),
         "concurrency": (1, 2),
@@ -44,9 +47,10 @@ VISION = {
         "note": "每天免费几百次（要绑定实名的阿里云账号）",
     },
     "siliconflow": {
-        "label": "硅基流动", "engine": "siliconflow_qwen3", "default_model": "Qwen/Qwen3-VL-32B-Instruct",
-        "suggested": ["Qwen/Qwen3-VL-30B-A3B-Instruct", "Qwen/Qwen3-VL-30B-A3B-Thinking",
-                      "Qwen/Qwen3-VL-32B-Instruct"],
+        "label": "硅基流动",
+        "engine": "siliconflow_qwen3",
+        "default_model": "Qwen/Qwen3-VL-32B-Instruct",
+        "suggested": ["Qwen/Qwen3-VL-30B-A3B-Instruct", "Qwen/Qwen3-VL-30B-A3B-Thinking", "Qwen/Qwen3-VL-32B-Instruct"],
         "free_models": [],
         "credential": ("siliconflow_key", "siliconflow_keys"),
         "environment": ("SILICONFLOW_API_KEY", "SILICONFLOW_API_KEYS_JSON"),
@@ -68,9 +72,12 @@ CHECKER_ORDER = ("modelscope", "siliconflow", "minimax")
 ASSISTANT_ENGINE = "assistant"
 
 ENGINES = {spec["engine"]: key for key, spec in VISION.items()}
-MINERU = {"credential": ("mineru_token", "mineru_tokens"), "environment": ("MINERU_TOKEN", "MINERU_TOKENS_JSON"),
-          "signup": "https://mineru.net/apiManage/token",
-          "note": "每天 1000 页最高优先级解析额度，超出部分降低优先级；额度和 Token 有效期以 API 管理页为准"}
+MINERU = {
+    "credential": ("mineru_token", "mineru_tokens"),
+    "environment": ("MINERU_TOKEN", "MINERU_TOKENS_JSON"),
+    "signup": "https://mineru.net/apiManage/token",
+    "note": "每天 1000 页最高优先级解析额度，超出部分降低优先级；额度和 Token 有效期以 API 管理页为准",
+}
 
 # Every credential service, MinerU first.
 SERVICES = ("mineru", *VISION)

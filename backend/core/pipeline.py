@@ -63,13 +63,7 @@ from .figure_policy import (
     stored_or_derived_review,
     without_automatic_textbook_badges,
 )
-from .mineru import (
-    MAX_PDF_PAGES,
-    MineruError,
-    load_blocks,
-    request_extract_file_from_pool,
-    write_pdf_slice,
-)
+from .mineru import MAX_PDF_PAGES, MineruError, load_blocks, request_extract_file_from_pool, write_pdf_slice
 from .models import Block, ImportChunk, Paper, Question, QuestionDeletionBatch, QuestionGroup
 from .textnorm import same_reading
 from .word import convert_docx_to_pdf
@@ -88,8 +82,7 @@ FLAG_RESEGMENT_RANGE_PROTECTED = (
     # 所以文案必须落在「请去核对」上。界面上用户看到的说法是「已入库」，
     # 「入库记录」是内部词，老师不知道那是什么；也不写「标黄」——那是界面状态，
     # 卡片自己会变黄，说出来只是噪音。
-    "重新切题发现这道题的取字范围和原来不同；你已通过或入库过它，系统保留原范围没有改动，"
-    "请对照原卷核对要不要改"
+    "重新切题发现这道题的取字范围和原来不同；你已通过或入库过它，系统保留原范围没有改动，请对照原卷核对要不要改"
 )
 FLAG_MANUAL_FIGURE_OUTSIDE_RANGE = "重新切题后，原人工配图不在新的题目范围内；已保留记录并标黄，请重新确认配图"
 
@@ -113,9 +106,7 @@ _EXAMPLE_SOLUTION_TEXT_RE = re.compile(
 # deliberately narrow so genuine image-choice questions are unaffected.
 _NUMERIC_SUBQUESTION_RE = re.compile(r"(?:^|\n|\s)[（(]\s*(\d{1,2})\s*[)）]")
 _EXPLICIT_OPTION_LABEL_RE = re.compile(r"(?:^|\n)\s*[A-EＡ-Ｅ]\s*[.．、:：)]", re.I)
-_EXERCISE_ACTION_RE = re.compile(
-    r"(?:请|试)?(?:求|证明|判断|写出|列举|画出|作出|选择|说明|回答|解答|计算|表示|分析)"
-)
+_EXERCISE_ACTION_RE = re.compile(r"(?:请|试)?(?:求|证明|判断|写出|列举|画出|作出|选择|说明|回答|解答|计算|表示|分析)")
 _DIRECT_EXERCISE_ACTION_RE = re.compile(
     r"(?:^|[\n。．.!！；;])\s*(?:请|试)?"
     r"(?:求|证明|判断|写出|列举|画出|作出|选择|说明|回答|解答|计算|表示|分析|"
@@ -136,12 +127,7 @@ def _invalidate_approval(question: Question) -> None:
 
 
 def _normalise_unlabelled_numeric_choice_type(
-    kind: str,
-    *,
-    final: dict,
-    readings: list[dict | None],
-    candidates: list[dict],
-    figures: list[dict],
+    kind: str, *, final: dict, readings: list[dict | None], candidates: list[dict], figures: list[dict]
 ) -> str:
     """Treat a bare ``(1)(2)…`` list as free response when readers disagree.
 
@@ -154,13 +140,8 @@ def _normalise_unlabelled_numeric_choice_type(
 
     if kind not in {"single_choice", "multiple_choice"}:
         return kind
-    reading_types = {
-        str(reading.get("type") or "unknown")
-        for reading in readings
-        if isinstance(reading, dict)
-    }
-    if not (reading_types & {"single_choice", "multiple_choice"}) \
-            or "free_response" not in reading_types:
+    reading_types = {str(reading.get("type") or "unknown") for reading in readings if isinstance(reading, dict)}
+    if not (reading_types & {"single_choice", "multiple_choice"}) or "free_response" not in reading_types:
         return kind
     if final.get("options") or candidates or figures:
         return kind
@@ -211,8 +192,7 @@ def _has_explicit_exercise_task(stem: str, options: dict | None, kind: str) -> b
 
 
 def _source_kind_has_question_support(
-    *, expected_kind: str | None, stem: str, options: dict | None,
-    kind: str, readings: list[dict],
+    *, expected_kind: str | None, stem: str, options: dict | None, kind: str, readings: list[dict]
 ) -> bool:
     """Return whether saved evidence supports the local example/exercise anchor."""
 
@@ -220,14 +200,8 @@ def _source_kind_has_question_support(
         return False
     question_kinds = {"exercise", "example"}
     non_question_kinds = {"prose", "heading"}
-    question_votes = sum(
-        str(result.get("content_kind") or "unknown") in question_kinds
-        for result in readings
-    )
-    non_question_votes = sum(
-        str(result.get("content_kind") or "unknown") in non_question_kinds
-        for result in readings
-    )
+    question_votes = sum(str(result.get("content_kind") or "unknown") in question_kinds for result in readings)
+    non_question_votes = sum(str(result.get("content_kind") or "unknown") in non_question_kinds for result in readings)
     return (
         _has_explicit_exercise_task(stem, options, kind)
         or question_votes > non_question_votes
@@ -235,9 +209,7 @@ def _source_kind_has_question_support(
     )
 
 
-def _number_seen_flag(
-    expected: int, readings: list[dict | None], *, clipped_number: bool = False,
-) -> str | None:
+def _number_seen_flag(expected: int, readings: list[dict | None], *, clipped_number: bool = False) -> str | None:
     """Warn only when neither independent reader found the expected number.
 
     ``clipped_number`` marks a start the local rules recovered from a number
@@ -246,23 +218,22 @@ def _number_seen_flag(
     """
 
     seen_numbers = {
-        value for result in readings
+        value
+        for result in readings
         if isinstance(result, dict)
         for value in [result.get("number_seen")]
         if isinstance(value, int) and not isinstance(value, bool)
     }
     if not seen_numbers or expected in seen_numbers:
         return None
-    if clipped_number and all(
-            value < expected and str(expected).endswith(str(value)) for value in seen_numbers):
+    if clipped_number and all(value < expected and str(expected).endswith(str(value)) for value in seen_numbers):
         return None
     rendered = "、".join(str(value) for value in sorted(seen_numbers))
     return f"AI 看到的题号是 {rendered}，请确认"
 
 
 def _content_kind_review_flag(
-    *, source_kind: str, stem: str, options: dict | None,
-    kind: str, readings: list[dict],
+    *, source_kind: str, stem: str, options: dict | None, kind: str, readings: list[dict]
 ) -> str | None:
     """Return the current deterministic content-kind warning, if any."""
 
@@ -271,33 +242,22 @@ def _content_kind_review_flag(
         for result in readings
         if str(result.get("content_kind") or "unknown") != "unknown"
     }
-    expected_kind = {
-        Question.SourceKind.EXAMPLE: "example",
-        Question.SourceKind.EXERCISE: "exercise",
-    }.get(source_kind)
+    expected_kind = {Question.SourceKind.EXAMPLE: "example", Question.SourceKind.EXERCISE: "exercise"}.get(source_kind)
     non_question_kinds = {"prose", "heading"}
     if _source_kind_has_question_support(
-            expected_kind=expected_kind,
-            stem=stem,
-            options=options,
-            kind=kind,
-            readings=readings):
+        expected_kind=expected_kind, stem=stem, options=options, kind=kind, readings=readings
+    ):
         content_kinds = {expected_kind}
     if expected_kind:
         conflicting = sorted(value for value in content_kinds if value in non_question_kinds)
         if conflicting:
-            labels = {
-                "example": "例题", "exercise": "练习题",
-                "prose": "教材正文", "heading": "标题",
-            }
+            labels = {"example": "例题", "exercise": "练习题", "prose": "教材正文", "heading": "标题"}
             rendered = "、".join(labels.get(value, value) for value in conflicting)
             return f"本地版面规则判为{labels[expected_kind]}，但 AI 判为{rendered}，请对照原书确认"
         return None
     if content_kinds and content_kinds <= non_question_kinds:
         rendered = (
-            "教材正文" if content_kinds == {"prose"}
-            else "标题" if content_kinds == {"heading"}
-            else "正文或标题"
+            "教材正文" if content_kinds == {"prose"} else "标题" if content_kinds == {"heading"} else "正文或标题"
         )
         return f"AI 判断这段更像{rendered}，请删除题卡或调整范围后再确认"
     if content_kinds & non_question_kinds:
@@ -306,36 +266,33 @@ def _content_kind_review_flag(
 
 
 def _local_text_review_flag(flag: str) -> bool:
-    return (
-        flag.startswith(("本地版面规则判为", "AI 判断这段更像", "两次 AI 对这段是否为题目", "AI 看到的题号是 "))
-    )
+    return flag.startswith(("本地版面规则判为", "AI 判断这段更像", "两次 AI 对这段是否为题目", "AI 看到的题号是 "))
 
 
 def persist_local_text_review_upgrades(questions) -> dict[str, int]:
     """Persist local content/number policy upgrades without rereading cards."""
 
-    stats = {"seen": 0, "updated": 0, "unchanged": 0, "state_skipped": 0,
-             "edited_skipped": 0}
+    stats = {"seen": 0, "updated": 0, "unchanged": 0, "state_skipped": 0, "edited_skipped": 0}
     iterator = questions.iterator() if hasattr(questions, "iterator") else iter(questions)
     for question in iterator:
         stats["seen"] += 1
-        if str(getattr(question, "state", "") or "") not in {
-                Question.State.GREEN, Question.State.YELLOW}:
+        if str(getattr(question, "state", "") or "") not in {Question.State.GREEN, Question.State.YELLOW}:
             stats["state_skipped"] += 1
             continue
         if bool(getattr(question, "edited", False)):
             stats["edited_skipped"] += 1
             continue
         readings = [
-            result for result in (
+            result
+            for result in (
                 getattr(question, "read_a", None),
                 getattr(question, "read_b", None),
                 getattr(question, "read_c", None),
-            ) if isinstance(result, dict)
+            )
+            if isinstance(result, dict)
         ]
         flags = [
-            str(flag) for flag in (getattr(question, "flags", None) or [])
-            if not _local_text_review_flag(str(flag))
+            str(flag) for flag in (getattr(question, "flags", None) or []) if not _local_text_review_flag(str(flag))
         ]
         content_flag = _content_kind_review_flag(
             source_kind=str(getattr(question, "source_kind", "") or ""),
@@ -347,9 +304,10 @@ def persist_local_text_review_upgrades(questions) -> dict[str, int]:
         if content_flag:
             flags.append(content_flag)
         if number_flag := _number_seen_flag(
-                int(getattr(question, "number", 0) or 0),
-                [getattr(question, "read_a", None), getattr(question, "read_b", None)],
-                clipped_number=getattr(question, "start_source", "") == "repaired"):
+            int(getattr(question, "number", 0) or 0),
+            [getattr(question, "read_a", None), getattr(question, "read_b", None)],
+            clipped_number=getattr(question, "start_source", "") == "repaired",
+        ):
             flags.append(number_flag)
         state = Question.State.YELLOW if flags else Question.State.GREEN
         changed_fields: list[str] = []
@@ -371,7 +329,7 @@ _CHOICE_BRACKET = re.compile(r"[（(]\s*[）)]\s*[。．.]?\s*$")
 
 
 def _row_as_choice_options(
-    *, stem: str, options: dict, kind: str, candidates: list[dict], assignments: dict,
+    *, stem: str, options: dict, kind: str, candidates: list[dict], assignments: dict
 ) -> dict[str, str]:
     """Four printed pictures in one row under a choice stem are options A–D.
 
@@ -386,8 +344,11 @@ def _row_as_choice_options(
         return assignments
     if any(role in readers.OPTION_KEYS for role in assignments.values()):
         return assignments
-    loose = [item for item in candidates or []
-             if assignments.get(item.get("label")) in {None, "stem", "none"} and item.get("bbox")]
+    loose = [
+        item
+        for item in candidates or []
+        if assignments.get(item.get("label")) in {None, "stem", "none"} and item.get("bbox")
+    ]
     row = _single_row(loose) if len(loose) == 4 else None
     if row is None:
         return assignments
@@ -398,8 +359,7 @@ def _row_as_choice_options(
 
 
 def _resolve_automatic_figure_assignments(
-    *, stem: str, options: dict, kind: str, candidates: list[dict], assignments: dict,
-    blocks: list[dict] | None = None,
+    *, stem: str, options: dict, kind: str, candidates: list[dict], assignments: dict, blocks: list[dict] | None = None
 ) -> dict[str, str]:
     """Apply deterministic local evidence before trusting model image labels.
 
@@ -417,11 +377,18 @@ def _resolve_automatic_figure_assignments(
         kind=kind,
         candidates=candidates,
         assignments=_row_as_choice_options(
-            stem=stem, options=options, kind=kind, candidates=candidates,
+            stem=stem,
+            options=options,
+            kind=kind,
+            candidates=candidates,
             assignments=figure_assignment.option_assignments(
-                stem=stem, options=options, kind=kind, candidates=candidates,
+                stem=stem,
+                options=options,
+                kind=kind,
+                candidates=candidates,
                 assignments=_sketches_beside_text_options(
-                    stem=stem, options=options, kind=kind, assignments=assignments),
+                    stem=stem, options=options, kind=kind, assignments=assignments
+                ),
                 blocks=blocks,
             ),
         ),
@@ -439,10 +406,7 @@ def _sketches_beside_text_options(*, stem: str, options: dict, kind: str, assign
 
 def _flags_after_figure_review(flags: list[str], review: dict, figures: list[dict]) -> list[str]:
     """Replace only figure-policy flags; preserve all unrelated review warnings."""
-    result = [
-        flag for flag in (flags or [])
-        if not figure_flag(flag) and flag != FLAG_MANUAL_FIGURE_OUTSIDE_RANGE
-    ]
+    result = [flag for flag in (flags or []) if not figure_flag(flag) and flag != FLAG_MANUAL_FIGURE_OUTSIDE_RANGE]
     if review.get("status") == BLOCKED_MISSING:
         result.append(FLAG_NO_FIGURE if review.get("cue_matches") and not figures else FLAG_UNFOUND_FIGURE)
     elif review.get("status") == CONFLICT:
@@ -450,49 +414,50 @@ def _flags_after_figure_review(flags: list[str], review: dict, figures: list[dic
         if "manual_figure_outside_range" in signals:
             result.append(FLAG_MANUAL_FIGURE_OUTSIDE_RANGE)
         else:
-            result.append(FLAG_UNFOUND_FIGURE if "candidate_unclassified" in signals
-                          else FLAG_UNCUED_FIGURE)
+            result.append(FLAG_UNFOUND_FIGURE if "candidate_unclassified" in signals else FLAG_UNCUED_FIGURE)
     return result
 
 
 def _manual_figures_and_review(question: Question) -> tuple[list[dict], dict]:
     """Keep human figure choices while discarding stale candidate identities."""
 
-    valid_keys = {
-        key for item in (question.figure_candidates or [])
-        if (key := candidate_key(item)) is not None
-    }
+    valid_keys = {key for item in (question.figure_candidates or []) if (key := candidate_key(item)) is not None}
     figures: list[dict] = []
     previous = question.figure_review if isinstance(question.figure_review, dict) else {}
     detached: list[dict] = [
-        dict(item) for item in (previous.get("detached_manual_figures") or [])
-        if isinstance(item, dict)
+        dict(item) for item in (previous.get("detached_manual_figures") or []) if isinstance(item, dict)
     ]
-    for item in (question.figures or []):
+    for item in question.figures or []:
         if not isinstance(item, dict) or item.get("source") != "manual":
             continue
         kept = dict(item)
-        if isinstance(kept.get("page_idx"), int) and isinstance(kept.get("bbox"), list) \
-                and not segment.center_in_regions(
-                    kept["page_idx"], kept["bbox"], question.regions or [],
-                ):
+        if (
+            isinstance(kept.get("page_idx"), int)
+            and isinstance(kept.get("bbox"), list)
+            and not segment.center_in_regions(kept["page_idx"], kept["bbox"], question.regions or [])
+        ):
             if kept not in detached:
                 detached.append(kept)
             continue
         if kept.get("candidate_key") not in valid_keys:
             kept.pop("candidate_key", None)
         figures.append(kept)
-    ignored = sorted({
-        value for value in previous.get("ignored_candidates", [])
-        if isinstance(value, str) and value in valid_keys
-    }) if isinstance(previous.get("ignored_candidates"), list) else []
+    ignored = (
+        sorted(
+            {
+                value
+                for value in previous.get("ignored_candidates", [])
+                if isinstance(value, str) and value in valid_keys
+            }
+        )
+        if isinstance(previous.get("ignored_candidates"), list)
+        else []
+    )
     review = {
         "status": CONFLICT if detached else OK,
         "source": "human",
-        "reason": ("重新切题后有人工配图落在新题目范围之外，请重新确认配图"
-                   if detached else "配图已经由人工设置"),
-        "signals": (["manual_figure", "manual_figure_outside_range"]
-                    if detached else ["manual_figure"]),
+        "reason": ("重新切题后有人工配图落在新题目范围之外，请重新确认配图" if detached else "配图已经由人工设置"),
+        "signals": (["manual_figure", "manual_figure_outside_range"] if detached else ["manual_figure"]),
         "cue_matches": list(previous.get("cue_matches") or []),
         "excluded_count": len(ignored),
         "ignored_candidates": ignored,
@@ -517,16 +482,13 @@ def _drop_stale_automatic_figures(question: Question, candidates: list[dict]) ->
 
     review = question.figure_review if isinstance(question.figure_review, dict) else {}
     if review.get("source") == "human" or any(
-            isinstance(item, dict) and item.get("source") == "manual"
-            for item in (question.figures or [])):
+        isinstance(item, dict) and item.get("source") == "manual" for item in (question.figures or [])
+    ):
         return False
-    valid_keys = {
-        key for candidate in candidates
-        if (key := candidate_key(candidate)) is not None
-    }
+    valid_keys = {key for candidate in candidates if (key := candidate_key(candidate)) is not None}
     kept: list[dict] = []
     changed = False
-    for figure in (question.figures or []):
+    for figure in question.figures or []:
         if not isinstance(figure, dict):
             changed = True
             continue
@@ -540,6 +502,7 @@ def _drop_stale_automatic_figures(question: Question, candidates: list[dict]) ->
 
 
 # ---------------------------------------------------------------- 文件与页面
+
 
 def paper_dir(paper: Paper) -> Path:
     return settings.DATA_ROOT / str(paper.id)
@@ -640,9 +603,11 @@ def _cloud_page_modes(plan: dict, blocks: list[dict], page_count: int) -> list[d
     for block in blocks:
         page = int(block.get("page_idx", -1))
         characters[page] = characters.get(page, 0) + len(str(block.get("text") or ""))
-    recorded = {int(item["page_idx"]): dict(item)
-                for item in (plan.get("pages") or []) if isinstance(item, dict)
-                and type(item.get("page_idx")) is int}
+    recorded = {
+        int(item["page_idx"]): dict(item)
+        for item in (plan.get("pages") or [])
+        if isinstance(item, dict) and type(item.get("page_idx")) is int
+    }
     pages = []
     unreadable = []
     for page in range(page_count):
@@ -650,8 +615,7 @@ def _cloud_page_modes(plan: dict, blocks: list[dict], page_count: int) -> list[d
         entry["page_idx"] = page
         if characters.get(page):
             entry.update(mode="mineru", text_characters=characters[page])
-            entry["warnings"] = [w for w in (entry.get("warnings") or [])
-                                 if "云端" not in str(w)]
+            entry["warnings"] = [w for w in (entry.get("warnings") or []) if "云端" not in str(w)]
         else:
             entry.update(mode="manual", text_characters=0)
             entry.setdefault("warnings", [])
@@ -663,8 +627,7 @@ def _cloud_page_modes(plan: dict, blocks: list[dict], page_count: int) -> list[d
         # One line on the plan, so the paper says which pages need a human
         # instead of quietly producing a short paper.
         note = "云端没有读出第 " + "、".join(str(number) for number in unreadable) + " 页的内容，这些页需要手工框题。"
-        plan["warnings"] = [w for w in (plan.get("warnings") or [])
-                            if not str(w).startswith("云端没有读出第")] + [note]
+        plan["warnings"] = [w for w in (plan.get("warnings") or []) if not str(w).startswith("云端没有读出第")] + [note]
     return pages
 
 
@@ -723,11 +686,7 @@ def _heartbeat_warn_once_in_a_while(paper_id, revision: int | None) -> None:
         _HEARTBEAT_WARNING_AT.move_to_end(key)
         while len(_HEARTBEAT_WARNING_AT) > 512:
             _HEARTBEAT_WARNING_AT.popitem(last=False)
-    logger.warning(
-        "paper %s heartbeat skipped after SQLite lock conflict (revision=%s)",
-        paper_id,
-        revision,
-    )
+    logger.warning("paper %s heartbeat skipped after SQLite lock conflict (revision=%s)", paper_id, revision)
 
 
 def _heartbeat_busy_timeout(timeout_ms: int) -> int:
@@ -740,8 +699,9 @@ def _heartbeat_busy_timeout(timeout_ms: int) -> int:
     return previous
 
 
-def _paper_heartbeat(paper_id, *, progress: int | None = None, total: int | None = None,
-                     revision: int | None = None) -> None:
+def _paper_heartbeat(
+    paper_id, *, progress: int | None = None, total: int | None = None, revision: int | None = None
+) -> None:
     """Touch one paper from the orchestration thread, optionally saving progress.
 
     This runs *inside* the MinerU wait loop, so it is the one write in the whole
@@ -759,10 +719,7 @@ def _paper_heartbeat(paper_id, *, progress: int | None = None, total: int | None
         fields["total"] = total
     updates = Paper.objects.filter(pk=paper_id)
     if revision is not None:
-        current_revision = (
-            Q(processing_plan__revision=revision)
-            | Q(processing_plan__revision=str(revision))
-        )
+        current_revision = Q(processing_plan__revision=revision) | Q(processing_plan__revision=str(revision))
         if revision == 0:
             # Older/manual plans may predate the revision key; _run_current
             # treats that shape as revision zero.
@@ -790,24 +747,21 @@ def _paper_heartbeat(paper_id, *, progress: int | None = None, total: int | None
 
 # ---------------------------------------------------------------- 1. 解析
 
+
 def _ensure_import_chunks(paper: Paper) -> list[ImportChunk]:
     """为需要本地切片的 PDF 建立确定、可重试的分片计划。"""
     chunks = list(paper.import_chunks.order_by("sequence"))
     if not chunks:
-        chunk_limit = import_planning.pdf_chunk_page_limit(
-            paper.material_type, MAX_PDF_PAGES,
-        )
+        chunk_limit = import_planning.pdf_chunk_page_limit(paper.material_type, MAX_PDF_PAGES)
         plan = import_planning.plan_pdf_chunks(len(paper.pages), chunk_limit)
-        chunks = ImportChunk.objects.bulk_create([
-            ImportChunk(paper=paper, **item.as_record()) for item in plan
-        ])
+        chunks = ImportChunk.objects.bulk_create([ImportChunk(paper=paper, **item.as_record()) for item in plan])
     try:
-        import_planning.validate_chunk_coverage(
-            chunks, expected_start=1, expected_end=len(paper.pages),
-        )
+        import_planning.validate_chunk_coverage(chunks, expected_start=1, expected_end=len(paper.pages))
     except import_planning.ChunkCoverageError:
-        raise MineruError("历史分片的原卷页码映射不完整，未修改分片或缓存。请保留这份任务，"
-                          "从任务备份恢复后重试，或把本机诊断号交给维护者检查。") from None
+        raise MineruError(
+            "历史分片的原卷页码映射不完整，未修改分片或缓存。请保留这份任务，"
+            "从任务备份恢复后重试，或把本机诊断号交给维护者检查。"
+        ) from None
     _replan_oversized_pending_chunks(paper, chunks)
     return list(paper.import_chunks.order_by("sequence"))
 
@@ -815,10 +769,15 @@ def _ensure_import_chunks(paper: Paper) -> list[ImportChunk]:
 def _chunk_archive_path(folder: Path, chunk: ImportChunk) -> Path:
     """Pin old cached filenames independently of a re-planned sequence number."""
     archive = Path(chunk.artifact_path) if chunk.artifact_path else folder / f"chunk_{chunk.sequence:03d}.zip"
-    if (archive.parent.resolve() != folder.resolve() or archive.is_symlink()
-            or not re.fullmatch(r"chunk_[0-9]+(?:_pages_[0-9]+_[0-9]+)?\.zip", archive.name)):
-        raise MineruError("历史分片缓存位置无法安全核实，未修改任务或缓存。请保留这份任务，"
-                          "从任务备份恢复后重试，或把本机诊断号交给维护者检查。")
+    if (
+        archive.parent.resolve() != folder.resolve()
+        or archive.is_symlink()
+        or not re.fullmatch(r"chunk_[0-9]+(?:_pages_[0-9]+_[0-9]+)?\.zip", archive.name)
+    ):
+        raise MineruError(
+            "历史分片缓存位置无法安全核实，未修改任务或缓存。请保留这份任务，"
+            "从任务备份恢复后重试，或把本机诊断号交给维护者检查。"
+        )
     return archive
 
 
@@ -847,11 +806,12 @@ def _replan_oversized_pending_chunks(paper: Paper, chunks: list[ImportChunk]) ->
                 pass
         if oversized and not cached:
             if chunk.status == ImportChunk.Status.PARSED:
-                raise MineruError("历史已完成分片的解析缓存缺失或损坏，未修改已完成分片。"
-                                  "请先从任务备份恢复解析缓存，再点“重试”；也可把本机诊断号交给维护者检查。")
+                raise MineruError(
+                    "历史已完成分片的解析缓存缺失或损坏，未修改已完成分片。"
+                    "请先从任务备份恢复解析缓存，再点“重试”；也可把本机诊断号交给维护者检查。"
+                )
             parts = import_planning.plan_pdf_chunks(
-                len(paper.pages), limit,
-                start_page=chunk.source_page_start, end_page=chunk.source_page_end,
+                len(paper.pages), limit, start_page=chunk.source_page_start, end_page=chunk.source_page_end
             )
             for index, part in enumerate(parts):
                 values = part.as_record()
@@ -880,8 +840,7 @@ def _replan_oversized_pending_chunks(paper: Paper, chunks: list[ImportChunk]) ->
                     setattr(chunk, name, value)
                 chunk.save(update_fields=list(values))
         import_planning.validate_chunk_coverage(
-            list(paper.import_chunks.order_by("sequence")),
-            expected_start=1, expected_end=len(paper.pages),
+            list(paper.import_chunks.order_by("sequence")), expected_start=1, expected_end=len(paper.pages)
         )
 
 
@@ -940,24 +899,24 @@ def _chunk_blocks(paper: Paper, render: Path, *, revision: int | None = None) ->
             archive.unlink(missing_ok=True)
         if blocks is not None:
             results[chunk.sequence] = blocks
-            _save_chunk(paper, revision, chunk.pk,
-                status=ImportChunk.Status.PARSED,
-                artifact_path=str(archive),
-                error="",
+            _save_chunk(
+                paper, revision, chunk.pk, status=ImportChunk.Status.PARSED, artifact_path=str(archive), error=""
             )
             continue
-        jobs.append({
-            "pk": chunk.pk,
-            "sequence": chunk.sequence,
-            "source_page_start": chunk.source_page_start,
-            "source_page_end": chunk.source_page_end,
-            "page_map": tuple(int(page) for page in chunk.page_map),
-            "page_count": page_count,
-            "source": source,
-            "archive": archive,
-            "download": run_folder / archive.name,
-            "attempts": chunk.attempts + 1,
-        })
+        jobs.append(
+            {
+                "pk": chunk.pk,
+                "sequence": chunk.sequence,
+                "source_page_start": chunk.source_page_start,
+                "source_page_end": chunk.source_page_end,
+                "page_map": tuple(int(page) for page in chunk.page_map),
+                "page_count": page_count,
+                "source": source,
+                "archive": archive,
+                "download": run_folder / archive.name,
+                "attempts": chunk.attempts + 1,
+            }
+        )
 
     _paper_heartbeat(paper.pk, progress=len(results), total=len(chunks), revision=revision)
 
@@ -966,7 +925,10 @@ def _chunk_blocks(paper: Paper, render: Path, *, revision: int | None = None) ->
         ready_jobs: list[dict] = []
         for job in jobs:
             _check_run(paper.pk, revision)
-            _save_chunk(paper, revision, job["pk"],
+            _save_chunk(
+                paper,
+                revision,
+                job["pk"],
                 status=ImportChunk.Status.PARSING,
                 attempts=job["attempts"],
                 artifact_path=str(job["archive"]),
@@ -976,17 +938,11 @@ def _chunk_blocks(paper: Paper, render: Path, *, revision: int | None = None) ->
                 if not job["source"].is_file():
                     # PyMuPDF opens the same original file for every slice, so do
                     # this deterministically on the main thread before networking.
-                    write_pdf_slice(
-                        render,
-                        job["source"],
-                        job["source_page_start"] - 1,
-                        job["source_page_end"],
-                    )
+                    write_pdf_slice(render, job["source"], job["source_page_start"] - 1, job["source_page_end"])
             except Exception as exc:
                 failures.append((job["sequence"], exc))
-                _save_chunk(paper, revision, job["pk"],
-                    status=ImportChunk.Status.FAILED,
-                    error=_chunk_error_message(exc),
+                _save_chunk(
+                    paper, revision, job["pk"], status=ImportChunk.Status.FAILED, error=_chunk_error_message(exc)
                 )
             else:
                 ready_jobs.append(job)
@@ -994,11 +950,10 @@ def _chunk_blocks(paper: Paper, render: Path, *, revision: int | None = None) ->
         def run(job: dict) -> list[dict]:
             def cancel() -> bool:
                 return cancelled.is_set() or cancel_file.exists()
+
             mineru._check_cancel(cancel)
             job["download"].parent.mkdir(parents=True, exist_ok=True)
-            request_extract_file_from_pool(
-                job["source"], job["download"], job["page_count"], cancel=cancel,
-            )
+            request_extract_file_from_pool(job["source"], job["download"], job["page_count"], cancel=cancel)
             mineru._check_cancel(cancel)
             return load_blocks(job["download"], job["page_count"])
 
@@ -1022,11 +977,7 @@ def _chunk_blocks(paper: Paper, render: Path, *, revision: int | None = None) ->
                             for future in pending:
                                 future.cancel()
                             raise mineru.MineruCancelled
-                        done, pending = wait(
-                            pending,
-                            timeout=0.25,
-                            return_when=FIRST_COMPLETED,
-                        )
+                        done, pending = wait(pending, timeout=0.25, return_when=FIRST_COMPLETED)
                         if not done:
                             _paper_heartbeat(paper.pk, revision=revision)
                             continue
@@ -1040,21 +991,31 @@ def _chunk_blocks(paper: Paper, render: Path, *, revision: int | None = None) ->
                             except Exception as exc:
                                 _check_run(paper.pk, revision)
                                 failures.append((job["sequence"], exc))
-                                _save_chunk(paper, revision, job["pk"],
+                                _save_chunk(
+                                    paper,
+                                    revision,
+                                    job["pk"],
                                     status=ImportChunk.Status.FAILED,
                                     error=_chunk_error_message(exc),
                                 )
                             else:
                                 with transaction.atomic():
                                     current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
-                                    if current is None or int((current.processing_plan or {}).get("revision", 0)) != revision:
+                                    if (
+                                        current is None
+                                        or int((current.processing_plan or {}).get("revision", 0)) != revision
+                                    ):
                                         cancelled.set()
                                         raise mineru.MineruCancelled
                                     job["download"].replace(job["archive"])
                                     results[job["sequence"]] = blocks
                                     ImportChunk.objects.filter(pk=job["pk"]).update(
-                                        status=ImportChunk.Status.PARSED, sha256=digest,
-                                        artifact_path=str(job["archive"]), error="", updated_at=timezone.now())
+                                        status=ImportChunk.Status.PARSED,
+                                        sha256=digest,
+                                        artifact_path=str(job["archive"]),
+                                        error="",
+                                        updated_at=timezone.now(),
+                                    )
                             _paper_heartbeat(paper.pk, progress=len(results), total=len(chunks), revision=revision)
             finally:
                 cancelled.set()
@@ -1077,11 +1038,7 @@ def _chunk_blocks(paper: Paper, render: Path, *, revision: int | None = None) ->
             local_page = block["page_idx"]
             if not 0 <= local_page < len(chunk.page_map):
                 raise MineruError(f"第 {chunk.sequence} 个分片返回了无效页码")
-            merged.append({
-                **block,
-                "seq": len(merged),
-                "page_idx": int(chunk.page_map[local_page]) - 1,
-            })
+            merged.append({**block, "seq": len(merged), "page_idx": int(chunk.page_map[local_page]) - 1})
     return merged
 
 
@@ -1089,55 +1046,57 @@ def _plan_structure(paper: Paper, blocks: list[dict]) -> tuple[dict, bool]:
     """用已有 MinerU 块本地判断题号结构；不调用任何识读模型。"""
     ranges = photos.page_ranges(paper.pages, blocks)
     ordered_ranges = [ranges.get(page["page_idx"]) for page in paper.pages]
-    plan = import_planning.analyze_page_number_ranges(
-        ordered_ranges, material_type=paper.material_type,
-    )
+    plan = import_planning.analyze_page_number_ranges(ordered_ranges, material_type=paper.material_type)
     scopes = (
         segment.book_numbering_scopes(paper.pages, blocks)
         if paper.material_type == Paper.MaterialType.BOOK
         else segment.numbering_scopes(paper.pages, blocks)
     )
     scoped_restart = len(scopes) > 1
-    suggested_groups = [scope["pages"] for scope in scopes] if scoped_restart else [
-        list(range(group.page_start - 1, group.page_end)) for group in plan.groups
-    ]
+    suggested_groups = (
+        [scope["pages"] for scope in scopes]
+        if scoped_restart
+        else [list(range(group.page_start - 1, group.page_end)) for group in plan.groups]
+    )
     structure = dict(paper.structure or {})
-    structure.update({
-        "page_ranges": [list(value) if value else None for value in ordered_ranges],
-        "suggested_groups": suggested_groups,
-        "suggested_scopes": scopes if scoped_restart else [],
-        "signals": [
-            {
-                "kind": signal.kind,
-                "page": signal.source_page - 1,
-                "numbers": list(signal.numbers),
-                "overlap": list(signal.overlapping_numbers),
-                "message": signal.message,
-            }
-            for signal in plan.signals
-        ],
-    })
+    structure.update(
+        {
+            "page_ranges": [list(value) if value else None for value in ordered_ranges],
+            "suggested_groups": suggested_groups,
+            "suggested_scopes": scopes if scoped_restart else [],
+            "signals": [
+                {
+                    "kind": signal.kind,
+                    "page": signal.source_page - 1,
+                    "numbers": list(signal.numbers),
+                    "overlap": list(signal.overlapping_numbers),
+                    "message": signal.message,
+                }
+                for signal in plan.signals
+            ],
+        }
+    )
     if scoped_restart and not structure["signals"]:
-        structure["signals"] = [{
-            "kind": "numbering_restart",
-            "page": scopes[1]["start_page"],
-            "numbers": [scopes[1]["first_number"]],
-            "overlap": [],
-            "message": "同一资料中题号重新开始；已按独立题组保留，不会覆盖前面的同号题",
-        }]
+        structure["signals"] = [
+            {
+                "kind": "numbering_restart",
+                "page": scopes[1]["start_page"],
+                "numbers": [scopes[1]["first_number"]],
+                "overlap": [],
+                "message": "同一资料中题号重新开始；已按独立题组保留，不会覆盖前面的同号题",
+            }
+        ]
     confirmed = bool(structure.get("confirmed"))
     needs_confirmation = (
-        (plan.needs_confirmation or (paper.material_type == Paper.MaterialType.EXAM and scoped_restart))
-        and not confirmed
-    )
+        plan.needs_confirmation or (paper.material_type == Paper.MaterialType.EXAM and scoped_restart)
+    ) and not confirmed
     return structure, needs_confirmation
 
 
 BOOK_GROUP_KIND = {"example": "例题", "exercise": "习题"}
 
 
-def _book_group_names(source_groups: list, paper: Paper,
-                       blocks: list[dict] | None = None) -> dict[int, str]:
+def _book_group_names(source_groups: list, paper: Paper, blocks: list[dict] | None = None) -> dict[int, str]:
     """教材题组用书上真实的章节名，不再是「第 N 组」。
 
     只读版面块，不调模型。同一个章、同一种题源会有很多组，重名比「第 N 组」
@@ -1171,13 +1130,13 @@ def _book_group_names(source_groups: list, paper: Paper,
     return result
 
 
-def _question_group_specs(paper: Paper, structure: dict | None = None,
-                          blocks: list[dict] | None = None) -> list[dict]:
+def _question_group_specs(paper: Paper, structure: dict | None = None, blocks: list[dict] | None = None) -> list[dict]:
     """Return the current confirmed/suggested scopes in a model-ready form."""
     structure = structure if structure is not None else (paper.structure or {})
     scopes = structure.get("confirmed_scopes") or structure.get("suggested_scopes") or []
-    page_groups = structure.get("confirmed_groups") or \
-        structure.get("suggested_groups") or [list(range(len(paper.pages)))]
+    page_groups = (
+        structure.get("confirmed_groups") or structure.get("suggested_groups") or [list(range(len(paper.pages)))]
+    )
     is_book = paper.material_type == Paper.MaterialType.BOOK
     specs: list[dict] = []
     source_groups = scopes if scopes else [{"pages": pages} for pages in page_groups]
@@ -1189,29 +1148,44 @@ def _question_group_specs(paper: Paper, structure: dict | None = None,
         valid = sorted({int(page) for page in pages if type(page) is int and 0 <= page < len(paper.pages)})
         if not valid:
             continue
-        title = ("第 %d 组" % (sequence + 1)) if is_book \
+        title = (
+            ("第 %d 组" % (sequence + 1))
+            if is_book
             else (paper.display_name if sequence == 0 else f"{paper.display_name}（{sequence + 1}）")
+        )
         if is_book:
             title = names.get(sequence, title)
-        specs.append({
-            "title": title[:255],
-            "kind": (QuestionGroup.Kind.CHAPTER if paper.material_type == Paper.MaterialType.BOOK
-                     else QuestionGroup.Kind.EXAM),
-            "sequence": sequence,
-            "page_start": min(valid) + 1,
-            "page_end": max(valid) + 1,
-            "metadata": {
-                "pages": valid,
-                **({"seq_start": scope.get("seq_start"), "seq_end": scope.get("seq_end")}
-                   if isinstance(scope, dict) and (scope.get("seq_start") is not None
-                                                   or scope.get("seq_end") is not None) else {}),
-                **({
-                    "scope_anchor_seq": scope.get("scope_anchor_seq"),
-                    "source_kind": scope.get("source_kind"),
-                    "scope_version": 1,
-                } if isinstance(scope, dict) and scope.get("scope_anchor_seq") is not None else {}),
-            },
-        })
+        specs.append(
+            {
+                "title": title[:255],
+                "kind": (
+                    QuestionGroup.Kind.CHAPTER
+                    if paper.material_type == Paper.MaterialType.BOOK
+                    else QuestionGroup.Kind.EXAM
+                ),
+                "sequence": sequence,
+                "page_start": min(valid) + 1,
+                "page_end": max(valid) + 1,
+                "metadata": {
+                    "pages": valid,
+                    **(
+                        {"seq_start": scope.get("seq_start"), "seq_end": scope.get("seq_end")}
+                        if isinstance(scope, dict)
+                        and (scope.get("seq_start") is not None or scope.get("seq_end") is not None)
+                        else {}
+                    ),
+                    **(
+                        {
+                            "scope_anchor_seq": scope.get("scope_anchor_seq"),
+                            "source_kind": scope.get("source_kind"),
+                            "scope_version": 1,
+                        }
+                        if isinstance(scope, dict) and scope.get("scope_anchor_seq") is not None
+                        else {}
+                    ),
+                },
+            }
+        )
     if not specs:
         raise RuntimeError("没有可用于切题的页面组")
     return specs
@@ -1274,9 +1248,7 @@ def _ensure_question_groups(paper: Paper) -> list[QuestionGroup]:
 
     specs = _question_group_specs(paper)
     if not existing:
-        QuestionGroup.objects.bulk_create([
-            QuestionGroup(paper=paper, **spec) for spec in specs
-        ])
+        QuestionGroup.objects.bulk_create([QuestionGroup(paper=paper, **spec) for spec in specs])
         if rebuild:
             structure["groups_need_rebuild"] = False
             structure["groups_applied_at"] = structure.get("confirmed_at") or timezone.now().isoformat()
@@ -1293,12 +1265,16 @@ def _ensure_question_groups(paper: Paper) -> list[QuestionGroup]:
             wanted = tuple(spec["metadata"]["pages"])
             wanted_anchor = spec["metadata"].get("scope_anchor_seq")
             wanted_kind = spec["metadata"].get("source_kind")
-            match = next((
-                group for group in unused
-                if wanted_anchor is not None
-                and (group.metadata or {}).get("scope_anchor_seq") == wanted_anchor
-                and (group.metadata or {}).get("source_kind") == wanted_kind
-            ), None)
+            match = next(
+                (
+                    group
+                    for group in unused
+                    if wanted_anchor is not None
+                    and (group.metadata or {}).get("scope_anchor_seq") == wanted_anchor
+                    and (group.metadata or {}).get("source_kind") == wanted_kind
+                ),
+                None,
+            )
             if match is None:
                 match = next((group for group in unused if _group_pages(group) == wanted), None)
             if match is not None:
@@ -1333,28 +1309,25 @@ def _ensure_question_groups(paper: Paper) -> list[QuestionGroup]:
                 group.metadata = metadata
                 # Keep a human/previous source title on a matched group. Only a
                 # newly created group needs the generated title/kind.
-                group.save(update_fields=[
-                    "sequence", "kind", "page_start", "page_end", "metadata", "updated_at",
-                ])
+                group.save(update_fields=["sequence", "kind", "page_start", "page_end", "metadata", "updated_at"])
             desired.append(group)
 
         desired_pages = {group.pk: set(_group_pages(group)) for group in desired}
         changed_questions: list[Question] = []
         for question in Question.all_objects.filter(paper=paper):
             region_pages = {
-                item.get("page_idx") for item in (question.regions or question.regions_auto or [])
+                item.get("page_idx")
+                for item in (question.regions or question.regions_auto or [])
                 if isinstance(item, dict) and type(item.get("page_idx")) is int
             }
-            matches = [
-                group for group in desired
-                if region_pages and region_pages.issubset(desired_pages[group.pk])
-            ]
+            matches = [group for group in desired if region_pages and region_pages.issubset(desired_pages[group.pk])]
             if len(matches) == 1 and question.group_id != matches[0].pk:
                 question.group = matches[0]
                 changed_questions.append(question)
         if changed_questions:
             Question.all_objects.bulk_update(changed_questions, ["group"])
             from .question_layout import bump
+
             bump(paper.pk)
 
         structure["groups_need_rebuild"] = False
@@ -1362,6 +1335,7 @@ def _ensure_question_groups(paper: Paper) -> list[QuestionGroup]:
         Paper.objects.filter(pk=paper.pk).update(structure=structure, updated_at=timezone.now())
         paper.structure = structure
     return desired
+
 
 def parse(paper: Paper, *, revision: int | None = None) -> None:
     paper.refresh_from_db()
@@ -1372,6 +1346,7 @@ def parse(paper: Paper, *, revision: int | None = None) -> None:
         raise mineru.MineruCancelled
     if (paper.processing_plan or {}).get("mode") in {"manual", "native"}:
         from . import intake
+
         if not paper.pages:
             intake.prepare(paper, paper.processing_plan["mode"])
         return
@@ -1394,9 +1369,7 @@ def parse(paper: Paper, *, revision: int | None = None) -> None:
         if not _set_if_plan_current(paper, plan_revision, pages=imaging.page_sizes(render, kind)):
             raise mineru.MineruCancelled
     chunked = kind == "pdf" and (
-        import_planning.pdf_requires_chunks(
-            len(paper.pages), paper.material_type, MAX_PDF_PAGES,
-        )
+        import_planning.pdf_requires_chunks(len(paper.pages), paper.material_type, MAX_PDF_PAGES)
         or paper.import_chunks.exists()
     )
     archive: Path | None = None
@@ -1433,8 +1406,13 @@ def parse(paper: Paper, *, revision: int | None = None) -> None:
                     _check_run(paper.pk, plan_revision)
                     run_folder.mkdir(parents=True, exist_ok=True)
                     request_extract_file_from_pool(
-                        render, download, len(paper.pages), heartbeat=heartbeat, on_state=on_state,
-                        restart=restart_file.exists, cancel=cancel,
+                        render,
+                        download,
+                        len(paper.pages),
+                        heartbeat=heartbeat,
+                        on_state=on_state,
+                        restart=restart_file.exists,
+                        cancel=cancel,
                     )
                     _check_run(paper.pk, plan_revision)
                     # Validate before promoting this run's cache. Old responses
@@ -1493,7 +1471,9 @@ def parse(paper: Paper, *, revision: int | None = None) -> None:
             # Chunked results are mapped from slices of the current render;
             # applying an older whole-document ZIP's order would move them twice.
             parsed_order = list(paper.photos.get("order") or [])
-        elif archive is not None and saved_archive.get("sha256") and saved_archive.get("sha256") == _file_sha256(archive):
+        elif (
+            archive is not None and saved_archive.get("sha256") and saved_archive.get("sha256") == _file_sha256(archive)
+        ):
             parsed_order = saved_archive.get("order")
         if preserve_order or parsed_order is not None:
             blocks = arrange_photo_pages(paper, blocks, preserve_order=preserve_order, parsed_order=parsed_order)
@@ -1560,8 +1540,9 @@ def _store_ranges(info: dict, ranges: dict[int, tuple | None]) -> None:
     info["ranges"] = {str(info["order"][page]): list(span) if span else None for page, span in ranges.items()}
 
 
-def arrange_photo_pages(paper: Paper, blocks: list[dict], *, preserve_order: bool = False,
-                        parsed_order: list[int] | None = None) -> list[dict]:
+def arrange_photo_pages(
+    paper: Paper, blocks: list[dict], *, preserve_order: bool = False, parsed_order: list[int] | None = None
+) -> list[dict]:
     """MinerU 读完后、切题之前：按卷面题号把照片排成正确的页序。
 
     blocks 的页码是交给 MinerU 时的页序；返回按最终页序改好页码的 blocks。
@@ -1622,17 +1603,17 @@ def reorder_photo_pages(paper: Paper, order: list[int]) -> None:
     # complete scope after structure confirmation.
     ordered_blocks = sorted(blocks, key=lambda block: (mapping[block["page_idx"]], block["seq"]))
     seq_mapping = {block["seq"]: sequence for sequence, block in enumerate(ordered_blocks)}
-    remapped_blocks = [
-        {**photos.remap_page(mapping, block), "seq": seq_mapping[block["seq"]]}
-        for block in blocks
-    ]
+    remapped_blocks = [{**photos.remap_page(mapping, block), "seq": seq_mapping[block["seq"]]} for block in blocks]
     new_pages = imaging.page_sizes(Path(paper.render_path), "pdf")
     ranges = photos.page_ranges(new_pages, remapped_blocks)
-    info["notes"] = [_page_note(info, ranges, "已手动调整。"),
-                     *[note for note in info.get("notes", []) if not note.startswith(PAGE_NOTE)]]
+    info["notes"] = [
+        _page_note(info, ranges, "已手动调整。"),
+        *[note for note in info.get("notes", []) if not note.startswith(PAGE_NOTE)],
+    ]
     _store_ranges(info, ranges)
     with transaction.atomic():
         from .question_layout import invalidate_page_epoch
+
         invalidate_page_epoch(paper)
         changed = list(paper.blocks.all())
         # Two-phase renumbering avoids a transient collision on the
@@ -1650,8 +1631,7 @@ def reorder_photo_pages(paper: Paper, order: list[int]) -> None:
                 remapped = [photos.remap_page(mapping, item) for item in getattr(question, field)]
                 if field == "figure_candidates":
                     remapped = [
-                        {**item, **({"seq": seq_mapping[item["seq"]]}
-                                   if item.get("seq") in seq_mapping else {})}
+                        {**item, **({"seq": seq_mapping[item["seq"]]} if item.get("seq") in seq_mapping else {})}
                         for item in remapped
                     ]
                 setattr(question, field, remapped)
@@ -1662,10 +1642,23 @@ def reorder_photo_pages(paper: Paper, order: list[int]) -> None:
             question.ocr_suggestion = {}
             question.ocr_pending = False
             question.reread_requested = False
-            question.save(update_fields=[
-                "regions", "regions_auto", "figures", "figure_candidates", "figure_review",
-                "approved", "approved_at", "approved_content_hash", "content_revision", "ocr_suggestion", "ocr_pending", "reread_requested", "updated_at",
-            ])
+            question.save(
+                update_fields=[
+                    "regions",
+                    "regions_auto",
+                    "figures",
+                    "figure_candidates",
+                    "figure_review",
+                    "approved",
+                    "approved_at",
+                    "approved_content_hash",
+                    "content_revision",
+                    "ocr_suggestion",
+                    "ocr_pending",
+                    "reread_requested",
+                    "updated_at",
+                ]
+            )
         # Question groups are source scopes, so their page membership must move
         # with the pages just like blocks and cards.  Leaving this stale can put a
         # chapter's cards under another chapter after a cross-group reorder.
@@ -1682,8 +1675,7 @@ def reorder_photo_pages(paper: Paper, order: list[int]) -> None:
             if isinstance(source_pages, list) and len(source_pages) == len(old_pages):
                 source_by_old_page = dict(zip(old_pages, source_pages))
                 metadata["source_pages"] = [
-                    source_by_old_page[old_page]
-                    for old_page in sorted(old_pages, key=mapping.get)
+                    source_by_old_page[old_page] for old_page in sorted(old_pages, key=mapping.get)
                 ]
             for key in ("seq_start", "seq_end"):
                 old_seq = metadata.get(key)
@@ -1726,9 +1718,12 @@ def reorder_photo_pages(paper: Paper, order: list[int]) -> None:
 
 # ---------------------------------------------------------------- 2. 切题
 
+
 def _block_dicts(paper: Paper) -> list[dict]:
-    return [{"seq": b.seq, "type": b.type, "page_idx": b.page_idx, "bbox": b.bbox, "text": b.text}
-            for b in paper.blocks.all()]
+    return [
+        {"seq": b.seq, "type": b.type, "page_idx": b.page_idx, "bbox": b.bbox, "text": b.text}
+        for b in paper.blocks.all()
+    ]
 
 
 def _snap_to_gap(image: Image.Image, row: int, band_height: float) -> int:
@@ -1750,12 +1745,10 @@ def _snap_to_gap(image: Image.Image, row: int, band_height: float) -> int:
 
 
 _OPTION_LINE = re.compile(r"^\s*[A-EＡ-Ｅ]\s*[.．、:：]")
-LOCATE_SNAP_RANGE = 30.0   # 页面坐标：定位结果向下吸附到题干行的最大距离
+LOCATE_SNAP_RANGE = 30.0  # 页面坐标：定位结果向下吸附到题干行的最大距离
 
 
-def _snap_located_start(
-    blocks: list[dict] | None, layout, page_idx: int, col: int, y: float,
-) -> float:
+def _snap_located_start(blocks: list[dict] | None, layout, page_idx: int, col: int, y: float) -> float:
     """Move an AI-located start onto the first stem line at or just below it.
 
     The band the model names is coarse.  Landing inside the previous
@@ -1777,7 +1770,7 @@ def _snap_located_start(
             below.append((bbox[1], str(block.get("text") or "")))
     below.sort()
     if not below or not _OPTION_LINE.match(below[0][1]):
-        return y   # already on (or just above) a non-option line
+        return y  # already on (or just above) a non-option line
     stem = next((top for top, text in below if not _OPTION_LINE.match(text)), None)
     return stem if stem is not None else y
 
@@ -1785,15 +1778,22 @@ def _snap_located_start(
 FIRST_LINE_HEIGHT = 20.0
 
 
-def _inside_previous_opening(blocks: list[dict] | None, previous: segment.Start,
-                             page_idx: int, col: int, y: float) -> bool:
+def _inside_previous_opening(
+    blocks: list[dict] | None, previous: segment.Start, page_idx: int, col: int, y: float
+) -> bool:
     """A located number cannot sit on the previous question's own first line."""
     if page_idx != previous.page or col != previous.col or y < previous.y:
         return False
     # Only the first printed line: MinerU sometimes merges the next question
     # into the previous paragraph, and a number further down that block is real.
-    opening = next((block for block in blocks or [] if previous.seq is not None and block.get("seq") == previous.seq
-                    and block.get("bbox")), None)
+    opening = next(
+        (
+            block
+            for block in blocks or []
+            if previous.seq is not None and block.get("seq") == previous.seq and block.get("bbox")
+        ),
+        None,
+    )
     bottom = previous.y + FIRST_LINE_HEIGHT
     if opening:
         bottom = min(bottom, float(opening["bbox"][3]))
@@ -1824,7 +1824,11 @@ def merged_question_flag(number: int) -> str:
 
 
 def locate_missing(
-    paper: Paper, layout, starts: list[segment.Start], store: PageStore, blocks: list[dict] | None = None,
+    paper: Paper,
+    layout,
+    starts: list[segment.Start],
+    store: PageStore,
+    blocks: list[dict] | None = None,
     unresolved: list[tuple[int, int]] | None = None,
 ) -> list[str]:
     """MinerU 漏掉的题号：把前一题到后一题之间的原卷交给 AI，只问"第 N 题的题号在第几格"。
@@ -1880,20 +1884,32 @@ def locate_missing(
             # 一张题干只有 [?] 的空壳。题号递增时第 N 题总在第 N-1 题之后，定位到它前面
             # 就是定位错了：退回 unresolved，让上一题自己说「可能吞了它」——那条通路本来
             # 就是为这件事准备的，只是以前错位定位会绕过所有警告分支直接当成成功。
-            notes.append(f"AI 给出的第 {number} 题位置比第 {previous.number} 题的起点还靠前，没有采用；"
-                         f"它可能和第 {previous.number} 题在同一张卡里。")
+            notes.append(
+                f"AI 给出的第 {number} 题位置比第 {previous.number} 题的起点还靠前，没有采用；"
+                f"它可能和第 {previous.number} 题在同一张卡里。"
+            )
             unresolved.append((number, previous.number))
             continue
         if _inside_previous_opening(blocks, previous, page_idx, col, y):
-            notes.append(f"AI 给出的第 {number} 题位置落在第 {previous.number} 题的第一行，没有采用；"
-                         f"它暂时和第 {previous.number} 题在同一张卡里。")
+            notes.append(
+                f"AI 给出的第 {number} 题位置落在第 {previous.number} 题的第一行，没有采用；"
+                f"它暂时和第 {previous.number} 题在同一张卡里。"
+            )
             unresolved.append((number, previous.number))
             continue
         snapped = _snap_located_start(blocks, layout, page_idx, col, y)
         # y 是题号上方的空隙：前一题到此为止，本题从这里（再往上留一点）开始。
-        starts.append(segment.Start(number=number, page=page_idx, x=x,
-                                    y=(snapped if snapped != y else y + segment.END_GAP),
-                                    seq=None, source="located", col=col))
+        starts.append(
+            segment.Start(
+                number=number,
+                page=page_idx,
+                x=x,
+                y=(snapped if snapped != y else y + segment.END_GAP),
+                seq=None,
+                source="located",
+                col=col,
+            )
+        )
         notes.append(f"第 {number} 题的题号 MinerU 没读出来，已由 AI 在原卷上定位。")
     return notes
 
@@ -1920,8 +1936,7 @@ FIGURE_RECLAIM_TIE = 2.0
 def reclaim_stranded_figures(items: list[dict], blocks: list[dict]) -> list[str]:
     """把「被上一张卡认领走、本题又确实缺图」的那张图改回本题。"""
     notes: list[str] = []
-    visuals = [b for b in blocks or []
-               if b.get("bbox") and b.get("type") in segment.FIGURE_TYPES]
+    visuals = [b for b in blocks or [] if b.get("bbox") and b.get("type") in segment.FIGURE_TYPES]
     by_seq = {b["seq"]: b for b in visuals if isinstance(b.get("seq"), int)}
 
     def owns_inside(item: dict) -> bool:
@@ -1929,7 +1944,8 @@ def reclaim_stranded_figures(items: list[dict], blocks: list[dict]) -> list[str]
         for candidate in item.get("figure_candidates") or []:
             block = by_seq.get(candidate.get("seq"))
             if block is not None and segment.center_in_regions(
-                    int(block["page_idx"]), block["bbox"], item.get("regions") or []):
+                int(block["page_idx"]), block["bbox"], item.get("regions") or []
+            ):
                 return True
         return False
 
@@ -1943,25 +1959,24 @@ def reclaim_stranded_figures(items: list[dict], blocks: list[dict]) -> list[str]
         确实更靠近题目，「近的赢」照旧成立；只有同一排里的两张才分不出来。
         """
         left, right = first["bbox"], second["bbox"]
-        return (abs(float(left[3]) - float(right[3])) <= FIGURE_RECLAIM_TIE
-                and (float(left[2]) <= float(right[0]) or float(right[2]) <= float(left[0])))
+        return abs(float(left[3]) - float(right[3])) <= FIGURE_RECLAIM_TIE and (
+            float(left[2]) <= float(right[0]) or float(right[2]) <= float(left[0])
+        )
 
     for item in items:
         regions = item.get("regions") or []
         if not regions or owns_inside(item):
             # 本题范围里已经有图就不是这一类，别去动一张已经拿对的卡。
             continue
-        cue_regions = [
-            region for region in regions
-            if has_figure_cue(segment._text_in_regions(blocks, [region]))
-        ]
+        cue_regions = [region for region in regions if has_figure_cue(segment._text_in_regions(blocks, [region]))]
         if not cue_regions:
             continue
         for region in cue_regions:
             page_idx = int(region["page_idx"])
             top = float(region["bbox"][1])
             stranded = [
-                block for block in visuals
+                block
+                for block in visuals
                 if int(block["page_idx"]) == page_idx
                 and float(block["bbox"][3]) <= top
                 and top - float(block["bbox"][3]) <= FIGURE_RECLAIM_BAND
@@ -1981,17 +1996,13 @@ def reclaim_stranded_figures(items: list[dict], blocks: list[dict]) -> list[str]
             sequence = block.get("seq")
             if sequence is None:
                 continue
-            holder = next((other for other in items
-                           if other is not item and holds(other, sequence)), None)
+            holder = next((other for other in items if other is not item and holds(other, sequence)), None)
             if holder is not None and len(holder.get("figure_candidates") or []) <= 1:
                 # 上一张卡可能就靠这一张图。别的题还指着图的时候不抢。
                 continue
             if holder is not None:
-                holder["figure_candidates"] = [
-                    c for c in holder["figure_candidates"] if c.get("seq") != sequence
-                ]
-            entry = {"seq": sequence, "page_idx": page_idx, "bbox": list(block["bbox"]),
-                     "recovered_input": True}
+                holder["figure_candidates"] = [c for c in holder["figure_candidates"] if c.get("seq") != sequence]
+            entry = {"seq": sequence, "page_idx": page_idx, "bbox": list(block["bbox"]), "recovered_input": True}
             item["figure_candidates"] = [*(item.get("figure_candidates") or []), entry]
             item["regions"] = [*regions, {"page_idx": page_idx, "bbox": list(block["bbox"])}]
             regions = item["regions"]
@@ -2007,26 +2018,29 @@ def reclaim_stranded_figures(items: list[dict], blocks: list[dict]) -> list[str]
             page_idx = int(region["page_idx"])
             top, bottom = float(region["bbox"][1]), float(region["bbox"][3])
             hanging = [
-                block for block in visuals
+                block
+                for block in visuals
                 if int(block["page_idx"]) == page_idx
                 and top <= float(block["bbox"][1]) <= bottom
                 and float(block["bbox"][3]) - bottom <= FIGURE_OVERHANG
                 and not holds(item, block.get("seq"))
-                and not any(other is not item and holds(other, block.get("seq"))
-                            for other in items)
+                and not any(other is not item and holds(other, block.get("seq")) for other in items)
                 # 图心若落在别的卡的范围内，那是那道卡的图：起点碰巧压在本卡的
                 # 文字带里而已，不碰。
-                and not any(other is not item
-                            and segment.center_in_regions(page_idx, block["bbox"],
-                                                          other.get("regions") or [])
-                            for other in items)
+                and not any(
+                    other is not item and segment.center_in_regions(page_idx, block["bbox"], other.get("regions") or [])
+                    for other in items
+                )
             ]
             if not hanging:
                 continue
-            block = min(hanging,
-                        key=lambda b: abs((float(b["bbox"][1]) + float(b["bbox"][3])) / 2 - bottom))
-            entry = {"seq": block.get("seq"), "page_idx": page_idx,
-                     "bbox": list(block["bbox"]), "recovered_input": True}
+            block = min(hanging, key=lambda b: abs((float(b["bbox"][1]) + float(b["bbox"][3])) / 2 - bottom))
+            entry = {
+                "seq": block.get("seq"),
+                "page_idx": page_idx,
+                "bbox": list(block["bbox"]),
+                "recovered_input": True,
+            }
             item["figure_candidates"] = [*(item.get("figure_candidates") or []), entry]
             item["regions"] = [*regions, {"page_idx": page_idx, "bbox": list(block["bbox"])}]
             regions = item["regions"]
@@ -2078,8 +2092,12 @@ def _normalise_source_kind(item: dict) -> str:
     raw = item.get("source_kind") or (item.get("start") or {}).get("source_kind")
     if (item.get("start") or {}).get("source") == "manual":
         return Question.SourceKind.MANUAL
-    if raw in {Question.SourceKind.EXAMPLE, Question.SourceKind.EXERCISE,
-               Question.SourceKind.MANUAL, Question.SourceKind.UNKNOWN}:
+    if raw in {
+        Question.SourceKind.EXAMPLE,
+        Question.SourceKind.EXERCISE,
+        Question.SourceKind.MANUAL,
+        Question.SourceKind.UNKNOWN,
+    }:
         return raw
     # The generic exam path calls ordinary starts ``question``; the persisted
     # schema deliberately uses ``unknown`` so future classifiers can improve it
@@ -2112,8 +2130,12 @@ def _snap_only_change(old: list[dict] | None, new: list[dict] | None) -> bool:
         a, b = before.get("bbox") or [], after.get("bbox") or []
         if len(a) != 4 or len(b) != 4:
             return False
-        if abs(a[0] - b[0]) > 1 or abs(a[2] - b[2]) > 1 \
-                or abs(a[1] - b[1]) > SNAP_TOLERANCE or abs(a[3] - b[3]) > SNAP_TOLERANCE:
+        if (
+            abs(a[0] - b[0]) > 1
+            or abs(a[2] - b[2]) > 1
+            or abs(a[1] - b[1]) > SNAP_TOLERANCE
+            or abs(a[3] - b[3]) > SNAP_TOLERANCE
+        ):
             return False
     return True
 
@@ -2157,8 +2179,7 @@ def _question_is_human_protected(question: Question) -> bool:
     review = question.figure_review if isinstance(question.figure_review, dict) else {}
     return bool(
         _question_range_is_human_protected(question)
-        or any(isinstance(figure, dict) and figure.get("source") == "manual"
-               for figure in (question.figures or []))
+        or any(isinstance(figure, dict) and figure.get("source") == "manual" for figure in (question.figures or []))
         or review.get("source") == "human"
     )
 
@@ -2177,7 +2198,7 @@ def _trim_example_solution_text(value: object) -> tuple[str, bool]:
     # appears a second time after the statements to prove.  Preserve the first
     # imperative label and cut at the second one.  With no second label there
     # is no text-only proof that anything should be removed.
-    if not text[:match.start()].strip():
+    if not text[: match.start()].strip():
         if "证明" in match.group(0) and len(matches) > 1:
             match = matches[1]
         else:
@@ -2185,7 +2206,7 @@ def _trim_example_solution_text(value: object) -> tuple[str, bool]:
             # with no preceding question is evidence of a bad source/read,
             # not proof that the entire saved card may be discarded locally.
             return text.strip(), False
-    return text[:match.start()].rstrip(), True
+    return text[: match.start()].rstrip(), True
 
 
 def _saved_example_solution_text_present(question: Question) -> bool:
@@ -2209,12 +2230,10 @@ def _strict_prefix_regions(old: list[dict], new: list[dict], *, tolerance: float
         if fresh.get("page_idx") != previous.get("page_idx"):
             return False
         fresh_box, old_box = fresh.get("bbox"), previous.get("bbox")
-        if not (isinstance(fresh_box, list) and isinstance(old_box, list)
-                and len(fresh_box) == len(old_box) == 4):
+        if not (isinstance(fresh_box, list) and isinstance(old_box, list) and len(fresh_box) == len(old_box) == 4):
             return False
         try:
-            if any(abs(float(fresh_box[pos]) - float(old_box[pos])) > tolerance
-                   for pos in (0, 1, 2)):
+            if any(abs(float(fresh_box[pos]) - float(old_box[pos])) > tolerance for pos in (0, 1, 2)):
                 return False
             if float(fresh_box[3]) > float(old_box[3]) + tolerance:
                 return False
@@ -2236,8 +2255,7 @@ def _regions_contained_in(old: list[dict], new: list[dict], *, tolerance: float 
         contained = False
         for previous in old:
             old_box = previous.get("bbox") if isinstance(previous, dict) else None
-            if previous.get("page_idx") != fresh.get("page_idx") \
-                    or not isinstance(old_box, list) or len(old_box) != 4:
+            if previous.get("page_idx") != fresh.get("page_idx") or not isinstance(old_box, list) or len(old_box) != 4:
                 continue
             try:
                 contained = (
@@ -2273,15 +2291,12 @@ def _solution_only_shortening(question: Question, item: dict, blocks: list[dict]
         return False
     if question.regions == (item.get("regions") or []):
         old_candidate_keys = {
-            key for candidate in (question.figure_candidates or [])
-            if (key := candidate_key(candidate)) is not None
+            key for candidate in (question.figure_candidates or []) if (key := candidate_key(candidate)) is not None
         }
         new_candidate_keys = {
-            key for candidate in (item.get("figure_candidates") or [])
-            if (key := candidate_key(candidate)) is not None
+            key for candidate in (item.get("figure_candidates") or []) if (key := candidate_key(candidate)) is not None
         }
-        return _saved_example_solution_text_present(question) \
-            or old_candidate_keys != new_candidate_keys
+        return _saved_example_solution_text_present(question) or old_candidate_keys != new_candidate_keys
     new_regions = item.get("regions") or []
     recovered_count = len(metadata.get("recovered_input_figure_seqs") or [])
     core_regions = new_regions[:-recovered_count] if recovered_count else new_regions
@@ -2290,8 +2305,9 @@ def _solution_only_shortening(question: Question, item: dict, blocks: list[dict]
     # only those explicitly marked image crops is the same deterministic fix.
     if recovered_count and question.regions == core_regions:
         return True
-    if not (_strict_prefix_regions(question.regions, new_regions)
-            or _regions_contained_in(question.regions, new_regions)):
+    if not (
+        _strict_prefix_regions(question.regions, new_regions) or _regions_contained_in(question.regions, new_regions)
+    ):
         return False
     old_blocks = segment.text_blocks_in(blocks, question.regions)
     new_blocks = segment.text_blocks_in(blocks, item.get("regions") or [])
@@ -2301,12 +2317,7 @@ def _solution_only_shortening(question: Question, item: dict, blocks: list[dict]
     return boundary_seq in old_blocks and new_blocks.issubset(old_blocks)
 
 
-def _remap_trimmed_reading(
-    reading: object,
-    *,
-    old_candidates: list[dict],
-    new_candidates: list[dict],
-) -> dict:
+def _remap_trimmed_reading(reading: object, *, old_candidates: list[dict], new_candidates: list[dict]) -> dict:
     """Trim one saved reader result and remap surviving candidate labels."""
 
     if not isinstance(reading, dict):
@@ -2316,13 +2327,15 @@ def _remap_trimmed_reading(
     old_label_to_key = {
         str(candidate.get("label")): key
         for candidate in old_candidates
-        if isinstance(candidate, dict) and candidate.get("label") is not None
+        if isinstance(candidate, dict)
+        and candidate.get("label") is not None
         and (key := candidate_key(candidate)) is not None
     }
     new_key_to_label = {
         key: str(candidate.get("label"))
         for candidate in new_candidates
-        if isinstance(candidate, dict) and candidate.get("label") is not None
+        if isinstance(candidate, dict)
+        and candidate.get("label") is not None
         and (key := candidate_key(candidate)) is not None
     }
     assignments: dict[str, str] = {}
@@ -2334,32 +2347,21 @@ def _remap_trimmed_reading(
         if candidate.get("recovered_input") is True and candidate.get("label") is not None:
             assignments[str(candidate["label"])] = "stem"
     result["figures"] = assignments
-    remaining_slots = {
-        role for role in assignments.values()
-        if role == "stem" or role in readers.OPTION_KEYS
-    }
+    remaining_slots = {role for role in assignments.values() if role == "stem" or role in readers.OPTION_KEYS}
     result["figure_descriptions"] = [
-        slot for slot in (reading.get("figure_descriptions") or [])
-        if slot in remaining_slots
+        slot for slot in (reading.get("figure_descriptions") or []) if slot in remaining_slots
     ]
     # A missing-image answer derived from the removed solution is stale.  A
     # genuine remaining cue is rediscovered below by the deterministic figure
     # policy, while image-choice completeness is checked from the kept options.
     result["missing_figure"] = False
     options = result.get("options") if isinstance(result.get("options"), dict) else {}
-    result["unclear"] = "[?]" in result["stem"] or any(
-        "[?]" in str(value) for value in options.values()
-    )
+    result["unclear"] = "[?]" in result["stem"] or any("[?]" in str(value) for value in options.values())
     return result
 
 
 def _apply_local_solution_shortening(
-    question: Question,
-    item: dict,
-    *,
-    group: QuestionGroup,
-    regions: list[dict],
-    candidates: list[dict],
+    question: Question, item: dict, *, group: QuestionGroup, regions: list[dict], candidates: list[dict]
 ) -> None:
     """Apply a proven solution-tail removal without changing reader latency."""
 
@@ -2372,28 +2374,21 @@ def _apply_local_solution_shortening(
     question.source_kind = item["source_kind"]
     question.source_anchor_seq = item["source_anchor_seq"]
     question.figure_candidates = candidates
-    question.read_a = _remap_trimmed_reading(
-        question.read_a, old_candidates=old_candidates, new_candidates=candidates,
-    )
-    question.read_b = _remap_trimmed_reading(
-        question.read_b, old_candidates=old_candidates, new_candidates=candidates,
-    )
-    question.read_c = _remap_trimmed_reading(
-        question.read_c, old_candidates=old_candidates, new_candidates=candidates,
-    )
+    question.read_a = _remap_trimmed_reading(question.read_a, old_candidates=old_candidates, new_candidates=candidates)
+    question.read_b = _remap_trimmed_reading(question.read_b, old_candidates=old_candidates, new_candidates=candidates)
+    question.read_c = _remap_trimmed_reading(question.read_c, old_candidates=old_candidates, new_candidates=candidates)
     question.stem, _changed = _trim_example_solution_text(question.stem)
     question.answer = ""
     question.analysis = ""
-    valid_candidate_keys = {
-        key for candidate in candidates
-        if (key := candidate_key(candidate)) is not None
-    }
+    valid_candidate_keys = {key for candidate in candidates if (key := candidate_key(candidate)) is not None}
     manual_before = [
-        dict(figure) for figure in (question.figures or [])
+        dict(figure)
+        for figure in (question.figures or [])
         if isinstance(figure, dict) and figure.get("source") == "manual"
     ]
     question.figures = [
-        figure for figure in (question.figures or [])
+        figure
+        for figure in (question.figures or [])
         if isinstance(figure, dict)
         and isinstance(figure.get("page_idx"), int)
         and isinstance(figure.get("bbox"), list)
@@ -2410,7 +2405,8 @@ def _apply_local_solution_shortening(
         )
     ]
     detached_manual = [
-        figure for figure in manual_before
+        figure
+        for figure in manual_before
         if isinstance(figure.get("page_idx"), int)
         and isinstance(figure.get("bbox"), list)
         and not segment.center_in_regions(figure["page_idx"], figure["bbox"], regions)
@@ -2423,26 +2419,18 @@ def _apply_local_solution_shortening(
             "signals": ["manual_figure_outside_range"],
             "detached_manual_figures": detached_manual,
         }
-    existing_figure_keys = {
-        key for figure in question.figures
-        if (key := candidate_key(figure)) is not None
-    }
+    existing_figure_keys = {key for figure in question.figures if (key := candidate_key(figure)) is not None}
     for candidate in candidates:
         key = candidate_key(candidate)
-        if candidate.get("recovered_input") is True and key is not None \
-                and key not in existing_figure_keys:
-            question.figures.append({
-                "slot": "stem",
-                "page_idx": candidate["page_idx"],
-                "bbox": list(candidate["bbox"]),
-                "source": "auto",
-            })
+        if candidate.get("recovered_input") is True and key is not None and key not in existing_figure_keys:
+            question.figures.append(
+                {"slot": "stem", "page_idx": candidate["page_idx"], "bbox": list(candidate["bbox"]), "source": "auto"}
+            )
             existing_figure_keys.add(key)
     flags = list(question.flags or [])
     if question.read_a and question.read_b and same_reading(question.read_a, question.read_b):
         flags = [flag for flag in flags if not str(flag).startswith("两次识读不一致")]
-    if "[?]" not in question.stem and not any(
-            "[?]" in str(value) for value in (question.options or {}).values()):
+    if "[?]" not in question.stem and not any("[?]" in str(value) for value in (question.options or {}).values()):
         flags = [flag for flag in flags if "有看不清的字" not in str(flag)]
     # Rebuild the decision from the shortened source.  A surviving manual crop
     # remains a manual choice; confirming a picture must not freeze the text
@@ -2464,11 +2452,7 @@ def _apply_local_solution_shortening(
 
 
 def _collect_segmentation_items(
-    paper: Paper,
-    groups: list[QuestionGroup],
-    *,
-    locate_gaps: bool,
-    page_store: PageStore | ReadOnlyPageStore,
+    paper: Paper, groups: list[QuestionGroup], *, locate_gaps: bool, page_store: PageStore | ReadOnlyPageStore
 ) -> tuple[list[dict], list[dict], list[str], list[dict]]:
     """Build the desired card set.
 
@@ -2503,17 +2487,17 @@ def _collect_segmentation_items(
                 if (seq_start is None or anchor >= seq_start) and (seq_end is None or anchor <= seq_end):
                     matching_groups.append(group)
             if len(matching_groups) != 1:
-                raise RuntimeError(
-                    f"教材题组规划没有唯一覆盖来源锚点 {anchor}，已停止重新切题"
-                )
+                raise RuntimeError(f"教材题组规划没有唯一覆盖来源锚点 {anchor}，已停止重新切题")
             regions = imaging.trim_regions(item.get("regions") or [], page_store.load)
-            questions.append({
-                **item,
-                "group": matching_groups[0],
-                "regions": regions,
-                "source_kind": _normalise_source_kind(item),
-                "source_anchor_seq": anchor,
-            })
+            questions.append(
+                {
+                    **item,
+                    "group": matching_groups[0],
+                    "regions": regions,
+                    "source_kind": _normalise_source_kind(item),
+                    "source_anchor_seq": anchor,
+                }
+            )
         if len(questions) != len(starts):
             raise RuntimeError("教材全书切题结果与来源锚点数量不一致，已停止重新切题")
         return blocks, questions, notes, diagnostics
@@ -2529,16 +2513,21 @@ def _collect_segmentation_items(
         group_pages = [page for page in paper.pages if page["page_idx"] in page_ids]
         seq_start, seq_end = metadata.get("seq_start"), metadata.get("seq_end")
         group_blocks = [
-            block for block in blocks
+            block
+            for block in blocks
             if block["page_idx"] in page_ids
             and (seq_start is None or block["seq"] >= seq_start)
             and (seq_end is None or block["seq"] <= seq_end)
         ]
         if not group_pages or not group_blocks:
-            diagnostics.append({
-                "kind": "empty_group", "group_id": group.pk, "group": group.title,
-                "message": "这个题组没有可用于切题的页面或 MinerU 内容块。",
-            })
+            diagnostics.append(
+                {
+                    "kind": "empty_group",
+                    "group_id": group.pk,
+                    "group": group.title,
+                    "message": "这个题组没有可用于切题的页面或 MinerU 内容块。",
+                }
+            )
             continue
         layout, starts = segment.analyse(group_pages, group_blocks)
         starts, leading = segment.repair_leading_question(layout, starts, group_blocks)
@@ -2554,24 +2543,26 @@ def _collect_segmentation_items(
         unresolved: list[tuple[int, int]] = []
         if locate_gaps:
             group_notes = locate_missing(paper, layout, starts, page_store, group_blocks, unresolved)
-            notes.extend([f"{group.title}：{note}" if len(groups) > 1 else note
-                          for note in group_notes])
+            notes.extend([f"{group.title}：{note}" if len(groups) > 1 else note for note in group_notes])
         elif missing:
-            diagnostics.append({
-                "kind": "unlocated_gaps",
-                "group_id": group.pk,
-                "group": group.title,
-                "numbers": [number for number, _previous in missing],
-                "message": "预演不会调用模型定位缺号；正式执行时这些缺号仍会按现行规则处理。",
-            })
+            diagnostics.append(
+                {
+                    "kind": "unlocated_gaps",
+                    "group_id": group.pk,
+                    "group": group.title,
+                    "numbers": [number for number, _previous in missing],
+                    "message": "预演不会调用模型定位缺号；正式执行时这些缺号仍会按现行规则处理。",
+                }
+            )
         items = segment.build_questions(layout, starts, group_blocks)
         # 切线压在字上（照片里 MinerU 的框偏大）时，挪到两题之间的空白行。
         cuts.snap_cuts(items, page_store.load, layout)
         # 配图印在题目上方、被上一题的范围盖住时，把它改回本题（纯几何，不调模型）。
         notes.extend(reclaim_stranded_figures(items, group_blocks))
         for item in items:
-            notes.extend([f"{group.title}：{note}" if len(groups) > 1 else note
-                          for note in item.get("segmentation_notes") or []])
+            notes.extend(
+                [f"{group.title}：{note}" if len(groups) > 1 else note for note in item.get("segmentation_notes") or []]
+            )
         # 切出来的题比页还少，几乎总是这份材料本来就没几道题（讲义、答案页、
         # 知识点总结），或者有一大半页没被认出来。这不是错误，只是不能默默
         # 交付：题卡数量低于页数时至少说一声，让用户自己判断。
@@ -2588,8 +2579,7 @@ def _collect_segmentation_items(
         for number, previous_number in unresolved:
             holder = next((item for item in items if item.get("number") == previous_number), None)
             if holder is not None:
-                holder["segmentation_flags"] = [*(holder.get("segmentation_flags") or []),
-                                                merged_question_flag(number)]
+                holder["segmentation_flags"] = [*(holder.get("segmentation_flags") or []), merged_question_flag(number)]
         for item in items:
             regions = imaging.trim_regions(item.get("regions") or [], page_store.load)
             prepared = {
@@ -2604,9 +2594,7 @@ def _collect_segmentation_items(
 
 
 def _match_segmentation_items(
-    existing_questions: list[Question],
-    desired: list[dict],
-    groups: list[QuestionGroup],
+    existing_questions: list[Question], desired: list[dict], groups: list[QuestionGroup]
 ) -> tuple[list[tuple[dict, Question | None]], list[Question]]:
     """Pair desired slices to stable source anchors, then fall back to position.
 
@@ -2625,24 +2613,26 @@ def _match_segmentation_items(
         if not available:
             return None
         position = _region_position(item.get("regions"))
-        return min(available, key=lambda question: (
-            abs(_region_position(question.regions) - position),
-            question.deleted_at is not None,
-            question.pk,
-        ))
+        return min(
+            available,
+            key=lambda question: (
+                abs(_region_position(question.regions) - position),
+                question.deleted_at is not None,
+                question.pk,
+            ),
+        )
 
     pairs: list[tuple[dict, Question | None]] = []
     for item in desired:
         wanted_group = item["group"].pk
         anchor = item.get("source_anchor_seq")
         kind = item.get("source_kind") or Question.SourceKind.UNKNOWN
-        typed_book_anchor = kind in {
-            Question.SourceKind.EXAMPLE, Question.SourceKind.EXERCISE,
-        }
+        typed_book_anchor = kind in {Question.SourceKind.EXAMPLE, Question.SourceKind.EXERCISE}
         question = None
         if anchor is not None:
             exact = [
-                candidate for candidate in existing_questions
+                candidate
+                for candidate in existing_questions
                 if (typed_book_anchor or group_id(candidate) == wanted_group)
                 and candidate.source_anchor_seq == anchor
                 and candidate.source_kind == kind
@@ -2650,15 +2640,16 @@ def _match_segmentation_items(
             question = pick(item, exact)
             if question is None:
                 anchored = [
-                    candidate for candidate in existing_questions
+                    candidate
+                    for candidate in existing_questions
                     if (typed_book_anchor or group_id(candidate) == wanted_group)
                     and candidate.source_anchor_seq == anchor
                 ]
                 question = pick(item, anchored)
-        if question is None and (anchor is None or kind in {
-                Question.SourceKind.UNKNOWN, Question.SourceKind.MANUAL}):
+        if question is None and (anchor is None or kind in {Question.SourceKind.UNKNOWN, Question.SourceKind.MANUAL}):
             numbered = [
-                candidate for candidate in existing_questions
+                candidate
+                for candidate in existing_questions
                 if group_id(candidate) == wanted_group and candidate.number == item["number"]
             ]
             question = pick(item, numbered)
@@ -2694,67 +2685,73 @@ def preview_resegment(paper: Paper) -> dict:
         if (paper.structure or {}).get("groups_need_rebuild"):
             raise RuntimeError("题组结构仍待更新，请先确认资料结构")
     blocks, desired, notes, diagnostics = _collect_segmentation_items(
-        paper, groups, locate_gaps=False, page_store=ReadOnlyPageStore(paper),
+        paper, groups, locate_gaps=False, page_store=ReadOnlyPageStore(paper)
     )
     if not desired:
         raise RuntimeError("新规则没有找到任何题目，未执行任何改动")
-    existing = list(
-        Question.all_objects.filter(paper=paper).select_related("group").prefetch_related("publications")
-    )
+    existing = list(Question.all_objects.filter(paper=paper).select_related("group").prefetch_related("publications"))
     pairs, unmatched = _match_segmentation_items(existing, desired, groups)
     categories: dict[str, list[dict]] = {
-        "added": [], "kept": [], "locally_trimmed": [], "range_changed": [],
-        "suspected_excluded": [], "protected_unmatched": [], "too_long": [],
+        "added": [],
+        "kept": [],
+        "locally_trimmed": [],
+        "range_changed": [],
+        "suspected_excluded": [],
+        "protected_unmatched": [],
+        "too_long": [],
     }
     for item, question in pairs:
         flags = list(item.get("segmentation_flags") or [])
         if flags:
-            categories["too_long"].append(_resegment_item_json(
-                item, question, reason="；".join(flags),
-            ))
+            categories["too_long"].append(_resegment_item_json(item, question, reason="；".join(flags)))
         if question is None:
             categories["added"].append(_resegment_item_json(item, reason="新规则找到的新题卡"))
             continue
-        if (question.start_source == "manual"
-                or (question.regions_auto and question.regions != question.regions_auto)):
-            categories["kept"].append(_resegment_item_json(
-                item, question, reason="人工范围保持不变",
-            ))
+        if question.start_source == "manual" or (question.regions_auto and question.regions != question.regions_auto):
+            categories["kept"].append(_resegment_item_json(item, question, reason="人工范围保持不变"))
             continue
         if _keeps_protected_range(question, item["regions"], blocks):
             item = {**item, "regions": question.regions}
         regions_changed = question.regions != item["regions"]
-        text_changed = segment.text_blocks_in(blocks, question.regions) != \
-            segment.text_blocks_in(blocks, item["regions"])
+        text_changed = segment.text_blocks_in(blocks, question.regions) != segment.text_blocks_in(
+            blocks, item["regions"]
+        )
         solution_text_changed = bool(
             isinstance(item.get("segmentation"), dict)
             and item["segmentation"].get("solution_trimmed") is True
             and _saved_example_solution_text_present(question)
         )
         solution_local_change = _solution_only_shortening(question, item, blocks)
-        if (regions_changed or text_changed or solution_text_changed or solution_local_change) \
-                and _question_range_is_human_protected(question):
-            categories["protected_unmatched"].append(_resegment_item_json(
-                item, question,
-                reason="新规则建议不同范围；现有人工修改、通过或入库记录将保留原范围并标黄",
-            ))
+        if (
+            regions_changed or text_changed or solution_text_changed or solution_local_change
+        ) and _question_range_is_human_protected(question):
+            categories["protected_unmatched"].append(
+                _resegment_item_json(
+                    item, question, reason="新规则建议不同范围；现有人工修改、通过或入库记录将保留原范围并标黄"
+                )
+            )
             continue
         if solution_local_change:
-            categories["locally_trimmed"].append(_resegment_item_json(
-                item, question, reason="例题仅去除分析/解答尾部；本地更新，不调用识读模型",
-            ))
+            categories["locally_trimmed"].append(
+                _resegment_item_json(item, question, reason="例题仅去除分析/解答尾部；本地更新，不调用识读模型")
+            )
             continue
         if regions_changed or text_changed or question.state == Question.State.RED:
-            categories["range_changed"].append(_resegment_item_json(
-                item, question, reason="原卷范围或范围内文字块发生变化，需要重新识读",
-            ))
+            categories["range_changed"].append(
+                _resegment_item_json(item, question, reason="原卷范围或范围内文字块发生变化，需要重新识读")
+            )
         else:
-            categories["kept"].append(_resegment_item_json(
-                item, question,
-                reason=("来源锚点和原卷范围已经一致；执行时将清理陈旧的范围冲突提示"
+            categories["kept"].append(
+                _resegment_item_json(
+                    item,
+                    question,
+                    reason=(
+                        "来源锚点和原卷范围已经一致；执行时将清理陈旧的范围冲突提示"
                         if FLAG_RESEGMENT_RANGE_PROTECTED in (question.flags or [])
-                        else "来源锚点和原卷范围保持不变"),
-            ))
+                        else "来源锚点和原卷范围保持不变"
+                    ),
+                )
+            )
     for question in unmatched:
         item = {
             "number": question.number,
@@ -2764,13 +2761,13 @@ def preview_resegment(paper: Paper) -> dict:
             "regions": question.regions,
         }
         if _question_is_human_protected(question):
-            categories["protected_unmatched"].append(_resegment_item_json(
-                item, question, reason="含人工修改、审批或入库记录，将保留并标黄",
-            ))
+            categories["protected_unmatched"].append(
+                _resegment_item_json(item, question, reason="含人工修改、审批或入库记录，将保留并标黄")
+            )
         else:
-            categories["suspected_excluded"].append(_resegment_item_json(
-                item, question, reason="新规则未再命中，将移入可恢复的回收站",
-            ))
+            categories["suspected_excluded"].append(
+                _resegment_item_json(item, question, reason="新规则未再命中，将移入可恢复的回收站")
+            )
     return {
         "read_only": True,
         "model_calls": 0,
@@ -2789,8 +2786,11 @@ def _preserve_continued_cards(paper: Paper) -> bool:
 def _continued_existing_ids(paper: Paper) -> set[int]:
     if not _preserve_continued_cards(paper):
         return set()
-    return {value for value in (paper.processing_plan or {}).get("continue_existing_question_ids", [])
-            if type(value) is int and value > 0}
+    return {
+        value
+        for value in (paper.processing_plan or {}).get("continue_existing_question_ids", [])
+        if type(value) is int and value > 0
+    }
 
 
 def _check_continued_original(paper: Paper) -> None:
@@ -2821,11 +2821,12 @@ def _continuation_already_cut(item: dict, questions: list[Question]) -> bool:
                 if old.get("page_idx") != region.get("page_idx") or len(old_box) != 4:
                     continue
                 old_area = max(0, old_box[2] - old_box[0]) * max(0, old_box[3] - old_box[1])
-                overlap = max(0, min(box[2], old_box[2]) - max(box[0], old_box[0])) * \
-                    max(0, min(box[3], old_box[3]) - max(box[1], old_box[1]))
+                overlap = max(0, min(box[2], old_box[2]) - max(box[0], old_box[0])) * max(
+                    0, min(box[3], old_box[3]) - max(box[1], old_box[1])
+                )
                 # Stable printed number plus substantial shared area, or a
                 # candidate already inside a saved crop, is already owned.
-                if overlap / area >= .8 or (same_number and old_area > 0 and overlap / min(area, old_area) >= .2):
+                if overlap / area >= 0.8 or (same_number and old_area > 0 and overlap / min(area, old_area) >= 0.2):
                     return True
     return False
 
@@ -2859,7 +2860,7 @@ def segment_paper(paper: Paper) -> None:
             groups = _ensure_question_groups(paper)
     with readers.selected_services_only(bool((paper.processing_plan or {}).get("auto_fallback"))):
         blocks, questions, notes, _diagnostics = _collect_segmentation_items(
-            paper, groups, locate_gaps=True, page_store=PageStore(paper),
+            paper, groups, locate_gaps=True, page_store=PageStore(paper)
         )
     if not questions:
         raise RuntimeError("没有在试卷里找到印刷题号，无法切题")
@@ -2872,7 +2873,9 @@ def segment_paper(paper: Paper) -> None:
         current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
         if current is None or int((current.processing_plan or {}).get("revision", 0)) != plan_revision:
             return
-        manual_pages = {p["page_idx"] for p in (current.processing_plan or {}).get("pages", []) if p.get("mode") == "manual"}
+        manual_pages = {
+            p["page_idx"] for p in (current.processing_plan or {}).get("pages", []) if p.get("mode") == "manual"
+        }
         if planned_structure is not None:
             # Plan, group reconciliation, card migration and final status form
             # one transaction.  If any later safeguard fails, the old 99-style
@@ -2904,10 +2907,17 @@ def segment_paper(paper: Paper) -> None:
                 continue
             if question is None:
                 Question.objects.create(
-                    paper=paper, group=group, number=item["number"], section=item["section"][:120],
-                    question_type=item["question_type"], regions=regions, regions_auto=regions,
-                    start_source=item["start"]["source"], figure_candidates=candidates,
-                    source_kind=item["source_kind"], source_anchor_seq=item["source_anchor_seq"],
+                    paper=paper,
+                    group=group,
+                    number=item["number"],
+                    section=item["section"][:120],
+                    question_type=item["question_type"],
+                    regions=regions,
+                    regions_auto=regions,
+                    start_source=item["start"]["source"],
+                    figure_candidates=candidates,
+                    source_kind=item["source_kind"],
+                    source_anchor_seq=item["source_anchor_seq"],
                     flags=list(item.get("segmentation_flags") or []),
                 )
                 continue
@@ -2916,8 +2926,12 @@ def segment_paper(paper: Paper) -> None:
             group_changed = question.group_id != group.id
             if group_changed:
                 question.group = group
-            if question.processing_mode != "auto" or question.body_mode == "source_image" or question.start_source == "manual" or (
-                    question.regions_auto and question.regions != question.regions_auto):
+            if (
+                question.processing_mode != "auto"
+                or question.body_mode == "source_image"
+                or question.start_source == "manual"
+                or (question.regions_auto and question.regions != question.regions_auto)
+            ):
                 fields = []
                 if group_changed:
                     fields.append("group")
@@ -2930,16 +2944,16 @@ def segment_paper(paper: Paper) -> None:
             if _keeps_protected_range(question, regions, blocks):
                 regions = question.regions
             regions_changed = question.regions != regions
-            text_changed = segment.text_blocks_in(blocks, question.regions) != \
-                segment.text_blocks_in(blocks, regions)
+            text_changed = segment.text_blocks_in(blocks, question.regions) != segment.text_blocks_in(blocks, regions)
             solution_text_changed = bool(
                 isinstance(item.get("segmentation"), dict)
                 and item["segmentation"].get("solution_trimmed") is True
                 and _saved_example_solution_text_present(question)
             )
             solution_local_change = _solution_only_shortening(question, item, blocks)
-            if (regions_changed or text_changed or solution_text_changed or solution_local_change) \
-                    and _question_range_is_human_protected(question):
+            if (
+                regions_changed or text_changed or solution_text_changed or solution_local_change
+            ) and _question_range_is_human_protected(question):
                 # A proposed crop is not allowed to overwrite the source range
                 # a human already edited/approved or that backs a publication.
                 # Keep the complete card, move only its stable scope identity,
@@ -2949,8 +2963,7 @@ def segment_paper(paper: Paper) -> None:
                 question.source_anchor_seq = item["source_anchor_seq"]
                 question.state = Question.State.YELLOW
                 question.flags = [
-                    *[flag for flag in (question.flags or [])
-                      if flag != FLAG_RESEGMENT_RANGE_PROTECTED],
+                    *[flag for flag in (question.flags or []) if flag != FLAG_RESEGMENT_RANGE_PROTECTED],
                     FLAG_RESEGMENT_RANGE_PROTECTED,
                 ]
                 question.error = ""
@@ -2960,31 +2973,22 @@ def segment_paper(paper: Paper) -> None:
                 preserved += 1
                 continue
             if solution_local_change:
-                _apply_local_solution_shortening(
-                    question,
-                    item,
-                    group=group,
-                    regions=regions,
-                    candidates=candidates,
-                )
+                _apply_local_solution_shortening(question, item, group=group, regions=regions, candidates=candidates)
                 locally_trimmed += 1
                 continue
             # MinerU text blocks are only a locator. A moved image range may add a
             # formula, diagram or printed line that MinerU never represented, so a
             # range change must be reread even when the block-id set looks equal.
-            unchanged = (not regions_changed and not text_changed and question.regions
-                         and question.state != Question.State.RED)
+            unchanged = (
+                not regions_changed and not text_changed and question.regions and question.state != Question.State.RED
+            )
             keep_human_metadata = unchanged and _question_range_is_human_protected(question)
             new_section = question.section if keep_human_metadata else item["section"][:120]
             new_start_source = question.start_source if keep_human_metadata else item["start"]["source"]
             # “重新切题”承诺未变化的题卡原样保留。题卡完成识读后，
             # question_type 往往比只看 MinerU 版面的初步分类更准确；如果范围
             # 和其中的文字块都没有变化，不能把它降回 unknown。
-            new_question_type = (
-                question.question_type
-                if question.edited or unchanged
-                else item["question_type"]
-            )
+            new_question_type = question.question_type if question.edited or unchanged else item["question_type"]
             if unchanged and not (question.edited or question.type_locked or question.approved):
                 # A section that says “有多项符合题目要求” fixes single → multiple.
                 new_question_type = qtypes.with_section(new_question_type, new_section)
@@ -3004,16 +3008,15 @@ def segment_paper(paper: Paper) -> None:
                 kept += 1
                 old_flags = list(question.flags or [])
                 if FLAG_RESEGMENT_RANGE_PROTECTED in old_flags:
-                    question.flags = [
-                        flag for flag in old_flags
-                        if flag != FLAG_RESEGMENT_RANGE_PROTECTED
-                    ]
+                    question.flags = [flag for flag in old_flags if flag != FLAG_RESEGMENT_RANGE_PROTECTED]
                     # Only the exact stale warning may turn a yellow card back
                     # to green.  Other review warnings and errors remain the
                     # source of truth.
-                    if old_flags == [FLAG_RESEGMENT_RANGE_PROTECTED] \
-                            and question.state == Question.State.YELLOW \
-                            and not question.error:
+                    if (
+                        old_flags == [FLAG_RESEGMENT_RANGE_PROTECTED]
+                        and question.state == Question.State.YELLOW
+                        and not question.error
+                    ):
                         question.state = Question.State.GREEN
                 if automatic_figures_changed:
                     # No model call is needed when only deterministic ownership
@@ -3022,21 +3025,16 @@ def segment_paper(paper: Paper) -> None:
                     question.figure_review = {}
                     review = stored_or_derived_review(question)
                     question.figure_review = review
-                    question.flags = _flags_after_figure_review(
-                        question.flags, review, question.figures,
-                    )
+                    question.flags = _flags_after_figure_review(question.flags, review, question.figures)
                     if question.state in {Question.State.GREEN, Question.State.YELLOW}:
-                        question.state = (
-                            Question.State.YELLOW if question.flags else Question.State.GREEN
-                        )
+                        question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
                     _invalidate_approval(question)
             else:
                 reread += 1
                 question.figures = [f for f in question.figures if f.get("source") == "manual"]
                 if question.figures:
                     question.figures, question.figure_review = _manual_figures_and_review(question)
-                elif "manual_figure_outside_range" in (
-                        (question.figure_review or {}).get("signals") or []):
+                elif "manual_figure_outside_range" in ((question.figure_review or {}).get("signals") or []):
                     # _manual_figures_and_review moved the out-of-range crop to
                     # detached audit metadata.  Keep that evidence until the
                     # reviewer explicitly chooses a new picture.
@@ -3046,8 +3044,7 @@ def segment_paper(paper: Paper) -> None:
                 question.state = Question.State.WAITING
                 _invalidate_approval(question)
                 question.flags = list(item.get("segmentation_flags") or [])
-                if "manual_figure_outside_range" in (
-                        (question.figure_review or {}).get("signals") or []):
+                if "manual_figure_outside_range" in ((question.figure_review or {}).get("signals") or []):
                     question.flags.append(FLAG_MANUAL_FIGURE_OUTSIDE_RANGE)
                 question.error = ""
             question.save()
@@ -3057,8 +3054,11 @@ def segment_paper(paper: Paper) -> None:
                 continue
             if question.deleted_at is not None:
                 continue
-            if (question.processing_mode != "auto" or question.body_mode == "source_image"
-                    or any(r["page_idx"] in manual_pages for r in question.regions)):
+            if (
+                question.processing_mode != "auto"
+                or question.body_mode == "source_image"
+                or any(r["page_idx"] in manual_pages for r in question.regions)
+            ):
                 continue
             if _question_is_human_protected(question):
                 # 自动重切不能物理删除人工改字、已通过草稿或已入库的来源卡。
@@ -3071,10 +3071,18 @@ def segment_paper(paper: Paper) -> None:
                 question.error = ""
                 question.reread_requested = False
                 _invalidate_approval(question)
-                question.save(update_fields=[
-                    "state", "flags", "error", "reread_requested",
-                    "approved", "approved_at", "approved_content_hash", "updated_at",
-                ])
+                question.save(
+                    update_fields=[
+                        "state",
+                        "flags",
+                        "error",
+                        "reread_requested",
+                        "approved",
+                        "approved_at",
+                        "approved_content_hash",
+                        "updated_at",
+                    ]
+                )
                 preserved += 1
                 continue
             question.state = Question.State.YELLOW
@@ -3085,10 +3093,18 @@ def segment_paper(paper: Paper) -> None:
             question.error = ""
             question.reread_requested = False
             _invalidate_approval(question)
-            question.save(update_fields=[
-                "state", "flags", "error", "reread_requested",
-                "approved", "approved_at", "approved_content_hash", "updated_at",
-            ])
+            question.save(
+                update_fields=[
+                    "state",
+                    "flags",
+                    "error",
+                    "reread_requested",
+                    "approved",
+                    "approved_at",
+                    "approved_content_hash",
+                    "updated_at",
+                ]
+            )
             system_deleted_ids.append(question.pk)
         if system_deleted_ids:
             batch = QuestionDeletionBatch.objects.create(
@@ -3098,9 +3114,10 @@ def segment_paper(paper: Paper) -> None:
                 reason="重新切题后未再命中的自动题卡；未物理删除，可从回收站恢复。",
             )
             Question.all_objects.filter(pk__in=system_deleted_ids).update(
-                deleted_at=timezone.now(), deletion_batch=batch,
+                deleted_at=timezone.now(), deletion_batch=batch
             )
             from .question_layout import bump
+
             bump(paper.pk)
             excluded = len(system_deleted_ids)
         desired_group_ids = [group.pk for group in groups]
@@ -3112,8 +3129,7 @@ def segment_paper(paper: Paper) -> None:
             notes.append(f"重新切题：{kept} 张题卡内容没变，原样保留；{reread} 张范围变了，已重新识读。")
         if locally_trimmed:
             notes.append(
-                f"教材例题：{locally_trimmed} 张已在本地去除“分析/解答/证明”尾部；"
-                "沿用已有题干识读，不调用模型。"
+                f"教材例题：{locally_trimmed} 张已在本地去除“分析/解答/证明”尾部；沿用已有题干识读，不调用模型。"
             )
         if preserved:
             notes.append(
@@ -3122,8 +3138,7 @@ def segment_paper(paper: Paper) -> None:
             )
         if excluded:
             notes.append(
-                f"重新切题时有 {excluded} 张自动题卡未被新规则命中；"
-                "已移入回收站而非永久删除，需要时可以恢复。"
+                f"重新切题时有 {excluded} 张自动题卡未被新规则命中；已移入回收站而非永久删除，需要时可以恢复。"
             )
         if dropped_on_manual_pages:
             pages = sorted({index + 1 for page in manual_pages for index in [page]})
@@ -3233,8 +3248,7 @@ def reconcile_slotted_figure_flags(paper: Paper, dry_run: bool = False) -> int:
             continue
         if renders_as_choice(question):
             continue
-        if not any(str(figure.get("slot") or "stem") in SLOT_OPTION_KEYS
-                   for figure in question.figures or []):
+        if not any(str(figure.get("slot") or "stem") in SLOT_OPTION_KEYS for figure in question.figures or []):
             continue
         question.flags = [*(question.flags or []), figure_policy.FLAG_SLOTTED_NON_CHOICE]
         if question.state in {Question.State.GREEN, Question.State.YELLOW}:
@@ -3293,8 +3307,11 @@ def _page_subitem_marks(page) -> list:
         if block.get("type") != 0:
             continue
         for line in block.get("lines", []):
-            chars = [(char.get("c", ""), char.get("bbox"))
-                     for span in line.get("spans", []) for char in span.get("chars", [])]
+            chars = [
+                (char.get("c", ""), char.get("bbox"))
+                for span in line.get("spans", [])
+                for char in span.get("chars", [])
+            ]
             flat = "".join(char for char, _ in chars)
             for match in _PRINTED_SUBITEM_MARK.finditer(flat):
                 value = int(match.group(1))
@@ -3328,8 +3345,10 @@ def _subitem_claimed_elsewhere(question, number, x, y, page_idx, size, others) -
             bbox = region.get("bbox")
             if not bbox or len(bbox) < 4:
                 continue
-            if bbox[0] * width / 1000 <= x <= bbox[2] * width / 1000 \
-                    and bbox[1] * height / 1000 <= y <= bbox[3] * height / 1000:
+            if (
+                bbox[0] * width / 1000 <= x <= bbox[2] * width / 1000
+                and bbox[1] * height / 1000 <= y <= bbox[3] * height / 1000
+            ):
                 return True
     return False
 
@@ -3421,15 +3440,21 @@ def reconcile_subitem_column_flags(paper: Paper, dry_run: bool = False) -> int:
             width, height = page.rect.width, page.rect.height
             # 框是**每张卡自己的**，不能按页缓存——同一页上左边那张和右边那张
             # 各有各的范围。缓存的只有页面本身。
-            mine = [(region["bbox"][0] * width / 1000, region["bbox"][1] * height / 1000,
-                     region["bbox"][2] * width / 1000, region["bbox"][3] * height / 1000)
-                    for region in regions
-                    if region.get("page_idx") == page_idx
-                    and isinstance(region.get("bbox"), list) and len(region["bbox"]) >= 4]
+            mine = [
+                (
+                    region["bbox"][0] * width / 1000,
+                    region["bbox"][1] * height / 1000,
+                    region["bbox"][2] * width / 1000,
+                    region["bbox"][3] * height / 1000,
+                )
+                for region in regions
+                if region.get("page_idx") == page_idx
+                and isinstance(region.get("bbox"), list)
+                and len(region["bbox"]) >= 4
+            ]
             if page_idx not in printed:
                 printed[page_idx] = _page_subitem_marks(page)
-            lost = _column_lost_numbers(question, missing, printed[page_idx], mine,
-                                        page_idx, (width, height), others)
+            lost = _column_lost_numbers(question, missing, printed[page_idx], mine, page_idx, (width, height), others)
             if not lost:
                 continue
             # 拿题干里**全部**的小问编号报首尾：只取前 len(lost) 个的话，
@@ -3472,11 +3497,9 @@ def _page_figure_captions(page) -> dict:
             continue
         for line in block.get("lines", []):
             key = _figure_number_key("".join(span.get("text", "") for span in line.get("spans", [])))
-            if key and _FIGURE_CAPTION_LINE.match(
-                    "".join(span.get("text", "") for span in line.get("spans", []))):
+            if key and _FIGURE_CAPTION_LINE.match("".join(span.get("text", "") for span in line.get("spans", []))):
                 x0, y0, x1, y1 = line["bbox"]
-                found.setdefault(key, []).append(
-                    (float(x0), float(y0), float(x1), float(y1)))
+                found.setdefault(key, []).append((float(x0), float(y0), float(x1), float(y1)))
     return found
 
 
@@ -3494,6 +3517,7 @@ def _figure_number_keys(text: str) -> set:
     """题干里点名的所有图号。一道题可以点名好几张（九上 #1301 的图 3-7/3-8/3-9），
     只认第一个会把另外两张的缺失漏掉。"""
     return {f"{int(match.group(1))}-{int(match.group(2))}" for match in _FIGURE_NUMBER.finditer(text or "")}
+
 
 def reconcile_figure_caption_flags(paper: Paper, dry_run: bool = False) -> int:
     """把「题干点名的图号被切在框外」这条兜底补回存量卡。
@@ -3518,8 +3542,7 @@ def reconcile_figure_caption_flags(paper: Paper, dry_run: bool = False) -> int:
     source = Path(paper.source_path or "")
     if not source.is_file():
         return 0
-    if not any(_figure_number_key(question.stem or "")
-               for question in paper.questions.only("id", "stem")):
+    if not any(_figure_number_key(question.stem or "") for question in paper.questions.only("id", "stem")):
         return 0
 
     import pymupdf as fitz
@@ -3531,8 +3554,7 @@ def reconcile_figure_caption_flags(paper: Paper, dry_run: bool = False) -> int:
         for question in paper.questions.filter(processing_mode="auto", body_mode="text").order_by("id"):
             if _figure_decision_protected(question):
                 continue
-            if any(str(flag).startswith(figure_policy.FIGURE_CAPTION_PREFIX)
-                   for flag in (question.flags or [])):
+            if any(str(flag).startswith(figure_policy.FIGURE_CAPTION_PREFIX) for flag in (question.flags or [])):
                 continue
             named = _figure_number_keys(question.stem or "")
             figures = [figure for figure in (question.figures or []) if figure.get("bbox")]
@@ -3550,14 +3572,16 @@ def reconcile_figure_caption_flags(paper: Paper, dry_run: bool = False) -> int:
                     sizes[page_idx] = page.rect.width, page.rect.height
                 width, height = sizes[page_idx]
                 x0, y0, x1, y1 = figure["bbox"]
-                cuts.append((page_idx, x0 * width / 1000, y0 * height / 1000,
-                             x1 * width / 1000, y1 * height / 1000))
+                cuts.append((page_idx, x0 * width / 1000, y0 * height / 1000, x1 * width / 1000, y1 * height / 1000))
             if not cuts:
                 continue
 
-            missing = [number for number in sorted(named)
-                       if not _caption_is_cut_out(cuts, captions, number)
-                       and _caption_owner(cuts, captions, number) is not None]
+            missing = [
+                number
+                for number in sorted(named)
+                if not _caption_is_cut_out(cuts, captions, number)
+                and _caption_owner(cuts, captions, number) is not None
+            ]
             if not missing:
                 continue
 
@@ -3627,28 +3651,22 @@ def trim_book_example_solutions_locally(paper: Paper) -> dict[str, int]:
     if not groups:
         raise RuntimeError("这项教材任务没有稳定题组")
     blocks, desired, _notes, _diagnostics = _collect_segmentation_items(
-        paper,
-        groups,
-        locate_gaps=False,
-        page_store=PageStore(paper),
+        paper, groups, locate_gaps=False, page_store=PageStore(paper)
     )
     examples = [
-        item for item in desired
+        item
+        for item in desired
         if item.get("source_kind") == Question.SourceKind.EXAMPLE
         and isinstance(item.get("segmentation"), dict)
         and item["segmentation"].get("solution_trimmed") is True
     ]
-    counts = {
-        "found": len(examples), "trimmed": 0, "unchanged": 0,
-        "protected": 0, "unsafe": 0,
-    }
+    counts = {"found": len(examples), "trimmed": 0, "unchanged": 0, "protected": 0, "unsafe": 0}
     with transaction.atomic():
         active = list(
-            Question.objects.select_for_update().filter(
-                paper=paper,
-                source_kind=Question.SourceKind.EXAMPLE,
-                source_anchor_seq__isnull=False,
-            ).select_related("group").prefetch_related("publications")
+            Question.objects.select_for_update()
+            .filter(paper=paper, source_kind=Question.SourceKind.EXAMPLE, source_anchor_seq__isnull=False)
+            .select_related("group")
+            .prefetch_related("publications")
         )
         by_anchor: dict[int, list[Question]] = defaultdict(list)
         for question in active:
@@ -3664,15 +3682,18 @@ def trim_book_example_solutions_locally(paper: Paper) -> dict[str, int]:
                 continue
             solution_text_present = _saved_example_solution_text_present(question)
             old_candidate_keys = {
-                key for candidate in (question.figure_candidates or [])
-                if (key := candidate_key(candidate)) is not None
+                key for candidate in (question.figure_candidates or []) if (key := candidate_key(candidate)) is not None
             }
             new_candidate_keys = {
-                key for candidate in (item.get("figure_candidates") or [])
+                key
+                for candidate in (item.get("figure_candidates") or [])
                 if (key := candidate_key(candidate)) is not None
             }
-            if (question.regions == item.get("regions") and not solution_text_present
-                    and old_candidate_keys == new_candidate_keys):
+            if (
+                question.regions == item.get("regions")
+                and not solution_text_present
+                and old_candidate_keys == new_candidate_keys
+            ):
                 counts["unchanged"] += 1
                 continue
             if not _solution_only_shortening(question, item, blocks):
@@ -3690,8 +3711,7 @@ def trim_book_example_solutions_locally(paper: Paper) -> dict[str, int]:
             paper = Paper.objects.select_for_update().get(pk=paper.pk)
             paper.notes = [
                 *(paper.notes or []),
-                f"教材例题：{counts['trimmed']} 张已在本地去除“分析/解答/证明”尾部；"
-                "沿用已有题干识读，未调用模型。",
+                f"教材例题：{counts['trimmed']} 张已在本地去除“分析/解答/证明”尾部；沿用已有题干识读，未调用模型。",
             ]
             paper.save(update_fields=["notes", "updated_at"])
     return counts
@@ -3723,9 +3743,11 @@ def _label_candidates(candidates: list[dict]) -> list[dict]:
 
 
 def candidates_in(paper: Paper, regions: list[dict]) -> list[dict]:
-    found = [{"seq": block.seq, "page_idx": block.page_idx, "bbox": block.bbox}
-             for block in paper.blocks.filter(type__in=segment.FIGURE_TYPES)
-             if block.bbox and segment.figure_in_regions(block.page_idx, block.bbox, regions)]
+    found = [
+        {"seq": block.seq, "page_idx": block.page_idx, "bbox": block.bbox}
+        for block in paper.blocks.filter(type__in=segment.FIGURE_TYPES)
+        if block.bbox and segment.figure_in_regions(block.page_idx, block.bbox, regions)
+    ]
     return _label_candidates(found)
 
 
@@ -3746,7 +3768,10 @@ def _table_check_flag(stem: str, mineru_tables: list[str], assignments: dict) ->
             return "识读说原卷有表格，但题干里没有写出表格，请对照原卷补上"
         return ""
     printed = sorted(
-        key for value in mineru_tables for row in tables.parse_html(value) for cell in row
+        key
+        for value in mineru_tables
+        for row in tables.parse_html(value)
+        for cell in row
         if (key := textnorm.witness_key(cell["text"]))
     )
     if not printed:
@@ -3762,7 +3787,8 @@ def _table_check_flag(stem: str, mineru_tables: list[str], assignments: dict) ->
 def _figure_slots(reading: dict | None) -> set[str]:
     """主读者明确归到题干或 A–D 的候选图槽位。"""
     return {
-        role for role in ((reading or {}).get("figures") or {}).values()
+        role
+        for role in ((reading or {}).get("figures") or {}).values()
         if role == "stem" or role in readers.OPTION_KEYS
     }
 
@@ -3789,8 +3815,7 @@ def _without_inferred_figure_text(reading: dict | None, figure_reading: dict | N
     # 仍须通过严格说明模式，因此“向右”等真实短语不会因主读漏字而被清掉。
     eligible_slots = set(readers.OPTION_KEYS) if pure_figure_choice else option_slots
     remove = {
-        slot for slot in eligible_slots
-        if readers.is_figure_description((reading.get("options") or {}).get(slot, ""))
+        slot for slot in eligible_slots if readers.is_figure_description((reading.get("options") or {}).get(slot, ""))
     }
     stem = reading.get("stem", "")
     table_removed = False
@@ -3803,14 +3828,10 @@ def _without_inferred_figure_text(reading: dict | None, figure_reading: dict | N
         return reading
     cleaned = dict(reading)
     cleaned["stem"] = stem
-    cleaned["options"] = {
-        key: value for key, value in (reading.get("options") or {}).items()
-        if key not in remove
-    }
+    cleaned["options"] = {key: value for key, value in (reading.get("options") or {}).items() if key not in remove}
     if remove:
         cleaned["figure_descriptions"] = sorted(
-            set(cleaned.get("figure_descriptions") or []) | remove,
-            key=lambda slot: (slot != "stem", slot),
+            set(cleaned.get("figure_descriptions") or []) | remove, key=lambda slot: (slot != "stem", slot)
         )
     cleaned["unclear"] = "[?]" in cleaned.get("stem", "") or any(
         "[?]" in value for value in cleaned["options"].values()
@@ -3832,13 +3853,14 @@ FLAG_UNREADABLE_STEM = "识读没能读出这道题的内容，卡上留下的�
 # AI 助手读题（不用看图模型）：题面是 MinerU 自己识别的文字，等 AI 助手或使用者对照原卷核对。
 FLAG_MINERU_DRAFT = "题面是 MinerU 识别的初稿，还没有看图核对；请对照原卷截图逐字核对、改字"
 FLAG_MINERU_DRAFT_EMPTY = "MinerU 没认出这道题的文字，请对照原卷截图把题目录进去"
-FLAG_READERS_DOWN = ("看图读题的服务这会儿用不了（多半是当天的免费额度用完了），先用了 MinerU 的初稿；"
-                     "额度恢复后点“重新识读”，或者对照原卷直接改字")
+FLAG_READERS_DOWN = (
+    "看图读题的服务这会儿用不了（多半是当天的免费额度用完了），先用了 MinerU 的初稿；"
+    "额度恢复后点“重新识读”，或者对照原卷直接改字"
+)
 # 原卷在题后面印着答案，誊录提示词只读题面、根本没有答案这一栏，识读回来
 # 的卡上永远是空的，界面还照实写着「原卷未提供答案与解析。」——一句假话。
 # 整条就是一个字母的选择题会自动填上；其余只提示，不替人抄。
-FLAG_PRINTED_ANSWER = ("原卷在这道题后面印着答案，卡上还没有；请对照原卷把它抄进答案栏"
-                       "（原卷没印答案就不用管）")
+FLAG_PRINTED_ANSWER = "原卷在这道题后面印着答案，卡上还没有；请对照原卷把它抄进答案栏（原卷没印答案就不用管）"
 # Saving the text answers these; they must not survive an edit.
 TEXT_DRAFT_FLAGS = (FLAG_MINERU_DRAFT, FLAG_MINERU_DRAFT_EMPTY, FLAG_READERS_DOWN)
 _LEADING_NUMBER = r"^\s*(?:第\s*)?{number}\s*(?:题)?\s*[.．、,，:：)）]\s*"
@@ -3854,12 +3876,18 @@ def _reading_order(blocks: list[dict], regions: list[dict]) -> list[dict]:
         kind, bbox = block.get("type"), block.get("bbox")
         if not bbox or kind in segment.NON_CONTENT or kind in {"image", "chart"}:
             continue
-        index = next((position for position, region in enumerate(regions)
-                      if segment.center_in_regions(int(block["page_idx"]), bbox, [region])), None)
+        index = next(
+            (
+                position
+                for position, region in enumerate(regions)
+                if segment.center_in_regions(int(block["page_idx"]), bbox, [region])
+            ),
+            None,
+        )
         if index is not None:
             placed.append((index, block))
     placed.sort(key=lambda item: (item[0], item[1]["bbox"][1], item[1]["bbox"][0]))
-    rows: list[list] = []          # [region index, top, bottom, blocks]
+    rows: list[list] = []  # [region index, top, bottom, blocks]
     for index, block in placed:
         top, bottom = block["bbox"][1], block["bbox"][3]
         if rows and rows[-1][0] == index:
@@ -3915,33 +3943,51 @@ def assistant_draft(snapshot: dict) -> dict:
     text = textnorm.fix_symbols(str(snapshot.get("draft") or "").strip())
     text = re.sub(_LEADING_NUMBER.format(number=number), "", text, count=1)
     stem, options = readers.split_inline_options(text)
-    tidied = prose.tidy_fields({"stem": stem, "options": options,
-                                "question_type": snapshot.get("question_type") or "unknown"})
+    tidied = prose.tidy_fields(
+        {"stem": stem, "options": options, "question_type": snapshot.get("question_type") or "unknown"}
+    )
     stem, options, origin = tidied["stem"], tidied["options"], tidied["origin"]
     kind = qtypes.with_section(
         qtypes.infer(tidied.get("question_type") or snapshot.get("question_type") or "unknown", stem, options),
-        snapshot.get("section"))
+        snapshot.get("section"),
+    )
     candidates = [candidate for candidate in snapshot.get("candidates") or [] if candidate.get("label")]
     labels = {str(candidate["label"]): candidate for candidate in candidates}
     assignments = _draft_figure_guess(stem, options, candidates)
     if assignments:
         assignments = _resolve_automatic_figure_assignments(
-            stem=stem, options=options, kind=kind, candidates=candidates, assignments=assignments)
-    figures = without_automatic_textbook_badges([
-        {"slot": role, "page_idx": labels[label]["page_idx"], "bbox": labels[label]["bbox"], "source": "auto"}
-        for label, role in assignments.items() if label in labels and role == "stem"
-    ])
-    review = automatic_review(stem=stem, options=options, candidate_labels=set(labels),
-                              assignments=assignments, figures=figures)
+            stem=stem, options=options, kind=kind, candidates=candidates, assignments=assignments
+        )
+    figures = without_automatic_textbook_badges(
+        [
+            {"slot": role, "page_idx": labels[label]["page_idx"], "bbox": labels[label]["bbox"], "source": "auto"}
+            for label, role in assignments.items()
+            if label in labels and role == "stem"
+        ]
+    )
+    review = automatic_review(
+        stem=stem, options=options, candidate_labels=set(labels), assignments=assignments, figures=figures
+    )
     flags = list(snapshot.get("segmentation_flags") or [])
     flags.append(FLAG_MINERU_DRAFT if stem else FLAG_MINERU_DRAFT_EMPTY)
     return {
         "read_a": {"engine": "MinerU", "stem": stem, "options": options, "draft": True, "figures": assignments},
-        "read_b": {}, "read_c": {},
-        "stem": stem, "options": options, "origin": origin, "question_type": kind, "text_source": "mineru",
-        "figures": figures, "figure_review": review, "foreign_figures": [],
-        "flags": flags, "error": "", "state": Question.State.YELLOW,
+        "read_b": {},
+        "read_c": {},
+        "stem": stem,
+        "options": options,
+        "origin": origin,
+        "question_type": kind,
+        "text_source": "mineru",
+        "figures": figures,
+        "figure_review": review,
+        "foreign_figures": [],
+        "flags": flags,
+        "error": "",
+        "state": Question.State.YELLOW,
     }
+
+
 WITNESS_FLAG_PREFIX = "AI 识读与 MinerU 原始文字有差异，请对照原卷："
 OBJECTION_FLAG_PREFIX = "两次识读一致，但 MinerU 在这里读法不同，再看一次也不能确定："  # legacy cards
 
@@ -3959,7 +4005,10 @@ def _located_spots(spots: list[dict], blocks: list[dict] | None) -> list[dict]:
     """The spots a person must check, each with the MinerU box to look at (when found)."""
     located = []
     for index, spot in enumerate(spots, 1):
-        entry = {"n": index, **{key: spot[key] for key in ("reading", "mineru", "before", "after", "at") if key in spot}}
+        entry = {
+            "n": index,
+            **{key: spot[key] for key in ("reading", "mineru", "before", "after", "at") if key in spot},
+        }
         box = textnorm.spot_block(spot, blocks or [])
         if box:
             entry.update(box)
@@ -4008,12 +4057,17 @@ def _derived_spots(question: Question, record: dict) -> list[dict]:
         objections = [spot for spot, answer in zip(objections, answers) if answer != "reading"]
     regions = question.regions or []
     pages = sorted({int(region["page_idx"]) for region in regions})
-    blocks = [
-        {"page_idx": block.page_idx, "bbox": block.bbox, "text": block.text}
-        for block in Block.objects.filter(paper_id=question.paper_id, page_idx__in=pages,
-                                          type__in=WITNESS_BLOCK_TYPES)
-        if isinstance(block.bbox, list) and segment.center_in_regions(block.page_idx, block.bbox, regions)
-    ] if pages else []
+    blocks = (
+        [
+            {"page_idx": block.page_idx, "bbox": block.bbox, "text": block.text}
+            for block in Block.objects.filter(
+                paper_id=question.paper_id, page_idx__in=pages, type__in=WITNESS_BLOCK_TYPES
+            )
+            if isinstance(block.bbox, list) and segment.center_in_regions(block.page_idx, block.bbox, regions)
+        ]
+        if pages
+        else []
+    )
     holder = {"doubtful": _located_spots(objections, blocks)}
     _mark_spot_text({"read_c": holder}, question.stem, question.options or {})
     return holder["doubtful"]
@@ -4070,9 +4124,21 @@ def check_spots(question: Question) -> list[dict]:
     return shown
 
 
-def _settle_objections(final: dict, source: str, update: dict, flags: list[str], *, witness: str, number: int,
-                       image_url: str, primary, checker, figure_source: dict,
-                       keep_reading: bool = False, blocks: list[dict] | None = None) -> tuple[dict, str]:
+def _settle_objections(
+    final: dict,
+    source: str,
+    update: dict,
+    flags: list[str],
+    *,
+    witness: str,
+    number: int,
+    image_url: str,
+    primary,
+    checker,
+    figure_source: dict,
+    keep_reading: bool = False,
+    blocks: list[dict] | None = None,
+) -> tuple[dict, str]:
     """Both vision reads agree, yet MinerU printed other characters at a few
     clean spots (x^3 / x^2, 至少需用 / 至少需要).  The same model reading twice
     repeats its own slips, so each spot gets one neutral either/or look.
@@ -4085,8 +4151,11 @@ def _settle_objections(final: dict, source: str, update: dict, flags: list[str],
     if not spots:
         return final, source
     previous = update.get("read_c") or {}
-    evidence = {"objections": spots, "witness": witness[:4000],
-                **({"chosen": previous["chosen"]} if "chosen" in previous else {})}
+    evidence = {
+        "objections": spots,
+        "witness": witness[:4000],
+        **({"chosen": previous["chosen"]} if "chosen" in previous else {}),
+    }
 
     prefix = ARBITER_OBJECTION_FLAG_PREFIX if keep_reading else OBJECTION_FLAG_PREFIX
 
@@ -4106,15 +4175,22 @@ def _settle_objections(final: dict, source: str, update: dict, flags: list[str],
         flags.append(_objection_flag(spots, prefix))
         return final, source
     doubtful = [spot for spot, answer in zip(spots, answers) if answer != "reading"]
-    record({**evidence, "engine": engine.label, "answers": answers,
-            **({"doubtful": _located_spots(doubtful, blocks)} if doubtful else {})})
+    record(
+        {
+            **evidence,
+            "engine": engine.label,
+            "answers": answers,
+            **({"doubtful": _located_spots(doubtful, blocks)} if doubtful else {}),
+        }
+    )
     if doubtful:
         flags.append(_objection_flag(doubtful, prefix))
     return final, source
 
 
-def _record_unverified_witness_differences(final: dict, update: dict, flags: list[str], *, witness: str,
-                                           blocks: list[dict] | None = None) -> None:
+def _record_unverified_witness_differences(
+    final: dict, update: dict, flags: list[str], *, witness: str, blocks: list[dict] | None = None
+) -> None:
     """Expose clear MinerU/vision substitutions for human review without another AI call."""
     spots = textnorm.witness_objections(final, witness)
     if not spots:
@@ -4141,8 +4217,7 @@ def _option_gaps(options: dict, figures: list[dict]) -> list[str]:
     A student's tick or cross over an option label made a reader skip that
     option, and the card still went green.  Option images count as present.
     """
-    letters = {key for key, value in (options or {}).items()
-               if key in _OPTION_LETTERS and str(value or "").strip()}
+    letters = {key for key, value in (options or {}).items() if key in _OPTION_LETTERS and str(value or "").strip()}
     letters |= {figure.get("slot") for figure in figures or [] if figure.get("slot") in _OPTION_LETTERS}
     if not letters:
         return []
@@ -4159,8 +4234,7 @@ def _surplus_options(options: dict, figures: list[dict]) -> list[str]:
     options as E, turning a four-option question into a five-option one nobody
     can answer correctly.  Option images count as present, like ``_option_gaps``.
     """
-    letters = {key for key, value in (options or {}).items()
-               if key in _OPTION_LETTERS and str(value or "").strip()}
+    letters = {key for key, value in (options or {}).items() if key in _OPTION_LETTERS and str(value or "").strip()}
     letters |= {figure.get("slot") for figure in figures or [] if figure.get("slot") in _OPTION_LETTERS}
     return sorted(letter for letter in letters if letter > "D")
 
@@ -4189,8 +4263,7 @@ def _section_choice_without_options(section: str, options: dict, figures: list[d
     """
     if not _CHOICE_SECTION.search(section or ""):
         return False
-    letters = {key for key, value in (options or {}).items()
-               if key in _OPTION_LETTERS and str(value or "").strip()}
+    letters = {key for key, value in (options or {}).items() if key in _OPTION_LETTERS and str(value or "").strip()}
     letters |= {figure.get("slot") for figure in figures or [] if figure.get("slot") in _OPTION_LETTERS}
     return not letters
 
@@ -4202,8 +4275,7 @@ _SOLUTION_MARK = re.compile(r"【答案】|【分析】|【解析】|【详解�
 # （202510 答案版第 15 页：「(3)将 ΔABD… 判断点 E_i 是否在该双曲线上【答案】(1)…」，
 # 标记在偏移 125 处）。按块顶裁会把上面那行题目连同它一起切掉——第 24 题的第 (3)
 # 小问就是这么丢的，而卡是绿的。全库这种并块只有两处，两处都在并块的中间。
-_SOLUTION_MARK_AT_START = re.compile(
-    r"^\s*(?:【答案】|【分析】|【解析】|【详解】|【点睛】)")
+_SOLUTION_MARK_AT_START = re.compile(r"^\s*(?:【答案】|【分析】|【解析】|【详解】|【点睛】)")
 
 
 def _figures_below_solution(blocks: list[dict] | None, figures: list[dict]) -> int:
@@ -4220,15 +4292,21 @@ def _figures_below_solution(blocks: list[dict] | None, figures: list[dict]) -> i
     ``witness_blocks`` 只收 type 为 text/title/list 且中心在卡范围内的块，
     【答案】这类标记印成正文块，实测确实在里面（判据恒不命中是最常见的假绿）。
     """
-    marks = [block for block in blocks or []
-             if _SOLUTION_MARK.search(str(block.get("text") or "").strip()) and block.get("bbox")]
+    marks = [
+        block
+        for block in blocks or []
+        if _SOLUTION_MARK.search(str(block.get("text") or "").strip()) and block.get("bbox")
+    ]
     if not marks or not figures:
         return 0
     first = min(marks, key=lambda block: (int(block["page_idx"]), float(block["bbox"][1])))
     top = float(first["bbox"][1]) + 1
-    return sum(1 for figure in figures or []
-               if int(figure.get("page_idx", -1)) == int(first["page_idx"])
-               and float((figure.get("bbox") or [0, 0, 0, 0])[1]) > top)
+    return sum(
+        1
+        for figure in figures or []
+        if int(figure.get("page_idx", -1)) == int(first["page_idx"])
+        and float((figure.get("bbox") or [0, 0, 0, 0])[1]) > top
+    )
 
 
 # 解析标记上方至少留这么多版面单位（0–1000，约 9mm）才算这段里还有正文；
@@ -4279,8 +4357,9 @@ def _reading_regions(snapshot: dict) -> list[dict]:
     return trimmed or regions
 
 
-def _unclassified_below_solution(blocks: list[dict] | None, candidates: list[dict] | None,
-                                 assignments: dict) -> tuple[int, int]:
+def _unclassified_below_solution(
+    blocks: list[dict] | None, candidates: list[dict] | None, assignments: dict
+) -> tuple[int, int]:
     """还没归类的候选图里，有几个印在卷面自己的【答案】/【解析】之后。返回（其中，合计）。
 
     答案版卷子上切题范围一路罩到下一道题，解析里印的图也成了候选框。给识读的图
@@ -4288,17 +4367,23 @@ def _unclassified_below_solution(blocks: list[dict] | None, candidates: list[dic
     「没归类」，卡上挂的那句「原卷可能有图没有被找到」会让人以为题目缺图——
     其实那张图印在答案里，本来就不该并进来（202510 答案版第 5、11、13、25 题）。
     """
-    marks = [block for block in blocks or []
-             if _SOLUTION_MARK.search(str(block.get("text") or "").strip()) and block.get("bbox")]
+    marks = [
+        block
+        for block in blocks or []
+        if _SOLUTION_MARK.search(str(block.get("text") or "").strip()) and block.get("bbox")
+    ]
     known = {str(label) for label in (assignments or {})}
-    pending = [c for c in candidates or []
-               if isinstance(c, dict) and str(c.get("label")) not in known and c.get("bbox")]
+    pending = [
+        c for c in candidates or [] if isinstance(c, dict) and str(c.get("label")) not in known and c.get("bbox")
+    ]
     if not marks or not pending:
         return 0, len(pending)
     tops = [(int(m["page_idx"]), float(m["bbox"][1])) for m in marks]
-    below = sum(1 for c in pending
-                if any(page == int(c.get("page_idx", -1)) and float(c["bbox"][1]) > top
-                       for page, top in tops))
+    below = sum(
+        1
+        for c in pending
+        if any(page == int(c.get("page_idx", -1)) and float(c["bbox"][1]) > top for page, top in tops)
+    )
     return below, len(pending)
 
 
@@ -4309,8 +4394,10 @@ _COORDINATE_EMPTY_LEFT = re.compile(r"[(（]\s*(?:\\[ ,]*)?[,，]\s*[-+−]?\s*\
 _COORDINATE_EMPTY_RIGHT = re.compile(r"[-+−]?\s*\d\s*(?:\\[ ,]*)?[,，]\s*(?:\\[ ,]*)?[)）]")
 # 只认「二、填空题」「三、解答题」这种大题标题开头的写法：括号里顺带提一句
 # 「含填空」不算，否则一道解答题只要提到填空二字就会被判成冲突。
-_HEADING_KIND = re.compile(r"^[一二三四五六七八九十]+\s*[、.．]\s*"
-                          r"(填空题|解答题|计算题|证明题|应用题|判断题|综合题|作图题)")
+_HEADING_KIND = re.compile(
+    r"^[一二三四五六七八九十]+\s*[、.．]\s*"
+    r"(填空题|解答题|计算题|证明题|应用题|判断题|综合题|作图题)"
+)
 
 
 def _section_kind_conflict(section: str | None, kind: str | None) -> tuple[str, str] | None:
@@ -4327,8 +4414,7 @@ def _section_kind_conflict(section: str | None, kind: str | None) -> tuple[str, 
     match = _HEADING_KIND.match(str(section or "").strip())
     printed = qtypes.from_words(match.group(1)) if match else "unknown"
     current = str(kind or "unknown")
-    if printed in _SECTION_KIND_COMPARE and current in _SECTION_KIND_COMPARE \
-            and printed != current:
+    if printed in _SECTION_KIND_COMPARE and current in _SECTION_KIND_COMPARE and printed != current:
         return qtypes.label(printed), qtypes.label(current)
     return None
 
@@ -4386,7 +4472,7 @@ def _restore_skipped_options(final: dict, readings: list[dict], witness: str) ->
     existing = {textnorm.canon(str(value)) for value in options.values() if str(value or "").strip()}
     witness_text = textnorm.witness_key(witness) if witness else ""
     restored: dict[str, bool] = {}
-    for letter in _OPTION_LETTERS[:_OPTION_LETTERS.index(last)]:
+    for letter in _OPTION_LETTERS[: _OPTION_LETTERS.index(last)]:
         if letter in present:
             continue
         for reading in readings:
@@ -4415,15 +4501,16 @@ def _without_echoed_number(reading: dict, number: int, others: tuple) -> dict:
         return reading
     if any(re.match(rf"\s*{int(number)}(?!\d)", str((other or {}).get("stem") or "")) for other in others):
         return reading
-    return {**reading, "stem": stem[match.end():]}
+    return {**reading, "stem": stem[match.end() :]}
 
 
 def _tidy_final(final: dict) -> tuple[dict, str]:
     """The chosen reading with its source note taken off and quotes tidied (see prose)."""
     if not isinstance(final, dict) or not isinstance(final.get("stem"), str):
         return final, ""
-    tidied = prose.tidy_fields({"stem": final["stem"], "options": final.get("options") or {},
-                                "question_type": final.get("type") or "unknown"})
+    tidied = prose.tidy_fields(
+        {"stem": final["stem"], "options": final.get("options") or {}, "question_type": final.get("type") or "unknown"}
+    )
     result = {**final, "stem": tidied["stem"], "options": tidied["options"]}
     if tidied.get("question_type"):
         result["type"] = tidied["question_type"]
@@ -4455,15 +4542,13 @@ def _exclude_handwritten_candidates(engine, store, labels: dict, figure_source: 
     with any printing in it keeps the prompt, which is the safe direction: a printed
     figure dropped without a word is the expensive mistake.
     """
-    unclaimed = sorted(set(labels) - set(figure_source.get("figures") or {}),
-                       key=lambda value: int(value))
+    unclaimed = sorted(set(labels) - set(figure_source.get("figures") or {}), key=lambda value: int(value))
     if not unclaimed or engine is None:
         return {}
     found = {}
     for label in unclaimed:
         item = labels[label]
-        crop = _figure_alone(store, {"page_idx": item.get("page_idx"),
-                                     "bbox": list(item.get("bbox") or [])})
+        crop = _figure_alone(store, {"page_idx": item.get("page_idx"), "bbox": list(item.get("bbox") or [])})
         if crop is None:
             continue
         try:
@@ -4495,16 +4580,23 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         # reaching here means the machine has no reading service at all.
         readiness = readers.primary_readiness()
         service = str(readiness.get("label") or readiness.get("selected") or "")
-        return {"state": Question.State.RED, "flags": [],
-            "error": f"本机还没有配置任何看图读题服务：所选的“{service}”没有 API Key，也没有其他已配置的服务。" if service
-                else "本机还没有配置任何看图读题服务。",
+        return {
+            "state": Question.State.RED,
+            "flags": [],
+            "error": f"本机还没有配置任何看图读题服务：所选的“{service}”没有 API Key，也没有其他已配置的服务。"
+            if service
+            else "本机还没有配置任何看图读题服务。",
             "error_kind": "reader_not_configured",
             "error_service": str(readiness.get("selected") or ""),
             "error_service_label": service,
-            "error_recoverable": True}
+            "error_recoverable": True,
+        }
     if not snapshot["regions"]:
-        return {"state": Question.State.RED, "flags": [],
-                "error": "没有切出这道题的原卷范围，请点“调整范围”在原卷上框出来"}
+        return {
+            "state": Question.State.RED,
+            "flags": [],
+            "error": "没有切出这道题的原卷范围，请点“调整范围”在原卷上框出来",
+        }
     reading_regions = _reading_regions(snapshot)
     clean, _ = imaging.stack_regions(reading_regions, store.load)
     marks = [{"label": c["label"], "page_idx": c["page_idx"], "bbox": c["bbox"]} for c in snapshot["candidates"]]
@@ -4516,10 +4608,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     witness = str(snapshot.get("witness") or "")
     jobs = [
         (name, engine, url, figures)
-        for name, engine, url, figures in (
-            ("a", primary, marked_url, True),
-            ("b", checker, clean_url, False),
-        )
+        for name, engine, url, figures in (("a", primary, marked_url, True), ("b", checker, clean_url, False))
         if engine is not None
     ]
     if double_read and checker is None:
@@ -4538,9 +4627,8 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
             def recognise():
                 if source_kind == Question.SourceKind.UNKNOWN:
                     return readers.read_question(engine, url, number, with_figures=figures)
-                return readers.read_question(
-                    engine, url, number, with_figures=figures, source_kind=source_kind,
-                )
+                return readers.read_question(engine, url, number, with_figures=figures, source_kind=source_kind)
+
             if double_read:
                 result = recognise()
             else:
@@ -4562,8 +4650,9 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     # 有 MinerU 旁证时先只读一次：主读与另一引擎的文字逐字一致，就不必再花一次
     # 视觉调用做同模型复核（实测同一模型复读几乎总是逐字相同，旁证更独立）。
     # 不一致或没有旁证时，照旧请复核读者独立再读一遍。
-    witness_first = bool(witness) and len(jobs) == 2 and \
-        len(textnorm.witness_key(witness)) >= textnorm.WITNESS_MIN_LENGTH
+    witness_first = (
+        bool(witness) and len(jobs) == 2 and len(textnorm.witness_key(witness)) >= textnorm.WITNESS_MIN_LENGTH
+    )
     if witness_first:
         first = run_reader(jobs[0])
         name, result, _error, _quota = first
@@ -4591,9 +4680,11 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     # The reading pass replaces transient AI/figure warnings, but a warning
     # emitted by the deterministic textbook segmenter must survive rereads.
     flags: list[str] = list(snapshot.get("segmentation_flags") or [])
-    update: dict = {"read_a": results.get("a", {"error": errors.get("a", "")}),
-                    "read_b": (results.get("b", {"error": errors.get("b", "")})
-                               if double_read else {"skipped": "disabled"}), "read_c": {}}
+    update: dict = {
+        "read_a": results.get("a", {"error": errors.get("a", "")}),
+        "read_b": (results.get("b", {"error": errors.get("b", "")}) if double_read else {"skipped": "disabled"}),
+        "read_c": {},
+    }
     if not results and quota_errors:
         raise quota_errors[0]
     asked = {name for name, *_rest in jobs}
@@ -4607,8 +4698,12 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         card["read_a"] = {**card["read_a"], "error": errors.get("a", "")}
         return card
     if not results:
-        return {**update, "state": Question.State.RED, "error": errors.get("a") or errors.get("b") or "识读失败",
-                "flags": []}
+        return {
+            **update,
+            "state": Question.State.RED,
+            "error": errors.get("a") or errors.get("b") or "识读失败",
+            "flags": [],
+        }
     a, b = results.get("a"), results.get("b")
     figure_source = a or {}
     a_text = _without_inferred_figure_text(a, figure_source)
@@ -4626,11 +4721,24 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         update["read_b"] = {"engine": "MinerU", "witness": witness[:4000], "skipped": "witness"}
     elif a and b and same_reading(a_text, b_text):
         final, source = a_text, "agree"
-        final, source = _settle_objections(final, source, update, flags, witness=witness, number=number,
-                                           image_url=clean_url, primary=primary, checker=checker,
-                                           figure_source=figure_source, blocks=snapshot.get("witness_blocks"))
-    elif a and b and (textnorm.witness_agrees(b_text, witness)
-                      or textnorm.witness_choice(a_text, b_text, witness) is not None):
+        final, source = _settle_objections(
+            final,
+            source,
+            update,
+            flags,
+            witness=witness,
+            number=number,
+            image_url=clean_url,
+            primary=primary,
+            checker=checker,
+            figure_source=figure_source,
+            blocks=snapshot.get("witness_blocks"),
+        )
+    elif (
+        a
+        and b
+        and (textnorm.witness_agrees(b_text, witness) or textnorm.witness_choice(a_text, b_text, witness) is not None)
+    ):
         # MinerU (a different engine) settles the disagreement.  An arbiter
         # from the readers' own model tends to repeat their slips: in testing
         # it “confirmed” a misread repeating decimal and kept inserted words
@@ -4638,11 +4746,20 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         # printed characters.  Every differing spot must side the same way.
         chosen = "b" if textnorm.witness_agrees(b_text, witness) else textnorm.witness_choice(a_text, b_text, witness)
         final, source = (a_text if chosen == "a" else b_text), "majority"
-        update["read_c"] = {"engine": "MinerU", "witness": witness[:4000], "skipped": "witness",
-                            "chosen": chosen}
-        final, source = _settle_objections(final, source, update, flags, witness=witness, number=number,
-                                           image_url=clean_url, primary=primary, checker=checker,
-                                           figure_source=figure_source, blocks=snapshot.get("witness_blocks"))
+        update["read_c"] = {"engine": "MinerU", "witness": witness[:4000], "skipped": "witness", "chosen": chosen}
+        final, source = _settle_objections(
+            final,
+            source,
+            update,
+            flags,
+            witness=witness,
+            number=number,
+            image_url=clean_url,
+            primary=primary,
+            checker=checker,
+            figure_source=figure_source,
+            blocks=snapshot.get("witness_blocks"),
+        )
     elif a and b:
         try:
             arbiter = readers.arbiter_engine(primary, checker)
@@ -4653,8 +4770,11 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
             # reading shown first (then the primary's, taken from the image with
             # candidate boxes drawn over it), while the checker — reading the
             # clean image — was right more often where the two differed.
-            c = readers.arbitrate(arbiter, clean_url, number, b_text, a_text, witness) if witness \
+            c = (
+                readers.arbitrate(arbiter, clean_url, number, b_text, a_text, witness)
+                if witness
                 else readers.arbitrate(arbiter, clean_url, number, b_text, a_text)
+            )
             c = _without_echoed_number(c, number, (a_text, b_text))
             update["read_c"] = c
             c_text = _without_inferred_figure_text(c, figure_source)
@@ -4675,9 +4795,19 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
                 # The arbiter saw MinerU's text but can still keep a slip both
                 # readers made (shengli7 #16 “器补” for the printed 添补).
                 final, source = _settle_objections(
-                    final, source, update, flags, witness=witness, number=number, image_url=clean_url,
-                    primary=primary, checker=checker, figure_source=figure_source, keep_reading=True,
-                    blocks=snapshot.get("witness_blocks"))
+                    final,
+                    source,
+                    update,
+                    flags,
+                    witness=witness,
+                    number=number,
+                    image_url=clean_url,
+                    primary=primary,
+                    checker=checker,
+                    figure_source=figure_source,
+                    keep_reading=True,
+                    blocks=snapshot.get("witness_blocks"),
+                )
         except readers.ReaderError as error:
             final, source = a_text, "single"
             update["read_c"] = {"error": str(error)}
@@ -4688,7 +4818,8 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         flags.append(f"只有一次识读成功（另一次：{errors.get('b') or errors.get('a')}）")
 
     final, restored_options = _restore_skipped_options(
-        final, [r for r in (a_text, b_text, update.get("read_c")) if isinstance(r, dict)], witness)
+        final, [r for r in (a_text, b_text, update.get("read_c")) if isinstance(r, dict)], witness
+    )
     # A third reading (arbiter) has no 【题型】; when its text wins, keep the
     # type the two readers agreed on instead of falling back to “未定”.
     if not qtypes.decided(final.get("type")):
@@ -4699,7 +4830,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     final, origin = _tidy_final(final)
     if not double_read and a_text and witness:
         _record_unverified_witness_differences(
-            final, update, flags, witness=witness, blocks=snapshot.get("witness_blocks"),
+            final, update, flags, witness=witness, blocks=snapshot.get("witness_blocks")
         )
     for letter, supported in restored_options.items():
         if not supported:
@@ -4708,16 +4839,14 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     # This is a zero-extra-call guardrail.  Page structure remains the source
     # of truth for explicit 例题/练习 anchors, while model classifications are
     # used to stop prose/title candidates from silently becoming green cards.
-    content_readings = [
-        result for result in (a, b, update.get("read_c"))
-        if isinstance(result, dict)
-    ]
+    content_readings = [result for result in (a, b, update.get("read_c")) if isinstance(result, dict)]
     if content_flag := _content_kind_review_flag(
-            source_kind=source_kind,
-            stem=str(final.get("stem") or ""),
-            options=final.get("options") or {},
-            kind=str(final.get("type") or snapshot.get("question_type") or "unknown"),
-            readings=content_readings):
+        source_kind=source_kind,
+        stem=str(final.get("stem") or ""),
+        options=final.get("options") or {},
+        kind=str(final.get("type") or snapshot.get("question_type") or "unknown"),
+        readings=content_readings,
+    ):
         flags.append(content_flag)
 
     figures, foreign = [], []
@@ -4737,15 +4866,17 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
                 update["read_a"] = {**update["read_a"], "figures_followup": extra}
     scratch = _exclude_handwritten_candidates(primary, store, labels, figure_source)
     if scratch:
-        figure_source = {**figure_source,
-                         "figures": {**(figure_source.get("figures") or {}), **scratch}}
+        figure_source = {**figure_source, "figures": {**(figure_source.get("figures") or {}), **scratch}}
         if isinstance(update.get("read_a"), dict):
             update["read_a"] = {**update["read_a"], "figures_handwritten": scratch}
     provisional_kind = final.get("type") or snapshot["question_type"] or "unknown"
     option_result = figure_assignment.option_evidence(
-        stem=final.get("stem", ""), options=final.get("options") or {},
-        kind=provisional_kind, candidates=snapshot["candidates"],
-        assignments=figure_source.get("figures") or {}, blocks=snapshot.get("witness_blocks"),
+        stem=final.get("stem", ""),
+        options=final.get("options") or {},
+        kind=provisional_kind,
+        candidates=snapshot["candidates"],
+        assignments=figure_source.get("figures") or {},
+        blocks=snapshot.get("witness_blocks"),
     )
     figure_assignments = _resolve_automatic_figure_assignments(
         stem=final.get("stem", ""),
@@ -4766,33 +4897,39 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
                 figure["assignment_evidence"] = evidence
             figures.append(figure)
         elif role.startswith("q") and role[1:].isdigit():
-            foreign.append({
-                "number": int(role[1:]),
-                "group_id": snapshot.get("group_id"),
-                **box,
-            })   # 属于同一题组内别的题的图，交给那道题
+            foreign.append(
+                {"number": int(role[1:]), "group_id": snapshot.get("group_id"), **box}
+            )  # 属于同一题组内别的题的图，交给那道题
     figures = without_automatic_textbook_badges(figures)
-    if table_flag := _table_check_flag(str(final.get("stem") or ""), snapshot.get("witness_tables") or [],
-                                       figure_assignments):
+    if table_flag := _table_check_flag(
+        str(final.get("stem") or ""), snapshot.get("witness_tables") or [], figure_assignments
+    ):
         flags.append(table_flag)
     if gaps := _option_gaps(final.get("options") or {}, figures):
         flags.append(f"选项 {'、'.join(gaps)} 没有读出来，请对照原卷补上")
     if twins := _identical_options(final.get("options") or {}):
         flags.append(f"选项 {'和'.join(twins)} 读成了一模一样的内容，请对照原卷核对")
     if surplus := _surplus_options(final.get("options") or {}, figures):
-        flags.append(f"这张卡读出了 {'、'.join(surplus)} 这样的第 5 个及以后的选项；"
-                     f"数学选择题通常只有四个，请对照原卷核对是不是把旁边的演算读成了选项")
-    if _section_choice_without_options(str(snapshot.get("section") or ""),
-                                       final.get("options") or {}, figures):
-        flags.append("卷面的大题标题写着这一段是选择题，可这道题一个选项都没有读出来（也没有选项配图）；"
-                     "请对照原卷补上 A、B、C、D")
+        flags.append(
+            f"这张卡读出了 {'、'.join(surplus)} 这样的第 5 个及以后的选项；"
+            f"数学选择题通常只有四个，请对照原卷核对是不是把旁边的演算读成了选项"
+        )
+    if _section_choice_without_options(str(snapshot.get("section") or ""), final.get("options") or {}, figures):
+        flags.append(
+            "卷面的大题标题写着这一段是选择题，可这道题一个选项都没有读出来（也没有选项配图）；"
+            "请对照原卷补上 A、B、C、D"
+        )
     if solution_figures := _figures_below_solution(snapshot.get("witness_blocks"), figures):
-        flags.append(f"这道题的范围里还印着答案和解析，其中 {solution_figures} 张配图印在【解析】之后，"
-                     f"可能来自解析部分而不是题目；请对照原卷核对，确实不要就在“配图”里删掉")
+        flags.append(
+            f"这道题的范围里还印着答案和解析，其中 {solution_figures} 张配图印在【解析】之后，"
+            f"可能来自解析部分而不是题目；请对照原卷核对，确实不要就在“配图”里删掉"
+        )
     if figure_policy.candidates_cut_by_own_range(
-            snapshot.get("regions") or [], snapshot.get("candidates") or [],
-            (final.get("figures") or {}).keys(),
-            [figure.get("label") for figure in figures]):
+        snapshot.get("regions") or [],
+        snapshot.get("candidates") or [],
+        (final.get("figures") or {}).keys(),
+        [figure.get("label") for figure in figures],
+    ):
         # 识读点名要这张图，候选池里也有，可题目范围只截到它一半——成品卷上这张图
         # 是残的。八下第 1 题 id=777 问「求 BD 的长」，菱形只剩上半截，B、D 不见了。
         # 这条以前一声不吭：FLAG_UNFOUND_FIGURE 只在「识读说缺图」或「点的标签不在
@@ -4801,10 +4938,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     audited_results = list(results.values()) + normalized_results
     if isinstance(update.get("read_c"), dict):
         audited_results.append(update["read_c"])
-    described_slots = {
-        slot for result in audited_results
-        for slot in (result.get("figure_descriptions") or [])
-    }
+    described_slots = {slot for result in audited_results for slot in (result.get("figure_descriptions") or [])}
     # The text reader sees the complete question and is more reliable than the
     # segmentation heuristic for sub-numbered free-response questions such as
     # “(1)…(2)…”.  Keep the segment type only as a fallback.
@@ -4812,30 +4946,20 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     if kind == "unknown":
         kind = snapshot["question_type"]
     kind = _normalise_unlabelled_numeric_choice_type(
-        kind,
-        final=final,
-        readings=[a, b],
-        candidates=snapshot["candidates"],
-        figures=figures,
+        kind, final=final, readings=[a, b], candidates=snapshot["candidates"], figures=figures
     )
-    kind = qtypes.with_section(qtypes.infer(kind, final.get("stem"), final.get("options")),
-                               snapshot.get("section"))
+    kind = qtypes.with_section(qtypes.infer(kind, final.get("stem"), final.get("options")), snapshot.get("section"))
     if conflict := _section_kind_conflict(snapshot.get("section"), kind):
         # 题型是题型待核对之外的一类：模型判了、也定了案，可卷面标题说的不一样。
-        flags.append(f"卷面的大题标题写着这一段是{conflict[0]}，卡上却是{conflict[1]}；"
-                     "请在题卡上选一下题型")
+        flags.append(f"卷面的大题标题写着这一段是{conflict[0]}，卡上却是{conflict[1]}；请在题卡上选一下题型")
     if qtypes.fill_blank_without_slot(kind, final.get("stem")):
         # 上面那条靠卷面标题对照，教材卡没有大题标题，所以要看题干：标成填空题
         # 却没有任何可填的位置，那是把计算题、解答题判成了填空题（两本书 37 张）。
         flags.append(qtypes.FLAG_FILL_NO_SLOT)
     if broken := _broken_coordinate(str(final.get("stem") or "")):
-        flags.append(f"题干里这个坐标只读到一半（{broken.strip()}），缺的那一格没读出来；"
-                     "请对照原卷补上再入库")
+        flags.append(f"题干里这个坐标只读到一半（{broken.strip()}），缺的那一格没读出来；请对照原卷补上再入库")
     choice_missing_slots = missing_choice_figure_slots(
-        kind=kind,
-        options=final.get("options") or {},
-        figures=figures,
-        readings=audited_results,
+        kind=kind, options=final.get("options") or {}, figures=figures, readings=audited_results
     )
     choice_missing = bool(choice_missing_slots)
     policy_stem = snapshot.get("stem", "") if snapshot.get("edited") else final.get("stem", "")
@@ -4853,15 +4977,20 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         # Preserve the raw reader roles and keep geometry decisions separately.
         local_evidence = {
             label: {**evidence, "candidate_key": candidate_key(labels[label])}
-            for label, evidence in option_result["evidence"].items() if label in labels
+            for label, evidence in option_result["evidence"].items()
+            if label in labels
         }
         review["assignment_evidence"] = local_evidence
         for name in ("read_a", "read_b"):
             if isinstance(update.get(name), dict) and ("stem" in update[name] or "figures" in update[name]):
-                update[name] = {**update[name], "figure_layout": {
-                    "evidence": local_evidence, "conflicts": option_result["conflicts"],
-                    "candidate_keys": {label: candidate_key(candidate) for label, candidate in labels.items()},
-                }}
+                update[name] = {
+                    **update[name],
+                    "figure_layout": {
+                        "evidence": local_evidence,
+                        "conflicts": option_result["conflicts"],
+                        "candidate_keys": {label: candidate_key(candidate) for label, candidate in labels.items()},
+                    },
+                }
                 break
     if option_result["conflicts"]:
         review["assignment_conflicts"] = option_result["conflicts"]
@@ -4877,12 +5006,14 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     elif review["status"] == CONFLICT:
         if "candidate_unclassified" in review.get("signals", []):
             below, total = _unclassified_below_solution(
-                snapshot.get("witness_blocks"), snapshot.get("candidates"),
-                figure_assignments)
+                snapshot.get("witness_blocks"), snapshot.get("candidates"), figure_assignments
+            )
             flags.append(
                 f"原卷有 {total} 张图印在这道题范围里的【答案】/【解析】之后，没有并进本题"
                 f"（可能来自解析）；确实属于题目的话，请对照原卷点“配图”框进来"
-                if below and below == total else figure_policy.FLAG_UNFOUND_FIGURE)
+                if below and below == total
+                else figure_policy.FLAG_UNFOUND_FIGURE
+            )
         else:
             flags.append(figure_policy.FLAG_UNCUED_FIGURE)
     if final.get("unclear"):
@@ -4891,59 +5022,59 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     # 硬编码关掉（features 里 double_read 恒为 False），所以它一直是单模型
     # 自说自话，真实题库 153 张卡里出现 6 次，人工核对基本都是错的。
     # "范围可能需要调整"的说法反而会误导人重切那些本来切对了的题。
-    if number_flag := _number_seen_flag(
-            number, [a, b], clipped_number=snapshot.get("start_source") == "repaired"):
+    if number_flag := _number_seen_flag(number, [a, b], clipped_number=snapshot.get("start_source") == "repaired"):
         flags.append(number_flag)
     # The printed line this card is anchored to must still be recognisable in what
     # the reader wrote.  When a run of textbook prose ends inside the next
     # section's body the reader sometimes hands back that prose as the stem, and
     # nothing else on the card notices（八下第 4 题印着三角形两边与一元二次方程，
     # 卡上却是矩形土地建花园）。
-    printed = next((str(block.get("text") or "")
-                    for block in snapshot.get("witness_blocks") or []
-                    if block.get("seq") == snapshot.get("source_anchor_seq")), None)
-    if printed and (probe := textnorm.anchor_reading_mismatch(
-            printed, "".join([
-                final.get("stem") or "",
-                *(final.get("options") or {}).values(),
-                final.get("analysis") or "",
-            ]))):
+    printed = next(
+        (
+            str(block.get("text") or "")
+            for block in snapshot.get("witness_blocks") or []
+            if block.get("seq") == snapshot.get("source_anchor_seq")
+        ),
+        None,
+    )
+    if printed and (
+        probe := textnorm.anchor_reading_mismatch(
+            printed,
+            "".join([final.get("stem") or "", *(final.get("options") or {}).values(), final.get("analysis") or ""]),
+        )
+    ):
         flags.append(
             f"这张卡题号那一行印着「{probe}…」，但识读出来的内容里认不出这句话，"
-            f"卡上可能是另一道题；请对照原书确认这张卡的范围和内容")
-    if printed and (solution := textnorm.printed_solution_in_stem(
-            printed, final.get("stem") or "")):
+            f"卡上可能是另一道题；请对照原书确认这张卡的范围和内容"
+        )
+    if printed and (solution := textnorm.printed_solution_in_stem(printed, final.get("stem") or "")):
         # 印刷解答跟在题后面，学生做卷子时答案就摆在眼前。
-        flags.append(
-            f"题干里混进了印刷的解答（{solution}…），它可能属于别的题；"
-            f"请对照原书确认该不该留在这里")
+        flags.append(f"题干里混进了印刷的解答（{solution}…），它可能属于别的题；请对照原书确认该不该留在这里")
     if (merged := textnorm.merged_question_number(final.get("stem"), number)) is not None:
         # 两道题并成一张卡时，卡上只有一道题号、却是绿的。只提示，不替用户拆。
         flags.append(
-            f"题干里还印着第 {merged} 题的题号，这张卡可能是两道题并成了一道；"
-            f"请对照原卷确认，必要时在这里把它拆成两道")
-    elif snapshot.get("is_book") and (extra := textnorm.printed_question_numbers(
-            snapshot.get("witness") or "", number)):
+            f"题干里还印着第 {merged} 题的题号，这张卡可能是两道题并成了一道；请对照原卷确认，必要时在这里把它拆成两道"
+        )
+    elif snapshot.get("is_book") and (
+        extra := textnorm.printed_question_numbers(snapshot.get("witness") or "", number)
+    ):
         # 另一种形状：卡上只有一道题，题号也对得上，范围却罩住了后面几道题 ——
         # 书上印着，库里却没有它们的卡（八下习题 7.1 的第 2 题就是这样没的）。
         listed = "、".join(str(value) for value in extra)
-        flags.append(
-            f"这张卡的范围里还印着第 {listed} 题的题号，卡上只有这一道；"
-            f"请对照原书确认那几道题是不是漏进来了")
-    if missing := textnorm.missing_sub_questions(
-            final.get("stem") or "", snapshot.get("witness_blocks")):
+        flags.append(f"这张卡的范围里还印着第 {listed} 题的题号，卡上只有这一道；请对照原书确认那几道题是不是漏进来了")
+    if missing := textnorm.missing_sub_questions(final.get("stem") or "", snapshot.get("witness_blocks")):
         # 小问在整段正文里跳号，而那些号在本题范围内确实印着内容：切题吞了一道小问。
         # 九上 id=1152 就是这样，(2)整条没进卡，成品卷上印成 (1)(3)。判据的另一半
         # （题面只印单数小题的那种不算）在 textnorm.missing_sub_questions 里。
         # 不挂 elif：吞题和范围越界可能同时发生，两个提示都要给。
         listed_subs = "、".join(f"（{n}）" for n in missing)
         flags.append(
-            f"题干的小问编号跳过了 {listed_subs}，而本题范围内印着这些小问的内容；"
-            f"这道题可能少了一问，请对照原书确认")
+            f"题干的小问编号跳过了 {listed_subs}，而本题范围内印着这些小问的内容；这道题可能少了一问，请对照原书确认"
+        )
     if headings := textnorm.section_headings_after_anchor(
-            snapshot.get("witness_blocks"), snapshot.get("source_anchor_seq"),
-            "".join([final.get("stem") or "",
-                     *(final.get("options") or {}).values()]),
+        snapshot.get("witness_blocks"),
+        snapshot.get("source_anchor_seq"),
+        "".join([final.get("stem") or "", *(final.get("options") or {}).values()]),
     ):
         # 范围一路罩到这道题后面去了：教材的栏目（数学理解/读一读/做一做…）或新章节，
         # 有时还连着后面几道题。成品卷上这张卡就带着一整块不相干的内容——八下第 1 题
@@ -4952,9 +5083,11 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         listed = "、".join(f"「{value}」" for value in headings)
         flags.append(
             f"这道题的范围往后罩住了 {listed}，成品卷上会带着一整块和本题无关的内容"
-            f"（有的还罩住了后面几道题）；请点“调整范围”缩短本题的范围")
+            f"（有的还罩住了后面几道题）；请点“调整范围”缩短本题的范围"
+        )
     elif snapshot.get("start_source") == "located" and not any(
-            isinstance((result or {}).get("number_seen"), int) for result in (a, b)):
+        isinstance((result or {}).get("number_seen"), int) for result in (a, b)
+    ):
         # The start came from the AI locator and nobody saw the printed number
         # in the crop: the opening line is probably above it (口镇第 8 题只剩
         # “B₁P 与 C₁D 所成角……”, and MinerU's text agreed, so it was green).
@@ -5012,23 +5145,35 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
 
 
 def _snapshot(question: Question) -> dict:
-    return {"id": question.id, "number": question.number, "group_id": question.group_id,
-            "start_source": question.start_source, "regions": question.regions,
-            "candidates": question.figure_candidates, "question_type": question.question_type,
-            "section": question.section, "content_revision": question.content_revision,
-            "body_mode": question.body_mode, "processing_mode": question.processing_mode,
-            "ocr_pending": question.ocr_pending,
-            "stem": question.stem, "options": question.options, "edited": question.edited,
-            "answer": question.answer,
-            "source_kind": question.source_kind, "source_anchor_seq": question.source_anchor_seq,
-            "segmentation_flags": [
-                flag for flag in (question.flags or [])
-                if str(flag).startswith("书本切题范围超过")
-                or str(flag).startswith(MERGED_QUESTION_FLAG_PREFIX)
-                or str(flag).startswith(segment.AMBIGUOUS_CONTINUATION_FLAG_PREFIX)
-                or flag == figure_policy.FLAG_SHARED_FIGURE
-                or flag == FLAG_MANUAL_FIGURE_OUTSIDE_RANGE
-            ]}
+    return {
+        "id": question.id,
+        "number": question.number,
+        "group_id": question.group_id,
+        "start_source": question.start_source,
+        "regions": question.regions,
+        "candidates": question.figure_candidates,
+        "question_type": question.question_type,
+        "section": question.section,
+        "content_revision": question.content_revision,
+        "body_mode": question.body_mode,
+        "processing_mode": question.processing_mode,
+        "ocr_pending": question.ocr_pending,
+        "stem": question.stem,
+        "options": question.options,
+        "edited": question.edited,
+        "answer": question.answer,
+        "source_kind": question.source_kind,
+        "source_anchor_seq": question.source_anchor_seq,
+        "segmentation_flags": [
+            flag
+            for flag in (question.flags or [])
+            if str(flag).startswith("书本切题范围超过")
+            or str(flag).startswith(MERGED_QUESTION_FLAG_PREFIX)
+            or str(flag).startswith(segment.AMBIGUOUS_CONTINUATION_FLAG_PREFIX)
+            or flag == figure_policy.FLAG_SHARED_FIGURE
+            or flag == FLAG_MANUAL_FIGURE_OUTSIDE_RANGE
+        ],
+    }
 
 
 WITNESS_BLOCK_TYPES = frozenset({"text", "title", "list"})
@@ -5101,8 +5246,9 @@ def _reading_regressed(question: Question, fields: dict) -> str:
     lost = qtypes.subquestion_count(old_stem) - qtypes.subquestion_count(new_stem)
     if lost <= 0:
         return ""
-    return (f"这次重读把题干读短了（小问少了 {lost} 个），已保留上一次识读的内容；"
-            f"如果新读出来的才是对的，请对照原卷改一下")
+    return (
+        f"这次重读把题干读短了（小问少了 {lost} 个），已保留上一次识读的内容；如果新读出来的才是对的，请对照原卷改一下"
+    )
 
 
 def _apply_reading_fields(question: Question, fields: dict) -> None:
@@ -5112,27 +5258,23 @@ def _apply_reading_fields(question: Question, fields: dict) -> None:
     # the new reading instead.
     own_keys = {candidate_key(item) for item in question.figure_candidates or []}
     borrowed = [
-        f for f in question.figures
+        f
+        for f in question.figures
         if f.get("source") in {"other", "shared"} or (f.get("source") == "row" and candidate_key(f) not in own_keys)
     ]
     if borrowed and "figures" in fields:
-        fields["figures"] = fields["figures"] + [
-            f for f in borrowed if not _same_box(f, fields["figures"])
-        ]
+        fields["figures"] = fields["figures"] + [f for f in borrowed if not _same_box(f, fields["figures"])]
         review_stem = question.stem if question.edited else fields.get("stem", question.stem)
         review_options = question.options if question.edited else fields.get("options", question.options)
         reading_review = fields.get("figure_review") or {}
         fields["figure_review"] = recheck_automatic_review(
-            stem=review_stem,
-            options=review_options,
-            figures=fields["figures"],
-            previous=fields.get("figure_review"),
+            stem=review_stem, options=review_options, figures=fields["figures"], previous=fields.get("figure_review")
         )
         for name in ("assignment_evidence", "assignment_conflicts"):
             if name in reading_review:
                 fields["figure_review"][name] = deepcopy(reading_review[name])
         fields["flags"] = _flags_after_figure_review(
-            fields.get("flags", []), fields["figure_review"], fields["figures"],
+            fields.get("flags", []), fields["figure_review"], fields["figures"]
         )
         if fields.get("state") in {Question.State.GREEN, Question.State.YELLOW}:
             fields["state"] = Question.State.YELLOW if fields["flags"] else Question.State.GREEN
@@ -5157,17 +5299,12 @@ def _apply_reading_fields(question: Question, fields: dict) -> None:
     if question.figures and any(f.get("source") == "manual" for f in question.figures):
         manual_figures, manual_review = _manual_figures_and_review(question)
         fields["figures"] = manual_figures
-        fields["flags"] = _flags_after_figure_review(
-            fields.get("flags", []), manual_review, manual_figures,
-        )
+        fields["flags"] = _flags_after_figure_review(fields.get("flags", []), manual_review, manual_figures)
         fields["figure_review"] = manual_review
-    elif "manual_figure_outside_range" in (
-            (question.figure_review or {}).get("signals") or []):
+    elif "manual_figure_outside_range" in ((question.figure_review or {}).get("signals") or []):
         fields["figures"] = []
         fields["figure_review"] = question.figure_review
-        fields["flags"] = _flags_after_figure_review(
-            fields.get("flags", []), question.figure_review, [],
-        )
+        fields["flags"] = _flags_after_figure_review(fields.get("flags", []), question.figure_review, [])
     elif stored_or_derived_review(question).get("status") == CONFIRMED_NO_FIGURE:
         fields["figures"] = []
         fields["flags"] = [f for f in fields.get("flags", []) if not figure_flag(f)]
@@ -5180,26 +5317,32 @@ def _apply_reading_fields(question: Question, fields: dict) -> None:
         setattr(question, key, value)
     question.save()
     Paper.objects.filter(pk=question.paper_id).update(
-        progress=question.paper.questions.exclude(
-            state__in=[Question.State.WAITING, Question.State.READING],
-        ).count(),
+        progress=question.paper.questions.exclude(state__in=[Question.State.WAITING, Question.State.READING]).count(),
         updated_at=timezone.now(),
     )
 
 
 def _usable_cut_reading(fields: dict) -> bool:
-    return (isinstance(fields, dict) and not fields.get("error")
-            and isinstance(fields.get("state", Question.State.GREEN), str)
-            and fields.get("state", Question.State.GREEN) in {Question.State.GREEN, Question.State.YELLOW}
-            and isinstance(fields.get("stem"), str) and bool(fields["stem"].strip())
-            and isinstance(fields.get("options", {}), dict)
-            and all(key in readers.OPTION_KEYS and isinstance(value, str)
-                    for key, value in fields.get("options", {}).items()))
+    return (
+        isinstance(fields, dict)
+        and not fields.get("error")
+        and isinstance(fields.get("state", Question.State.GREEN), str)
+        and fields.get("state", Question.State.GREEN) in {Question.State.GREEN, Question.State.YELLOW}
+        and isinstance(fields.get("stem"), str)
+        and bool(fields["stem"].strip())
+        and isinstance(fields.get("options", {}), dict)
+        and all(
+            key in readers.OPTION_KEYS and isinstance(value, str) for key, value in fields.get("options", {}).items()
+        )
+    )
 
 
 def _cut_content_protected(question: Question) -> bool:
-    return bool(question.approved or question.publications.exists()
-                or (question.edited and (question.stem.strip() or question.options)))
+    return bool(
+        question.approved
+        or question.publications.exists()
+        or (question.edited and (question.stem.strip() or question.options))
+    )
 
 
 def _cut_source_current(question: Question) -> bool:
@@ -5229,34 +5372,67 @@ def _cut_to_text(question: Question, fields: dict) -> None:
 
 def promote_saved_readings(paper_id=None) -> list[int]:
     """Upgrade a current successful pre-1.11.9 candidate locally, with no API."""
-    query = Question.objects.filter(body_mode="source_image", paper__status=Paper.Status.READY,
-        paper__archived=False, ocr_pending=False, reread_requested=False).exclude(ocr_suggestion={})
+    query = Question.objects.filter(
+        body_mode="source_image",
+        paper__status=Paper.Status.READY,
+        paper__archived=False,
+        ocr_pending=False,
+        reread_requested=False,
+    ).exclude(ocr_suggestion={})
     if paper_id is not None:
         query = query.filter(paper_id=paper_id)
     promoted = []
     for question_id, owner in query.values_list("pk", "paper_id"):
         with transaction.atomic():
-            current = Paper.objects.select_for_update().filter(pk=owner, status=Paper.Status.READY,
-                archived=False).first()
+            current = (
+                Paper.objects.select_for_update().filter(pk=owner, status=Paper.Status.READY, archived=False).first()
+            )
             if current is None:
                 continue
             question = Question.objects.select_for_update().select_related("paper").filter(pk=question_id).first()
-            if (question is None or question.body_mode != "source_image" or question.ocr_pending
-                    or question.reread_requested or _cut_content_protected(question)):
+            if (
+                question is None
+                or question.body_mode != "source_image"
+                or question.ocr_pending
+                or question.reread_requested
+                or _cut_content_protected(question)
+            ):
                 continue
             candidate = question.ocr_suggestion
-            if (not isinstance(candidate, dict) or type(candidate.get("revision")) is not int
-                    or candidate["revision"] != question.content_revision or not _usable_cut_reading(candidate)
-                    or not source_images.valid_regions(current, question.regions) or not _cut_source_current(question)):
+            if (
+                not isinstance(candidate, dict)
+                or type(candidate.get("revision")) is not int
+                or candidate["revision"] != question.content_revision
+                or not _usable_cut_reading(candidate)
+                or not source_images.valid_regions(current, question.regions)
+                or not _cut_source_current(question)
+            ):
                 continue
             # Historical candidates carried the content revision. Newer ones
             # may also bind the paper/source plan, which must agree when present.
-            if ("paper_revision" in candidate and candidate["paper_revision"] != int(
-                    (current.processing_plan or {}).get("revision", 0))):
+            if "paper_revision" in candidate and candidate["paper_revision"] != int(
+                (current.processing_plan or {}).get("revision", 0)
+            ):
                 continue
-            fields = {key: deepcopy(value) for key, value in candidate.items() if key in {
-                "stem", "options", "question_type", "origin", "text_source", "figures", "figure_review",
-                "flags", "error", "state", "answer", "analysis"}}
+            fields = {
+                key: deepcopy(value)
+                for key, value in candidate.items()
+                if key
+                in {
+                    "stem",
+                    "options",
+                    "question_type",
+                    "origin",
+                    "text_source",
+                    "figures",
+                    "figure_review",
+                    "flags",
+                    "error",
+                    "state",
+                    "answer",
+                    "analysis",
+                }
+            }
             fields.setdefault("state", Question.State.GREEN)
             fields.setdefault("flags", [])
             fields.setdefault("error", "")
@@ -5275,7 +5451,8 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
     for question in questions:
         if question.body_mode == "source_image" and _cut_content_protected(question):
             Question.objects.filter(pk=question.pk, content_revision=question.content_revision).update(
-                reread_requested=False, ocr_pending=False)
+                reread_requested=False, ocr_pending=False
+            )
         else:
             eligible.append(question)
     questions = eligible
@@ -5314,24 +5491,32 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
         # 各自从 1 重新编号，对不上，所以范围里多出来的题号只在教材上当成问题。
         snapshot["is_book"] = paper.material_type == Paper.MaterialType.BOOK
         # Only the pages this card touches: a long book has thousands of blocks.
-        nearby = [block for page in sorted({int(r["page_idx"]) for r in regions})
-                  for block in blocks_by_page.get(page, [])]
+        nearby = [
+            block for page in sorted({int(r["page_idx"]) for r in regions}) for block in blocks_by_page.get(page, [])
+        ]
         snapshot["witness"] = segment._text_in_regions(nearby, regions) if regions else ""
         snapshot["witness_blocks"] = [
-            {"page_idx": int(block["page_idx"]), "bbox": block["bbox"], "text": block.get("text") or "",
-             "seq": block.get("seq"), "type": block.get("type", "text")}
+            {
+                "page_idx": int(block["page_idx"]),
+                "bbox": block["bbox"],
+                "text": block.get("text") or "",
+                "seq": block.get("seq"),
+                "type": block.get("type", "text"),
+            }
             for block in nearby
-            if regions and block.get("bbox") and segment.center_in_regions(int(block["page_idx"]), block["bbox"], regions)
+            if regions
+            and block.get("bbox")
+            and segment.center_in_regions(int(block["page_idx"]), block["bbox"], regions)
         ]
         if regions:
             pages = sorted({int(r["page_idx"]) for r in regions})
-            draft = mineru_draft([block for page in pages for block in all_by_page.get(page, [])],
-                                 table_html, regions)
+            draft = mineru_draft([block for page in pages for block in all_by_page.get(page, [])], table_html, regions)
             snapshot["draft" if assistant else "fallback_draft"] = draft
         elif assistant:
             snapshot["draft"] = ""
         snapshot["witness_tables"] = [
-            item["html"] for item in table_list
+            item["html"]
+            for item in table_list
             if regions and segment.center_in_regions(int(item["page_idx"]), item["bbox"], regions)
         ]
     for question in questions:
@@ -5346,10 +5531,16 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
         try:
             with readers.selected_services_only(bool((paper.processing_plan or {}).get("auto_fallback"))):
                 if snapshot["body_mode"] == "source_image" or snapshot["processing_mode"] == "manual":
+
                     def cut_cancelled() -> bool:
-                        return not Question.objects.filter(pk=snapshot["id"],
-                            content_revision=snapshot["content_revision"], body_mode=snapshot["body_mode"],
-                            processing_mode=snapshot["processing_mode"], ocr_pending=True).exists()
+                        return not Question.objects.filter(
+                            pk=snapshot["id"],
+                            content_revision=snapshot["content_revision"],
+                            body_mode=snapshot["body_mode"],
+                            processing_mode=snapshot["processing_mode"],
+                            ocr_pending=True,
+                        ).exists()
+
                     # Keep the existing request timeouts. Cancellation also
                     # covers account/HTTP-slot waiting and unstarted crops;
                     # an already-sent request can only be discarded locally.
@@ -5357,7 +5548,11 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
                         return snapshot["id"], read_card(snapshot, store)
                 return snapshot["id"], read_card(snapshot, store)
         except readers.ReaderRequestStopped:
-            return snapshot["id"], {"state": Question.State.RED, "error": "已停止本机识读，本轮结果不再采用", "flags": []}
+            return snapshot["id"], {
+                "state": Question.State.RED,
+                "error": "已停止本机识读，本轮结果不再采用",
+                "flags": [],
+            }
         except readers.ReaderQuotaExhausted:
             # This is a task-wide pause signal.  Converting it into one red
             # card would make the worker repeat the same permanent failure for
@@ -5366,12 +5561,12 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
         except Exception as error:  # 单题失败不影响其他题
             logger.exception("read failed")
             detail = str(error).strip() or type(error).__name__
-            return snapshot["id"], {"state": Question.State.RED, "error": f"识读出错：{detail}"[:280],
-                                    "flags": []}
+            return snapshot["id"], {"state": Question.State.RED, "error": f"识读出错：{detail}"[:280], "flags": []}
         finally:
             close_old_connections()
 
     foreign: list[dict] = []
+
     def _persist_locked(question_id: int, fields: dict) -> None:
         current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
         if current is None or int((current.processing_plan or {}).get("revision", 0)) != revision:
@@ -5380,9 +5575,12 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
         if question is None:
             return
         snapshot = snapshots_by_id[question_id]
-        if (question.content_revision != snapshot["content_revision"]
-                or question.processing_mode != snapshot["processing_mode"]
-                or question.body_mode != snapshot["body_mode"] or question.regions != snapshot["regions"]):
+        if (
+            question.content_revision != snapshot["content_revision"]
+            or question.processing_mode != snapshot["processing_mode"]
+            or question.body_mode != snapshot["body_mode"]
+            or question.regions != snapshot["regions"]
+        ):
             return
         if question.body_mode == "source_image":
             if not question.ocr_pending or _cut_content_protected(question):
@@ -5398,10 +5596,14 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
                 return
             # Failed OCR does not erase the original-image body. Its last
             # error remains visible, and another read requires an explicit request.
-            suggestion = {"revision": question.content_revision,
-                "paper_revision": revision, "error": (fields.get("error") or "识读未返回有效正文") if source_current
+            suggestion = {
+                "revision": question.content_revision,
+                "paper_revision": revision,
+                "error": (fields.get("error") or "识读未返回有效正文")
+                if source_current
                 else "原卷文件或裁片已变化，本轮识读未写入，请重新确认原卷范围。",
-                "state": Question.State.RED}
+                "state": Question.State.RED,
+            }
             if fields.get("error_kind"):
                 suggestion["error_kind"] = fields["error_kind"]
             if fields.get("error_service"):
@@ -5421,8 +5623,18 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
                 if key in fields:
                     setattr(question, key, fields[key])
             question.ocr_pending = question.reread_requested = False
-            question.save(update_fields=["ocr_suggestion", "ocr_pending", "reread_requested", "error",
-                "read_a", "read_b", "read_c", "updated_at"])
+            question.save(
+                update_fields=[
+                    "ocr_suggestion",
+                    "ocr_pending",
+                    "reread_requested",
+                    "error",
+                    "read_a",
+                    "read_b",
+                    "read_c",
+                    "updated_at",
+                ]
+            )
             return
         foreign.extend(fields.pop("foreign_figures", []))
         if question.processing_mode == "manual":
@@ -5494,14 +5706,20 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
     if quota_error is not None:
         for snapshot in snapshots:
             if snapshot["body_mode"] == "source_image":
-                Question.objects.filter(pk=snapshot["id"], content_revision=snapshot["content_revision"], ocr_pending=True).update(
-                    ocr_pending=False, ocr_suggestion={"revision": snapshot["content_revision"], "error": str(quota_error)[:280]})
+                Question.objects.filter(
+                    pk=snapshot["id"], content_revision=snapshot["content_revision"], ocr_pending=True
+                ).update(
+                    ocr_pending=False,
+                    ocr_suggestion={"revision": snapshot["content_revision"], "error": str(quota_error)[:280]},
+                )
         raise quota_error
 
 
 def _same_box(figure: dict, others: list[dict]) -> bool:
-    return any(o["page_idx"] == figure["page_idx"] and all(abs(a - b) < 1 for a, b in zip(o["bbox"], figure["bbox"]))
-               for o in others)
+    return any(
+        o["page_idx"] == figure["page_idx"] and all(abs(a - b) < 1 for a, b in zip(o["bbox"], figure["bbox"]))
+        for o in others
+    )
 
 
 FLAG_ROW_FIGURE = figure_policy.FLAG_ROW_FIGURE
@@ -5555,12 +5773,14 @@ def _row_targets(owner: Question, row: list[dict], by_key: dict) -> list[Questio
 
 def _drop_borrowed_copies(paper: Paper, boxes: list[dict], keep: set[int]) -> None:
     """A reader's “this is question N's figure” guess loses to the row order."""
-    for question in paper.questions.filter(processing_mode="auto", body_mode="text")\
-            .exclude(id__in=keep | _continued_existing_ids(paper)):
+    for question in paper.questions.filter(processing_mode="auto", body_mode="text").exclude(
+        id__in=keep | _continued_existing_ids(paper)
+    ):
         if _figure_decision_protected(question):
             continue
         figures = [
-            figure for figure in question.figures or []
+            figure
+            for figure in question.figures or []
             if not (figure.get("source") == "other" and _same_box(figure, boxes))
         ]
         if len(figures) == len(question.figures or []):
@@ -5568,7 +5788,7 @@ def _drop_borrowed_copies(paper: Paper, boxes: list[dict], keep: set[int]) -> No
         previous_review = stored_or_derived_review(question)
         question.figures = figures
         question.figure_review = recheck_automatic_review(
-            stem=question.stem, options=question.options, figures=figures, previous=previous_review,
+            stem=question.stem, options=question.options, figures=figures, previous=previous_review
         )
         flags = [flag for flag in question.flags or [] if flag != FLAG_FOREIGN_FIGURE]
         question.flags = _flags_after_figure_review(flags, question.figure_review, figures)
@@ -5589,8 +5809,11 @@ def distribute_figure_rows(paper: Paper) -> int:
     card so a person confirms the pairing.  No model call is made.
     """
     changed = 0
-    questions = list(paper.questions.filter(processing_mode="auto", body_mode="text")
-        .exclude(pk__in=_continued_existing_ids(paper)).order_by("group_id", "number", "id"))
+    questions = list(
+        paper.questions.filter(processing_mode="auto", body_mode="text")
+        .exclude(pk__in=_continued_existing_ids(paper))
+        .order_by("group_id", "number", "id")
+    )
     by_key = {(question.group_id, question.number): question for question in questions}
     for owner in questions:
         if _figure_decision_protected(owner):
@@ -5606,25 +5829,29 @@ def distribute_figure_rows(paper: Paper) -> int:
         # pairing is confirmed. Each other card still needs its own reading
         # evidence or a person's confirmation.
         own_box = row[targets.index(owner)]
-        claimed = {
-            label for label, role in ((owner.read_a or {}).get("figures") or {}).items()
-            if role == "stem"
-        }
+        claimed = {label for label, role in ((owner.read_a or {}).get("figures") or {}).items() if role == "stem"}
         owner_confirmed = claimed == {str(own_box.get("label"))} and own_box.get("label") is not None
         for question, figure in zip(targets, row):
             # One reader's agreement validates that question's pairing only.
             own_candidate_labels = {
-                str(item.get("label")) for item in question.figure_candidates or []
+                str(item.get("label"))
+                for item in question.figure_candidates or []
                 if figure_claims.frame_key(item) == figure_claims.frame_key(figure) and item.get("label") is not None
             }
             own_reader_roles = (question.read_a or {}).get("figures") or {}
-            confirmed = (owner_confirmed if question is owner else
-                         any(own_reader_roles.get(label) == "stem" for label in own_candidate_labels))
+            confirmed = (
+                owner_confirmed
+                if question is owner
+                else any(own_reader_roles.get(label) == "stem" for label in own_candidate_labels)
+            )
             box = {"slot": "stem", "page_idx": figure["page_idx"], "bbox": list(figure["bbox"]), "source": "row"}
             question.figures = [box]
             question.figure_review = automatic_review(
-                stem=question.stem, options=question.options, candidate_labels=set(),
-                assignments={}, figures=question.figures,
+                stem=question.stem,
+                options=question.options,
+                candidate_labels=set(),
+                assignments={},
+                figures=question.figures,
             )
             flags = [flag for flag in (question.flags or []) if not figure_flag(flag) and flag != FLAG_ROW_FIGURE]
             flags = _flags_after_figure_review(flags, question.figure_review, question.figures)
@@ -5655,13 +5882,11 @@ def assign_foreign_figures(paper: Paper, foreign: list[dict]) -> None:
             continue
         previous_review = stored_or_derived_review(target)
         had_own_figures = any(f.get("source") not in {"other", "row", "shared"} for f in target.figures or [])
-        target.figures = target.figures + [{"slot": "stem", "page_idx": item["page_idx"], "bbox": item["bbox"],
-                                            "source": "other"}]
+        target.figures = target.figures + [
+            {"slot": "stem", "page_idx": item["page_idx"], "bbox": item["bbox"], "source": "other"}
+        ]
         target.figure_review = recheck_automatic_review(
-            stem=target.stem,
-            options=target.options,
-            figures=target.figures,
-            previous=previous_review,
+            stem=target.stem, options=target.options, figures=target.figures, previous=previous_review
         )
         target.flags = _flags_after_figure_review(target.flags, target.figure_review, target.figures)
         # Another card's reader said this picture belongs here.  That is only
@@ -5675,8 +5900,7 @@ def assign_foreign_figures(paper: Paper, foreign: list[dict]) -> None:
             # 落在本题范围外面，说明本题的范围根本没圈住它 —— 重新识读时那个
             # 指认未必还在，范围少了图也会让这道题在成品卷上没法做。
             # 真实案例：八下 p136 第 4 题 id=1083，范围只有一行字高，图在范围外。
-            target.flags = [flag for flag in target.flags
-                            if flag != figure_policy.FLAG_FIGURE_OUTSIDE_RANGE]
+            target.flags = [flag for flag in target.flags if flag != figure_policy.FLAG_FIGURE_OUTSIDE_RANGE]
             target.flags = [*target.flags, figure_policy.FLAG_FIGURE_OUTSIDE_RANGE]
         if target.state in {Question.State.GREEN, Question.State.YELLOW}:
             target.state = Question.State.YELLOW if target.flags else Question.State.GREEN
@@ -5685,10 +5909,14 @@ def assign_foreign_figures(paper: Paper, foreign: list[dict]) -> None:
 
 
 def _figure_decision_protected(question: Question) -> bool:
-    return bool(question.approved or question.edited or question.processing_mode != "auto"
-                or question.body_mode != "text"
-                or (question.figure_review or {}).get("source") == "human"
-                or any(item.get("source") == "manual" for item in question.figures or []))
+    return bool(
+        question.approved
+        or question.edited
+        or question.processing_mode != "auto"
+        or question.body_mode != "text"
+        or (question.figure_review or {}).get("source") == "human"
+        or any(item.get("source") == "manual" for item in question.figures or [])
+    )
 
 
 def _figure_slot(card: Question, key: str) -> str:
@@ -5732,25 +5960,24 @@ def _resolve_figure_claim_winner(questions: list[Question], ledger: dict) -> lis
         if any(_figure_slot(card, key) != "stem" for card in claimants):
             # 有人把同一张图认作某个选项的图：这不是「谁要图谁留」能判的。
             continue
-        winner = figure_policy.contest_winner([
-            {"id": card.pk, "stem": card.stem, "options": card.options} for card in claimants
-        ])
+        winner = figure_policy.contest_winner(
+            [{"id": card.pk, "stem": card.stem, "options": card.options} for card in claimants]
+        )
         if winner is None:
             continue
         for loser in claimants:
             if loser.pk == winner:
                 continue
             kept = [
-                figure for figure in loser.figures or []
-                if all(figure_claims.frame_key(piece) != key
-                       for piece in figure_claims.figure_frames(figure))
+                figure
+                for figure in loser.figures or []
+                if all(figure_claims.frame_key(piece) != key for piece in figure_claims.figure_frames(figure))
             ]
             if len(kept) == len(loser.figures or []):
                 continue
             loser.figures = kept
             loser.figure_review = recheck_automatic_review(
-                stem=loser.stem, options=loser.options, figures=kept,
-                previous=loser.figure_review,
+                stem=loser.stem, options=loser.options, figures=kept, previous=loser.figure_review
             )
             loser.flags = _flags_after_figure_review(loser.flags, loser.figure_review, kept)
             _invalidate_approval(loser)
@@ -5774,12 +6001,22 @@ def audit_figure_claims(paper: Paper, *, revision: int | None = None) -> dict:
         for question in questions:
             by_key[(question.group_id, question.number)].append(question)
         all_blocks = [block for values in blocks_by_page.values() for block in values]
-        initial_ledger = figure_claims.build_ledger([{
-            "id": question.pk, "group_id": question.group_id, "number": question.number,
-            "candidates": question.figure_candidates, "figures": question.figures,
-        } for question in questions], all_blocks)
-        declarations = {entry["key"]: entry["shared_caption"] for entry in initial_ledger["figures"]
-                        if entry.get("shared_caption")}
+        initial_ledger = figure_claims.build_ledger(
+            [
+                {
+                    "id": question.pk,
+                    "group_id": question.group_id,
+                    "number": question.number,
+                    "candidates": question.figure_candidates,
+                    "figures": question.figures,
+                }
+                for question in questions
+            ],
+            all_blocks,
+        )
+        declarations = {
+            entry["key"]: entry["shared_caption"] for entry in initial_ledger["figures"] if entry.get("shared_caption")
+        }
         handled = set()
         for owner in questions:
             if owner.pk in continued or _figure_decision_protected(owner):
@@ -5798,16 +6035,24 @@ def audit_figure_claims(paper: Paper, *, revision: int | None = None) -> dict:
                 for (target,) in targets:
                     if target.pk in continued or _figure_decision_protected(target):
                         continue
-                    if any(figure_claims.frame_key(piece) == key for figure in target.figures or []
-                           for piece in figure_claims.figure_frames(figure)):
+                    if any(
+                        figure_claims.frame_key(piece) == key
+                        for figure in target.figures or []
+                        for piece in figure_claims.figure_frames(figure)
+                    ):
                         continue
-                    target.figures = [*(target.figures or []), {
-                        "slot": "stem", "page_idx": candidate["page_idx"], "bbox": list(candidate["bbox"]),
-                        "source": "shared", "shared_numbers": declaration["numbers"],
-                    }]
+                    target.figures = [
+                        *(target.figures or []),
+                        {
+                            "slot": "stem",
+                            "page_idx": candidate["page_idx"],
+                            "bbox": list(candidate["bbox"]),
+                            "source": "shared",
+                            "shared_numbers": declaration["numbers"],
+                        },
+                    ]
                     target.figure_review = recheck_automatic_review(
-                        stem=target.stem, options=target.options, figures=target.figures,
-                        previous=target.figure_review,
+                        stem=target.stem, options=target.options, figures=target.figures, previous=target.figure_review
                     )
                     target.flags = _flags_after_figure_review(target.flags, target.figure_review, target.figures)
                     if figure_policy.FLAG_SHARED_FIGURE not in target.flags:
@@ -5815,18 +6060,36 @@ def audit_figure_claims(paper: Paper, *, revision: int | None = None) -> dict:
                     if target.state in {Question.State.GREEN, Question.State.YELLOW}:
                         target.state = Question.State.YELLOW
                     target.save()
-        ledger = figure_claims.build_ledger([{
-            "id": question.pk, "group_id": question.group_id, "number": question.number,
-            "candidates": question.figure_candidates, "figures": question.figures,
-            "protected": _figure_decision_protected(question) or question.pk in continued,
-        } for question in questions], all_blocks)
+        ledger = figure_claims.build_ledger(
+            [
+                {
+                    "id": question.pk,
+                    "group_id": question.group_id,
+                    "number": question.number,
+                    "candidates": question.figure_candidates,
+                    "figures": question.figures,
+                    "protected": _figure_decision_protected(question) or question.pk in continued,
+                }
+                for question in questions
+            ],
+            all_blocks,
+        )
         if _resolve_figure_claim_winner(questions, ledger):
             # 一张图改判给别的题之后，冲突清单要重算，否则刚解开的还会被标黄。
-            ledger = figure_claims.build_ledger([{
-                "id": question.pk, "group_id": question.group_id, "number": question.number,
-                "candidates": question.figure_candidates, "figures": question.figures,
-                "protected": _figure_decision_protected(question) or question.pk in continued,
-            } for question in questions], all_blocks)
+            ledger = figure_claims.build_ledger(
+                [
+                    {
+                        "id": question.pk,
+                        "group_id": question.group_id,
+                        "number": question.number,
+                        "candidates": question.figure_candidates,
+                        "figures": question.figures,
+                        "protected": _figure_decision_protected(question) or question.pk in continued,
+                    }
+                    for question in questions
+                ],
+                all_blocks,
+            )
         for question in questions:
             if question.pk in continued or _figure_decision_protected(question):
                 continue
@@ -5875,21 +6138,20 @@ def reconcile_geometric_figure_flags(paper: Paper, dry_run: bool = False) -> int
     仍然是 22 张。清完的库再跑一次应当是 0，否则「命中 22 张」是在报一件没发生的事。
     """
 
-    already_flagged = {*GEOMETRIC_FLAG_BY_SOURCE.values(),
-                       figure_policy.FLAG_FIGURE_OUTSIDE_RANGE}
+    already_flagged = {*GEOMETRIC_FLAG_BY_SOURCE.values(), figure_policy.FLAG_FIGURE_OUTSIDE_RANGE}
     changed = 0
     for question in paper.questions.filter(processing_mode="auto", body_mode="text").order_by("id"):
         figures = question.figures or []
-        if not any(isinstance(figure, dict) and figure.get("source") in GEOMETRIC_SOURCES
-                   for figure in figures):
+        if not any(isinstance(figure, dict) and figure.get("source") in GEOMETRIC_SOURCES for figure in figures):
             continue
         if _figure_decision_protected(question) or set(question.flags or []) & already_flagged:
             continue
         if not figure_policy.figures_outside_own_range(question.regions, figures):
             continue
-        question.flags = [*[flag for flag in question.flags or []
-                            if flag != figure_policy.FLAG_FIGURE_OUTSIDE_RANGE],
-                          figure_policy.FLAG_FIGURE_OUTSIDE_RANGE]
+        question.flags = [
+            *[flag for flag in question.flags or [] if flag != figure_policy.FLAG_FIGURE_OUTSIDE_RANGE],
+            figure_policy.FLAG_FIGURE_OUTSIDE_RANGE,
+        ]
         if question.state in {Question.State.GREEN, Question.State.YELLOW}:
             question.state = Question.State.YELLOW
         if not dry_run:
@@ -5925,9 +6187,7 @@ def reconcile_anchor_reading_flags(paper: Paper, dry_run: bool = False) -> int:
     已经挂着这句话的也跳过。只提示，不擅自改。
     """
     printed_by_seq = {
-        block.get("seq"): str(block.get("text") or "")
-        for block in _block_dicts(paper)
-        if block.get("seq") is not None
+        block.get("seq"): str(block.get("text") or "") for block in _block_dicts(paper) if block.get("seq") is not None
     }
     changed = 0
     for question in paper.questions.filter(processing_mode="auto", body_mode="text").order_by("id"):
@@ -5938,16 +6198,18 @@ def reconcile_anchor_reading_flags(paper: Paper, dry_run: bool = False) -> int:
         printed = printed_by_seq.get(question.source_anchor_seq)
         if not printed:
             continue
-        probe = textnorm.anchor_reading_mismatch(printed, "".join([
-            question.stem or "",
-            *(question.options or {}).values(),
-            question.analysis or "",
-        ]))
+        probe = textnorm.anchor_reading_mismatch(
+            printed, "".join([question.stem or "", *(question.options or {}).values(), question.analysis or ""])
+        )
         if not probe:
             continue
-        question.flags = [*(question.flags or []), (
-            f"这张卡题号那一行印着「{probe}…」，但识读出来的内容里认不出这句话，"
-            "卡上可能是另一道题；请对照原书确认这张卡的范围和内容")]
+        question.flags = [
+            *(question.flags or []),
+            (
+                f"这张卡题号那一行印着「{probe}…」，但识读出来的内容里认不出这句话，"
+                "卡上可能是另一道题；请对照原书确认这张卡的范围和内容"
+            ),
+        ]
         if question.state in {Question.State.GREEN, Question.State.YELLOW}:
             question.state = Question.State.YELLOW
         if not dry_run:
@@ -6031,13 +6293,15 @@ def verify_geometric_figures(paper: Paper, *, revision: int | None = None) -> in
     if revision is None:
         revision = int((paper.processing_plan or {}).get("revision", 0))
     targets = []
-    for question in paper.questions.filter(processing_mode="auto", body_mode="text") \
-            .exclude(pk__in=_continued_existing_ids(paper)).order_by("group_id", "number", "id"):
+    for question in (
+        paper.questions.filter(processing_mode="auto", body_mode="text")
+        .exclude(pk__in=_continued_existing_ids(paper))
+        .order_by("group_id", "number", "id")
+    ):
         if _figure_decision_protected(question):
             continue
         flags = set(question.flags or [])
-        pending = [figure for figure in question.figures or []
-                   if _wants_handwritten_check(figure, flags)]
+        pending = [figure for figure in question.figures or [] if _wants_handwritten_check(figure, flags)]
         if pending:
             targets.append((question, pending))
     if not targets:
@@ -6051,13 +6315,10 @@ def verify_geometric_figures(paper: Paper, *, revision: int | None = None) -> in
         # 编号跟着候选框的顺序走，模型点到的号才能对回这张几何配的图。框残缺
         # （宽或高为零、坐标反了）的候选先剔掉：它既裁不出图，也进不了编号，
         # 留着会让下面按它配对时直接崩。
-        candidates = [item for item in question.figure_candidates or []
-                      if figure_claims.frame_key(item) is not None]
+        candidates = [item for item in question.figure_candidates or [] if figure_claims.frame_key(item) is not None]
         keys = {figure_claims.frame_key(item): item for item in candidates}
-        paired = [(figure, keys.get(figure_claims.frame_key(figure)))
-                  for figure in pending]
-        indexed = [(figure, candidate) for figure, candidate in paired
-                   if candidate is not None]
+        paired = [(figure, keys.get(figure_claims.frame_key(figure))) for figure in pending]
+        indexed = [(figure, candidate) for figure, candidate in paired if candidate is not None]
         unnumbered = [figure for figure, candidate in paired if candidate is None]
         # 别题转赠过来的图，本卡一个候选框都没有——它本来就属于别人的范围。条图
         # 那一套（要给模型编号、再和候选配对）在这里根本搭不起来，以前正是直接
@@ -6070,8 +6331,7 @@ def verify_geometric_figures(paper: Paper, *, revision: int | None = None) -> in
             if one is None:
                 continue
             try:
-                verdict = readers.confirm_all_handwritten(
-                    engine, imaging.jpeg_data_url(one), [1])
+                verdict = readers.confirm_all_handwritten(engine, imaging.jpeg_data_url(one), [1])
             except readers.ReaderError:
                 verdict = None
             if verdict == {1}:
@@ -6083,20 +6343,23 @@ def verify_geometric_figures(paper: Paper, *, revision: int | None = None) -> in
                 changed += 1
             continue
         try:
-            strip = imaging.figure_strip(store.load, [{"page_idx": item["page_idx"],
-                                                       "bbox": list(item["bbox"])}
-                                                      for item in candidates])
+            strip = imaging.figure_strip(
+                store.load, [{"page_idx": item["page_idx"], "bbox": list(item["bbox"])} for item in candidates]
+            )
         except (ValueError, OSError):
             continue
         if strip is None:
             continue
-        positions = {figure_claims.frame_key(item): index
-                     for index, item in enumerate(candidates, 1)}
-        indexed = [(figure, positions[figure_claims.frame_key(candidate)])
-                   for figure, candidate in paired if candidate is not None]
+        positions = {figure_claims.frame_key(item): index for index, item in enumerate(candidates, 1)}
+        indexed = [
+            (figure, positions[figure_claims.frame_key(candidate)])
+            for figure, candidate in paired
+            if candidate is not None
+        ]
         try:
             answer = readers.verify_figure_ownership(
-                engine, imaging.jpeg_data_url(strip), question.stem, len(candidates))
+                engine, imaging.jpeg_data_url(strip), question.stem, len(candidates)
+            )
         except readers.ReaderError:
             answer = None
         if answer is not None:
@@ -6105,8 +6368,7 @@ def verify_geometric_figures(paper: Paper, *, revision: int | None = None) -> in
                 # 一次判定会翻转，而撤图是破坏性的，所以只对判否的那几幅再问一次，
                 # 而且换成一条硬标准：有没有一笔印刷的内容。问不出来就当没问。
                 try:
-                    confirmed = readers.confirm_all_handwritten(
-                        engine, imaging.jpeg_data_url(strip), doubtful)
+                    confirmed = readers.confirm_all_handwritten(engine, imaging.jpeg_data_url(strip), doubtful)
                 except readers.ReaderError:
                     confirmed = None
                 for figure, position in indexed:
@@ -6124,8 +6386,7 @@ def verify_geometric_figures(paper: Paper, *, revision: int | None = None) -> in
 def _figure_alone(store, figure: dict):
     """One figure cropped on its own and blown up — the framing that decides."""
     try:
-        return imaging.figure_strip(
-            store.load, [{"page_idx": figure["page_idx"], "bbox": list(figure["bbox"])}])
+        return imaging.figure_strip(store.load, [{"page_idx": figure["page_idx"], "bbox": list(figure["bbox"])}])
     except (ValueError, OSError, KeyError, TypeError):
         return None
 
@@ -6148,21 +6409,21 @@ def _figure_alone_says_handwritten(engine, store, figure: dict) -> bool:
 
 def _withdraw_figures(question: Question, dropped: set[str]) -> bool:
     """Take the named frames off the card and let the review pick new flags."""
-    unprinted = [figure for figure in question.figures or []
-                 if figure_claims.frame_key(figure) in dropped]
-    figures = [figure for figure in question.figures or []
-               if figure_claims.frame_key(figure) not in dropped]
+    unprinted = [figure for figure in question.figures or [] if figure_claims.frame_key(figure) in dropped]
+    figures = [figure for figure in question.figures or [] if figure_claims.frame_key(figure) not in dropped]
     if len(figures) == len(question.figures or []):
         return False
     previous_review = stored_or_derived_review(question)
     review = recheck_automatic_review(
-        stem=question.stem, options=question.options, figures=figures,
-        previous=previous_review)
+        stem=question.stem, options=question.options, figures=figures, previous=previous_review
+    )
     # 「已按顺序分配」在图被撤走之后就是假话，先摘掉再让复判重选旗标。
-    stale = {GEOMETRIC_FLAG_BY_SOURCE[figure["source"]] for figure in unprinted
-             if figure.get("source") in GEOMETRIC_FLAG_BY_SOURCE}
-    flags = _flags_after_figure_review(
-        [flag for flag in question.flags or [] if flag not in stale], review, figures)
+    stale = {
+        GEOMETRIC_FLAG_BY_SOURCE[figure["source"]]
+        for figure in unprinted
+        if figure.get("source") in GEOMETRIC_FLAG_BY_SOURCE
+    }
+    flags = _flags_after_figure_review([flag for flag in question.flags or [] if flag not in stale], review, figures)
     question.figures = figures
     question.figure_review = review
     # 撤图是机器替人做的决定，撤错了得让人看得见、点得回来——实测 7 次里有 1 次
@@ -6188,11 +6449,9 @@ def _flag_doubtful_figures(question: Question, dropped: set[str]) -> bool:
 
     ``AUTO_FIGURES_ARE_WITHDRAWN`` 是这条取舍的唯一开关，换回自动撤改它一个值。
     """
-    if not any(figure_claims.frame_key(figure) in dropped
-               for figure in question.figures or []):
+    if not any(figure_claims.frame_key(figure) in dropped for figure in question.figures or []):
         return False
-    flags = [flag for flag in question.flags or []
-             if flag != figure_policy.FLAG_DOUBTFUL_FIGURE]
+    flags = [flag for flag in question.flags or [] if flag != figure_policy.FLAG_DOUBTFUL_FIGURE]
     flags.append(figure_policy.FLAG_DOUBTFUL_FIGURE)
     question.flags = flags
     if question.state == Question.State.GREEN:
@@ -6229,6 +6488,7 @@ def _settle_doubtful_figures(question: Question, dropped: set[str]) -> bool:
 
 # ---------------------------------------------------------------- 总控
 
+
 def _set_if_plan_current(paper: Paper, revision: int, **fields) -> bool:
     with transaction.atomic():
         current = Paper.objects.select_for_update().filter(pk=paper.pk).first()
@@ -6248,6 +6508,7 @@ def process_paper(paper: Paper) -> None:
     try:
         if (paper.processing_plan or {}).get("mode") in {"manual", "native"}:
             from . import intake
+
             if not paper.pages:
                 intake.prepare(paper, paper.processing_plan["mode"])
             return
@@ -6263,8 +6524,11 @@ def process_paper(paper: Paper) -> None:
             if _fail_when_nothing_was_cut(paper, run_revision):
                 return
         if paper.status == Paper.Status.READING:
-            pending = list(paper.questions.filter(processing_mode="auto", state__in=[Question.State.WAITING, Question.State.READING])
-                .exclude(pk__in=_continued_existing_ids(paper)))
+            pending = list(
+                paper.questions.filter(
+                    processing_mode="auto", state__in=[Question.State.WAITING, Question.State.READING]
+                ).exclude(pk__in=_continued_existing_ids(paper))
+            )
             read_questions(paper, pending, revision=run_revision)
             _set_if_plan_current(paper, run_revision, status=Paper.Status.READY)
     except mineru.MineruCancelled as error:
@@ -6276,17 +6540,24 @@ def process_paper(paper: Paper) -> None:
         # them without parsing, segmenting, or touching completed/protected cards.
         logger.warning("paper paused because the configured vision plan is exhausted")
         from . import intake
+
         if (paper.processing_plan or {}).get("auto_fallback") and intake.fallback_manual(
-                paper, run_revision, "所选识读服务未完成，原页与已有成果已保留，可继续手工处理。"):
+            paper, run_revision, "所选识读服务未完成，原页与已有成果已保留，可继续手工处理。"
+        ):
             return
         _set_if_plan_current(paper, run_revision, status=Paper.Status.FAILED, error=str(error)[:500])
     except Exception as error:
         logger.exception("paper failed")
-        message = str(error) if isinstance(error, (MineruError, readers.ReaderError, RuntimeError)) else \
-            f"处理出错：{type(error).__name__}"
+        message = (
+            str(error)
+            if isinstance(error, (MineruError, readers.ReaderError, RuntimeError))
+            else f"处理出错：{type(error).__name__}"
+        )
         from . import intake
+
         if (paper.processing_plan or {}).get("auto_fallback") and intake.fallback_manual(
-                paper, run_revision, "自动解析未完成，原页与已有成果已保留，请继续手工切题。"):
+            paper, run_revision, "自动解析未完成，原页与已有成果已保留，请继续手工切题。"
+        ):
             return
         _set_if_plan_current(paper, run_revision, status=Paper.Status.FAILED, error=message[:500])
 
@@ -6315,19 +6586,22 @@ def parse_ahead(paper: Paper) -> bool:
         return False
     except Exception as error:
         logger.exception("paper failed while parsing ahead")
-        message = str(error) if isinstance(error, (MineruError, readers.ReaderError, RuntimeError)) else \
-            f"处理出错：{type(error).__name__}"
+        message = (
+            str(error)
+            if isinstance(error, (MineruError, readers.ReaderError, RuntimeError))
+            else f"处理出错：{type(error).__name__}"
+        )
         from . import intake
+
         if (paper.processing_plan or {}).get("auto_fallback") and intake.fallback_manual(
-                paper, run_revision, "自动解析未完成，原页与已有成果已保留，请继续手工切题。"):
+            paper, run_revision, "自动解析未完成，原页与已有成果已保留，请继续手工切题。"
+        ):
             return False
         _set_if_plan_current(paper, run_revision, status=Paper.Status.FAILED, error=message[:500])
         return False
 
 
-ACTIVE_PAPER_STATUSES = (
-    Paper.Status.QUEUED, Paper.Status.PARSING, Paper.Status.SEGMENTING, Paper.Status.READING,
-)
+ACTIVE_PAPER_STATUSES = (Paper.Status.QUEUED, Paper.Status.PARSING, Paper.Status.SEGMENTING, Paper.Status.READING)
 
 
 def process_rereads(*, idle_papers_only: bool = False) -> int:

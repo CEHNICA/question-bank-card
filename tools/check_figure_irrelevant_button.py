@@ -80,14 +80,10 @@ async def main():
             await page.goto(f"{args.base}/", wait_until="domcontentloaded")
             await page.wait_for_selector(".paper-link", timeout=30000)
             await page.wait_for_timeout(2500)
-            for dialog in await page.evaluate(
-                "() => [...document.querySelectorAll('dialog[open]')].map((d) => d.id)"
-            ):
+            for dialog in await page.evaluate("() => [...document.querySelectorAll('dialog[open]')].map((d) => d.id)"):
                 await page.evaluate("(id) => document.getElementById(id)?.close()", dialog)
 
-            papers = await page.evaluate(
-                "() => [...document.querySelectorAll('.paper-link')].map((b) => b.title)"
-            )
+            papers = await page.evaluate("() => [...document.querySelectorAll('.paper-link')].map((b) => b.title)")
             print(f"试卷 {len(papers)} 份")
 
             # Open the paper that still has work to do.
@@ -99,9 +95,7 @@ async def main():
             }""")
             await page.wait_for_selector(".card", timeout=30000)
             await page.wait_for_timeout(3000)
-            for dialog in await page.evaluate(
-                "() => [...document.querySelectorAll('dialog[open]')].map((d) => d.id)"
-            ):
+            for dialog in await page.evaluate("() => [...document.querySelectorAll('dialog[open]')].map((d) => d.id)"):
                 await page.evaluate("(id) => document.getElementById(id)?.close()", dialog)
 
             # Scroll the whole list: cards are content-visibility:auto, so a panel
@@ -120,30 +114,33 @@ async def main():
             print(f"  面板现有按钮：{target['buttons']}")
 
             if not any(BUTTON_ALL_IRRELEVANT in b for b in target["buttons"]):
-                failures += fail(
-                    f"面板上没有「{BUTTON_ALL_IRRELEVANT}」按钮，文案承诺了动作但界面上没有")
+                failures += fail(f"面板上没有「{BUTTON_ALL_IRRELEVANT}」按钮，文案承诺了动作但界面上没有")
                 return failures
 
-            paper_id = await page.evaluate(
-                "() => new URL(location.href).searchParams.get('paper')")
+            paper_id = await page.evaluate("() => new URL(location.href).searchParams.get('paper')")
             # page.request.get is a coroutine — await the response before .json().
             before = await (await page.request.get(f"{args.base}/api/papers/{paper_id}")).json()
             before_q = next(q for q in before["questions"] if str(q["id"]) == target["id"])
             # /api/library caps limit at 100 server-side and reports the real size in
             # "total". Counting items would compare two truncated lists of 100.
-            before_total = (await (await page.request.get(
-                f"{args.base}/api/library?limit=500")).json())["total"]
-            print(f"  操作前：status={before_q['figure_review'].get('status')} "
-                  f"figures={len(before_q.get('figures') or [])} 题库={before_total}")
+            before_total = (await (await page.request.get(f"{args.base}/api/library?limit=500")).json())["total"]
+            print(
+                f"  操作前：status={before_q['figure_review'].get('status')} "
+                f"figures={len(before_q.get('figures') or [])} 题库={before_total}"
+            )
 
             # Click the real button, then really confirm.
-            await page.evaluate("""(id) => {
+            await page.evaluate(
+                """(id) => {
                 const panel = document.querySelector(`.card[data-id="${id}"] .figure-review`);
                 panel.scrollIntoView({ block: 'center' });
                 const button = [...panel.querySelectorAll('button')]
                   .find((b) => (b.textContent || '').includes('%s'));
                 button.click();
-            }""" % BUTTON_ALL_IRRELEVANT, target["id"])
+            }"""
+                % BUTTON_ALL_IRRELEVANT,
+                target["id"],
+            )
             await page.wait_for_timeout(700)
             # Only the confirm dialog: the preview also opens a teaching panel, and a
             # bare "dialog[open] .confirm-text" can land on that instead.
@@ -156,14 +153,17 @@ async def main():
             if not dialog_text:
                 failures += fail("点了按钮没有出现确认框")
                 return failures
-            await page.evaluate("""() => {
+            await page.evaluate(
+                """() => {
                 const dialogs = [...document.querySelectorAll('dialog[open]')];
                 const target = dialogs.find((d) => d.querySelector('.confirm-text'));
                 const button = [...target.querySelectorAll('button')]
                   .find((b) => (b.textContent || '').trim() === '%s')
                   || target.querySelector('.confirm-actions .button.primary');
                 button.click();
-            }""" % CONFIRM_ALL)
+            }"""
+                % CONFIRM_ALL
+            )
             await page.wait_for_timeout(2000)
 
             # Read the API directly: page.evaluate(fetch) right after a re-render
@@ -171,8 +171,10 @@ async def main():
             after = await (await page.request.get(f"{args.base}/api/papers/{paper_id}")).json()
             after_q = next(q for q in after["questions"] if str(q["id"]) == target["id"])
             review = after_q["figure_review"]
-            print(f"  操作后：status={review.get('status')} figures={len(after_q.get('figures') or [])} "
-                  f"ignored={len(review.get('ignored_candidates') or [])}")
+            print(
+                f"  操作后：status={review.get('status')} figures={len(after_q.get('figures') or [])} "
+                f"ignored={len(review.get('ignored_candidates') or [])}"
+            )
 
             if review.get("status") != "confirmed_no_figure":
                 failures += fail(f"落到了 {review.get('status')}，不是 confirmed_no_figure")
@@ -186,20 +188,24 @@ async def main():
                     const el = document.querySelector(`.card[data-id="${id}"] .figure-review`);
                     return el ? { status: (el.className.match(/figure-review-([a-z_]+)/) || [])[1],
                                   buttons: [...el.querySelectorAll('button')].map((b) => b.textContent.trim()) } : null;
-                }""", target["id"])
+                }""",
+                target["id"],
+            )
             print(f"  面板现在：{json.dumps(panel, ensure_ascii=False)}")
             if panel and panel["status"] == "conflict":
                 failures += fail("界面上仍然是冲突状态，没有变成「已人工确认本题无图」")
 
             # Now it must be passable, and passing must reach the bank.
-            await page.evaluate("""(id) => {
+            await page.evaluate(
+                """(id) => {
                 const tick = document.querySelector(`.card[data-id="${id}"] .card-tick`);
                 tick.scrollIntoView({ block: 'center' });
                 tick.click();
-            }""", target["id"])
+            }""",
+                target["id"],
+            )
             await page.wait_for_timeout(2500)
-            after_total = (await (await page.request.get(
-                f"{args.base}/api/library?limit=500")).json())["total"]
+            after_total = (await (await page.request.get(f"{args.base}/api/library?limit=500")).json())["total"]
             print(f"  题库：{before_total} → {after_total}")
             if after_total != before_total + 1:
                 failures += fail(f"标记通过后台库条数是 {before_total} → {after_total}，不是 +1")

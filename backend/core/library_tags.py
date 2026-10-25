@@ -20,8 +20,16 @@ from . import library
 from .library_tagging import knowledge_directory
 from .models import PublishedQuestion
 
-_TAG_KEYS = ("tags", "tags_source", "tags_at", "tags_fingerprint", "tags_publication_id",
-             "tags_agent", "tags_executor", "tags_checked")
+_TAG_KEYS = (
+    "tags",
+    "tags_source",
+    "tags_at",
+    "tags_fingerprint",
+    "tags_publication_id",
+    "tags_agent",
+    "tags_executor",
+    "tags_checked",
+)
 
 
 class TagError(Exception):
@@ -90,6 +98,7 @@ def tags_view(request, publication_id):
     if request.method not in {"GET", "POST"}:
         return JsonResponse({"error": "不支持的请求方式"}, status=405)
     from .views import _body, _guard
+
     if request.method == "POST":
         rejected = _guard(request)
         if rejected is not None:
@@ -103,7 +112,12 @@ def tags_view(request, publication_id):
         if payload is None:
             return JsonResponse({"error": "请求内容无法读取，标签没有改动"}, status=400)
         publication = apply(publication, clean(payload.get("tags")))
-        return JsonResponse({"ok": True, "tags": library.tags_of(publication.extras),
-                             "publication": library.publication_json(publication)})
+        return JsonResponse(
+            {
+                "ok": True,
+                "tags": library.tags_of(publication.extras),
+                "publication": library.publication_json(publication),
+            }
+        )
     except TagError as error:
         return JsonResponse({"error": str(error)}, status=error.status)

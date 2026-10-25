@@ -1,4 +1,5 @@
 """Explicitly continue missing automatic cuts without replacing saved cards."""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -49,7 +50,9 @@ def _check_original(paper):
             raise ValueError("Changed original bytes")
         return digest
     except Exception as exc:
-        raise ContinueCutConflict("原文件或已保存的原页缺失、损坏或发生变化，请先恢复原件再继续；已有题目已保留。", "missing_source") from exc
+        raise ContinueCutConflict(
+            "原文件或已保存的原页缺失、损坏或发生变化，请先恢复原件再继续；已有题目已保留。", "missing_source"
+        ) from exc
 
 
 def _cancellation_file(paper):
@@ -93,7 +96,12 @@ def continue_ai_cut(request, paper_id):
             plan = deepcopy(paper.processing_plan or {})
             current_revision = plan.get("revision", 0)
             mode = plan.get("mode", "mineru")
-            if type(current_revision) is not int or current_revision < 0 or type(mode) is not str or mode not in intake.MODES:
+            if (
+                type(current_revision) is not int
+                or current_revision < 0
+                or type(mode) is not str
+                or mode not in intake.MODES
+            ):
                 raise ContinueCutConflict("原卷处理记录不完整，请刷新或恢复原件后再继续。", "invalid_plan")
             if revision != current_revision or (expected_mode is not None and expected_mode != mode):
                 raise ContinueCutConflict("原卷处理方式已发生变化，请刷新后再继续。", "stale_revision")
@@ -102,30 +110,60 @@ def continue_ai_cut(request, paper_id):
             if demo.is_demo(paper):
                 raise ContinueCutConflict("示例资料用于练习审核；请使用自己的原卷继续自动切题。", "demo")
             if mode == "mineru" and paper.status in ACTIVE:
-                return JsonResponse({"paper": paper_json(paper), "changed": False,
-                    "action": "already_running", "reuses_saved_parse": paper.blocks.exists(),
-                    "requires_cloud": False, "message": "自动切题任务已在处理中，可查看当前进度。"})
+                return JsonResponse(
+                    {
+                        "paper": paper_json(paper),
+                        "changed": False,
+                        "action": "already_running",
+                        "reuses_saved_parse": paper.blocks.exists(),
+                        "requires_cloud": False,
+                        "message": "自动切题任务已在处理中，可查看当前进度。",
+                    }
+                )
             if paper.status not in {Paper.Status.READY, Paper.Status.FAILED}:
                 raise ContinueCutConflict("请先停止当前处理并确认资料结构，再继续自动切题。", "active_or_ambiguous")
             structure = paper.structure or {}
-            if ((structure.get("signals") or len(structure.get("suggested_groups") or []) > 1
-                    or plan.get("native_numbering_fallback"))
-                    and not structure.get("confirmed") and paper.material_type == Paper.MaterialType.EXAM):
-                raise ContinueCutConflict("原卷可能含多套题号，请先确认或拆分资料结构，再继续自动切题。", "needs_grouping")
+            if (
+                (
+                    structure.get("signals")
+                    or len(structure.get("suggested_groups") or []) > 1
+                    or plan.get("native_numbering_fallback")
+                )
+                and not structure.get("confirmed")
+                and paper.material_type == Paper.MaterialType.EXAM
+            ):
+                raise ContinueCutConflict(
+                    "原卷可能含多套题号，请先确认或拆分资料结构，再继续自动切题。", "needs_grouping"
+                )
             if structure.get("groups_need_rebuild"):
-                raise ContinueCutConflict("题组结构仍需重新确认；为保留已有题目的来源，本次未继续自动切题。", "needs_grouping")
+                raise ContinueCutConflict(
+                    "题组结构仍需重新确认；为保留已有题目的来源，本次未继续自动切题。", "needs_grouping"
+                )
             if paper.material_type == Paper.MaterialType.BOOK:
                 groups = list(paper.question_groups.all())
-                if len(groups) > 1 and any(type((group.metadata or {}).get("seq_start")) is not int
-                        or type((group.metadata or {}).get("seq_end")) is not int for group in groups):
-                    raise ContinueCutConflict("这份教材的既有题组来源范围不明确，不能安全补切；请继续手工切题。", "ambiguous_book_groups")
+                if len(groups) > 1 and any(
+                    type((group.metadata or {}).get("seq_start")) is not int
+                    or type((group.metadata or {}).get("seq_end")) is not int
+                    for group in groups
+                ):
+                    raise ContinueCutConflict(
+                        "这份教材的既有题组来源范围不明确，不能安全补切；请继续手工切题。", "ambiguous_book_groups"
+                    )
             if (paper.photos or {}).get("check") and not (paper.photos or {}).get("manual"):
                 raise ContinueCutConflict("请先确认照片页序，再继续自动切题；已有裁剪范围已保留。", "photo_order")
-            if paper.questions.filter(models.Q(ocr_pending=True) | models.Q(reread_requested=True)
-                    | models.Q(state=Question.State.READING, processing_mode="manual")).exists() \
-                    or RegionRead.objects.filter(question__paper=paper,
-                        status__in=[RegionRead.Status.QUEUED, RegionRead.Status.RUNNING]).exists():
-                raise ContinueCutConflict("仍有题目或框选区域正在识读，请完成或停止这些识读后再继续自动切题。", "active_read")
+            if (
+                paper.questions.filter(
+                    models.Q(ocr_pending=True)
+                    | models.Q(reread_requested=True)
+                    | models.Q(state=Question.State.READING, processing_mode="manual")
+                ).exists()
+                or RegionRead.objects.filter(
+                    question__paper=paper, status__in=[RegionRead.Status.QUEUED, RegionRead.Status.RUNNING]
+                ).exists()
+            ):
+                raise ContinueCutConflict(
+                    "仍有题目或框选区域正在识读，请完成或停止这些识读后再继续自动切题。", "active_read"
+                )
             original_digest = _check_original(paper)
             has_blocks = paper.blocks.exists()
             if not has_blocks:
@@ -133,20 +171,38 @@ def continue_ai_cut(request, paper_id):
                 # upload. Keep the explicit authorization even when it may reuse
                 # a valid archive; do not promise reuse of an old remote batch.
                 if payload.get("allow_cloud") is not True:
-                    raise ContinueCutConflict("没有可直接切题的解析结果；继续可能重新提交原卷，请明确允许本次自动解析。", "cloud_authorization")
+                    raise ContinueCutConflict(
+                        "没有可直接切题的解析结果；继续可能重新提交原卷，请明确允许本次自动解析。",
+                        "cloud_authorization",
+                    )
                 if not readers.configured("mineru"):
-                    raise ContinueCutConflict("请先在“设置 → 服务与密钥 → 读题与切题”配置 MinerU Token，再继续自动切题。", "missing_mineru")
+                    raise ContinueCutConflict(
+                        "请先在“设置 → 服务与密钥 → 读题与切题”配置 MinerU Token，再继续自动切题。", "missing_mineru"
+                    )
             existing_ids = list(Question.all_objects.filter(paper=paper).values_list("pk", flat=True))
             cancel = _cancellation_file(paper)
             previous_cancel = cancel.read_bytes() if cancel.exists() else None
-            plan.update(schema=1, mode="mineru", requested_mode="mineru", revision=current_revision + 1,
-                auto_fallback=False, cloud_authorized=not has_blocks,
-                continue_preserve_existing=True, continue_revision=current_revision + 1,
-                continue_existing_question_ids=existing_ids, continue_render_sha256=original_digest)
-            recorded = {item["page_idx"]: item for item in plan.get("pages", [])
-                if isinstance(item, dict) and type(item.get("page_idx")) is int}
-            plan["pages"] = [{**recorded.get(item["page_idx"], {}), "page_idx": item["page_idx"], "mode": "mineru"}
-                for item in paper.pages]
+            plan.update(
+                schema=1,
+                mode="mineru",
+                requested_mode="mineru",
+                revision=current_revision + 1,
+                auto_fallback=False,
+                cloud_authorized=not has_blocks,
+                continue_preserve_existing=True,
+                continue_revision=current_revision + 1,
+                continue_existing_question_ids=existing_ids,
+                continue_render_sha256=original_digest,
+            )
+            recorded = {
+                item["page_idx"]: item
+                for item in plan.get("pages", [])
+                if isinstance(item, dict) and type(item.get("page_idx")) is int
+            }
+            plan["pages"] = [
+                {**recorded.get(item["page_idx"], {}), "page_idx": item["page_idx"], "mode": "mineru"}
+                for item in paper.pages
+            ]
             paper.processing_plan = plan
             paper.status = Paper.Status.SEGMENTING if has_blocks else Paper.Status.QUEUED
             paper.error = ""
@@ -160,14 +216,27 @@ def continue_ai_cut(request, paper_id):
         return JsonResponse({"error": str(exc), "reason": exc.reason, "paper": paper_json(paper)}, status=409)
     except OSError:
         paper = get_object_or_404(Paper, pk=paper_id)
-        return JsonResponse({"error": "停止标记无法安全清除，处理未继续；已有成果已保留。",
-            "reason": "cancel_unavailable", "paper": paper_json(paper)}, status=409)
+        return JsonResponse(
+            {
+                "error": "停止标记无法安全清除，处理未继续；已有成果已保留。",
+                "reason": "cancel_unavailable",
+                "paper": paper_json(paper),
+            },
+            status=409,
+        )
     except Exception:
         if cancellation_removed and cancel is not None and previous_cancel is not None:
             cancel.write_bytes(previous_cancel)
         raise
-    return JsonResponse({"paper": paper_json(paper), "changed": True,
-        "action": "local_segmentation" if has_blocks else "queued_mineru",
-        "reuses_saved_parse": has_blocks, "requires_cloud": not has_blocks,
-        "message": "已用保存的解析结果继续切题；已有题目会保留，只补充尚未切出的题目。" if has_blocks else
-            "已继续自动切题；本机会优先使用有效解析缓存，否则重新提交原卷，可能使用 MinerU 额度。已有题目会保留。"})
+    return JsonResponse(
+        {
+            "paper": paper_json(paper),
+            "changed": True,
+            "action": "local_segmentation" if has_blocks else "queued_mineru",
+            "reuses_saved_parse": has_blocks,
+            "requires_cloud": not has_blocks,
+            "message": "已用保存的解析结果继续切题；已有题目会保留，只补充尚未切出的题目。"
+            if has_blocks
+            else "已继续自动切题；本机会优先使用有效解析缓存，否则重新提交原卷，可能使用 MinerU 额度。已有题目会保留。",
+        }
+    )

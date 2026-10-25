@@ -1,4 +1,4 @@
-﻿"""Export the real questions through the running app and measure the result in WPS.
+"""Export the real questions through the running app and measure the result in WPS.
 
 The synthetic document ``tools/measure_all_figure_rows.py`` builds is not what a
 teacher downloads: it skips the whole export path. This asks the running app for
@@ -7,6 +7,7 @@ measures that file in WPS â€” the program the teacher actually opens it in.
 
 Usage: python tools/export_real_and_measure.py [question-id ...]
 """
+
 import json
 import os
 import sqlite3
@@ -36,12 +37,21 @@ def units(value):
 
 
 def field(value):
-    return {"source": value, "blocks": [{"type": "text", "start": 0, "end": units(value),
-                                         "segments": [{"type": "text", "start": 0,
-                                                       "end": units(value)}]}]} if value else []
-
-
-
+    return (
+        {
+            "source": value,
+            "blocks": [
+                {
+                    "type": "text",
+                    "start": 0,
+                    "end": units(value),
+                    "segments": [{"type": "text", "start": 0, "end": units(value)}],
+                }
+            ],
+        }
+        if value
+        else []
+    )
 
 
 def plain(value):
@@ -55,16 +65,14 @@ def load(ids):
     rendered = {}
     for identifier in ids:
         row = connection.execute(
-            "SELECT content FROM core_publishedquestion WHERE id = ?",
-            (str(plain(identifier)).replace("-", ""),)).fetchone()
+            "SELECT content FROM core_publishedquestion WHERE id = ?", (str(plain(identifier)).replace("-", ""),)
+        ).fetchone()
         if row is None:
             print("missing", identifier)
             continue
         content = json.loads(row["content"] or "{}")
-        fields = {name: field(str(content.get(name) or ""))
-                  for name in ("stem", "origin", "answer", "analysis")}
-        fields.update({f"options.{key}": field(value)
-                       for key, value in (content.get("options") or {}).items()})
+        fields = {name: field(str(content.get(name) or "")) for name in ("stem", "origin", "answer", "analysis")}
+        fields.update({f"options.{key}": field(value) for key, value in (content.get("options") or {}).items()})
         rendered[str(plain(identifier))] = fields
         stem = str(content.get("stem") or "")
         formulas = stem.count("$")
@@ -87,7 +95,8 @@ def main():
         BASE + "/api/library/export-docx",
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         method="POST",
-        headers={"Content-Type": "application/json", "X-QB-Request": "1"})
+        headers={"Content-Type": "application/json", "X-QB-Request": "1"},
+    )
     try:
         with urllib.request.urlopen(request, timeout=300) as response:
             data = response.read()
@@ -99,13 +108,19 @@ def main():
         handle.write(data)
     print(f"exported {len(data)} bytes ({kind}) -> {OUT}")
     result = subprocess.run(
-        [os.path.join(ROOT, "packaging", ".build", "venv", "Scripts", "python.exe"),
-         os.path.join(ROOT, "tools", "measure_all_figure_rows_wps.py"), OUT],
-        capture_output=True, text=True, encoding="utf-8", errors="replace")
+        [
+            os.path.join(ROOT, "packaging", ".build", "venv", "Scripts", "python.exe"),
+            os.path.join(ROOT, "tools", "measure_all_figure_rows_wps.py"),
+            OUT,
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     print(result.stdout or result.stderr)
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
-

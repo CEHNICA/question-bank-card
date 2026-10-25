@@ -3,6 +3,7 @@
 Reuses the isolated hierarchy harness, never the installed app or user data.
 The before screenshot serves the delivered 1.21.0 frontend from its source ZIP.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -26,6 +27,7 @@ def seed():
 
     from core import library, library_tagging
     from core.models import LibraryTag, LibraryTagAssignment, LibraryTagRelation, PublishedQuestion
+
     fixtures = json.loads((harness.OUTPUT / "fixture.json").read_text(encoding="utf-8"))
     questions = [PublishedQuestion.objects.get(pk=key) for key in fixtures["ids"]]
     geometry = LibraryTag.objects.get(pk=fixtures["tags"]["geometry"])
@@ -36,16 +38,33 @@ def seed():
     properties = LibraryTag.objects.create(name="二次函数的性质", kind="knowledge")
     LibraryTagRelation.objects.create(parent_id=fixtures["tags"]["quadratic"], child=properties)
     specs = [
-        ("single_choice", r"如图，在直角三角形 $ABC$ 中，$\angle A=90^\circ$，$AB=4$，$AC=3$。则 $\sin B$ 的值为（　）。", {"A": r"$\frac35$", "B": r"$\frac45$", "C": r"$\frac34$", "D": r"$\frac43$"}),
-        ("free_response", r"已知函数 $f(x)=2\sin(\omega x+\varphi)$ 的最小正周期为 $\pi$。\n（1）求 $\omega$ 的值；\n（2）若 $f(0)=1$，且 $0<\varphi<\frac\pi2$，求 $\varphi$。", {}),
+        (
+            "single_choice",
+            r"如图，在直角三角形 $ABC$ 中，$\angle A=90^\circ$，$AB=4$，$AC=3$。则 $\sin B$ 的值为（　）。",
+            {"A": r"$\frac35$", "B": r"$\frac45$", "C": r"$\frac34$", "D": r"$\frac43$"},
+        ),
+        (
+            "free_response",
+            r"已知函数 $f(x)=2\sin(\omega x+\varphi)$ 的最小正周期为 $\pi$。\n（1）求 $\omega$ 的值；\n（2）若 $f(0)=1$，且 $0<\varphi<\frac\pi2$，求 $\varphi$。",
+            {},
+        ),
         ("fill_blank", r"已知二次函数 $y=x^2-4x+3$，当 $x\in[0,3]$ 时，函数的最小值为________。", {}),
-        ("multiple_choice", r"对于函数 $f(x)=x^2$，下列说法正确的是（　）。", {"A": "图像关于 y 轴对称", "B": "值域为所有实数", "C": "在正半轴上单调递增", "D": "图像经过原点"}),
+        (
+            "multiple_choice",
+            r"对于函数 $f(x)=x^2$，下列说法正确的是（　）。",
+            {"A": "图像关于 y 轴对称", "B": "值域为所有实数", "C": "在正半轴上单调递增", "D": "图像经过原点"},
+        ),
     ]
     for index, publication in enumerate(questions):
         kind, stem, options = specs[index % len(specs)]
         content = dict(publication.content)
-        content.update(stem=stem.replace(r"\n", "\n"), options=options, origin="", question_type=kind,
-                       source_filename="数学专项练习 · 界面验收示例.pdf")
+        content.update(
+            stem=stem.replace(r"\n", "\n"),
+            options=options,
+            origin="",
+            question_type=kind,
+            source_filename="数学专项练习 · 界面验收示例.pdf",
+        )
         LibraryTagAssignment.objects.filter(publication=publication).delete()
         tag = [triangle, period, LibraryTag.objects.get(pk=fixtures["tags"]["minimum"]), properties][index % 4]
         LibraryTagAssignment.objects.create(publication=publication, tag=tag, source="human")
@@ -56,10 +75,18 @@ def seed():
             draw = ImageDraw.Draw(image)
             draw.line([(50, 175), (275, 175), (50, 25), (50, 175)], fill="#27362f", width=3)
             draw.line([(50, 157), (68, 157), (68, 175)], fill="#27362f", width=2)
-            for point, label in [((34, 183), "A"), ((280, 174), "B"), ((35, 8), "C"), ((145, 181), "4"), ((26, 91), "3")]:
+            for point, label in [
+                ((34, 183), "A"),
+                ((280, 174), "B"),
+                ((35, 8), "C"),
+                ((145, 181), "4"),
+                ((26, 91), "3"),
+            ]:
                 draw.text(point, label, fill="#27362f", font_size=19)
             image.save(folder / "figure-1.png")
-            content["figures"] = [{"slot": "stem", "file": "figure-1.png", "url": f"/api/library/{publication.pk}/figures/figure-1.png"}]
+            content["figures"] = [
+                {"slot": "stem", "file": "figure-1.png", "url": f"/api/library/{publication.pk}/figures/figure-1.png"}
+            ]
         publication.content = content
         publication.content_hash = library.content_hash(content)
         publication.search_text = library.search_key(content["stem"])
@@ -71,14 +98,32 @@ def seed():
 
 def check(base):
     from playwright.sync_api import expect, sync_playwright
+
     harness.harness.regression._assert_isolated()
     report = {"checks": [], "errors": [], "external_requests": [], "screenshots": [], "real_backend": True}
     json.loads((harness.OUTPUT / "fixture.json").read_text(encoding="utf-8"))
     with sync_playwright() as playwright:
-        executable = next((str(path) for path in [Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"), Path(playwright.chromium.executable_path)] if path.is_file()), None)
+        executable = next(
+            (
+                str(path)
+                for path in [
+                    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                    Path(playwright.chromium.executable_path),
+                ]
+                if path.is_file()
+            ),
+            None,
+        )
         browser = playwright.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
         context = browser.new_context(viewport={"width": 1536, "height": 960}, device_scale_factor=1)
-        context.route("**/*", lambda route: route.continue_() if urlparse(route.request.url).hostname in {"localhost", "127.0.0.1"} else (report["external_requests"].append(route.request.url), route.abort()))
+        context.route(
+            "**/*",
+            lambda route: (
+                route.continue_()
+                if urlparse(route.request.url).hostname in {"localhost", "127.0.0.1"}
+                else (report["external_requests"].append(route.request.url), route.abort())
+            ),
+        )
         page = context.new_page()
         page.on("pageerror", lambda error: report["errors"].append(str(error)))
         requests = []
@@ -89,7 +134,9 @@ def check(base):
         report["frozen_bundle"] = str(harness.BUNDLE) if harness.BUNDLE else None
 
         def shot(name):
-            page.evaluate("() => Promise.allSettled(document.getAnimations().filter(animation => animation.effect.getTiming().iterations !== Infinity).map(animation => animation.finished))")
+            page.evaluate(
+                "() => Promise.allSettled(document.getAnimations().filter(animation => animation.effect.getTiming().iterations !== Infinity).map(animation => animation.finished))"
+            )
             destination = harness.OUTPUT / name
             page.screenshot(path=str(destination), full_page=False)
             report["screenshots"].append(str(destination))
@@ -97,7 +144,9 @@ def check(base):
         def overflow():
             if not page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"):
                 shot("overflow-diagnostic.png")
-                details = page.evaluate("() => ({width: innerWidth, scrollWidth: document.documentElement.scrollWidth, nodes: [...document.querySelectorAll('header,nav,main,section,input,button')].filter(node => {let r=node.getBoundingClientRect(); return r.width && (r.right>innerWidth+1 || r.left< -1)}).map(node => ({node:node.id||node.className, left:node.getBoundingClientRect().left,right:node.getBoundingClientRect().right})).slice(0,15)})")
+                details = page.evaluate(
+                    "() => ({width: innerWidth, scrollWidth: document.documentElement.scrollWidth, nodes: [...document.querySelectorAll('header,nav,main,section,input,button')].filter(node => {let r=node.getBoundingClientRect(); return r.width && (r.right>innerWidth+1 || r.left< -1)}).map(node => ({node:node.id||node.className, left:node.getBoundingClientRect().left,right:node.getBoundingClientRect().right})).slice(0,15)})"
+                )
                 raise AssertionError("page overflows horizontally: " + json.dumps(details))
 
         # Use a fixed order, so the same example question appears in both views.
@@ -105,14 +154,26 @@ def check(base):
         old_zip = ROOT / "packaging/dist/local-acceptance-1.21.0/question-bank-card-1.21.0-source.zip"
         if old_zip.is_file():
             with zipfile.ZipFile(old_zip) as archive:
-                old = {name: archive.read("question-bank-card-1.21.0/frontend/" + name) for name in ["library.html", "library.css", "library.js"]}
+                old = {
+                    name: archive.read("question-bank-card-1.21.0/frontend/" + name)
+                    for name in ["library.html", "library.css", "library.js"]
+                }
+
             def before(route):
                 path = urlparse(route.request.url).path
                 key = "library.html" if path == "/library" else path.lstrip("/")
                 if key in old:
-                    route.fulfill(body=old[key], content_type="text/html" if key.endswith("html") else "text/css" if key.endswith("css") else "text/javascript")
+                    route.fulfill(
+                        body=old[key],
+                        content_type="text/html"
+                        if key.endswith("html")
+                        else "text/css"
+                        if key.endswith("css")
+                        else "text/javascript",
+                    )
                 else:
                     route.fallback()
+
             page.route("**/*", before)
             page.goto(url)
             expect(page.locator(".library-card")).to_have_count(14)
@@ -123,7 +184,9 @@ def check(base):
         page.goto(url)
         expect(page.locator(".library-card")).to_have_count(14)
         page.evaluate("document.fonts.ready")
-        assert page.locator(".library-card .qb-figures img").first.evaluate("node => node.complete && node.naturalWidth > 0")
+        assert page.locator(".library-card .qb-figures img").first.evaluate(
+            "node => node.complete && node.naturalWidth > 0"
+        )
         overflow()
         first = page.locator(".library-card").first
         expect(first.locator(".library-number")).to_have_text("第 1 题")
@@ -137,10 +200,14 @@ def check(base):
         for key in ["allQuestionsButton", "basketViewButton"]:
             assert page.locator("#" + key).count() == 1
         assert page.locator("#questionInspector").bounding_box()["height"] < 600
-        types = page.locator("#typeFilters .draft-filter").evaluate_all("nodes => nodes.map(node => Math.round(node.getBoundingClientRect().top))")
+        types = page.locator("#typeFilters .draft-filter").evaluate_all(
+            "nodes => nodes.map(node => Math.round(node.getBoundingClientRect().top))"
+        )
         assert len(set(types)) == 1, types
         shot("after-desktop.png")
-        report["checks"].append("1536px: intentional filter rows, visible question titles, loaded figure, compact inspector and no overflow")
+        report["checks"].append(
+            "1536px: intentional filter rows, visible question titles, loaded figure, compact inspector and no overflow"
+        )
 
         page.locator("#advancedFilters > summary").click()
         expect(page.locator("#advancedFilters > .library-filters")).to_be_visible()
@@ -165,7 +232,9 @@ def check(base):
         first.locator(".library-card-tag-glimpse").first.hover()
         expect(page.locator("#libraryTagHover")).to_be_visible()
         page.keyboard.press("Escape")
-        report["checks"].append("Advanced filters, batch selection, basket, full-screen viewing and hierarchy hover remain usable")
+        report["checks"].append(
+            "Advanced filters, batch selection, basket, full-screen viewing and hierarchy hover remain usable"
+        )
 
         page.locator("#closeInspector").click()
         width = page.locator(".library-results").bounding_box()["width"]
@@ -180,7 +249,9 @@ def check(base):
         expect(page.locator(".library-card")).to_have_count(4)
         page.locator("#searchInput").fill("")
         expect(page.locator(".library-card")).to_have_count(14)
-        report["checks"].append("The left rail stays hidden; right inspector collapse gives full list width; header search and / shortcut return the correct subset")
+        report["checks"].append(
+            "The left rail stays hidden; right inspector collapse gives full list width; header search and / shortcut return the correct subset"
+        )
 
         page.set_viewport_size({"width": 1366, "height": 768})
         overflow()
@@ -215,8 +286,16 @@ def check(base):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--bundle", type=Path, help="Test a frozen package folder or QuestionBankCard.exe using only isolated fixture data")
-    parser.add_argument("--output", type=Path, default=ROOT / "tmp/library-reading-design" / (time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]))
+    parser.add_argument(
+        "--bundle",
+        type=Path,
+        help="Test a frozen package folder or QuestionBankCard.exe using only isolated fixture data",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=ROOT / "tmp/library-reading-design" / (time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]),
+    )
     args = parser.parse_args()
     if args.bundle:
         harness.BUNDLE = args.bundle.resolve()

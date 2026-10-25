@@ -75,18 +75,23 @@ def test_reading_connection(service: str) -> dict:
     model = _saved_model(service)
     payload = {
         "model": model,
-        "messages": [{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": PROMPT},
-                {"type": "image_url", "image_url": {"url": _synthetic_image()}},
-            ],
-        }],
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": PROMPT},
+                    {"type": "image_url", "image_url": {"url": _synthetic_image()}},
+                ],
+            }
+        ],
         "max_tokens": 256,
     }
     try:
         response = requests.post(
-            SERVICE_URLS[service], json=payload, timeout=(10, 90), allow_redirects=False,
+            SERVICE_URLS[service],
+            json=payload,
+            timeout=(10, 90),
+            allow_redirects=False,
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         )
     except requests.Timeout:
@@ -95,11 +100,23 @@ def test_reading_connection(service: str) -> dict:
         return {"ok": False, "model": model, "message": "连不上这家服务商：网络不通或地址被挡住了。"}
 
     if response.status_code in (401, 403):
-        return {"ok": False, "model": model, "message": "密钥没通过：这家服务商不认这串密钥（可能复制少了、有多余空格，或已经过期）。"}
+        return {
+            "ok": False,
+            "model": model,
+            "message": "密钥没通过：这家服务商不认这串密钥（可能复制少了、有多余空格，或已经过期）。",
+        }
     if response.status_code == 429:
-        return {"ok": False, "model": model, "message": "这家服务商现在不接请求：额度用完了，或者请求太频繁。稍后再试。"}
+        return {
+            "ok": False,
+            "model": model,
+            "message": "这家服务商现在不接请求：额度用完了，或者请求太频繁。稍后再试。",
+        }
     if response.status_code >= 400:
-        return {"ok": False, "model": model, "message": f"这家服务商拒绝了这次请求（HTTP {response.status_code}）。多半是模型名不对，或这个账号没开通这个模型。"}
+        return {
+            "ok": False,
+            "model": model,
+            "message": f"这家服务商拒绝了这次请求（HTTP {response.status_code}）。多半是模型名不对，或这个账号没开通这个模型。",
+        }
 
     try:
         body = response.json()
@@ -107,7 +124,11 @@ def test_reading_connection(service: str) -> dict:
     except (ValueError, KeyError, IndexError, TypeError):
         return {"ok": False, "model": model, "message": "服务有回应，但没给出可读的答案。"}
     if "2" in text:
-        return {"ok": True, "model": model, "message": f"连接成功：{VISION[service]['label']} 的 {model} 能用，也看得懂图片。"}
+        return {
+            "ok": True,
+            "model": model,
+            "message": f"连接成功：{VISION[service]['label']} 的 {model} 能用，也看得懂图片。",
+        }
     return {
         "ok": False,
         "model": model,

@@ -14,14 +14,23 @@ CANDIDATE = {"label": "1", "seq": 7, "page_idx": 0, "bbox": [130, 100, 260, 210]
 def reading(role="stem", slot="A", applied=True):
     key = figure_policy.candidate_key(CANDIDATE)
     return {
-        "stem": "下列图形正确的是（ ）", "type": "single_choice", "options": {},
-        "figures": {"1": role}, "figure_layout": {
+        "stem": "下列图形正确的是（ ）",
+        "type": "single_choice",
+        "options": {},
+        "figures": {"1": role},
+        "figure_layout": {
             "candidate_keys": {"1": key},
-            "evidence": {"1": {
-                "slot": slot, "page_idx": 0, "marker_bbox": [100, 100, 120, 120],
-                "marker_seq": 6, "source": "printed_option_marker",
-                "applied": applied, "candidate_key": key,
-            }},
+            "evidence": {
+                "1": {
+                    "slot": slot,
+                    "page_idx": 0,
+                    "marker_bbox": [100, 100, 120, 120],
+                    "marker_seq": 6,
+                    "source": "printed_option_marker",
+                    "applied": applied,
+                    "candidate_key": key,
+                }
+            },
             "conflicts": [],
         },
     }
@@ -29,9 +38,16 @@ def reading(role="stem", slot="A", applied=True):
 
 def question_stub(**changes):
     values = {
-        "number": 1, "stem": "下列图形正确的是（ ）", "options": {}, "flags": [],
-        "question_type": "single_choice", "state": "yellow", "figure_review": {},
-        "read_a": reading(), "read_b": {}, "read_c": {},
+        "number": 1,
+        "stem": "下列图形正确的是（ ）",
+        "options": {},
+        "flags": [],
+        "question_type": "single_choice",
+        "state": "yellow",
+        "figure_review": {},
+        "read_a": reading(),
+        "read_b": {},
+        "read_c": {},
         "figure_candidates": [deepcopy(CANDIDATE)],
         "figures": [{"slot": "A", "page_idx": 0, "bbox": CANDIDATE["bbox"], "source": "auto"}],
     }
@@ -54,38 +70,54 @@ class ValidatedLayoutPolicyTests(SimpleTestCase):
             with self.subTest(value=value):
                 raw = reading()
                 raw["figure_layout"] = value
-                self.assertEqual(figure_policy.validated_layout_assignments(raw, [CANDIDATE], {"1": "stem"}),
-                                 {"1": "stem"})
+                self.assertEqual(
+                    figure_policy.validated_layout_assignments(raw, [CANDIDATE], {"1": "stem"}), {"1": "stem"}
+                )
                 figure_policy.stored_or_derived_review(question_stub(read_a=raw))
 
     def test_stale_crop_wrong_source_and_invalid_metadata_are_ignored(self):
-        for field, value in (("candidate_key", "0:200,100,330,210"), ("source", "model_guess"),
-                             ("slot", "q3"), ("slot", []), ("applied", 1), ("page_idx", 1)):
+        for field, value in (
+            ("candidate_key", "0:200,100,330,210"),
+            ("source", "model_guess"),
+            ("slot", "q3"),
+            ("slot", []),
+            ("applied", 1),
+            ("page_idx", 1),
+        ):
             with self.subTest(field=field, value=value):
                 raw = reading()
                 raw["figure_layout"]["evidence"]["1"][field] = value
-                self.assertEqual(figure_policy.validated_layout_assignments(raw, [CANDIDATE], {"1": "stem"}),
-                                 {"1": "stem"})
+                self.assertEqual(
+                    figure_policy.validated_layout_assignments(raw, [CANDIDATE], {"1": "stem"}), {"1": "stem"}
+                )
 
     def test_protected_roles_and_manual_candidates_are_not_changed(self):
         raw = reading()
         for role in ("B", "none", "decoration", "q3", "table", "old_custom_role"):
             with self.subTest(role=role):
-                self.assertEqual(figure_policy.validated_layout_assignments(raw, [CANDIDATE], {"1": role}),
-                                 {"1": role})
+                self.assertEqual(figure_policy.validated_layout_assignments(raw, [CANDIDATE], {"1": role}), {"1": role})
         for source in ("manual", "human"):
-            self.assertEqual(figure_policy.validated_layout_assignments(raw, [{**CANDIDATE, "source": source}],
-                                                                       {"1": "stem"}), {"1": "stem"})
+            self.assertEqual(
+                figure_policy.validated_layout_assignments(raw, [{**CANDIDATE, "source": source}], {"1": "stem"}),
+                {"1": "stem"},
+            )
 
     def test_duplicate_candidate_labels_are_not_used(self):
-        self.assertEqual(figure_policy.validated_layout_assignments(
-            reading(), [CANDIDATE, {**CANDIDATE, "bbox": [530, 100, 660, 210]}], {"1": "stem"}),
-            {"1": "stem"})
+        self.assertEqual(
+            figure_policy.validated_layout_assignments(
+                reading(), [CANDIDATE, {**CANDIDATE, "bbox": [530, 100, 660, 210]}], {"1": "stem"}
+            ),
+            {"1": "stem"},
+        )
 
     def test_get_upgrade_preserves_validated_evidence_and_conflicts(self):
         raw = reading(role="A", slot="B", applied=False)
-        conflict = {"candidate_label": "1", "current_role": "A", "proposed_role": "B",
-                    "reason": "printed_option_marker_disagrees"}
+        conflict = {
+            "candidate_label": "1",
+            "current_role": "A",
+            "proposed_role": "B",
+            "reason": "printed_option_marker_disagrees",
+        }
         raw["figure_layout"]["conflicts"] = [conflict]
         question = question_stub(read_a=raw)
         before_raw = deepcopy(question.read_a)
@@ -121,15 +153,29 @@ class ValidatedLayoutPolicyTests(SimpleTestCase):
 
 class PersistedLayoutPolicyTests(TestCase):
     def setUp(self):
-        self.paper = Paper.objects.create(filename="labels.pdf", kind="pdf", sha256="l" * 64,
-                                          source_path="data/labels/source.pdf")
+        self.paper = Paper.objects.create(
+            filename="labels.pdf", kind="pdf", sha256="l" * 64, source_path="data/labels/source.pdf"
+        )
 
     def make_question(self, **changes):
         stub = question_stub()
-        fields = {key: deepcopy(getattr(stub, key)) for key in (
-            "number", "stem", "options", "flags", "question_type", "state", "figure_review",
-            "read_a", "read_b", "read_c", "figure_candidates", "figures",
-        )}
+        fields = {
+            key: deepcopy(getattr(stub, key))
+            for key in (
+                "number",
+                "stem",
+                "options",
+                "flags",
+                "question_type",
+                "state",
+                "figure_review",
+                "read_a",
+                "read_b",
+                "read_c",
+                "figure_candidates",
+                "figures",
+            )
+        }
         fields.update(changes)
         return Question.objects.create(paper=self.paper, **fields)
 

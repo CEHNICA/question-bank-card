@@ -17,12 +17,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from . import demo, features, imaging, prose, qtypes, source_images
-from .figure_policy import (
-    CONFIRMED_NO_FIGURE,
-    DECISION_FLAGS,
-    blocking_message,
-    blocks_approval,
-)
+from .figure_policy import CONFIRMED_NO_FIGURE, DECISION_FLAGS, blocking_message, blocks_approval
 from .models import Paper, PublishedQuestion, Question, QuestionGroup
 from .textnorm import strip_example_label, strip_type_label
 
@@ -41,6 +36,8 @@ def option_content(options: dict | None, *, plain: bool = False) -> dict:
     if str(options.get("E") or "").strip():
         content["E"] = text(options["E"])
     return content
+
+
 REVIEWABLE_STATES = {Question.State.GREEN, Question.State.YELLOW}
 
 
@@ -56,8 +53,10 @@ def figure_parts(figure: dict) -> list[dict]:
     return [
         {"page_idx": part["page_idx"], "bbox": part["bbox"]}
         for part in parts
-        if isinstance(part, dict) and isinstance(part.get("page_idx"), int)
-        and isinstance(part.get("bbox"), list) and len(part["bbox"]) == 4
+        if isinstance(part, dict)
+        and isinstance(part.get("page_idx"), int)
+        and isinstance(part.get("bbox"), list)
+        and len(part["bbox"]) == 4
     ]
 
 
@@ -96,13 +95,18 @@ def figure_file(question: Question, index: int) -> Path:
         else:
             page = store.load(figure["page_idx"])
             imaging.crop_figure(page, imaging.to_pixels(figure["bbox"], page.size)).save(
-                target, format="PNG", optimize=True)
+                target, format="PNG", optimize=True
+            )
     return target
 
 
 def _content_figure(figure: dict) -> dict:
-    item = {"slot": figure["slot"], "page_idx": figure["page_idx"], "bbox": figure["bbox"],
-            "source": figure.get("source", "unknown")}
+    item = {
+        "slot": figure["slot"],
+        "page_idx": figure["page_idx"],
+        "bbox": figure["bbox"],
+        "source": figure.get("source", "unknown"),
+    }
     parts = figure_parts(figure)
     if parts:
         item["parts"] = parts
@@ -111,8 +115,11 @@ def _content_figure(figure: dict) -> dict:
 
 def final_content(question: Question) -> dict:
     is_choice = question.question_type in CHOICE_TYPES or bool(question.options)
-    source_origin = "manual" if question.start_source == "manual" or question.regions != question.regions_auto \
+    source_origin = (
+        "manual"
+        if question.start_source == "manual" or question.regions != question.regions_auto
         else question.start_source
+    )
     # 入库版是要印给人看的，所以这里再清一次识读标记。早于清理规则的旧题，
     # 题卡里留着“**做一做**”“<!-- Image(268, 493, 650, 637) -->”这样的原文，
     # 审核时看得见原样，印出去的卷子上不该有它们。题卡本身一个字不改。
@@ -132,11 +139,11 @@ def final_content(question: Question) -> dict:
         ],
         "document_id": str(question.paper_id),
         "source_filename": question.paper.display_name,
-        "source_group": ({
-            "id": question.group_id,
-            "title": question.group.title,
-            "sequence": question.group.sequence,
-        } if question.group_id else None),
+        "source_group": (
+            {"id": question.group_id, "title": question.group.title, "sequence": question.group.sequence}
+            if question.group_id
+            else None
+        ),
         # 审核记录随不可变快照保存。一般提示不参与版本身份；人工“确实无图”的决定例外，
         # 因为它是允许一条原本会被阻止的题目入库的关键依据。
         "review": {
@@ -159,10 +166,20 @@ def final_content(question: Question) -> dict:
 
 def content_hash(content: dict) -> str:
     """题目内容与追溯来源的稳定哈希；忽略图片 URL 等发布时生成的字段。"""
-    material = {k: content.get(k) for k in (
-        "number", "section", "question_type", "stem", "options", "answer", "analysis",
-        "document_id", "source_filename",
-    )}
+    material = {
+        k: content.get(k)
+        for k in (
+            "number",
+            "section",
+            "question_type",
+            "stem",
+            "options",
+            "answer",
+            "analysis",
+            "document_id",
+            "source_filename",
+        )
+    }
     material["figures"] = [
         {k: f.get(k) for k in ("slot", "page_idx", "bbox", "source")}
         # Only a stitched figure carries parts, so every other hash is unchanged.
@@ -170,21 +187,22 @@ def content_hash(content: dict) -> str:
         for f in content.get("figures", [])
     ]
     material["sources"] = [
-        {k: source.get(k) for k in ("page_idx", "bbox", "type", "source")}
-        for source in content.get("sources", [])
+        {k: source.get(k) for k in ("page_idx", "bbox", "type", "source")} for source in content.get("sources", [])
     ]
     if content.get("body_mode") == "source_image":
         material["body_mode"] = "source_image"
         material["question_images"] = [
-            {key: item.get(key) for key in ("page_idx", "bbox", "order", "source", "render_sha256", "image_sha256", "width", "height")}
+            {
+                key: item.get(key)
+                for key in ("page_idx", "bbox", "order", "source", "render_sha256", "image_sha256", "width", "height")
+            }
             for item in content.get("question_images", [])
         ]
     # 题源为空时不进校验：升级前通过、入库的题，校验值和以前一模一样。
     if str(content.get("origin") or "").strip():
         material["origin"] = content["origin"]
     figure_review = (content.get("review") or {}).get("figure_review") or {}
-    if (figure_review.get("status") == CONFIRMED_NO_FIGURE
-            and figure_review.get("source") == "human"):
+    if figure_review.get("status") == CONFIRMED_NO_FIGURE and figure_review.get("source") == "human":
         material["figure_review_decision"] = {
             "status": CONFIRMED_NO_FIGURE,
             "source": "human",
@@ -242,7 +260,8 @@ def confirm_published_review(question: Question) -> int:
     if approval_source(question) != "human" or not question.approved_content_hash:
         return 0
     return question.publications.filter(
-        status=PublishedQuestion.Status.PUBLISHED, review_source="ai",
+        status=PublishedQuestion.Status.PUBLISHED,
+        review_source="ai",
         content_hash=content_hash(final_content(question)),
     ).update(review_source="human", review_agent="")
 
@@ -265,18 +284,56 @@ def approval_is_current(question: Question) -> bool:
 
 
 _LATEX_SYMBOLS = {
-    "angle": "∠", "parallel": "∥", "perp": "⊥", "bot": "⊥", "triangle": "△", "times": "×",
-    "div": "÷", "leqslant": "≤", "geqslant": "≥", "leq": "≤", "le": "≤", "geq": "≥", "ge": "≥",
-    "neq": "≠", "ne": "≠", "pi": "π", "circ": "°", "sqrt": "√", "cdot": "·", "in": "∈",
-    "cup": "∪", "cap": "∩", "infty": "∞", "mid": "|", "pm": "±", "because": "∵", "therefore": "∴",
-    "alpha": "α", "beta": "β", "gamma": "γ", "theta": "θ", "square": "□", "cong": "≅", "sim": "∽",
-    "forall": "∀", "exists": "∃", "emptyset": "∅", "varnothing": "∅", "subset": "⊂", "subseteq": "⊆",
+    "angle": "∠",
+    "parallel": "∥",
+    "perp": "⊥",
+    "bot": "⊥",
+    "triangle": "△",
+    "times": "×",
+    "div": "÷",
+    "leqslant": "≤",
+    "geqslant": "≥",
+    "leq": "≤",
+    "le": "≤",
+    "geq": "≥",
+    "ge": "≥",
+    "neq": "≠",
+    "ne": "≠",
+    "pi": "π",
+    "circ": "°",
+    "sqrt": "√",
+    "cdot": "·",
+    "in": "∈",
+    "cup": "∪",
+    "cap": "∩",
+    "infty": "∞",
+    "mid": "|",
+    "pm": "±",
+    "because": "∵",
+    "therefore": "∴",
+    "alpha": "α",
+    "beta": "β",
+    "gamma": "γ",
+    "theta": "θ",
+    "square": "□",
+    "cong": "≅",
+    "sim": "∽",
+    "forall": "∀",
+    "exists": "∃",
+    "emptyset": "∅",
+    "varnothing": "∅",
+    "subset": "⊂",
+    "subseteq": "⊆",
     # 这几个是 KaTeX 排出来就长这样的正体英文函数名。表里没有它们，``replace``
     # 会把命令整个删掉（``\\sin A`` 变成 ``a``），于是卡面上明明印着 sin 30°，
     # 老师搜「sin」却一张都搜不到——不报错、不提示，只是静静地少一批题。
     # 只收真库里真出现过的：``\\sec`` 之类一次都没用到，收了反而可能撞上英文单词
     # （section 里有 sec）。正体函数名保持和屏幕上一致，搜到就是搜到。
-    "sin": "sin", "cos": "cos", "tan": "tan", "log": "log", "ln": "ln",
+    "sin": "sin",
+    "cos": "cos",
+    "tan": "tan",
+    "log": "log",
+    "ln": "ln",
 }
 _LATEX_COMMAND = re.compile(r"\\([A-Za-z]+)|\\([{}|,;!% ])")
 
@@ -316,10 +373,17 @@ def section_label(section) -> str:
 
 
 def _search_text(content: dict, extras: dict | None = None) -> str:
-    parts = [content["stem"], *content["options"].values(), content["answer"], content["analysis"],
-             content["source_filename"], (content.get("source_group") or {}).get("title", ""),
-             section_label(content.get("section")),
-             str(content.get("origin") or ""), *tags_of(extras)]
+    parts = [
+        content["stem"],
+        *content["options"].values(),
+        content["answer"],
+        content["analysis"],
+        content["source_filename"],
+        (content.get("source_group") or {}).get("title", ""),
+        section_label(content.get("section")),
+        str(content.get("origin") or ""),
+        *tags_of(extras),
+    ]
     return search_key(" ".join(parts))
 
 
@@ -351,7 +415,9 @@ def generation_fingerprint(content: dict, publication_id=None) -> str:
         for item, image in zip(material["question_images"], content.get("question_images", [])):
             owner = str(publication_id or "")
             if not owner:
-                match = re.fullmatch(r"/api/library/([0-9a-fA-F-]{36})/question-images/[^/]+", str(image.get("url") or ""))
+                match = re.fullmatch(
+                    r"/api/library/([0-9a-fA-F-]{36})/question-images/[^/]+", str(image.get("url") or "")
+                )
                 owner = match.group(1) if match else ""
             name = str(image.get("file") or "")
             try:
@@ -385,7 +451,9 @@ def generation_fingerprint(content: dict, publication_id=None) -> str:
             image["missing"] = True
         images.append(image)
     material["figures"] = images
-    return hashlib.sha256(json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def carried_extras(previous: PublishedQuestion | None, content: dict) -> dict:
@@ -400,7 +468,14 @@ def carried_extras(previous: PublishedQuestion | None, content: dict) -> dict:
         extras["tags"] = tags_of(previous.extras)
         if previous.extras.get("tags_source"):
             extras["tags_source"] = previous.extras["tags_source"]
-        for key in ("tags_at", "tags_fingerprint", "tags_publication_id", "tags_agent", "tags_executor", "tags_checked"):
+        for key in (
+            "tags_at",
+            "tags_fingerprint",
+            "tags_publication_id",
+            "tags_agent",
+            "tags_executor",
+            "tags_checked",
+        ):
             if key in previous.extras:
                 extras[key] = previous.extras[key]
     answer = previous.extras.get("ai_answer")
@@ -447,8 +522,17 @@ def save_extras(publication: PublishedQuestion, extras: dict) -> PublishedQuesti
     current = PublishedQuestion.objects.filter(pk=publication.pk).values("extras").first()
     saved = current.get("extras") if current and isinstance(current.get("extras"), dict) else {}
     extras = deepcopy(extras) if isinstance(extras, dict) else {}
-    tag_keys = ("tags", "tags_source", "tags_at", "tags_fingerprint", "tags_publication_id",
-                "tags_agent", "tags_executor", "tags_checked", "tags_legacy_original")
+    tag_keys = (
+        "tags",
+        "tags_source",
+        "tags_at",
+        "tags_fingerprint",
+        "tags_publication_id",
+        "tags_agent",
+        "tags_executor",
+        "tags_checked",
+        "tags_legacy_original",
+    )
     for key in tag_keys:
         if key in saved:
             extras[key] = deepcopy(saved[key])
@@ -475,8 +559,11 @@ def already_published(question: Question) -> bool:
         return False
     if latest.review_source == "ai" and approval_source(question) == "human":
         return False
-    return bool(question.approved_content_hash) and latest.content_hash == question.approved_content_hash \
+    return (
+        bool(question.approved_content_hash)
+        and latest.content_hash == question.approved_content_hash
         and approval_is_current(question)
+    )
 
 
 def publish(question: Question, *, queue_enrichment: bool = True) -> tuple[PublishedQuestion, bool]:
@@ -535,19 +622,29 @@ def publish(question: Question, *, queue_enrichment: bool = True) -> tuple[Publi
                 figure["url"] = f"/api/library/{publication_id}/figures/{name}"
             extras = carried_extras(latest, content)
             publication = PublishedQuestion.objects.create(
-                id=publication_id, question=question, paper=paper,
-                source_filename=paper.display_name, number=question.number,
-                question_type=question.question_type, version=(latest.version if latest else 0) + 1,
-                content=content, content_hash=digest, search_text=_search_text(content, extras),
-                review_source=source, review_agent=agent,
-                extras=extras, tags_text=tags_text(tags_of(extras)),
+                id=publication_id,
+                question=question,
+                paper=paper,
+                source_filename=paper.display_name,
+                number=question.number,
+                question_type=question.question_type,
+                version=(latest.version if latest else 0) + 1,
+                content=content,
+                content_hash=digest,
+                search_text=_search_text(content, extras),
+                review_source=source,
+                review_agent=agent,
+                extras=extras,
+                tags_text=tags_text(tags_of(extras)),
             )
-            question.publications.filter(status=PublishedQuestion.Status.PUBLISHED).exclude(
-                pk=publication.pk).update(status=PublishedQuestion.Status.SUPERSEDED)
+            question.publications.filter(status=PublishedQuestion.Status.PUBLISHED).exclude(pk=publication.pk).update(
+                status=PublishedQuestion.Status.SUPERSEDED
+            )
             # A queued or running enrichment job keeps its original snapshot.
             # The worker rejects replaced versions; a new version needs its own job.
             if queue_enrichment:
                 from .library_jobs import queue_on_intake
+
                 queue_on_intake(publication)
         except Exception:
             shutil.rmtree(folder, ignore_errors=True)
@@ -567,9 +664,7 @@ def rename_paper(paper: Paper, name: str) -> tuple[Paper, bool]:
         if name == old_name:
             return paper, False
 
-        questions = list(
-            Question.all_objects.select_for_update().select_related("paper", "group").filter(paper=paper)
-        )
+        questions = list(Question.all_objects.select_for_update().select_related("paper", "group").filter(paper=paper))
         groups = list(QuestionGroup.objects.select_for_update().filter(paper=paper))
         current_approval_ids = [question.pk for question in questions if approval_is_current(question)]
         publications = list(PublishedQuestion.objects.select_for_update().filter(paper=paper))
@@ -583,14 +678,14 @@ def rename_paper(paper: Paper, name: str) -> tuple[Paper, bool]:
             if group.title == old_name:
                 group.title = name
             elif group.title.startswith(f"{old_name}（"):
-                group.title = f"{name}{group.title[len(old_name):]}"[:255]
+                group.title = f"{name}{group.title[len(old_name) :]}"[:255]
             else:
                 continue
             group.updated_at = timezone.now()
             renamed_groups[group.pk] = group.title
         if renamed_groups:
             QuestionGroup.objects.bulk_update(
-                [group for group in groups if group.pk in renamed_groups], ["title", "updated_at"],
+                [group for group in groups if group.pk in renamed_groups], ["title", "updated_at"]
             )
 
         if current_approval_ids:
@@ -633,7 +728,8 @@ def live_publications_prefetch():
     return Prefetch(
         "publications",
         queryset=PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
-        .only(*LIVE_PUBLICATION_FIELDS).order_by("-version"),
+        .only(*LIVE_PUBLICATION_FIELDS)
+        .order_by("-version"),
         to_attr="live_publications",
     )
 
@@ -646,8 +742,11 @@ def publication_state(question: Question) -> dict | None:
         live = question.publications.filter(status=PublishedQuestion.Status.PUBLISHED).order_by("-version").first()
     if live is None:
         return None
-    return {"id": str(live.id), "version": live.version,
-            "up_to_date": live.content_hash == content_hash(final_content(question))}
+    return {
+        "id": str(live.id),
+        "version": live.version,
+        "up_to_date": live.content_hash == content_hash(final_content(question)),
+    }
 
 
 def withdraw(publication: PublishedQuestion) -> PublishedQuestion:
@@ -684,6 +783,7 @@ def _content_with_figure_state(publication: PublishedQuestion) -> dict:
 
 def publication_json(publication: PublishedQuestion, *, include_tag_details: bool = True) -> dict:
     from . import library_solutions
+
     solution, solution_error = None, ""
     if (publication.extras or {}).get("solution_id"):
         try:
@@ -717,15 +817,23 @@ def publication_json(publication: PublishedQuestion, *, include_tag_details: boo
         data.update(tags=[], tag_revision=publication.tag_revision, tag_assignments=[], tag_suggestion=None)
         return data
     from . import library_tagging
+
     return library_tagging.attach_to_publication_json(publication, data)
 
 
 HISTORY_FIELDS = (
-    ("body_mode", "正文形式"), ("question_images", "原图正文"),
-    ("stem", "题干"), ("options", "选项"), ("answer", "答案"),
-    ("analysis", "解析"), ("origin", "题源"), ("question_type", "题型"),
-    ("figures", "配图"), ("sources", "原卷位置"),
-    ("number", "原卷题号"), ("section", "大题分组"),
+    ("body_mode", "正文形式"),
+    ("question_images", "原图正文"),
+    ("stem", "题干"),
+    ("options", "选项"),
+    ("answer", "答案"),
+    ("analysis", "解析"),
+    ("origin", "题源"),
+    ("question_type", "题型"),
+    ("figures", "配图"),
+    ("sources", "原卷位置"),
+    ("number", "原卷题号"),
+    ("section", "大题分组"),
 )
 
 
@@ -734,17 +842,23 @@ def _history_value(content: dict, key: str):
     if key == "body_mode":
         return "原图正文" if value == "source_image" else "文字正文"
     if key == "question_images":
-        return [{name: image.get(name) for name in ("page_idx", "bbox", "order", "image_sha256")}
-                for image in (value or [])]
+        return [
+            {name: image.get(name) for name in ("page_idx", "bbox", "order", "image_sha256")} for image in (value or [])
+        ]
     if key == "figures":
         # Every publication gets new file names/URLs. Compare the actual crop,
         # slot and provenance instead, including all cross-page pieces.
-        return [{name: figure.get(name) for name in ("slot", "page_idx", "bbox", "source", "parts")}
-                for figure in (value or [])]
+        return [
+            {name: figure.get(name) for name in ("slot", "page_idx", "bbox", "source", "parts")}
+            for figure in (value or [])
+        ]
     if key == "sources":
-        return {"document_id": content.get("document_id"),
-                "regions": [{name: region.get(name) for name in ("page_idx", "bbox", "type", "source")}
-                            for region in (value or [])]}
+        return {
+            "document_id": content.get("document_id"),
+            "regions": [
+                {name: region.get(name) for name in ("page_idx", "bbox", "type", "source")} for region in (value or [])
+            ],
+        }
     if key == "options":
         return {name: str(text) for name, text in (value or {}).items() if str(text).strip()}
     return value if value is not None else ""
@@ -770,8 +884,10 @@ def publication_changes(before: PublishedQuestion, after: PublishedQuestion, *, 
             # Bound character comparison for very long textbook questions.
             # The complete snapshot remains available in the rendered panels.
             if len(old) + len(new) <= 20_000:
-                field["segments"] = [{"kind": kind, "before": old[a:b], "after": new[c:d]}
-                                     for kind, a, b, c, d in SequenceMatcher(None, old, new).get_opcodes()]
+                field["segments"] = [
+                    {"kind": kind, "before": old[a:b], "after": new[c:d]}
+                    for kind, a, b, c, d in SequenceMatcher(None, old, new).get_opcodes()
+                ]
         changes.append(field)
     return changes
 
@@ -782,18 +898,27 @@ def publication_history(publication: PublishedQuestion) -> list[dict]:
     Orphan snapshots must never be grouped merely because their question FK
     is NULL (nor by number or filename, which repeat across chapters).
     """
-    rows = list(PublishedQuestion.objects.filter(question_id=publication.question_id).order_by("version")) \
-        if publication.question_id else [publication]
+    rows = (
+        list(PublishedQuestion.objects.filter(question_id=publication.question_id).order_by("version"))
+        if publication.question_id
+        else [publication]
+    )
     history = []
     previous = None
     for row in rows:
-        history.append({
-            "id": str(row.id), "version": row.version, "status": row.status,
-            "published_at": row.published_at.isoformat(),
-            "review": {"source": row.review_source or "human", "agent": row.review_agent},
-            "changes": [field["label"] for field in publication_changes(previous, row, with_text=False)] if previous else [],
-            "previous_id": str(previous.id) if previous else None,
-        })
+        history.append(
+            {
+                "id": str(row.id),
+                "version": row.version,
+                "status": row.status,
+                "published_at": row.published_at.isoformat(),
+                "review": {"source": row.review_source or "human", "agent": row.review_agent},
+                "changes": [field["label"] for field in publication_changes(previous, row, with_text=False)]
+                if previous
+                else [],
+                "previous_id": str(previous.id) if previous else None,
+            }
+        )
         previous = row
     return list(reversed(history))
 
@@ -802,11 +927,29 @@ def publication_history(publication: PublishedQuestion) -> list[dict]:
 # question in another paper is evidence to inspect, never a licence to move a
 # review, merge a draft or compare unrelated version numbers.
 RELATED_SOURCE_LIMIT = 20
-_SOURCE_PUNCTUATION = str.maketrans({
-    "，": ",", "。": ".", "．": ".", "；": ";", "：": ":", "！": "!", "？": "?",
-    "（": "(", "）": ")", "［": "[", "］": "]", "｛": "{", "｝": "}",
-    "“": '"', "”": '"', "＂": '"', "‘": "'", "’": "'", "＇": "'",
-})
+_SOURCE_PUNCTUATION = str.maketrans(
+    {
+        "，": ",",
+        "。": ".",
+        "．": ".",
+        "；": ";",
+        "：": ":",
+        "！": "!",
+        "？": "?",
+        "（": "(",
+        "）": ")",
+        "［": "[",
+        "］": "]",
+        "｛": "{",
+        "｝": "}",
+        "“": '"',
+        "”": '"',
+        "＂": '"',
+        "‘": "'",
+        "’": "'",
+        "＇": "'",
+    }
+)
 _SOURCE_PROTECTED = re.compile(
     r"(`+)[\s\S]*?\1|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)"
     r"|(?<!\\)\$\$[\s\S]*?(?<!\\)\$\$|(?<!\\)\$(?:\\.|[^$])*?(?<!\\)\$"
@@ -827,7 +970,7 @@ def _source_match_text(value: str, *, possible: bool = False) -> list[list[str]]
     pieces = []
     start = 0
     for match in _SOURCE_PROTECTED.finditer(value):
-        pieces.append(["prose", value[start:match.start()]])
+        pieces.append(["prose", value[start : match.start()]])
         pieces.append(["literal", match.group()])
         start = match.end()
     pieces.append(["prose", value[start:]])
@@ -835,8 +978,10 @@ def _source_match_text(value: str, *, possible: bool = False) -> list[list[str]]
         return [["literal", value]]
     for piece in pieces:
         if piece[0] != "prose":
-            if possible and not piece[1].startswith("`") and not re.search(
-                r"\\(?:text\w*|mbox|hbox|operatorname)\b", piece[1],
+            if (
+                possible
+                and not piece[1].startswith("`")
+                and not re.search(r"\\(?:text\w*|mbox|hbox|operatorname)\b", piece[1])
             ):
                 # These two TeX presentation differences only suggest an
                 # inspection.  Even a candidate never alters exact history.
@@ -859,13 +1004,23 @@ def _source_match_text(value: str, *, possible: bool = False) -> list[list[str]]
 def source_match_fingerprint(publication: PublishedQuestion, *, possible: bool = False) -> str | None:
     """Conservative identity for a text-only stored question, without writes."""
     content = publication.content
-    if not isinstance(content, dict) or content.get("body_mode") == "source_image" or content.get("figures") \
-            or ("figures" in content and not isinstance(content["figures"], list)):
+    if (
+        not isinstance(content, dict)
+        or content.get("body_mode") == "source_image"
+        or content.get("figures")
+        or ("figures" in content and not isinstance(content["figures"], list))
+    ):
         return None
     kind = content.get("question_type")
     stem, options = content.get("stem"), content.get("options", {})
-    if kind != publication.question_type or kind not in qtypes.TYPE_LABELS or kind == "unknown" \
-            or not isinstance(stem, str) or not stem.strip() or not isinstance(options, dict):
+    if (
+        kind != publication.question_type
+        or kind not in qtypes.TYPE_LABELS
+        or kind == "unknown"
+        or not isinstance(stem, str)
+        or not stem.strip()
+        or not isinstance(options, dict)
+    ):
         return None
     if any(key not in OPTION_KEYS or not isinstance(value, str) for key, value in options.items()):
         return None
@@ -874,8 +1029,11 @@ def source_match_fingerprint(publication: PublishedQuestion, *, possible: bool =
         return None
     if any(_SOURCE_IMAGE.search(value) for value in [stem, *options.values()]):
         return None
-    material = {"type": kind, "stem": _source_match_text(stem, possible=possible),
-                "options": {key: _source_match_text(value, possible=possible) for key, value in options.items()}}
+    material = {
+        "type": kind,
+        "stem": _source_match_text(stem, possible=possible),
+        "options": {key: _source_match_text(value, possible=possible) for key, value in options.items()},
+    }
     return hashlib.sha256(json.dumps(material, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
@@ -900,13 +1058,20 @@ def related_publication_sources(publication: PublishedQuestion) -> dict:
     """
     fingerprint, document = source_match_fingerprint(publication), _publication_document(publication)
     possible_fingerprint = source_match_fingerprint(publication, possible=True)
-    result = {f"{name}{suffix}": (False if suffix == "_truncated" else 0 if suffix == "_count" else [])
-              for name in ("related_sources", "possible_sources") for suffix in ("", "_count", "_truncated")}
+    result = {
+        f"{name}{suffix}": (False if suffix == "_truncated" else 0 if suffix == "_count" else [])
+        for name in ("related_sources", "possible_sources")
+        for suffix in ("", "_count", "_truncated")
+    }
     if not fingerprint or not document:
         return result
-    candidates = PublishedQuestion.objects.filter(
-        status=PublishedQuestion.Status.PUBLISHED, question_type=publication.question_type,
-    ).exclude(pk=publication.pk).order_by("source_filename", "number", "-version", "id")
+    candidates = (
+        PublishedQuestion.objects.filter(
+            status=PublishedQuestion.Status.PUBLISHED, question_type=publication.question_type
+        )
+        .exclude(pk=publication.pk)
+        .order_by("source_filename", "number", "-version", "id")
+    )
     if publication.question_id:
         candidates = candidates.exclude(question_id=publication.question_id)
     if publication.paper_id:
@@ -923,10 +1088,12 @@ def related_publication_sources(publication: PublishedQuestion) -> dict:
         name = "related_sources" if other_fingerprint == fingerprint else "possible_sources"
         if name == "possible_sources" and source_match_fingerprint(candidate, possible=True) != possible_fingerprint:
             continue
-        if any(str(publication.content.get(key) or "").strip()
-               and str(candidate.content.get(key) or "").strip()
-               and _source_match_text(str(publication.content[key])) != _source_match_text(str(candidate.content[key]))
-               for key in ("answer", "analysis")):
+        if any(
+            str(publication.content.get(key) or "").strip()
+            and str(candidate.content.get(key) or "").strip()
+            and _source_match_text(str(publication.content[key])) != _source_match_text(str(candidate.content[key]))
+            for key in ("answer", "analysis")
+        ):
             continue
         card_identity = candidate.question_id or str(candidate.pk)
         if card_identity in seen_cards:
@@ -941,12 +1108,19 @@ def related_publication_sources(publication: PublishedQuestion) -> dict:
     if matched_rows:
         from django.db.models import Count
 
-        counts = dict(PublishedQuestion.objects.filter(
-            question_id__in=[row.question_id for row in matched_rows if row.question_id],
-        ).values("question_id").annotate(total=Count("id")).values_list("question_id", "total"))
+        counts = dict(
+            PublishedQuestion.objects.filter(
+                question_id__in=[row.question_id for row in matched_rows if row.question_id]
+            )
+            .values("question_id")
+            .annotate(total=Count("id"))
+            .values_list("question_id", "total")
+        )
         for name, rows in matches.items():
-            result[name] = [publication_json(row, include_tag_details=False)
-                            | {"version_count": counts.get(row.question_id, 1)} for row in rows]
+            result[name] = [
+                publication_json(row, include_tag_details=False) | {"version_count": counts.get(row.question_id, 1)}
+                for row in rows
+            ]
     return result
 
 
@@ -954,8 +1128,9 @@ _E_TAG = re.compile(r"\s*【\s*E\s*】\s*")
 _LABEL_SETS_TYPE = {"unknown", "", "single_choice", "multiple_choice"}
 
 
-def tidy_text(stem: str, options: dict | None, question_type: str, origin: str = "", *,
-              switches: dict | None = None) -> tuple[str, dict, str, str]:
+def tidy_text(
+    stem: str, options: dict | None, question_type: str, origin: str = "", *, switches: dict | None = None
+) -> tuple[str, dict, str, str]:
     """Apply the saved-card fixes that only reformat, never re-read.
 
     * a leading “例1” label is dropped (1.5.1);
@@ -986,8 +1161,10 @@ def tidy_text(stem: str, options: dict | None, question_type: str, origin: str =
         if before.strip() and after.strip():
             new_options["D"] = before.strip()
             new_options["E"] = after.strip()
-    new_options = {key: prose.tidy_value(value, switches=switches) if isinstance(value, str) else value
-                   for key, value in new_options.items()}
+    new_options = {
+        key: prose.tidy_value(value, switches=switches) if isinstance(value, str) else value
+        for key, value in new_options.items()
+    }
     return new_stem, new_options, new_type, new_origin
 
 
@@ -997,7 +1174,9 @@ def _tidy_reading(reading, switches: dict | None = None, origin: str = ""):
     stem, options, _kind, _origin = tidy_text(
         reading.get("stem") if isinstance(reading.get("stem"), str) else "",
         reading.get("options") if isinstance(reading.get("options"), dict) else {},
-        "unknown", origin, switches=switches,
+        "unknown",
+        origin,
+        switches=switches,
     )
     changed = dict(reading)
     if isinstance(reading.get("stem"), str):
@@ -1074,7 +1253,8 @@ def tidy_saved_cards() -> dict[str, int]:
     with transaction.atomic():
         for question in Question.all_objects.select_for_update().select_related("paper", "group"):
             stem, options, kind, origin = tidy_text(
-                question.stem, question.options, question.question_type, question.origin, switches=switches)
+                question.stem, question.options, question.question_type, question.origin, switches=switches
+            )
             if not (question.approved or question.edited or question.type_locked):
                 # 1.10.1: a choice card under “…有多项符合题目要求…” is multiple
                 # choice, whatever the reader said.  Only cards nobody has
@@ -1106,8 +1286,16 @@ def tidy_saved_cards() -> dict[str, int]:
             flags, state = qtypes.sync(current_flags, base_state, kind)
             if invented and state == Question.State.GREEN:
                 state = Question.State.YELLOW
-            before = (question.stem, dict(question.options or {}), question.question_type, question.origin,
-                      question.answer, question.analysis, list(question.flags or []), question.state)
+            before = (
+                question.stem,
+                dict(question.options or {}),
+                question.question_type,
+                question.origin,
+                question.answer,
+                question.analysis,
+                list(question.flags or []),
+                question.state,
+            )
             if (stem, options, kind, origin, answer, analysis, flags, state) == before:
                 # 1.10.2: store where the “MinerU 读法不同” spots are, once, so the
                 # review page need not look them up again on every load.
@@ -1126,17 +1314,35 @@ def tidy_saved_cards() -> dict[str, int]:
                 setattr(question, field, _tidy_reading(getattr(question, field), switches, origin))
             if approval_was_current and approval_is_current_ignoring_hash(question):
                 question.approved_content_hash = approval_hash(question)
-            question.save(update_fields=[
-                "stem", "options", "question_type", "origin", "answer", "analysis", "flags", "state",
-                "read_a", "read_b", "read_c", "approved_content_hash", "updated_at",
-            ])
+            question.save(
+                update_fields=[
+                    "stem",
+                    "options",
+                    "question_type",
+                    "origin",
+                    "answer",
+                    "analysis",
+                    "flags",
+                    "state",
+                    "read_a",
+                    "read_b",
+                    "read_c",
+                    "approved_content_hash",
+                    "updated_at",
+                ]
+            )
             counts["questions"] += 1
 
         for publication in PublishedQuestion.objects.select_for_update():
             content = deepcopy(publication.content)
-            original = (content.get("stem") or "", dict(content.get("options") or {}),
-                        content.get("question_type") or "unknown", str(content.get("origin") or ""),
-                        content.get("answer") or "", content.get("analysis") or "")
+            original = (
+                content.get("stem") or "",
+                dict(content.get("options") or {}),
+                content.get("question_type") or "unknown",
+                str(content.get("origin") or ""),
+                content.get("answer") or "",
+                content.get("analysis") or "",
+            )
             stem, options, kind, origin = tidy_text(*original[:4], switches=switches)
             answer = prose.tidy_value(original[4], switches=switches)
             analysis = prose.tidy_value(original[5], switches=switches)

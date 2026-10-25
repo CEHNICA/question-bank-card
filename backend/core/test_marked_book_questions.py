@@ -18,6 +18,7 @@ r"""教材把难题、拓展题印成 `※3.` `*5.`：这些题以前从来没�
 `※N.` 里的 N 就是这道习题里真正的序号（两本教材 27 个带标记题号，27/27 都刚好
 是前一个印刷题号 +1，没有一个重新编号），所以认出它不会和同组的裸号撞号。
 """
+
 from django.test import SimpleTestCase
 
 from . import segment
@@ -26,13 +27,11 @@ PAGES = [{"page_idx": index, "width": 1000, "height": 1400} for index in range(3
 
 
 def block(seq, page, y, text, kind="text", x0=80, x1=920, height=45):
-    return {"seq": seq, "type": kind, "page_idx": page,
-            "bbox": [x0, y, x1, y + height], "text": text}
+    return {"seq": seq, "type": kind, "page_idx": page, "bbox": [x0, y, x1, y + height], "text": text}
 
 
 def contains(regions, page, y):
-    return any(item["page_idx"] == page and item["bbox"][1] <= y <= item["bbox"][3]
-               for item in regions)
+    return any(item["page_idx"] == page and item["bbox"][1] <= y <= item["bbox"][3] for item in regions)
 
 
 # 数学八年级下册第 41 页，坐标与 MinerU 给的一致（0-1000 归一化）
@@ -40,16 +39,19 @@ PAGE41 = [
     block(731, 0, 49, "第七章二次根式", kind="header", height=35),
     block(734, 0, 328, "习题 7.1"),
     block(736, 0, 375, "知识技能"),
-    block(737, 0, 411, "1. a 是怎样的实数时，下列各式在实数范围内有意义？"
-                       "（1） $\\sqrt { 2 - a } $ ；", height=63),
-    block(738, 0, 476, "2.计算：（1） $( { \\sqrt { 1 6 } } ) ^ { 2 } $ "
-                       "（2） $( - 3 \\sqrt { \\frac { 1 } { 6 } } ) ^ { 2 }$ 。"),
+    block(737, 0, 411, "1. a 是怎样的实数时，下列各式在实数范围内有意义？（1） $\\sqrt { 2 - a } $ ；", height=63),
+    block(
+        738,
+        0,
+        476,
+        "2.计算：（1） $( { \\sqrt { 1 6 } } ) ^ { 2 } $ （2） $( - 3 \\sqrt { \\frac { 1 } { 6 } } ) ^ { 2 }$ 。",
+    ),
     block(740, 0, 559, "数学理解"),
     block(741, 0, 600, "※3. 计算："),
-    block(742, 0, 625, "（1） $( \\sqrt { 3 a ^ { 3 } } ) ^ { 2 } \\left( a \\geqslant 0 \\right)$ ；",
-           height=22),
-    block(743, 0, 620, "（2） $( 2 \\sqrt { 5 b + 1 } ) ^ { 2 } ( b \\geqslant - \\frac { 1 } { 5 } )$",
-           x0=535, height=31),
+    block(742, 0, 625, "（1） $( \\sqrt { 3 a ^ { 3 } } ) ^ { 2 } \\left( a \\geqslant 0 \\right)$ ；", height=22),
+    block(
+        743, 0, 620, "（2） $( 2 \\sqrt { 5 b + 1 } ) ^ { 2 } ( b \\geqslant - \\frac { 1 } { 5 } )$", x0=535, height=31
+    ),
     block(745, 0, 722, "<sup>2</sup> 二次根式的性质", x1=505, height=48),
     block(747, 0, 828, "议一论".replace("论", "议")),
     block(748, 0, 864, "（1）计算： $\\sqrt { 2 ^ { 2 } } , \\sqrt { 3 ^ { 2 } } $ 。你发现了什么？"),
@@ -80,8 +82,7 @@ class MarkedBookQuestionTests(SimpleTestCase):
         second = next(item for item in questions if item["number"] == 2)
         self.assertFalse(contains(second["regions"], 0, 600), "第 2 题的范围罩住了 ※3")
         self.assertFalse(contains(second["regions"], 0, 625))
-        self.assertEqual([region["page_idx"] for region in second["regions"]], [0],
-                         "第 2 题不该再一路罩到下一页的正文")
+        self.assertEqual([region["page_idx"] for region in second["regions"]], [0], "第 2 题不该再一路罩到下一页的正文")
 
     def test_the_marked_question_gets_its_own_body(self):
         questions = self.cut()
@@ -106,9 +107,14 @@ class MarkedBookFigureTests(SimpleTestCase):
             block(2, 0, 190, "2. 已知：如图，在 $\\triangle ABC$ 中，$AB=AC$。"),
             block(3, 0, 300, "", kind="image", x0=700, x1=920, height=150),
             block(4, 0, 470, "联系拓广"),
-            block(5, 0, 520, "※4. 如图，在矩形 $ABCD$ 中，$AB = 3$, $AD = 4$，"
-                             "过点 $P$ 分别作 $AC$ 和 $BD$ 的垂线，求 $PE + PF$ 的值。",
-                   height=70),
+            block(
+                5,
+                0,
+                520,
+                "※4. 如图，在矩形 $ABCD$ 中，$AB = 3$, $AD = 4$，"
+                "过点 $P$ 分别作 $AC$ 和 $BD$ 的垂线，求 $PE + PF$ 的值。",
+                height=70,
+            ),
             block(6, 0, 540, "", kind="image", x0=120, x1=500, height=200),
         ]
 
@@ -116,8 +122,9 @@ class MarkedBookFigureTests(SimpleTestCase):
         fourth = next(item for item in questions if item["number"] == 4)
         second = next(item for item in questions if item["number"] == 2)
 
-        self.assertEqual([int(candidate["seq"]) for candidate in fourth["figure_candidates"]],
-                         [6], "※4 的配图应当挂在 ※4 上")
+        self.assertEqual(
+            [int(candidate["seq"]) for candidate in fourth["figure_candidates"]], [6], "※4 的配图应当挂在 ※4 上"
+        )
         self.assertNotIn(6, [int(candidate["seq"]) for candidate in second["figure_candidates"]])
 
 

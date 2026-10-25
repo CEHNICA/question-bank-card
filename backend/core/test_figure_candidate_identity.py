@@ -13,6 +13,7 @@
 现在的做法：身份算法两边统一；原卷里确实存在的那张图（哪怕已经不在本题范围内）
 继续算有效；连原卷里都没有的 key 仍然是格式错误。
 """
+
 from __future__ import annotations
 
 import json
@@ -49,8 +50,7 @@ class CandidateIdentityTests(TestCase):
         """旧规则确实会让两边分叉 —— 这正是要修掉的那个分叉。"""
         for value in (90.55, 7.25, 0.35, 0.25, 57.05):
             box = {"page_idx": 0, "bbox": [value, value + 10, value + 20, value + 30]}
-            self.assertNotEqual(legacy_candidate_key(box), candidate_key(box),
-                                f"{value} 在旧规则下两边会算出两个身份")
+            self.assertNotEqual(legacy_candidate_key(box), candidate_key(box), f"{value} 在旧规则下两边会算出两个身份")
 
 
 class IgnoreListAcceptanceTests(TempDataMixin, TestCase):
@@ -61,19 +61,26 @@ class IgnoreListAcceptanceTests(TempDataMixin, TestCase):
         self.paper = self.make_paper()
         self.paper.status = Paper.Status.READY
         self.paper.save(update_fields=["status"])
-        Block.objects.create(paper=self.paper, seq=10, page_idx=0, type="image",
-                             text="", bbox=[100, 120, 300, 320])
-        Block.objects.create(paper=self.paper, seq=20, page_idx=0, type="image",
-                             text="", bbox=[400, 420, 700, 720])
+        Block.objects.create(paper=self.paper, seq=10, page_idx=0, type="image", text="", bbox=[100, 120, 300, 320])
+        Block.objects.create(paper=self.paper, seq=20, page_idx=0, type="image", text="", bbox=[400, 420, 700, 720])
         self.inside = {"label": "1", "page_idx": 0, "bbox": [100, 120, 300, 320]}
         self.outside = {"label": "2", "page_idx": 0, "bbox": [400, 420, 700, 720]}
         self.inside_key = candidate_key(self.inside)
         self.outside_key = candidate_key(self.outside)
         self.question = self.card(
-            self.paper, number=1, question_type="single_choice", stem="下列说法正确的是。",
-            options={"A": "甲"}, figures=[], figure_candidates=[self.inside],
-            figure_review={"status": "conflict", "signals": ["candidate_unclassified"],
-                           "unclassified_count": 1, "excluded_count": 0},
+            self.paper,
+            number=1,
+            question_type="single_choice",
+            stem="下列说法正确的是。",
+            options={"A": "甲"},
+            figures=[],
+            figure_candidates=[self.inside],
+            figure_review={
+                "status": "conflict",
+                "signals": ["candidate_unclassified"],
+                "unclassified_count": 1,
+                "excluded_count": 0,
+            },
             state=Question.State.YELLOW,
         )
 
@@ -81,7 +88,8 @@ class IgnoreListAcceptanceTests(TempDataMixin, TestCase):
         return self.client.post(
             f"/api/questions/{self.question.pk}/figures",
             data=json.dumps({"figures": figures, "ignored_candidates": ignored}),
-            content_type="application/json", HTTP_X_QB_REQUEST="1",
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
         )
 
     def test_an_image_outside_the_current_range_can_still_be_marked_irrelevant(self):
@@ -91,8 +99,7 @@ class IgnoreListAcceptanceTests(TempDataMixin, TestCase):
 
     def test_marking_an_out_of_range_image_irrelevant_keeps_that_decision(self):
         """本题有配图时，老师标过的"无关"要原样记下来 —— 改过范围也不能丢。"""
-        figure = {"page_idx": 0, "bbox": list(self.inside["bbox"]), "slot": "stem",
-                  "candidate_key": self.inside_key}
+        figure = {"page_idx": 0, "bbox": list(self.inside["bbox"]), "slot": "stem", "candidate_key": self.inside_key}
         response = self.post_figures(figures=[figure], ignored=[self.outside_key])
         self.assertEqual(response.status_code, 200, response.content)
         review = response.json()["question"]["figure_review"]
@@ -106,8 +113,7 @@ class IgnoreListAcceptanceTests(TempDataMixin, TestCase):
     def test_a_decision_recorded_by_an_older_build_still_matches(self):
         """旧版本记下的身份（上一套四舍五入）也要认，否则老师的判断会悄悄失效。"""
         odd = {"label": "3", "page_idx": 0, "bbox": [90.55, 120, 300, 320]}
-        Block.objects.create(paper=self.paper, seq=30, page_idx=0, type="image",
-                             text="", bbox=odd["bbox"])
+        Block.objects.create(paper=self.paper, seq=30, page_idx=0, type="image", text="", bbox=odd["bbox"])
         self.question.figure_candidates = [self.inside, odd]
         self.question.save(update_fields=["figure_candidates"])
         old_key = legacy_candidate_key(odd)

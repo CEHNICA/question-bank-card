@@ -14,16 +14,21 @@ class AssistantAPIBoundaryTests(TestCase):
         self.client = Client()
 
     def post(self, endpoint, data="{}", **extra):
-        return self.client.post("/api/library/assistant/" + endpoint, data=data,
-                                content_type="application/json", **extra)
+        return self.client.post(
+            "/api/library/assistant/" + endpoint, data=data, content_type="application/json", **extra
+        )
 
     def test_remote_requests_and_browser_forms_cannot_create_or_submit_tasks(self):
         for endpoint in ("prepare", "complete"):
             with self.subTest(endpoint=endpoint), mock.patch.object(library_assistant, endpoint) as action:
                 self.assertEqual(self.post(endpoint, HTTP_X_QB_REQUEST="1", REMOTE_ADDR="192.0.2.1").status_code, 403)
                 self.assertEqual(self.post(endpoint).status_code, 403)
-                self.assertEqual(self.client.post("/api/library/assistant/" + endpoint,
-                                                 {"job_id": "ignored"}, HTTP_X_QB_REQUEST="1").status_code, 415)
+                self.assertEqual(
+                    self.client.post(
+                        "/api/library/assistant/" + endpoint, {"job_id": "ignored"}, HTTP_X_QB_REQUEST="1"
+                    ).status_code,
+                    415,
+                )
                 self.assertEqual(self.client.get("/api/library/assistant/" + endpoint).status_code, 405)
                 action.assert_not_called()
         self.assertFalse(LibraryJob.objects.exists())

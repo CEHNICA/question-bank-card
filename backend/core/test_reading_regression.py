@@ -9,6 +9,7 @@
 同时也必须放过真正的修复：
   #1152  库上 174 字、缺小问(2) -> 重读 257 字、把 (2) 补上了
 """
+
 import tempfile
 from pathlib import Path
 
@@ -17,11 +18,13 @@ from django.test import TestCase, override_settings
 from core import pipeline
 from core.models import Paper, Question
 
-LONG = ("在同一直角坐标系内画出函数 $y=\\dfrac{2}{x}$ 与函数 $y=x-1$ 的图象，"
-        "并利用图象求它们的交点坐标。\n\n"
-        "（1）先画出反比例函数 $y=\\dfrac{2}{x}$ 的图象，再画出直线 $y=x-1$；\n\n"
-        "（2）观察图象，说出这两个图象的交点坐标；\n\n"
-        "（3）用你求出的交点坐标代入两个函数，检验是否正确。")
+LONG = (
+    "在同一直角坐标系内画出函数 $y=\\dfrac{2}{x}$ 与函数 $y=x-1$ 的图象，"
+    "并利用图象求它们的交点坐标。\n\n"
+    "（1）先画出反比例函数 $y=\\dfrac{2}{x}$ 的图象，再画出直线 $y=x-1$；\n\n"
+    "（2）观察图象，说出这两个图象的交点坐标；\n\n"
+    "（3）用你求出的交点坐标代入两个函数，检验是否正确。"
+)
 
 
 class ReadingRegressionTests(TestCase):
@@ -35,13 +38,23 @@ class ReadingRegressionTests(TestCase):
 
     def card(self, stem, **extra):
         question = Question.objects.create(
-            paper=self.paper, number=extra.pop("number", 1), question_type="free_response",
-            stem=stem, state=Question.State.YELLOW, **extra)
+            paper=self.paper,
+            number=extra.pop("number", 1),
+            question_type="free_response",
+            stem=stem,
+            state=Question.State.YELLOW,
+            **extra,
+        )
         return question
 
     def fields(self, stem, **extra):
-        base = {"stem": stem, "options": {}, "flags": [],
-                "state": Question.State.GREEN, "question_type": "free_response"}
+        base = {
+            "stem": stem,
+            "options": {},
+            "flags": [],
+            "state": Question.State.GREEN,
+            "question_type": "free_response",
+        }
         base.update(extra)
         return base
 

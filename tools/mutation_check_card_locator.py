@@ -5,6 +5,7 @@ column grid auto-placed it into the 18px checkbox column and stacked every
 character vertically. Two mutations, each reintroducing that shape; the test
 must go red both times.
 """
+
 import pathlib
 import subprocess
 import sys
@@ -16,23 +17,22 @@ target = root / "frontend/library.js"
 original = target.read_bytes()
 
 FIXED_APPEND = "    meta.append(select, heading, sourceName, provenance);"
-FIXED_INTO_PROVENANCE = (
-    '    if (shortSection(item)) provenance.append(node("span", "", cardLocator(item)));'
-)
+FIXED_INTO_PROVENANCE = '    if (shortSection(item)) provenance.append(node("span", "", cardLocator(item)));'
 
-REGRESSED_APPEND = (
-    "    meta.append(select, heading, sourceName, node(\"span\", \"\", cardLocator(item)), provenance);"
-)
+REGRESSED_APPEND = '    meta.append(select, heading, sourceName, node("span", "", cardLocator(item)), provenance);'
 
 
 def run():
     proc = subprocess.run(
         ["node", "--test", "frontend/test_library_card_locator.js"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=root,
     )
     out = proc.stdout + proc.stderr
-    reason = next((ln.strip() for ln in out.splitlines()
-                   if "AssertionError" in ln or "不能作为没有类名" in ln), "")
+    reason = next((ln.strip() for ln in out.splitlines() if "AssertionError" in ln or "不能作为没有类名" in ln), "")
     return proc.returncode, reason[:150]
 
 
@@ -42,11 +42,14 @@ try:
     assert FIXED_INTO_PROVENANCE in text, "fixed provenance.append not found"
 
     cases = [
-        ("把定位句又挂回卡头（竖排回归）",
-         text.replace(FIXED_APPEND, REGRESSED_APPEND).replace(FIXED_INTO_PROVENANCE, "")),
-        ("无条件显示定位句（试卷卡开始重复念题号）",
-         text.replace(FIXED_INTO_PROVENANCE,
-                      '    provenance.append(node("span", "", cardLocator(item)));')),
+        (
+            "把定位句又挂回卡头（竖排回归）",
+            text.replace(FIXED_APPEND, REGRESSED_APPEND).replace(FIXED_INTO_PROVENANCE, ""),
+        ),
+        (
+            "无条件显示定位句（试卷卡开始重复念题号）",
+            text.replace(FIXED_INTO_PROVENANCE, '    provenance.append(node("span", "", cardLocator(item)));'),
+        ),
     ]
     all_red = True
     for label, mutated in cases:

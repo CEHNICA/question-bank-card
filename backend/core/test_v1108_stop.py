@@ -24,10 +24,12 @@ class PollingStopsTests(SimpleTestCase):
         source = folder / "paper.pdf"
         source.write_bytes(b"%PDF-1.4")
         asked = iter([False, True])
-        with mock.patch.object(mineru, "_api_json", side_effect=fake_api([{"state": "pending"}] * 5)), \
-                mock.patch.object(mineru.requests.Session, "put", return_value=mock.Mock(ok=True)), \
-                mock.patch.object(mineru.time, "sleep"), \
-                self.assertRaises(mineru.MineruCancelled):
+        with (
+            mock.patch.object(mineru, "_api_json", side_effect=fake_api([{"state": "pending"}] * 5)),
+            mock.patch.object(mineru.requests.Session, "put", return_value=mock.Mock(ok=True)),
+            mock.patch.object(mineru.time, "sleep"),
+            self.assertRaises(mineru.MineruCancelled),
+        ):
             mineru.request_extract_file("token", source, folder / "r.zip", 4, cancel=lambda: next(asked))
 
 
@@ -37,8 +39,12 @@ class StopTests(v110.TempDataMixin, TestCase):
         self.paper = self.make_paper()
 
     def post(self, action):
-        return Client().post(f"/api/papers/{self.paper.id}/{action}", data=json.dumps({}),
-                             content_type="application/json", HTTP_X_QB_REQUEST="1")
+        return Client().post(
+            f"/api/papers/{self.paper.id}/{action}",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
 
     def test_a_queued_paper_stops_at_once_and_can_be_deleted(self):
         Paper.objects.filter(pk=self.paper.pk).update(status=Paper.Status.QUEUED)

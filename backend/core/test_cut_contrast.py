@@ -2,6 +2,7 @@
 
 These fixtures validate crop invariants, not accuracy on real phone photos.
 """
+
 from __future__ import annotations
 
 from django.test import SimpleTestCase
@@ -27,8 +28,9 @@ class CutContrastTests(SimpleTestCase):
                 self.assertEqual(photo.tobytes(), before)
 
     def test_reliable_contrast_repairs_a_fraction_without_losing_the_next_first_line(self):
-        reference = page(lines=[(800, 830), (866, 890)],
-                         strokes=[(100, 836, 108, 856), (220, 836, 228, 856), (330, 836, 338, 856)])
+        reference = page(
+            lines=[(800, 830), (866, 890)], strokes=[(100, 836, 108, 856), (220, 836, 228, 856), (330, 836, 338, 856)]
+        )
         for paper, ink in ((145, 85), (245, 185)):
             with self.subTest(paper=paper, ink=ink):
                 image = recolor(reference, paper=paper, ink=ink)
@@ -98,6 +100,7 @@ class CutContrastTests(SimpleTestCase):
         gray = reference.crop((24, 970, 738, 1040)).convert("L")
         legacy = gray.point(lambda value: 255 if value < cuts.INK_LEVEL else 0)
         means = legacy.resize((1, legacy.height), Image.Resampling.BOX)
-        expected = [((970 + row + 0.5) * 1000 / reference.height, means.getpixel((0, row)) / 255)
-                    for row in range(means.height)]
+        expected = [
+            ((970 + row + 0.5) * 1000 / reference.height, means.getpixel((0, row)) / 255) for row in range(means.height)
+        ]
         self.assertEqual(cuts.row_ink(reference, *COLUMN, 485, 520), expected)

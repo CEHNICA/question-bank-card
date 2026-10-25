@@ -92,68 +92,131 @@ SEARCH_FILL_GONE = ".library-search input { width: 100% !important; min-width: 0
 
 MUTATIONS = [
     # 「定位题目」没了
-    (LIBRARY_HTML, NODE_RUNS,
-     "the locate button is gone from the panel header, so the teacher's first ask is undone",
-     LOCATE_MOUNT, LOCATE_MOUNT_GONE),
-    (LIBRARY_HTML, NODE_RUNS,
-     "the locate button has no label — a button that says nothing",
-     LOCATE_LABEL, LOCATE_LABEL_EMPTY),
-    (LIBRARY_JS, NODE_RUNS,
-     "locating scrolls the card to the nearest edge instead of the middle, so the question can "
-     "land off-screen and you cannot tell where it went",
-     LOCATE_SCROLL, LOCATE_SCROLL_TOP),
-    (LIBRARY_JS, NODE_RUNS,
-     "the located question no longer flashes — it scrolls into place and you lose track of it",
-     LOCATE_FLASH, LOCATE_FLASH_GONE),
-    (LIBRARY_CSS, NODE_RUNS,
-     "the flash has no styling left, so adding the class does nothing",
-     LOCATE_CSS, LOCATE_CSS_GONE),
-    (LIBRARY_JS, NODE_RUNS,
-     "the locate button now stays visible even when the question is already on screen",
-     LOCATE_HIDE, LOCATE_HIDE_GONE),
-    (LIBRARY_JS, NODE_RUNS,
-     "picking a question no longer refreshes the locate button — it keeps the previous question's state",
-     LOCATE_SYNC, LOCATE_SYNC_GONE),
-    (LIBRARY_JS, NODE_RUNS,
-     "the click handler is never registered, so the button is decorative",
-     LOCATE_INIT, LOCATE_INIT_GONE),
-    (LIBRARY_JS, NODE_RUNS,
-     "inView goes back inside selectInspectorQuestion, where syncLocateButton cannot reach it — "
-     "the button then stays hidden forever at runtime",
-     IN_VIEW_TOP, IN_VIEW_IN_FUNCTION),    (LIBRARY_JS, NODE_RUNS,
-     "an unloaded question now just says 「找不到」, with no hint that it loads further down",
-     LOCATE_TIP, LOCATE_TIP_VAGUE),
-
+    (
+        LIBRARY_HTML,
+        NODE_RUNS,
+        "the locate button is gone from the panel header, so the teacher's first ask is undone",
+        LOCATE_MOUNT,
+        LOCATE_MOUNT_GONE,
+    ),
+    (
+        LIBRARY_HTML,
+        NODE_RUNS,
+        "the locate button has no label — a button that says nothing",
+        LOCATE_LABEL,
+        LOCATE_LABEL_EMPTY,
+    ),
+    (
+        LIBRARY_JS,
+        NODE_RUNS,
+        "locating scrolls the card to the nearest edge instead of the middle, so the question can "
+        "land off-screen and you cannot tell where it went",
+        LOCATE_SCROLL,
+        LOCATE_SCROLL_TOP,
+    ),
+    (
+        LIBRARY_JS,
+        NODE_RUNS,
+        "the located question no longer flashes — it scrolls into place and you lose track of it",
+        LOCATE_FLASH,
+        LOCATE_FLASH_GONE,
+    ),
+    (
+        LIBRARY_CSS,
+        NODE_RUNS,
+        "the flash has no styling left, so adding the class does nothing",
+        LOCATE_CSS,
+        LOCATE_CSS_GONE,
+    ),
+    (
+        LIBRARY_JS,
+        NODE_RUNS,
+        "the locate button now stays visible even when the question is already on screen",
+        LOCATE_HIDE,
+        LOCATE_HIDE_GONE,
+    ),
+    (
+        LIBRARY_JS,
+        NODE_RUNS,
+        "picking a question no longer refreshes the locate button — it keeps the previous question's state",
+        LOCATE_SYNC,
+        LOCATE_SYNC_GONE,
+    ),
+    (
+        LIBRARY_JS,
+        NODE_RUNS,
+        "the click handler is never registered, so the button is decorative",
+        LOCATE_INIT,
+        LOCATE_INIT_GONE,
+    ),
+    (
+        LIBRARY_JS,
+        NODE_RUNS,
+        "inView goes back inside selectInspectorQuestion, where syncLocateButton cannot reach it — "
+        "the button then stays hidden forever at runtime",
+        IN_VIEW_TOP,
+        IN_VIEW_IN_FUNCTION,
+    ),
+    (
+        LIBRARY_JS,
+        NODE_RUNS,
+        "an unloaded question now just says 「找不到」, with no hint that it loads further down",
+        LOCATE_TIP,
+        LOCATE_TIP_VAGUE,
+    ),
     # 「回到顶部」回到老样子
-    (LIBRARY_HTML, NODE_RUNS,
-     "the back-to-top button goes back to a text pill, so it no longer matches the review page",
-     BACK_TO_TOP_ICON, BACK_TO_TOP_TEXT),
-    (LIBRARY_HTML, NODE_RUNS,
-     "the up-arrow symbol is dropped from the library page — the icon button renders empty",
-     UP_SYMBOL, UP_SYMBOL_GONE),
-    (LIBRARY_CSS, NODE_RUNS,
-     "the button is no longer 42px, so the two pages no longer look the same",
-     SIZE_42, SIZE_FULL),
-    (LIBRARY_CSS, NODE_RUNS,
-     "the button goes back to a pill shape",
-     ROUND_50, ROUND_PILL),
-    (LIBRARY_CSS, NODE_RUNS,
-     "the button is fully invisible instead of faded — on a touch screen it can never be found",
-     FADE, FADE_HIDDEN),
-    (LIBRARY_CSS, NODE_RUNS,
-     "the button is fully opaque by default, undoing 「鼠标移过去才显示」",
-     FADE, FADE_NONE),
-    (LIBRARY_CSS, NODE_RUNS,
-     "only the mouse reveals it now — keyboard users can focus an invisible button",
-     HOVER, HOVER_MOUSE_ONLY),
-
+    (
+        LIBRARY_HTML,
+        NODE_RUNS,
+        "the back-to-top button goes back to a text pill, so it no longer matches the review page",
+        BACK_TO_TOP_ICON,
+        BACK_TO_TOP_TEXT,
+    ),
+    (
+        LIBRARY_HTML,
+        NODE_RUNS,
+        "the up-arrow symbol is dropped from the library page — the icon button renders empty",
+        UP_SYMBOL,
+        UP_SYMBOL_GONE,
+    ),
+    (
+        LIBRARY_CSS,
+        NODE_RUNS,
+        "the button is no longer 42px, so the two pages no longer look the same",
+        SIZE_42,
+        SIZE_FULL,
+    ),
+    (LIBRARY_CSS, NODE_RUNS, "the button goes back to a pill shape", ROUND_50, ROUND_PILL),
+    (
+        LIBRARY_CSS,
+        NODE_RUNS,
+        "the button is fully invisible instead of faded — on a touch screen it can never be found",
+        FADE,
+        FADE_HIDDEN,
+    ),
+    (LIBRARY_CSS, NODE_RUNS, "the button is fully opaque by default, undoing 「鼠标移过去才显示」", FADE, FADE_NONE),
+    (
+        LIBRARY_CSS,
+        NODE_RUNS,
+        "only the mouse reveals it now — keyboard users can focus an invisible button",
+        HOVER,
+        HOVER_MOUSE_ONLY,
+    ),
     # 搜索框回到独吞整条顶栏
-    (READING_CSS, NODE_RUNS,
-     "the search box goes back to filling the whole topbar (1077px on a 1520px screen)",
-     SEARCH_MAX, SEARCH_MAX_NONE),
-    (LIBRARY_CSS, NODE_RUNS,
-     "the search box stops filling the available width on narrow screens",
-     SEARCH_FILL, SEARCH_FILL_GONE),
+    (
+        READING_CSS,
+        NODE_RUNS,
+        "the search box goes back to filling the whole topbar (1077px on a 1520px screen)",
+        SEARCH_MAX,
+        SEARCH_MAX_NONE,
+    ),
+    (
+        LIBRARY_CSS,
+        NODE_RUNS,
+        "the search box stops filling the available width on narrow screens",
+        SEARCH_FILL,
+        SEARCH_FILL_GONE,
+    ),
 ]
 
 
@@ -169,8 +232,7 @@ def apply(source: str, original: str, mutation: str) -> str:
 
 def run(runner) -> subprocess.CompletedProcess:
     cwd, command = runner
-    return subprocess.run(command, cwd=str(cwd), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
+    return subprocess.run(command, cwd=str(cwd), capture_output=True, text=True, encoding="utf-8", errors="replace")
 
 
 def main() -> int:
@@ -202,8 +264,11 @@ def main() -> int:
         if not caught:
             print((broken.stdout or "")[-2000:] + (broken.stderr or "")[-2000:])
     survived = [item for item in results if not item[1]]
-    print(f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住" if not survived
-          else f"\n{len(survived)} 条变异漏过：{survived}")
+    print(
+        f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住"
+        if not survived
+        else f"\n{len(survived)} 条变异漏过：{survived}"
+    )
     return 1 if survived else 0
 
 

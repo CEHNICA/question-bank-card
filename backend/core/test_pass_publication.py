@@ -1,4 +1,5 @@
 """Passing saves a bank snapshot atomically; old publish stays idempotent."""
+
 import json
 import os
 from copy import deepcopy
@@ -15,11 +16,14 @@ from .test_v110_types_origin import TempDataMixin
 class PassPublicationTests(TempDataMixin, TestCase):
     def setUp(self):
         self.use_temp_data()
-        environment = mock.patch.dict(os.environ, {
-            "QB_LIBRARY_AI_SETTINGS_FILE": str(self.temp / "ai-settings.json"),
-            "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.temp / "ai-key.dat"),
-            "QB_FEATURES_FILE": str(self.temp / "features.json"),
-        })
+        environment = mock.patch.dict(
+            os.environ,
+            {
+                "QB_LIBRARY_AI_SETTINGS_FILE": str(self.temp / "ai-settings.json"),
+                "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.temp / "ai-key.dat"),
+                "QB_FEATURES_FILE": str(self.temp / "features.json"),
+            },
+        )
         environment.start()
         self.addCleanup(environment.stop)
         network = mock.patch("requests.sessions.Session.request", side_effect=AssertionError("No cloud calls"))
@@ -29,7 +33,9 @@ class PassPublicationTests(TempDataMixin, TestCase):
         self.question = self.card(self.paper, number=1, question_type="free_response", stem="计算 $1+2$。")
 
     def post(self, endpoint, payload=None):
-        return self.client.post(endpoint, json.dumps(payload or {}), content_type="application/json", HTTP_X_QB_REQUEST="1")
+        return self.client.post(
+            endpoint, json.dumps(payload or {}), content_type="application/json", HTTP_X_QB_REQUEST="1"
+        )
 
     def approve(self, question=None, **extra):
         question = question or self.question
@@ -53,8 +59,18 @@ class PassPublicationTests(TempDataMixin, TestCase):
         self.assertFalse(LibraryJob.objects.exists())
 
     def test_single_pass_failure_after_snapshot_insert_rolls_back_approval_and_files(self):
-        before = {field: deepcopy(getattr(self.question, field)) for field in (
-            "approved", "approved_at", "approved_content_hash", "approval_source", "approval_agent", "figure_review", "state")}
+        before = {
+            field: deepcopy(getattr(self.question, field))
+            for field in (
+                "approved",
+                "approved_at",
+                "approved_content_hash",
+                "approval_source",
+                "approval_agent",
+                "figure_review",
+                "state",
+            )
+        }
         with mock.patch.object(library_jobs, "queue_on_intake", side_effect=OSError("synthetic save failure")):
             response = self.approve(by="ai", agent="离线助手")
         self.assertEqual(response.status_code, 409, response.content)
@@ -84,10 +100,12 @@ class PassPublicationTests(TempDataMixin, TestCase):
     def test_batch_save_failure_keeps_successes_and_failed_card_is_not_passed(self):
         failed = self.card(self.paper, number=2, question_type="free_response", stem="计算 $3+4$。")
         original_queue = library_jobs.queue_on_intake
+
         def partially_fail(publication):
             if publication.question_id == failed.pk:
                 raise OSError("synthetic second-card save failure")
             return original_queue(publication)
+
         with mock.patch.object(library_jobs, "queue_on_intake", side_effect=partially_fail):
             response = self.post(f"/api/papers/{self.paper.pk}/approve-green", {"by": "ai", "agent": "离线助手"})
         self.assertEqual(response.status_code, 200, response.content)
@@ -97,8 +115,16 @@ class PassPublicationTests(TempDataMixin, TestCase):
         self.assertIn("第 2 题", result["problems"][0])
         self.assertEqual((result["paper"]["counts"]["approved"], result["paper"]["counts"]["published"]), (1, 1))
         failed.refresh_from_db()
-        self.assertEqual((failed.approved, failed.approved_at, failed.approved_content_hash,
-                          failed.approval_source, failed.approval_agent), (False, None, "", "", ""))
+        self.assertEqual(
+            (
+                failed.approved,
+                failed.approved_at,
+                failed.approved_content_hash,
+                failed.approval_source,
+                failed.approval_agent,
+            ),
+            (False, None, "", "", ""),
+        )
         self.assertEqual((failed.state, failed.stem), ("green", "计算 $3+4$。"))
         self.assertFalse(failed.publications.exists())
         saved = self.question.publications.get()
@@ -116,7 +142,9 @@ class PassPublicationTests(TempDataMixin, TestCase):
         settings = {path: path.read_bytes() for path in (self.temp / "features.json", self.temp / "ai-settings.json")}
         library.approve(self.question, now=timezone.now())
         self.question.save()
-        with mock.patch.object(library_jobs, "queue_on_intake", side_effect=AssertionError("Upgrade must not create generation work")) as queue:
+        with mock.patch.object(
+            library_jobs, "queue_on_intake", side_effect=AssertionError("Upgrade must not create generation work")
+        ) as queue:
             publication, created = library.publish(self.question, queue_enrichment=False)
         queue.assert_not_called()
         self.assertTrue(created)

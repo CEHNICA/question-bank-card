@@ -4,15 +4,8 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
-    dependencies = [
-        ('core', '0024_tag_suggestion_progress'),
-    ]
+    dependencies = [("core", "0024_tag_suggestion_progress")]
 
     operations = [
-        migrations.AlterField(
-            model_name='librarytagoperation',
-            name='action',
-            field=models.CharField(max_length=32),
-        ),
+        migrations.AlterField(model_name="librarytagoperation", name="action", field=models.CharField(max_length=32))
     ]

@@ -33,12 +33,7 @@ class ImportStructureMigrationTests(TransactionTestCase):
         old_apps = executor.loader.project_state(self.migrate_from).apps
         OldPaper = old_apps.get_model("core", "Paper")
         OldQuestion = old_apps.get_model("core", "Question")
-        paper = OldPaper.objects.create(
-            filename="旧试卷.pdf",
-            kind="pdf",
-            sha256="c" * 64,
-            source_path="data/old.pdf",
-        )
+        paper = OldPaper.objects.create(filename="旧试卷.pdf", kind="pdf", sha256="c" * 64, source_path="data/old.pdf")
         self.paper_id = paper.pk
         self.question_id = OldQuestion.objects.create(paper=paper, number=1).pk
 
@@ -83,8 +78,7 @@ class PdfChunkPlanningTests(TestCase):
         chunks = plan_pdf_chunks(270, pdf_chunk_page_limit("book", 200))
 
         self.assertEqual(
-            [(chunk.source_page_start, chunk.source_page_end) for chunk in chunks],
-            [(1, 100), (101, 200), (201, 270)],
+            [(chunk.source_page_start, chunk.source_page_end) for chunk in chunks], [(1, 100), (101, 200), (201, 270)]
         )
         self.assertEqual([page for chunk in chunks for page in chunk.page_map], list(range(1, 271)))
 
@@ -99,10 +93,7 @@ class PdfChunkPlanningTests(TestCase):
         self.assertTrue(validate_chunk_coverage(chunks, expected_start=1, expected_end=260))
 
     def test_illegal_overlap_is_rejected_instead_of_being_silently_sorted(self):
-        chunks = [
-            PageChunk(1, 1, 50, tuple(range(1, 51))),
-            PageChunk(2, 50, 80, tuple(range(50, 81))),
-        ]
+        chunks = [PageChunk(1, 1, 50, tuple(range(1, 51))), PageChunk(2, 50, 80, tuple(range(50, 81)))]
 
         with self.assertRaisesRegex(ChunkCoverageError, "重叠"):
             validate_chunk_coverage(chunks, expected_start=1, expected_end=80)
@@ -191,15 +182,11 @@ class ImportStructureModelTests(TestCase):
     def test_pipeline_backfills_legacy_book_with_100_page_chunks(self):
         from .pipeline import _ensure_import_chunks
 
-        self.paper.pages = [
-            {"page_idx": index, "width": 595, "height": 842}
-            for index in range(270)
-        ]
+        self.paper.pages = [{"page_idx": index, "width": 595, "height": 842} for index in range(270)]
         self.paper.save(update_fields=["pages"])
 
         chunks = _ensure_import_chunks(self.paper)
 
         self.assertEqual(
-            [(chunk.source_page_start, chunk.source_page_end) for chunk in chunks],
-            [(1, 100), (101, 200), (201, 270)],
+            [(chunk.source_page_start, chunk.source_page_end) for chunk in chunks], [(1, 100), (101, 200), (201, 270)]
         )

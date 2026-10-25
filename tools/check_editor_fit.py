@@ -119,22 +119,30 @@ def run(page, width: int, height: int) -> None:
                 ok: hit === b || b.contains(hit)};
       });
     }""")
-    check(bool(top) and any(t["label"] == "保存" and t["ok"] for t in (top or [])),
-          f"{tag}：保存按钮在操作栏里、点得到（y={next((t['y'] for t in (top or []) if t['label'] == '保存'), '?')}，视口高 {height}）"
-          if top else f"{tag}：改字的操作栏（.editor-bar）没找到，这一项没量到")
+    check(
+        bool(top) and any(t["label"] == "保存" and t["ok"] for t in (top or [])),
+        f"{tag}：保存按钮在操作栏里、点得到（y={next((t['y'] for t in (top or []) if t['label'] == '保存'), '?')}，视口高 {height}）"
+        if top
+        else f"{tag}：改字的操作栏（.editor-bar）没找到，这一项没量到",
+    )
     if top:
         stuck = [t for t in top if not t["ok"]]
         for t in stuck:
             problems.append(f"{tag} · 改字操作栏的「{t['label']}」点不到")
-        check(not stuck,
-              f"{tag}：改字操作栏 {len(top)} 个控件全都点得到" if not stuck
-              else f"{tag}：改字操作栏有 {len(stuck)} 个控件点不到")
+        check(
+            not stuck,
+            f"{tag}：改字操作栏 {len(top)} 个控件全都点得到"
+            if not stuck
+            else f"{tag}：改字操作栏有 {len(stuck)} 个控件点不到",
+        )
     for item in data["bad"]:
         problems.append(f"{tag} · 改字里的「{item['label']}」{item['why']}")
-    check(not data["bad"],
-          f"{tag}：编辑器里 {data['total']} 个可见控件滚到面前都点得到（折叠起来的 {data['skipped']} 个不算）"
-          if not data["bad"]
-          else f"{tag}：编辑器里有 {len(data['bad'])}/{data['total']} 个控件点不到")
+    check(
+        not data["bad"],
+        f"{tag}：编辑器里 {data['total']} 个可见控件滚到面前都点得到（折叠起来的 {data['skipped']} 个不算）"
+        if not data["bad"]
+        else f"{tag}：编辑器里有 {len(data['bad'])}/{data['total']} 个控件点不到",
+    )
 
     # 3：实时预览是不是真在更新
     stem = page.locator("form.editor textarea").first
@@ -143,9 +151,12 @@ def run(page, width: int, height: int) -> None:
     stem.type(MARK, delay=12)
     page.wait_for_timeout(500)
     after = page.locator(".editor-preview").inner_text()
-    check(MARK in after and MARK not in before,
-          f"{tag}：在题干里打「{MARK}」，预览里出现了同一段字"
-          if MARK in after else f"{tag}：预览没有跟着更新（打进去的是「{MARK}」，预览里没有）")
+    check(
+        MARK in after and MARK not in before,
+        f"{tag}：在题干里打「{MARK}」，预览里出现了同一段字"
+        if MARK in after
+        else f"{tag}：预览没有跟着更新（打进去的是「{MARK}」，预览里没有）",
+    )
     page.screenshot(path=f"{SHOTS}/editor_{width}x{height}.png")
 
     # 4：改了字之后按 Esc —— 不能直接把编辑器关掉丢改动，要先问一句。
@@ -153,23 +164,23 @@ def run(page, width: int, height: int) -> None:
     #    不是「编辑器关没关」——没保存的改动本来就不该被一声不吭地丢掉。
     qid = page.evaluate("() => document.querySelector('.card.editing')?.dataset.id")
     card_text_before = page.evaluate(
-        "(id) => document.querySelector(`.card[data-id=\"${id}\"] .rendered`)?.textContent || ''", qid)
+        "(id) => document.querySelector(`.card[data-id=\"${id}\"] .rendered`)?.textContent || ''", qid
+    )
     page.keyboard.press("Escape")
     page.wait_for_timeout(700)
-    check(page.locator("#confirmDialog[open]").count() == 1,
-          f"{tag}：改了字按 Esc，先问一句要不要丢")
-    focused = page.evaluate("() => { const d = document.querySelector('#confirmDialog[open]'); "
-                            "if (!d) return ''; return (document.activeElement?.textContent || '').trim(); }")
-    check("继续编辑" in focused,
-          f"{tag}：确认框默认落在「继续编辑」上（现在落在「{focused}」）")
+    check(page.locator("#confirmDialog[open]").count() == 1, f"{tag}：改了字按 Esc，先问一句要不要丢")
+    focused = page.evaluate(
+        "() => { const d = document.querySelector('#confirmDialog[open]'); "
+        "if (!d) return ''; return (document.activeElement?.textContent || '').trim(); }"
+    )
+    check("继续编辑" in focused, f"{tag}：确认框默认落在「继续编辑」上（现在落在「{focused}」）")
     # 按文字精确点。`.get_by_role("button").last` 是取对话框里最后一个按钮，
     # 而焦点落在「继续编辑」上、它未必是最后一个 —— 我这么写过一回，
     # 结果点到了「丢弃改动」，把编辑器关了，后面全错。
     page.locator("#confirmDialog button", has_text="继续编辑").first.click()
     page.wait_for_timeout(500)
     check(page.locator("form.editor").count() == 1, f"{tag}：选「继续编辑」后编辑器还开着")
-    check(MARK in page.locator("form.editor textarea").first.input_value(),
-          f"{tag}：选「继续编辑」后刚才打的字还在")
+    check(MARK in page.locator("form.editor textarea").first.input_value(), f"{tag}：选「继续编辑」后刚才打的字还在")
     page.keyboard.press("Escape")
     page.wait_for_timeout(500)
     if page.locator("#confirmDialog[open]").count():
@@ -177,11 +188,14 @@ def run(page, width: int, height: int) -> None:
     page.wait_for_timeout(800)
     check(page.locator("form.editor").count() == 0, f"{tag}：选「丢弃改动」之后编辑器关掉了")
     card_text_after = page.evaluate(
-        "(id) => document.querySelector(`.card[data-id=\"${id}\"] .rendered`)?.textContent || ''", qid)
-    check(MARK not in card_text_after and card_text_after == card_text_before,
-          f"{tag}：丢弃之后题面一个字都没变"
-          if card_text_after == card_text_before
-          else f"{tag}：丢弃之后题面变了（标记还在：{MARK in card_text_after}）")
+        "(id) => document.querySelector(`.card[data-id=\"${id}\"] .rendered`)?.textContent || ''", qid
+    )
+    check(
+        MARK not in card_text_after and card_text_after == card_text_before,
+        f"{tag}：丢弃之后题面一个字都没变"
+        if card_text_after == card_text_before
+        else f"{tag}：丢弃之后题面变了（标记还在：{MARK in card_text_after}）",
+    )
 
 
 def main() -> int:

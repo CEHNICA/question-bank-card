@@ -7,6 +7,7 @@ assert "four questions" while the seed builds three, and every run died on the
 first stale number instead of testing anything.
 No workers, OCR, cloud probes, publication changes or real credentials are used.
 """
+
 import argparse
 import json
 from pathlib import Path
@@ -18,22 +19,31 @@ OUT = ROOT / "tmp" / "library-v111" / "browser"
 
 def check(base):
     from playwright.sync_api import expect, sync_playwright
+
     assert urlparse(base).hostname in ("127.0.0.1", "localhost")
     fixture = json.loads((ROOT / "tmp/library-ux-browser/fixture.json").read_text(encoding="utf-8"))
     OUT.mkdir(parents=True, exist_ok=True)
     errors, outgoing = [], []
     with sync_playwright() as pw:
-        executable = next(str(p) for p in (
-            Path(pw.chromium.executable_path), Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if p.is_file())
+        executable = next(
+            str(p)
+            for p in (
+                Path(pw.chromium.executable_path),
+                Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+            )
+            if p.is_file()
+        )
         browser = pw.chromium.launch(headless=True, executable_path=executable)
         context = browser.new_context(viewport={"width": 1280, "height": 900})
+
         def local_only(route):
             if urlparse(route.request.url).hostname in ("127.0.0.1", "localhost"):
                 route.continue_()
             else:
                 outgoing.append(route.request.url)
                 route.abort()
+
         context.route("**/*", local_only)
         page = context.new_page()
         page.on("pageerror", lambda error: errors.append(str(error)))
@@ -42,8 +52,9 @@ def check(base):
         # 题数从服务端取，不写死。写死过一次（4），而 seed 造的是 3 —— 这个脚本
         # 于是从那天起只在这两个地方报错，谁也没真去核对过它到底测到了什么。
         total = len(fixture["ids"])
-        assert served["total"] == total and set(fixture["ids"]) == {i["id"] for i in served["items"]}, \
+        assert served["total"] == total and set(fixture["ids"]) == {i["id"] for i in served["items"]}, (
             "Not the isolated fixture; refusing writes"
+        )
         expect(page.locator(".library-card")).to_have_count(total)
         expect(page.locator("#advancedFilters")).not_to_have_attribute("open", "")
         page.locator("#selectVisible").check()
@@ -93,7 +104,9 @@ def check(base):
 
         card.get_by_role("button", name="查看出处", exact=True).click()
         expect(page.locator("#sourceDialog")).to_be_visible()
-        page.wait_for_function("[...document.querySelectorAll('#sourcePages img')].length && [...document.querySelectorAll('#sourcePages img')].every(i=>i.complete&&i.naturalWidth)")
+        page.wait_for_function(
+            "[...document.querySelectorAll('#sourcePages img')].length && [...document.querySelectorAll('#sourcePages img')].every(i=>i.complete&&i.naturalWidth)"
+        )
         page.locator("#sourceZoomIn").click()
         expect(page.locator("#sourceZoom")).to_have_text("150%")
         canvas = page.locator("#sourcePages")
@@ -119,12 +132,14 @@ def check(base):
         page.locator("#printTitle").fill("离线验收草稿-v111")
         page.locator("label:has(#printOrigin)").click()
         expect(page.locator("#printOrigin")).to_be_checked()
+
         # 「保存草稿」藏在「草稿」这个折叠里，真人得先把它点开。
         def save_draft():
             menu = page.locator("#printDraftMenu")
             if not menu.evaluate("e => e.open"):
                 menu.locator("summary").click()
             page.locator("#saveDraft").click()
+
         save_draft()
         expect(page.locator("#draftSaveStatus")).to_contain_text("已保存")
         drafts = page.request.get(base + "/api/library/drafts").json()["drafts"]
@@ -142,11 +157,13 @@ def check(base):
         page.locator("#closePrint").click()
         page.reload()
         expect(page.locator(".library-card")).to_have_count(total)
+
         # 「组卷草稿」被搬进导航抽屉（☰）了，抽屉关着的时候这个按钮根本不在页面上。
         def open_drafts():
             if not page.locator("#siteDrawer").is_visible():
                 page.locator(".drawer-trigger").click()
             page.locator("#openDrafts").click()
+
         open_drafts()
         row = page.locator(".draft-row").filter(has_text="离线验收草稿-v111").first
         row.get_by_role("button", name="继续组卷", exact=True).click()
@@ -157,15 +174,19 @@ def check(base):
         expect(page.locator(".print-question")).to_have_count(total)
         kinds = ["single_choice", "multiple_choice", "fill_blank", "true_false", "free_response"]
         item_types = {item["id"]: item["question_type"] for item in served["items"]}
-        expected_order = sorted(reloaded["ids"], key=lambda key: kinds.index(item_types[key]) if item_types[key] in kinds else len(kinds))
+        expected_order = sorted(
+            reloaded["ids"], key=lambda key: kinds.index(item_types[key]) if item_types[key] in kinds else len(kinds)
+        )
         assert page.locator(".print-question").evaluate_all("rows=>rows.map(e=>e.dataset.questionId)") == expected_order
         # The saved request contains a snapshot; later edits must stay dirty.
         held = []
+
         def delay_save(route):
             if route.request.method == "PUT":
                 held.append(route)
             else:
                 route.continue_()
+
         page.route("**/api/library/drafts/*", delay_save)
         save_draft()
         page.wait_for_timeout(100)
@@ -179,7 +200,9 @@ def check(base):
             page.locator("#closeDrafts").click()
         # Same IDs still need confirmation when only the title was edited.
         open_drafts()
-        page.locator(".draft-row").filter(has_text="离线验收草稿-v111").first.get_by_role("button", name="继续组卷", exact=True).click()
+        page.locator(".draft-row").filter(has_text="离线验收草稿-v111").first.get_by_role(
+            "button", name="继续组卷", exact=True
+        ).click()
         expect(page.locator("#confirmDialog")).to_be_visible()
         page.locator("#confirmOk").click()
         expect(page.locator("#printTitle")).to_have_value("离线验收草稿-v111")
@@ -200,7 +223,9 @@ def check(base):
         for width in (1280, 980, 650, 390, 320):
             page.set_viewport_size({"width": width, "height": 900})
             page.wait_for_timeout(100)
-            assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1"), f"Horizontal overflow at {width}"
+            assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1"), (
+                f"Horizontal overflow at {width}"
+            )
             menu = page.locator(".library-card-more").first
             menu.locator("summary").click()
             assert page.evaluate("document.documentElement.scrollWidth<=innerWidth+1"), f"Menu overflow at {width}"
@@ -214,9 +239,13 @@ def check(base):
         # 唯一不能接受的是它变回一个占高度的普通块，把第一道题挤到屏幕外。
         # 1.12.7 之后已经没有 .library-toolbar 了。
         assert page.locator("#libraryRail").evaluate("e=>getComputedStyle(e).position") in ("sticky", "fixed")
-        assert page.locator(".library-card").first.bounding_box()["y"] < 300, "Short window keeps controls over the question"
+        assert page.locator(".library-card").first.bounding_box()["y"] < 300, (
+            "Short window keeps controls over the question"
+        )
         browser.close()
-    print("Offline workspace browser passed: filters/selected basket/full detail/source wheel+pan/history/draft save+reorder+reopen/AI default off/5 viewport widths; no external requests")
+    print(
+        "Offline workspace browser passed: filters/selected basket/full detail/source wheel+pan/history/draft save+reorder+reopen/AI default off/5 viewport widths; no external requests"
+    )
 
 
 if __name__ == "__main__":

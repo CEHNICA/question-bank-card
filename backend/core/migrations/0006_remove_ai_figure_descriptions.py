@@ -45,8 +45,7 @@ def _strip_markdown_tables(value):
     kept = []
     index = 0
     while index < len(lines):
-        if (index + 1 < len(lines) and "|" in lines[index]
-                and MARKDOWN_TABLE_SEPARATOR.fullmatch(lines[index + 1])):
+        if index + 1 < len(lines) and "|" in lines[index] and MARKDOWN_TABLE_SEPARATOR.fullmatch(lines[index + 1]):
             index += 2
             while index < len(lines) and "|" in lines[index] and lines[index].strip():
                 index += 1
@@ -63,11 +62,13 @@ def _is_figure_description(value):
 
 def _automatic_figure_slots(question):
     slots = {
-        figure.get("slot") for figure in (question.figures or [])
+        figure.get("slot")
+        for figure in (question.figures or [])
         if isinstance(figure, dict) and figure.get("source") == "auto"
     }
     slots.update(
-        role for role in ((question.read_a or {}).get("figures") or {}).values()
+        role
+        for role in ((question.read_a or {}).get("figures") or {}).values()
         if role == "stem" or role in OPTION_KEYS
     )
     return slots & (OPTION_KEYS | {"stem"})
@@ -127,17 +128,12 @@ def forwards(apps, schema_editor):
         question.flags = flags
         if question.state in {"green", "yellow"}:
             question.state = "yellow"
-        question.save(update_fields=[
-            "stem", "options", "approved", "approved_at", "approved_content_hash", "flags", "state",
-        ])
+        question.save(
+            update_fields=["stem", "options", "approved", "approved_at", "approved_content_hash", "flags", "state"]
+        )
 
 
 class Migration(migrations.Migration):
+    dependencies = [("core", "0005_normalize_parallelogram_readings")]
 
-    dependencies = [
-        ("core", "0005_normalize_parallelogram_readings"),
-    ]
-
-    operations = [
-        migrations.RunPython(forwards, migrations.RunPython.noop),
-    ]
+    operations = [migrations.RunPython(forwards, migrations.RunPython.noop)]

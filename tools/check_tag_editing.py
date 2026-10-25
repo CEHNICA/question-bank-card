@@ -74,13 +74,14 @@ def run(page, publication, original) -> None:
     # 来源要么写着人工改过，要么写着是哪个引擎自动打的，要和存的一致。
     said_human = "人工改过" in place
     said_engine = "自动生成" in place and served_before["source"] in place
-    check(said_human == (served_before["source"] == "human") or said_engine,
-          f"对话框说得出这组标签是谁打的（{served_before['source'] or '没打过'}）")
+    check(
+        said_human == (served_before["source"] == "human") or said_engine,
+        f"对话框说得出这组标签是谁打的（{served_before['source'] or '没打过'}）",
+    )
     points = page.locator("#tagEditorList .tag-editor-point").count()
     catalogue_size = len(api(f"/api/library/{publication}/tags")["catalogue"])
     check(points == catalogue_size, f"目录列出全部 {points} 个知识点")
-    check(page.locator("#tagEditorPicked .library-tag").all_text_contents() == before,
-          "对话框原样带出当前标签")
+    check(page.locator("#tagEditorPicked .library-tag").all_text_contents() == before, "对话框原样带出当前标签")
     page.screenshot(path=f"{SHOTS}/tag_editor_open.png")
 
     # 上限三个：满了再点要被挡住，而且要说清为什么
@@ -88,8 +89,7 @@ def run(page, publication, original) -> None:
         page.locator("#tagEditorList .tag-editor-point:not(.active)").first.click()
         page.wait_for_timeout(300)
         check(page.locator("#tagEditorPicked .library-tag").count() == 3, "已经有 3 个时点第 4 个没有加上")
-        check("最多" in page.locator("#toast").inner_text(),
-              f"并且说明了原因：{page.locator('#toast').inner_text()}")
+        check("最多" in page.locator("#toast").inner_text(), f"并且说明了原因：{page.locator('#toast').inner_text()}")
         page.locator("#tagEditorSearch").fill("这一串目录里不可能有")
         page.wait_for_timeout(250)
         check(page.locator("#tagEditorList .library-empty").count() == 1, "搜不到时给一句话，不留空白")
@@ -110,15 +110,16 @@ def run(page, publication, original) -> None:
     page.wait_for_selector("#tagEditorDialog[open]", state="detached", timeout=8000)
     page.wait_for_timeout(1200)
     shown = card.locator(".library-tag").all_text_contents()
-    check(addition in shown and before[0] not in shown,
-          f"保存后卡片上换成了：{'、'.join(shown)}")
+    check(addition in shown and before[0] not in shown, f"保存后卡片上换成了：{'、'.join(shown)}")
     check(api(f"/api/library/{publication}/tags")["tags"] == shown, "保存后服务端也是同一组标签")
     check(api(f"/api/library/{publication}/tags")["source"] == "human", "来源改成了人工改过")
     page.screenshot(path=f"{SHOTS}/tag_editor_saved.png")
 
     # 题面没被动过
-    check(api(f"/api/library/{publication}")["publication"]["version"] == version_before,
-          f"题面版本号没有变（第 {version_before} 版）")
+    check(
+        api(f"/api/library/{publication}")["publication"]["version"] == version_before,
+        f"题面版本号没有变（第 {version_before} 版）",
+    )
 
     # 清除：清空后「打知识点标签」按钮要自己回来
     card.locator(".library-tags-edit").click()
@@ -178,4 +179,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

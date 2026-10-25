@@ -1,4 +1,5 @@
 """One source picture belongs to one card: the card whose text asks for it."""
+
 from copy import deepcopy
 
 from django.test import SimpleTestCase, TestCase
@@ -20,19 +21,15 @@ class ContestWinnerTests(SimpleTestCase):
         return {"id": pk, "stem": stem, "options": options or {}}
 
     def test_only_the_card_that_asks_for_a_picture_keeps_it(self):
-        self.assertEqual(
-            figure_policy.contest_winner([self.card(1, PLAIN), self.card(2, CUED)]), 2)
-        self.assertEqual(
-            figure_policy.contest_winner([self.card(2, CUED), self.card(1, PLAIN)]), 2)
+        self.assertEqual(figure_policy.contest_winner([self.card(1, PLAIN), self.card(2, CUED)]), 2)
+        self.assertEqual(figure_policy.contest_winner([self.card(2, CUED), self.card(1, PLAIN)]), 2)
 
     def test_text_that_cannot_separate_them_keeps_both(self):
         self.assertIsNone(figure_policy.contest_winner([self.card(1, CUED), self.card(2, CUED)]))
         self.assertIsNone(figure_policy.contest_winner([self.card(1, PLAIN), self.card(2, PLAIN)]))
 
     def test_a_cue_hidden_in_the_options_still_counts(self):
-        self.assertEqual(
-            figure_policy.contest_winner(
-                [self.card(1, PLAIN, {"A": "如图"}), self.card(2, PLAIN)]), 1)
+        self.assertEqual(figure_policy.contest_winner([self.card(1, PLAIN, {"A": "如图"}), self.card(2, PLAIN)]), 1)
 
     def test_asking_the_student_to_draw_is_not_a_picture(self):
         # 「画出函数图象」是让学生画，不证明原卷印了图，所以它不能抢走别人的图。
@@ -43,15 +40,28 @@ class ContestWinnerTests(SimpleTestCase):
 
 class FigureClaimWinnerIntegrationTests(TestCase):
     def setUp(self):
-        self.paper = Paper.objects.create(filename="fixture.pdf", kind="pdf", sha256="d" * 64,
-                                          pages=[{"page_idx": 0, "width": 1000, "height": 1000}],
-                                          status="ready", processing_plan={"revision": 1})
+        self.paper = Paper.objects.create(
+            filename="fixture.pdf",
+            kind="pdf",
+            sha256="d" * 64,
+            pages=[{"page_idx": 0, "width": 1000, "height": 1000}],
+            status="ready",
+            processing_plan={"revision": 1},
+        )
         self.group = QuestionGroup.objects.create(paper=self.paper, title="卷一", kind="exam", sequence=0)
 
     def question(self, number, stem, **extra):
-        values = {"paper": self.paper, "group": self.group, "number": number, "stem": stem,
-                      "question_type": "free_response", "figures": [diagram()], "state": "green",
-                      "figure_review": {"status": "ok", "source": "automatic"}, "flags": []}
+        values = {
+            "paper": self.paper,
+            "group": self.group,
+            "number": number,
+            "stem": stem,
+            "question_type": "free_response",
+            "figures": [diagram()],
+            "state": "green",
+            "figure_review": {"status": "ok", "source": "automatic"},
+            "flags": [],
+        }
         values.update(extra)
         return Question.objects.create(**values)
 
@@ -138,15 +148,18 @@ class FigureClaimWinnerIntegrationTests(TestCase):
         for parts in (5, "abc", 0, {"a": 1}, True):
             with self.subTest(parts=parts):
                 self.assertEqual(
-                    figure_claims.figure_frames({**diagram(), "parts": parts}),
-                    [{"page_idx": 0, "bbox": list(BOX)}])
+                    figure_claims.figure_frames({**diagram(), "parts": parts}), [{"page_idx": 0, "bbox": list(BOX)}]
+                )
 
     def test_parts_that_are_not_dicts_are_skipped(self):
-        figure = {**diagram(), "parts": [None, 5, {"page_idx": 0}, {"bbox": [0, 0, 9, 9]},
-                                         {"page_idx": 1, "bbox": [0, 0, 10, 10]}]}
+        figure = {
+            **diagram(),
+            "parts": [None, 5, {"page_idx": 0}, {"bbox": [0, 0, 9, 9]}, {"page_idx": 1, "bbox": [0, 0, 10, 10]}],
+        }
         self.assertEqual(
             figure_claims.figure_frames(figure),
-            [{"page_idx": 0, "bbox": list(BOX)}, {"page_idx": 1, "bbox": [0, 0, 10, 10]}])
+            [{"page_idx": 0, "bbox": list(BOX)}, {"page_idx": 1, "bbox": [0, 0, 10, 10]}],
+        )
 
     def test_a_paper_whose_cards_carry_broken_parts_still_gets_a_ledger(self):
         good = self.question(12, CUED, figures=[diagram()])

@@ -26,15 +26,30 @@ def main():
     OUTPUT.mkdir(parents=True, exist_ok=True)
     errors, failures = [], []
     with sync_playwright() as pw:
-        exe = next((str(p) for p in (Path(pw.chromium.executable_path),
-            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if p.is_file()), None)
+        exe = next(
+            (
+                str(p)
+                for p in (
+                    Path(pw.chromium.executable_path),
+                    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                )
+                if p.is_file()
+            ),
+            None,
+        )
         browser = pw.chromium.launch(headless=True, **({"executable_path": exe} if exe else {}))
         for width in (1366, 900):
             ctx = browser.new_context(viewport={"width": width, "height": 768})
             ctx.add_init_script("localStorage.setItem('qb-welcome-seen','1')")
-            ctx.route("**/*", lambda route: route.continue_() if urlparse(route.request.url).hostname in
-                      ("127.0.0.1", "localhost") else route.abort())
+            ctx.route(
+                "**/*",
+                lambda route: (
+                    route.continue_()
+                    if urlparse(route.request.url).hostname in ("127.0.0.1", "localhost")
+                    else route.abort()
+                ),
+            )
             page = ctx.new_page()
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.goto(f"{url}/library")
@@ -58,8 +73,12 @@ def main():
                     failures.append(f"{width}px 打印时 {key} 仍然可见")
             if not state["cards"]:
                 failures.append(f"{width}px 打印时题目也没了")
-            page.pdf(path=str(OUTPUT / f"library-print-{width}.pdf"), format="A4",
-                     print_background=True, margin={"top": "0", "bottom": "0", "left": "0", "right": "0"})
+            page.pdf(
+                path=str(OUTPUT / f"library-print-{width}.pdf"),
+                format="A4",
+                print_background=True,
+                margin={"top": "0", "bottom": "0", "left": "0", "right": "0"},
+            )
             ctx.close()
         browser.close()
     print("errors:", errors or "无")

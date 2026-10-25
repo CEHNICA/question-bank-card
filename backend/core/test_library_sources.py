@@ -19,19 +19,36 @@ class LibrarySourceTests(TestCase):
         if question:
             paper = question.paper
         paper = paper or Paper.objects.create(filename=f"资料{self.serial}.pdf", kind="pdf", sha256="a" * 64)
-        question = question or Question.objects.create(paper=paper, number=1, question_type="single_choice",
-                                                        stem="虚构题卡", state="green")
-        content = deepcopy(content) if content is not None else {
-            "question_type": "single_choice", "stem": "若 $x+1=3$，求 $x$ 的值。（ ）",
-            "options": {"A": "$1$", "B": "$2$", "C": "$3$", "D": "$4$"},
-            "answer": "", "analysis": "", "figures": [], "origin": "甲校月考",
-        }
+        question = question or Question.objects.create(
+            paper=paper, number=1, question_type="single_choice", stem="虚构题卡", state="green"
+        )
+        content = (
+            deepcopy(content)
+            if content is not None
+            else {
+                "question_type": "single_choice",
+                "stem": "若 $x+1=3$，求 $x$ 的值。（ ）",
+                "options": {"A": "$1$", "B": "$2$", "C": "$3$", "D": "$4$"},
+                "answer": "",
+                "analysis": "",
+                "figures": [],
+                "origin": "甲校月考",
+            }
+        )
         content.update(changes)
         content.update(document_id=str(paper.id), source_filename=paper.filename)
         return PublishedQuestion.objects.create(
-            paper=paper, question=question, source_filename=paper.filename, number=self.serial,
-            question_type=content["question_type"], version=version, status=status, content=content,
-            content_hash=library.content_hash(content), review_source="ai", review_agent="演示助手",
+            paper=paper,
+            question=question,
+            source_filename=paper.filename,
+            number=self.serial,
+            question_type=content["question_type"],
+            version=version,
+            status=status,
+            content=content,
+            content_hash=library.content_hash(content),
+            review_source="ai",
+            review_agent="演示助手",
         )
 
     def detail(self, publication=None, **params):
@@ -45,8 +62,7 @@ class LibrarySourceTests(TestCase):
         body = self.detail().json()
         self.assertEqual([row["id"] for row in body["related_sources"]], [str(second.id)])
         row = body["related_sources"][0]
-        self.assertEqual((row["version_count"], row["origin"], row["review"]["source"]),
-                         (2, "另一份资料的题源", "ai"))
+        self.assertEqual((row["version_count"], row["origin"], row["review"]["source"]), (2, "另一份资料的题源", "ai"))
         self.assertEqual(row["content"], second.content)
         self.assertEqual([row["id"] for row in body["history"]], [str(self.first.id)])
         self.assertEqual(body["versions"], [])
@@ -56,10 +72,12 @@ class LibrarySourceTests(TestCase):
         self.assertNotIn(str(old.id), [row["id"] for row in body["related_sources"]])
 
     def test_limited_tex_variants_are_candidates_requiring_inspection(self):
-        first = self.publication(question_type="free_response", options={},
-                                 stem=r"集合 $A=\{x| 1\leq x\leq 5\}$．求 $\complement_U A$．")
-        candidate = self.publication(question_type="free_response", options={},
-                                     stem=r"集合$A=\{x\mid 1\leq x\leq 5\}$.求$\complement_{U}A$.")
+        first = self.publication(
+            question_type="free_response", options={}, stem=r"集合 $A=\{x| 1\leq x\leq 5\}$．求 $\complement_U A$．"
+        )
+        candidate = self.publication(
+            question_type="free_response", options={}, stem=r"集合$A=\{x\mid 1\leq x\leq 5\}$.求$\complement_{U}A$."
+        )
         body = self.detail(first).json()
         self.assertEqual(body["related_sources"], [])
         self.assertEqual([row["id"] for row in body["possible_sources"]], [str(candidate.id)])
@@ -90,25 +108,33 @@ class LibrarySourceTests(TestCase):
 
     def test_candidate_rules_do_not_change_numbers_operators_or_subscript_contents(self):
         first = self.publication(question_type="free_response", options={}, stem=r"求 $\complement_U A$。")
-        for text in (r"求 $\complement_{V}A$。", r"求 $\complement_{UV}A$。",
-                     r"求 $\complement_{U}A^2$。", r"求 $\complement_{U}A+B$。"):
+        for text in (
+            r"求 $\complement_{V}A$。",
+            r"求 $\complement_{UV}A$。",
+            r"求 $\complement_{U}A^2$。",
+            r"求 $\complement_{U}A+B$。",
+        ):
             self.publication(question_type="free_response", options={}, stem=text)
         body = self.detail(first).json()
         self.assertEqual((body["related_sources"], body["possible_sources"]), ([], []))
 
     def test_candidate_separator_command_boundary_is_only_math_layout(self):
-        first = self.publication(question_type="free_response", options={},
-                                 stem=r"$A=\{x|x>1\}$，求 $\complement_U A$。")
-        candidate = self.publication(question_type="free_response", options={},
-                                     stem=r"$A=\{x\mid x>1\}$，求 $\complement_{U}A$。")
-        different = self.publication(question_type="free_response", options={},
-                                     stem=r"$A=\{x\mid x>2\}$，求 $\complement_{U}A$。")
+        first = self.publication(
+            question_type="free_response", options={}, stem=r"$A=\{x|x>1\}$，求 $\complement_U A$。"
+        )
+        candidate = self.publication(
+            question_type="free_response", options={}, stem=r"$A=\{x\mid x>1\}$，求 $\complement_{U}A$。"
+        )
+        different = self.publication(
+            question_type="free_response", options={}, stem=r"$A=\{x\mid x>2\}$，求 $\complement_{U}A$。"
+        )
         body = self.detail(first).json()
         self.assertEqual(body["related_sources"], [])
         self.assertEqual([row["id"] for row in body["possible_sources"]], [str(candidate.id)])
         self.assertNotIn(str(different.id), [row["id"] for row in body["possible_sources"]])
-        self.assertNotEqual(library._source_match_text(r"$x +1$", possible=True),
-                            library._source_match_text(r"$x+1$", possible=True))
+        self.assertNotEqual(
+            library._source_match_text(r"$x +1$", possible=True), library._source_match_text(r"$x+1$", possible=True)
+        )
 
     def test_picture_questions_and_missing_picture_references_are_not_auto_linked(self):
         for change in (
@@ -122,14 +148,19 @@ class LibrarySourceTests(TestCase):
             self.assertEqual(self.detail(other).json()["related_sources"], [])
 
     def test_normalization_does_not_join_english_or_rewrite_units_code_and_tables(self):
-        for a, b in (("Find ab.", "Find a b."), ("面积为 2 cm²。", "面积为 2 cm2。"),
-                     (r"比较 `$x_U B$`。", r"比较 `$x_{U}B$`。"),
-                     ("| A | B |\n|--|--|", "|A|B|\n|--|--|"),
-                     (r"说明 $\text{x_U A}$。", r"说明 $\text{x_{U}A}$。")):
+        for a, b in (
+            ("Find ab.", "Find a b."),
+            ("面积为 2 cm²。", "面积为 2 cm2。"),
+            (r"比较 `$x_U B$`。", r"比较 `$x_{U}B$`。"),
+            ("| A | B |\n|--|--|", "|A|B|\n|--|--|"),
+            (r"说明 $\text{x_U A}$。", r"说明 $\text{x_{U}A}$。"),
+        ):
             first = self.publication(stem=a)
             second = self.publication(stem=b)
-            self.assertNotEqual(library.source_match_fingerprint(first, possible=True),
-                                library.source_match_fingerprint(second, possible=True))
+            self.assertNotEqual(
+                library.source_match_fingerprint(first, possible=True),
+                library.source_match_fingerprint(second, possible=True),
+            )
 
     def test_unknown_document_and_orphans_are_not_grouped_by_null_foreign_keys(self):
         second = self.publication()

@@ -36,15 +36,19 @@ def ink_pixels(image):
 def border_ink(image):
     """最外面一整圈里有没有墨——只让到边上干净为止，所以这条边上不该再有墨。"""
     gray = image.convert("L")
-    strips = [gray.crop((0, 0, gray.width, 1)), gray.crop((0, gray.height - 1, gray.width, gray.height)),
-              gray.crop((0, 0, 1, gray.height)), gray.crop((gray.width - 1, 0, gray.width, gray.height))]
+    strips = [
+        gray.crop((0, 0, gray.width, 1)),
+        gray.crop((0, gray.height - 1, gray.width, gray.height)),
+        gray.crop((0, 0, 1, gray.height)),
+        gray.crop((gray.width - 1, 0, gray.width, gray.height)),
+    ]
     return min(strip.getextrema()[0] for strip in strips)
 
 
 class CropFigureTests(SimpleTestCase):
     def test_a_box_that_cuts_a_line_in_half_grows_until_the_whole_line_is_inside(self):
         page = page_with_bars()
-        box = (100, 100, 300, 201)            # 下沿正好压在 y=200..215 这条黑条中间
+        box = (100, 100, 300, 201)  # 下沿正好压在 y=200..215 这条黑条中间
         cropped = imaging.crop_figure(page, box)
 
         self.assertGreater(cropped.height, box[3] - box[1])
@@ -55,7 +59,7 @@ class CropFigureTests(SimpleTestCase):
 
     def test_a_box_already_clear_of_ink_is_left_exactly_where_it_is(self):
         page = page_with_bars()
-        box = (100, 400, 300, 600)            # 框和黑条之间有一截白
+        box = (100, 400, 300, 600)  # 框和黑条之间有一截白
         cropped = imaging.crop_figure(page, box)
         self.assertEqual(cropped.size, (box[2] - box[0], box[3] - box[1]))
 
@@ -76,7 +80,7 @@ class CropFigureTests(SimpleTestCase):
 
     def test_a_box_on_the_page_edge_does_not_grow_past_the_page(self):
         page = page_with_bars()
-        box = (0, 100, 300, 201)               # 左边已经在纸上
+        box = (0, 100, 300, 201)  # 左边已经在纸上
         cropped = imaging.crop_figure(page, box)
         self.assertEqual(cropped.width, 300)
 
@@ -91,18 +95,25 @@ class FigureFileUsesTheRelaxedCropTests(TransactionTestCase):
         override.enable()
         self.addCleanup(override.disable)
         self.paper = Paper.objects.create(
-            filename="k3.pdf", kind="pdf", sha256="d" * 64,
-            source_path=str(Path(temp.name) / "k3.pdf"), render_path=str(Path(temp.name) / "k3.pdf"),
-            pages=[{"page_idx": 0, "width": 1000, "height": 1000}], status=Paper.Status.READY,
+            filename="k3.pdf",
+            kind="pdf",
+            sha256="d" * 64,
+            source_path=str(Path(temp.name) / "k3.pdf"),
+            render_path=str(Path(temp.name) / "k3.pdf"),
+            pages=[{"page_idx": 0, "width": 1000, "height": 1000}],
+            status=Paper.Status.READY,
         )
         pages = paper_dir(self.paper) / "pages"
         pages.mkdir(parents=True)
         page_with_bars().save(pages / "page_0.png")
         self.question = Question.objects.create(
-            paper=self.paper, number=7, question_type="free_response",
+            paper=self.paper,
+            number=7,
+            question_type="free_response",
             figures=[{"page_idx": 0, "bbox": [100, 100, 300, 201], "slot": "stem"}],
             regions=[{"page_idx": 0, "bbox": [50, 50, 500, 500]}],
-            stem="如图", state=Question.State.GREEN,
+            stem="如图",
+            state=Question.State.GREEN,
         )
 
     def test_the_cropped_figure_file_keeps_the_line_the_box_was_sitting_on(self):
@@ -112,13 +123,14 @@ class FigureFileUsesTheRelaxedCropTests(TransactionTestCase):
             self.assertEqual(sum(1 for v in cropped.convert("L").tobytes() if v < 128), 101 * 16)
 
     def test_the_served_figure_is_the_relaxed_crop(self):
-        self.question.figures = [
-            {"page_idx": 0, "bbox": [100, 100, 300, 201], "slot": "stem", "source": "manual"}]
+        self.question.figures = [{"page_idx": 0, "bbox": [100, 100, 300, 201], "slot": "stem", "source": "manual"}]
         self.question.save()
         response = self.client.post(
             f"/api/questions/{self.question.pk}/figures",
             data=json.dumps({"figures": [self.question.figures[0]], "ignored_candidates": []}),
-            content_type="application/json", HTTP_X_QB_REQUEST="1")
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
         self.assertEqual(response.status_code, 200, response.content)
         url = response.json()["question"]["figures"][0]["url"]
         served = self.client.get(url)

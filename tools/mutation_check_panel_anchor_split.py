@@ -40,34 +40,44 @@ for _stream in (sys.stdout, sys.stderr):
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
-COMMAND = ["node", "--test", "test_library_todo_merge.js", "test_library_context_sidebar.js",
-           "test_library_filter_bar.js", "test_library_compact.js"]
+COMMAND = [
+    "node",
+    "--test",
+    "test_library_todo_merge.js",
+    "test_library_context_sidebar.js",
+    "test_library_filter_bar.js",
+    "test_library_compact.js",
+]
 
 LIBRARY_JS = "frontend/library.js"
 LIBRARY_CSS = "frontend/library.css"
 
 # ── 面板锚点 ────────────────────────────────────────────────────────────────
-ADVANCED_RULE = '.library-advanced { flex: none; font-size: 13px; color: var(--ink-2); }\n'
-ADVANCED_POSITIONED = '.library-advanced { position: relative; flex: none; font-size: 13px; color: var(--ink-2); }\n'
-PANEL_ANCHOR = 'top: calc(100% + 7px); left: 0; right: auto;\n'
-PANEL_ANCHOR_RIGHT = 'top: calc(100% + 7px); right: 0;\n'
-PANEL_WIDTH = '  width: min(680px, 100%); margin: 0; padding: 14px;\n'
-PANEL_WIDTH_VIEWPORT = '  width: min(680px, calc(100vw - 32px)); margin: 0; padding: 14px;\n'
-PANEL_NARROW = '  .library-advanced[open] > .library-filters { width: min(520px, 100%); padding: 11px; flex-wrap: wrap; }\n'
-PANEL_NARROW_VIEWPORT = ('  .library-advanced[open] > .library-filters '
-                        '{ width: min(520px, calc(100vw - 24px)); padding: 11px; flex-wrap: wrap; }\n')
+ADVANCED_RULE = ".library-advanced { flex: none; font-size: 13px; color: var(--ink-2); }\n"
+ADVANCED_POSITIONED = ".library-advanced { position: relative; flex: none; font-size: 13px; color: var(--ink-2); }\n"
+PANEL_ANCHOR = "top: calc(100% + 7px); left: 0; right: auto;\n"
+PANEL_ANCHOR_RIGHT = "top: calc(100% + 7px); right: 0;\n"
+PANEL_WIDTH = "  width: min(680px, 100%); margin: 0; padding: 14px;\n"
+PANEL_WIDTH_VIEWPORT = "  width: min(680px, calc(100vw - 32px)); margin: 0; padding: 14px;\n"
+PANEL_NARROW = (
+    "  .library-advanced[open] > .library-filters { width: min(520px, 100%); padding: 11px; flex-wrap: wrap; }\n"
+)
+PANEL_NARROW_VIEWPORT = (
+    "  .library-advanced[open] > .library-filters "
+    "{ width: min(520px, calc(100vw - 24px)); padding: 11px; flex-wrap: wrap; }\n"
+)
 
 # ── 分栏 ────────────────────────────────────────────────────────────────────
 NOTE_LINE = '    body.append(node("p", "library-todo-note", apiReady\n'
-NOTE_LINE_GONE = ''
+NOTE_LINE_GONE = ""
 COLS = '    const cols = node("div", "library-todo-cols");\n'
-COLS_GONE = ''
+COLS_GONE = ""
 SOLO = '    if (!answerActions.length) cols.classList.add("library-todo-cols-solo");\n'
-SOLO_GONE = ''
+SOLO_GONE = ""
 TAG_COLUMN = '    cols.append(column("标签", [\n'
-TAG_COLUMN_GONE = ''
+TAG_COLUMN_GONE = ""
 ANSWER_COLUMN = '      cols.append(column("答案", [paidGroup(answerActions)]));\n'
-ANSWER_COLUMN_GONE = ''
+ANSWER_COLUMN_GONE = ""
 
 TAG_COST = '      tags.dataset.cost = "ai";\n'
 CURRENT_COST = '      current.dataset.cost = "ai";\n'
@@ -76,101 +86,81 @@ ANSWER_COST = '      answers.dataset.cost = "ai";\n'
 # 从 1.25.21 迁过来的四条（锚点在本版改措辞/改结构时过期了，检查本身没作废）
 LOOK_CONTAINER = '      const g = node("div", "library-todo-look");\n'
 LOOK_CONTAINER_BUG = '      const g = node("div", "library-tool-actions library-todo-look");\n'
-PAID_BORDER = ('.library-todo-body .library-tool-actions > .library-tool-action '
-               '{ border-color: var(--line-strong); }\n')
-PAID_BORDER_FLAT = ('.library-todo-body .library-tool-actions > .library-tool-action '
-                    '{ border-color: transparent; }\n')
+PAID_BORDER = ".library-todo-body .library-tool-actions > .library-tool-action { border-color: var(--line-strong); }\n"
+PAID_BORDER_FLAT = ".library-todo-body .library-tool-actions > .library-tool-action { border-color: transparent; }\n"
 
-CSS_COLS = ('.library-todo-cols { display: grid; grid-template-columns: '
-            'repeat(2, minmax(0, 1fr)); gap: 14px; }\n')
-CSS_COLS_ONE = '.library-todo-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }\n'
-CSS_SOLO = '.library-todo-cols-solo { grid-template-columns: minmax(0, 1fr); }\n'
-CSS_SOLO_GONE = ''
-CSS_SPLIT = '.library-todo-col + .library-todo-col { padding-left: 14px; border-left: 1px solid var(--line); }\n'
-CSS_SPLIT_GONE = ''
-CSS_CHIP = ('.library-todo-body .library-tool-action[data-cost="ai"]::after {\n'
-            '  content: "AI"; flex: 0 0 auto; margin-left: auto; padding: 1px 6px; border-radius: 99px;\n'
-            '  background: var(--accent-soft); color: var(--accent-dark); font-size: 10.5px; '
-            'font-weight: 700; line-height: 1.6;\n}\n')
-CSS_CHIP_GONE = ''
+CSS_COLS = ".library-todo-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }\n"
+CSS_COLS_ONE = ".library-todo-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }\n"
+CSS_SOLO = ".library-todo-cols-solo { grid-template-columns: minmax(0, 1fr); }\n"
+CSS_SOLO_GONE = ""
+CSS_SPLIT = ".library-todo-col + .library-todo-col { padding-left: 14px; border-left: 1px solid var(--line); }\n"
+CSS_SPLIT_GONE = ""
+CSS_CHIP = (
+    '.library-todo-body .library-tool-action[data-cost="ai"]::after {\n'
+    '  content: "AI"; flex: 0 0 auto; margin-left: auto; padding: 1px 6px; border-radius: 99px;\n'
+    "  background: var(--accent-soft); color: var(--accent-dark); font-size: 10.5px; "
+    "font-weight: 700; line-height: 1.6;\n}\n"
+)
+CSS_CHIP_GONE = ""
 
 # (relative, description, original, mutation)
 MUTATIONS = [
-    (LIBRARY_CSS,
-     "「更多筛选」becomes its own positioning context again — the panel follows the button, "
-     "and 1.25.22 proved exactly where that lands: x=-276, half the panel off-screen",
-     ADVANCED_RULE, ADVANCED_POSITIONED),
-
-    (LIBRARY_CSS,
-     "the panel is anchored back to the button's right edge instead of the filter row",
-     PANEL_ANCHOR, PANEL_ANCHOR_RIGHT),
-
-    (LIBRARY_CSS,
-     "the panel stops being bounded by the filter row and sizes off the viewport again",
-     PANEL_WIDTH, PANEL_WIDTH_VIEWPORT),
-
-    (LIBRARY_CSS,
-     "the narrow-screen panel sizes off the viewport again, so it can hang past the edge",
-     PANEL_NARROW, PANEL_NARROW_VIEWPORT),
-
-    (LIBRARY_JS,
-     "the 标签 column disappears",
-     TAG_COLUMN, TAG_COLUMN_GONE),
-
-    (LIBRARY_JS,
-     "the 答案 column disappears — the two kinds of work are flat again",
-     ANSWER_COLUMN, ANSWER_COLUMN_GONE),
-
-    (LIBRARY_JS,
-     "the whole split block is gone and the panel has no columns at all",
-     COLS, COLS_GONE),
-
-    (LIBRARY_JS,
-     "the solo-column rule is dropped, so a 标签-only panel leaves half a row of blank",
-     SOLO, SOLO_GONE),
-
-    (LIBRARY_JS,
-     "the note explaining what costs money is gone",
-     NOTE_LINE, NOTE_LINE_GONE),
-
-    (LIBRARY_JS,
-     "补齐缺的知识点标签 loses its AI marker — the cost is back to one line of small text",
-     TAG_COST, ''),
-
-    (LIBRARY_JS,
-     "只处理当前这批 loses its AI marker, and nothing says which kind of work it is",
-     CURRENT_COST, ''),
-
-    (LIBRARY_JS,
-     "补齐缺的参考答案 loses its AI marker",
-     ANSWER_COST, ''),
-
-    (LIBRARY_CSS,
-     "the AI chip stops being drawn",
-     CSS_CHIP, CSS_CHIP_GONE),
-
-    (LIBRARY_CSS,
-     "the two columns stop sitting side by side",
-     CSS_COLS, CSS_COLS_ONE),
-
-    (LIBRARY_CSS,
-     "the solo-column rule is dropped from the stylesheet",
-     CSS_SOLO, CSS_SOLO_GONE),
-
-    (LIBRARY_CSS,
-     "the divider between the two columns disappears",
-     CSS_SPLIT, CSS_SPLIT_GONE),
-
+    (
+        LIBRARY_CSS,
+        "「更多筛选」becomes its own positioning context again — the panel follows the button, "
+        "and 1.25.22 proved exactly where that lands: x=-276, half the panel off-screen",
+        ADVANCED_RULE,
+        ADVANCED_POSITIONED,
+    ),
+    (
+        LIBRARY_CSS,
+        "the panel is anchored back to the button's right edge instead of the filter row",
+        PANEL_ANCHOR,
+        PANEL_ANCHOR_RIGHT,
+    ),
+    (
+        LIBRARY_CSS,
+        "the panel stops being bounded by the filter row and sizes off the viewport again",
+        PANEL_WIDTH,
+        PANEL_WIDTH_VIEWPORT,
+    ),
+    (
+        LIBRARY_CSS,
+        "the narrow-screen panel sizes off the viewport again, so it can hang past the edge",
+        PANEL_NARROW,
+        PANEL_NARROW_VIEWPORT,
+    ),
+    (LIBRARY_JS, "the 标签 column disappears", TAG_COLUMN, TAG_COLUMN_GONE),
+    (
+        LIBRARY_JS,
+        "the 答案 column disappears — the two kinds of work are flat again",
+        ANSWER_COLUMN,
+        ANSWER_COLUMN_GONE,
+    ),
+    (LIBRARY_JS, "the whole split block is gone and the panel has no columns at all", COLS, COLS_GONE),
+    (LIBRARY_JS, "the solo-column rule is dropped, so a 标签-only panel leaves half a row of blank", SOLO, SOLO_GONE),
+    (LIBRARY_JS, "the note explaining what costs money is gone", NOTE_LINE, NOTE_LINE_GONE),
+    (LIBRARY_JS, "补齐缺的知识点标签 loses its AI marker — the cost is back to one line of small text", TAG_COST, ""),
+    (LIBRARY_JS, "只处理当前这批 loses its AI marker, and nothing says which kind of work it is", CURRENT_COST, ""),
+    (LIBRARY_JS, "补齐缺的参考答案 loses its AI marker", ANSWER_COST, ""),
+    (LIBRARY_CSS, "the AI chip stops being drawn", CSS_CHIP, CSS_CHIP_GONE),
+    (LIBRARY_CSS, "the two columns stop sitting side by side", CSS_COLS, CSS_COLS_ONE),
+    (LIBRARY_CSS, "the solo-column rule is dropped from the stylesheet", CSS_SOLO, CSS_SOLO_GONE),
+    (LIBRARY_CSS, "the divider between the two columns disappears", CSS_SPLIT, CSS_SPLIT_GONE),
     # ── 从 tools/mutation_check_todo_cost_split.py 迁过来的四条 ──
-    (LIBRARY_JS,
-     "the filter container takes .library-tool-actions back — AI queues, the two free "
-     "filters go grey for the whole run",
-     LOOK_CONTAINER, LOOK_CONTAINER_BUG),
-
-    (LIBRARY_CSS,
-     "the paying buttons lose their solid border and all five look identical again",
-     PAID_BORDER, PAID_BORDER_FLAT),
-
+    (
+        LIBRARY_JS,
+        "the filter container takes .library-tool-actions back — AI queues, the two free "
+        "filters go grey for the whole run",
+        LOOK_CONTAINER,
+        LOOK_CONTAINER_BUG,
+    ),
+    (
+        LIBRARY_CSS,
+        "the paying buttons lose their solid border and all five look identical again",
+        PAID_BORDER,
+        PAID_BORDER_FLAT,
+    ),
 ]
 
 
@@ -185,8 +175,9 @@ def apply(source: str, original: str, mutation: str) -> str:
 
 
 def run() -> subprocess.CompletedProcess:
-    return subprocess.run(COMMAND, cwd=str(FRONTEND), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
+    return subprocess.run(
+        COMMAND, cwd=str(FRONTEND), capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
 
 
 def main() -> int:
@@ -218,8 +209,11 @@ def main() -> int:
         if not caught:
             print((broken.stdout or "")[-2000:] + (broken.stderr or "")[-2000:])
     survived = [item for item in results if not item[1]]
-    print(f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住" if not survived
-          else f"\n{len(survived)} 条变异漏过：{survived}")
+    print(
+        f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住"
+        if not survived
+        else f"\n{len(survived)} 条变异漏过：{survived}"
+    )
     return 1 if survived else 0
 
 

@@ -1,4 +1,5 @@
 """Real offline browser/PDF pagination checks with synthesized papers only."""
+
 import base64
 import io
 import os
@@ -42,8 +43,8 @@ _TABLES = r"""(()=>[...document.querySelectorAll('#printPaper .qb-table-wrap')].
 def _preview_driver():
     # Exercise the actual preview renderer, not a second fixture implementation.
     source = (Path(settings.FRONTEND_ROOT) / "library.js").read_text(encoding="utf-8")
-    render = source[source.index("  function renderPrint("):source.index("  function syncIndividualLayout(")]
-    answer = source[source.index("  function printAnswerRow("):source.index("  async function checkMissingAnswers(")]
+    render = source[source.index("  function renderPrint(") : source.index("  function syncIndividualLayout(")]
+    answer = source[source.index("  function printAnswerRow(") : source.index("  async function checkMissingAnswers(")]
     return r"""
 window.__qbPdfStatus={ready:false};
 (async()=>{
@@ -75,212 +76,328 @@ class SharedPdfPaginationTests(SimpleTestCase):
         except pdf.word.ExportError:
             self.skipTest("No installed local PDF browser")
         from PIL import Image, ImageDraw
+
         image = Image.new("RGB", (363, 349), "white")
         draw = ImageDraw.Draw(image)
         draw.line((25, 320, 25, 25, 330, 320, 25, 320), fill="black", width=3)
-        stream = io.BytesIO(); image.save(stream, format="PNG")
+        stream = io.BytesIO()
+        image.save(stream, format="PNG")
         self.image_bytes = stream.getvalue()
         specs = [
-            ("single_choice", r'命题“$\forall x\in\mathbb R$，都有 $x^2+x\ge0$”的否定为（ ）',
-             {"A":r'$\exists x\in\mathbb R$，使得 $x^2+x<0$',"B":r'$\exists x\in\mathbb R$，使得 $x^2+x\ge0$',
-              "C":r'$\forall x\in\mathbb R$，都有 $x^2+x\le0$',"D":r'$\forall x\in\mathbb R$，都有 $x^2+x<0$'}),
-            ("single_choice", r'设 $U=\{x|-2<x<6,x\in\mathbb N\}$，$A=\{0,2\}$，求 $\complement_U A$（ ）',
-             {"A":"{0,1,3,4}","B":"{1,3,4}","C":"{-1,1,3,4}","D":"{-1,0,1,3,4}"}),
-            ("multiple_choice", r'定义 $f(x,y)=x+y+xy$，则下列说法正确的是（ ）',
-             {"A":r'$f(1,5)=f(5,1)$',"B":r'$x>0,y>0,f(x,y)f(\frac1x,\frac1y)\ge4$',
-              "C":r'对一切 $x\in\mathbb R$，$(2x+1)(x-a)+a+2\ge0$，则 $a\in[-\frac32,\frac52]$',
-              "D":r'对一切 $x>2$，$(2x+1)(x-a)\ge-a-2$，则 $a\in[3,+\infty)$'}),
-            ("fill_blank", r'已知 $f(x)=\begin{cases}x^2-1,&x\le1\\\frac1{x-1},&x>1\end{cases}$，求 $f(f(-2))=$____。', {}),
-            ("free_response", r'设 $m\in\mathbb R$，$A=\{x|-2\le x<4\}$，$B=\{x|m\le x\le m+2\}$。'+'\n'+
-             r'（1）若 $m=3$，求 $A\cup B$ 与 $\complement_\mathbb R(A\cup B)$；'+'\n'+r'（2）若 $A\cap B=\varnothing$，求 $m$ 的取值范围。',{}),
-            ("free_response", r'已知 $f(x)=x^2-bx+c$。'+'\n'+r'（1）若 $f(x)\le0$ 的解集为 $\{x|1\le x\le2\}$，求 $b,c$；'+'\n'+
-             r'（2）若 $b=c$，求 $f(x)>x$ 的解集；'+'\n'+r'（3）若 $\exists a\in[1,2]$，对 $\forall x\in[1,2]$，$f(x)\le(1-a)x^2$，求 $2c-3b$ 的最大值。',{}),
-            ("free_response", r'某商品进价为10元，每天的销售量 $y$ 与价格 $x$ 的关系如图。'+'\n'+
-             '(1)为使日利润最大，应如何确定销售价格？'+'\n'+r'(2)为使日利润不低于售价15元时的日利润，求 $x$ 的取值范围。',{}),
+            (
+                "single_choice",
+                r"命题“$\forall x\in\mathbb R$，都有 $x^2+x\ge0$”的否定为（ ）",
+                {
+                    "A": r"$\exists x\in\mathbb R$，使得 $x^2+x<0$",
+                    "B": r"$\exists x\in\mathbb R$，使得 $x^2+x\ge0$",
+                    "C": r"$\forall x\in\mathbb R$，都有 $x^2+x\le0$",
+                    "D": r"$\forall x\in\mathbb R$，都有 $x^2+x<0$",
+                },
+            ),
+            (
+                "single_choice",
+                r"设 $U=\{x|-2<x<6,x\in\mathbb N\}$，$A=\{0,2\}$，求 $\complement_U A$（ ）",
+                {"A": "{0,1,3,4}", "B": "{1,3,4}", "C": "{-1,1,3,4}", "D": "{-1,0,1,3,4}"},
+            ),
+            (
+                "multiple_choice",
+                r"定义 $f(x,y)=x+y+xy$，则下列说法正确的是（ ）",
+                {
+                    "A": r"$f(1,5)=f(5,1)$",
+                    "B": r"$x>0,y>0,f(x,y)f(\frac1x,\frac1y)\ge4$",
+                    "C": r"对一切 $x\in\mathbb R$，$(2x+1)(x-a)+a+2\ge0$，则 $a\in[-\frac32,\frac52]$",
+                    "D": r"对一切 $x>2$，$(2x+1)(x-a)\ge-a-2$，则 $a\in[3,+\infty)$",
+                },
+            ),
+            (
+                "fill_blank",
+                r"已知 $f(x)=\begin{cases}x^2-1,&x\le1\\\frac1{x-1},&x>1\end{cases}$，求 $f(f(-2))=$____。",
+                {},
+            ),
+            (
+                "free_response",
+                r"设 $m\in\mathbb R$，$A=\{x|-2\le x<4\}$，$B=\{x|m\le x\le m+2\}$。"
+                + "\n"
+                + r"（1）若 $m=3$，求 $A\cup B$ 与 $\complement_\mathbb R(A\cup B)$；"
+                + "\n"
+                + r"（2）若 $A\cap B=\varnothing$，求 $m$ 的取值范围。",
+                {},
+            ),
+            (
+                "free_response",
+                r"已知 $f(x)=x^2-bx+c$。"
+                + "\n"
+                + r"（1）若 $f(x)\le0$ 的解集为 $\{x|1\le x\le2\}$，求 $b,c$；"
+                + "\n"
+                + r"（2）若 $b=c$，求 $f(x)>x$ 的解集；"
+                + "\n"
+                + r"（3）若 $\exists a\in[1,2]$，对 $\forall x\in[1,2]$，$f(x)\le(1-a)x^2$，求 $2c-3b$ 的最大值。",
+                {},
+            ),
+            (
+                "free_response",
+                r"某商品进价为10元，每天的销售量 $y$ 与价格 $x$ 的关系如图。"
+                + "\n"
+                + "(1)为使日利润最大，应如何确定销售价格？"
+                + "\n"
+                + r"(2)为使日利润不低于售价15元时的日利润，求 $x$ 的取值范围。",
+                {},
+            ),
         ]
-        self.items = [{"id":str(uuid.UUID(int=index)),"type":kind,"content":{"stem":stem,"options":choices},
-                       "selected":{},"ai":False,"solution_images":[],
-                       "images":[{"slot":"stem","bytes":self.image_bytes,"size":(363,349)}] if index==7 else []}
-                      for index,(kind,stem,choices) in enumerate(specs,1)]
-        self.options={"document":"questions","answers":False,"ai_answers":False,"origin":False,"font_size":12,
-                      "student_info":True,"pagination":"compact","option_layout":"auto","answer_space":"large",
-                      "answer_layout":"appendix","option_overrides":{},"answer_space_overrides":{},"question_breaks":[]}
+        self.items = [
+            {
+                "id": str(uuid.UUID(int=index)),
+                "type": kind,
+                "content": {"stem": stem, "options": choices},
+                "selected": {},
+                "ai": False,
+                "solution_images": [],
+                "images": [{"slot": "stem", "bytes": self.image_bytes, "size": (363, 349)}] if index == 7 else [],
+            }
+            for index, (kind, stem, choices) in enumerate(specs, 1)
+        ]
+        self.options = {
+            "document": "questions",
+            "answers": False,
+            "ai_answers": False,
+            "origin": False,
+            "font_size": 12,
+            "student_info": True,
+            "pagination": "compact",
+            "option_layout": "auto",
+            "answer_space": "large",
+            "answer_layout": "appendix",
+            "option_overrides": {},
+            "answer_space_overrides": {},
+            "question_breaks": [],
+        }
 
     def render(self, document, *, remote_fonts=False, probe=_GEOMETRY):
-        geometry=[]
+        geometry = []
         original = pdf._CDP.call
+
         def observe(client, method, params=None):
-            if method=="Network.setBlockedURLs" and remote_fonts:
-                params={"urls":["https://*","ws://*","wss://*","ftp://*","file://*"]}
-            if method=="Page.printToPDF":
-                geometry.append(original(client,"Runtime.evaluate",{"expression":probe,"returnByValue":True})["result"]["value"])
-            return original(client,method,params)
-        original_popen=pdf.subprocess.Popen
+            if method == "Network.setBlockedURLs" and remote_fonts:
+                params = {"urls": ["https://*", "ws://*", "wss://*", "ftp://*", "file://*"]}
+            if method == "Page.printToPDF":
+                geometry.append(
+                    original(client, "Runtime.evaluate", {"expression": probe, "returnByValue": True})["result"][
+                        "value"
+                    ]
+                )
+            return original(client, method, params)
+
+        original_popen = pdf.subprocess.Popen
+
         def start(args, **kwargs):
-            args=["--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1" if remote_fonts and x.startswith("--host-resolver-rules=") else x for x in args]
-            return original_popen(args,**kwargs)
-        with mock.patch.object(pdf._CDP,"call",observe), mock.patch.object(pdf.subprocess,"Popen",start):
-            data,pages=pdf._render(document)
-        return data,pages,geometry[0]
+            args = [
+                "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"
+                if remote_fonts and x.startswith("--host-resolver-rules=")
+                else x
+                for x in args
+            ]
+            return original_popen(args, **kwargs)
+
+        with mock.patch.object(pdf._CDP, "call", observe), mock.patch.object(pdf.subprocess, "Popen", start):
+            data, pages = pdf._render(document)
+        return data, pages, geometry[0]
 
     def assert_geometry(self, left, right):
-        if isinstance(left,dict):
-            self.assertEqual(left.keys(),right.keys())
-            for key in left:self.assert_geometry(left[key],right[key])
-        elif isinstance(left,list):
-            self.assertEqual(len(left),len(right))
-            for a,b in zip(left,right):self.assert_geometry(a,b)
-        elif isinstance(left,(float,int)):
-            self.assertAlmostEqual(left,right,delta=.15)
-        else:self.assertEqual(left,right)
+        if isinstance(left, dict):
+            self.assertEqual(left.keys(), right.keys())
+            for key in left:
+                self.assert_geometry(left[key], right[key])
+        elif isinstance(left, list):
+            self.assertEqual(len(left), len(right))
+            for a, b in zip(left, right):
+                self.assert_geometry(a, b)
+        elif isinstance(left, (float, int)):
+            self.assertAlmostEqual(left, right, delta=0.15)
+        else:
+            self.assertEqual(left, right)
 
     def documents(self, options=None):
-        options=options or self.options
-        with mock.patch.object(pdf,"_DRIVER",_preview_driver()):
-            preview=pdf._html_document(self.items,"合成分页验收",options)
-        return preview,pdf._html_document(self.items,"合成分页验收",options)
+        options = options or self.options
+        with mock.patch.object(pdf, "_DRIVER", _preview_driver()):
+            preview = pdf._html_document(self.items, "合成分页验收", options)
+        return preview, pdf._html_document(self.items, "合成分页验收", options)
 
     def test_compact_blank_space_splits_without_empty_third_page_or_losing_writing_space(self):
-        before=deepcopy(self.items)
-        preview, exported=self.documents()
-        _,preview_count,preview_geometry=self.render(preview)
-        data,export_count,geometry=self.render(exported)
-        self.assertEqual((preview_count,export_count),(2,2))
-        self.assert_geometry(preview_geometry,geometry)
-        questions=[q for page in geometry["pages"] for q in page["questions"]]
-        self.assertEqual({q["id"] for q in questions},{x["id"] for x in self.items})
-        self.assertEqual(sum(len(q["images"]) for q in questions),1)
-        space_mm=sum(s["rect"][3] for q in questions for s in q["spaces"])*25.4/96
-        self.assertAlmostEqual(space_mm,180,delta=.05)
-        self.assertTrue(any(q["spaces"] for q in geometry["pages"][0]["questions"]),"Page-bottom writing space is used before continuing")
+        before = deepcopy(self.items)
+        preview, exported = self.documents()
+        _, preview_count, preview_geometry = self.render(preview)
+        data, export_count, geometry = self.render(exported)
+        self.assertEqual((preview_count, export_count), (2, 2))
+        self.assert_geometry(preview_geometry, geometry)
+        questions = [q for page in geometry["pages"] for q in page["questions"]]
+        self.assertEqual({q["id"] for q in questions}, {x["id"] for x in self.items})
+        self.assertEqual(sum(len(q["images"]) for q in questions), 1)
+        space_mm = sum(s["rect"][3] for q in questions for s in q["spaces"]) * 25.4 / 96
+        self.assertAlmostEqual(space_mm, 180, delta=0.05)
+        self.assertTrue(
+            any(q["spaces"] for q in geometry["pages"][0]["questions"]),
+            "Page-bottom writing space is used before continuing",
+        )
         import pymupdf
-        with pymupdf.open(stream=data,filetype="pdf") as result:
-            self.assertEqual(result.page_count,2)
-            self.assertIn("商品",result[1].get_text())
+
+        with pymupdf.open(stream=data, filetype="pdf") as result:
+            self.assertEqual(result.page_count, 2)
+            self.assertIn("商品", result[1].get_text())
             self.assertTrue(result[1].get_images())
-        self.assertEqual(self.items,before)
+        self.assertEqual(self.items, before)
 
     def test_slow_url_fonts_match_embedded_pdf_and_failed_fonts_do_not_publish_fallback_pagination(self):
-        preview,exported=self.documents()
-        fonts,requests={},[]
+        preview, exported = self.documents()
+        fonts, requests = {}, []
+
         class Handler(BaseHTTPRequestHandler):
-            fail=False
-            def log_message(self,*args):pass
+            fail = False
+
+            def log_message(self, *args):
+                pass
+
             def do_GET(self):
                 requests.append(self.path)
                 if self.fail or self.path not in fonts:
-                    self.send_error(503);return
-                time.sleep(.15)
-                data=fonts[self.path]
-                self.send_response(200);self.send_header("Content-Type","font/woff2")
-                self.send_header("Access-Control-Allow-Origin","*");self.send_header("Content-Length",str(len(data)))
-                self.end_headers();self.wfile.write(data)
-        server=ThreadingHTTPServer(("127.0.0.1",0),Handler)
-        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
-        origin=f"http://127.0.0.1:{server.server_port}"
+                    self.send_error(503)
+                    return
+                time.sleep(0.15)
+                data = fonts[self.path]
+                self.send_response(200)
+                self.send_header("Content-Type", "font/woff2")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        origin = f"http://127.0.0.1:{server.server_port}"
+
         def replace(match):
-            key=f"/font-{len(fonts)}.woff2";fonts[key]=base64.b64decode(match[1]);return f'url("{origin}{key}")'
-        delayed=re.sub(r'url\("data:font/[^;]+;base64,([^"\)]+)"\)',replace,preview)
-        delayed=delayed.replace("font-src data:;",f"font-src data: {origin};")
+            key = f"/font-{len(fonts)}.woff2"
+            fonts[key] = base64.b64decode(match[1])
+            return f'url("{origin}{key}")'
+
+        delayed = re.sub(r'url\("data:font/[^;]+;base64,([^"\)]+)"\)', replace, preview)
+        delayed = delayed.replace("font-src data:;", f"font-src data: {origin};")
         try:
-            _,preview_count,preview_geometry=self.render(delayed,remote_fonts=True)
-            _,export_count,export_geometry=self.render(exported)
-            self.assertGreater(len(requests),0,"The test must actually load delayed URL fonts")
-            self.assertEqual((preview_count,export_count),(2,2))
-            self.assert_geometry(preview_geometry,export_geometry)
-            Handler.fail=True
-            with self.assertRaisesRegex(pdf.word.ExportError,"公式字体未能载入"):
-                self.render(delayed,remote_fonts=True)
+            _, preview_count, preview_geometry = self.render(delayed, remote_fonts=True)
+            _, export_count, export_geometry = self.render(exported)
+            self.assertGreater(len(requests), 0, "The test must actually load delayed URL fonts")
+            self.assertEqual((preview_count, export_count), (2, 2))
+            self.assert_geometry(preview_geometry, export_geometry)
+            Handler.fail = True
+            with self.assertRaisesRegex(pdf.word.ExportError, "公式字体未能载入"):
+                self.render(delayed, remote_fonts=True)
         finally:
-            server.shutdown();server.server_close();thread.join(timeout=2)
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_keep_whole_questions_retains_unsplit_writing_space_and_matching_geometry(self):
-        options={**self.options,"pagination":"keep"}
-        preview,exported=self.documents(options)
-        _,preview_count,preview_geometry=self.render(preview)
-        _,export_count,geometry=self.render(exported)
-        self.assertEqual(preview_count,export_count)
-        self.assert_geometry(preview_geometry,geometry)
-        questions=[q for page in geometry["pages"] for q in page["questions"]]
-        self.assertEqual(len(questions),7,"Keep mode must not split a fitting question to save paper")
-        spaces=[s for q in questions for s in q["spaces"]]
-        self.assertEqual(len(spaces),3)
-        for space in spaces:self.assertAlmostEqual(space["rect"][3]*25.4/96,60,delta=.02)
+        options = {**self.options, "pagination": "keep"}
+        preview, exported = self.documents(options)
+        _, preview_count, preview_geometry = self.render(preview)
+        _, export_count, geometry = self.render(exported)
+        self.assertEqual(preview_count, export_count)
+        self.assert_geometry(preview_geometry, geometry)
+        questions = [q for page in geometry["pages"] for q in page["questions"]]
+        self.assertEqual(len(questions), 7, "Keep mode must not split a fitting question to save paper")
+        spaces = [s for q in questions for s in q["spaces"]]
+        self.assertEqual(len(spaces), 3)
+        for space in spaces:
+            self.assertAlmostEqual(space["rect"][3] * 25.4 / 96, 60, delta=0.02)
 
-    def page_heads(self,geometry):
-        heads={}
-        for index,page in enumerate(geometry["pages"]):
-            if page["questions"]:heads[page["questions"][0]["id"]]=index
+    def page_heads(self, geometry):
+        heads = {}
+        for index, page in enumerate(geometry["pages"]):
+            if page["questions"]:
+                heads[page["questions"][0]["id"]] = index
         return heads
 
-    def page_of(self,geometry):
-        where={}
-        for index,page in enumerate(geometry["pages"]):
-            for question in page["questions"]:where[question["id"]]=index
+    def page_of(self, geometry):
+        where = {}
+        for index, page in enumerate(geometry["pages"]):
+            for question in page["questions"]:
+                where[question["id"]] = index
         return where
 
     def test_question_break_starts_that_question_on_a_new_page_and_leaves_the_others_alone(self):
-        target=self.items[3]["id"]
-        before=deepcopy(self.items)
-        _,base_count,base_geometry=self.render(self.documents()[1])
-        base_heads=self.page_heads(base_geometry)
-        base_where=self.page_of(base_geometry)
-        self.assertNotIn(target,base_heads,"The fixture must not already break this question for the test to mean anything")
+        target = self.items[3]["id"]
+        before = deepcopy(self.items)
+        _, base_count, base_geometry = self.render(self.documents()[1])
+        base_heads = self.page_heads(base_geometry)
+        base_where = self.page_of(base_geometry)
+        self.assertNotIn(
+            target, base_heads, "The fixture must not already break this question for the test to mean anything"
+        )
 
-        options={**self.options,"question_breaks":[target]}
-        preview,exported=self.documents(options)
-        _,preview_count,preview_geometry=self.render(preview)
-        _,export_count,geometry=self.render(exported)
-        self.assertEqual((preview_count,export_count),(preview_count,export_count))
-        self.assert_geometry(preview_geometry,geometry)
-        heads=self.page_heads(geometry)
-        self.assertIn(target,heads,"The chosen question has to become the first one on its page")
-        self.assertGreaterEqual(heads[target],1,"A break on the first question cannot invent a page before the title")
-        broken_where=self.page_of(geometry)
-        for index,other in enumerate(self.items,1):
-            if index>=4:break
-            self.assertEqual(broken_where[other["id"]],base_where[other["id"]],
-                             "Questions printed before the break must not move")
-        self.assertGreaterEqual(export_count,base_count)
-        self.assertEqual(self.items,before,"Rendering must not rewrite the caller's items")
+        options = {**self.options, "question_breaks": [target]}
+        preview, exported = self.documents(options)
+        _, preview_count, preview_geometry = self.render(preview)
+        _, export_count, geometry = self.render(exported)
+        self.assertEqual((preview_count, export_count), (preview_count, export_count))
+        self.assert_geometry(preview_geometry, geometry)
+        heads = self.page_heads(geometry)
+        self.assertIn(target, heads, "The chosen question has to become the first one on its page")
+        self.assertGreaterEqual(heads[target], 1, "A break on the first question cannot invent a page before the title")
+        broken_where = self.page_of(geometry)
+        for index, other in enumerate(self.items, 1):
+            if index >= 4:
+                break
+            self.assertEqual(
+                broken_where[other["id"]], base_where[other["id"]], "Questions printed before the break must not move"
+            )
+        self.assertGreaterEqual(export_count, base_count)
+        self.assertEqual(self.items, before, "Rendering must not rewrite the caller's items")
 
     _COLUMNS = r"""(()=>[...document.querySelectorAll('#printPaper .print-question')].map(q=>({
       id:q.dataset.questionId,
       columns:[...q.querySelectorAll('.qb-options')].map(n=>n.dataset.examColumns)})))()"""
 
     def test_per_question_option_columns_override_wins_and_leaves_the_others_alone(self):
-        choices=[item for item in self.items if item["content"]["options"]]
-        self.assertGreaterEqual(len(choices),2,"The fixture needs a target plus a bystander")
-        target=choices[1]["id"]; bystanders={item["id"] for item in choices} - {target}
-        before=deepcopy(self.items)
+        choices = [item for item in self.items if item["content"]["options"]]
+        self.assertGreaterEqual(len(choices), 2, "The fixture needs a target plus a bystander")
+        target = choices[1]["id"]
+        bystanders = {item["id"] for item in choices} - {target}
+        before = deepcopy(self.items)
 
-        _,_,plain=self.render(self.documents({**self.options,"option_layout":"four"})[1],probe=self._COLUMNS)
-        plain={row["id"]:row["columns"] for row in plain}
-        self.assertEqual(plain[target],["4"],"The fixture must print four across for the test to mean anything")
+        _, _, plain = self.render(self.documents({**self.options, "option_layout": "four"})[1], probe=self._COLUMNS)
+        plain = {row["id"]: row["columns"] for row in plain}
+        self.assertEqual(plain[target], ["4"], "The fixture must print four across for the test to mean anything")
 
-        options={**self.options,"option_layout":"four","option_overrides":{target:"vertical"}}
-        preview,exported=self.documents(options)
-        _,_,preview_columns=self.render(preview,probe=self._COLUMNS)
-        _,_,export_columns=self.render(exported,probe=self._COLUMNS)
-        self.assertEqual(preview_columns,export_columns,"The preview the teacher checked has to match the download")
-        columns={row["id"]:row["columns"] for row in export_columns}
-        self.assertEqual(columns[target],["1"],"The named question has to print one option per line")
+        options = {**self.options, "option_layout": "four", "option_overrides": {target: "vertical"}}
+        preview, exported = self.documents(options)
+        _, _, preview_columns = self.render(preview, probe=self._COLUMNS)
+        _, _, export_columns = self.render(exported, probe=self._COLUMNS)
+        self.assertEqual(preview_columns, export_columns, "The preview the teacher checked has to match the download")
+        columns = {row["id"]: row["columns"] for row in export_columns}
+        self.assertEqual(columns[target], ["1"], "The named question has to print one option per line")
         for other in bystanders:
-            self.assertEqual(columns[other],plain[other],
-                             "An option override is per question; the rest keep the global layout")
-        self.assertEqual(self.items,before,"Rendering must not rewrite the caller's items")
+            self.assertEqual(
+                columns[other], plain[other], "An option override is per question; the rest keep the global layout"
+            )
+        self.assertEqual(self.items, before, "Rendering must not rewrite the caller's items")
 
     def test_teacher_ai_note_matches_preview_text_order_and_geometry(self):
-        for index,item in enumerate(self.items):
-            item["selected"]={"answer":"合成答案","analysis":r"由 $x=1$ 代入计算，得到结论。"}
-            item["ai"]=index%2==0
-        options={**self.options,"document":"combined","answers":True,"answer_layout":"inline","answer_space":"none"}
-        preview,exported=self.documents(options)
-        _,preview_count,preview_geometry=self.render(preview)
-        _,export_count,geometry=self.render(exported)
-        self.assertEqual(preview_count,export_count)
-        self.assert_geometry(preview_geometry,geometry)
-        notes=[answer["text"] for page in geometry["pages"] for answer in page["answers"] if "AI" in answer["text"]]
+        for index, item in enumerate(self.items):
+            item["selected"] = {"answer": "合成答案", "analysis": r"由 $x=1$ 代入计算，得到结论。"}
+            item["ai"] = index % 2 == 0
+        options = {
+            **self.options,
+            "document": "combined",
+            "answers": True,
+            "answer_layout": "inline",
+            "answer_space": "none",
+        }
+        preview, exported = self.documents(options)
+        _, preview_count, preview_geometry = self.render(preview)
+        _, export_count, geometry = self.render(exported)
+        self.assertEqual(preview_count, export_count)
+        self.assert_geometry(preview_geometry, geometry)
+        notes = [answer["text"] for page in geometry["pages"] for answer in page["answers"] if "AI" in answer["text"]]
         self.assertTrue(notes)
         self.assertTrue(all(text.startswith("（AI 参考，未核对）") for text in notes))
 
@@ -290,20 +407,20 @@ class SharedPdfPaginationTests(SimpleTestCase):
         题源在导出侧已经能落到 .qb-stem 上，预览侧却只认 .qb-stem-body，于是这类题
         在屏幕上没有题源、导出的卷子上有 —— 老师照屏幕核对会对不上号。
         """
-        before=deepcopy(self.items)
-        items=deepcopy(self.items)
-        items[0]["content"].update(body_mode="source_image",stem="",origin="2024 全国甲卷 第 1 题")
-        items[0]["images"]=[{"slot":"stem","bytes":self.image_bytes,"size":(363,349)}]
-        options={**self.options,"origin":True}
-        with mock.patch.object(pdf,"_DRIVER",_preview_driver()):
-            preview=pdf._html_document(items,"原图题源对齐",options)
-        exported=pdf._html_document(items,"原图题源对齐",options)
-        _,preview_count,preview_geometry=self.render(preview)
-        _,export_count,geometry=self.render(exported)
-        self.assertEqual(preview_count,export_count)
-        self.assert_geometry(preview_geometry,geometry)
-        self.assertIn("2024 全国甲卷 第 1 题",geometry["pages"][0]["questions"][0]["text"])
-        self.assertEqual(self.items,before)
+        before = deepcopy(self.items)
+        items = deepcopy(self.items)
+        items[0]["content"].update(body_mode="source_image", stem="", origin="2024 全国甲卷 第 1 题")
+        items[0]["images"] = [{"slot": "stem", "bytes": self.image_bytes, "size": (363, 349)}]
+        options = {**self.options, "origin": True}
+        with mock.patch.object(pdf, "_DRIVER", _preview_driver()):
+            preview = pdf._html_document(items, "原图题源对齐", options)
+        exported = pdf._html_document(items, "原图题源对齐", options)
+        _, preview_count, preview_geometry = self.render(preview)
+        _, export_count, geometry = self.render(exported)
+        self.assertEqual(preview_count, export_count)
+        self.assert_geometry(preview_geometry, geometry)
+        self.assertIn("2024 全国甲卷 第 1 题", geometry["pages"][0]["questions"][0]["text"])
+        self.assertEqual(self.items, before)
 
     # 九上教材「下面是某同学的画法」那张列表：13 列 + 单元格里的 \dfrac，
     # 正是它在真卷上把表格盒撑出了滚动条。合成自检不能换成 \frac —— 那个不溢出。
@@ -311,7 +428,8 @@ class SharedPdfPaginationTests(SimpleTestCase):
         "下面是某同学的列表：\n"
         "| $x$ | $-8$ | $-4$ | $-3$ | $-2$ | $-1$ | $-\\dfrac12$ | $\\dfrac12$ | $1$ | $2$ | $3$ | $4$ | $8$ |\n"
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
-        "| $y=\\dfrac4x$ | $-\\dfrac12$ | $-1$ | $-\\dfrac43$ | $-2$ | $-4$ | $-8$ | $8$ | $4$ | $2$ | $\\dfrac43$ | $1$ | $\\dfrac12$ |")
+        "| $y=\\dfrac4x$ | $-\\dfrac12$ | $-1$ | $-\\dfrac43$ | $-2$ | $-4$ | $-8$ | $8$ | $4$ | $2$ | $\\dfrac43$ | $1$ | $\\dfrac12$ |"
+    )
 
     def test_a_wide_table_prints_without_a_browser_scrollbar(self):
         """宽表格在卷面上长出一条浏览器滚动条。
@@ -322,17 +440,21 @@ class SharedPdfPaginationTests(SimpleTestCase):
         老师印出来就是表格右边一条竖杠。这里量的是几何（滚动条占掉的那 15px），
         所以换成别的实现方式也照样抓得到。
         """
-        before=deepcopy(self.items)
-        items=deepcopy(self.items)
-        items[0]["content"]["stem"]=self.WIDE_TABLE
-        exported=pdf._html_document(items,"宽表格卷",self.options)
-        _,pages,tables=self.render(exported,probe=_TABLES)
-        self.assertGreaterEqual(pages,1)
-        self.assertTrue(tables,"卷面上必须真的排出这张表格，否则这道测试是空跑")
-        self.assertEqual([(table["columns"],table["rows"]) for table in tables],[(13,2)])
+        before = deepcopy(self.items)
+        items = deepcopy(self.items)
+        items[0]["content"]["stem"] = self.WIDE_TABLE
+        exported = pdf._html_document(items, "宽表格卷", self.options)
+        _, pages, tables = self.render(exported, probe=_TABLES)
+        self.assertGreaterEqual(pages, 1)
+        self.assertTrue(tables, "卷面上必须真的排出这张表格，否则这道测试是空跑")
+        self.assertEqual([(table["columns"], table["rows"]) for table in tables], [(13, 2)])
         for table in tables:
-            self.assertEqual((table["overflow_x"],table["overflow_y"]),(0,0),
-                "卷面上这张表格长出了滚动条，PDF 会把它印到纸上："+repr(table))
-            self.assertEqual(table["overflow"],"visible/visible",
-                "卷面上这张表格是滚动容器，PDF 会把它印到纸上："+repr(table))
-        self.assertEqual(self.items,before)
+            self.assertEqual(
+                (table["overflow_x"], table["overflow_y"]),
+                (0, 0),
+                "卷面上这张表格长出了滚动条，PDF 会把它印到纸上：" + repr(table),
+            )
+            self.assertEqual(
+                table["overflow"], "visible/visible", "卷面上这张表格是滚动容器，PDF 会把它印到纸上：" + repr(table)
+            )
+        self.assertEqual(self.items, before)

@@ -1,4 +1,5 @@
 """One-action manual fallback: real local pages, offline late-result races."""
+
 import json
 import tempfile
 from copy import deepcopy
@@ -36,20 +37,31 @@ class SwitchToManualTests(TestCase):
         self.addCleanup(config.disable)
 
     def switch(self, paper, **payload):
-        return self.client.post(f"/api/papers/{paper.pk}/processing", json.dumps({"mode": "manual", **payload}),
-            content_type="application/json", HTTP_X_QB_REQUEST="1")
+        return self.client.post(
+            f"/api/papers/{paper.pk}/processing",
+            json.dumps({"mode": "manual", **payload}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
 
     def card(self, paper, number=1, **fields):
-        return Question.objects.create(paper=paper, number=number, question_type="free_response",
-            regions=[{"page_idx": 0, "bbox": [50, 50, 900, 420]}], **fields)
+        return Question.objects.create(
+            paper=paper,
+            number=number,
+            question_type="free_response",
+            regions=[{"page_idx": 0, "bbox": [50, 50, 900, 420]}],
+            **fields,
+        )
 
     def test_old_parsing_task_switches_immediately_without_worker_or_cloud(self):
         paper = self.paper(mode="mineru", status="parsing")
         original = Path(paper.source_path).read_bytes()
         Paper.objects.filter(pk=paper.pk).update(updated_at=timezone.now() - timedelta(hours=16))
-        with mock.patch.object(intake, "_prepare_manual_pages") as prepare, \
-                mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud, \
-                mock.patch.object(readers, "chat") as read:
+        with (
+            mock.patch.object(intake, "_prepare_manual_pages") as prepare,
+            mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud,
+            mock.patch.object(readers, "chat") as read,
+        ):
             result = self.switch(paper)
         self.assertEqual(result.status_code, 200, result.content)
         shown = result.json()
@@ -66,21 +78,37 @@ class SwitchToManualTests(TestCase):
     def test_switch_preserves_edited_body_figures_approval_and_publication_bytes(self):
         paper = self.paper(mode="mineru", status="parsing")
         stem = "如图，Human mathematical body $x^2$"
-        question = self.card(paper, stem=stem, state="green", edited=True,
-            options={"A": "human option"}, figures=[{"page_idx": 0, "bbox": [200, 100, 600, 350], "slot": "stem"}])
+        question = self.card(
+            paper,
+            stem=stem,
+            state="green",
+            edited=True,
+            options={"A": "human option"},
+            figures=[{"page_idx": 0, "bbox": [200, 100, 600, 350], "slot": "stem"}],
+        )
         figures = deepcopy(question.figures)
         library.approve(question, now=timezone.now())
         question.save()
         publication, _ = library.publish(question)
         snapshot = deepcopy(publication.content)
-        publication_files = {str(path.relative_to(self.root)): path.read_bytes()
-            for path in (self.root / "library" / str(publication.pk)).rglob("*") if path.is_file()}
+        publication_files = {
+            str(path.relative_to(self.root)): path.read_bytes()
+            for path in (self.root / "library" / str(publication.pk)).rglob("*")
+            if path.is_file()
+        }
         key, approved_hash = question.source_key, question.approved_content_hash
         block = Block.objects.create(paper=paper, seq=0, type="text", page_idx=0, text="previous layout")
         archive = pipeline.paper_dir(paper) / "completed.zip"
         archive.write_bytes(b"previous successful parsed result")
-        chunk = ImportChunk.objects.create(paper=paper, sequence=1, source_page_start=1,
-            source_page_end=2, page_map=[1, 2], status="parsed", artifact_path=str(archive))
+        chunk = ImportChunk.objects.create(
+            paper=paper,
+            sequence=1,
+            source_page_start=1,
+            source_page_end=2,
+            page_map=[1, 2],
+            status="parsed",
+            artifact_path=str(archive),
+        )
         paper.progress, paper.total = 7, 9
         paper.save(update_fields=["progress", "total"])
         self.assertEqual(self.switch(paper).status_code, 200)
@@ -88,13 +116,18 @@ class SwitchToManualTests(TestCase):
         paper.refresh_from_db()
         publication.refresh_from_db()
         chunk.refresh_from_db()
-        self.assertEqual((question.stem, question.options, question.figures),
-            (stem, {"A": "human option"}, figures))
+        self.assertEqual((question.stem, question.options, question.figures), (stem, {"A": "human option"}, figures))
         self.assertEqual((question.source_key, question.approved_content_hash), (key, approved_hash))
         self.assertTrue(question.edited and question.approved and library.approval_is_current(question))
         self.assertEqual(publication.content, snapshot)
-        self.assertEqual(publication_files, {str(path.relative_to(self.root)): path.read_bytes()
-            for path in (self.root / "library" / str(publication.pk)).rglob("*") if path.is_file()})
+        self.assertEqual(
+            publication_files,
+            {
+                str(path.relative_to(self.root)): path.read_bytes()
+                for path in (self.root / "library" / str(publication.pk)).rglob("*")
+                if path.is_file()
+            },
+        )
         self.assertEqual((paper.progress, paper.total), (7, 9))
         self.assertTrue(Block.objects.filter(pk=block.pk, text="previous layout").exists())
         self.assertEqual(chunk.status, "parsed")
@@ -104,13 +137,22 @@ class SwitchToManualTests(TestCase):
         paper = self.paper(mode="mineru", status="reading")
         question = self.card(paper, state="reading", ocr_pending=True, reread_requested=True)
         queued = RegionRead.objects.create(question=question, page_idx=0, bbox=[30, 30, 100, 100], target="stem")
-        running = RegionRead.objects.create(question=question, page_idx=0, bbox=[30, 30, 100, 100],
-            target="stem", status="running")
-        done = RegionRead.objects.create(question=question, page_idx=0, bbox=[30, 30, 100, 100],
-            target="stem", status="done", text="previous usable reading")
+        running = RegionRead.objects.create(
+            question=question, page_idx=0, bbox=[30, 30, 100, 100], target="stem", status="running"
+        )
+        done = RegionRead.objects.create(
+            question=question,
+            page_idx=0,
+            bbox=[30, 30, 100, 100],
+            target="stem",
+            status="done",
+            text="previous usable reading",
+        )
         self.assertEqual(self.switch(paper).status_code, 200)
         question.refresh_from_db()
-        self.assertEqual((question.state, question.body_mode, question.processing_mode), ("yellow", "source_image", "manual"))
+        self.assertEqual(
+            (question.state, question.body_mode, question.processing_mode), ("yellow", "source_image", "manual")
+        )
         self.assertFalse(question.ocr_pending or question.reread_requested)
         self.assertEqual(question.content_revision, 1)
         region_reads._finish(running, "done", text="late text")
@@ -144,14 +186,20 @@ class SwitchToManualTests(TestCase):
         question = self.card(paper, stem="Existing manual correction", state="green", edited=True)
         block = Block.objects.create(paper=paper, seq=0, type="text", page_idx=0, text="existing native or cloud block")
         real_sizes = intake.imaging.page_sizes
+
         def size_after_stop(*args):
             current = Paper.objects.get(pk=paper.pk)
             self.assertEqual((current.processing_plan["mode"], current.processing_plan["revision"]), ("manual", 1))
             self.assertTrue((pipeline.paper_dir(current) / mineru.CANCEL_FILE).exists())
             return real_sizes(*args)
-        with mock.patch.object(intake.imaging, "page_sizes", side_effect=size_after_stop), \
-                mock.patch.object(intake, "prepare", side_effect=AssertionError("New import must not replace existing results")), \
-                mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud:
+
+        with (
+            mock.patch.object(intake.imaging, "page_sizes", side_effect=size_after_stop),
+            mock.patch.object(
+                intake, "prepare", side_effect=AssertionError("New import must not replace existing results")
+            ),
+            mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud,
+        ):
             result = self.switch(paper)
         self.assertEqual(result.status_code, 200, result.content)
         self.assertTrue(result.json()["manual_ready"])
@@ -180,8 +228,9 @@ class SwitchToManualTests(TestCase):
         self.assertEqual(question.stem, "Retained text")
         source.write_bytes(original)
         with mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud:
-            retry = self.client.post(f"/api/papers/{paper.pk}/retry", "{}",
-                content_type="application/json", HTTP_X_QB_REQUEST="1")
+            retry = self.client.post(
+                f"/api/papers/{paper.pk}/retry", "{}", content_type="application/json", HTTP_X_QB_REQUEST="1"
+            )
         self.assertEqual(retry.status_code, 200, retry.content)
         self.assertEqual((retry.json()["paper"]["status"], retry.json()["paper"]["parse_mode"]), ("ready", "manual"))
         self.assertEqual(len(retry.json()["paper"]["pages"]), 2)
@@ -197,8 +246,10 @@ class SwitchToManualTests(TestCase):
         paper.kind, paper.source_path, paper.pages = "image", str(source), []
         paper.photos = {"files": [{"name": "photo.jpg", "file": "photo.jpg"}], "order": [0], "enhance": False}
         paper.save()
-        with mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud, \
-                mock.patch.object(readers, "chat") as read:
+        with (
+            mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud,
+            mock.patch.object(readers, "chat") as read,
+        ):
             result = self.switch(paper)
         self.assertEqual(result.status_code, 200, result.content)
         paper.refresh_from_db()
@@ -215,13 +266,17 @@ class SwitchToManualTests(TestCase):
         source.write_bytes(b"original docx test bytes")
         paper.kind, paper.source_path, paper.pages = "docx", str(source), []
         paper.save()
+
         def convert(original, target):
             self.assertEqual(original, source)
             self.assertNotEqual(target, folder / "converted.pdf")
             self.assertEqual(Paper.objects.get(pk=paper.pk).processing_plan["mode"], "manual")
             target.write_bytes(review_tests.original_pdf(pages=1))
-        with mock.patch.object(pipeline, "convert_docx_to_pdf", side_effect=convert), \
-                mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud:
+
+        with (
+            mock.patch.object(pipeline, "convert_docx_to_pdf", side_effect=convert),
+            mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud,
+        ):
             result = self.switch(paper)
         self.assertEqual(result.status_code, 200, result.content)
         paper.refresh_from_db()
@@ -234,13 +289,17 @@ class SwitchToManualTests(TestCase):
         paper = self.paper(mode="mineru", status="queued")
         original = Path(paper.source_path).read_bytes()
         block = Block.objects.create(paper=paper, seq=0, type="text", page_idx=0, text="retained block")
+
         def extract(_source, target, _count, **kwargs):
             self.assertEqual(self.switch(paper).status_code, 200)
             self.assertTrue(kwargs["cancel"]())
             target.write_bytes(b"late obsolete MinerU result")
             kwargs["on_state"]({"state": "done"})
-        with mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=extract), \
-                mock.patch.object(pipeline, "load_blocks", return_value=[]):
+
+        with (
+            mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=extract),
+            mock.patch.object(pipeline, "load_blocks", return_value=[]),
+        ):
             pipeline.process_paper(paper)
         paper.refresh_from_db()
         self.assertEqual((paper.status, paper.processing_plan["mode"], paper.error), ("ready", "manual", ""))
@@ -254,9 +313,11 @@ class SwitchToManualTests(TestCase):
         for ahead in (False, True):
             with self.subTest(ahead=ahead):
                 paper = self.paper(mode="mineru", status="queued")
+
                 def extract(*args, _paper=paper, **kwargs):
                     self.assertEqual(self.switch(_paper).status_code, 200)
                     raise mineru.MineruError("obsolete remote failure")
+
                 with mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=extract):
                     if ahead:
                         pipeline.parse_ahead(paper)
@@ -271,21 +332,34 @@ class SwitchToManualTests(TestCase):
         folder.mkdir()
         archive = folder / "chunk_001.zip"
         archive.write_bytes(b"completed original artifact")
-        completed = ImportChunk.objects.create(paper=paper, sequence=1, source_page_start=1,
-            source_page_end=1, page_map=[1], status="parsed", artifact_path=str(archive))
-        pending = ImportChunk.objects.create(paper=paper, sequence=2, source_page_start=2,
-            source_page_end=2, page_map=[2])
+        completed = ImportChunk.objects.create(
+            paper=paper,
+            sequence=1,
+            source_page_start=1,
+            source_page_end=1,
+            page_map=[1],
+            status="parsed",
+            artifact_path=str(archive),
+        )
+        pending = ImportChunk.objects.create(
+            paper=paper, sequence=2, source_page_start=2, source_page_end=2, page_map=[2]
+        )
+
         def extract(_source, target, _count, **kwargs):
             self.assertEqual(self.switch(paper).status_code, 200)
             self.assertTrue(kwargs["cancel"]())
             target.write_bytes(b"obsolete chunk")
+
         def cut(_source, target, *args):
             target.write_bytes(b"offline local slice")
-        with mock.patch.object(pipeline, "ThreadPoolExecutor", local_tests.InlineExecutor), \
-                mock.patch.object(pipeline, "account_pool", return_value=mock.Mock(size=1)), \
-                mock.patch.object(pipeline, "write_pdf_slice", side_effect=cut), \
-                mock.patch.object(pipeline, "load_blocks", return_value=[]), \
-                mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=extract):
+
+        with (
+            mock.patch.object(pipeline, "ThreadPoolExecutor", local_tests.InlineExecutor),
+            mock.patch.object(pipeline, "account_pool", return_value=mock.Mock(size=1)),
+            mock.patch.object(pipeline, "write_pdf_slice", side_effect=cut),
+            mock.patch.object(pipeline, "load_blocks", return_value=[]),
+            mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=extract),
+        ):
             with self.assertRaises(mineru.MineruCancelled):
                 pipeline._chunk_blocks(paper, Path(paper.source_path))
         pending.refresh_from_db()
@@ -300,19 +374,25 @@ class SwitchToManualTests(TestCase):
     def test_late_card_read_after_manual_switch_cannot_overwrite_edited_text(self):
         paper = self.paper(mode="mineru", status="reading")
         question = self.card(paper, stem="Saved human correction", state="waiting", edited=True)
+
         def finish(*args):
             self.assertEqual(self.switch(paper).status_code, 200)
             return {"stem": "obsolete OCR replacement", "options": {}, "state": "green", "flags": []}
+
         self.run_read(question, finish)
         question.refresh_from_db()
-        self.assertEqual((question.stem, question.processing_mode, question.state), ("Saved human correction", "manual", "yellow"))
+        self.assertEqual(
+            (question.stem, question.processing_mode, question.state), ("Saved human correction", "manual", "yellow")
+        )
         self.assertFalse(question.ocr_pending or question.reread_requested)
 
     def test_restarted_worker_and_old_claim_do_not_resume_mineru_or_read_cards(self):
         paper = self.paper(mode="mineru", status="parsing")
         self.assertEqual(self.switch(paper).status_code, 200)
-        with mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud, \
-                mock.patch.object(pipeline, "read_card") as read:
+        with (
+            mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud,
+            mock.patch.object(pipeline, "read_card") as read,
+        ):
             pipeline.process_paper(paper)
             self.assertFalse(pipeline.parse_ahead(paper))
             with self.assertRaises(mineru.MineruCancelled):

@@ -24,6 +24,7 @@ def seed():
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "qb_server.settings")
     sys.path.insert(0, str(ROOT / "backend"))
     import django
+
     django.setup()
     import shutil
 
@@ -37,8 +38,9 @@ def seed():
     call_command("migrate", verbosity=0)
     OUTPUT.mkdir(parents=True, exist_ok=True)
     fixture = json.loads((ROOT / "backend/core/demo_data/demo-paper.json").read_text(encoding="utf-8"))
-    paper = Paper.objects.create(filename="出处理离线演示.pdf", kind="pdf", sha256="browser-source",
-                                 pages=fixture["pages"], status="ready")
+    paper = Paper.objects.create(
+        filename="出处理离线演示.pdf", kind="pdf", sha256="browser-source", pages=fixture["pages"], status="ready"
+    )
     folder = settings.DATA_ROOT / str(paper.id)
     folder.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(ROOT / "backend/core/demo_data/demo-paper.pdf", folder / "source.pdf")
@@ -46,10 +48,19 @@ def seed():
     paper.save()
     base = Question.objects.create(paper=paper, number=12, question_type="free_response", stem="求 $1+1$。")
     content = library.final_content(base)
-    row = PublishedQuestion.objects.create(question=base, paper=paper, source_filename=paper.filename,
-        number=12, question_type="free_response", version=1, content=content,
-        content_hash=library.content_hash(content), search_text=library._search_text(content),
-        status="published", published_at=timezone.now())
+    row = PublishedQuestion.objects.create(
+        question=base,
+        paper=paper,
+        source_filename=paper.filename,
+        number=12,
+        question_type="free_response",
+        version=1,
+        content=content,
+        content_hash=library.content_hash(content),
+        search_text=library._search_text(content),
+        status="published",
+        published_at=timezone.now(),
+    )
     base.stem = "设集合 $A=\\{x|x>1\\}$，求 $\\complement_U A$。"
     base.question_type = "single_choice"
     base.options = {"A": "空集", "B": "$\\{x|x\\leq 1\\}$"}
@@ -64,8 +75,13 @@ def seed():
     first.save()
     ids = [str(first.id)]
     for index, near in enumerate((False, True)):
-        paper = Paper.objects.create(filename=f"另一份资料{index + 1}.pdf", kind="pdf", sha256=f"ux-other-{index}",
-                                     pages=base.paper.pages, status="ready")
+        paper = Paper.objects.create(
+            filename=f"另一份资料{index + 1}.pdf",
+            kind="pdf",
+            sha256=f"ux-other-{index}",
+            pages=base.paper.pages,
+            status="ready",
+        )
         folder = settings.DATA_ROOT / str(paper.id)
         folder.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(base.paper.source_path, folder / "source.pdf")
@@ -75,11 +91,26 @@ def seed():
         saved.update(document_id=str(paper.id), source_filename=paper.filename)
         if near:
             saved["stem"] = saved["stem"].replace("x|", "x\\mid ").replace("_U ", "_{U}")
-        draft = Question.objects.create(paper=paper, number=1, question_type="single_choice", stem=saved["stem"],
-                                        options=saved["options"], regions=base.regions)
-        row = PublishedQuestion.objects.create(question=draft, paper=paper, source_filename=paper.filename,
-            number=1, question_type="single_choice", version=1, status="published", content=saved,
-            content_hash=library.content_hash(saved), search_text=library._search_text(saved))
+        draft = Question.objects.create(
+            paper=paper,
+            number=1,
+            question_type="single_choice",
+            stem=saved["stem"],
+            options=saved["options"],
+            regions=base.regions,
+        )
+        row = PublishedQuestion.objects.create(
+            question=draft,
+            paper=paper,
+            source_filename=paper.filename,
+            number=1,
+            question_type="single_choice",
+            version=1,
+            status="published",
+            content=saved,
+            content_hash=library.content_hash(saved),
+            search_text=library._search_text(saved),
+        )
         ids.append(str(row.id))
     (OUTPUT / "fixture.json").write_text(json.dumps({"ids": ids}), encoding="utf-8")
     print("Offline UX fixtures ready")
@@ -87,16 +118,32 @@ def seed():
 
 def check(url):
     from playwright.sync_api import expect, sync_playwright
+
     ids = json.loads((OUTPUT / "fixture.json").read_text(encoding="utf-8"))["ids"]
     errors = []
     with sync_playwright() as pw:
-        executable = next((str(p) for p in (Path(pw.chromium.executable_path),
-            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if p.is_file()), None)
+        executable = next(
+            (
+                str(p)
+                for p in (
+                    Path(pw.chromium.executable_path),
+                    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                )
+                if p.is_file()
+            ),
+            None,
+        )
         browser = pw.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
         context = browser.new_context(viewport={"width": 650, "height": 920})
-        context.route("**/*", lambda route: route.continue_() if urlparse(route.request.url).hostname in
-                      ("127.0.0.1", "localhost") else route.abort())
+        context.route(
+            "**/*",
+            lambda route: (
+                route.continue_()
+                if urlparse(route.request.url).hostname in ("127.0.0.1", "localhost")
+                else route.abort()
+            ),
+        )
         page = context.new_page()
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(url + "/library")
@@ -121,10 +168,14 @@ def check(url):
         expect(page.locator("#sourceQuestion")).to_have_attribute("aria-pressed", "true")
         image = dialog.locator("img").first
         expect(image).to_be_visible()
-        page.wait_for_function("[...document.querySelectorAll('#sourcePages img')].every(i => i.complete && i.naturalWidth > 0)")
+        page.wait_for_function(
+            "[...document.querySelectorAll('#sourcePages img')].every(i => i.complete && i.naturalWidth > 0)"
+        )
         crop_width = image.evaluate("e => e.getBoundingClientRect().width")
         box = dialog.locator(".source-box").first
-        assert box.evaluate("e => { const a=e.getBoundingClientRect(),b=e.parentElement.getBoundingClientRect(); return a.left >= b.left-1 && a.right <= b.right+1 && a.top>=b.top-1 && a.bottom<=b.bottom+1; }")
+        assert box.evaluate(
+            "e => { const a=e.getBoundingClientRect(),b=e.parentElement.getBoundingClientRect(); return a.left >= b.left-1 && a.right <= b.right+1 && a.top>=b.top-1 && a.bottom<=b.bottom+1; }"
+        )
         page.locator("#sourceWholePage").click()
         expect(page.locator("#sourceQuestion")).to_have_attribute("aria-pressed", "false")
         expect(dialog.locator(".source-cropped")).to_have_count(0)
@@ -179,7 +230,9 @@ def check(url):
         assert page.get_by_role("button", name="版本历史", exact=True).count() == 0
         assert not errors, errors
         browser.close()
-    print("Library UX browser checks passed: clear filters, crop/position/zoom, related sources, missing source, narrow viewport")
+    print(
+        "Library UX browser checks passed: clear filters, crop/position/zoom, related sources, missing source, narrow viewport"
+    )
 
 
 if __name__ == "__main__":

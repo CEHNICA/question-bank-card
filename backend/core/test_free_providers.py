@@ -23,8 +23,12 @@ class _Response:
 
 def keys(**services):
     """Environment with the given services configured (one key each)."""
-    environment = {"QB_HEDGE_AFTER": "0", "QB_PRIMARY_ENGINE": "minimax_m3", "QB_CHECKER_ENGINE": "auto",
-                   "QB_ARBITER_ENGINE": "primary"}
+    environment = {
+        "QB_HEDGE_AFTER": "0",
+        "QB_PRIMARY_ENGINE": "minimax_m3",
+        "QB_CHECKER_ENGINE": "auto",
+        "QB_ARBITER_ENGINE": "primary",
+    }
     for service in provider_catalog.VISION:
         pool, single = provider_catalog.environment_names()[service]
         environment[pool] = json.dumps([f"{service}-key"]) if service in services else "[]"
@@ -43,7 +47,7 @@ class FreeProviderTests(SimpleTestCase):
         with keys(modelscope=1):
             primary, checker = readers.primary_engine(), readers.checker_engine()
             self.assertEqual((primary.provider, primary.model), ("modelscope", "Qwen/Qwen3.5-35B-A3B"))
-            self.assertEqual(checker.provider, "modelscope")      # nobody else: read twice
+            self.assertEqual(checker.provider, "modelscope")  # nobody else: read twice
         with keys(modelscope=1, siliconflow=1):
             self.assertEqual(readers.primary_engine().provider, "modelscope")
             self.assertEqual(readers.checker_engine().provider, "siliconflow")
@@ -62,7 +66,7 @@ class FreeProviderTests(SimpleTestCase):
 
         with keys(modelscope=1), mock.patch.object(readers, "_post", side_effect=post):
             readers.chat(readers.Engine("modelscope", "Qwen/Qwen3.5-35B-A3B"), "读题", ["data:image/jpeg;base64,QUJD"])
-        (url, key, payload), = sent
+        ((url, key, payload),) = sent
         self.assertEqual((url, key), (readers.MODELSCOPE_URL, "modelscope-key"))
         self.assertIs(payload["enable_thinking"], False)
         self.assertEqual(payload["messages"][0]["content"][1]["image_url"]["url"], "data:image/jpeg;base64,QUJD")
@@ -76,7 +80,9 @@ class FreeProviderTests(SimpleTestCase):
             return answers.pop(0)
 
         with keys(modelscope=1), mock.patch.object(readers, "_post", side_effect=post):
-            text = readers.chat(readers.Engine("modelscope", "Qwen/Qwen3.5-35B-A3B"), "读题", ["data:image/png;base64,QUJD"])
+            text = readers.chat(
+                readers.Engine("modelscope", "Qwen/Qwen3.5-35B-A3B"), "读题", ["data:image/png;base64,QUJD"]
+            )
         self.assertEqual(text, "好")
         self.assertIn("enable_thinking", sent[0])
         self.assertNotIn("enable_thinking", sent[1])
@@ -96,7 +102,7 @@ class FreeProviderTests(SimpleTestCase):
             text = readers.chat(engine, "读题", ["data:image/png;base64,QUJD"])
             self.assertEqual(text, "好")
             self.assertEqual([payload["max_tokens"] for payload in sent], [3000, 1024])
-            self.assertIn("enable_thinking", sent[1])          # nothing else was dropped
+            self.assertIn("enable_thinking", sent[1])  # nothing else was dropped
             # The next question asks within the limit straight away.
             answers.append(_Response(200, text="又好"))
             readers.chat(engine, "读题", ["data:image/png;base64,QUJD"])
@@ -112,8 +118,10 @@ class FreeProviderTests(SimpleTestCase):
             self.assertEqual(text, "【题干】硅基流动读的")
             self.assertEqual(readers.answered_by(engine).provider, "siliconflow")
             account_pool.reset_account_pools()
-            with mock.patch.dict("os.environ", {"QB_PROVIDER_FALLBACK": "0"}), \
-                    self.assertRaises(readers.ReaderUnavailable):
+            with (
+                mock.patch.dict("os.environ", {"QB_PROVIDER_FALLBACK": "0"}),
+                self.assertRaises(readers.ReaderUnavailable),
+            ):
                 readers.chat(engine, "读题", ["data:image/png;base64,QUJD"])
 
     def test_a_failed_service_rests_so_later_questions_go_elsewhere(self):
@@ -130,7 +138,7 @@ class FreeProviderTests(SimpleTestCase):
             self.assertEqual((calls[0], calls[-1]), (readers.MODELSCOPE_URL, readers.SILICONFLOW_URL))
             calls.clear()
             readers.chat(engine, "读题", image)
-            self.assertEqual(calls, [readers.SILICONFLOW_URL])      # no waiting on 魔搭 again
+            self.assertEqual(calls, [readers.SILICONFLOW_URL])  # no waiting on 魔搭 again
             self.assertEqual(readers.answered_by(engine).provider, "siliconflow")
             # The next paper (or new keys) starts with 魔搭 again.
             account_pool.reset_account_pools()
@@ -156,7 +164,7 @@ class FreeProviderTests(SimpleTestCase):
             asked = len(calls)
             with self.assertRaises(readers.ReaderUnavailable) as again:
                 readers.chat(engine, "读题", image)
-        self.assertEqual(len(calls), asked)                  # not asked while it rests
+        self.assertEqual(len(calls), asked)  # not asked while it rests
         self.assertIn("魔搭", str(again.exception))
 
     def test_a_busy_service_is_left_sooner_when_another_can_read(self):
@@ -205,6 +213,7 @@ class FreeProviderTests(SimpleTestCase):
 class FreeReaderFormattingTests(SimpleTestCase):
     def test_a_blank_written_as_underline_hspace_is_shown_as_underscores(self):
         from .textnorm import fix_symbols, witness_key
+
         self.assertEqual(fix_symbols(r"则 $BD$ 的长为 $\underline{\hspace{2em}}$."), "则 $BD$ 的长为 ____.")
         self.assertEqual(fix_symbols(r"是 $\underline{\quad}$ 尺"), "是 ____ 尺")
         # Inside a formula, or underlining real content, nothing changes.

@@ -17,21 +17,36 @@ from pathlib import Path
 import requests
 
 HOSTS = ["api.minimaxi.com", "api.minimax.io"]
-PROMPT = ("你是数学资料誊录员。只誊录图中印刷体内容，数学式用 LaTeX（$...$），忽略手写。\n"
-          "只按格式输出：\n【题号】\n【题型】单选题/多选题/填空题/解答题\n【题干】\n…\n【A】…\n【B】…\n【C】…\n【D】…")
+PROMPT = (
+    "你是数学资料誊录员。只誊录图中印刷体内容，数学式用 LaTeX（$...$），忽略手写。\n"
+    "只按格式输出：\n【题号】\n【题型】单选题/多选题/填空题/解答题\n【题干】\n…\n【A】…\n【B】…\n【C】…\n【D】…"
+)
 
 
 def call(host, key, model, data_url, max_tokens=1500, thinking=False):
-    payload = {"model": model, "messages": [{"role": "user", "content": [
-        {"type": "text", "text": PROMPT}, {"type": "image_url", "image_url": {"url": data_url}}]}],
-        "temperature": 0, "stream": False, "max_completion_tokens": max_tokens}
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": PROMPT}, {"type": "image_url", "image_url": {"url": data_url}}],
+            }
+        ],
+        "temperature": 0,
+        "stream": False,
+        "max_completion_tokens": max_tokens,
+    }
     if not thinking:
         payload["thinking"] = {"type": "disabled"}
         payload["reasoning_split"] = True
     start = time.monotonic()
     try:
-        r = requests.post(f"https://{host}/v1/chat/completions", json=payload, timeout=(10, 180),
-                          headers={"Authorization": f"Bearer {key}"})
+        r = requests.post(
+            f"https://{host}/v1/chat/completions",
+            json=payload,
+            timeout=(10, 180),
+            headers={"Authorization": f"Bearer {key}"},
+        )
         elapsed = time.monotonic() - start
         body = {}
         try:
@@ -44,8 +59,14 @@ def call(host, key, model, data_url, max_tokens=1500, thinking=False):
         except Exception:
             pass
         err = "" if r.status_code == 200 else json.dumps(body, ensure_ascii=False)[:300]
-        return {"status": r.status_code, "elapsed": round(elapsed, 2), "usage": body.get("usage"),
-                "text": text[:800], "error": err, "retry_after": r.headers.get("Retry-After")}
+        return {
+            "status": r.status_code,
+            "elapsed": round(elapsed, 2),
+            "usage": body.get("usage"),
+            "text": text[:800],
+            "error": err,
+            "retry_after": r.headers.get("Retry-After"),
+        }
     except Exception as e:
         return {"status": None, "elapsed": round(time.monotonic() - start, 2), "error": repr(e)[:300]}
 
@@ -94,12 +115,15 @@ def main():
             results = list(pool.map(lambda _: call(host, key, "MiniMax-M3", data_url), range(count)))
         wall = time.monotonic() - start
         ok = [r["elapsed"] for r in results if r["status"] == 200]
-        report["levels"][level] = {"wall": round(wall, 2), "count": count,
-                                   "statuses": [r["status"] for r in results],
-                                   "median": statistics.median(ok) if ok else None,
-                                   "max": max(ok) if ok else None,
-                                   "errors": [r["error"] for r in results if r["status"] != 200][:3],
-                                   "texts_identical": len({r.get("text") for r in results if r["status"] == 200})}
+        report["levels"][level] = {
+            "wall": round(wall, 2),
+            "count": count,
+            "statuses": [r["status"] for r in results],
+            "median": statistics.median(ok) if ok else None,
+            "max": max(ok) if ok else None,
+            "errors": [r["error"] for r in results if r["status"] != 200][:3],
+            "texts_identical": len({r.get("text") for r in results if r["status"] == 200}),
+        }
         print("level", level, report["levels"][level], flush=True)
         time.sleep(3)
     Path(args.out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")

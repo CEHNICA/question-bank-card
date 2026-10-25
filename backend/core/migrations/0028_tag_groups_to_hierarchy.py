@@ -8,6 +8,7 @@
 「历史标签」不是章节而是待核对状态，本来就没有章节归属，不转。
 已经有父级的标签（比如挂在某个知识点下面的）保留原父级，不被章节覆盖。
 """
+
 from __future__ import annotations
 
 import uuid
@@ -29,15 +30,14 @@ def forwards(apps, schema_editor):
     # 这里必须取快照——同一个标签后面还要接到别的章节去，不能拿「现在已经
     # 有上级」当理由把它挡掉，否则同时属于初中和高中两章的知识点（函数图象、
     # 平面直角坐标系、统计图表）只会挂到其中一章，另一章就再也找不到它。
-    placed_before = set(
-        LibraryTagRelation.objects
-        .filter(relation_type=HIERARCHY).values_list("child_id", flat=True))
+    placed_before = set(LibraryTagRelation.objects.filter(relation_type=HIERARCHY).values_list("child_id", flat=True))
 
     changed = False
-    for group in (LibraryTagGroup.objects
-                  .exclude(system_key=LEGACY_GROUP_KEY)
-                  .prefetch_related("tags")
-                  .order_by("position", "name")):
+    for group in (
+        LibraryTagGroup.objects.exclude(system_key=LEGACY_GROUP_KEY)
+        .prefetch_related("tags")
+        .order_by("position", "name")
+    ):
         members = list(group.tags.all())
         if not members:
             continue
@@ -72,7 +72,8 @@ def forwards(apps, schema_editor):
             if member.pk in placed_before:
                 continue
             _, made = LibraryTagRelation.objects.get_or_create(
-                parent_id=section.pk, child_id=member.pk, relation_type=HIERARCHY)
+                parent_id=section.pk, child_id=member.pk, relation_type=HIERARCHY
+            )
             changed = changed or made
 
     if changed:

@@ -16,11 +16,25 @@ class LibraryHistoryTests(TempDataMixin, TestCase):
         self.paper = self.make_paper()
         self.question = self.card(self.paper, question_type="single_choice", stem="求 $x+1$ 的值。")
         self.content = {
-            "stem": "求 $x+1$ 的值。", "question_type": "single_choice", "options": {"A": "1", "B": "2"},
-            "answer": "A", "analysis": "原卷解析", "origin": "演示题源", "number": 2,
+            "stem": "求 $x+1$ 的值。",
+            "question_type": "single_choice",
+            "options": {"A": "1", "B": "2"},
+            "answer": "A",
+            "analysis": "原卷解析",
+            "origin": "演示题源",
+            "number": 2,
             "sources": [{"page_idx": 0, "bbox": [50, 100, 480, 300], "type": "text", "source": "mineru"}],
-            "figures": [{"slot": "stem", "page_idx": 0, "bbox": [50, 200, 300, 400],
-                         "source": "human", "parts": [], "file": "figure-1.png", "url": "/api/library/old/figures/figure-1.png"}],
+            "figures": [
+                {
+                    "slot": "stem",
+                    "page_idx": 0,
+                    "bbox": [50, 200, 300, 400],
+                    "source": "human",
+                    "parts": [],
+                    "file": "figure-1.png",
+                    "url": "/api/library/old/figures/figure-1.png",
+                }
+            ],
         }
         self.first = self.publish(1, self.content, status="superseded", reviewer="ai")
         changed = deepcopy(self.content)
@@ -30,9 +44,16 @@ class LibraryHistoryTests(TempDataMixin, TestCase):
 
     def publish(self, version, content, *, status="published", reviewer="human", question=None):
         return PublishedQuestion.objects.create(
-            question=question or self.question, paper=self.paper, source_filename="历史演示卷.pdf",
-            number=2, question_type="single_choice", version=version, status=status,
-            content=content, content_hash=library.content_hash(content), review_source=reviewer,
+            question=question or self.question,
+            paper=self.paper,
+            source_filename="历史演示卷.pdf",
+            number=2,
+            question_type="single_choice",
+            version=version,
+            status=status,
+            content=content,
+            content_hash=library.content_hash(content),
+            review_source=reviewer,
             review_agent="演示助手" if reviewer == "ai" else "",
         )
 
@@ -75,7 +96,9 @@ class LibraryHistoryTests(TempDataMixin, TestCase):
         self.assertEqual(library.publication_changes(self.second, third), [{"key": "figures", "label": "配图"}])
         changed["sources"][0]["bbox"] = [50, 110, 480, 300]
         third.content = changed
-        self.assertEqual([field["key"] for field in library.publication_changes(self.second, third)], ["figures", "sources"])
+        self.assertEqual(
+            [field["key"] for field in library.publication_changes(self.second, third)], ["figures", "sources"]
+        )
 
     def test_comparison_refuses_invalid_or_unrelated_version(self):
         other_card = self.card(self.paper, number=2)

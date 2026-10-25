@@ -82,10 +82,9 @@ class MineruRecoveryTests(SimpleTestCase):
         self.assertEqual(set(ERROR_HINTS), official)
         for code in sorted(official):
             with self.subTest(code=code):
-                message = _error_message("解析", {
-                    "code": code,
-                    "err_msg": "Bearer TOP_SECRET https://signed.invalid/file?token=LEAK",
-                })
+                message = _error_message(
+                    "解析", {"code": code, "err_msg": "Bearer TOP_SECRET https://signed.invalid/file?token=LEAK"}
+                )
                 self.assertIn(f"错误码 {code}", message)
                 self.assertIn(ERROR_HINTS[code], message)
                 self.assertNotIn("TOP_SECRET", message)
@@ -101,37 +100,33 @@ class MineruRecoveryTests(SimpleTestCase):
                 self.assertNotIn("signed.invalid", message)
 
     def test_page_limit_err_msg_is_classified_without_echoing_remote_text(self):
-        message = _error_message("解析", {
-            "err_msg": "PDF page count exceeds the page limit; SECRET_REMOTE_TEXT=https://signed.invalid",
-        })
+        message = _error_message(
+            "解析", {"err_msg": "PDF page count exceeds the page limit; SECRET_REMOTE_TEXT=https://signed.invalid"}
+        )
         self.assertIn("200 页", message)
         self.assertIn("拆分", message)
         self.assertNotIn("SECRET_REMOTE_TEXT", message)
         self.assertNotIn("signed.invalid", message)
 
     def test_arbitrary_remote_error_text_is_never_echoed(self):
-        message = _error_message("解析", {
-            "err_msg": "signed_url=https://signed.invalid/file?token=SUPERSECRET; Bearer TOP_SECRET",
-        })
+        message = _error_message(
+            "解析", {"err_msg": "signed_url=https://signed.invalid/file?token=SUPERSECRET; Bearer TOP_SECRET"}
+        )
         self.assertIn("检查 MinerU API 配置", message)
         self.assertNotIn("SUPERSECRET", message)
         self.assertNotIn("TOP_SECRET", message)
         self.assertNotIn("signed.invalid", message)
 
     def test_invalid_trace_id_is_never_exposed(self):
-        message = _error_message("解析", {
-            "err_msg": "unknown failure",
-            "trace_id": "https://signed.invalid/?token=SUPERSECRET",
-        })
+        message = _error_message(
+            "解析", {"err_msg": "unknown failure", "trace_id": "https://signed.invalid/?token=SUPERSECRET"}
+        )
         self.assertNotIn("signed.invalid", message)
         self.assertNotIn("SUPERSECRET", message)
         self.assertNotIn("追踪号", message)
 
     def test_known_error_code_takes_priority_over_err_msg_heuristics(self):
-        message = _error_message("解析", {
-            "code": -60009,
-            "err_msg": "page parser rate limit exceeded",
-        })
+        message = _error_message("解析", {"code": -60009, "err_msg": "page parser rate limit exceeded"})
         self.assertIn("任务队列已满", message)
         self.assertNotIn("页数超限", message)
 
@@ -140,20 +135,26 @@ class MineruRecoveryTests(SimpleTestCase):
             source = Path(directory) / "source.pdf"
             source.write_bytes(b"test")
             paper = SimpleNamespace(
-                pk="paper-id", source_path=str(source),
-                pages=[{"page_idx": 0, "width": 1, "height": 1}],
+                pk="paper-id", source_path=str(source), pages=[{"page_idx": 0, "width": 1, "height": 1}]
             )
-            session = _ApiSession([
-                {"code": 0, "data": {
-                    "batch_id": "batch-id", "file_urls": ["https://upload.invalid/source.pdf"],
-                }},
-                {"code": 0, "data": {"extract_result": [{
-                    "state": "failed", "err_code": None,
-                    "err_msg": "PDF has too many pages; DO_NOT_ECHO_THIS_REMOTE_TEXT",
-                }]}},
-            ])
-            with patch("core.mineru.requests.Session", return_value=session), \
-                    patch("core.mineru.Paper.objects.filter"):
+            session = _ApiSession(
+                [
+                    {"code": 0, "data": {"batch_id": "batch-id", "file_urls": ["https://upload.invalid/source.pdf"]}},
+                    {
+                        "code": 0,
+                        "data": {
+                            "extract_result": [
+                                {
+                                    "state": "failed",
+                                    "err_code": None,
+                                    "err_msg": "PDF has too many pages; DO_NOT_ECHO_THIS_REMOTE_TEXT",
+                                }
+                            ]
+                        },
+                    },
+                ]
+            )
+            with patch("core.mineru.requests.Session", return_value=session), patch("core.mineru.Paper.objects.filter"):
                 with self.assertRaises(MineruError) as raised:
                     request_extract(paper, "secret-token", source)
             message = str(raised.exception)
@@ -166,21 +167,31 @@ class MineruRecoveryTests(SimpleTestCase):
             source = Path(directory) / "source.pdf"
             source.write_bytes(b"test")
             paper = SimpleNamespace(
-                pk="paper-id", source_path=str(source),
-                pages=[{"page_idx": 0, "width": 1, "height": 1}],
+                pk="paper-id", source_path=str(source), pages=[{"page_idx": 0, "width": 1, "height": 1}]
             )
             trace_id = "a" * 32
-            session = _ApiSession([
-                {"code": 0, "trace_id": "b" * 32, "data": {
-                    "batch_id": "batch-id", "file_urls": ["https://upload.invalid/source.pdf"],
-                }},
-                {"code": 0, "trace_id": trace_id, "data": {"extract_result": [{
-                    "state": "failed",
-                    "err_msg": "file format not supported; signed_url=https://signed.invalid/?token=LEAK",
-                }]}},
-            ])
-            with patch("core.mineru.requests.Session", return_value=session), \
-                    patch("core.mineru.Paper.objects.filter"):
+            session = _ApiSession(
+                [
+                    {
+                        "code": 0,
+                        "trace_id": "b" * 32,
+                        "data": {"batch_id": "batch-id", "file_urls": ["https://upload.invalid/source.pdf"]},
+                    },
+                    {
+                        "code": 0,
+                        "trace_id": trace_id,
+                        "data": {
+                            "extract_result": [
+                                {
+                                    "state": "failed",
+                                    "err_msg": "file format not supported; signed_url=https://signed.invalid/?token=LEAK",
+                                }
+                            ]
+                        },
+                    },
+                ]
+            )
+            with patch("core.mineru.requests.Session", return_value=session), patch("core.mineru.Paper.objects.filter"):
                 with self.assertRaises(MineruError) as raised:
                     request_extract(paper, "secret-token", source)
 
@@ -241,6 +252,7 @@ class _FlakyUploadSession(_ApiSession):
         assert body is not None and body.read() == b"test", "every attempt must send the whole file"
         if self.puts <= self.failures:
             import requests
+
             raise requests.ReadTimeout("stalled")
         return _JsonResponse()
 
@@ -248,15 +260,18 @@ class _FlakyUploadSession(_ApiSession):
 class MineruNetworkRetryTests(SimpleTestCase):
     def run_upload(self, failures: int):
         from .mineru import request_extract_file
+
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "source.pdf"
             source.write_bytes(b"test")
-            session = _FlakyUploadSession([
-                {"code": 0, "data": {"batch_id": "b", "file_urls": ["https://upload.invalid/x"]}},
-                {"code": 0, "data": {"extract_result": [{"state": "failed", "err_msg": "parsing failed"}]}},
-            ], failures)
-            with patch("core.mineru.requests.Session", return_value=session), \
-                    patch("core.mineru.time.sleep") as sleep:
+            session = _FlakyUploadSession(
+                [
+                    {"code": 0, "data": {"batch_id": "b", "file_urls": ["https://upload.invalid/x"]}},
+                    {"code": 0, "data": {"extract_result": [{"state": "failed", "err_msg": "parsing failed"}]}},
+                ],
+                failures,
+            )
+            with patch("core.mineru.requests.Session", return_value=session), patch("core.mineru.time.sleep") as sleep:
                 with self.assertRaises(MineruError) as raised:
                     request_extract_file("token", source, Path(directory) / "out.zip", 1)
             return session, sleep, str(raised.exception)
@@ -264,7 +279,7 @@ class MineruNetworkRetryTests(SimpleTestCase):
     def test_a_stalled_upload_is_retried_with_the_whole_file(self):
         session, sleep, message = self.run_upload(failures=1)
         self.assertEqual(session.puts, 2)
-        self.assertNotIn("上传失败", message)   # it went on to the (mocked) parse result
+        self.assertNotIn("上传失败", message)  # it went on to the (mocked) parse result
         sleep.assert_any_call(2.0)
 
     def test_persistent_upload_failure_still_fails_with_a_safe_message(self):

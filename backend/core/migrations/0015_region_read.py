@@ -5,36 +5,20 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
-    dependencies = [
-        ("core", "0014_library_extras_and_origin"),
-    ]
+    dependencies = [("core", "0014_library_extras_and_origin")]
 
     operations = [
         migrations.CreateModel(
             name="RegionRead",
             fields=[
-                (
-                    "id",
-                    models.BigAutoField(
-                        auto_created=True,
-                        primary_key=True,
-                        serialize=False,
-                        verbose_name="ID",
-                    ),
-                ),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
                 ("page_idx", models.PositiveIntegerField()),
                 ("bbox", models.JSONField()),
                 ("target", models.CharField(max_length=8)),
                 (
                     "status",
                     models.CharField(
-                        choices=[
-                            ("queued", "排队中"),
-                            ("running", "进行中"),
-                            ("done", "完成"),
-                            ("failed", "失败"),
-                        ],
+                        choices=[("queued", "排队中"), ("running", "进行中"), ("done", "完成"), ("failed", "失败")],
                         db_index=True,
                         default="queued",
                         max_length=8,
@@ -48,14 +32,10 @@ class Migration(migrations.Migration):
                 (
                     "question",
                     models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE,
-                        related_name="region_reads",
-                        to="core.question",
+                        on_delete=django.db.models.deletion.CASCADE, related_name="region_reads", to="core.question"
                     ),
                 ),
             ],
-            options={
-                "ordering": ["created_at"],
-            },
-        ),
+            options={"ordering": ["created_at"]},
+        )
     ]

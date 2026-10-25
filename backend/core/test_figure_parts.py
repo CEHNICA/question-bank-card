@@ -15,8 +15,8 @@ from . import imaging, library
 from .models import Paper, PublishedQuestion, Question
 from .pipeline import paper_dir
 
-TOP = [100, 800, 900, 990]      # the header and 甲车间 row at the foot of page 1
-BOTTOM = [100, 10, 900, 60]     # the 乙车间 row at the top of page 2
+TOP = [100, 800, 900, 990]  # the header and 甲车间 row at the foot of page 1
+BOTTOM = [100, 10, 900, 60]  # the 乙车间 row at the top of page 2
 
 
 def ruled_page(line_x: int, size=(1000, 1000)) -> Image.Image:
@@ -28,11 +28,13 @@ def ruled_page(line_x: int, size=(1000, 1000)) -> Image.Image:
 class StackPiecesTests(SimpleTestCase):
     def test_columns_line_up_and_halves_meet(self):
         page = ruled_page(500)
-        joined = imaging.stack_figure_pieces([
-            (page, imaging.to_pixels([100, 800, 900, 990], page.size)),
-            # The lower half was framed a little wider; its column must not shift.
-            (page, imaging.to_pixels([80, 10, 920, 60], page.size)),
-        ])
+        joined = imaging.stack_figure_pieces(
+            [
+                (page, imaging.to_pixels([100, 800, 900, 990], page.size)),
+                # The lower half was framed a little wider; its column must not shift.
+                (page, imaging.to_pixels([80, 10, 920, 60], page.size)),
+            ]
+        )
         self.assertEqual(joined.height, 190 + 50)
         self.assertEqual(joined.width, 840)
         # The ruling at x=500 sits at the same canvas column in both halves.
@@ -42,10 +44,9 @@ class StackPiecesTests(SimpleTestCase):
 
     def test_page_of_another_width_is_scaled_to_the_first(self):
         first, second = ruled_page(500), ruled_page(1000, size=(2000, 2000))
-        joined = imaging.stack_figure_pieces([
-            (first, imaging.to_pixels(TOP, first.size)),
-            (second, imaging.to_pixels(BOTTOM, second.size)),
-        ])
+        joined = imaging.stack_figure_pieces(
+            [(first, imaging.to_pixels(TOP, first.size)), (second, imaging.to_pixels(BOTTOM, second.size))]
+        )
         self.assertEqual(joined.width, 800)
         self.assertEqual(joined.height, 190 + 50)
 
@@ -58,8 +59,11 @@ class FigurePartsApiTests(TransactionTestCase):
         override.enable()
         self.addCleanup(override.disable)
         self.paper = Paper.objects.create(
-            filename="k2.pdf", kind="pdf", sha256="c" * 64,
-            source_path=str(Path(temp.name) / "k2.pdf"), render_path=str(Path(temp.name) / "k2.pdf"),
+            filename="k2.pdf",
+            kind="pdf",
+            sha256="c" * 64,
+            source_path=str(Path(temp.name) / "k2.pdf"),
+            render_path=str(Path(temp.name) / "k2.pdf"),
             pages=[{"page_idx": 0, "width": 1000, "height": 1000}, {"page_idx": 1, "width": 1000, "height": 1000}],
             status=Paper.Status.READY,
         )
@@ -70,24 +74,40 @@ class FigurePartsApiTests(TransactionTestCase):
         self.top_key = "0:100,800,900,990"
         self.bottom_key = "1:100,10,900,60"
         self.question = Question.objects.create(
-            paper=self.paper, number=19, question_type="free_response",
+            paper=self.paper,
+            number=19,
+            question_type="free_response",
             regions=[{"page_idx": 0, "bbox": [50, 500, 950, 995]}, {"page_idx": 1, "bbox": [50, 5, 950, 400]}],
             regions_auto=[{"page_idx": 0, "bbox": [50, 500, 950, 995]}, {"page_idx": 1, "bbox": [50, 5, 950, 400]}],
             figure_candidates=[{"page_idx": 0, "bbox": TOP}, {"page_idx": 1, "bbox": BOTTOM}],
-            stem="（1）填写如下列联表：", state=Question.State.GREEN,
+            stem="（1）填写如下列联表：",
+            state=Question.State.GREEN,
         )
 
     def post(self, action: str, body: dict):
         return self.client.post(
             f"/api/questions/{self.question.pk}/{action}",
-            data=json.dumps(body), content_type="application/json", HTTP_X_QB_REQUEST="1",
+            data=json.dumps(body),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
         )
 
     def save_joined(self):
-        return self.post("figures", {"figures": [{
-            "page_idx": 0, "bbox": TOP, "slot": "stem", "candidate_key": self.top_key,
-            "parts": [{"page_idx": 1, "bbox": BOTTOM, "candidate_key": self.bottom_key}],
-        }], "ignored_candidates": []})
+        return self.post(
+            "figures",
+            {
+                "figures": [
+                    {
+                        "page_idx": 0,
+                        "bbox": TOP,
+                        "slot": "stem",
+                        "candidate_key": self.top_key,
+                        "parts": [{"page_idx": 1, "bbox": BOTTOM, "candidate_key": self.bottom_key}],
+                    }
+                ],
+                "ignored_candidates": [],
+            },
+        )
 
     def test_joined_figure_is_saved_served_and_published_as_one_image(self):
         response = self.save_joined()
@@ -121,10 +141,16 @@ class FigurePartsApiTests(TransactionTestCase):
         joined_url = self.save_joined().json()["question"]["figures"][0]["url"]
         joined = Question.objects.select_related("paper", "group").get(pk=self.question.pk)
         joined_hash = library.approval_hash(joined)
-        response = self.post("figures", {"figures": [
-            {"page_idx": 0, "bbox": TOP, "slot": "stem", "candidate_key": self.top_key},
-            {"page_idx": 1, "bbox": BOTTOM, "slot": "stem", "candidate_key": self.bottom_key},
-        ], "ignored_candidates": []})
+        response = self.post(
+            "figures",
+            {
+                "figures": [
+                    {"page_idx": 0, "bbox": TOP, "slot": "stem", "candidate_key": self.top_key},
+                    {"page_idx": 1, "bbox": BOTTOM, "slot": "stem", "candidate_key": self.bottom_key},
+                ],
+                "ignored_candidates": [],
+            },
+        )
         self.assertEqual(response.status_code, 200, response.content)
         split = Question.objects.select_related("paper", "group").get(pk=self.question.pk)
         self.assertNotEqual(library.approval_hash(split), joined_hash)
@@ -143,11 +169,19 @@ class FigurePartsApiTests(TransactionTestCase):
         self.assertEqual(library.content_hash(content), library.content_hash(legacy))
 
     def test_bad_parts_are_refused(self):
-        for parts in ([{"page_idx": 9, "bbox": BOTTOM}], [{"page_idx": 1, "bbox": [1, 1, 1, 1]}],
-                      [{"page_idx": 1, "bbox": BOTTOM}] * (library.MAX_FIGURE_PARTS + 1), "x",
-                      [{"page_idx": 1, "bbox": BOTTOM, "candidate_key": "1:0,0,5,5"}]):
+        for parts in (
+            [{"page_idx": 9, "bbox": BOTTOM}],
+            [{"page_idx": 1, "bbox": [1, 1, 1, 1]}],
+            [{"page_idx": 1, "bbox": BOTTOM}] * (library.MAX_FIGURE_PARTS + 1),
+            "x",
+            [{"page_idx": 1, "bbox": BOTTOM, "candidate_key": "1:0,0,5,5"}],
+        ):
             with self.subTest(parts=parts):
-                response = self.post("figures", {"figures": [
-                    {"page_idx": 0, "bbox": TOP, "slot": "stem", "parts": parts},
-                ], "ignored_candidates": []})
+                response = self.post(
+                    "figures",
+                    {
+                        "figures": [{"page_idx": 0, "bbox": TOP, "slot": "stem", "parts": parts}],
+                        "ignored_candidates": [],
+                    },
+                )
                 self.assertEqual(response.status_code, 400)

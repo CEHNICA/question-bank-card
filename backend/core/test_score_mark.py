@@ -9,6 +9,7 @@
 
     .\\backend\\.venv\\Scripts\\python.exe backend\\manage.py test core.test_score_mark
 """
+
 from types import SimpleNamespace
 from unittest import mock
 
@@ -48,13 +49,7 @@ class ScoreMarkTests(SimpleTestCase):
 class ScoreMarkReadingTests(SimpleTestCase):
     """清理由 ``parse_reading`` 走，题卡上拿到的必须已经没有分值。"""
 
-    RAW = (
-        "【内容类型】练习题\n"
-        "【题号】16\n"
-        "【题型】解答题\n"
-        f"【题干】\n{REAL}\n"
-        "【配图】无\n"
-    )
+    RAW = f"【内容类型】练习题\n【题号】16\n【题型】解答题\n【题干】\n{REAL}\n【配图】无\n"
 
     def test_parse_drops_the_score(self):
         reading = readers.parse_reading(self.RAW, 16)
@@ -63,23 +58,33 @@ class ScoreMarkReadingTests(SimpleTestCase):
 
     def snapshot(self):
         return {
-            "id": 1, "number": 16, "group_id": None,
+            "id": 1,
+            "number": 16,
+            "group_id": None,
             "regions": [{"page_idx": 4, "bbox": [40.0, 600.0, 480.0, 700.0]}],
-            "candidates": [], "question_type": "free_response", "section": "三、解答题",
-            "stem": "", "options": {}, "edited": False,
-            "source_kind": Question.SourceKind.UNKNOWN, "source_anchor_seq": 12,
-            "segmentation_flags": [], "body_mode": "text", "start_source": "mineru",
+            "candidates": [],
+            "question_type": "free_response",
+            "section": "三、解答题",
+            "stem": "",
+            "options": {},
+            "edited": False,
+            "source_kind": Question.SourceKind.UNKNOWN,
+            "source_anchor_seq": 12,
+            "segmentation_flags": [],
+            "body_mode": "text",
+            "start_source": "mineru",
             "witness_blocks": [],
         }
 
     def test_the_card_itself_is_clean(self):
-        with mock.patch.object(readers, "primary_engine", return_value=object()), \
-                mock.patch.object(readers, "read_question",
-                                  return_value=readers.parse_reading(self.RAW, 16)), \
-                mock.patch.object(pipeline.imaging, "stack_regions",
-                                  return_value=(SimpleNamespace(height=700, width=900), [])), \
-                mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:url"):
-            result = pipeline.read_card(self.snapshot(),
-                                        SimpleNamespace(load=lambda page: object()))
+        with (
+            mock.patch.object(readers, "primary_engine", return_value=object()),
+            mock.patch.object(readers, "read_question", return_value=readers.parse_reading(self.RAW, 16)),
+            mock.patch.object(
+                pipeline.imaging, "stack_regions", return_value=(SimpleNamespace(height=700, width=900), [])
+            ),
+            mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:url"),
+        ):
+            result = pipeline.read_card(self.snapshot(), SimpleNamespace(load=lambda page: object()))
         self.assertNotIn("7分", result["stem"])
         self.assertTrue(result["stem"].startswith("计算："))

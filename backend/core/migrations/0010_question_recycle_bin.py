@@ -10,10 +10,7 @@ import core.models
 
 
 class Migration(migrations.Migration):
-
-    dependencies = [
-        ("core", "0009_import_structure"),
-    ]
+    dependencies = [("core", "0009_import_structure")]
 
     operations = [
         migrations.AlterModelOptions(
@@ -32,22 +29,12 @@ class Migration(migrations.Migration):
             ],
         ),
         migrations.AddField(
-            model_name="question",
-            name="deleted_at",
-            field=models.DateTimeField(blank=True, db_index=True, null=True),
+            model_name="question", name="deleted_at", field=models.DateTimeField(blank=True, db_index=True, null=True)
         ),
         migrations.CreateModel(
             name="QuestionDeletionBatch",
             fields=[
-                (
-                    "id",
-                    models.UUIDField(
-                        default=uuid.uuid4,
-                        editable=False,
-                        primary_key=True,
-                        serialize=False,
-                    ),
-                ),
+                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
                 ("question_ids", models.JSONField(default=list)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
                 ("restored_at", models.DateTimeField(blank=True, null=True)),

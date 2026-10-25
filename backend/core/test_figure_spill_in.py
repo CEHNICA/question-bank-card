@@ -9,6 +9,7 @@
 
     .\\backend\\.venv\\Scripts\\python.exe backend\\manage.py test core.test_figure_spill_in
 """
+
 from django.test import SimpleTestCase
 
 from core import segment
@@ -47,8 +48,7 @@ class FigureSpillDirectionTests(SimpleTestCase):
         # The scratch dips into one range and touches nothing else.  A second question
         # further down the same page must not turn the verdict around.
         later = {"page_idx": 0, "bbox": [0.0, 300.0, 512.0, 400.0]}
-        self.assertFalse(
-            segment.figure_in_regions(0, self.scratch_above, [self.question_below[0], later]))
+        self.assertFalse(segment.figure_in_regions(0, self.scratch_above, [self.question_below[0], later]))
 
     def test_empty_regions_keep_the_old_answer(self):
         self.assertFalse(segment.figure_in_regions(0, self.picture_below, []))
@@ -58,8 +58,7 @@ PAGES = [{"page_idx": 0, "width": 595, "height": 415}]
 
 
 def block(seq, y, text, kind="text", x0=60, x1=520, height=30):
-    return {"seq": seq, "type": kind, "page_idx": 0,
-            "bbox": [x0, y, x1, y + height], "text": text}
+    return {"seq": seq, "type": kind, "page_idx": 0, "bbox": [x0, y, x1, y + height], "text": text}
 
 
 class FigureSpillWiringTests(SimpleTestCase):
@@ -84,8 +83,7 @@ class FigureSpillWiringTests(SimpleTestCase):
         result, blocks = self.build(380)
         self.assertEqual(self.candidates(result, 9), [])
         self.assertEqual(self.candidates(result, 8), [1])
-        self.assertTrue(segment.overlaps_regions(
-            0, blocks[1]["bbox"], result["questions"][1]["regions"]))
+        self.assertTrue(segment.overlaps_regions(0, blocks[1]["bbox"], result["questions"][1]["regions"]))
 
     def test_picture_hanging_below_the_boundary_is_kept(self):
         result, _blocks = self.build(430)

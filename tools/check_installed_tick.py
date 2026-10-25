@@ -32,13 +32,25 @@ def main():
     from playwright.sync_api import expect, sync_playwright
 
     with sync_playwright() as pw:
-        executable = next((str(p) for p in (Path(pw.chromium.executable_path),
-            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if p.is_file()), None)
+        executable = next(
+            (
+                str(p)
+                for p in (
+                    Path(pw.chromium.executable_path),
+                    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                )
+                if p.is_file()
+            ),
+            None,
+        )
         browser = pw.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
         context = browser.new_context(viewport={"width": 1500, "height": 950})
         context.add_init_script("localStorage.setItem('qb-welcome-seen','1')")
-        context.route("**/*", lambda r: r.continue_() if urlparse(r.request.url).hostname in ("127.0.0.1", "localhost") else r.abort())
+        context.route(
+            "**/*",
+            lambda r: r.continue_() if urlparse(r.request.url).hostname in ("127.0.0.1", "localhost") else r.abort(),
+        )
         page = context.new_page()
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
@@ -102,7 +114,9 @@ def main():
         print("re-tick         :", final, "library:", library_total(page, url))
         assert not errors, errors
         browser.close()
-    print("Installed app: an in-library tick is solid and reversible; the library count and both review counters move together and come back: OK")
+    print(
+        "Installed app: an in-library tick is solid and reversible; the library count and both review counters move together and come back: OK"
+    )
 
 
 if __name__ == "__main__":

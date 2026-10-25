@@ -3,6 +3,7 @@
 The caller never supplies HTML, CSS, a URL, executable paths or browser flags.
 A fresh system-browser profile renders a fixed document with no network assets.
 """
+
 from __future__ import annotations
 
 import base64
@@ -60,10 +61,23 @@ def _browser_path():
 
 def _launch_browser(executable, profile):
     """Keep ownership of the headless process used by PDF and Word pictures."""
-    flags = [str(executable), "--headless=new", "--disable-gpu", "--no-first-run", "--no-default-browser-check",
-             "--disable-background-networking", "--disable-component-update", "--disable-sync", "--disable-extensions",
-             "--no-proxy-server", "--host-resolver-rules=MAP * ~NOTFOUND", "--remote-debugging-port=0",
-             "--remote-debugging-address=127.0.0.1", "--window-size=1280,1000", "--user-data-dir=" + str(profile)]
+    flags = [
+        str(executable),
+        "--headless=new",
+        "--disable-gpu",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-background-networking",
+        "--disable-component-update",
+        "--disable-sync",
+        "--disable-extensions",
+        "--no-proxy-server",
+        "--host-resolver-rules=MAP * ~NOTFOUND",
+        "--remote-debugging-port=0",
+        "--remote-debugging-address=127.0.0.1",
+        "--window-size=1280,1000",
+        "--user-data-dir=" + str(profile),
+    ]
     if os.name == "nt" and executable.name.lower() == "msedge.exe":
         # Edge's compatibility-layer relaunch exits this Popen with code 0 and
         # leaves another browser using the profile. Waiting and cleanup must own
@@ -101,7 +115,7 @@ def _process_started_at(pid) -> int | None:
         kernel.GetProcessTimes.restype = wintypes.BOOL
         kernel.CloseHandle.argtypes = [wintypes.HANDLE]
         kernel.CloseHandle.restype = wintypes.BOOL
-        handle = kernel.OpenProcess(0x1000, False, int(pid))   # PROCESS_QUERY_LIMITED_INFORMATION
+        handle = kernel.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
         if not handle:
             return None
         try:
@@ -156,7 +170,7 @@ def _wait_debug_port(profile, process, deadline):
             if not 1 <= port <= 65535:
                 raise ValueError("debug port")
             return port
-        time.sleep(min(.05, _remaining(deadline)))
+        time.sleep(min(0.05, _remaining(deadline)))
 
 
 def _wait_page_target(opener, port, process, deadline):
@@ -175,10 +189,12 @@ def _wait_page_target(opener, port, process, deadline):
             targets = []
         if not isinstance(targets, list) or any(not isinstance(target, dict) for target in targets):
             raise ValueError("debug catalog")
-        target = next((item for item in targets if item.get("type") == "page" and item.get("url") == "about:blank"), None)
+        target = next(
+            (item for item in targets if item.get("type") == "page" and item.get("url") == "about:blank"), None
+        )
         if target is not None:
             return target
-        time.sleep(min(.05, _remaining(deadline)))
+        time.sleep(min(0.05, _remaining(deadline)))
 
 
 def _cleanup_warning(stage, error):
@@ -238,9 +254,14 @@ def _cleanup_browser(client, process):
                     # tree kill here would hit whoever owns the number now.
                     _cleanup_warning("process_recycled_pid", RuntimeError("process id reused"))
                     return
-                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False,
-                    timeout=5, creationflags=subprocess.CREATE_NO_WINDOW)
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    shell=False,
+                    timeout=5,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
             else:
                 process.kill()
     except Exception as error:
@@ -255,15 +276,21 @@ class _CDP:
     """Bounded RFC 6455 transport, only to this fresh browser's loopback port."""
 
     def __init__(self, port, path, deadline):
-        if type(port) is not int or not 1 <= port <= 65535 or not re.fullmatch(r"/devtools/(?:page|browser)/[A-Za-z0-9_-]+", path):
+        if (
+            type(port) is not int
+            or not 1 <= port <= 65535
+            or not re.fullmatch(r"/devtools/(?:page|browser)/[A-Za-z0-9_-]+", path)
+        ):
             raise word.ExportError("本机 PDF 排版进程未能连接，请重试。", 503)
         self.deadline, self.serial, self.buffer = deadline, 0, bytearray()
         self.socket = socket.create_connection(("127.0.0.1", port), timeout=_remaining(deadline))
         self.events = []
         try:
             key = base64.b64encode(secrets.token_bytes(16)).decode("ascii")
-            request = (f"GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\n"
-                       f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n")
+            request = (
+                f"GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\n"
+                f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
+            )
             self.socket.sendall(request.encode("ascii"))
             while b"\r\n\r\n" not in self.buffer:
                 self.socket.settimeout(_remaining(deadline))
@@ -276,7 +303,9 @@ class _CDP:
             lines = header.decode("ascii").split("\r\n")
             fields = dict(line.split(":", 1) for line in lines[1:] if ":" in line)
             fields = {key.lower(): value.strip() for key, value in fields.items()}
-            expected = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode("ascii")).digest()).decode("ascii")
+            expected = base64.b64encode(
+                hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode("ascii")).digest()
+            ).decode("ascii")
             if not re.match(r"HTTP/1\.[01] 101(?: |$)", lines[0]) or fields.get("sec-websocket-accept") != expected:
                 raise ValueError("invalid handshake")
         except BaseException:
@@ -349,7 +378,9 @@ class _CDP:
     def call(self, method, params=None):
         self.serial += 1
         serial = self.serial
-        self._send(json.dumps({"id": serial, "method": method, "params": params or {}}, ensure_ascii=False).encode("utf-8"))
+        self._send(
+            json.dumps({"id": serial, "method": method, "params": params or {}}, ensure_ascii=False).encode("utf-8")
+        )
         while True:
             response = self._message()
             if not isinstance(response, dict):
@@ -358,19 +389,25 @@ class _CDP:
                 if "error" in response:
                     raise word.ExportError("本机 PDF 排版未完成，请重试；也可先导出 Word。", 503)
                 return response.get("result", {})
-            if len(self.events) < 1000 and response.get("method") in {"Runtime.exceptionThrown", "Network.requestWillBeSent"}:
+            if len(self.events) < 1000 and response.get("method") in {
+                "Runtime.exceptionThrown",
+                "Network.requestWillBeSent",
+            }:
                 self.events.append(response)
 
 
 def _assets(frontend):
     """Read only fixed public program files, embedding fonts in the document."""
     frontend = frontend.resolve()
+
     def read(name):
         path = (frontend / name).resolve()
         if not path.is_relative_to(frontend) or not path.is_file():
             raise word.ExportError("PDF 排版文件缺失，请修复或重新安装题有据。", 503)
         return path.read_text(encoding="utf-8")
+
     katex_css = read("vendor/katex/katex.min.css")
+
     def font(match):
         name = match.group(1).strip("\"'")
         path = (frontend / "vendor/katex" / name).resolve()
@@ -378,14 +415,23 @@ def _assets(frontend):
         if not path.is_relative_to(allowed) or path.suffix not in {".woff2", ".woff", ".ttf"} or not path.is_file():
             raise word.ExportError("PDF 公式字体不完整，请修复安装。", 503)
         mime = {".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf"}[path.suffix]
-        return 'url("data:' + mime + ';base64,' + base64.b64encode(path.read_bytes()).decode("ascii") + '")'
+        return 'url("data:' + mime + ";base64," + base64.b64encode(path.read_bytes()).decode("ascii") + '")'
+
     katex_css = re.sub(r"url\(([^)]+)\)", font, katex_css)
     css = "\n".join([read("styles.css"), katex_css, read("library.css")])
     # 1.26.25：exam-export.js 也要带进来 —— 组卷预览的大题标题由它算
-    #（frontend/library.js 的 renderPrint），这个页面跑的正是预览那段真代码，
+    # （frontend/library.js 的 renderPrint），这个页面跑的正是预览那段真代码，
     # 少一个模块它就报「sectionHeading 不是函数」。
-    scripts = [read(name) for name in ("vendor/katex/katex.min.js", "qb-render.js", "library-solutions.js",
-                                       "exam-export.js", "exam-layout.js")]
+    scripts = [
+        read(name)
+        for name in (
+            "vendor/katex/katex.min.js",
+            "qb-render.js",
+            "library-solutions.js",
+            "exam-export.js",
+            "exam-layout.js",
+        )
+    ]
     return css, scripts
 
 
@@ -463,14 +509,12 @@ def _section_headings(captured) -> dict:
     枚举方式和 word._ordered 完全一致，空组跳过，所以序号也一致。
     """
     known = {key for key, _ in word.GROUPS}
-    groups = [(key, name, [item for item in captured if item["type"] == key])
-              for key, name in word.GROUPS]
+    groups = [(key, name, [item for item in captured if item["type"] == key]) for key, name in word.GROUPS]
     groups.append(("other", "其他", [item for item in captured if item["type"] not in known]))
     # 先去掉空组再编号：Word 那边的序号是在过滤之后的列表上数的，
     # 这里要是先编号，缺一个题型时 PDF 会印出「三、填空题」而 Word 印「二、」。
     present = [(key, name, group) for key, name, group in groups if group]
-    return {key: word._section_heading(group, index, name)
-            for index, (key, name, group) in enumerate(present)}
+    return {key: word._section_heading(group, index, name) for index, (key, name, group) in enumerate(present)}
 
 
 def _html_document(captured, title, options):
@@ -483,38 +527,85 @@ def _html_document(captured, title, options):
         content = {name: item["content"].get(name) for name in ("stem", "options", "origin")}
         if item["content"].get("body_mode", "text") == "source_image":
             content["body_mode"] = "source_image"
-            content["question_images"] = [{"file": "data:image/png;base64," + base64.b64encode(image["bytes"]).decode("ascii"),
-                                            "width": image["size"][0], "height": image["size"][1], "order": order}
-                                           for order, image in enumerate(item["images"])]
+            content["question_images"] = [
+                {
+                    "file": "data:image/png;base64," + base64.b64encode(image["bytes"]).decode("ascii"),
+                    "width": image["size"][0],
+                    "height": image["size"][1],
+                    "order": order,
+                }
+                for order, image in enumerate(item["images"])
+            ]
             content["figures"] = []
         else:
-            content["figures"] = [{"slot": image["slot"], "file": "data:image/png;base64," + base64.b64encode(image["bytes"]).decode("ascii")}
-                                  for image in item["images"]]
-        items.append({"id": item["id"], "type": item["type"], "content": content,
-                      "selected": item["selected"] if options["document"] != "questions" else {},
-                      "solution_images": [{**{key: image[key] for key in ("position", "paragraph", "display_width")},
-                          "file": "data:image/png;base64," + base64.b64encode(image["bytes"]).decode("ascii")}
-                          for image in item.get("solution_images", [])] if options["document"] != "questions" else [],
-                      "ai": item["ai"] if options["document"] != "questions" else False})
-    data = json.dumps({"items": items, "title": title, "options": options,
-                       "sectionHeadings": _section_headings(captured)},
-                      ensure_ascii=False)
-    data = data.replace("&", "\\u0026").replace("<", "\\u003c").replace(">", "\\u003e").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+            content["figures"] = [
+                {
+                    "slot": image["slot"],
+                    "file": "data:image/png;base64," + base64.b64encode(image["bytes"]).decode("ascii"),
+                }
+                for image in item["images"]
+            ]
+        items.append(
+            {
+                "id": item["id"],
+                "type": item["type"],
+                "content": content,
+                "selected": item["selected"] if options["document"] != "questions" else {},
+                "solution_images": [
+                    {
+                        **{key: image[key] for key in ("position", "paragraph", "display_width")},
+                        "file": "data:image/png;base64," + base64.b64encode(image["bytes"]).decode("ascii"),
+                    }
+                    for image in item.get("solution_images", [])
+                ]
+                if options["document"] != "questions"
+                else [],
+                "ai": item["ai"] if options["document"] != "questions" else False,
+            }
+        )
+    data = json.dumps(
+        {"items": items, "title": title, "options": options, "sectionHeadings": _section_headings(captured)},
+        ensure_ascii=False,
+    )
+    data = (
+        data.replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
     policy = f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'"
-    script_tags = "".join(f'<script nonce="{nonce}" src="data:application/javascript;base64,{base64.b64encode(script.encode()).decode()}"></script>' for script in scripts)
+    script_tags = "".join(
+        f'<script nonce="{nonce}" src="data:application/javascript;base64,{base64.b64encode(script.encode()).decode()}"></script>'
+        for script in scripts
+    )
     if re.search(r"</style", css, re.I):
         raise word.ExportError("PDF 排版资源不完整，请修复安装。", 503)
     # Measurements use fixed print width, independent of the headless viewport.
     fixed = "html,body{margin:0;background:#fff}#printSource{position:absolute;left:-20000px;top:0;width:178mm;max-width:none}#printPaper{width:210mm;max-width:none;padding:0;box-shadow:none}"
-    return ('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="'
-            + html.escape(policy, quote=True) + '"><title>' + html.escape(title) + '</title><style>' + css + fixed + '</style></head>'
-            + '<body><section class="print-sheet"><div id="printSource" class="print-flow exam-source"></div><article id="printPaper" class="print-paper"></article></section>'
-            + f'<script nonce="{nonce}" id="examData" type="application/json">' + data + '</script>' + script_tags
-            + f'<script nonce="{nonce}">' + _DRIVER + '</script></body></html>')
+    return (
+        '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="'
+        + html.escape(policy, quote=True)
+        + '"><title>'
+        + html.escape(title)
+        + "</title><style>"
+        + css
+        + fixed
+        + "</style></head>"
+        + '<body><section class="print-sheet"><div id="printSource" class="print-flow exam-source"></div><article id="printPaper" class="print-paper"></article></section>'
+        + f'<script nonce="{nonce}" id="examData" type="application/json">'
+        + data
+        + "</script>"
+        + script_tags
+        + f'<script nonce="{nonce}">'
+        + _DRIVER
+        + "</script></body></html>"
+    )
 
 
 def _validate_pdf(data, pages):
     import pymupdf
+
     if not data.startswith(b"%PDF-") or b"%%EOF" not in data[-1024:] or len(data) > MAX_PDF_BYTES:
         raise word.ExportError("PDF 文件未完整生成，请减少选题后重试。", 422)
     try:
@@ -553,23 +644,40 @@ def _render(document):
                 client.call("Page.enable")
                 client.call("Runtime.enable")
                 client.call("Network.enable")
-                client.call("Network.setBlockedURLs", {"urls": ["http://*", "https://*", "ws://*", "wss://*", "ftp://*", "file://*"]})
+                client.call(
+                    "Network.setBlockedURLs",
+                    {"urls": ["http://*", "https://*", "ws://*", "wss://*", "ftp://*", "file://*"]},
+                )
                 frame = client.call("Page.getFrameTree")["frameTree"]["frame"]["id"]
                 client.call("Page.setDocumentContent", {"frameId": frame, "html": document})
                 while True:
-                    value = client.call("Runtime.evaluate", {"expression": "window.__qbPdfStatus || {ready:false}", "returnByValue": True})
+                    value = client.call(
+                        "Runtime.evaluate",
+                        {"expression": "window.__qbPdfStatus || {ready:false}", "returnByValue": True},
+                    )
                     status = value.get("result", {}).get("value", {})
                     if status.get("error"):
                         raise word.ExportError("PDF 未能完整排版：" + str(status["error"])[:200], 422)
                     if status.get("ready"):
                         break
                     _remaining(deadline)
-                    time.sleep(.05)
+                    time.sleep(0.05)
                 if type(status.get("page_count")) is not int or not 1 <= status["page_count"] <= MAX_PAGES:
                     raise word.ExportError("PDF 页数不完整，请重新打开组卷。", 422)
-                result = client.call("Page.printToPDF", {"printBackground": True, "displayHeaderFooter": False,
-                    "preferCSSPageSize": True, "paperWidth": 210 / 25.4, "paperHeight": 297 / 25.4,
-                    "marginTop": 0, "marginBottom": 0, "marginLeft": 0, "marginRight": 0})
+                result = client.call(
+                    "Page.printToPDF",
+                    {
+                        "printBackground": True,
+                        "displayHeaderFooter": False,
+                        "preferCSSPageSize": True,
+                        "paperWidth": 210 / 25.4,
+                        "paperHeight": 297 / 25.4,
+                        "marginTop": 0,
+                        "marginBottom": 0,
+                        "marginLeft": 0,
+                        "marginRight": 0,
+                    },
+                )
                 data = base64.b64decode(result.get("data", ""), validate=True)
                 _validate_pdf(data, status["page_count"])
                 if any(event.get("method") == "Runtime.exceptionThrown" for event in client.events):
@@ -581,14 +689,28 @@ def _render(document):
                 client = process = None
     except word.ExportError:
         raise
-    except (OSError, ValueError, ConnectionError, TimeoutError, KeyError, StopIteration, IndexError, subprocess.SubprocessError):
+    except (
+        OSError,
+        ValueError,
+        ConnectionError,
+        TimeoutError,
+        KeyError,
+        StopIteration,
+        IndexError,
+        subprocess.SubprocessError,
+    ):
         raise word.ExportError("本机 PDF 排版连接失败，请重试；也可先导出 Word。", 503) from None
     finally:
         _render_lock.release()
 
 
 def export(payload):
-    if not isinstance(payload, dict) or set(payload) - {"ids", "title", "print_options", "rendered_fields", "format", "solutions", "preview_page_count"} or payload.get("format", "pdf") != "pdf":
+    if (
+        not isinstance(payload, dict)
+        or set(payload)
+        - {"ids", "title", "print_options", "rendered_fields", "format", "solutions", "preview_page_count"}
+        or payload.get("format", "pdf") != "pdf"
+    ):
         raise word.ExportError("PDF 导出内容格式不正确")
     try:
         ids = normalize_ids(payload.get("ids"))
@@ -602,7 +724,9 @@ def export(payload):
     previewed = payload.get("preview_page_count")
     if previewed is not None and (type(previewed) is not int or not 1 <= previewed <= MAX_PAGES):
         raise word.ExportError("请重新打开组卷预览后再导出 PDF")
-    captured, use_ai = word._capture(ids, payload.get("rendered_fields"), options, "pdf", solutions=payload.get("solutions"))
+    captured, use_ai = word._capture(
+        ids, payload.get("rendered_fields"), options, "pdf", solutions=payload.get("solutions")
+    )
     document = _html_document(captured, title, options)
     data, pages = _render(document)
     word._recheck(captured, options, use_ai)
@@ -619,6 +743,7 @@ def export_pdf_view(request):
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
     from .views import _body, _guard
+
     rejected = _guard(request)
     if rejected:
         return rejected
@@ -627,7 +752,9 @@ def export_pdf_view(request):
     try:
         payload = _body(request, limit=word.MAX_BODY)
         if payload is None:
-            raise word.ExportError("PDF 导出内容格式不正确或超过 2 MiB，请减少选题", 413 if len(request.body) > word.MAX_BODY else 400)
+            raise word.ExportError(
+                "PDF 导出内容格式不正确或超过 2 MiB，请减少选题", 413 if len(request.body) > word.MAX_BODY else 400
+            )
         data, filename, count, pages = export(payload)
     except RequestDataTooBig:
         return JsonResponse({"error": "导出内容超过 2 MiB，请减少选题、分批导出"}, status=413)
@@ -638,4 +765,5 @@ def export_pdf_view(request):
     response["X-Question-Count"], response["X-Page-Count"] = str(count), str(pages)
     response["Cache-Control"] = "no-store"
     from .export_preferences import deliver
+
     return deliver(request, response, data, filename, count=count, pages=pages)

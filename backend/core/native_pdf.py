@@ -3,6 +3,7 @@
 No model, guessed formula, or guessed scan-page text enters this adapter.
 The extracted text is a draft; original-page bodies remain the safe default.
 """
+
 from __future__ import annotations
 
 import math
@@ -76,10 +77,12 @@ def normalized_bbox(page, bbox) -> list[float] | None:
     bounds = page.rect
     if rect.is_empty or bounds.width <= 0 or bounds.height <= 0:
         return None
-    return [round((rect.x0 - bounds.x0) / bounds.width * 1000, 2),
-            round((rect.y0 - bounds.y0) / bounds.height * 1000, 2),
-            round((rect.x1 - bounds.x0) / bounds.width * 1000, 2),
-            round((rect.y1 - bounds.y0) / bounds.height * 1000, 2)]
+    return [
+        round((rect.x0 - bounds.x0) / bounds.width * 1000, 2),
+        round((rect.y0 - bounds.y0) / bounds.height * 1000, 2),
+        round((rect.x1 - bounds.x0) / bounds.width * 1000, 2),
+        round((rect.y1 - bounds.y0) / bounds.height * 1000, 2),
+    ]
 
 
 def extract(source: Path, selected_pages: list[int] | None = None) -> dict:
@@ -116,8 +119,15 @@ def extract(source: Path, selected_pages: list[int] | None = None) -> dict:
                     rect = (rect + (-padding, -padding, padding, padding)) & page.rect
                     if not rect.is_empty:
                         drawings.append({**drawing, "rect": rect})
-                rectangles = (page.cluster_drawings(drawings=drawings) if hasattr(page, "cluster_drawings")
-                              else [drawing["rect"] for drawing in drawings]) if drawings else []
+                rectangles = (
+                    (
+                        page.cluster_drawings(drawings=drawings)
+                        if hasattr(page, "cluster_drawings")
+                        else [drawing["rect"] for drawing in drawings]
+                    )
+                    if drawings
+                    else []
+                )
                 for rectangle in rectangles:
                     box = normalized_bbox(page, rectangle)
                     if box:
@@ -130,16 +140,37 @@ def extract(source: Path, selected_pages: list[int] | None = None) -> dict:
                         if box is not None and text.strip():
                             text_lines.append(text)
                             marked = mark_private(text)
-                            blocks.append({"seq": len(blocks), "type": "text", "page_idx": index,
-                                           "bbox": box, "text": marked[:20000], "html": ""})
+                            blocks.append(
+                                {
+                                    "seq": len(blocks),
+                                    "type": "text",
+                                    "page_idx": index,
+                                    "bbox": box,
+                                    "text": marked[:20000],
+                                    "html": "",
+                                }
+                            )
                 for box in visual_boxes:
-                    blocks.append({"seq": len(blocks), "type": "image", "page_idx": index,
-                                   "bbox": box, "text": "", "html": ""})
+                    blocks.append(
+                        {"seq": len(blocks), "type": "image", "page_idx": index, "bbox": box, "text": "", "html": ""}
+                    )
                 joined = "\n".join(text_lines)
                 warnings.extend(classify_page_text(joined, full_page_image=full_page_image))
-                pages.append({"page_idx": index, "mode": page_mode(joined, full_page_image=full_page_image),
-                              "text_characters": len(joined), "warnings": warnings})
+                pages.append(
+                    {
+                        "page_idx": index,
+                        "mode": page_mode(joined, full_page_image=full_page_image),
+                        "text_characters": len(joined),
+                        "warnings": warnings,
+                    }
+                )
             except Exception as exc:
                 # One malformed page must not erase successful pages.
-                pages.append({"page_idx": index, "mode": "manual", "warnings": [f"本页文字提取失败（{type(exc).__name__}），请手工框题。"]})
+                pages.append(
+                    {
+                        "page_idx": index,
+                        "mode": "manual",
+                        "warnings": [f"本页文字提取失败（{type(exc).__name__}），请手工框题。"],
+                    }
+                )
     return {"blocks": blocks, "pages": pages}

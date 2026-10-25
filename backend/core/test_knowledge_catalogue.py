@@ -34,8 +34,7 @@ class KnowledgeCatalogueTests(TestCase):
         # point belongs to is read by walking up the hierarchy.
         chapter = LibraryTag.objects.create(name="正式数学目录", kind="knowledge", levels=["高中"])
         tag = LibraryTag.objects.create(name="题库知识点", kind="knowledge", levels=["高中"])
-        LibraryTagRelation.objects.create(parent=chapter, child=tag,
-                                          relation_type=LibraryTagRelation.Type.HIERARCHY)
+        LibraryTagRelation.objects.create(parent=chapter, child=tag, relation_type=LibraryTagRelation.Type.HIERARCHY)
 
     def body(self):
         response = self.client.get("/api/settings/knowledge", headers={"x-qb-request": "1"})
@@ -52,8 +51,7 @@ class KnowledgeCatalogueTests(TestCase):
         self.assertEqual(body["source"], "正式题库标签目录")
 
     def test_legacy_text_file_does_not_override_the_live_catalogue(self):
-        knowledge.ensure_file().write_text(
-            "# 第一章 自己的章\n甲\n乙\n\n# 第二章 另一个章\n丙\n", encoding="utf-8")
+        knowledge.ensure_file().write_text("# 第一章 自己的章\n甲\n乙\n\n# 第二章 另一个章\n丙\n", encoding="utf-8")
         _, body = self.body()
         self.assertEqual({item["point"] for item in body["points"]}, {"正式数学目录", "题库知识点"})
         self.assertEqual((body["total"], body["chapters"]), (2, 1))
@@ -67,17 +65,17 @@ class KnowledgeCatalogueTests(TestCase):
         found from the stage they are taught in.
         """
         concept = LibraryTag.objects.create(name="函数的概念", kind="knowledge", levels=["高中"])
-        LibraryTagRelation.objects.create(parent=LibraryTag.objects.get(name="正式数学目录"), child=concept,
-                                          relation_type=LibraryTagRelation.Type.HIERARCHY)
+        LibraryTagRelation.objects.create(
+            parent=LibraryTag.objects.get(name="正式数学目录"),
+            child=concept,
+            relation_type=LibraryTagRelation.Type.HIERARCHY,
+        )
         deep = LibraryTag.objects.create(name="函数的单调性", kind="knowledge", levels=["高中"])
-        LibraryTagRelation.objects.create(parent=concept, child=deep,
-                                          relation_type=LibraryTagRelation.Type.HIERARCHY)
+        LibraryTagRelation.objects.create(parent=concept, child=deep, relation_type=LibraryTagRelation.Type.HIERARCHY)
         junior = LibraryTag.objects.create(name="初中 · 函数", kind="knowledge", levels=["初中"])
         shared = LibraryTag.objects.create(name="函数图象", kind="knowledge", levels=["初中", "高中"])
-        LibraryTagRelation.objects.create(parent=deep, child=shared,
-                                          relation_type=LibraryTagRelation.Type.HIERARCHY)
-        LibraryTagRelation.objects.create(parent=junior, child=shared,
-                                          relation_type=LibraryTagRelation.Type.HIERARCHY)
+        LibraryTagRelation.objects.create(parent=deep, child=shared, relation_type=LibraryTagRelation.Type.HIERARCHY)
+        LibraryTagRelation.objects.create(parent=junior, child=shared, relation_type=LibraryTagRelation.Type.HIERARCHY)
 
         _, body = self.body()
         points = {item["point"]: item for item in body["points"]}
@@ -88,6 +86,6 @@ class KnowledgeCatalogueTests(TestCase):
     def test_requests_without_the_local_page_header_are_refused(self):
         response = self.client.get("/api/settings/knowledge")
         self.assertEqual(response.status_code, 403)
-        self.assertEqual(self.client.post("/api/settings/knowledge", data="{}",
-                                          content_type="application/json").status_code, 405)
-
+        self.assertEqual(
+            self.client.post("/api/settings/knowledge", data="{}", content_type="application/json").status_code, 405
+        )

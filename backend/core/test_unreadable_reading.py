@@ -13,6 +13,7 @@
 
     .\\backend\\.venv\\Scripts\\python.exe backend\\manage.py test core.test_unreadable_reading
 """
+
 from types import SimpleNamespace
 from unittest import mock
 
@@ -89,13 +90,24 @@ class RefusalRetryTests(SimpleTestCase):
 
 def snapshot():
     return {
-        "id": 1, "number": 18, "group_id": None,
-        "regions": [{"page_idx": 8, "bbox": [62.0, 480.0, 937.0, 583.0]},
-                    {"page_idx": 9, "bbox": [60.0, 45.0, 937.0, 474.0]}],
-        "candidates": [], "question_type": "unknown", "section": "三、解答题",
-        "stem": "", "options": {}, "edited": False,
-        "source_kind": Question.SourceKind.UNKNOWN, "source_anchor_seq": 18,
-        "segmentation_flags": [], "body_mode": "text", "start_source": "mineru",
+        "id": 1,
+        "number": 18,
+        "group_id": None,
+        "regions": [
+            {"page_idx": 8, "bbox": [62.0, 480.0, 937.0, 583.0]},
+            {"page_idx": 9, "bbox": [60.0, 45.0, 937.0, 474.0]},
+        ],
+        "candidates": [],
+        "question_type": "unknown",
+        "section": "三、解答题",
+        "stem": "",
+        "options": {},
+        "edited": False,
+        "source_kind": Question.SourceKind.UNKNOWN,
+        "source_anchor_seq": 18,
+        "segmentation_flags": [],
+        "body_mode": "text",
+        "start_source": "mineru",
         "witness_blocks": [],
     }
 
@@ -104,11 +116,14 @@ class UnreadableFlagTests(SimpleTestCase):
     """提示必须落在卡上，不只是留在 readers 里。"""
 
     def read(self, reading):
-        with mock.patch.object(readers, "primary_engine", return_value=object()), \
-                mock.patch.object(readers, "read_question", return_value=reading), \
-                mock.patch.object(pipeline.imaging, "stack_regions",
-                                  return_value=(SimpleNamespace(height=1614, width=1862), [])), \
-                mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:url"):
+        with (
+            mock.patch.object(readers, "primary_engine", return_value=object()),
+            mock.patch.object(readers, "read_question", return_value=reading),
+            mock.patch.object(
+                pipeline.imaging, "stack_regions", return_value=(SimpleNamespace(height=1614, width=1862), [])
+            ),
+            mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:url"),
+        ):
             return pipeline.read_card(snapshot(), SimpleNamespace(load=lambda page: object()))
 
     def test_a_refusal_leaves_a_flag_and_yellows_the_card(self):

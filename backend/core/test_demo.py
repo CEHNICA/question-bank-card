@@ -23,8 +23,9 @@ class DemoPaperTests(TransactionTestCase):
         self.addCleanup(override.disable)
 
     def post(self, path, body=None):
-        return self.client.post(path, data=json.dumps(body or {}), content_type="application/json",
-                                HTTP_X_QB_REQUEST="1")
+        return self.client.post(
+            path, data=json.dumps(body or {}), content_type="application/json", HTTP_X_QB_REQUEST="1"
+        )
 
     def test_practice_paper_is_ready_with_the_planted_situations(self):
         response = self.post("/api/demo")
@@ -78,8 +79,7 @@ class DemoPaperTests(TransactionTestCase):
         pdf = (demo.data_root() / "demo-paper.pdf").read_bytes()
         from django.core.files.uploadedfile import SimpleUploadedFile
 
-        response = self.client.post("/api/papers", {"file": SimpleUploadedFile("demo.pdf", pdf)},
-                                    HTTP_X_QB_REQUEST="1")
+        response = self.client.post("/api/papers", {"file": SimpleUploadedFile("demo.pdf", pdf)}, HTTP_X_QB_REQUEST="1")
         self.assertIn(response.status_code, (200, 201))
         self.assertFalse(response.json().get("duplicate"))
         self.assertFalse(response.json()["paper"]["demo"])

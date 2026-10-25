@@ -11,6 +11,7 @@
 
 借一段答案进去，收尾还回去（借之前那道题本来是没有答案的）。
 """
+
 import json
 import sqlite3
 import sys
@@ -21,7 +22,7 @@ BASE = "http://127.0.0.1:8803"
 CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 DB = r"tmp\accept-1133\db.sqlite3"
 MARK = "界面复现标记"
-LOAN = None      # (publication_id, 借之前的 extras, 借出来的 solution id)
+LOAN = None  # (publication_id, 借之前的 extras, 借出来的 solution id)
 
 
 def db_key(publication_id: str) -> str:
@@ -31,15 +32,17 @@ def db_key(publication_id: str) -> str:
 def restore(pub_id: str, original_extras: str, solution_id: str) -> None:
     connection = sqlite3.connect(DB)
     try:
-        deleted = connection.execute("DELETE FROM core_librarysolution WHERE id = ?",
-                                    (db_key(solution_id),)).rowcount
-        written = connection.execute("UPDATE core_publishedquestion SET extras = ? WHERE id = ?",
-                                    (original_extras, db_key(pub_id))).rowcount
+        deleted = connection.execute("DELETE FROM core_librarysolution WHERE id = ?", (db_key(solution_id),)).rowcount
+        written = connection.execute(
+            "UPDATE core_publishedquestion SET extras = ? WHERE id = ?", (original_extras, db_key(pub_id))
+        ).rowcount
         connection.commit()
     finally:
         connection.close()
-    print(f"  还原：删了 {deleted} 行、extras 改了 {written} 行"
-          + ("" if deleted == 1 and written == 1 else "  ← 没还原干净"))
+    print(
+        f"  还原：删了 {deleted} 行、extras 改了 {written} 行"
+        + ("" if deleted == 1 and written == 1 else "  ← 没还原干净")
+    )
 
 
 def main() -> int:
@@ -76,7 +79,8 @@ def walk() -> int:
             if not candidate:
                 continue
             row = connection.execute(
-                "select extras from core_publishedquestion where id = ?", (db_key(candidate),)).fetchone()
+                "select extras from core_publishedquestion where id = ?", (db_key(candidate),)
+            ).fetchone()
             if row and "solution_id" not in (json.loads(row[0] or "{}") or {}):
                 card_index, pub_id = index, candidate
                 original_extras = row[0] or "{}"
@@ -100,7 +104,9 @@ def walk() -> int:
         print("一、第一次打开组卷预览")
         page.locator("#basketButton").click()
         page.wait_for_selector("#printSheet[open]")
-        page.wait_for_function("() => document.querySelectorAll('#printPaper .print-question').length >= 1", timeout=40000)
+        page.wait_for_function(
+            "() => document.querySelectorAll('#printPaper .print-question').length >= 1", timeout=40000
+        )
         first = page.locator("#printAnswerStatus").inner_text().strip()
         print("   ", first)
         page.locator("#closePrint").click()
@@ -121,15 +127,24 @@ def walk() -> int:
         page.locator("#answerEditorSave").click()
         page.wait_for_function(
             "mark => { const s = document.getElementById('answerEditorStatus') || document.querySelector('.answer-editor-status');"
-            " return s && s.textContent.includes('已保存'); }", arg=MARK, timeout=30000)
+            " return s && s.textContent.includes('已保存'); }",
+            arg=MARK,
+            timeout=30000,
+        )
         saved_text = page.locator(".answer-editor-status").inner_text().strip()
         print("   保存后状态：", saved_text[:60])
 
         # 把刚存的那一版解析记下来，收尾要还回去
         connection = sqlite3.connect(DB)
-        linked = (json.loads(connection.execute(
-            "select extras from core_publishedquestion where id = ?", (db_key(pub_id),)).fetchone()[0] or "{}")
-            or {}).get("solution_id")
+        linked = (
+            json.loads(
+                connection.execute(
+                    "select extras from core_publishedquestion where id = ?", (db_key(pub_id),)
+                ).fetchone()[0]
+                or "{}"
+            )
+            or {}
+        ).get("solution_id")
         connection.close()
         LOAN = (pub_id, original_extras, linked or "")
         print("   题库已挂上解析：", linked)
@@ -144,7 +159,9 @@ def walk() -> int:
             page.wait_for_selector("#basketPanel", state="visible")
         page.locator("#basketButton").click()
         page.wait_for_selector("#printSheet[open]")
-        page.wait_for_function("() => document.querySelectorAll('#printPaper .print-question').length >= 1", timeout=40000)
+        page.wait_for_function(
+            "() => document.querySelectorAll('#printPaper .print-question').length >= 1", timeout=40000
+        )
         again = page.locator("#printAnswerStatus").inner_text().strip()
         print("   ", again)
         split_disabled = page.evaluate("() => document.getElementById('exportSplit').disabled")
@@ -161,18 +178,25 @@ def walk() -> int:
             page.wait_for_selector("#basketPanel", state="visible")
         page.locator("#basketButton").click()
         page.wait_for_selector("#printSheet[open]")
-        page.wait_for_function("() => document.querySelectorAll('#printPaper .print-question').length >= 1", timeout=40000)
+        page.wait_for_function(
+            "() => document.querySelectorAll('#printPaper .print-question').length >= 1", timeout=40000
+        )
         after_reload = page.locator("#printAnswerStatus").inner_text().strip()
         print("   ", after_reload)
-        print("    「分别导出题目卷与答案卷」是灰的：",
-              page.evaluate("() => document.getElementById('exportSplit').disabled"))
+        print(
+            "    「分别导出题目卷与答案卷」是灰的：",
+            page.evaluate("() => document.getElementById('exportSplit').disabled"),
+        )
 
         # 三、四两处看到的应该一样。刷新能好、同一次使用里不好，
         # 说明答案在题库里、只是这次组卷没认它 —— 正是这条要盯的毛病。
         broken = "没有答案" in again and "没有答案" not in after_reload
         print()
-        print("FAIL  填过的答案在这次组卷里没出现，刷新一下才认" if broken
-              else "PASS  填过的答案，同一次使用里立刻就在试卷上")
+        print(
+            "FAIL  填过的答案在这次组卷里没出现，刷新一下才认"
+            if broken
+            else "PASS  填过的答案，同一次使用里立刻就在试卷上"
+        )
         print("      " + ("（刷新后：" + after_reload + "）" if broken else ""))
 
         context.close()

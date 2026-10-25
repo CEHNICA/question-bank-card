@@ -1,4 +1,5 @@
 """Original-image questions must survive actual Word/PDF export without OCR."""
+
 import hashlib
 import io
 import zipfile
@@ -10,8 +11,10 @@ from PIL import Image
 
 from . import library, library_assistant, library_export, library_jobs, library_pdf, test_library_export as fixtures
 
-urlpatterns = [path("api/library/export-docx", library_export.export_docx_view),
-               path("api/library/export-pdf", library_pdf.export_pdf_view)]
+urlpatterns = [
+    path("api/library/export-docx", library_export.export_docx_view),
+    path("api/library/export-pdf", library_pdf.export_pdf_view),
+]
 
 
 @override_settings(ROOT_URLCONF=__name__)
@@ -29,13 +32,22 @@ class SourceImageExportTests(TestCase):
         for index, (size, color) in enumerate((((1200, 400), "red"), ((1200, 300), "blue")), 1):
             target = folder / f"question-{index}.png"
             Image.new("RGB", size, color).save(target)
-            images.append({"file": target.name, "width": size[0], "height": size[1],
-                           "page_idx": index - 1, "bbox": [100, 100, 900, 400], "order": index - 1,
-                           "image_sha256": hashlib.sha256(target.read_bytes()).hexdigest()})
+            images.append(
+                {
+                    "file": target.name,
+                    "width": size[0],
+                    "height": size[1],
+                    "page_idx": index - 1,
+                    "bbox": [100, 100, 900, 400],
+                    "order": index - 1,
+                    "image_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+                }
+            )
         # A separately extracted figure is kept for later transcription; do not
         # insert it again while the original image is the full question body.
-        pub.content.update(body_mode="source_image", question_images=images,
-                           figures=[{"file": "figure-1.png", "slot": "B"}])
+        pub.content.update(
+            body_mode="source_image", question_images=images, figures=[{"file": "figure-1.png", "slot": "B"}]
+        )
         pub.content_hash = library.content_hash(pub.content)
         pub.save(update_fields=["content", "content_hash"])
         return pub, folder
@@ -71,15 +83,21 @@ class SourceImageExportTests(TestCase):
     def test_pdf_embeds_snapshot_fragments_and_rechecks_them_after_rendering(self):
         pub, folder = self.image_question()
         payload = self.payload([pub], output_format="pdf")
+
         def change(document):
             self.assertIn('"body_mode": "source_image"', document)
             self.assertEqual(document.count('"file": "data:image/png;base64,'), 2)
             self.assertNotIn('"slot": "B"', document)
             Image.new("RGB", (1200, 400), "green").save(folder / "question-1.png")
             return b"%PDF-1.7\n%%EOF\n", 1
+
         with mock.patch.object(library_pdf, "_render", side_effect=change):
-            result = self.client.post("/api/library/export-pdf", __import__("json").dumps(payload),
-                                      content_type="application/json", HTTP_X_QB_REQUEST="1")
+            result = self.client.post(
+                "/api/library/export-pdf",
+                __import__("json").dumps(payload),
+                content_type="application/json",
+                HTTP_X_QB_REQUEST="1",
+            )
         self.assertEqual(result.status_code, 409)
 
     def test_body_image_dimensions_must_match_reviewed_snapshot(self):
@@ -93,7 +111,9 @@ class SourceImageExportTests(TestCase):
         prepared = library_assistant._images(pub)
         self.assertEqual(len(prepared["question_images"]), 2)
         self.assertEqual(prepared["figures"], [])
-        with mock.patch.object(library_jobs.library_ai_settings, "chat", return_value=("【答案】D\n【解析】测试", "test")) as chat:
+        with mock.patch.object(
+            library_jobs.library_ai_settings, "chat", return_value=("【答案】D\n【解析】测试", "test")
+        ) as chat:
             result = library_jobs.run_answer(pub)
         self.assertEqual(result["answer"], "D")
         self.assertIn("原卷截图", chat.call_args.args[0])
@@ -103,13 +123,17 @@ class SourceImageExportTests(TestCase):
     def test_run_answer_refuses_unpaired_dollar_and_truncation_never_cuts_a_formula(self):
         pub, _ = self.image_question()
         library_assistant._images(pub)
-        with mock.patch.object(library_jobs.library_ai_settings, "chat",
-                               return_value=("【答案】$S=1$d_1$、$d_2$ 为对角线）\n【解析】测试", "test")):
+        with mock.patch.object(
+            library_jobs.library_ai_settings,
+            "chat",
+            return_value=("【答案】$S=1$d_1$、$d_2$ 为对角线）\n【解析】测试", "test"),
+        ):
             with self.assertRaises(library_jobs.JobError) as caught:
                 library_jobs.run_answer(pub)
         self.assertIn("配对", str(caught.exception))
-        with mock.patch.object(library_jobs.library_ai_settings, "chat",
-                               return_value=("【答案】$x=1$\n【解析】" + "$a+b$" * 30, "test")):
+        with mock.patch.object(
+            library_jobs.library_ai_settings, "chat", return_value=("【答案】$x=1$\n【解析】" + "$a+b$" * 30, "test")
+        ):
             result = library_jobs.run_answer(pub)
         self.assertFalse(library_jobs.unpaired_dollar(result["answer"]))
         self.assertFalse(library_jobs.unpaired_dollar(result["analysis"]))

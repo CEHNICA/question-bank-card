@@ -38,7 +38,7 @@ def _write_pdf(body):
     return path
 
 
-PRIVATE = ""          # 分段函数的大括号在这类 PDF 字体里的真实编码
+PRIVATE = ""  # 分段函数的大括号在这类 PDF 字体里的真实编码
 REPLACEMENT = "�"
 BODY = "已知函数 f(x) 的最小值问题。" * 40
 
@@ -56,46 +56,62 @@ class ExtractWiringTests(SimpleTestCase):
         page = result["pages"][0]
         self.assertEqual(page["mode"], "native")
         self.assertGreater(len(result["blocks"]), 0, "A page with text must yield blocks")
-        self.assertFalse(any("提取失败" in w for w in page["warnings"]),
-                         f"extract must reach page_mode instead of failing into the per-page handler: {page['warnings']}")
+        self.assertFalse(
+            any("提取失败" in w for w in page["warnings"]),
+            f"extract must reach page_mode instead of failing into the per-page handler: {page['warnings']}",
+        )
 
     def test_extract_reports_the_private_encoding_note(self):
         result = native_pdf.extract(_write_pdf(BODY))
-        self.assertTrue(any("不能保证分式" in w for w in result["pages"][0]["warnings"]),
-                        f"Every native page carries that note, got {result['pages'][0]['warnings']}")
+        self.assertTrue(
+            any("不能保证分式" in w for w in result["pages"][0]["warnings"]),
+            f"Every native page carries that note, got {result['pages'][0]['warnings']}",
+        )
 
 
 class PageModeTests(SimpleTestCase):
     """什么情况下这一页才该交给老师手工框题。"""
 
     def test_private_characters_alone_do_not_condemn_a_page(self):
-        self.assertEqual(native_pdf.page_mode(f"{PRIVATE} 12. 已知函数 f(x) = {PRIVATE} ，求 f(f(−2)) ．"),
-                         "native",
-                         "A page whose only odd characters are font-private must still cut normally")
+        self.assertEqual(
+            native_pdf.page_mode(f"{PRIVATE} 12. 已知函数 f(x) = {PRIVATE} ，求 f(f(−2)) ．"),
+            "native",
+            "A page whose only odd characters are font-private must still cut normally",
+        )
 
     def test_a_page_of_replacement_characters_is_still_manual(self):
-        self.assertEqual(native_pdf.page_mode(REPLACEMENT * 400 + "���"), "manual",
-                         "A body that genuinely will not decode must not be trusted")
+        self.assertEqual(
+            native_pdf.page_mode(REPLACEMENT * 400 + "���"),
+            "manual",
+            "A body that genuinely will not decode must not be trusted",
+        )
 
     def test_a_handful_of_replacements_does_not_condemn_the_page(self):
-        self.assertEqual(native_pdf.page_mode(BODY + "���" + BODY), "native",
-                         "Three missing characters in a long page must not cost the page its questions")
+        self.assertEqual(
+            native_pdf.page_mode(BODY + "���" + BODY),
+            "native",
+            "Three missing characters in a long page must not cost the page its questions",
+        )
 
     def test_a_whole_scan_dominated_page_is_manual(self):
-        self.assertEqual(native_pdf.page_mode(BODY, full_page_image=True), "manual",
-                         "A page that is mostly a scan still needs the teacher")
+        self.assertEqual(
+            native_pdf.page_mode(BODY, full_page_image=True),
+            "manual",
+            "A page that is mostly a scan still needs the teacher",
+        )
 
     def test_an_empty_page_is_manual(self):
         self.assertEqual(native_pdf.page_mode("  \n "), "manual")
 
 
 class PageWarningTests(SimpleTestCase):
-
     def test_the_note_says_private_encoding_not_corruption(self):
         warnings = native_pdf.classify_page_text(f"{PRIVATE} 12. 已知函数 f(x) = {PRIVATE}")
         self.assertTrue(any("私有编码" in w for w in warnings), f"Expected a private-encoding note, got {warnings}")
-        self.assertFalse(any("乱码" in w for w in warnings),
-                         "Font-private symbols are not corruption; saying so sends the teacher hunting a bad file")
+        self.assertFalse(
+            any("乱码" in w for w in warnings),
+            "Font-private symbols are not corruption; saying so sends the teacher hunting a bad file",
+        )
 
     def test_lost_characters_are_still_counted(self):
         warnings = native_pdf.classify_page_text(BODY + "���")
@@ -106,7 +122,6 @@ class PageWarningTests(SimpleTestCase):
 
 
 class PrivatePlaceholderTests(SimpleTestCase):
-
     def test_private_characters_become_a_visible_placeholder(self):
         marked = native_pdf.mark_private(f"{PRIVATE} 12. 已知函数 f(x) = {PRIVATE}")
         self.assertNotIn(PRIVATE, marked, "A raw private-use code point must not reach the draft text")

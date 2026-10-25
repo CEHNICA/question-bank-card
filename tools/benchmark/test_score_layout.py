@@ -1,4 +1,5 @@
 """Synthetic geometry counterexamples; no readers or application database."""
+
 from __future__ import annotations
 
 import io
@@ -21,9 +22,13 @@ def figure(box, slot="stem", page=0, **extra):
 
 
 def card(number=1, *, group=0, kind="unknown", regions=None, figures=None):
-    return {"group_sequence": group, "source_kind": kind, "number": number,
-            "regions": regions if regions is not None else [region([0, 0, 10, 10])],
-            "figures": figures if figures is not None else []}
+    return {
+        "group_sequence": group,
+        "source_kind": kind,
+        "number": number,
+        "regions": regions if regions is not None else [region([0, 0, 10, 10])],
+        "figures": figures if figures is not None else [],
+    }
 
 
 def document(*cards):
@@ -116,8 +121,9 @@ class ScoreLayoutTests(unittest.TestCase):
         truth = document(card(figures=[expected]))
         duplicate_parts = deepcopy(expected)
         duplicate_parts["parts"].append(region([0, 0, 10, 10], page=1))
-        self.assertEqual(score_layout.score(truth, document(card(figures=[duplicate_parts])))
-                         ["figure_relations"]["matched_count"], 1)
+        self.assertEqual(
+            score_layout.score(truth, document(card(figures=[duplicate_parts])))["figure_relations"]["matched_count"], 1
+        )
         incomplete = document(card(figures=[figure([0, 0, 10, 10])]))
         self.assertEqual(score_layout.score(truth, incomplete)["figure_relations"]["matched_count"], 0)
 
@@ -129,8 +135,9 @@ class ScoreLayoutTests(unittest.TestCase):
 
     def test_duplicate_prediction_cannot_match_one_figure_twice(self):
         expected = figure([0, 0, 10, 10])
-        metrics = score_layout.score(document(card(figures=[expected])),
-                                     document(card(figures=[expected, expected])))["figure_relations"]
+        metrics = score_layout.score(document(card(figures=[expected])), document(card(figures=[expected, expected])))[
+            "figure_relations"
+        ]
         self.assertEqual(metrics["matched_count"], 1)
         self.assertEqual(metrics["precision"], 0.5)
         self.assertEqual(metrics["recall"], 1)
@@ -144,16 +151,26 @@ class ScoreLayoutTests(unittest.TestCase):
 
     def test_exact_iou_threshold_matches_but_the_wrong_page_does_not(self):
         truth = document(card(figures=[figure([0, 0, 10, 10])]))
-        self.assertEqual(score_layout.score(truth, document(card(figures=[figure([0, 0, 5, 10])])))
-                         ["figure_relations"]["matched_count"], 1)
-        self.assertEqual(score_layout.score(truth, document(card(figures=[figure([0, 0, 10, 10], page=1)])))
-                         ["figure_relations"]["matched_count"], 0)
+        self.assertEqual(
+            score_layout.score(truth, document(card(figures=[figure([0, 0, 5, 10])])))["figure_relations"][
+                "matched_count"
+            ],
+            1,
+        )
+        self.assertEqual(
+            score_layout.score(truth, document(card(figures=[figure([0, 0, 10, 10], page=1)])))["figure_relations"][
+                "matched_count"
+            ],
+            0,
+        )
 
     def test_empty_denominators_are_null_without_claiming_perfect_scores(self):
         empty = score_layout.score(document(), document())
-        for category, names in [("question_numbers", ["precision", "recall"]),
-                                ("body_regions", ["coverage", "precision"]),
-                                ("figure_relations", ["precision", "recall"])]:
+        for category, names in [
+            ("question_numbers", ["precision", "recall"]),
+            ("body_regions", ["coverage", "precision"]),
+            ("figure_relations", ["precision", "recall"]),
+        ]:
             for name in names:
                 self.assertIsNone(empty[category][name])
         missed = score_layout.score(document(card()), document())
@@ -163,9 +180,16 @@ class ScoreLayoutTests(unittest.TestCase):
         self.assertIsNone(missed["body_regions"]["precision"])
 
     def test_invalid_coordinates_report_the_affected_input_field(self):
-        bad_boxes = [[0, 0, float("nan"), 10], [0, 0, float("inf"), 10],
-                     [0, 0, True, 10], [0, 0, "10", 10], [10, 0, 0, 10], [0, 0, 0, 10],
-                     [0, 0, 10], [-1e308, -1e308, 1e308, 1e308]]
+        bad_boxes = [
+            [0, 0, float("nan"), 10],
+            [0, 0, float("inf"), 10],
+            [0, 0, True, 10],
+            [0, 0, "10", 10],
+            [10, 0, 0, 10],
+            [0, 0, 0, 10],
+            [0, 0, 10],
+            [-1e308, -1e308, 1e308, 1e308],
+        ]
         for box in bad_boxes:
             with self.subTest(box=box), self.assertRaises(ValueError) as caught:
                 score_layout.score(document(card(regions=[region(box)])), document())

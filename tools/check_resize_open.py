@@ -66,10 +66,12 @@ def probe_open(page, root_selector: str, name: str, tag: str) -> None:
     data = page.evaluate(PROBE, page.locator(root_selector).first.element_handle())
     for item in data["bad"]:
         problems.append(f"{tag} · {name} 的「{item['label']}」{item['why']}")
-    check(not data["bad"],
-          f"{tag}：{name} 的 {data['total']} 个控件拖小之后还点得到"
-          if not data["bad"]
-          else f"{tag}：{name} 有 {len(data['bad'])}/{data['total']} 个控件拖小之后点不到")
+    check(
+        not data["bad"],
+        f"{tag}：{name} 的 {data['total']} 个控件拖小之后还点得到"
+        if not data["bad"]
+        else f"{tag}：{name} 有 {len(data['bad'])}/{data['total']} 个控件拖小之后点不到",
+    )
 
 
 def run(page) -> None:
@@ -139,9 +141,11 @@ def run(page) -> None:
 
     def api(path: str, payload=None):
         request = urllib.request.Request(
-            f"{BASE}{path}", data=json.dumps(payload).encode() if payload is not None else None,
+            f"{BASE}{path}",
+            data=json.dumps(payload).encode() if payload is not None else None,
             headers={"Content-Type": "application/json", "X-QB-Request": "1"},
-            method="POST" if payload is not None else "GET")
+            method="POST" if payload is not None else "GET",
+        )
         with urllib.request.urlopen(request, timeout=15) as response:
             return json.loads(response.read())
 

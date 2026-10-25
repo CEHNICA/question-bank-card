@@ -20,6 +20,7 @@ r"""配图有一大半落在题目范围外面，成品卷上这张图是残的�
 阈值 0.81 的来历见 `figure_policy._RANGE_COVERS_FIGURE` 的注释：逐档裁图看过，
 82% 往上全是完整的（多出来的是页边留白和学生写在旁边的字）。
 """
+
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
@@ -39,7 +40,9 @@ class CandidatesCutByOwnRangeTests(SimpleTestCase):
         return figure_policy.candidates_cut_by_own_range(
             list(REGIONS) if regions is _UNSET else regions,
             [CANDIDATE] if candidates is None else candidates,
-            named, attached)
+            named,
+            attached,
+        )
 
     def test_a_figure_the_range_only_half_covers_is_a_hit(self):
         self.assertEqual(len(self.cut()), 1)
@@ -52,18 +55,22 @@ class CandidatesCutByOwnRangeTests(SimpleTestCase):
         # 初二 id=230 的形状：候选框比范围大 18%，多出来的是页边留白，图是完整的。
         region = {"page_idx": 10, "bbox": [717, 271, 857, 399]}
         box = CANDIDATE["bbox"]
-        covered = ((min(box[2], 857) - max(box[0], 717))
-                   * (min(box[3], 399) - max(box[1], 271)))
+        covered = (min(box[2], 857) - max(box[0], 717)) * (min(box[3], 399) - max(box[1], 271))
         self.assertGreater(covered / ((box[2] - box[0]) * (box[3] - box[1])), 0.81)
         self.assertEqual(self.cut(regions=[region]), [])
 
     def test_two_ranges_covering_the_figure_between_them_still_count_as_covered(self):
         # 一道题跨两段范围时，每一段都只盖住一半，但拼起来是整张图——不能报。
         box = CANDIDATE["bbox"]
-        self.assertEqual(self.cut(regions=[
-            {"page_idx": 10, "bbox": [box[0], box[1], box[2], (box[1] + box[3]) // 2]},
-            {"page_idx": 10, "bbox": [box[0], (box[1] + box[3]) // 2, box[2], box[3]]},
-        ]), [])
+        self.assertEqual(
+            self.cut(
+                regions=[
+                    {"page_idx": 10, "bbox": [box[0], box[1], box[2], (box[1] + box[3]) // 2]},
+                    {"page_idx": 10, "bbox": [box[0], (box[1] + box[3]) // 2, box[2], box[3]]},
+                ]
+            ),
+            [],
+        )
 
     def test_a_figure_already_cropped_onto_the_card_is_left_alone(self):
         # 单独裁出来挂在卡上的那张不受题目范围影响。
@@ -79,9 +86,13 @@ class CandidatesCutByOwnRangeTests(SimpleTestCase):
         self.assertEqual(self.cut(regions=[{"page_idx": 9, "bbox": [98, 329, 914, 422]}]), [])
 
     def test_malformed_candidates_are_left_to_the_other_guards(self):
-        for candidate in ({"label": "1"}, {"label": "1", "bbox": [1, 2]},
-                          {"label": "1", "bbox": None}, {"label": "1", "bbox": [1, 1, 1, 1]},
-                          "不是字典"):
+        for candidate in (
+            {"label": "1"},
+            {"label": "1", "bbox": [1, 2]},
+            {"label": "1", "bbox": None},
+            {"label": "1", "bbox": [1, 1, 1, 1]},
+            "不是字典",
+        ):
             self.assertEqual(self.cut(candidates=[candidate]), [], candidate)
 
     def test_missing_regions_do_not_flag_every_figure(self):
@@ -90,14 +101,19 @@ class CandidatesCutByOwnRangeTests(SimpleTestCase):
         self.assertEqual(self.cut(regions=None), [])
 
     def test_no_named_figures_means_no_hit(self):
-        self.assertEqual(figure_policy.candidates_cut_by_own_range(
-            REGIONS, [CANDIDATE], {}, []), [])
+        self.assertEqual(figure_policy.candidates_cut_by_own_range(REGIONS, [CANDIDATE], {}, []), [])
 
 
 READING = {
-    "stem": "", "options": {}, "type": "free_response", "content_kind": "exercise",
-    "figures": {"1": "stem"}, "missing_figure": False, "number_seen": 2,
-    "figure_descriptions": [], "unclear": False,
+    "stem": "",
+    "options": {},
+    "type": "free_response",
+    "content_kind": "exercise",
+    "figures": {"1": "stem"},
+    "missing_figure": False,
+    "number_seen": 2,
+    "figure_descriptions": [],
+    "unclear": False,
 }
 
 
@@ -106,15 +122,22 @@ def snapshot(**changes):
     # 那条守卫，测的就不是这条判据了。
     stem = changes.get("stem") or "如图，在菱形 ABCD 中，对角线 AC 与 BD 相交于点 O。"
     base = {
-        "id": 1, "number": 2, "group_id": None,
+        "id": 1,
+        "number": 2,
+        "group_id": None,
         "regions": list(REGIONS),
-        "candidates": [dict(CANDIDATE)], "question_type": "free_response",
-        "stem": "", "options": {}, "edited": False,
-        "source_kind": Question.SourceKind.EXERCISE, "source_anchor_seq": 128,
-        "segmentation_flags": [], "body_mode": "text", "start_source": "mineru",
-        "witness": "", "witness_blocks": [
-            {"seq": 128, "page_idx": 10, "bbox": [98, 329, 914, 350],
-             "text": stem, "type": "text"}],
+        "candidates": [dict(CANDIDATE)],
+        "question_type": "free_response",
+        "stem": "",
+        "options": {},
+        "edited": False,
+        "source_kind": Question.SourceKind.EXERCISE,
+        "source_anchor_seq": 128,
+        "segmentation_flags": [],
+        "body_mode": "text",
+        "start_source": "mineru",
+        "witness": "",
+        "witness_blocks": [{"seq": 128, "page_idx": 10, "bbox": [98, 329, 914, 350], "text": stem, "type": "text"}],
     }
     base.update(changes)
     return base
@@ -127,11 +150,12 @@ class CutFigureFlagTests(SimpleTestCase):
 
     def run_card(self, stem="如图，在菱形 ABCD 中，对角线 AC 与 BD 相交于点 O。", **changes):
         reading = {**READING, "stem": stem}
-        with patch.object(pipeline.readers, "primary_engine", return_value=object()), \
-                patch.object(pipeline.readers, "read_question", return_value=reading), \
-                patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])), \
-                patch.object(pipeline.imaging, "jpeg_data_url",
-                             return_value="data:image/jpeg;base64,x"):
+        with (
+            patch.object(pipeline.readers, "primary_engine", return_value=object()),
+            patch.object(pipeline.readers, "read_question", return_value=reading),
+            patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])),
+            patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:image/jpeg;base64,x"),
+        ):
             return pipeline.read_card(snapshot(**changes), self.store)
 
     def test_a_card_whose_figure_is_cut_off_is_not_green(self):
@@ -152,25 +176,26 @@ class CutFigureFlagTests(SimpleTestCase):
         # 原卷这一段压根没有配图：候选池空、识读也没点名。别因为「没挂图」就报。
         stem = "计算：$(\\pi-3)^0+\\left(\\frac{1}{2}\\right)^{-1}$。"
         reading = {**READING, "stem": stem, "figures": {}}
-        with patch.object(pipeline.readers, "primary_engine", return_value=object()), \
-                patch.object(pipeline.readers, "read_question", return_value=reading), \
-                patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])), \
-                patch.object(pipeline.imaging, "jpeg_data_url",
-                             return_value="data:image/jpeg;base64,x"):
+        with (
+            patch.object(pipeline.readers, "primary_engine", return_value=object()),
+            patch.object(pipeline.readers, "read_question", return_value=reading),
+            patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])),
+            patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:image/jpeg;base64,x"),
+        ):
             result = pipeline.read_card(
-                snapshot(stem=stem, candidates=[],
-                         regions=[{"page_idx": 10, "bbox": [700, 260, 870, 410]}]),
-                self.store)
+                snapshot(stem=stem, candidates=[], regions=[{"page_idx": 10, "bbox": [700, 260, 870, 410]}]), self.store
+            )
 
         self.assertEqual(result["state"], Question.State.GREEN)
 
     def test_a_card_that_never_named_a_figure_stays_green(self):
         reading = {**READING, "stem": "下列说法正确的是（　）", "figures": {}}
-        with patch.object(pipeline.readers, "primary_engine", return_value=object()), \
-                patch.object(pipeline.readers, "read_question", return_value=reading), \
-                patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])), \
-                patch.object(pipeline.imaging, "jpeg_data_url",
-                             return_value="data:image/jpeg;base64,x"):
+        with (
+            patch.object(pipeline.readers, "primary_engine", return_value=object()),
+            patch.object(pipeline.readers, "read_question", return_value=reading),
+            patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])),
+            patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:image/jpeg;base64,x"),
+        ):
             result = pipeline.read_card(snapshot(), self.store)
 
         self.assertNotIn(figure_policy.FLAG_FIGURE_CUT_BY_RANGE, result["flags"])

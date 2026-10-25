@@ -27,12 +27,26 @@ class PanelStabilityTests(TempDataMixin, TransactionTestCase):
         self.use_temp_data()
 
     def publication(self, number, *, answer="", review_source="human"):
-        content = {"question_type": "free_response", "stem": f"第 {number} 题。", "options": {},
-                   "figures": [], "sources": [], "answer": answer, "analysis": "", "source_filename": "panel.pdf"}
+        content = {
+            "question_type": "free_response",
+            "stem": f"第 {number} 题。",
+            "options": {},
+            "figures": [],
+            "sources": [],
+            "answer": answer,
+            "analysis": "",
+            "source_filename": "panel.pdf",
+        }
         return PublishedQuestion.objects.create(
-            source_filename="panel.pdf", number=number, question_type="free_response", version=1,
-            content=content, content_hash=library.content_hash(content), extras={},
-            review_source=review_source)
+            source_filename="panel.pdf",
+            number=number,
+            question_type="free_response",
+            version=1,
+            content=content,
+            content_hash=library.content_hash(content),
+            extras={},
+            review_source=review_source,
+        )
 
     def listing(self, **params):
         query = "&".join(f"{key}={value}" for key, value in params.items())
@@ -52,9 +66,11 @@ class PanelStabilityTests(TempDataMixin, TransactionTestCase):
 
         # 换成一道也不匹配的题型：当前结果 0 道，三张卡片一个都不该凭空出现或消失。
         narrow = self.listing(type="single_choice")["presence"]
-        self.assertEqual(narrow, wide,
-                         "筛到 0 道题之后 presence 变了，面板就会重排 —— 老师的原话是"
-                         "「我选择了两三个标签之后，这个界面就变了」")
+        self.assertEqual(
+            narrow,
+            wide,
+            "筛到 0 道题之后 presence 变了，面板就会重排 —— 老师的原话是「我选择了两三个标签之后，这个界面就变了」",
+        )
 
         # 用了题库里根本不存在的题型 id，也不能影响。
         self.assertEqual(self.listing(document="not-a-uuid")["presence"], wide)
@@ -126,13 +142,15 @@ class PanelStabilityTests(TempDataMixin, TransactionTestCase):
         geometry = LibraryTag.objects.create(name="平行四边形", kind="knowledge", levels=["初中"])
         LibraryTagAssignment.objects.create(publication=kept, tag=geometry, source="human", needs_review=False)
         LibraryTagAssignment.objects.create(
-            publication=other, tag=LibraryTag.objects.create(name="二次函数", kind="knowledge", levels=["初中"]),
-            source="human", needs_review=False)
+            publication=other,
+            tag=LibraryTag.objects.create(name="二次函数", kind="knowledge", levels=["初中"]),
+            source="human",
+            needs_review=False,
+        )
 
         body = self.listing(tag="平行四边形")
         self.assertIn("total", body)
-        self.assertEqual(body["selected_tag_names"], {},
-                         "按名字筛的老写法没有编号要查名字，也不该因此报错")
+        self.assertEqual(body["selected_tag_names"], {}, "按名字筛的老写法没有编号要查名字，也不该因此报错")
 
         # 名字里带非 UUID 的字符、空格、逗号，一个都不能把这一页打成 500。
         for value in ["集合间的基本关系", "a,b", "  ", "平行四边形,二次函数", "12345"]:

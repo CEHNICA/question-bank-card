@@ -1,4 +1,5 @@
 """Offline library editing: immutable history, exact locks and source assets."""
+
 import hashlib
 import json
 import os
@@ -23,15 +24,22 @@ class LibraryQuestionEditorTests(TestCase):
         state = override_settings(DATA_ROOT=self.root)
         state.enable()
         self.addCleanup(state.disable)
-        env = mock.patch.dict(os.environ, {
-            "QB_FEATURES_FILE": str(self.root / "features.json"),
-            "QB_LIBRARY_AI_SETTINGS_FILE": str(self.root / "ai.json"),
-            "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.root / "key.dat"),
-        })
+        env = mock.patch.dict(
+            os.environ,
+            {
+                "QB_FEATURES_FILE": str(self.root / "features.json"),
+                "QB_LIBRARY_AI_SETTINGS_FILE": str(self.root / "ai.json"),
+                "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.root / "key.dat"),
+            },
+        )
         env.start()
         self.addCleanup(env.stop)
-        (self.root / "features.json").write_text(json.dumps({"ai_answer": False, "knowledge_tags": False}), encoding="utf-8")
-        transport = mock.patch("requests.sessions.Session.request", side_effect=AssertionError("offline tests cannot call a cloud API"))
+        (self.root / "features.json").write_text(
+            json.dumps({"ai_answer": False, "knowledge_tags": False}), encoding="utf-8"
+        )
+        transport = mock.patch(
+            "requests.sessions.Session.request", side_effect=AssertionError("offline tests cannot call a cloud API")
+        )
         self.transport = transport.start()
         self.addCleanup(transport.stop)
         self.factory = RequestFactory()
@@ -44,24 +52,55 @@ class LibraryQuestionEditorTests(TestCase):
         draw.rectangle((10, 30, 95, 125), fill="red")
         draw.rectangle((130, 130, 245, 220), fill="blue")
         image.save(source)
-        paper = Paper.objects.create(filename="离线编辑原卷.png", kind="image", source_path=str(source),
-            sha256=hashlib.sha256(source.read_bytes()).hexdigest(), status=Paper.Status.READY,
-            pages=[{"page_idx": 0, "width": 300, "height": 400}, {"page_idx": 1, "width": 300, "height": 400}])
+        paper = Paper.objects.create(
+            filename="离线编辑原卷.png",
+            kind="image",
+            source_path=str(source),
+            sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+            status=Paper.Status.READY,
+            pages=[{"page_idx": 0, "width": 300, "height": 400}, {"page_idx": 1, "width": 300, "height": 400}],
+        )
         folder = self.root / str(paper.pk) / "pages"
         folder.mkdir(parents=True)
         image.save(folder / "page_0.png")
         image.save(folder / "page_1.png")
-        boxes = [{"slot": "stem", "page_idx": 0, "bbox": [30, 75, 320, 315], "source": "manual",
-                  "label_offset": {"x": 4, "y": 5}, "parts": [{"page_idx": 1, "bbox": [30, 75, 320, 315]}]},
-                 {"slot": "B", "page_idx": 0, "bbox": [430, 325, 820, 550], "source": "manual"}] if figures else []
-        question = Question.objects.create(paper=paper, number=1, question_type="single_choice",
-            stem="已知 $x^2=4$，则 $x$ 的值是（ ）" if not image_body else "", options={"A": "1", "B": "2", "C": "$\\pm2$", "D": "4"},
-            answer="原卷 B", analysis="原卷保留的解析 $x=2$", origin="2025原卷",
-            regions=[{"page_idx": 0, "bbox": [0, 0, 900, 650]}], state=Question.State.GREEN,
-            body_mode="source_image" if image_body else "text", figures=boxes,
-            read_a={"stem": "AI 原始读法", "original": True}, read_b={"stem": "第二次原始读法"},
-            figure_review={"status": "ok" if figures else "confirmed_no_figure", "source": "human",
-                           "reason": "已由人工确认", "confirmed_at": "2026-01-01T00:00:00+00:00"})
+        boxes = (
+            [
+                {
+                    "slot": "stem",
+                    "page_idx": 0,
+                    "bbox": [30, 75, 320, 315],
+                    "source": "manual",
+                    "label_offset": {"x": 4, "y": 5},
+                    "parts": [{"page_idx": 1, "bbox": [30, 75, 320, 315]}],
+                },
+                {"slot": "B", "page_idx": 0, "bbox": [430, 325, 820, 550], "source": "manual"},
+            ]
+            if figures
+            else []
+        )
+        question = Question.objects.create(
+            paper=paper,
+            number=1,
+            question_type="single_choice",
+            stem="已知 $x^2=4$，则 $x$ 的值是（ ）" if not image_body else "",
+            options={"A": "1", "B": "2", "C": "$\\pm2$", "D": "4"},
+            answer="原卷 B",
+            analysis="原卷保留的解析 $x=2$",
+            origin="2025原卷",
+            regions=[{"page_idx": 0, "bbox": [0, 0, 900, 650]}],
+            state=Question.State.GREEN,
+            body_mode="source_image" if image_body else "text",
+            figures=boxes,
+            read_a={"stem": "AI 原始读法", "original": True},
+            read_b={"stem": "第二次原始读法"},
+            figure_review={
+                "status": "ok" if figures else "confirmed_no_figure",
+                "source": "human",
+                "reason": "已由人工确认",
+                "confirmed_at": "2026-01-01T00:00:00+00:00",
+            },
+        )
         library.approve(question, now=timezone.now())
         question.save()
         publication, created = library.publish(question)
@@ -71,17 +110,25 @@ class LibraryQuestionEditorTests(TestCase):
     def payload(self, pub=None, **changes):
         pub = pub or self.pub
         data = editor.editor_data(pub)
-        return {key: data[key] for key in ("revision", "content_hash", "stem", "options", "question_type", "body_mode")} | changes
+        return {
+            key: data[key] for key in ("revision", "content_hash", "stem", "options", "question_type", "body_mode")
+        } | changes
 
     def request(self, pub=None, *, payload=None, headers=True):
         pub = pub or self.pub
-        request = self.factory.post("/unused", json.dumps(payload or self.payload(pub)), content_type="application/json",
-                                    **({"HTTP_X_QB_REQUEST": "1"} if headers else {}))
+        request = self.factory.post(
+            "/unused",
+            json.dumps(payload or self.payload(pub)),
+            content_type="application/json",
+            **({"HTTP_X_QB_REQUEST": "1"} if headers else {}),
+        )
         return editor.question_editor(request, pub.pk)
 
     def unchanged(self, question=None, pub=None):
         question, pub = question or self.question, pub or self.pub
-        return Question.all_objects.filter(pk=question.pk).values().get(), PublishedQuestion.objects.filter(pk=pub.pk).values().get()
+        return Question.all_objects.filter(pk=question.pk).values().get(), PublishedQuestion.objects.filter(
+            pk=pub.pk
+        ).values().get()
 
     def test_get_returns_only_snapshot_fields_with_exact_source_lock(self):
         response = editor.question_editor(self.factory.get("/unused"), self.pub.pk)
@@ -95,7 +142,11 @@ class LibraryQuestionEditorTests(TestCase):
     def test_human_save_publishes_new_snapshot_and_preserves_original_readings(self):
         original_content, original_extras = deepcopy(self.pub.content), deepcopy(self.pub.extras)
         original_source = Path(self.paper.source_path).read_bytes()
-        response = self.request(payload=self.payload(stem="计算 $x^2=9$。", options={"A": "3", "B": "$\\pm3$"}, question_type="multiple_choice"))
+        response = self.request(
+            payload=self.payload(
+                stem="计算 $x^2=9$。", options={"A": "3", "B": "$\\pm3$"}, question_type="multiple_choice"
+            )
+        )
         self.assertEqual(response.status_code, 201, response.content)
         data = json.loads(response.content)
         updated = PublishedQuestion.objects.get(pk=data["publication"]["id"])
@@ -191,9 +242,10 @@ class LibraryQuestionEditorTests(TestCase):
         source_figures = deepcopy(question.figures)
         folder = self.root / "library" / str(pub.pk)
         old_bytes = [(folder / item["file"]).read_bytes() for item in pub.content["figures"]]
-        edited, _, _ = editor.save(pub, self.payload(pub, figures=[
-            {"file": "figure-2.png", "slot": "A"}, {"file": "figure-1.png", "slot": "D"},
-        ]))
+        edited, _, _ = editor.save(
+            pub,
+            self.payload(pub, figures=[{"file": "figure-2.png", "slot": "A"}, {"file": "figure-1.png", "slot": "D"}]),
+        )
         question.refresh_from_db()
         self.assertEqual(question.figures, [{**source_figures[1], "slot": "A"}, {**source_figures[0], "slot": "D"}])
         new_folder = self.root / "library" / str(edited.pk)
@@ -209,11 +261,15 @@ class LibraryQuestionEditorTests(TestCase):
     def test_external_duplicate_path_and_malformed_asset_roles_are_rejected(self):
         _, question, pub = self.fixture(figures=True)
         before = self.unchanged(question, pub)
-        invalid = [[{"file": "../source.png", "slot": "stem"}],
+        invalid = [
+            [{"file": "../source.png", "slot": "stem"}],
             [{"file": "figure-1.png", "slot": "stem"}, {"file": "figure-1.png", "slot": "A"}],
-            [{"file": "figure-1.png", "slot": []}], [{"file": "figure-1.png", "slot": "F"}],
+            [{"file": "figure-1.png", "slot": []}],
+            [{"file": "figure-1.png", "slot": "F"}],
             [{"file": "figure-1.png", "slot": "stem", "bbox": [0, 0, 2, 2]}],
-            [{"file": "figure-999.png", "slot": "stem"}], None]
+            [{"file": "figure-999.png", "slot": "stem"}],
+            None,
+        ]
         for figures in invalid:
             with self.subTest(figures=figures):
                 response = self.request(pub, payload=self.payload(pub, figures=figures))
@@ -253,20 +309,26 @@ class LibraryQuestionEditorTests(TestCase):
         before = self.unchanged(question, pub)
         target = self.root / str(question.paper_id) / "figures"
         original_check = Path.is_symlink
-        with mock.patch.object(Path, "is_symlink", autospec=True,
-                               side_effect=lambda path: path == target or original_check(path)), \
-                mock.patch("core.library.figure_file", side_effect=AssertionError("do not create or access an unsafe crop")):
+        with (
+            mock.patch.object(
+                Path, "is_symlink", autospec=True, side_effect=lambda path: path == target or original_check(path)
+            ),
+            mock.patch(
+                "core.library.figure_file", side_effect=AssertionError("do not create or access an unsafe crop")
+            ),
+        ):
             response = self.request(pub)
         self.assertEqual(response.status_code, 409)
         self.assertEqual(self.unchanged(question, pub), before)
 
     def test_changed_math_invalidates_generated_answer_and_flags_solution_without_moving_it(self):
         fingerprint = library.generation_fingerprint(self.pub.content, self.pub.pk)
-        solution = library_solutions.save(self.pub, {"answer": "C", "analysis": "独立人工解析", "figures": [],
-                                                    "base_revision": None, "sync_library": True})
+        solution = library_solutions.save(
+            self.pub,
+            {"answer": "C", "analysis": "独立人工解析", "figures": [], "base_revision": None, "sync_library": True},
+        )
         self.pub.refresh_from_db()
-        extras = {**self.pub.extras,
-                  "ai_answer": {"answer": "D", "analysis": "旧模型解析", "fingerprint": fingerprint}}
+        extras = {**self.pub.extras, "ai_answer": {"answer": "D", "analysis": "旧模型解析", "fingerprint": fingerprint}}
         library.save_extras(self.pub, extras)
         old = deepcopy(self.pub.content)
         edited, _, _ = editor.save(self.pub, self.payload(stem="完全不同的题 $x+1=0$。"))
@@ -301,7 +363,9 @@ class LibraryQuestionEditorTests(TestCase):
         edited, _, _ = editor.save(pub, self.payload(pub, question_type="multiple_choice"))
         self.assertEqual(edited.content["figures"], [])
         self.assertEqual(edited.content["body_mode"], "source_image")
-        self.assertEqual(edited.content["question_images"][0]["image_sha256"], pub.content["question_images"][0]["image_sha256"])
+        self.assertEqual(
+            edited.content["question_images"][0]["image_sha256"], pub.content["question_images"][0]["image_sha256"]
+        )
 
     def test_withdrawn_deleted_and_disconnected_sources_are_readonly(self):
         base = self.payload()
@@ -320,11 +384,25 @@ class LibraryQuestionEditorTests(TestCase):
 
     def test_payload_validation_and_local_guard_do_not_mutate_snapshot(self):
         before = self.unchanged()
-        invalid = [{"revision": True}, {"revision": -1}, {"content_hash": "fake"}, {"stem": ""},
-            {"stem": "x" * 20001}, {"stem": "\x00bad"}, {"stem": "\ud800"}, {"options": {"F": "1"}},
-            {"options": {"A": 1}}, {"options": {"A": "x" * 4001}}, {"question_type": "unknown"},
-            {"question_type": []}, {"body_mode": []}, {"answer": "偷偷改答案"}, {"by": "ai"},
-            {"regions": []}, {"extras": {"tags": ["偷偷改标签"]}}]
+        invalid = [
+            {"revision": True},
+            {"revision": -1},
+            {"content_hash": "fake"},
+            {"stem": ""},
+            {"stem": "x" * 20001},
+            {"stem": "\x00bad"},
+            {"stem": "\ud800"},
+            {"options": {"F": "1"}},
+            {"options": {"A": 1}},
+            {"options": {"A": "x" * 4001}},
+            {"question_type": "unknown"},
+            {"question_type": []},
+            {"body_mode": []},
+            {"answer": "偷偷改答案"},
+            {"by": "ai"},
+            {"regions": []},
+            {"extras": {"tags": ["偷偷改标签"]}},
+        ]
         for changes in invalid:
             with self.subTest(changes=str(changes)[:80]):
                 response = self.request(payload=self.payload() | changes)

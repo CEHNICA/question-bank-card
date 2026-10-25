@@ -4,6 +4,7 @@ This service never recognizes, publishes, deletes files or restores approval.
 The first write is a paper-token CAS; on SQLite this acquires the writer before
 reading source rows. Every legacy topology write also advances that token.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -50,8 +51,9 @@ def canonical(value):
 
 
 def digest(value):
-    data = json.dumps(value, cls=DjangoJSONEncoder, ensure_ascii=False, sort_keys=True,
-                      separators=(",", ":"), allow_nan=False)
+    data = json.dumps(
+        value, cls=DjangoJSONEncoder, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
     return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
 
@@ -70,26 +72,58 @@ def source_epoch(paper):
 
 
 def snapshot(question):
-    return canonical({field.attname: getattr(question, field.attname)
-                      for field in Question._meta.concrete_fields
-                      if field.name not in {"created_at", "updated_at"}})
+    return canonical(
+        {
+            field.attname: getattr(question, field.attname)
+            for field in Question._meta.concrete_fields
+            if field.name not in {"created_at", "updated_at"}
+        }
+    )
 
 
 def publication_records(question_ids):
-    return canonical(list(PublishedQuestion.objects.filter(question_id__in=question_ids).order_by("id")
-        .values("id", "question_id", "version", "status", "content_hash", "withdrawn_at", "extras")))
+    return canonical(
+        list(
+            PublishedQuestion.objects.filter(question_id__in=question_ids)
+            .order_by("id")
+            .values("id", "question_id", "version", "status", "content_hash", "withdrawn_at", "extras")
+        )
+    )
 
 
 def job_records(question_ids):
     # No configuration or credentials are copied into layout history.
-    return canonical(list(LibraryJob.objects.filter(publication__question_id__in=question_ids).order_by("id")
-        .values("id", "publication_id", "kind", "status", "executor", "solution_scope", "result", "error", "updated_at")))
+    return canonical(
+        list(
+            LibraryJob.objects.filter(publication__question_id__in=question_ids)
+            .order_by("id")
+            .values(
+                "id", "publication_id", "kind", "status", "executor", "solution_scope", "result", "error", "updated_at"
+            )
+        )
+    )
 
 
 def region_records(question_ids):
-    return canonical(list(RegionRead.objects.filter(question_id__in=question_ids).order_by("id")
-        .values("id", "question_id", "page_idx", "bbox", "target", "status", "text", "error", "engine",
-                "recommendation", "updated_at")))
+    return canonical(
+        list(
+            RegionRead.objects.filter(question_id__in=question_ids)
+            .order_by("id")
+            .values(
+                "id",
+                "question_id",
+                "page_idx",
+                "bbox",
+                "target",
+                "status",
+                "text",
+                "error",
+                "engine",
+                "recommendation",
+                "updated_at",
+            )
+        )
+    )
 
 
 def fingerprint(question):
@@ -97,10 +131,12 @@ def fingerprint(question):
     # region-read changes that do not increment the content counter.
     dependencies = getattr(question, "_layout_dependencies", None)
     if dependencies is None:
-        dependencies = {"publications": publication_records([question.pk]),
-                        "jobs": job_records([question.pk]), "region_reads": region_records([question.pk])}
-    return digest({"question": snapshot(question), **dependencies,
-                   "source_epoch": source_epoch(question.paper)})
+        dependencies = {
+            "publications": publication_records([question.pk]),
+            "jobs": job_records([question.pk]),
+            "region_reads": region_records([question.pk]),
+        }
+    return digest({"question": snapshot(question), **dependencies, "source_epoch": source_epoch(question.paper)})
 
 
 def prepare_fingerprints(questions):
@@ -118,9 +154,22 @@ def prepare_fingerprints(questions):
         dependencies[record["question_id"]]["publications"].append(record)
     for record in region_records(rows):
         dependencies[record["question_id"]]["region_reads"].append(record)
-    jobs = LibraryJob.objects.filter(publication__question_id__in=rows).order_by("id").values(
-        "publication__question_id", "id", "publication_id", "kind", "status", "executor",
-        "solution_scope", "result", "error", "updated_at")
+    jobs = (
+        LibraryJob.objects.filter(publication__question_id__in=rows)
+        .order_by("id")
+        .values(
+            "publication__question_id",
+            "id",
+            "publication_id",
+            "kind",
+            "status",
+            "executor",
+            "solution_scope",
+            "result",
+            "error",
+            "updated_at",
+        )
+    )
     for record in jobs:
         question_id = record.pop("publication__question_id")
         dependencies[question_id]["jobs"].append(canonical(record))
@@ -144,8 +193,11 @@ def _distance(regions, other):
 
 
 def choose_color(paper_id, regions, exclude=()):
-    rows = list(Question.objects.filter(paper_id=paper_id, color_index__isnull=False)
-                .exclude(pk__in=exclude).values("id", "regions", "color_index"))
+    rows = list(
+        Question.objects.filter(paper_id=paper_id, color_index__isnull=False)
+        .exclude(pk__in=exclude)
+        .values("id", "regions", "color_index")
+    )
     counts = Counter(row["color_index"] for row in rows)
     neighbours = sorted(rows, key=lambda row: (_distance(regions, row["regions"]), row["id"]))
     avoid = {row["color_index"] for row in neighbours[:3] if math.isfinite(_distance(regions, row["regions"]))}
@@ -154,7 +206,8 @@ def choose_color(paper_id, regions, exclude=()):
 
 def ordinary_deleted(paper):
     return Question.all_objects.filter(paper=paper, deleted_at__isnull=False).exclude(
-        deletion_batch__origin=QuestionDeletionBatch.Origin.LAYOUT)
+        deletion_batch__origin=QuestionDeletionBatch.Origin.LAYOUT
+    )
 
 
 def _regions(paper, value):
@@ -166,8 +219,11 @@ def _regions(paper, value):
         if not isinstance(item, dict) or type(item.get("page_idx")) is not int or item["page_idx"] not in pages:
             raise LayoutError("原卷页码不正确。")
         box = item.get("bbox")
-        if (not isinstance(box, list) or len(box) != 4 or any(type(v) not in (int, float)
-                or not math.isfinite(v) or not 0 <= v <= 1000 for v in box)):
+        if (
+            not isinstance(box, list)
+            or len(box) != 4
+            or any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1000 for v in box)
+        ):
             raise LayoutError("范围坐标需要在 0–1000 内。")
         box = [round(float(v), 1) for v in box]
         if box[2] - box[0] < 3 or box[3] - box[1] < 3:
@@ -183,11 +239,13 @@ def _group(paper, target, regions, default=None):
     groups = list(QuestionGroup.objects.filter(paper=paper).order_by("sequence", "id"))
     requested = target.get("group_id", default)
     region_pages = {region["page_idx"] for region in regions}
+
     def covers(group):
         pages = (group.metadata or {}).get("pages")
         if not isinstance(pages, list):
             pages = list(range((group.page_start or 1) - 1, group.page_end or len(paper.pages)))
         return region_pages.issubset({page for page in pages if type(page) is int})
+
     if requested is not None:
         if type(requested) is not int:
             raise LayoutError("题组编号格式不正确。")
@@ -210,19 +268,22 @@ def _clear_approval(question):
 
 def _cancel_reads(question_ids):
     RegionRead.objects.filter(question_id__in=question_ids, status__in=ACTIVE_READS).update(
-        status=RegionRead.Status.FAILED, error=CANCELLED, updated_at=timezone.now())
+        status=RegionRead.Status.FAILED, error=CANCELLED, updated_at=timezone.now()
+    )
 
 
 def _withdraw(question_ids):
     from . import library
     from .library_job_control import CANCEL_MESSAGE
-    publications = list(PublishedQuestion.objects.select_for_update()
-                        .filter(question_id__in=question_ids).order_by("id"))
+
+    publications = list(
+        PublishedQuestion.objects.select_for_update().filter(question_id__in=question_ids).order_by("id")
+    )
     for publication in publications:
         library.withdraw(publication)
-    LibraryJob.objects.filter(publication_id__in=[publication.pk for publication in publications],
-                             status__in=ACTIVE_JOBS).update(
-        status=LibraryJob.Status.FAILED, error=CANCEL_MESSAGE, updated_at=timezone.now())
+    LibraryJob.objects.filter(
+        publication_id__in=[publication.pk for publication in publications], status__in=ACTIVE_JOBS
+    ).update(status=LibraryJob.Status.FAILED, error=CANCEL_MESSAGE, updated_at=timezone.now())
 
 
 def _latest(paper):
@@ -242,8 +303,12 @@ def undo_reason(operation, paper=None):
     latest = _latest(paper)
     if latest is None or latest.pk != operation.pk or operation.after_layout_revision != paper.layout_revision:
         return "之后已有布局操作，无法覆盖当前布局。"
-    rows = {row.pk: row for row in Question.all_objects.filter(pk__in=[int(key) for key in operation.after_fingerprints])
-            .select_related("paper")}
+    rows = {
+        row.pk: row
+        for row in Question.all_objects.filter(
+            pk__in=[int(key) for key in operation.after_fingerprints]
+        ).select_related("paper")
+    }
     if len(rows) != len(operation.after_fingerprints):
         return "相关题卡已不存在，未撤销。"
     if any(fingerprint(rows[int(key)]) != value for key, value in operation.after_fingerprints.items()):
@@ -253,12 +318,18 @@ def undo_reason(operation, paper=None):
 
 def operation_json(operation, paper=None, *, snapshots=True):
     reason = undo_reason(operation, paper)
-    result = {"id": str(operation.pk), "kind": operation.kind,
-              "client_request_id": str(operation.client_request_id), "source_ids": operation.source_ids,
-              "target_ids": operation.target_ids, "created_at": operation.created_at.isoformat(),
-              "undone_at": operation.undone_at.isoformat() if operation.undone_at else None,
-              "can_undo": not reason, "blocked_reason": reason,
-              "layout_revision": operation.after_layout_revision}
+    result = {
+        "id": str(operation.pk),
+        "kind": operation.kind,
+        "client_request_id": str(operation.client_request_id),
+        "source_ids": operation.source_ids,
+        "target_ids": operation.target_ids,
+        "created_at": operation.created_at.isoformat(),
+        "undone_at": operation.undone_at.isoformat() if operation.undone_at else None,
+        "can_undo": not reason,
+        "blocked_reason": reason,
+        "layout_revision": operation.after_layout_revision,
+    }
     if snapshots:
         result.update(before_snapshot=operation.before_snapshot, after_snapshot=operation.after_snapshot)
     return result
@@ -324,22 +395,32 @@ def _sources(paper, payload, kind):
         raise LayoutError("所选源题数量不正确。")
     ids = []
     for entry in entries:
-        if (not isinstance(entry, dict) or type(entry.get("id")) is not int
-                or type(entry.get("revision")) is not int or not isinstance(entry.get("fingerprint"), str)):
+        if (
+            not isinstance(entry, dict)
+            or type(entry.get("id")) is not int
+            or type(entry.get("revision")) is not int
+            or not isinstance(entry.get("fingerprint"), str)
+        ):
             raise LayoutError("请提供源题编号、内容版本和指纹。")
         ids.append(entry["id"])
     if len(set(ids)) != len(ids):
         raise LayoutError("源题不能重复。")
-    rows = {row.pk: row for row in Question.objects.select_for_update().filter(paper=paper, pk__in=ids)
-            .select_related("paper", "group").order_by("id")}
+    rows = {
+        row.pk: row
+        for row in Question.objects.select_for_update()
+        .filter(paper=paper, pk__in=ids)
+        .select_related("paper", "group")
+        .order_by("id")
+    }
     if len(rows) != len(ids):
         raise LayoutError("所选源题已变化、已删除或不属于当前资料。", 409)
     for entry in entries:
         row = rows[entry["id"]]
         if row.content_revision != entry["revision"] or fingerprint(row) != entry["fingerprint"]:
             raise LayoutError("源题已编辑、审核或识读结果已变化；本次未覆盖。", 409)
-        if kind in {"split", "merge"} and (row.state in {Question.State.WAITING, Question.State.READING}
-                or row.ocr_pending or row.reread_requested):
+        if kind in {"split", "merge"} and (
+            row.state in {Question.State.WAITING, Question.State.READING} or row.ocr_pending or row.reread_requested
+        ):
             raise LayoutError("所选题目仍在识读，请先停止或完成识读。", 409)
     result = [rows[identity] for identity in ids]
     if kind == "merge" and len({row.group_id for row in result}) != 1:
@@ -349,6 +430,7 @@ def _sources(paper, payload, kind):
 
 def _targets(paper, payload, kind, sources):
     from . import qtypes
+
     entries = payload.get("targets")
     low, high = (2, 12) if kind == "split" else (1, 1)
     if not isinstance(entries, list) or not low <= len(entries) <= high:
@@ -380,7 +462,9 @@ def _targets(paper, payload, kind, sources):
         if len(set(keys)) != len(keys):
             raise LayoutError("结果题号不能重复。", 409)
         occupied = Question.all_objects.filter(paper=paper).exclude(pk__in=[row.pk for row in sources])
-        occupied = occupied.exclude(deleted_at__isnull=False, deletion_batch__origin=QuestionDeletionBatch.Origin.LAYOUT)
+        occupied = occupied.exclude(
+            deleted_at__isnull=False, deletion_batch__origin=QuestionDeletionBatch.Origin.LAYOUT
+        )
         for group, number in keys:
             if kind == "renumber" and number == sources[0].number:
                 continue
@@ -391,8 +475,11 @@ def _targets(paper, payload, kind, sources):
 
 def _counts(paper):
     active = paper.questions.all()
-    Paper.objects.filter(pk=paper.pk).update(total=active.count(), progress=active.exclude(
-        state__in=(Question.State.WAITING, Question.State.READING)).count(), updated_at=timezone.now())
+    Paper.objects.filter(pk=paper.pk).update(
+        total=active.count(),
+        progress=active.exclude(state__in=(Question.State.WAITING, Question.State.READING)).count(),
+        updated_at=timezone.now(),
+    )
 
 
 def mutate(paper_id, payload, *, request_payload=None):
@@ -416,11 +503,22 @@ def mutate(paper_id, payload, *, request_payload=None):
             sources = _sources(paper, payload, kind)
             targets = _targets(paper, payload, kind, sources)
             ids = [row.pk for row in sources]
-            before = {"questions": [snapshot(row) for row in sources], "publications": publication_records(ids),
-                      "region_reads": region_records(ids), "library_jobs": job_records(ids)}
-            operation = QuestionLayoutOperation(paper=paper, client_request_id=identity, request_hash=request_hash,
-                kind=kind, source_ids=ids, before_snapshot=before, page_epoch=paper.layout_page_epoch,
-                source_epoch=source_epoch(paper))
+            before = {
+                "questions": [snapshot(row) for row in sources],
+                "publications": publication_records(ids),
+                "region_reads": region_records(ids),
+                "library_jobs": job_records(ids),
+            }
+            operation = QuestionLayoutOperation(
+                paper=paper,
+                client_request_id=identity,
+                request_hash=request_hash,
+                kind=kind,
+                source_ids=ids,
+                before_snapshot=before,
+                page_epoch=paper.layout_page_epoch,
+                source_epoch=source_epoch(paper),
+            )
             changed_rows = list(sources)
             if kind in {"regions", "renumber"}:
                 question = sources[0]
@@ -431,12 +529,15 @@ def mutate(paper_id, payload, *, request_payload=None):
                     setattr(question, field, targets[0][field])
                     if kind == "regions":
                         from .pipeline import candidates_in
+
                         question.figure_candidates = candidates_in(paper, question.regions)
                     question.content_revision += 1
                     question.ocr_pending = question.reread_requested = False
                     question.ocr_suggestion = {}
                     question.state, question.error = Question.State.YELLOW, ""
-                    warning = "题号已修改，请重新对照原卷确认。" if kind == "renumber" else "原卷范围已修改，请重新对照确认。"
+                    warning = (
+                        "题号已修改，请重新对照原卷确认。" if kind == "renumber" else "原卷范围已修改，请重新对照确认。"
+                    )
                     question.flags = list(dict.fromkeys([*(question.flags or []), warning]))
                     _clear_approval(question)
                     _cancel_reads(ids)
@@ -446,8 +547,12 @@ def mutate(paper_id, payload, *, request_payload=None):
                 if ids:
                     _withdraw(ids)
                     _cancel_reads(ids)
-                    batch = QuestionDeletionBatch.objects.create(paper=paper, question_ids=ids,
-                        origin=QuestionDeletionBatch.Origin.LAYOUT, reason="原卷拆合操作的完整源题历史")
+                    batch = QuestionDeletionBatch.objects.create(
+                        paper=paper,
+                        question_ids=ids,
+                        origin=QuestionDeletionBatch.Origin.LAYOUT,
+                        reason="原卷拆合操作的完整源题历史",
+                    )
                     operation.deletion_batch = batch
                     for question in sources:
                         question.content_revision += 1
@@ -458,22 +563,32 @@ def mutate(paper_id, payload, *, request_payload=None):
                         question.save()
                 from . import qtypes
                 from .pipeline import candidates_in
+
                 new = []
                 for target in targets:
-                    question = Question.objects.create(paper=paper, **target,
-                        regions_auto=deepcopy(target["regions"]), start_source="manual",
-                        source_kind=Question.SourceKind.MANUAL, processing_mode="manual", body_mode="source_image",
+                    question = Question.objects.create(
+                        paper=paper,
+                        **target,
+                        regions_auto=deepcopy(target["regions"]),
+                        start_source="manual",
+                        source_kind=Question.SourceKind.MANUAL,
+                        processing_mode="manual",
+                        body_mode="source_image",
                         figure_candidates=candidates_in(paper, target["regions"]),
-                        type_locked=qtypes.decided(target["question_type"]), state=Question.State.YELLOW,
-                        flags=["原图题范围已保存，请对照原卷核对；识读需主动提交。"])
+                        type_locked=qtypes.decided(target["question_type"]),
+                        state=Question.State.YELLOW,
+                        flags=["原图题范围已保存，请对照原卷核对；识读需主动提交。"],
+                    )
                     new.append(question)
                 operation.target_ids = [row.pk for row in new]
                 changed_rows += new
             _counts(paper)
             paper.refresh_from_db()
             operation.after_layout_revision = paper.layout_revision
-            operation.after_snapshot = {"questions": [snapshot(row) for row in changed_rows],
-                                        "no_change": operation.blocked_reason in NO_CHANGE_REASONS}
+            operation.after_snapshot = {
+                "questions": [snapshot(row) for row in changed_rows],
+                "no_change": operation.blocked_reason in NO_CHANGE_REASONS,
+            }
             operation.after_fingerprints = {str(row.pk): fingerprint(row) for row in changed_rows}
             operation.save()
             return operation, False
@@ -499,8 +614,12 @@ def undo(paper_id, operation_id, payload):
             operation = QuestionLayoutOperation.objects.select_for_update().get(pk=operation_id, paper=paper)
             if operation.undone_at:
                 return operation, True
-            rows = list(Question.all_objects.select_for_update().filter(
-                pk__in=[int(key) for key in operation.after_fingerprints]).select_related("paper").order_by("id"))
+            rows = list(
+                Question.all_objects.select_for_update()
+                .filter(pk__in=[int(key) for key in operation.after_fingerprints])
+                .select_related("paper")
+                .order_by("id")
+            )
             reason = undo_reason(operation, paper)
             if reason:
                 raise LayoutError(reason, 409)
@@ -508,11 +627,28 @@ def undo(paper_id, operation_id, payload):
             _cancel_reads([row.pk for row in rows])
             batch = None
             if operation.kind not in {"regions", "renumber"}:
-                batch = QuestionDeletionBatch.objects.create(paper=paper, question_ids=operation.target_ids,
-                    origin=QuestionDeletionBatch.Origin.LAYOUT, reason="已撤销补题或拆合后的结果历史")
-            excluded = {"id", "paper_id", "source_key", "content_revision", "approved", "approved_at",
-                        "approved_content_hash", "approval_source", "approval_agent", "deleted_at", "deletion_batch_id",
-                        "ocr_pending", "reread_requested", "ocr_suggestion"}
+                batch = QuestionDeletionBatch.objects.create(
+                    paper=paper,
+                    question_ids=operation.target_ids,
+                    origin=QuestionDeletionBatch.Origin.LAYOUT,
+                    reason="已撤销补题或拆合后的结果历史",
+                )
+            excluded = {
+                "id",
+                "paper_id",
+                "source_key",
+                "content_revision",
+                "approved",
+                "approved_at",
+                "approved_content_hash",
+                "approval_source",
+                "approval_agent",
+                "deleted_at",
+                "deletion_batch_id",
+                "ocr_pending",
+                "reread_requested",
+                "ocr_suggestion",
+            }
             for question in rows:
                 if question.pk in before:
                     for key, value in before[question.pk].items():
@@ -520,7 +656,9 @@ def undo(paper_id, operation_id, payload):
                             setattr(question, key, deepcopy(value))
                     question.deleted_at = question.deletion_batch_id = None
                     question.state = Question.State.YELLOW
-                    question.flags = list(dict.fromkeys([*(question.flags or []), "已撤销原卷布局操作，请重新对照核对。"] ))
+                    question.flags = list(
+                        dict.fromkeys([*(question.flags or []), "已撤销原卷布局操作，请重新对照核对。"])
+                    )
                     question.error = ""
                 else:
                     question.deleted_at, question.deletion_batch = timezone.now(), batch
@@ -543,7 +681,9 @@ def undo(paper_id, operation_id, payload):
 
 
 def invalidate_page_epoch(paper):
-    Paper.objects.filter(pk=paper.pk).update(layout_page_epoch=F("layout_page_epoch") + 1,
-                                           layout_revision=F("layout_revision") + 1)
+    Paper.objects.filter(pk=paper.pk).update(
+        layout_page_epoch=F("layout_page_epoch") + 1, layout_revision=F("layout_revision") + 1
+    )
     paper.layout_operations.filter(undone_at__isnull=True).exclude(blocked_reason__in=NO_CHANGE_REASONS).update(
-        blocked_reason="原卷页序或页面来源已变化，旧布局不能覆盖当前原卷。")
+        blocked_reason="原卷页序或页面来源已变化，旧布局不能覆盖当前原卷。"
+    )

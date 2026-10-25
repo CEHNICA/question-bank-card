@@ -1,4 +1,5 @@
 """Cross-card figure relationships with isolated source geometry."""
+
 from copy import deepcopy
 from unittest import mock
 
@@ -16,8 +17,7 @@ def diagram(**extra):
 
 
 def caption(text="第3～5题共用下图", **extra):
-    return {"seq": 50, "type": "text", "page_idx": 0, "bbox": [100, 425, 450, 445],
-            "text": text, **extra}
+    return {"seq": 50, "type": "text", "page_idx": 0, "bbox": [100, 425, 450, 445], "text": text, **extra}
 
 
 class FigureLedgerTests(SimpleTestCase):
@@ -48,21 +48,28 @@ class FigureLedgerTests(SimpleTestCase):
 
     def test_joined_piece_cannot_hide_another_cards_claim(self):
         piece = {"page_idx": 1, "bbox": [100, 100, 450, 250]}
-        cards = [self.card(1, 3, figures=[diagram(parts=[piece])]),
-                 self.card(2, 4, figures=[{**piece, "slot": "stem"}])]
+        cards = [
+            self.card(1, 3, figures=[diagram(parts=[piece])]),
+            self.card(2, 4, figures=[{**piece, "slot": "stem"}]),
+        ]
         self.assertEqual(set(figure_claims.build_ledger(cards)["conflicts"]), {"1", "2"})
 
     def test_wrong_page_inside_graph_and_handwriting_captions_are_not_authority(self):
-        for block in (caption(page_idx=1), caption(bbox=[100, 250, 450, 275]),
-                      caption(handwritten=True), caption(bbox=[600, 425, 900, 445])):
+        for block in (
+            caption(page_idx=1),
+            caption(bbox=[100, 250, 450, 275]),
+            caption(handwritten=True),
+            caption(bbox=[600, 425, 900, 445]),
+        ):
             self.assertIsNone(figure_claims.shared_caption(diagram(), [block]))
 
     def test_inconsistent_shared_captions_are_not_guessed(self):
         self.assertIsNone(figure_claims.shared_caption(diagram(), [caption(), caption("第3、6题共用下图")]))
 
     def test_mixed_range_and_list_is_expanded_completely(self):
-        self.assertEqual(figure_claims.shared_caption(diagram(), [caption("第3—5、7题共用图")])["numbers"],
-                         [3, 4, 5, 7])
+        self.assertEqual(
+            figure_claims.shared_caption(diagram(), [caption("第3—5、7题共用图")])["numbers"], [3, 4, 5, 7]
+        )
 
     def test_duplicate_shared_numbers_and_large_ranges_are_rejected(self):
         for text in ("第3、3题共用图", "第3～300题共用图", "第5～3题共用图"):
@@ -81,19 +88,30 @@ class FigureLedgerTests(SimpleTestCase):
 
     def test_reading_pipeline_uses_marker_and_preserves_the_original_model_role(self):
         candidate = {"label": "9", "page_idx": 0, "bbox": [130, 100, 260, 210]}
-        snapshot = {"id": 1, "number": 3, "question_type": "single_choice",
-                    "regions": [{"page_idx": 0, "bbox": [50, 50, 900, 900]}],
-                    "candidates": [candidate], "witness_blocks": [
-                        {"page_idx": 0, "bbox": [100, 100, 120, 120], "text": "A.", "type": "text"}]}
+        snapshot = {
+            "id": 1,
+            "number": 3,
+            "question_type": "single_choice",
+            "regions": [{"page_idx": 0, "bbox": [50, 50, 900, 900]}],
+            "candidates": [candidate],
+            "witness_blocks": [{"page_idx": 0, "bbox": [100, 100, 120, 120], "text": "A.", "type": "text"}],
+        }
         # Picture options are the ones the reader leaves without text — that is
         # what real papers look like, and it is what lets the printed "A." claim
         # the picture next to it.
-        reading = {"stem": "请选择正确的选项。", "options": {},
-                   "type": "single_choice", "figures": {"9": "stem"}, "missing_figure": False}
+        reading = {
+            "stem": "请选择正确的选项。",
+            "options": {},
+            "type": "single_choice",
+            "figures": {"9": "stem"},
+            "missing_figure": False,
+        }
         image = Image.new("RGB", (500, 500), "white")
-        with mock.patch.object(pipeline.readers, "primary_engine", return_value=mock.Mock()), \
-                mock.patch.object(pipeline.readers, "read_question", return_value=reading) as reader, \
-                mock.patch.object(pipeline.imaging, "stack_regions", return_value=(image, [])):
+        with (
+            mock.patch.object(pipeline.readers, "primary_engine", return_value=mock.Mock()),
+            mock.patch.object(pipeline.readers, "read_question", return_value=reading) as reader,
+            mock.patch.object(pipeline.imaging, "stack_regions", return_value=(image, [])),
+        ):
             result = pipeline.read_card(snapshot, mock.Mock())
         self.assertEqual(reader.call_count, 1)
         self.assertEqual(result["figures"][0]["slot"], "A")
@@ -107,14 +125,15 @@ class FigureLedgerTests(SimpleTestCase):
         labels a line of text, so it has no business claiming the stem diagram.
         """
         candidates = [{"label": "1", "page_idx": 0, "bbox": [80, 612, 151, 730]}]
-        blocks = [{"page_idx": 0, "bbox": [82, 734, 200, 748], "text": "A. $\\dfrac{\\sqrt{2}}{2}$",
-                   "type": "text"}]
+        blocks = [{"page_idx": 0, "bbox": [82, 734, 200, 748], "text": "A. $\\dfrac{\\sqrt{2}}{2}$", "type": "text"}]
         resolved = pipeline._resolve_automatic_figure_assignments(
             stem="如图所示，$\\triangle ABC$的顶点在正方形网格的格点上，则$\\tan C$的值为（ ）",
-            options={"A": "$\\dfrac{\\sqrt{2}}{2}$", "B": "$\\dfrac{1}{2}$",
-                     "C": "$\\dfrac{1}{3}$", "D": "3"},
-            kind="single_choice", candidates=candidates,
-            assignments={"1": "stem"}, blocks=blocks)
+            options={"A": "$\\dfrac{\\sqrt{2}}{2}$", "B": "$\\dfrac{1}{2}$", "C": "$\\dfrac{1}{3}$", "D": "3"},
+            kind="single_choice",
+            candidates=candidates,
+            assignments={"1": "stem"},
+            blocks=blocks,
+        )
         self.assertEqual(resolved, {"1": "stem"})
 
     def test_a_picture_option_label_still_claims_its_own_picture(self):
@@ -123,29 +142,51 @@ class FigureLedgerTests(SimpleTestCase):
         blocks = [{"page_idx": 0, "bbox": [82, 734, 110, 748], "text": "A.", "type": "text"}]
         resolved = pipeline._resolve_automatic_figure_assignments(
             stem="下列图形中，不是柱体的是（ ）",
-            options={}, kind="single_choice", candidates=candidates,
-            assignments={"1": "stem"}, blocks=blocks)
+            options={},
+            kind="single_choice",
+            candidates=candidates,
+            assignments={"1": "stem"},
+            blocks=blocks,
+        )
         self.assertEqual(resolved, {"1": "A"})
 
     def test_conflicting_marker_requires_review_and_retains_the_model_candidate(self):
         candidates = [{"label": "9", "page_idx": 0, "bbox": [130, 100, 260, 210]}]
         result = pipeline._resolve_automatic_figure_assignments(
-            stem="请选择", options={}, kind="single_choice", candidates=candidates,
-            assignments={"9": "A"}, blocks=[{"page_idx": 0, "bbox": [100, 100, 120, 120], "text": "B."}])
+            stem="请选择",
+            options={},
+            kind="single_choice",
+            candidates=candidates,
+            assignments={"9": "A"},
+            blocks=[{"page_idx": 0, "bbox": [100, 100, 120, 120], "text": "B."}],
+        )
         self.assertEqual(result, {"9": "A"})
 
 
 class FigureClaimIntegrationTests(TestCase):
     def setUp(self):
-        self.paper = Paper.objects.create(filename="fixture.pdf", kind="pdf", sha256="c" * 64,
-                                          pages=[{"page_idx": 0, "width": 1000, "height": 1000}],
-                                          status="ready", processing_plan={"revision": 1})
+        self.paper = Paper.objects.create(
+            filename="fixture.pdf",
+            kind="pdf",
+            sha256="c" * 64,
+            pages=[{"page_idx": 0, "width": 1000, "height": 1000}],
+            status="ready",
+            processing_plan={"revision": 1},
+        )
         self.group = QuestionGroup.objects.create(paper=self.paper, title="卷一", kind="exam", sequence=0)
 
     def question(self, number, **extra):
-        values = {"paper": self.paper, "group": self.group, "number": number, "stem": "如图，求面积",
-                      "question_type": "free_response", "figures": [diagram()], "state": "green",
-                      "figure_review": {"status": "ok", "source": "automatic"}, "flags": []}
+        values = {
+            "paper": self.paper,
+            "group": self.group,
+            "number": number,
+            "stem": "如图，求面积",
+            "question_type": "free_response",
+            "figures": [diagram()],
+            "state": "green",
+            "figure_review": {"status": "ok", "source": "automatic"},
+            "flags": [],
+        }
         values.update(extra)
         return Question.objects.create(**values)
 
@@ -178,8 +219,11 @@ class FigureClaimIntegrationTests(TestCase):
         self.assertEqual(self.paper.processing_plan["figure_assignment_audit"]["schema"], 1)
 
     def test_approved_edited_and_human_decisions_are_never_changed(self):
-        protected = [self.question(3, approved=True), self.question(4, edited=True),
-                     self.question(5, figure_review={"source": "human", "status": "ok"})]
+        protected = [
+            self.question(3, approved=True),
+            self.question(4, edited=True),
+            self.question(5, figure_review={"source": "human", "status": "ok"}),
+        ]
         before = deepcopy([(item.figures, item.flags, item.approved, item.figure_review) for item in protected])
         pipeline.audit_figure_claims(self.paper, revision=1)
         for item, expected in zip(protected, before):
@@ -213,15 +257,19 @@ class FigureClaimIntegrationTests(TestCase):
     def test_formula_and_shared_decision_survive_reading_snapshot(self):
         warning = pipeline.segment.AMBIGUOUS_CONTINUATION_FLAG_PREFIX + "请核查第3题续页"
         question = self.question(3, flags=[warning, figure_policy.FLAG_SHARED_FIGURE])
-        self.assertEqual(pipeline._snapshot(question)["segmentation_flags"],
-                         [warning, figure_policy.FLAG_SHARED_FIGURE])
+        self.assertEqual(
+            pipeline._snapshot(question)["segmentation_flags"], [warning, figure_policy.FLAG_SHARED_FIGURE]
+        )
 
     def test_borrowed_figure_recheck_retains_current_label_evidence(self):
         question = self.question(3, figures=[diagram(source="shared")])
         evidence = {"1": {"slot": "A", "source": "printed_option_marker"}}
-        fields = {"figures": [diagram(slot="A", bbox=[600, 200, 900, 420])],
-                  "figure_review": {"status": "ok", "assignment_evidence": evidence},
-                  "flags": [], "state": "green"}
+        fields = {
+            "figures": [diagram(slot="A", bbox=[600, 200, 900, 420])],
+            "figure_review": {"status": "ok", "assignment_evidence": evidence},
+            "flags": [],
+            "state": "green",
+        }
         pipeline._apply_reading_fields(question, fields)
         question.refresh_from_db()
         self.assertEqual(question.figure_review["assignment_evidence"], evidence)

@@ -105,9 +105,7 @@ class WitnessSafetyTests(SimpleTestCase):
         witness = "起点20末尾甲乙丙丁戊己庚 30 附带结论"
         self.assertIsNone(witness_choice(first, second, witness))
         # Remove the undecidable tail and the same witness does settle it.
-        self.assertEqual(
-            witness_choice(first, reading("起点26末尾甲乙丙丁戊己庚"), witness), "a",
-        )
+        self.assertEqual(witness_choice(first, reading("起点26末尾甲乙丙丁戊己庚"), witness), "a")
 
     def test_missing_stem_never_counts_as_support(self):
         self.assertIsNone(witness_choice(reading(""), reading(self.BASE), self.BASE))

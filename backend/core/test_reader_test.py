@@ -22,10 +22,7 @@ class ReaderConnectionTestTests(TestCase):
         if remote:
             extra["REMOTE_ADDR"] = remote
         return self.client.post(
-            "/api/settings/credentials/test",
-            data=json.dumps(payload),
-            content_type="application/json",
-            **extra,
+            "/api/settings/credentials/test", data=json.dumps(payload), content_type="application/json", **extra
         )
 
     def test_requires_local_origin(self):
@@ -61,8 +58,11 @@ class ReaderConnectionTestTests(TestCase):
         of its own and never touches the real credential store.
         """
 
-        with mock.patch.object(reader_test, "test_reading_connection",
-                               return_value={"ok": True, "model": "offline-model", "message": "连接成功"}) as call:
+        with mock.patch.object(
+            reader_test,
+            "test_reading_connection",
+            return_value={"ok": True, "model": "offline-model", "message": "连接成功"},
+        ) as call:
             response = self._post({"service": "minimax", "confirm": True})
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(call.call_args.args[0], "minimax")
@@ -77,9 +77,11 @@ class ReaderConnectionCallTests(TestCase):
 
     def test_a_correct_answer_passes(self):
         body = {"choices": [{"message": {"content": "【答案】2"}}]}
-        with mock.patch.object(reader_test.credential_settings, "reveal_saved_key", return_value="offline-key"), \
-             mock.patch.object(reader_test, "_saved_model", return_value="MiniMax-M3"), \
-             mock.patch.object(reader_test.requests, "post", return_value=self._response(200, body)) as post:
+        with (
+            mock.patch.object(reader_test.credential_settings, "reveal_saved_key", return_value="offline-key"),
+            mock.patch.object(reader_test, "_saved_model", return_value="MiniMax-M3"),
+            mock.patch.object(reader_test.requests, "post", return_value=self._response(200, body)) as post,
+        ):
             result = reader_test.test_reading_connection("minimax")
         self.assertTrue(result["ok"])
         self.assertIn("连接成功", result["message"])
@@ -93,34 +95,42 @@ class ReaderConnectionCallTests(TestCase):
 
     def test_a_miscount_is_reported_as_a_model_that_cannot_see(self):
         body = {"choices": [{"message": {"content": "【答案】5"}}]}
-        with mock.patch.object(reader_test.credential_settings, "reveal_saved_key", return_value="offline-key"), \
-             mock.patch.object(reader_test, "_saved_model", return_value="MiniMax-M3"), \
-             mock.patch.object(reader_test.requests, "post", return_value=self._response(200, body)):
+        with (
+            mock.patch.object(reader_test.credential_settings, "reveal_saved_key", return_value="offline-key"),
+            mock.patch.object(reader_test, "_saved_model", return_value="MiniMax-M3"),
+            mock.patch.object(reader_test.requests, "post", return_value=self._response(200, body)),
+        ):
             result = reader_test.test_reading_connection("minimax")
         self.assertFalse(result["ok"])
         self.assertIn("看不懂图片", result["message"])
 
     def test_a_rejected_key_says_so(self):
-        with mock.patch.object(reader_test.credential_settings, "reveal_saved_key", return_value="offline-key"), \
-             mock.patch.object(reader_test, "_saved_model", return_value="MiniMax-M3"), \
-             mock.patch.object(reader_test.requests, "post", return_value=self._response(401)):
+        with (
+            mock.patch.object(reader_test.credential_settings, "reveal_saved_key", return_value="offline-key"),
+            mock.patch.object(reader_test, "_saved_model", return_value="MiniMax-M3"),
+            mock.patch.object(reader_test.requests, "post", return_value=self._response(401)),
+        ):
             result = reader_test.test_reading_connection("minimax")
         self.assertFalse(result["ok"])
         self.assertIn("密钥", result["message"])
 
     def test_a_used_up_quota_says_so(self):
-        with mock.patch.object(reader_test.credential_settings, "reveal_saved_key", return_value="offline-key"), \
-             mock.patch.object(reader_test, "_saved_model", return_value="MiniMax-M3"), \
-             mock.patch.object(reader_test.requests, "post", return_value=self._response(429)):
+        with (
+            mock.patch.object(reader_test.credential_settings, "reveal_saved_key", return_value="offline-key"),
+            mock.patch.object(reader_test, "_saved_model", return_value="MiniMax-M3"),
+            mock.patch.object(reader_test.requests, "post", return_value=self._response(429)),
+        ):
             result = reader_test.test_reading_connection("minimax")
         self.assertFalse(result["ok"])
         self.assertIn("额度", result["message"])
 
     def test_the_saved_key_is_never_written_into_the_message(self):
         body = {"choices": [{"message": {"content": "【答案】2"}}]}
-        with mock.patch.object(reader_test.credential_settings, "reveal_saved_key", return_value="offline-secret-key"), \
-             mock.patch.object(reader_test, "_saved_model", return_value="MiniMax-M3"), \
-             mock.patch.object(reader_test.requests, "post", return_value=self._response(200, body)):
+        with (
+            mock.patch.object(reader_test.credential_settings, "reveal_saved_key", return_value="offline-secret-key"),
+            mock.patch.object(reader_test, "_saved_model", return_value="MiniMax-M3"),
+            mock.patch.object(reader_test.requests, "post", return_value=self._response(200, body)),
+        ):
             result = reader_test.test_reading_connection("minimax")
         self.assertNotIn("offline-secret-key", result["message"])
         self.assertNotIn("offline-secret-key", json.dumps(result, ensure_ascii=False))

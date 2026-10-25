@@ -1,4 +1,5 @@
 """Where does this Chrome save downloads? Ask the profile instead of guessing."""
+
 import json
 import os
 from pathlib import Path
@@ -14,5 +15,4 @@ for profile in sorted(base.glob("*")):
         continue
     download = data.get("download", {})
     directory = download.get("default_directory")
-    print(f"{profile.name}: default_directory={directory!r} "
-          f"prompt={download.get('prompt_for_download')}")
+    print(f"{profile.name}: default_directory={directory!r} prompt={download.get('prompt_for_download')}")

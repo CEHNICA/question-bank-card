@@ -76,8 +76,8 @@ def pick_question():
     c = sqlite3.connect(WORK_DB)
     try:
         rows = c.execute(
-            "select id, extras, content from core_publishedquestion"
-            " where status = 'published' and withdrawn_at is null").fetchall()
+            "select id, extras, content from core_publishedquestion where status = 'published' and withdrawn_at is null"
+        ).fetchall()
     finally:
         c.close()
     for pub, extras, content in rows:
@@ -100,7 +100,8 @@ def card_for(page, pub_id: str):
 def images_loaded(scope) -> bool:
     """图 <img> 挂在页面上不等于图真出来了。逐张量 complete/naturalWidth。"""
     return bool(scope.locator("img").count()) and scope.evaluate(
-        "n => [...n.querySelectorAll('img')].every(i => i.complete && i.naturalWidth > 0)")
+        "n => [...n.querySelectorAll('img')].every(i => i.complete && i.naturalWidth > 0)"
+    )
 
 
 def open_from_card(page, card, label: str):
@@ -122,6 +123,7 @@ def service_is_up() -> bool:
 
 def make_figure() -> None:
     from PIL import Image, ImageDraw
+
     os.makedirs(os.path.dirname(FIG), exist_ok=True)
     image = Image.new("RGB", (420, 150), "#ffffff")
     draw = ImageDraw.Draw(image)
@@ -183,11 +185,13 @@ def main() -> int:
         page.locator("#answerEditorAnalysis").fill(MARK + "解析：从题面条件出发，两边同号才能相加。")
         page.locator("#answerEditorDialog input[type='file']").set_input_files(FIG)
         page.wait_for_function(
-            "() => document.querySelectorAll('#answerEditorDialog .answer-image-row').length > 0", timeout=30000)
+            "() => document.querySelectorAll('#answerEditorDialog .answer-image-row').length > 0", timeout=30000
+        )
         print(f"   解析图挂上 {page.locator('#answerEditorDialog .answer-image-row').count()} 张")
         page.locator("#answerEditorSave").click()
         page.wait_for_function(
-            "() => document.querySelector('.answer-editor-status')?.textContent.includes('已保存')", timeout=30000)
+            "() => document.querySelector('.answer-editor-status')?.textContent.includes('已保存')", timeout=30000
+        )
         print(f"   {page.locator('.answer-editor-status').inner_text().strip()}")
         page.keyboard.press("Escape")
         page.wait_for_selector("#answerEditorDialog", state="hidden")
@@ -238,7 +242,8 @@ def main() -> int:
 
         aside = page.locator("#answerEditorDialog .answer-set-aside")
         visible = aside.count() == 1 and aside.evaluate(
-            "n => n.checkVisibility({checkVisibilityCSS: true, contentVisibilityAuto: true})")
+            "n => n.checkVisibility({checkVisibilityCSS: true, contentVisibilityAuto: true})"
+        )
         if not check(visible, "改完之后，编辑器里多出一块「原来那份解析」"):
             page.screenshot(path="tmp/export/stale-restore-fail.png")
             context.close()
@@ -250,11 +255,15 @@ def main() -> int:
         aside_text = aside.inner_text()
         print(f"   那块上写着：{re.sub(chr(10), ' | ', aside_text)[:150]!r}")
         check(MARK in aside_text, "那块里就是原来填的那份解析（答案和过程都在）")
-        check(aside.locator("img").count() >= 1 and images_loaded(aside),
-              "连原来那张解析图也在，而且真加载出来了（不是裂图）")
+        check(
+            aside.locator("img").count() >= 1 and images_loaded(aside),
+            "连原来那张解析图也在，而且真加载出来了（不是裂图）",
+        )
         check(bool(re.search(r"第\s*\d+\s*版", aside_text)), "那块说清了它是哪一版题面时填的")
-        check(page.locator("#answerEditorResult").input_value().strip() == "",
-              "编辑框本身是空的 —— 旧解析没有被悄悄塞进来顶替新题面")
+        check(
+            page.locator("#answerEditorResult").input_value().strip() == "",
+            "编辑框本身是空的 —— 旧解析没有被悄悄塞进来顶替新题面",
+        )
         status_empty = page.locator(".answer-editor-status").inner_text()
         check("已载入" in status_empty, "这时候状态栏说的是「已载入」（还没动过）")
         page.screenshot(path="tmp/export/stale-restore-aside.png")
@@ -273,12 +282,14 @@ def main() -> int:
         analysis_now = page.locator("#answerEditorAnalysis").input_value()
         check(MARK in answer_now, "按一下，答案就进了编辑框")
         check(MARK in analysis_now, "按一下，过程也进了编辑框")
-        check(page.locator("#answerEditorDialog .answer-image-row").count() == 1,
-              "按一下，原来那张解析图也跟着进了编辑区")
-        check(images_loaded(page.locator("#answerEditorDialog .answer-image-list")),
-              "搬过来的那张图真能显示，不是空框")
-        check("未保存" in page.locator(".answer-editor-status").inner_text(),
-              "填回来之后状态栏说的是「未保存」，不是当成已经存好了")
+        check(
+            page.locator("#answerEditorDialog .answer-image-row").count() == 1, "按一下，原来那张解析图也跟着进了编辑区"
+        )
+        check(images_loaded(page.locator("#answerEditorDialog .answer-image-list")), "搬过来的那张图真能显示，不是空框")
+        check(
+            "未保存" in page.locator(".answer-editor-status").inner_text(),
+            "填回来之后状态栏说的是「未保存」，不是当成已经存好了",
+        )
         page.screenshot(path="tmp/export/stale-restore-filled.png")
 
         # 六、老师已经对着新题面写了半段，再按一次会不会被悄悄盖掉
@@ -292,8 +303,10 @@ def main() -> int:
         check("盖掉" in prompt or "填回" in prompt, "按之前问了一句，不是直接盖")
         page.locator("#confirmDialog [value='cancel']").click()
         page.wait_for_timeout(500)
-        check(page.locator("#answerEditorAnalysis").input_value() == "对着改过的题面重写的过程，先写着。",
-              "选择不盖之后，刚才写的那段一个字都没丢")
+        check(
+            page.locator("#answerEditorAnalysis").input_value() == "对着改过的题面重写的过程，先写着。",
+            "选择不盖之后，刚才写的那段一个字都没丢",
+        )
         check(page.locator("#answerEditorResult").input_value().strip() != "", "答案也没被顺带清掉")
 
         # 七、同意盖，然后保存
@@ -305,11 +318,13 @@ def main() -> int:
         check(MARK in page.locator("#answerEditorAnalysis").input_value(), "同意之后确实换成原来那份")
         page.locator("#answerEditorSave").click()
         page.wait_for_function(
-            "() => document.querySelector('.answer-editor-status')?.textContent.includes('已保存')", timeout=30000)
+            "() => document.querySelector('.answer-editor-status')?.textContent.includes('已保存')", timeout=30000
+        )
         print(f"   {page.locator('.answer-editor-status').inner_text().strip()}")
-        check(aside.evaluate(
-            "n => !n.checkVisibility({checkVisibilityCSS: true, contentVisibilityAuto: true})"),
-            "保存之后，那块「原来那份解析」自己收起来了")
+        check(
+            aside.evaluate("n => !n.checkVisibility({checkVisibilityCSS: true, contentVisibilityAuto: true})"),
+            "保存之后，那块「原来那份解析」自己收起来了",
+        )
         page.keyboard.press("Escape")
         page.wait_for_selector("#answerEditorDialog", state="hidden")
 
@@ -326,13 +341,19 @@ def main() -> int:
         page.wait_for_selector("#answerEditorDialog[open]")
         page.wait_for_timeout(1200)
         check(MARK in page.locator("#answerEditorResult").input_value(), "重新打开，答案就在编辑框里（这次是挂上了）")
-        check(page.locator("#answerEditorDialog .answer-image-row").count() == 1
-              and images_loaded(page.locator("#answerEditorDialog .answer-image-list")),
-              "重新打开，那张解析图也还在（图片真的搬到了新版本名下）")
+        check(
+            page.locator("#answerEditorDialog .answer-image-row").count() == 1
+            and images_loaded(page.locator("#answerEditorDialog .answer-image-list")),
+            "重新打开，那张解析图也还在（图片真的搬到了新版本名下）",
+        )
         aside_again = page.locator("#answerEditorDialog .answer-set-aside")
-        check(aside_again.count() == 1 and not aside_again.evaluate(
-            "n => n.checkVisibility({checkVisibilityCSS: true, contentVisibilityAuto: true})"),
-            "不再提示「题面改过」—— 它已经是这道题的解析了")
+        check(
+            aside_again.count() == 1
+            and not aside_again.evaluate(
+                "n => n.checkVisibility({checkVisibilityCSS: true, contentVisibilityAuto: true})"
+            ),
+            "不再提示「题面改过」—— 它已经是这道题的解析了",
+        )
         page.screenshot(path="tmp/export/stale-restore-done.png")
         page.keyboard.press("Escape")
         page.wait_for_selector("#answerEditorDialog", state="hidden")
@@ -344,12 +365,15 @@ def main() -> int:
     print("九、库里")
     c = sqlite3.connect(WORK_DB)
     try:
-        rows_new = c.execute("select id, answer, analysis, figures from core_librarysolution where publication_id = ?",
-                             (key(new_pub),)).fetchall()
-        attached = row_extras(c.execute("select extras from core_publishedquestion where id = ?",
-                                       (key(new_pub),)).fetchone()[0]).get("solution_id")
-        needs = row_extras(c.execute("select extras from core_publishedquestion where id = ?",
-                                     (key(new_pub),)).fetchone()[0]).get("solution_needs_review_id")
+        rows_new = c.execute(
+            "select id, answer, analysis, figures from core_librarysolution where publication_id = ?", (key(new_pub),)
+        ).fetchall()
+        attached = row_extras(
+            c.execute("select extras from core_publishedquestion where id = ?", (key(new_pub),)).fetchone()[0]
+        ).get("solution_id")
+        needs = row_extras(
+            c.execute("select extras from core_publishedquestion where id = ?", (key(new_pub),)).fetchone()[0]
+        ).get("solution_needs_review_id")
     finally:
         c.close()
     check(len(rows_new) == 1, f"新版本下只多出一行解析（实际 {len(rows_new)} 行）")
@@ -364,11 +388,16 @@ def main() -> int:
     # 目录名用的是 str(publication.pk)，也就是**带横杠**的 UUID；sqlite 里的 id 才是不带横杠的。
     carried = json.loads(rows_new[0][3]) if rows_new and rows_new[0][3] else []
     folder = os.path.join("tmp", "accept-review", "data", "library-solutions", new_pub)
-    on_disk = [f for f in carried
-               if os.path.isfile(os.path.join(folder, f.get("id", "") + ".png"))
-               and os.path.isfile(os.path.join(folder, f.get("id", "") + ".json"))]
-    check(len(carried) == 1 and len(on_disk) == 1,
-          f"新版本目录下真的躺着这张图（记录 {len(carried)} 张，磁盘上 {len(on_disk)} 张）")
+    on_disk = [
+        f
+        for f in carried
+        if os.path.isfile(os.path.join(folder, f.get("id", "") + ".png"))
+        and os.path.isfile(os.path.join(folder, f.get("id", "") + ".json"))
+    ]
+    check(
+        len(carried) == 1 and len(on_disk) == 1,
+        f"新版本目录下真的躺着这张图（记录 {len(carried)} 张，磁盘上 {len(on_disk)} 张）",
+    )
 
     print()
     passed = sum(1 for ok, _ in results if ok)

@@ -21,12 +21,15 @@ from .test_v110_types_origin import TempDataMixin
 class ExplicitAnswerAPITests(TempDataMixin, TransactionTestCase):
     def setUp(self):
         self.use_temp_data()
-        environment = mock.patch.dict(os.environ, {
-            "QB_LIBRARY_AI_SETTINGS_FILE": str(self.temp / "ai-settings.json"),
-            "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.temp / "ai-key.dat"),
-            "QB_FEATURES_FILE": str(self.temp / "features.json"),
-            "QB_CREDENTIAL_FILE": str(self.temp / "ocr-key.dat"),
-        })
+        environment = mock.patch.dict(
+            os.environ,
+            {
+                "QB_LIBRARY_AI_SETTINGS_FILE": str(self.temp / "ai-settings.json"),
+                "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.temp / "ai-key.dat"),
+                "QB_FEATURES_FILE": str(self.temp / "features.json"),
+                "QB_CREDENTIAL_FILE": str(self.temp / "ocr-key.dat"),
+            },
+        )
         environment.start()
         self.addCleanup(environment.stop)
         transform = mock.patch.object(service.credential_settings.store, "_transform", side_effect=protected_test_bytes)
@@ -46,7 +49,9 @@ class ExplicitAnswerAPITests(TempDataMixin, TransactionTestCase):
         self.assertEqual(service.public_status()["mode"], "assistant")
 
     def publication(self, number):
-        question = self.card(self.paper, number=number, question_type="free_response", stem=f"离线第 {number} 题，计算 $1+1$。")
+        question = self.card(
+            self.paper, number=number, question_type="free_response", stem=f"离线第 {number} 题，计算 $1+1$。"
+        )
         question.approved = True
         question.approved_at = timezone.now()
         question.approved_content_hash = library.approval_hash(question)
@@ -54,8 +59,16 @@ class ExplicitAnswerAPITests(TempDataMixin, TransactionTestCase):
         return library.publish(question)[0]
 
     def configure(self, **extra):
-        return service.save({"mode": "api", "endpoint_id": "ep-offline-explicit", "supports_images": True,
-                             "thinking": True, "key": {"action": "replace", "value": "synthetic-explicit-api-key"}, **extra})
+        return service.save(
+            {
+                "mode": "api",
+                "endpoint_id": "ep-offline-explicit",
+                "supports_images": True,
+                "thinking": True,
+                "key": {"action": "replace", "value": "synthetic-explicit-api-key"},
+                **extra,
+            }
+        )
 
     def verify(self):
         service.save({"mode": "api"})
@@ -66,9 +79,14 @@ class ExplicitAnswerAPITests(TempDataMixin, TransactionTestCase):
         self.transport.side_effect = AssertionError("unexpected cloud request")
 
     def post(self, **changes):
-        return self.client.post("/api/library/jobs", json.dumps({"kind": "answer", "ids": [str(self.pub.pk)],
-                                "solution_scope": True, "executor": "api", **changes}),
-                                content_type="application/json", HTTP_X_QB_REQUEST="1")
+        return self.client.post(
+            "/api/library/jobs",
+            json.dumps(
+                {"kind": "answer", "ids": [str(self.pub.pk)], "solution_scope": True, "executor": "api", **changes}
+            ),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
 
     def queue(self):
         response = self.post()
@@ -81,14 +99,17 @@ class ExplicitAnswerAPITests(TempDataMixin, TransactionTestCase):
         return LibraryJob.objects.get(pk=row["id"])
 
     def config_bytes(self):
-        return {str(path.resolve().relative_to(self.temp.resolve())): path.read_bytes() if path.exists() else None
-                for path in (service.path(), service.key_path(), features.path(), self.temp / "ocr-key.dat")}
+        return {
+            str(path.resolve().relative_to(self.temp.resolve())): path.read_bytes() if path.exists() else None
+            for path in (service.path(), service.key_path(), features.path(), self.temp / "ocr-key.dat")
+        }
 
     def process(self, result_mutation=None):
         def reply(*_args, **_kwargs):
             if result_mutation:
                 result_mutation()
             return answer_response("【答案】2【解析】逐步推导的离线 API 初稿。")
+
         self.transport.side_effect = reply
         return library_jobs.process_pending()
 
@@ -148,11 +169,29 @@ class ExplicitAnswerAPITests(TempDataMixin, TransactionTestCase):
         self.transport.assert_not_called()
 
     def test_generation_preserves_saved_manual_solution_and_existing_ai_history(self):
-        saved = library_solutions.save(self.pub, {"answer": "人工答案", "analysis": "已保存的完整解析", "figures": [],
-                                                 "base_revision": None, "sync_library": True})
+        saved = library_solutions.save(
+            self.pub,
+            {
+                "answer": "人工答案",
+                "analysis": "已保存的完整解析",
+                "figures": [],
+                "base_revision": None,
+                "sync_library": True,
+            },
+        )
         self.pub.refresh_from_db()
-        library.save_extras(self.pub, {**self.pub.extras, "ai_answer": {"answer": "旧 AI 答案", "analysis": "旧 AI 解析",
-            "fingerprint": library.generation_fingerprint(self.pub.content, self.pub.pk), "checked": False}})
+        library.save_extras(
+            self.pub,
+            {
+                **self.pub.extras,
+                "ai_answer": {
+                    "answer": "旧 AI 答案",
+                    "analysis": "旧 AI 解析",
+                    "fingerprint": library.generation_fingerprint(self.pub.content, self.pub.pk),
+                    "checked": False,
+                },
+            },
+        )
         self.pub.refresh_from_db()
         before = deepcopy(self.pub.extras)
         job = self.queue()
@@ -168,8 +207,14 @@ class ExplicitAnswerAPITests(TempDataMixin, TransactionTestCase):
         self.assertEqual(LibrarySolution.objects.count(), 1)
 
     def test_executor_override_is_not_available_to_tags_or_unscoped_answers(self):
-        for payload in ({"kind": "tags"}, {"kind": "tags", "solution_scope": False},
-                        {"solution_scope": False}, {"executor": "assistant"}, {"executor": None}, {"missing": True}):
+        for payload in (
+            {"kind": "tags"},
+            {"kind": "tags", "solution_scope": False},
+            {"solution_scope": False},
+            {"executor": "assistant"},
+            {"executor": None},
+            {"missing": True},
+        ):
             with self.subTest(payload=payload):
                 self.assertEqual(self.post(**payload).status_code, 400)
         with self.assertRaises(library_jobs.JobError):
@@ -244,15 +289,19 @@ class ExplicitAnswerAPITests(TempDataMixin, TransactionTestCase):
 
     def test_verification_withdrawn_during_response_discards_the_late_draft(self):
         job = self.queue()
+
         def revoke():
             service._write_settings({**service._load(), "verified": False, "verified_at": "", "resolved_model": ""})
+
         self.process(revoke)
         self.assert_no_result(job)
         self.transport.assert_called_once()
 
     def test_withdrawn_publication_cannot_receive_the_late_api_result(self):
         job = self.queue()
-        self.process(lambda: PublishedQuestion.objects.filter(pk=self.pub.pk).update(status=PublishedQuestion.Status.WITHDRAWN))
+        self.process(
+            lambda: PublishedQuestion.objects.filter(pk=self.pub.pk).update(status=PublishedQuestion.Status.WITHDRAWN)
+        )
         self.assert_no_result(job)
         self.assertEqual(self.pub.status, "withdrawn")
         self.transport.assert_called_once()
@@ -265,8 +314,12 @@ class ExplicitAnswerAPITests(TempDataMixin, TransactionTestCase):
         self.transport.assert_called_once()
 
     def normal_post(self, kind="answer", **changes):
-        return self.client.post("/api/library/jobs", json.dumps({"kind": kind, "ids": [str(self.pub.pk)], **changes}),
-                                content_type="application/json", HTTP_X_QB_REQUEST="1")
+        return self.client.post(
+            "/api/library/jobs",
+            json.dumps({"kind": kind, "ids": [str(self.pub.pk)], **changes}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
 
     def test_normal_api_only_rejects_mode_change_between_ready_get_and_post(self):
         features.save({"ai_answer": True, "knowledge_tags": True})
@@ -318,7 +371,11 @@ class ExplicitAnswerAPITests(TempDataMixin, TransactionTestCase):
                     self.assertEqual(job.executor, executor)
                     self.assertFalse(job.solution_scope)
                     self.assertEqual(bool(job.api_snapshot), False)
-        self.assertEqual(LibraryJob.objects.count(), 2, "Identical tags suggestions are reused; answer work remains assistant-compatible")
+        self.assertEqual(
+            LibraryJob.objects.count(),
+            2,
+            "Identical tags suggestions are reused; answer work remains assistant-compatible",
+        )
         self.assertEqual(self.config_bytes(), settings)
         self.transport.assert_not_called()
 
@@ -331,7 +388,9 @@ class ExplicitAnswerAPITests(TempDataMixin, TransactionTestCase):
         for kind, feature in (("tags", "knowledge_tags"), ("answer", "ai_answer")):
             with self.subTest(kind=kind):
                 before = LibraryJob.objects.count()
-                self.assertEqual(self.normal_post(kind, api_only=True).status_code, 409, "API-only must not enable a feature")
+                self.assertEqual(
+                    self.normal_post(kind, api_only=True).status_code, 409, "API-only must not enable a feature"
+                )
                 self.assertEqual(LibraryJob.objects.count(), before)
                 features.save({feature: True})
                 settings = self.config_bytes()

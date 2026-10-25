@@ -30,7 +30,8 @@ MAX_ACCOUNT_CONCURRENCY = 8
 # Conservative defaults: vision providers tolerate a few parallel requests per
 # key; MinerU tasks are long-running uploads and stay at one per token.
 DEFAULT_ACCOUNT_CONCURRENCY = {
-    "mineru": 1, **{key: spec["concurrency"][0] for key, spec in provider_catalog.VISION.items()},
+    "mineru": 1,
+    **{key: spec["concurrency"][0] for key, spec in provider_catalog.VISION.items()},
 }
 # MiniMax Token Plan concurrency follows the membership tier.  MiniMax's own
 # guide (peak hours): Plus about 3-4, Max about 4-5, Ultra about 6-7 agents at
@@ -184,6 +185,7 @@ def forget_learned_concurrency() -> None:
     with _POOL_LOCK:
         _LEARNED.clear()
 
+
 # Lower is more urgent.  The worker tags each paper's reading with the
 # paper's upload time, so when two papers overlap the older one gets every
 # slot it asks for and the newer one only fills the gaps.  Untagged work
@@ -211,10 +213,10 @@ class _State:
     capacity: int = 1
     disabled: bool = False
     disabled_reason: str = ""
-    limit: int = 1           # configured per-account concurrency (ceiling)
-    successes: int = 0       # clean releases since the last throttle
-    epoch: int = 0           # bumped whenever a throttle removes a slot
-    probing: bool = True     # no 429 yet in this pool: climb quickly
+    limit: int = 1  # configured per-account concurrency (ceiling)
+    successes: int = 0  # clean releases since the last throttle
+    epoch: int = 0  # bumped whenever a throttle removes a slot
+    probing: bool = True  # no 429 yet in this pool: climb quickly
 
     @property
     def in_use(self) -> bool:
@@ -269,8 +271,14 @@ class AccountLease:
 
 
 class AccountPool:
-    def __init__(self, service: str, secrets: tuple[str, ...], per_account: int = 1,
-                 ceiling: int | None = None, memory: dict[str, int] | None = None) -> None:
+    def __init__(
+        self,
+        service: str,
+        secrets: tuple[str, ...],
+        per_account: int = 1,
+        ceiling: int | None = None,
+        memory: dict[str, int] | None = None,
+    ) -> None:
         self.service = service
         self._secrets = secrets
         start = max(1, min(MAX_ACCOUNT_CONCURRENCY, int(per_account)))
@@ -324,8 +332,7 @@ class AccountPool:
 
         with self._condition:
             return bool(self._states) and all(
-                state.disabled and state.disabled_reason == "quota"
-                for state in self._states.values()
+                state.disabled and state.disabled_reason == "quota" for state in self._states.values()
             )
 
     def _acquire(self, exclude: frozenset[int] = frozenset(), cancel: Callable[[], bool] | None = None) -> AccountLease:
@@ -351,14 +358,15 @@ class AccountPool:
             if index not in exclude and not state.disabled and state.ready_at <= now
         )
 
-    def _acquire_locked(self, exclude: frozenset[int], priority: float, cancel: Callable[[], bool] | None = None) -> AccountLease:
+    def _acquire_locked(
+        self, exclude: frozenset[int], priority: float, cancel: Callable[[], bool] | None = None
+    ) -> AccountLease:
         while True:
             if cancel is not None and cancel():
                 raise AccountPoolCancelled("本机任务已停止")
             now = time.monotonic()
             enabled = [
-                (index, secret) for index, secret in enumerate(self._secrets)
-                if not self._states[secret].disabled
+                (index, secret) for index, secret in enumerate(self._secrets) if not self._states[secret].disabled
             ]
             if not enabled:
                 raise AccountPoolError(f"{self.service} 账号池中没有可用账号")
@@ -389,7 +397,8 @@ class AccountPool:
                 self._cursor = (index + 1) % len(self._secrets)
                 return AccountLease(self, secret, index, self._states[secret].epoch)
             ready_times = [
-                self._states[secret].ready_at for index, secret in enabled
+                self._states[secret].ready_at
+                for index, secret in enabled
                 if index not in exclude
                 and self._states[secret].active < self._states[secret].capacity
                 and self._states[secret].ready_at > now
@@ -440,13 +449,15 @@ class AccountPool:
         with self._condition:
             now = time.monotonic()
             return sum(
-                max(0, state.capacity - state.active) for state in self._states.values()
+                max(0, state.capacity - state.active)
+                for state in self._states.values()
                 if not state.disabled and state.ready_at <= now
             )
 
     @contextmanager
-    def lease(self, *, exclude: set[int] | frozenset[int] | None = None,
-              cancel: Callable[[], bool] | None = None) -> Iterator[AccountLease]:
+    def lease(
+        self, *, exclude: set[int] | frozenset[int] | None = None, cancel: Callable[[], bool] | None = None
+    ) -> Iterator[AccountLease]:
         lease = self._acquire(frozenset(exclude or ()), cancel)
         try:
             yield lease

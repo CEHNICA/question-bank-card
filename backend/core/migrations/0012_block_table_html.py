@@ -4,15 +4,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
+    dependencies = [("core", "0011_resegment_source_identity")]
 
-    dependencies = [
-        ("core", "0011_resegment_source_identity"),
-    ]
-
-    operations = [
-        migrations.AddField(
-            model_name="block",
-            name="html",
-            field=models.TextField(blank=True, default=""),
-        ),
-    ]
+    operations = [migrations.AddField(model_name="block", name="html", field=models.TextField(blank=True, default=""))]

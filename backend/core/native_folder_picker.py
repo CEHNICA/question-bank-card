@@ -4,6 +4,7 @@ The desktop HTTP service has one native dialog at a time. Each calling thread
 initializes its own COM apartment; all interfaces and returned memory are
 released before that apartment is closed. No optional GUI package is needed.
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -16,8 +17,12 @@ class FolderPickerError(RuntimeError):
 
 
 class _GUID(ctypes.Structure):
-    _fields_ = [("Data1", ctypes.c_uint32), ("Data2", ctypes.c_uint16),
-                ("Data3", ctypes.c_uint16), ("Data4", ctypes.c_ubyte * 8)]
+    _fields_ = [
+        ("Data1", ctypes.c_uint32),
+        ("Data2", ctypes.c_uint16),
+        ("Data3", ctypes.c_uint16),
+        ("Data4", ctypes.c_ubyte * 8),
+    ]
 
     @classmethod
     def from_string(cls, value):
@@ -40,22 +45,37 @@ class _WindowsFolderDialog:
         self.ole.CoInitializeEx.restype = ctypes.c_long
         self.ole.CoUninitialize.argtypes = []
         self.ole.CoUninitialize.restype = None
-        self.ole.CoCreateInstance.argtypes = [ctypes.POINTER(_GUID), ctypes.c_void_p, ctypes.c_uint32,
-                                            ctypes.POINTER(_GUID), ctypes.POINTER(ctypes.c_void_p)]
+        self.ole.CoCreateInstance.argtypes = [
+            ctypes.POINTER(_GUID),
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.POINTER(_GUID),
+            ctypes.POINTER(ctypes.c_void_p),
+        ]
         self.ole.CoCreateInstance.restype = ctypes.c_long
         self.ole.CoTaskMemFree.argtypes = [ctypes.c_void_p]
         self.ole.CoTaskMemFree.restype = None
-        self.shell.SHCreateItemFromParsingName.argtypes = [ctypes.c_wchar_p, ctypes.c_void_p,
-                                                          ctypes.POINTER(_GUID), ctypes.POINTER(ctypes.c_void_p)]
+        self.shell.SHCreateItemFromParsingName.argtypes = [
+            ctypes.c_wchar_p,
+            ctypes.c_void_p,
+            ctypes.POINTER(_GUID),
+            ctypes.POINTER(ctypes.c_void_p),
+        ]
         self.shell.SHCreateItemFromParsingName.restype = ctypes.c_long
         self.user.GetForegroundWindow.argtypes = []
         self.user.GetForegroundWindow.restype = ctypes.c_void_p
         self._check(self.ole.CoInitializeEx(None, 2))  # COINIT_APARTMENTTHREADED
         self.initialized = True
         try:
-            self._check(self.ole.CoCreateInstance(
-                ctypes.byref(_GUID.from_string("dc1c5a9c-e88a-4dde-a5a1-60f82a20aef7")), None, 1,
-                ctypes.byref(_GUID.from_string("42f85136-db7e-439c-85f1-e4075d135fc8")), ctypes.byref(self.interface)))
+            self._check(
+                self.ole.CoCreateInstance(
+                    ctypes.byref(_GUID.from_string("dc1c5a9c-e88a-4dde-a5a1-60f82a20aef7")),
+                    None,
+                    1,
+                    ctypes.byref(_GUID.from_string("42f85136-db7e-439c-85f1-e4075d135fc8")),
+                    ctypes.byref(self.interface),
+                )
+            )
         except Exception:
             self.release()
             raise
@@ -77,8 +97,12 @@ class _WindowsFolderDialog:
         self._check(self._call(18, [ctypes.c_wchar_p], "选择文件夹"))
         if initial_directory:
             item = ctypes.c_void_p()
-            result = self.shell.SHCreateItemFromParsingName(initial_directory, None,
-                ctypes.byref(_GUID.from_string("43826d1e-e718-42ee-bc55-a1e261c37bfe")), ctypes.byref(item))
+            result = self.shell.SHCreateItemFromParsingName(
+                initial_directory,
+                None,
+                ctypes.byref(_GUID.from_string("43826d1e-e718-42ee-bc55-a1e261c37bfe")),
+                ctypes.byref(item),
+            )
             if item:
                 try:
                     if result >= 0:
@@ -96,7 +120,8 @@ class _WindowsFolderDialog:
                 raise FolderPickerError("未能读取所选文件夹，请重新选择。")
             # SIGDN_FILESYSPATH: never a shell URI, virtual folder or display name.
             result = _method(item, 5, ctypes.c_long, ctypes.c_uint32, ctypes.POINTER(ctypes.c_void_p))(
-                item, 0x80058000, ctypes.byref(text))
+                item, 0x80058000, ctypes.byref(text)
+            )
             self._check(result)
             if not text:
                 raise FolderPickerError("未能读取所选文件夹，请重新选择。")

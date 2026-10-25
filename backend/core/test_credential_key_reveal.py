@@ -1,4 +1,5 @@
 """Local pool viewing tests: synthetic encrypted files only, no network."""
+
 import json
 import os
 import tempfile
@@ -31,43 +32,65 @@ class CredentialKeyRevealTests(SimpleTestCase):
         self.root = Path(temporary.name)
         self.path = self.root / "credentials.dat"
         environment = {
-            "QB_CREDENTIAL_FILE": str(self.path), "QB_MODEL_PREFERENCES_FILE": str(self.root / "models.json"),
+            "QB_CREDENTIAL_FILE": str(self.path),
+            "QB_MODEL_PREFERENCES_FILE": str(self.root / "models.json"),
             "MINIMAX_API_KEY": "synthetic-environment-key-must-not-be-viewed",
         }
         for service in credential_settings.SERVICES:
             environment[f"QB_{service.upper()}_CONFIGURED"] = "0"
             environment[f"QB_{service.upper()}_POOL_SIZE"] = "0"
         env = mock.patch.dict(os.environ, environment)
-        env.start(); self.addCleanup(env.stop)
+        env.start()
+        self.addCleanup(env.stop)
         cipher = mock.patch.object(credential_settings.store, "_transform", side_effect=protected_test_bytes)
-        self.cipher = cipher.start(); self.addCleanup(cipher.stop)
+        self.cipher = cipher.start()
+        self.addCleanup(cipher.stop)
         self.secrets = {
             service: [f"synthetic-{service}-key-{index}" for index in range(credential_settings.MAX_ACCOUNT_POOL_SIZE)]
             for service in credential_settings.SERVICES
         }
-        values = {credential_settings.store.ACCOUNT_POOL_FIELDS[service][1]: keys for service, keys in self.secrets.items()}
+        values = {
+            credential_settings.store.ACCOUNT_POOL_FIELDS[service][1]: keys for service, keys in self.secrets.items()
+        }
         credential_settings.store.save_credentials(values)
         credential_settings.apply_public_environment(credential_settings.public_status(values))
         (self.root / "models.json").write_text('{"roles":{"primary_engine":"modelscope_qwen"}}', encoding="utf-8")
         self.cipher.reset_mock()
         reset = mock.patch.object(credential_settings, "reset_account_pools")
-        self.reset = reset.start(); self.addCleanup(reset.stop)
-        network = mock.patch("requests.sessions.Session.request", side_effect=AssertionError("credential viewing must stay offline"))
-        self.network = network.start(); self.addCleanup(network.stop)
-        urllib_network = mock.patch("urllib.request.urlopen", side_effect=AssertionError("credential viewing must stay offline"))
-        self.urllib_network = urllib_network.start(); self.addCleanup(urllib_network.stop)
+        self.reset = reset.start()
+        self.addCleanup(reset.stop)
+        network = mock.patch(
+            "requests.sessions.Session.request", side_effect=AssertionError("credential viewing must stay offline")
+        )
+        self.network = network.start()
+        self.addCleanup(network.stop)
+        urllib_network = mock.patch(
+            "urllib.request.urlopen", side_effect=AssertionError("credential viewing must stay offline")
+        )
+        self.urllib_network = urllib_network.start()
+        self.addCleanup(urllib_network.stop)
         self.files = {path.name: (path.read_bytes(), path.stat().st_mtime_ns) for path in self.root.iterdir()}
         self.environment = dict(os.environ)
 
     def post(self, payload=None, **headers):
-        options = {"HTTP_HOST": "127.0.0.1:8768", "HTTP_ORIGIN": "http://127.0.0.1:8768",
-                   "HTTP_X_QB_REQUEST": "1", "HTTP_SEC_FETCH_SITE": "same-origin"}
+        options = {
+            "HTTP_HOST": "127.0.0.1:8768",
+            "HTTP_ORIGIN": "http://127.0.0.1:8768",
+            "HTTP_X_QB_REQUEST": "1",
+            "HTTP_SEC_FETCH_SITE": "same-origin",
+        }
         options.update(headers)
-        return self.client.post(self.url, json.dumps(payload if payload is not None else {"service": "minimax", "index": 0}),
-                                content_type="application/json", **options)
+        return self.client.post(
+            self.url,
+            json.dumps(payload if payload is not None else {"service": "minimax", "index": 0}),
+            content_type="application/json",
+            **options,
+        )
 
     def unchanged(self):
-        self.assertEqual(self.files, {path.name: (path.read_bytes(), path.stat().st_mtime_ns) for path in self.root.iterdir()})
+        self.assertEqual(
+            self.files, {path.name: (path.read_bytes(), path.stat().st_mtime_ns) for path in self.root.iterdir()}
+        )
         self.assertEqual(self.environment, dict(os.environ))
         self.reset.assert_not_called()
         self.network.assert_not_called()
@@ -94,7 +117,10 @@ class CredentialKeyRevealTests(SimpleTestCase):
             self.assertEqual(response.status_code, 405)
             self.assertIn("no-store", response["Cache-Control"])
         status = self.client.get("/api/settings/credentials").json()
-        self.assertEqual(status, {"services": {service: {"configured": True, "count": 8} for service in self.secrets}, "max_accounts": 8})
+        self.assertEqual(
+            status,
+            {"services": {service: {"configured": True, "count": 8} for service in self.secrets}, "max_accounts": 8},
+        )
         for keys in self.secrets.values():
             for key in keys:
                 self.assertNotIn(key, json.dumps(status))
@@ -102,10 +128,17 @@ class CredentialKeyRevealTests(SimpleTestCase):
         self.unchanged()
 
     def test_nonlocal_missing_cross_origin_fetch_site_and_request_header_refuse_before_read(self):
-        for headers in ({"REMOTE_ADDR": "192.0.2.10"}, {"REMOTE_ADDR": ""}, {"HTTP_ORIGIN": ""},
-                        {"HTTP_ORIGIN": "https://other.example"}, {"HTTP_ORIGIN": "http://127.0.0.1:8778"},
-                        {"HTTP_SEC_FETCH_SITE": "cross-site"}, {"HTTP_SEC_FETCH_SITE": "same-site"},
-                        {"HTTP_X_QB_REQUEST": ""}, {"HTTP_HOST": "localhost:8768"}):
+        for headers in (
+            {"REMOTE_ADDR": "192.0.2.10"},
+            {"REMOTE_ADDR": ""},
+            {"HTTP_ORIGIN": ""},
+            {"HTTP_ORIGIN": "https://other.example"},
+            {"HTTP_ORIGIN": "http://127.0.0.1:8778"},
+            {"HTTP_SEC_FETCH_SITE": "cross-site"},
+            {"HTTP_SEC_FETCH_SITE": "same-site"},
+            {"HTTP_X_QB_REQUEST": ""},
+            {"HTTP_HOST": "localhost:8768"},
+        ):
             with self.subTest(headers=headers):
                 response = self.post(**headers)
                 self.assertEqual(response.status_code, 403)
@@ -137,12 +170,20 @@ class CredentialKeyRevealTests(SimpleTestCase):
         self.unchanged()
 
     def test_bad_service_index_shape_or_extra_fields_never_read_or_echo_values(self):
-        bad = ({}, {"service": "minimax"}, {"service": "minimax", "index": 0, "key": "synthetic-never-echo"},
-               {"service": "../credentials.dat", "index": 0}, {"service": [], "index": 0},
-               {"service": "minimax", "index": True}, {"service": "minimax", "index": "0"},
-               {"service": "minimax", "index": 0.0}, {"service": "minimax", "index": -1},
-               {"service": "minimax", "index": 8}, {"service": "minimax", "index": None},
-               {"service": "minimax", "index": []})
+        bad = (
+            {},
+            {"service": "minimax"},
+            {"service": "minimax", "index": 0, "key": "synthetic-never-echo"},
+            {"service": "../credentials.dat", "index": 0},
+            {"service": [], "index": 0},
+            {"service": "minimax", "index": True},
+            {"service": "minimax", "index": "0"},
+            {"service": "minimax", "index": 0.0},
+            {"service": "minimax", "index": -1},
+            {"service": "minimax", "index": 8},
+            {"service": "minimax", "index": None},
+            {"service": "minimax", "index": []},
+        )
         for payload in bad:
             with self.subTest(payload=payload):
                 response = self.post(payload)
@@ -157,7 +198,9 @@ class CredentialKeyRevealTests(SimpleTestCase):
         for value in ("[1,2]", "{broken", json.dumps({"service": "x" * 1100, "index": 0})):
             response = self.client.post(self.url, value, content_type="application/json", **headers)
             self.assertEqual(response.status_code, 400)
-        response = self.client.post(self.url, "service=minimax&index=0", content_type="application/x-www-form-urlencoded", **headers)
+        response = self.client.post(
+            self.url, "service=minimax&index=0", content_type="application/x-www-form-urlencoded", **headers
+        )
         self.assertEqual(response.status_code, 415)
         self.cipher.assert_not_called()
         self.unchanged()
@@ -194,7 +237,9 @@ class CredentialKeyRevealTests(SimpleTestCase):
         self.assertEqual(self.post({"service": "minimax", "index": 1}).status_code, 409)
 
     def test_guard_errors_cannot_trigger_store_read(self):
-        with mock.patch.object(credential_settings.store, "load_credentials", side_effect=AssertionError("must not read")):
+        with mock.patch.object(
+            credential_settings.store, "load_credentials", side_effect=AssertionError("must not read")
+        ):
             self.assertEqual(self.post(REMOTE_ADDR="198.51.100.1").status_code, 403)
             self.assertEqual(self.post({"service": "minimax", "index": False}).status_code, 400)
             self.assertEqual(self.client.get(self.url).status_code, 405)

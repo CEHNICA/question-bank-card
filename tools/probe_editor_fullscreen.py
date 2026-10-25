@@ -69,14 +69,29 @@ def main():
     OUTPUT.mkdir(parents=True, exist_ok=True)
     errors = []
     with sync_playwright() as pw:
-        executable = next((str(p) for p in (Path(pw.chromium.executable_path),
-            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if p.is_file()), None)
+        executable = next(
+            (
+                str(p)
+                for p in (
+                    Path(pw.chromium.executable_path),
+                    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                )
+                if p.is_file()
+            ),
+            None,
+        )
         browser = pw.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
         context = browser.new_context(viewport={"width": args.width, "height": args.height})
         context.add_init_script("localStorage.setItem('qb-welcome-seen','1'); localStorage.setItem('qb-lens','0')")
-        context.route("**/*", lambda route: route.continue_() if urlparse(route.request.url).hostname in
-                      ("127.0.0.1", "localhost") else route.abort())
+        context.route(
+            "**/*",
+            lambda route: (
+                route.continue_()
+                if urlparse(route.request.url).hostname in ("127.0.0.1", "localhost")
+                else route.abort()
+            ),
+        )
         page = context.new_page()
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.goto(f"{url}/?paper={args.paper}")
@@ -87,8 +102,11 @@ def main():
             page.wait_for_timeout(300)
 
         for number in [int(value) for value in args.questions.split(",") if value.strip()]:
-            index = page.evaluate("""(n) => [...document.querySelectorAll('.card:not(.compact)')]
-                .findIndex(c => ((c.querySelector('.qnum') || {}).textContent || '').includes(`第 ${n} 题`))""", number)
+            index = page.evaluate(
+                """(n) => [...document.querySelectorAll('.card:not(.compact)')]
+                .findIndex(c => ((c.querySelector('.qnum') || {}).textContent || '').includes(`第 ${n} 题`))""",
+                number,
+            )
             if index < 0:
                 print(f"第 {number} 题: not found")
                 continue
@@ -101,8 +119,10 @@ def main():
             print(json.dumps(data, ensure_ascii=False, indent=2))
             if data["source"] and data["previewBox"] and data["bar"]:
                 print(f"  预览顶 - 原卷顶 = {data['previewBox']['top'] - data['source']['top']}  (应为 0)")
-            print(f"  顶栏底 = {data['bar']['bottom']}  原卷底 = {data['source']['bottom']}  "
-                  f"编辑底 = {data['body']['bottom']}  视口高 = {data['viewport']['h']}")
+            print(
+                f"  顶栏底 = {data['bar']['bottom']}  原卷底 = {data['source']['bottom']}  "
+                f"编辑底 = {data['body']['bottom']}  视口高 = {data['viewport']['h']}"
+            )
             print(f"  底部挡视线的悬浮/固定元素: {data['blockers'] or '无'}")
             page.screenshot(path=str(OUTPUT / f"fullscreen-{args.tag}-{number}.png"))
             page.keyboard.press("Escape")

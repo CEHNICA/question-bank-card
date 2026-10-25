@@ -4,15 +4,27 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
-    dependencies = [
-        ('core', '0023_library_tag_revision'),
-    ]
+    dependencies = [("core", "0023_library_tag_revision")]
 
     operations = [
         migrations.AlterField(
-            model_name='librarytagsuggestion',
-            name='status',
-            field=models.CharField(choices=[('queued', '排队中'), ('running', '生成中'), ('pending', '待核对'), ('accepted', '已采纳'), ('rejected', '已拒绝'), ('no_match', '无合适标签'), ('review', '暂不能判断'), ('failed', '生成失败'), ('stale', '依据已变化')], db_index=True, default='pending', max_length=16),
-        ),
+            model_name="librarytagsuggestion",
+            name="status",
+            field=models.CharField(
+                choices=[
+                    ("queued", "排队中"),
+                    ("running", "生成中"),
+                    ("pending", "待核对"),
+                    ("accepted", "已采纳"),
+                    ("rejected", "已拒绝"),
+                    ("no_match", "无合适标签"),
+                    ("review", "暂不能判断"),
+                    ("failed", "生成失败"),
+                    ("stale", "依据已变化"),
+                ],
+                db_index=True,
+                default="pending",
+                max_length=16,
+            ),
+        )
     ]

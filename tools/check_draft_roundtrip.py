@@ -58,7 +58,8 @@ def wait_layout(page) -> None:
     try:
         page.wait_for_function(
             "() => { const s = document.getElementById('printPageStatus'); return s && !s.textContent.includes('正在排版'); }",
-            timeout=90000)
+            timeout=90000,
+        )
     except Exception:
         check(False, "排版报了完成（这轮一直卡在「正在排版…」，下面的量都不可信）")
 
@@ -83,8 +84,12 @@ def main() -> int:
         context = browser.new_context(viewport={"width": 1600, "height": 1000}, accept_downloads=True)
         page = context.new_page()
         posts: list[dict] = []
-        page.on("request", lambda r: posts.append(r.post_data or "")
-                if "/api/library/export-docx" in r.url and r.method == "POST" else None)
+        page.on(
+            "request",
+            lambda r: (
+                posts.append(r.post_data or "") if "/api/library/export-docx" in r.url and r.method == "POST" else None
+            ),
+        )
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
 
@@ -105,7 +110,10 @@ def main() -> int:
                 try:
                     page.wait_for_function(
                         "l => { const c = document.querySelector('.library-card .library-type');"
-                        " return c && c.textContent.trim() === l; }", arg=label, timeout=15000)
+                        " return c && c.textContent.trim() === l; }",
+                        arg=label,
+                        timeout=15000,
+                    )
                 except Exception:
                     check(False, f"{label}：筛完列表没换过来")
                     continue
@@ -122,7 +130,9 @@ def main() -> int:
             open_basket(page)
             page.locator("#basketButton").click()
             page.wait_for_selector("#printSheet[open]")
-            page.wait_for_function("() => document.querySelectorAll('#printPaper .print-question').length >= 1", timeout=40000)
+            page.wait_for_function(
+                "() => document.querySelectorAll('#printPaper .print-question').length >= 1", timeout=40000
+            )
             wait_layout(page)
             # 字号和留白收在「更多排版」里，不点开根本点不到。
             if not page.locator(".print-advanced").evaluate("n => n.open"):
@@ -147,8 +157,11 @@ def main() -> int:
             if not page.locator("#printDraftMenu").evaluate("n => n.open"):
                 page.locator("#printDraftMenu > summary").click()
             page.locator("#saveDraft").click()
-            page.wait_for_function("t => { const s = document.getElementById('draftSaveStatus');"
-                                   " return s && s.textContent.includes(t); }", arg=TITLE, timeout=30000)
+            page.wait_for_function(
+                "t => { const s = document.getElementById('draftSaveStatus'); return s && s.textContent.includes(t); }",
+                arg=TITLE,
+                timeout=30000,
+            )
             saved_text = page.locator("#draftSaveStatus").inner_text().strip()
             check("已保存" in saved_text, f"存下来了：{saved_text}")
             listing = page.request.get(f"{BASE}/api/library/drafts")
@@ -160,8 +173,11 @@ def main() -> int:
             check(stored["ids"] == order, f"存进去的选题顺序和篮里一样（{len(stored['ids'])} 题）")
             # 存盘用的是 normalizePrintOptions 之后的键名，不是界面控件的 id。
             saved_options = stored.get("print_options") or {}
-            wrong = {key: (saved_options.get(key), value) for key, value in SETTINGS.items()
-                     if str(saved_options.get(key)) != value}
+            wrong = {
+                key: (saved_options.get(key), value)
+                for key, value in SETTINGS.items()
+                if str(saved_options.get(key)) != value
+            }
             check(not wrong, f"排版设置原样存进去了（对不上的：{wrong}）")
             check(stored.get("title") == TITLE, f"标题存下来了：{stored.get('title')}")
 
@@ -183,14 +199,21 @@ def main() -> int:
             row.locator("button", has_text="继续组卷").click()
             # 篮里现在是空的，和草稿一致时不该弹确认
             page.wait_for_selector("#printSheet[open]", timeout=40000)
-            page.wait_for_function("() => document.querySelectorAll('#printPaper .print-question').length >= 1", timeout=40000)
+            page.wait_for_function(
+                "() => document.querySelectorAll('#printPaper .print-question').length >= 1", timeout=40000
+            )
             wait_layout(page)
 
             after = read_options(page)
             check(after == before, f"排版设置一样回来了（{after}）")
             check(page.locator("#printOrigin").is_checked() == origin_before, "「印题源」也回来了")
-            check(page.locator("#printTitle").input_value() == TITLE, f"标题也回来了：{page.locator('#printTitle').input_value()}")
-            ids = page.eval_on_selector_all("#printPaper .print-question", "nodes => nodes.map(n => n.dataset.questionId)")
+            check(
+                page.locator("#printTitle").input_value() == TITLE,
+                f"标题也回来了：{page.locator('#printTitle').input_value()}",
+            )
+            ids = page.eval_on_selector_all(
+                "#printPaper .print-question", "nodes => nodes.map(n => n.dataset.questionId)"
+            )
             check(ids == order, f"选题和顺序都一样（{len(ids)} 题）")
             page.screenshot(path=f"{SHOTS}/draft-after.png")
 
@@ -212,18 +235,25 @@ def main() -> int:
             body = posts[-1] if posts else ""
             if not check(bool(body), f"重新打开之后导得出 Word（状态栏：{status.strip()[:70]}）"):
                 return 1
-            blob = page.request.post(f"{BASE}/api/library/export-docx", data=body,
-                                     headers={"Content-Type": "application/json", "X-QB-Request": "1"}).body()
+            blob = page.request.post(
+                f"{BASE}/api/library/export-docx",
+                data=body,
+                headers={"Content-Type": "application/json", "X-QB-Request": "1"},
+            ).body()
             with zipfile.ZipFile(io.BytesIO(blob)) as archive:
                 xml = archive.read("word/document.xml").decode("utf-8")
             text = unescape("".join(re.findall(r"<w:t(?:\s[^>]*)?>(.*?)</w:t>", xml, re.S)))
             # 「竖排」是把四个选项各占一段，不是排成多列的表格；
             # 「自动 / 一行四个」才会用表格。所以这里看选项是不是各自成段。
-            paragraphs = [unescape("".join(re.findall(r"<w:t(?:\s[^>]*)?>(.*?)</w:t>", block, re.S)))
-                          for block in re.findall(r"<w:p[ >].*?</w:p>", xml, re.S)]
+            paragraphs = [
+                unescape("".join(re.findall(r"<w:t(?:\s[^>]*)?>(.*?)</w:t>", block, re.S)))
+                for block in re.findall(r"<w:p[ >].*?</w:p>", xml, re.S)
+            ]
             option_lines = [p for p in paragraphs if re.match(r"^\s*[A-E]\s*[.．、]", p)]
-            check(len(option_lines) >= 4 and xml.count("<w:tbl>") == 0,
-                  f"选项真的按「竖排」排了（{len(option_lines)} 个选项各占一段，表格 {xml.count('<w:tbl>')} 张）")
+            check(
+                len(option_lines) >= 4 and xml.count("<w:tbl>") == 0,
+                f"选项真的按「竖排」排了（{len(option_lines)} 个选项各占一段，表格 {xml.count('<w:tbl>')} 张）",
+            )
             check(TITLE in text, f"标题写进了文件：{TITLE in text}")
             sizes = re.findall(r'<w:sz w:val="(\d+)"/>', xml)
             # Word 里字号是「半磅」为单位的数值：14 磅存成 28。
@@ -234,9 +264,11 @@ def main() -> int:
 
         finally:
             if draft_id:
-                removed = page.request.delete(f"{BASE}/api/library/drafts/{draft_id}",
-                                              data="{}", headers={"Content-Type": "application/json",
-                                                                  "X-QB-Request": "1"})
+                removed = page.request.delete(
+                    f"{BASE}/api/library/drafts/{draft_id}",
+                    data="{}",
+                    headers={"Content-Type": "application/json", "X-QB-Request": "1"},
+                )
                 print(f"  （收尾删掉自己建的草稿：HTTP {removed.status}）")
             context.close()
             browser.close()

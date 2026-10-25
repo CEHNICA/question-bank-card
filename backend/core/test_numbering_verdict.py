@@ -6,6 +6,7 @@ unreadable "cards" with nothing anywhere saying the file contained no questions
 at all.  These fixtures pin the rule that tells the two apart, and — just as
 important — pin that a real exam is never mistaken for a handout.
 """
+
 from __future__ import annotations
 
 from django.test import SimpleTestCase, TestCase
@@ -17,14 +18,16 @@ from .models import Block, Paper, Question
 
 def block(seq: int, text: str, *, page_idx: int = 0, top: float | None = None) -> dict:
     top = float(seq * 100) if top is None else top
-    return {"seq": seq, "type": "text", "page_idx": page_idx, "bbox": [80.0, top, 920.0, top + 40.0],
-            "text": text}
+    return {"seq": seq, "type": "text", "page_idx": page_idx, "bbox": [80.0, top, 920.0, top + 40.0], "text": text}
 
 
 def starts_for(blocks: list[dict], numbers: list[int]) -> list[segment.Start]:
-    return [segment.Start(number=number, page=0, x=80.0, y=float(block["seq"]) * 100.0,
-                          seq=block["seq"], at_start=True, score=4.0)
-            for number, block in zip(numbers, blocks)]
+    return [
+        segment.Start(
+            number=number, page=0, x=80.0, y=float(block["seq"]) * 100.0, seq=block["seq"], at_start=True, score=4.0
+        )
+        for number, block in zip(numbers, blocks)
+    ]
 
 
 HANDOUT = [
@@ -89,7 +92,9 @@ class NumberingVerdictTests(SimpleTestCase):
         # refused: the cost of a false refusal (throwing away real questions)
         # is far higher than the cost of a missed handout.
         mixed = HANDOUT + [block(6, "4. 求下列各式的值：（ ）")]
-        verdict = segment.classify_numbering(mixed, starts_for(mixed + [block(6, "4. 求下列各式的值：（ ）")], [1, 2, 3, 4]))
+        verdict = segment.classify_numbering(
+            mixed, starts_for(mixed + [block(6, "4. 求下列各式的值：（ ）")], [1, 2, 3, 4])
+        )
         self.assertEqual(verdict.verdict, "exam")
 
     def test_too_few_numbered_lines_is_not_enough_evidence(self):
@@ -98,12 +103,12 @@ class NumberingVerdictTests(SimpleTestCase):
 
     def test_a_title_with_a_comma_counts_as_a_sentence_not_a_topic(self):
         # “计算下列各式, 并化简” is a question even though 计算 is a topic word.
-        blocks = [block(index, text) for index, text in enumerate([
-            "1. 棱柱的结构特征",
-            "2. 计算下列各式，并化简：（ ）",
-            "3. 棱锥的结构特征",
-            "4. 求证：（ ）",
-        ])]
+        blocks = [
+            block(index, text)
+            for index, text in enumerate(
+                ["1. 棱柱的结构特征", "2. 计算下列各式，并化简：（ ）", "3. 棱锥的结构特征", "4. 求证：（ ）"]
+            )
+        ]
         verdict = segment.classify_numbering(blocks, starts_for(blocks, [1, 2, 3, 4]))
         self.assertEqual(verdict.verdict, "exam")
 
@@ -129,13 +134,18 @@ class NumberingVerdictTests(SimpleTestCase):
         # mark.  A rule that only looks for sentence punctuation throws this
         # real exam away; the imperative verb at the start of the line is what
         # saves it.  The cost of getting this wrong is the whole paper.
-        terse = [block(index, text) for index, text in enumerate([
-            "1. 化简 $\\sqrt{8}$",
-            "2. 计算下列各式的值",
-            "3. 解方程：$x^2=4$",
-            "4. 写出下列各数的相反数",
-            "5. 证明：三角形的外角大于不相邻的内角",
-        ])]
+        terse = [
+            block(index, text)
+            for index, text in enumerate(
+                [
+                    "1. 化简 $\\sqrt{8}$",
+                    "2. 计算下列各式的值",
+                    "3. 解方程：$x^2=4$",
+                    "4. 写出下列各数的相反数",
+                    "5. 证明：三角形的外角大于不相邻的内角",
+                ]
+            )
+        ]
         verdict = segment.classify_numbering(terse, starts_for(terse, [1, 2, 3, 4, 5]))
         self.assertEqual(verdict.verdict, "exam")
         self.assertEqual(verdict.stem_like, 5)
@@ -146,33 +156,33 @@ class NumberingVerdictTests(SimpleTestCase):
         # not symmetric: a missed handout leaves the user looking at section
         # cards they can recognise as not questions, while a refused exam loses
         # every question in it.  So this paper is deliberately refused.
-        terse = [block(index, text) for index, text in enumerate([
-            "1. 平行四边形的性质",
-            "2. 三角形的内角和",
-            "3. 圆锥的结构特征",
-            "4. 圆柱的结构特征",
-        ])]
+        terse = [
+            block(index, text)
+            for index, text in enumerate(
+                ["1. 平行四边形的性质", "2. 三角形的内角和", "3. 圆锥的结构特征", "4. 圆柱的结构特征"]
+            )
+        ]
         verdict = segment.classify_numbering(terse, starts_for(terse, [1, 2, 3, 4]))
         self.assertEqual(verdict.verdict, "topics")
 
     def test_a_handful_of_topic_like_titles_does_not_condemn_a_real_exam(self):
         # Two headings in a paper of twenty-five real questions must not tip it.
-        blocks = EXAM + [
-            block(index + 5, text) for index, text in enumerate([
-                "6. 多边形的性质",
-                "7. 三角形的分类",
-            ])
-        ]
+        blocks = EXAM + [block(index + 5, text) for index, text in enumerate(["6. 多边形的性质", "7. 三角形的分类"])]
         verdict = segment.classify_numbering(blocks, starts_for(blocks, list(range(1, 8))))
         self.assertEqual(verdict.verdict, "exam")
         self.assertEqual(verdict.stem_like, 5)
 
     def test_inline_tags_do_not_hide_the_punctuation(self):
-        blocks = [block(index, text) for index, text in enumerate([
-            "<sub>1.</sub> <sub>棱柱的结构特征</sub>",
-            "<sub>2.</sub> <sub>棱锥的结构特征</sub>",
-            "<sub>3.</sub> <sub>下列各式中正确的是（ ）</sub>",
-        ])]
+        blocks = [
+            block(index, text)
+            for index, text in enumerate(
+                [
+                    "<sub>1.</sub> <sub>棱柱的结构特征</sub>",
+                    "<sub>2.</sub> <sub>棱锥的结构特征</sub>",
+                    "<sub>3.</sub> <sub>下列各式中正确的是（ ）</sub>",
+                ]
+            )
+        ]
         verdict = segment.classify_numbering(blocks, starts_for(blocks, [1, 2, 3]))
         self.assertEqual(verdict.verdict, "topics")
         self.assertEqual(verdict.stem_like, 1)
@@ -186,12 +196,17 @@ class PipelineWiringTests(TestCase):
     """
 
     def _paper(self, blocks: list[dict]) -> Paper:
-        paper = Paper.objects.create(filename="讲义.pdf", kind="pdf", sha256="a" * 64,
-                                     pages=[{"page_idx": 0, "mode": "mineru"}])
+        paper = Paper.objects.create(
+            filename="讲义.pdf", kind="pdf", sha256="a" * 64, pages=[{"page_idx": 0, "mode": "mineru"}]
+        )
         for item in blocks:
             Block.objects.create(
-                paper=paper, seq=item["seq"], type=item["type"], page_idx=item["page_idx"],
-                bbox=item["bbox"], text=item["text"],
+                paper=paper,
+                seq=item["seq"],
+                type=item["type"],
+                page_idx=item["page_idx"],
+                bbox=item["bbox"],
+                text=item["text"],
             )
         return paper
 
@@ -205,8 +220,7 @@ class PipelineWiringTests(TestCase):
         paper = self._paper(HANDOUT)
         groups = pipeline._ensure_question_groups(paper)
         with self.assertRaises(RuntimeError) as caught:
-            pipeline._collect_segmentation_items(
-                paper, list(groups), locate_gaps=False, page_store=self._BlankPages())
+            pipeline._collect_segmentation_items(paper, list(groups), locate_gaps=False, page_store=self._BlankPages())
         self.assertIn("不是试卷", str(caught.exception))
         self.assertEqual(Question.objects.filter(paper=paper).count(), 0)
 
@@ -214,7 +228,8 @@ class PipelineWiringTests(TestCase):
         paper = self._paper(EXAM)
         groups = pipeline._ensure_question_groups(paper)
         _blocks, questions, _notes, _diagnostics = pipeline._collect_segmentation_items(
-            paper, list(groups), locate_gaps=False, page_store=self._BlankPages())
+            paper, list(groups), locate_gaps=False, page_store=self._BlankPages()
+        )
         self.assertEqual([item["number"] for item in questions], [1, 2, 3, 4, 5])
         self.assertTrue(all(item["regions"] for item in questions))
 
@@ -223,10 +238,9 @@ class PipelineWiringTests(TestCase):
         # is the shape a 讲义 or an answer sheet takes when it is routed to the
         # exam cutter, and it is the only signal left for material shapes the
         # numbering verdict cannot name.
-        paper = self._paper([block(index, text) for index, text in enumerate([
-            "1. 如图，AB=AC（ ）",
-            "2. 下列说法正确的是（ ）",
-        ])])
+        paper = self._paper(
+            [block(index, text) for index, text in enumerate(["1. 如图，AB=AC（ ）", "2. 下列说法正确的是（ ）"])]
+        )
         paper.pages = [{"page_idx": index, "mode": "mineru"} for index in range(3)]
         paper.save(update_fields=["pages"])
         groups = pipeline._ensure_question_groups(paper)
@@ -235,7 +249,8 @@ class PipelineWiringTests(TestCase):
             group.metadata = {"pages": [0, 1, 2]}
             group.save(update_fields=["page_start", "page_end", "metadata"])
         _blocks, questions, notes, _diagnostics = pipeline._collect_segmentation_items(
-            paper, list(groups), locate_gaps=False, page_store=self._BlankPages())
+            paper, list(groups), locate_gaps=False, page_store=self._BlankPages()
+        )
         self.assertEqual(len(questions), 2)
         self.assertTrue(any("题数少于页数" in note for note in notes), notes)
 
@@ -243,5 +258,6 @@ class PipelineWiringTests(TestCase):
         paper = self._paper(EXAM)
         groups = pipeline._ensure_question_groups(paper)
         _blocks, _questions, notes, _diagnostics = pipeline._collect_segmentation_items(
-            paper, list(groups), locate_gaps=False, page_store=self._BlankPages())
+            paper, list(groups), locate_gaps=False, page_store=self._BlankPages()
+        )
         self.assertFalse([note for note in notes if "题数少于页数" in note], notes)

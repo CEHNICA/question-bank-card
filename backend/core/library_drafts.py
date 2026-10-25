@@ -26,10 +26,22 @@ MAX_TITLE_LENGTH = 120
 LEGACY_PRINT_KEYS = {"answers", "origin", "ai_answers"}
 # 1.12.9：默认只出题目卷。answers 这一栏下面第 75 行会按 document 重算，
 # 这里跟着改只是别让常量自相矛盾。
-PRINT_DEFAULTS = {"answers": False, "origin": False, "ai_answers": False,
-                  "document": "questions", "font_size": 12, "answer_space": "none", "student_info": True,
-                  "pagination": "compact", "option_layout": "auto", "option_overrides": {}, "question_breaks": [],
-                  "answer_layout": "inline", "answer_space_overrides": {}, "figure_overrides": {}}
+PRINT_DEFAULTS = {
+    "answers": False,
+    "origin": False,
+    "ai_answers": False,
+    "document": "questions",
+    "font_size": 12,
+    "answer_space": "none",
+    "student_info": True,
+    "pagination": "compact",
+    "option_layout": "auto",
+    "option_overrides": {},
+    "question_breaks": [],
+    "answer_layout": "inline",
+    "answer_space_overrides": {},
+    "figure_overrides": {},
+}
 # 配图调整（figure_overrides）：老师在自己这份卷子里把题干配图放大缩小、决定每行靠左还是
 # 靠右、点名让某张图从下一行开始。跟着草稿存，不写回题库 —— 换一份卷子、换一个老师，
 # 题库里那道题还是原样。
@@ -107,8 +119,11 @@ def _figure_overrides(value):
         clean_widths = {}
         for key, millimetres in widths.items():
             index = _figure_index(key)
-            if isinstance(millimetres, bool) or not isinstance(millimetres, (int, float)) \
-                    or not FIGURE_WIDTH_MIN_MM <= millimetres <= FIGURE_WIDTH_MAX_MM:
+            if (
+                isinstance(millimetres, bool)
+                or not isinstance(millimetres, (int, float))
+                or not FIGURE_WIDTH_MIN_MM <= millimetres <= FIGURE_WIDTH_MAX_MM
+            ):
                 raise DraftError(f"配图宽度应为 {FIGURE_WIDTH_MIN_MM}–{FIGURE_WIDTH_MAX_MM} 毫米之间的数字")
             clean_widths[index] = round(float(millimetres), 1)
         breaks = setting.get("breaks", [])
@@ -149,11 +164,18 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
         result["document"] = "combined" if value["answers"] else "questions"
     result["answers"] = result["document"] != "questions"
     overrides = result["option_overrides"]
-    if not isinstance(overrides, dict) or len(overrides) > 500 \
-            or any(mode not in ("auto", "four", "two", "vertical") for mode in overrides.values()):
+    if (
+        not isinstance(overrides, dict)
+        or len(overrides) > 500
+        or any(mode not in ("auto", "four", "two", "vertical") for mode in overrides.values())
+    ):
         raise DraftError("单题选项排版应为题目编号到 auto、four、two、vertical 的映射，最多 500 题")
     spaces = result["answer_space_overrides"]
-    if not isinstance(spaces, dict) or len(spaces) > 500 or any(mode not in ("none", "small", "medium", "large") for mode in spaces.values()):
+    if (
+        not isinstance(spaces, dict)
+        or len(spaces) > 500
+        or any(mode not in ("none", "small", "medium", "large") for mode in spaces.values())
+    ):
         raise DraftError("单题留白应为题目编号到 none、small、medium、large 的映射，最多500题")
     try:
         figures = _figure_overrides(result["figure_overrides"])
@@ -164,8 +186,12 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
         selected = set(normalize_ids(ids)) if ids is not None else None
     except BrowseError as error:
         raise DraftError("单题排版或另起页的题目编号不正确：" + str(error)) from None
-    if len(keys) != len(overrides) or len(space_keys) != len(spaces) or len(breaks) != len(result["question_breaks"]) \
-            or len(figure_keys) != len(figures):
+    if (
+        len(keys) != len(overrides)
+        or len(space_keys) != len(spaces)
+        or len(breaks) != len(result["question_breaks"])
+        or len(figure_keys) != len(figures)
+    ):
         raise DraftError("单题排版或另起页的题目编号不能重复")
     if selected is not None and (set(keys) | set(space_keys) | set(figure_keys) | set(breaks)) - selected:
         raise DraftError("单题排版和另起页只能指定当前选中的题目")
@@ -195,13 +221,22 @@ def _read() -> dict:
         if len(raw) > MAX_STORE_BYTES:
             raise DraftError("草稿文件超过大小上限，未覆盖原文件", 409)
         data = json.loads(raw)
-        if not isinstance(data, dict) or set(data) != {"schema", "drafts"} or data["schema"] != 1 \
-                or isinstance(data["schema"], bool) or not isinstance(data["drafts"], list) \
-                or len(data["drafts"]) > MAX_DRAFTS:
+        if (
+            not isinstance(data, dict)
+            or set(data) != {"schema", "drafts"}
+            or data["schema"] != 1
+            or isinstance(data["schema"], bool)
+            or not isinstance(data["drafts"], list)
+            or len(data["drafts"]) > MAX_DRAFTS
+        ):
             raise ValueError
         seen = set()
         for draft in data["drafts"]:
-            if not isinstance(draft, dict) or set(draft) - STORED_FIELDS - {"solutions"} or not set(draft) >= STORED_FIELDS:
+            if (
+                not isinstance(draft, dict)
+                or set(draft) - STORED_FIELDS - {"solutions"}
+                or not set(draft) >= STORED_FIELDS
+            ):
                 raise ValueError
             key = str(uuid.UUID(draft["id"]))
             if key != draft["id"] or key in seen:
@@ -212,8 +247,11 @@ def _read() -> dict:
             if not isinstance(draft["print_options"], dict) or not set(draft["print_options"]) >= LEGACY_PRINT_KEYS:
                 raise ValueError
             # Old saved papers intentionally retain their appendix layout.
-            draft["print_options"] = _print_options(draft["print_options"], {"answer_layout": "appendix"}, ids=draft["ids"])
+            draft["print_options"] = _print_options(
+                draft["print_options"], {"answer_layout": "appendix"}, ids=draft["ids"]
+            )
             from .library_solutions import SolutionError, normalize_map
+
             try:
                 fixed = normalize_map(draft.get("solutions", {}), draft["ids"])
                 draft["solutions"] = {key: fixed.get(key, "origin") for key in draft["ids"]}
@@ -224,6 +262,7 @@ def _read() -> dict:
                 if not isinstance(draft[field], str) or len(draft[field]) > 40:
                     raise ValueError
                 from datetime import datetime
+
                 datetime.fromisoformat(draft[field])
     except DraftError as error:
         raise DraftError("草稿文件内容异常，未覆盖原文件", 409) from error
@@ -251,9 +290,11 @@ def _write_lock():
                 try:
                     if os.name == "nt":
                         import msvcrt
+
                         msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
                     else:
                         import fcntl
+
                         fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                     break
                 except OSError as error:
@@ -268,9 +309,11 @@ def _write_lock():
                 handle.seek(0)
                 if os.name == "nt":
                     import msvcrt
+
                     msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
                 else:
                     import fcntl
+
                     fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
@@ -294,12 +337,19 @@ def _write(data: dict) -> None:
 
 def _public(draft: dict) -> dict:
     checked = resolve_ids(draft["ids"], include_items=False)
-    return {**draft, "validity": {"valid": not checked["missing"],
-                                 "valid_count": checked["available_count"], "missing": checked["missing"]}}
+    return {
+        **draft,
+        "validity": {
+            "valid": not checked["missing"],
+            "valid_count": checked["available_count"],
+            "missing": checked["missing"],
+        },
+    }
 
 
 def _payload(request) -> dict:
     from .views import _body
+
     payload = _body(request)
     if payload is None or set(payload) - INPUT_FIELDS:
         raise DraftError("只可保存草稿名称、题目编号、打印设置和草稿版本")
@@ -331,26 +381,42 @@ def _save(payload: dict, draft_id=None) -> dict:
         # Removing a question also removes its saved layout hint. Explicit new
         # hints for an unselected ID still fail validation rather than disappearing.
         defaults["option_overrides"] = {key: mode for key, mode in defaults["option_overrides"].items() if key in ids}
-        defaults["answer_space_overrides"] = {key: mode for key, mode in defaults["answer_space_overrides"].items() if key in ids}
+        defaults["answer_space_overrides"] = {
+            key: mode for key, mode in defaults["answer_space_overrides"].items() if key in ids
+        }
         defaults["figure_overrides"] = {key: mode for key, mode in defaults["figure_overrides"].items() if key in ids}
         defaults["question_breaks"] = [key for key in defaults["question_breaks"] if key in ids]
         options = _print_options(payload.get("print_options", {}), defaults, ids=ids)
         from .library_solutions import SolutionError, normalize_map
+
         try:
-            previous_solutions = {key: value for key, value in (draft.get("solutions", {}) if draft else {}).items() if key in ids}
+            previous_solutions = {
+                key: value for key, value in (draft.get("solutions", {}) if draft else {}).items() if key in ids
+            }
             solutions = normalize_map(payload.get("solutions", previous_solutions), ids)
             # Newly added entries capture their current library overlay once;
             # an original selection is explicit so later edits cannot alter it.
             from .models import PublishedQuestion
-            current = {str(item.pk): (item.extras or {}).get("solution_id") for item in PublishedQuestion.objects.filter(pk__in=ids)}
+
+            current = {
+                str(item.pk): (item.extras or {}).get("solution_id")
+                for item in PublishedQuestion.objects.filter(pk__in=ids)
+            }
             for key in ids:
                 solutions.setdefault(key, current.get(key) or "origin")
         except SolutionError as error:
             raise DraftError(str(error), error.status) from None
         now = timezone.now().isoformat()
-        result = {"id": str(draft_id) if draft else str(uuid.uuid4()), "title": title, "ids": ids,
-                  "print_options": options, "solutions": solutions, "created_at": draft["created_at"] if draft else now,
-                  "updated_at": now, "revision": draft["revision"] + 1 if draft else 1}
+        result = {
+            "id": str(draft_id) if draft else str(uuid.uuid4()),
+            "title": title,
+            "ids": ids,
+            "print_options": options,
+            "solutions": solutions,
+            "created_at": draft["created_at"] if draft else now,
+            "updated_at": now,
+            "revision": draft["revision"] + 1 if draft else 1,
+        }
         if draft is None:
             data["drafts"].append(result)
         else:
@@ -365,6 +431,7 @@ def drafts_view(request):
         return HttpResponseNotAllowed(["GET", "POST"])
     if request.method == "POST":
         from .views import _guard
+
         rejected = _guard(request)
         if rejected is not None:
             return rejected
@@ -386,6 +453,7 @@ def draft_detail(request, draft_id):
         return HttpResponseNotAllowed(["GET", "PUT", "DELETE"])
     if request.method != "GET":
         from .views import _guard
+
         rejected = _guard(request)
         if rejected is not None:
             return rejected

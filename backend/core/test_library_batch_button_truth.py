@@ -23,23 +23,36 @@ from .test_v110_types_origin import TempDataMixin
 class BatchButtonTruthTests(TempDataMixin, TransactionTestCase):
     def setUp(self):
         self.use_temp_data()
-        environment = mock.patch.dict(os.environ, {
-            "QB_LIBRARY_AI_SETTINGS_FILE": str(self.temp / "ai-settings.json"),
-            "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.temp / "ai-key.dat"),
-            "QB_FEATURES_FILE": str(self.temp / "features.json"),
-            "QB_CREDENTIAL_FILE": str(self.temp / "ocr-key.dat"),
-        })
-        environment.start(); self.addCleanup(environment.stop)
+        environment = mock.patch.dict(
+            os.environ,
+            {
+                "QB_LIBRARY_AI_SETTINGS_FILE": str(self.temp / "ai-settings.json"),
+                "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.temp / "ai-key.dat"),
+                "QB_FEATURES_FILE": str(self.temp / "features.json"),
+                "QB_CREDENTIAL_FILE": str(self.temp / "ocr-key.dat"),
+            },
+        )
+        environment.start()
+        self.addCleanup(environment.stop)
         transform = mock.patch.object(service.credential_settings.store, "_transform", side_effect=protected_test_bytes)
-        transform.start(); self.addCleanup(transform.stop)
+        transform.start()
+        self.addCleanup(transform.stop)
         transport = mock.patch.object(service.requests, "post", side_effect=AssertionError("unexpected cloud request"))
-        self.transport = transport.start(); self.addCleanup(transport.stop)
+        self.transport = transport.start()
+        self.addCleanup(transport.stop)
         features.save({"ai_answer": True, "knowledge_tags": True})
         self.ready_api()
 
     def ready_api(self):
-        service.save({"mode": "api", "endpoint_id": "ep-offline-batch", "supports_images": True, "thinking": True,
-                      "key": {"action": "replace", "value": "synthetic-batch-api-key"}})
+        service.save(
+            {
+                "mode": "api",
+                "endpoint_id": "ep-offline-batch",
+                "supports_images": True,
+                "thinking": True,
+                "key": {"action": "replace", "value": "synthetic-batch-api-key"},
+            }
+        )
         service.save({"mode": "api"})
         self.transport.side_effect = None
         self.transport.return_value = answer_response()
@@ -48,28 +61,55 @@ class BatchButtonTruthTests(TempDataMixin, TransactionTestCase):
         self.transport.side_effect = AssertionError("unexpected cloud request")
 
     def publication(self, number, *, answer="", extras=None):
-        content = {"question_type": "free_response", "stem": f"离线第 {number} 题，求 $1+{number}$。", "options": {},
-                   "figures": [], "sources": [], "answer": answer, "analysis": "", "source_filename": "isolated.pdf"}
-        return PublishedQuestion.objects.create(source_filename="isolated.pdf", number=number,
-            question_type="free_response", version=1, content=content,
-            content_hash=library.content_hash(content), extras=extras or {})
+        content = {
+            "question_type": "free_response",
+            "stem": f"离线第 {number} 题，求 $1+{number}$。",
+            "options": {},
+            "figures": [],
+            "sources": [],
+            "answer": answer,
+            "analysis": "",
+            "source_filename": "isolated.pdf",
+        }
+        return PublishedQuestion.objects.create(
+            source_filename="isolated.pdf",
+            number=number,
+            question_type="free_response",
+            version=1,
+            content=content,
+            content_hash=library.content_hash(content),
+            extras=extras or {},
+        )
 
     def waiting_suggestion(self, publication, status=LibraryTagSuggestion.Status.PENDING):
         from .models import LibraryTagCatalogue
-        return LibraryTagSuggestion.objects.create(publication=publication,
+
+        return LibraryTagSuggestion.objects.create(
+            publication=publication,
             question_fingerprint=library.generation_fingerprint(publication.content, publication.pk),
             taxonomy_revision=LibraryTagCatalogue.objects.get(pk=1).revision,
-            assignment_revision=publication.tag_revision, method_source={}, suggestions=[],
-            status=status, message="排队中。")
+            assignment_revision=publication.tag_revision,
+            method_source={},
+            suggestions=[],
+            status=status,
+            message="排队中。",
+        )
 
     def job(self, publication, kind, *, executor="api", status="queued"):
-        return LibraryJob.objects.create(publication=publication, kind=kind, executor=executor, status=status,
-            solution_scope=False, tag_scope=kind == "tags",
-            fingerprint=library.generation_fingerprint(publication.content, publication.pk))
+        return LibraryJob.objects.create(
+            publication=publication,
+            kind=kind,
+            executor=executor,
+            status=status,
+            solution_scope=False,
+            tag_scope=kind == "tags",
+            fingerprint=library.generation_fingerprint(publication.content, publication.pk),
+        )
 
     def post(self, payload):
-        return self.client.post("/api/library/jobs", json.dumps(payload), content_type="application/json",
-                                HTTP_X_QB_REQUEST="1")
+        return self.client.post(
+            "/api/library/jobs", json.dumps(payload), content_type="application/json", HTTP_X_QB_REQUEST="1"
+        )
 
     def test_tag_button_counts_the_questions_pressing_it_really_queues(self):
         first, second, third = self.publication(1), self.publication(2), self.publication(3)
@@ -79,9 +119,11 @@ class BatchButtonTruthTests(TempDataMixin, TransactionTestCase):
 
         # 已经在等、在跑、已经生成好等核对的，都还是「没打标签」，
         # 可再点一次并不会为它们建任务 —— 按钮必须改报后一个数。
-        for publication, status in [(first, LibraryTagSuggestion.Status.QUEUED),
-                                    (second, LibraryTagSuggestion.Status.RUNNING),
-                                    (third, LibraryTagSuggestion.Status.PENDING)]:
+        for publication, status in [
+            (first, LibraryTagSuggestion.Status.QUEUED),
+            (second, LibraryTagSuggestion.Status.RUNNING),
+            (third, LibraryTagSuggestion.Status.PENDING),
+        ]:
             self.waiting_suggestion(publication, status)
         work = library_browse.tag_work_counts()
         self.assertEqual(work["untagged_knowledge"], 3, "the untagged filter still counts all three")
@@ -119,8 +161,11 @@ class BatchButtonTruthTests(TempDataMixin, TransactionTestCase):
         self.assertEqual(work["missing_answer"], 2, "没有答案、也没有 AI 初稿")
         self.assertEqual(work["ai_draft_answers"], 1, "没有答案、但已经有 AI 初稿")
         self.assertEqual(work["missing_answer_total"], 3, "没入库答案的全部")
-        self.assertEqual(work["missing_answer_total"] - work["missing_answer"],
-                         work["ai_draft_answers"], "两个数之差必须正好等于第三个数")
+        self.assertEqual(
+            work["missing_answer_total"] - work["missing_answer"],
+            work["ai_draft_answers"],
+            "两个数之差必须正好等于第三个数",
+        )
         self.assertGreaterEqual(work["missing_answer_total"], work["missing_answer"])
 
     def test_the_library_tells_the_page_whether_a_key_was_ever_filled_in(self):
@@ -148,8 +193,10 @@ class BatchButtonTruthTests(TempDataMixin, TransactionTestCase):
             self.publication(number)
         self.assertEqual(library_browse.tag_work_counts()["missing_answer"], 4)
 
-        with mock.patch.object(library_job_control, "expire_api_jobs", return_value=0) as sweep, \
-             mock.patch.object(library_jobs, "enqueue", wraps=library_jobs.enqueue):
+        with (
+            mock.patch.object(library_job_control, "expire_api_jobs", return_value=0) as sweep,
+            mock.patch.object(library_jobs, "enqueue", wraps=library_jobs.enqueue),
+        ):
             response = self.post({"kind": "answer", "missing": True, "api_only": True})
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["queued"], 4)

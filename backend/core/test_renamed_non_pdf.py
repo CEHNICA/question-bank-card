@@ -6,6 +6,7 @@ PyMuPDF 不只认 PDF：HTML、PNG、SVG 改个后缀就能打开，还会被赋
 （一片空白），失败原因还说「本地文字层没有可靠题卡」。老师看到的是「切题坏了」，
 真实原因是文件根本不是 PDF。
 """
+
 import io
 import tempfile
 from pathlib import Path
@@ -19,8 +20,10 @@ from . import imaging, views
 from .models import Paper
 
 NOT_A_PDF_HTML = b"<!DOCTYPE html><html><body>404</body></html>"
-NOT_A_PDF_SVG = (b'<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" '
-                 b'width="100" height="100"><rect width="100" height="100" fill="red"/></svg>')
+NOT_A_PDF_SVG = (
+    b'<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" '
+    b'width="100" height="100"><rect width="100" height="100" fill="red"/></svg>'
+)
 
 
 def png_bytes(width: int = 600, height: int = 400) -> bytes:
@@ -42,9 +45,7 @@ class RenamedNonPdfUploadTests(TransactionTestCase):
     def upload(self, name: str, data: bytes, **extra):
         upload = io.BytesIO(data)
         upload.name = name
-        return self.client.post("/api/papers",
-                                {"file": upload, "parse_mode": "auto", **extra},
-                                HTTP_X_QB_REQUEST="1")
+        return self.client.post("/api/papers", {"file": upload, "parse_mode": "auto", **extra}, HTTP_X_QB_REQUEST="1")
 
     def test_dead_link_404_page_saved_as_pdf_is_refused_and_named_as_a_webpage(self):
         response = self.upload("月考卷.pdf", NOT_A_PDF_HTML)
@@ -76,9 +77,9 @@ class RenamedNonPdfUploadTests(TransactionTestCase):
         # 图片按后缀走照片分支，压根不经过 PDF 校验；这条不能被上面的守卫误伤。
         upload = io.BytesIO(png_bytes())
         upload.name = "photo.png"
-        response = self.client.post("/api/papers",
-                                    {"file": upload, "parse_mode": "manual", "enhance": "0"},
-                                    HTTP_X_QB_REQUEST="1")
+        response = self.client.post(
+            "/api/papers", {"file": upload, "parse_mode": "manual", "enhance": "0"}, HTTP_X_QB_REQUEST="1"
+        )
         self.assertEqual(response.status_code, 201, response.content)
         self.assertEqual(Paper.objects.get().kind, "image")
 
@@ -112,13 +113,13 @@ class PageSizesRejectsRenamedFilesTests(TransactionTestCase):
                     imaging.page_sizes(self.write(data), "pdf")
 
     def test_a_real_pdf_still_reports_its_page_sizes(self):
-        self.assertEqual(imaging.page_sizes(self.write(real_pdf_bytes()), "pdf"),
-                         [{"page_idx": 0, "width": 595.0, "height": 842.0}])
+        self.assertEqual(
+            imaging.page_sizes(self.write(real_pdf_bytes()), "pdf"), [{"page_idx": 0, "width": 595.0, "height": 842.0}]
+        )
 
     def test_image_kind_still_goes_through_pillow(self):
         path = self.write(png_bytes(12, 7))
-        self.assertEqual(imaging.page_sizes(path, "image"),
-                         [{"page_idx": 0, "width": 12, "height": 7}])
+        self.assertEqual(imaging.page_sizes(path, "image"), [{"page_idx": 0, "width": 12, "height": 7}])
 
     def test_the_error_names_what_the_file_really_is(self):
         with self.assertRaises(imaging.NotAPdfFile) as caught:

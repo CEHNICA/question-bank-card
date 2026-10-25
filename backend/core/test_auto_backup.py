@@ -68,6 +68,7 @@ class AutoBackupTests(TestCase):
         """1.26.21：每天一份 —— 今天打过了，今天就别再打了。"""
         path = self._make_backup(1)
         import os
+
         earlier = time.time() - 3 * 3600
         os.utime(path, (earlier, earlier))
         self.assertFalse(library_transfer.backup_due())
@@ -75,6 +76,7 @@ class AutoBackupTests(TestCase):
     def test_a_backup_from_yesterday_is_due_again(self):
         path = self._make_backup(1)
         import os
+
         yesterday = time.time() - 26 * 3600
         os.utime(path, (yesterday, yesterday))
         self.assertTrue(library_transfer.backup_due())
@@ -96,29 +98,38 @@ class AutoBackupTests(TestCase):
     def test_the_auto_backup_switch_defaults_to_on(self):
         """1.26.22：默认开着，但老师可以自己关掉。"""
         from core import features
+
         self.assertTrue(features.DEFAULTS["auto_backup"])
 
     def test_the_switch_help_does_not_promise_which_days_the_two_copies_are(self):
         """1.26.26：手动打过一次备份，留着的两份就都是今天的；隔几天没开软件，
         两份比昨天还旧。所以话里不能写死「今天和昨天」。"""
         from core import features
+
         help_text = features.FEATURES["auto_backup"]["help"]
         self.assertNotIn("今天和昨天", help_text)
         self.assertIn("只留最近 2 份", help_text)
 
     def test_the_worker_skips_the_backup_when_the_switch_is_off(self):
         from .management.commands import run_worker
-        with mock.patch("core.features.enabled", return_value=False), \
-                mock.patch.object(library_transfer, "run_auto_backup") as run:
+
+        with (
+            mock.patch("core.features.enabled", return_value=False),
+            mock.patch.object(library_transfer, "run_auto_backup") as run,
+        ):
             run_worker.auto_backup_lane(self._Once())
             run.assert_not_called()
 
     def test_the_worker_takes_the_backup_when_the_switch_is_on(self):
         from .management.commands import run_worker
-        with mock.patch("core.features.enabled", return_value=True), \
-                mock.patch.object(library_transfer, "backup_due", return_value=True), \
-                mock.patch.object(library_transfer, "run_auto_backup",
-                                  return_value={"name": "题有据自动备份-x.zip"}) as run:
+
+        with (
+            mock.patch("core.features.enabled", return_value=True),
+            mock.patch.object(library_transfer, "backup_due", return_value=True),
+            mock.patch.object(
+                library_transfer, "run_auto_backup", return_value={"name": "题有据自动备份-x.zip"}
+            ) as run,
+        ):
             run_worker.auto_backup_lane(self._Once())
             run.assert_called_once()
 
@@ -126,6 +137,7 @@ class AutoBackupTests(TestCase):
         path = self._make_backup(1)
         old = time.time() - 8 * 86400
         import os
+
         os.utime(path, (old, old))
         self.assertTrue(library_transfer.backup_due())
 
@@ -136,6 +148,7 @@ class AutoBackupTests(TestCase):
             path = root / f"{library_transfer.AUTO_BACKUP_PREFIX}-2026{index:04d}-050000.zip"
             path.write_bytes(b"x")
             import os
+
             os.utime(path, (1000000 + index, 1000000 + index))
         removed = library_transfer.prune_backups()
         self.assertEqual(len(removed), 12 - library_transfer.BACKUP_KEEP)
@@ -161,8 +174,9 @@ class AutoBackupTests(TestCase):
         root.mkdir(parents=True, exist_ok=True)
         (root / f"{library_transfer.AUTO_BACKUP_PREFIX}-20261020-050000.zip").write_bytes(b"old")
         bundle_files = list(library_transfer._bundle_files(self.root))
-        assert not any(path.name.endswith(".zip") and "backups" in path.parts
-                       for path in bundle_files), "备份包里不能有别的备份包"
+        assert not any(path.name.endswith(".zip") and "backups" in path.parts for path in bundle_files), (
+            "备份包里不能有别的备份包"
+        )
         assert not any("imports" in path.parts for path in bundle_files), "合并记录也不进包"
 
     def test_a_full_disk_stops_the_backup(self):
@@ -195,8 +209,7 @@ class AutoBackupTests(TestCase):
         result = library_transfer.export_bundle(out)
         package = Path(result["file"])
         self.assertTrue(package.is_file())
-        self.assertEqual([p.name for p in out.iterdir()], [package.name],
-                         "临时文件要清干净，只留最终的包")
+        self.assertEqual([p.name for p in out.iterdir()], [package.name], "临时文件要清干净，只留最终的包")
         with library_transfer.zipfile.ZipFile(package) as archive:
             names = set(archive.namelist())
         self.assertIn(library_transfer.MANIFEST_NAME, names)
@@ -228,15 +241,15 @@ class AutoBackupApiTests(TestCase):
         self.assertEqual(body["keep"], library_transfer.BACKUP_KEEP)
 
     def test_running_one_now_is_refused_without_consent(self):
-        response = self.client.post(
-            "/api/backup/auto", data=json.dumps({}), content_type="application/json",
-        )
+        response = self.client.post("/api/backup/auto", data=json.dumps({}), content_type="application/json")
         self.assertIn(response.status_code, {400, 403})
 
     def test_restoring_an_unknown_backup_says_so(self):
         response = self.client.post(
-            "/api/backup/auto/import", data=json.dumps({"id": "题有据自动备份-19700101-000000.zip"}),
-            content_type="application/json", HTTP_X_QB_REQUEST="1",
+            "/api/backup/auto/import",
+            data=json.dumps({"id": "题有据自动备份-19700101-000000.zip"}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("找不到", response.json()["error"])

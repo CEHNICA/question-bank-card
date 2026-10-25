@@ -17,10 +17,12 @@ class SingleInstance:
         try:
             if os.name == "nt":
                 import msvcrt
+
                 self.handle.seek(0)
                 msvcrt.locking(self.handle.fileno(), msvcrt.LK_NBLCK, 1)
             else:
                 import fcntl
+
                 fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             self.handle.close()

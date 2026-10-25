@@ -1,4 +1,5 @@
 """Original-page question bodies: real ordered crops, never OCR placeholders."""
+
 from __future__ import annotations
 
 import hashlib
@@ -28,9 +29,13 @@ def valid_regions(paper, regions) -> bool:
         if not isinstance(region, dict) or type(region.get("page_idx")) is not int or region["page_idx"] not in pages:
             return False
         box = region.get("bbox")
-        if not isinstance(box, list) or len(box) != 4 or any(
-            type(v) not in {float, int} or not math.isfinite(v) or not 0 <= v <= 1000 for v in box
-        ) or box[2] - box[0] < 3 or box[3] - box[1] < 3:
+        if (
+            not isinstance(box, list)
+            or len(box) != 4
+            or any(type(v) not in {float, int} or not math.isfinite(v) or not 0 <= v <= 1000 for v in box)
+            or box[2] - box[0] < 3
+            or box[3] - box[1] < 3
+        ):
             return False
     return True
 
@@ -103,8 +108,7 @@ def assets(question) -> list[dict]:
         raise ValueError("原图题需要有效的原卷范围")
     source, kind, source_hash = source_identity(question.paper)
     folder = Path(settings.DATA_ROOT) / str(question.paper_id) / "question-images"
-    cache_key = (question.pk, question.content_revision, source_hash,
-                 json.dumps(question.regions, sort_keys=True))
+    cache_key = (question.pk, question.content_revision, source_hash, json.dumps(question.regions, sort_keys=True))
     with _ASSETS_LOCK:
         held = _ASSETS.get(cache_key)
     if held is not None and _crops_unchanged(held[0], folder):
@@ -134,10 +138,20 @@ def assets(question) -> list[dict]:
         stamp = _stamp(target)
         if stamp is not None:
             stamps.append(stamp)
-        result.append({"page_idx": region["page_idx"], "bbox": list(region["bbox"]), "order": index,
-                       "source": "manual", "render_sha256": source_hash, "image_sha256": image_hash,
-                       "width": width, "height": height, "file": target.name,
-                       "url": f"/api/questions/{question.pk}/question-images/{index}?v={image_hash[:16]}"})
+        result.append(
+            {
+                "page_idx": region["page_idx"],
+                "bbox": list(region["bbox"]),
+                "order": index,
+                "source": "manual",
+                "render_sha256": source_hash,
+                "image_sha256": image_hash,
+                "width": width,
+                "height": height,
+                "file": target.name,
+                "url": f"/api/questions/{question.pk}/question-images/{index}?v={image_hash[:16]}",
+            }
+        )
     if len(stamps) == len(result):
         with _ASSETS_LOCK:
             _ASSETS[cache_key] = (tuple(stamps), deepcopy(result))
@@ -165,6 +179,11 @@ def body_valid(question) -> bool:
 
 def review(question) -> dict:
     if is_image(question):
-        return {"status": "ok", "source": "manual", "reason": "正文保留所选原卷范围的完整图像，请对照原卷确认范围完整。"}
+        return {
+            "status": "ok",
+            "source": "manual",
+            "reason": "正文保留所选原卷范围的完整图像，请对照原卷确认范围完整。",
+        }
     from .figure_policy import stored_or_derived_review
+
     return stored_or_derived_review(question)

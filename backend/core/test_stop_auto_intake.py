@@ -1,4 +1,5 @@
 """Real isolated originals and offline race boundaries; never a user API/key."""
+
 from __future__ import annotations
 
 import hashlib
@@ -43,8 +44,9 @@ class StopAndAutoIntakeTests(TestCase):
         self.addCleanup(config.disable)
 
     def action(self, paper, name):
-        return self.client.post(f"/api/papers/{paper.pk}/{name}", "{}",
-            content_type="application/json", HTTP_X_QB_REQUEST="1")
+        return self.client.post(
+            f"/api/papers/{paper.pk}/{name}", "{}", content_type="application/json", HTTP_X_QB_REQUEST="1"
+        )
 
     def upload(self, *, scan=False, allow_cloud=None, services=True):
         file = io.BytesIO(self.pdf(scan=scan).read_bytes())
@@ -52,9 +54,11 @@ class StopAndAutoIntakeTests(TestCase):
         data = {"file": file, "parse_mode": "auto"}
         if allow_cloud is not None:
             data["allow_cloud"] = allow_cloud
-        with mock.patch.object(views.readers, "configured", return_value=services), \
-                mock.patch.object(views, "_reading_ready", return_value=services), \
-                mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud:
+        with (
+            mock.patch.object(views.readers, "configured", return_value=services),
+            mock.patch.object(views, "_reading_ready", return_value=services),
+            mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud,
+        ):
             response = self.client.post("/api/papers", data, HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 201, response.content)
         cloud.assert_not_called()
@@ -85,8 +89,15 @@ class StopAndAutoIntakeTests(TestCase):
                 paper = self.paper(mode="mineru", status=status)
                 archive = pipeline.paper_dir(paper) / "completed.zip"
                 archive.write_bytes(b"saved successful result")
-                chunk = ImportChunk.objects.create(paper=paper, sequence=1, source_page_start=1,
-                    source_page_end=2, page_map=[1, 2], status="parsed", artifact_path=str(archive))
+                chunk = ImportChunk.objects.create(
+                    paper=paper,
+                    sequence=1,
+                    source_page_start=1,
+                    source_page_end=2,
+                    page_map=[1, 2],
+                    status="parsed",
+                    artifact_path=str(archive),
+                )
                 self.assertEqual(self.action(paper, "stop").status_code, 200)
                 chunk.refresh_from_db()
                 self.assertEqual(chunk.status, "parsed")
@@ -94,9 +105,16 @@ class StopAndAutoIntakeTests(TestCase):
 
     def test_stop_preserves_human_body_approval_and_published_history(self):
         paper = self.paper()
-        question = Question.objects.create(paper=paper, number=1, processing_mode="manual",
-            body_mode="source_image", state="yellow", question_type="free_response", edited=True,
-            regions=[{"page_idx": 0, "bbox": [50, 50, 900, 420]}])
+        question = Question.objects.create(
+            paper=paper,
+            number=1,
+            processing_mode="manual",
+            body_mode="source_image",
+            state="yellow",
+            question_type="free_response",
+            edited=True,
+            regions=[{"page_idx": 0, "bbox": [50, 50, 900, 420]}],
+        )
         library.approve(question, now=timezone.now())
         question.save()
         publication, _ = library.publish(question)
@@ -118,21 +136,34 @@ class StopAndAutoIntakeTests(TestCase):
         folder.mkdir()
         completed = folder / "chunk_001.zip"
         completed.write_bytes(b"previous successful chunk")
-        ImportChunk.objects.create(paper=paper, sequence=1, source_page_start=1,
-            source_page_end=1, page_map=[1], status="parsed", artifact_path=str(completed))
-        pending = ImportChunk.objects.create(paper=paper, sequence=2, source_page_start=2,
-            source_page_end=2, page_map=[2])
+        ImportChunk.objects.create(
+            paper=paper,
+            sequence=1,
+            source_page_start=1,
+            source_page_end=1,
+            page_map=[1],
+            status="parsed",
+            artifact_path=str(completed),
+        )
+        pending = ImportChunk.objects.create(
+            paper=paper, sequence=2, source_page_start=2, source_page_end=2, page_map=[2]
+        )
+
         def extract(_source, target, _count, **kwargs):
             self.action(paper, "stop")
             self.action(paper, "retry")
             target.write_bytes(b"obsolete result")
+
         def cut(_source, target, *args):
             target.write_bytes(b"local slice")
-        with mock.patch.object(pipeline, "ThreadPoolExecutor", local_tests.InlineExecutor), \
-                mock.patch.object(pipeline, "account_pool", return_value=mock.Mock(size=1)), \
-                mock.patch.object(pipeline, "write_pdf_slice", side_effect=cut), \
-                mock.patch.object(pipeline, "load_blocks", return_value=[]), \
-                mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=extract):
+
+        with (
+            mock.patch.object(pipeline, "ThreadPoolExecutor", local_tests.InlineExecutor),
+            mock.patch.object(pipeline, "account_pool", return_value=mock.Mock(size=1)),
+            mock.patch.object(pipeline, "write_pdf_slice", side_effect=cut),
+            mock.patch.object(pipeline, "load_blocks", return_value=[]),
+            mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=extract),
+        ):
             with self.assertRaises(mineru.MineruCancelled):
                 pipeline._chunk_blocks(paper, Path(paper.source_path))
         pending.refresh_from_db()
@@ -147,13 +178,17 @@ class StopAndAutoIntakeTests(TestCase):
             with self.subTest(retry=retry):
                 paper = self.paper(mode="mineru", status="queued")
                 real_parse = pipeline.parse
+
                 def at_boundary(current, *, revision, _paper=paper, _retry=retry, _real_parse=real_parse):
                     self.action(_paper, "stop")
                     if _retry:
                         self.action(_paper, "retry")
                     return _real_parse(current, revision=revision)
-                with mock.patch.object(pipeline, "parse", side_effect=at_boundary), \
-                        mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud:
+
+                with (
+                    mock.patch.object(pipeline, "parse", side_effect=at_boundary),
+                    mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud,
+                ):
                     pipeline.process_paper(paper)
                 cloud.assert_not_called()
                 paper.refresh_from_db()
@@ -163,13 +198,17 @@ class StopAndAutoIntakeTests(TestCase):
     def test_late_success_after_stop_retry_is_not_promoted_or_duplicated(self):
         paper = self.paper(mode="mineru", status="queued")
         original = Path(paper.source_path).read_bytes()
+
         def extract(_source, target, _count, **kwargs):
             self.action(paper, "stop")
             self.action(paper, "retry")
             self.assertTrue(kwargs["cancel"]())  # marker cleared, revision still obsolete
             target.write_bytes(b"late obsolete zip")
-        with mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=extract), \
-                mock.patch.object(pipeline, "load_blocks", return_value=[]):
+
+        with (
+            mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=extract),
+            mock.patch.object(pipeline, "load_blocks", return_value=[]),
+        ):
             pipeline.process_paper(paper)
         paper.refresh_from_db()
         self.assertEqual(paper.status, "queued")
@@ -181,10 +220,12 @@ class StopAndAutoIntakeTests(TestCase):
 
     def test_late_failure_cannot_undo_stop_or_new_retry(self):
         paper = self.paper(mode="mineru", status="queued")
+
         def extract(*args, **kwargs):
             self.action(paper, "stop")
             self.action(paper, "retry")
             raise mineru.MineruError("old failed request")
+
         with mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=extract):
             pipeline.process_paper(paper)
         paper.refresh_from_db()
@@ -193,10 +234,12 @@ class StopAndAutoIntakeTests(TestCase):
     def test_deleted_task_cannot_be_recreated_by_late_success(self):
         paper = self.paper(mode="mineru", status="queued")
         paper_id = paper.pk
+
         def extract(*args, **kwargs):
             self.action(paper, "stop")
             self.assertEqual(self.client.delete(f"/api/papers/{paper.pk}", HTTP_X_QB_REQUEST="1").status_code, 200)
             return
+
         with mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=extract):
             pipeline.process_paper(paper)
         self.assertFalse(Paper.objects.filter(pk=paper_id).exists())
@@ -204,16 +247,26 @@ class StopAndAutoIntakeTests(TestCase):
 
     def test_stop_rejects_pending_question_result_without_clearing_completed_text(self):
         paper = self.paper(mode="mineru", status="reading")
-        question = Question.objects.create(paper=paper, number=1, stem="saved human text", edited=True,
-            state="reading", regions=[{"page_idx": 0, "bbox": [50, 50, 900, 420]}])
+        question = Question.objects.create(
+            paper=paper,
+            number=1,
+            stem="saved human text",
+            edited=True,
+            state="reading",
+            regions=[{"page_idx": 0, "bbox": [50, 50, 900, 420]}],
+        )
         key = question.source_key
+
         def read(*args):
             self.action(paper, "stop")
             return {"stem": "late OCR replacement", "state": "green", "flags": []}
-        with mock.patch.object(pipeline, "ThreadPoolExecutor", local_tests.InlineExecutor), \
-                mock.patch.object(pipeline, "_reader_parallelism", return_value=1), \
-                mock.patch.object(pipeline, "close_old_connections"), \
-                mock.patch.object(pipeline, "read_card", side_effect=read):
+
+        with (
+            mock.patch.object(pipeline, "ThreadPoolExecutor", local_tests.InlineExecutor),
+            mock.patch.object(pipeline, "_reader_parallelism", return_value=1),
+            mock.patch.object(pipeline, "close_old_connections"),
+            mock.patch.object(pipeline, "read_card", side_effect=read),
+        ):
             pipeline.read_questions(paper, [question])
         question.refresh_from_db()
         paper.refresh_from_db()
@@ -232,15 +285,20 @@ class StopAndAutoIntakeTests(TestCase):
         paper = self.paper(mode="mineru", status="reading")
         paper.processing_plan = {**paper.processing_plan, "auto_fallback": True}
         paper.save(update_fields=["processing_plan"])
-        question = Question.objects.create(paper=paper, number=1, state="waiting",
-            regions=[{"page_idx": 0, "bbox": [50, 50, 900, 420]}])
+        question = Question.objects.create(
+            paper=paper, number=1, state="waiting", regions=[{"page_idx": 0, "bbox": [50, 50, 900, 420]}]
+        )
+
         def read(*args):
             self.assertFalse(readers._fallback_enabled())
             return {"stem": "selected service result", "state": "yellow", "flags": []}
-        with mock.patch.object(pipeline, "ThreadPoolExecutor", local_tests.InlineExecutor), \
-                mock.patch.object(pipeline, "_reader_parallelism", return_value=1), \
-                mock.patch.object(pipeline, "close_old_connections"), \
-                mock.patch.object(pipeline, "read_card", side_effect=read) as reading:
+
+        with (
+            mock.patch.object(pipeline, "ThreadPoolExecutor", local_tests.InlineExecutor),
+            mock.patch.object(pipeline, "_reader_parallelism", return_value=1),
+            mock.patch.object(pipeline, "close_old_connections"),
+            mock.patch.object(pipeline, "read_card", side_effect=read) as reading,
+        ):
             pipeline.read_questions(paper, [question])
         reading.assert_called_once()
         question.refresh_from_db()
@@ -266,11 +324,20 @@ class StopAndAutoIntakeTests(TestCase):
     def test_failed_authorized_cloud_returns_to_manual_and_preserves_saved_draft(self):
         paper = self.upload(scan=True, allow_cloud="1")
         original = Path(paper.source_path).read_bytes()
-        question = Question.objects.create(paper=paper, number=1, body_mode="source_image",
-            processing_mode="manual", state="yellow", question_type="free_response", edited=True,
-            regions=[{"page_idx": 0, "bbox": [50, 50, 900, 420]}])
+        question = Question.objects.create(
+            paper=paper,
+            number=1,
+            body_mode="source_image",
+            processing_mode="manual",
+            state="yellow",
+            question_type="free_response",
+            edited=True,
+            regions=[{"page_idx": 0, "bbox": [50, 50, 900, 420]}],
+        )
         key, regions = question.source_key, question.regions
-        with mock.patch.object(pipeline, "request_extract_file_from_pool", side_effect=mineru.MineruError("service unavailable")):
+        with mock.patch.object(
+            pipeline, "request_extract_file_from_pool", side_effect=mineru.MineruError("service unavailable")
+        ):
             pipeline.process_paper(paper)
         paper.refresh_from_db()
         question.refresh_from_db()
@@ -304,18 +371,23 @@ class CancelNetworkTests(SimpleTestCase):
             source.write_bytes(b"original")
             stopped = False
             api = fake_api([{"state": "done", "full_zip_url": "https://example.invalid/result"}])
+
             def response(*args, **kwargs):
                 nonlocal stopped
                 answer = api(*args, **kwargs)
                 if "extract-results" in args[2]:
                     stopped = True
                 return answer
-            with mock.patch.object(mineru, "_api_json", side_effect=response), \
-                    mock.patch.object(mineru.requests.Session, "put", return_value=mock.Mock(ok=True)), \
-                    mock.patch.object(mineru, "_download_zip") as download:
+
+            with (
+                mock.patch.object(mineru, "_api_json", side_effect=response),
+                mock.patch.object(mineru.requests.Session, "put", return_value=mock.Mock(ok=True)),
+                mock.patch.object(mineru, "_download_zip") as download,
+            ):
                 with self.assertRaises(mineru.MineruCancelled):
-                    mineru.request_extract_file("test-only", source, Path(temporary) / "result.zip", 1,
-                        cancel=lambda: stopped)
+                    mineru.request_extract_file(
+                        "test-only", source, Path(temporary) / "result.zip", 1, cancel=lambda: stopped
+                    )
             download.assert_not_called()
 
     def test_download_cancel_removes_partial_and_keeps_previous_archive(self):
@@ -325,19 +397,22 @@ class CancelNetworkTests(SimpleTestCase):
                 archive.writestr("existing", "successful result")
             before = target.read_bytes()
             stopped = False
+
             class Session(_Session):
                 def get(self, *args, **kwargs):
                     response = super().get(*args, **kwargs)
+
                     def chunks(**kwargs):
                         nonlocal stopped
                         yield b"part of new result"
                         stopped = True
                         yield b"late bytes"
+
                     response.iter_content = chunks
                     return response
+
             with self.assertRaises(mineru.MineruCancelled):
-                mineru._download_zip(Session([]), "https://example.invalid/result.zip", target,
-                    cancel=lambda: stopped)
+                mineru._download_zip(Session([]), "https://example.invalid/result.zip", target, cancel=lambda: stopped)
             self.assertEqual(target.read_bytes(), before)
             self.assertFalse(target.with_name(target.name + ".part").exists())
 
@@ -346,6 +421,7 @@ class CancelNetworkTests(SimpleTestCase):
         cancel = threading.Event()
         started = threading.Event()
         result = []
+
         def waiter():
             started.set()
             try:
@@ -353,6 +429,7 @@ class CancelNetworkTests(SimpleTestCase):
                     result.append("unexpected lease")
             except account_pool.AccountPoolCancelled:
                 result.append("cancelled")
+
         with pool.lease():
             thread = threading.Thread(target=waiter)
             thread.start()

@@ -9,35 +9,23 @@
 要让它们成卡，只能编一个会和本章习题号撞车的号，或者把列改成可空、牵连下游
 几十处判断。这些断言守的就是这条边界——栏目只截断，不开新卡。
 """
+
 from django.test import SimpleTestCase
 
 from . import segment
 
-PAGES = [
-    {"page_idx": index, "width": 1000, "height": 1400}
-    for index in range(4)
-]
+PAGES = [{"page_idx": index, "width": 1000, "height": 1400} for index in range(4)]
 
 # 八个栏目标题全部只做边界
-COLUMNS = ["做一做", "随堂练习", "议一议", "想一想",
-           "读一读", "问题解决", "回顾与思考", "综合与实践"]
+COLUMNS = ["做一做", "随堂练习", "议一议", "想一想", "读一读", "问题解决", "回顾与思考", "综合与实践"]
 
 
 def block(seq, page, y, text, kind="text", x0=80, x1=920, height=45):
-    return {
-        "seq": seq,
-        "type": kind,
-        "page_idx": page,
-        "bbox": [x0, y, x1, y + height],
-        "text": text,
-    }
+    return {"seq": seq, "type": kind, "page_idx": page, "bbox": [x0, y, x1, y + height], "text": text}
 
 
 def covers(regions, page, y):
-    return any(
-        item["page_idx"] == page and item["bbox"][1] <= y <= item["bbox"][3]
-        for item in regions
-    )
+    return any(item["page_idx"] == page and item["bbox"][1] <= y <= item["bbox"][3] for item in regions)
 
 
 def practice_page(header, column_text="在图中画出函数的图象。", top=60):
@@ -57,12 +45,13 @@ class ColumnHeaderBoundaryTests(SimpleTestCase):
             with self.subTest(header=header):
                 result = segment.segment_book(PAGES[:1], practice_page(header))
 
-                self.assertEqual(len(result["questions"]), 1,
-                                 f"「{header}」不该自己开一道新卡")
+                self.assertEqual(len(result["questions"]), 1, f"「{header}」不该自己开一道新卡")
                 first = result["questions"][0]
-                self.assertFalse(covers(first["regions"], 0, 300),   # 栏目标题
-                                 f"「{header}」应结束上一题的范围")
-                self.assertFalse(covers(first["regions"], 0, 380))   # 栏目正文
+                self.assertFalse(
+                    covers(first["regions"], 0, 300),  # 栏目标题
+                    f"「{header}」应结束上一题的范围",
+                )
+                self.assertFalse(covers(first["regions"], 0, 380))  # 栏目正文
 
     def test_column_question_with_its_own_printed_number_is_still_kept(self):
         """栏目正文自己印着题号时，那道题照常成卡，边界也不能把它吃掉。"""
@@ -128,8 +117,12 @@ class ColumnHeaderBoundaryTests(SimpleTestCase):
         """
         blocks = [
             block(0, 0, 60, "习题 1.1"),
-            block(1, 0, 120, "1. 请回答下面这个问题，它需要写满二十四个字以上"
-                              "才不会被当成小节标题，进而影响这道题的完整范围。"),
+            block(
+                1,
+                0,
+                120,
+                "1. 请回答下面这个问题，它需要写满二十四个字以上才不会被当成小节标题，进而影响这道题的完整范围。",
+            ),
             block(2, 0, 300, "这是第一题的续行，里面提到了做一做这两个字。"),
         ]
 

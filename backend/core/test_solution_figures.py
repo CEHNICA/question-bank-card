@@ -11,6 +11,7 @@
 只提示、不删图：答案版卷子上解析里的图也许用户想留着当讲解用，删掉要人工确认，
 而误删一张真题图的代价比多提示一次大。
 """
+
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -23,10 +24,14 @@ from .models import Question
 # page 1 才是题目自己的图1、图2。题图和解析图不在同一页，所以判据必须同时看页和上下。
 ANSWER_BLOCK = {"page_idx": 0, "bbox": [89, 49, 245, 61], "text": "【答案】(1) y = -x + 2x + 3"}
 DETAIL_BLOCK = {"page_idx": 0, "bbox": [89, 178, 324, 191], "text": "【详解】(1) 解：∵", "type": "text"}
-QUESTION_FIGURES = [{"slot": "stem", "page_idx": 1, "bbox": [87, 60, 289, 120]},
-                    {"slot": "stem", "page_idx": 1, "bbox": [297, 60, 497, 120]}]
-SOLUTION_FIGURES = [{"slot": "stem", "page_idx": 0, "bbox": [136, 275, 371, 424]},
-                    {"slot": "stem", "page_idx": 0, "bbox": [137, 581, 373, 753]}]
+QUESTION_FIGURES = [
+    {"slot": "stem", "page_idx": 1, "bbox": [87, 60, 289, 120]},
+    {"slot": "stem", "page_idx": 1, "bbox": [297, 60, 497, 120]},
+]
+SOLUTION_FIGURES = [
+    {"slot": "stem", "page_idx": 0, "bbox": [136, 275, 371, 424]},
+    {"slot": "stem", "page_idx": 0, "bbox": [137, 581, 373, 753]},
+]
 
 
 class SolutionFigureTests(SimpleTestCase):
@@ -51,8 +56,9 @@ class SolutionFigureTests(SimpleTestCase):
         self.assertEqual(self.count([ANSWER_BLOCK], above), 0)
 
     def test_an_ordinary_paper_has_no_marker_at_all(self):
-        self.assertEqual(self.count([{"page_idx": 0, "bbox": [78, 60, 400, 90],
-                                      "text": "25.如图1，抛物线"}], SOLUTION_FIGURES), 0)
+        self.assertEqual(
+            self.count([{"page_idx": 0, "bbox": [78, 60, 400, 90], "text": "25.如图1，抛物线"}], SOLUTION_FIGURES), 0
+        )
 
     def test_nothing_is_counted_without_blocks_or_figures(self):
         self.assertEqual(self.count([], SOLUTION_FIGURES), 0)
@@ -61,29 +67,47 @@ class SolutionFigureTests(SimpleTestCase):
 
 
 class SolutionFigureFlagTests(SimpleTestCase):
-    READING = {"stem": "如图1，抛物线 $y=ax^2+2x+c$，求抛物线的表达式。",
-               "options": {}, "type": "free_response", "content_kind": "exercise",
-               "figures": {"1": "stem", "2": "stem", "3": "stem"}, "missing_figure": False,
-               "number_seen": 25, "figure_descriptions": [], "unclear": False}
+    READING = {
+        "stem": "如图1，抛物线 $y=ax^2+2x+c$，求抛物线的表达式。",
+        "options": {},
+        "type": "free_response",
+        "content_kind": "exercise",
+        "figures": {"1": "stem", "2": "stem", "3": "stem"},
+        "missing_figure": False,
+        "number_seen": 25,
+        "figure_descriptions": [],
+        "unclear": False,
+    }
 
     def read(self, witness_blocks):
         snapshot = {
-            "id": 1, "number": 25, "group_id": None,
-            "regions": [{"page_idx": 0, "bbox": [67, 0, 870, 970]},
-                        {"page_idx": 1, "bbox": [60, 40, 920, 900]}],
-            "candidates": [{"label": "1", "page_idx": 1, "bbox": [87, 60, 289, 120]},
-                           {"label": "2", "page_idx": 1, "bbox": [297, 60, 497, 120]},
-                           {"label": "3", "page_idx": 0, "bbox": [136, 275, 371, 424]}],
-            "question_type": "free_response", "section": "三、解答题", "stem": "", "options": {},
-            "edited": False, "source_kind": Question.SourceKind.UNKNOWN,
-            "source_anchor_seq": 25, "segmentation_flags": [], "body_mode": "text",
-            "start_source": "mineru", "witness_blocks": witness_blocks,
+            "id": 1,
+            "number": 25,
+            "group_id": None,
+            "regions": [{"page_idx": 0, "bbox": [67, 0, 870, 970]}, {"page_idx": 1, "bbox": [60, 40, 920, 900]}],
+            "candidates": [
+                {"label": "1", "page_idx": 1, "bbox": [87, 60, 289, 120]},
+                {"label": "2", "page_idx": 1, "bbox": [297, 60, 497, 120]},
+                {"label": "3", "page_idx": 0, "bbox": [136, 275, 371, 424]},
+            ],
+            "question_type": "free_response",
+            "section": "三、解答题",
+            "stem": "",
+            "options": {},
+            "edited": False,
+            "source_kind": Question.SourceKind.UNKNOWN,
+            "source_anchor_seq": 25,
+            "segmentation_flags": [],
+            "body_mode": "text",
+            "start_source": "mineru",
+            "witness_blocks": witness_blocks,
         }
-        with patch.object(readers, "primary_engine", return_value=object()), \
-                patch.object(readers, "read_question", return_value=self.READING), \
-                patch.object(pipeline.imaging, "stack_regions",
-                             return_value=(SimpleNamespace(height=900, width=1400), [])), \
-                patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:url"):
+        with (
+            patch.object(readers, "primary_engine", return_value=object()),
+            patch.object(readers, "read_question", return_value=self.READING),
+            patch.object(pipeline.imaging, "stack_regions", return_value=(SimpleNamespace(height=900, width=1400), [])),
+            patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:url"),
+        ):
             return pipeline.read_card(snapshot, SimpleNamespace(load=lambda page: object()))
 
     def test_the_card_carrying_a_solution_figure_is_yellow(self):

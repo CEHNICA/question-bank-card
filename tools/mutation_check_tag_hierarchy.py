@@ -10,6 +10,7 @@
   4. 模板导入要把章节建成父标签；
 外加一条界面行为：选标签时按章节子树过滤。
 """
+
 from __future__ import annotations
 
 import subprocess
@@ -26,7 +27,9 @@ ORIGINALS = {path: path.read_text(encoding="utf-8") for path in (TAGGING, SEED, 
 
 DIRECTORY_TEST = "core.test_library_tagging.FormalLibraryTaggingTests.test_the_catalogue_never_carries_groups_any_more"
 CHAPTER_TEST = "core.test_knowledge_catalogue.KnowledgeCatalogueTests.test_the_reported_chapter_is_the_topmost_one"
-CHAPTER_EDGE_TEST = "core.test_tag_hierarchy_template.HierarchyTemplateTests.test_a_point_taught_in_both_stages_reaches_both_chapters"
+CHAPTER_EDGE_TEST = (
+    "core.test_tag_hierarchy_template.HierarchyTemplateTests.test_a_point_taught_in_both_stages_reaches_both_chapters"
+)
 TEMPLATE_TEST = "core.test_library_tag_hierarchy.LibraryTagHierarchyTests.test_template_dependencies_are_imported_and_repeat_preserves_user_hierarchy"
 NO_GROUPS_TEST = "core.test_library_tagging.FormalLibraryTaggingTests.test_the_catalogue_never_carries_groups_any_more"
 
@@ -35,33 +38,43 @@ def broken_chapter_walks_one_level_only(text: str) -> str:
     """只看直接上级，跨学段的知识点就只剩一章能找到了。"""
     return text.replace(
         "    return set().union(*(_chapter_names(parent, context, by_id, nested) for parent in parents))",
-        "    return {parent.name for parent in parents}", 1)
+        "    return {parent.name for parent in parents}",
+        1,
+    )
 
 
 def broken_catalogue_republishes_groups(text: str) -> str:
     """目录又把分组塞回响应里，前端就会以为还能按分组筛。"""
     return text.replace(
         '    return {"revision": state.revision, "tags": tags,',
-        '    return {"revision": state.revision, "tags": tags, "groups": [],', 1)
+        '    return {"revision": state.revision, "tags": tags, "groups": [],',
+        1,
+    )
 
 
 def broken_blueprint_drops_chapter_edges(text: str) -> str:
     """只留概念父级，父级链路够不到的章节就没有入口了。"""
     return text.replace(
         '        result[key] = parents + [section for section in row["section_keys"] if section not in inherited]',
-        "        result[key] = parents", 1)
+        "        result[key] = parents",
+        1,
+    )
 
 
 def broken_template_skips_section_tags(text: str) -> str:
     """模板导入不建章节父标签，导入完还是一堆平铺标签。"""
     return text.replace(
         "            for key in keys:\n                spec = section_by_key[key]",
-        "            for key in []:\n                spec = section_by_key[key]", 1)
+        "            for key in []:\n                spec = section_by_key[key]",
+        1,
+    )
 
 
 def broken_subtree_is_just_itself(text: str) -> str:
     """按章节筛选退化成只看自己，章节下面一层都看不到。"""
-    return text.replace("    return seen;\n  }\n  function tagTrail", "    return new Set([id]);\n  }\n  function tagTrail", 1)
+    return text.replace(
+        "    return seen;\n  }\n  function tagTrail", "    return new Set([id]);\n  }\n  function tagTrail", 1
+    )
 
 
 DJANGO = [
@@ -75,14 +88,26 @@ NODE = [("选标签不再按子树过滤", LIBRARY, broken_subtree_is_just_itsel
 
 
 def run_django(label: str) -> tuple[int, str]:
-    finished = subprocess.run([str(VENV_PY), "manage.py", "test", label], cwd=str(ROOT / "backend"),
-        capture_output=True, text=True, encoding="utf-8", errors="replace")
+    finished = subprocess.run(
+        [str(VENV_PY), "manage.py", "test", label],
+        cwd=str(ROOT / "backend"),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     return finished.returncode, (finished.stdout or "") + (finished.stderr or "")
 
 
 def run_node() -> tuple[int, str]:
-    finished = subprocess.run(["node", "--test", str(ROOT / "frontend" / "test_tag_chapter_filtering.js")],
-        cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace")
+    finished = subprocess.run(
+        ["node", "--test", str(ROOT / "frontend" / "test_tag_chapter_filtering.js")],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     return finished.returncode, (finished.stdout or "") + (finished.stderr or "")
 
 
@@ -120,8 +145,7 @@ def main() -> int:
                 failures.append(label)
                 print(f"[{label}] 坏实现竟然通过了测试 —— 这个测试没守住")
             else:
-                first = next((line.strip() for line in output.splitlines()
-                              if "Error" in line or "FAIL" in line), "")
+                first = next((line.strip() for line in output.splitlines() if "Error" in line or "FAIL" in line), "")
                 print(f"[{label}] 测试如期失败 ✓ {first[:90]}")
         for label, path, breaker in NODE:
             mutated = breaker(ORIGINALS[path])
@@ -135,8 +159,7 @@ def main() -> int:
                 failures.append(label)
                 print(f"[{label}] 坏实现竟然通过了测试 —— 这个测试没守住")
             else:
-                first = next((line.strip() for line in output.splitlines()
-                              if "AssertionError" in line), "")
+                first = next((line.strip() for line in output.splitlines() if "AssertionError" in line), "")
                 print(f"[{label}] 测试如期失败 ✓ {first[:90]}")
     finally:
         restore()

@@ -21,15 +21,18 @@ class WitnessKeyTests(SimpleTestCase):
             "stem": r"已知 $b$ 是 $a,c$ 的等差中项，则 $|AB|$ 的最小值为（ ）",
             "options": {"A": "2", "B": "3", "C": "4", "D": r"$2\sqrt{5}$"},
         }
-        mineru = r"12. 已知b是 a,c 的等差中项，则 $\left| A B \right|$ 的最小值为（ ） A. 2 B. 3 C. 4 D. $2 \sqrt { 5 }$"
+        mineru = (
+            r"12. 已知b是 a,c 的等差中项，则 $\left| A B \right|$ 的最小值为（ ） A. 2 B. 3 C. 4 D. $2 \sqrt { 5 }$"
+        )
         self.assertTrue(witness_agrees(reading, mineru))
         # A moved comma can alter a mathematical expression, so it now falls
         # back to a second vision reading instead of counting as agreement.
         self.assertFalse(witness_agrees(reading, mineru.replace("a,c", "a c,")))
 
     def test_degrees_parallel_and_score_markers_normalise(self):
-        self.assertEqual(witness_key(r"（本题满分6分）$BC / / AD$，$60 ^ { \circ }$"),
-                         witness_key(r"$BC\parallel AD$，60°"))
+        self.assertEqual(
+            witness_key(r"（本题满分6分）$BC / / AD$，$60 ^ { \circ }$"), witness_key(r"$BC\parallel AD$，60°")
+        )
         self.assertEqual(canon(r"$60 ^ { \circ }$"), canon("60°"))
 
     def test_any_content_difference_is_disagreement(self):
@@ -53,7 +56,7 @@ class WitnessKeyTests(SimpleTestCase):
             ("已知ab=6，求a", "已知a.b=6，求a"),
             ("已知x=2，求x", "已知x=2；求x"),
             ("求x=2时的值", "求x?=2时的值"),
-            ('已知x=2，求x', '已知"x"=2，求x'),
+            ("已知x=2，求x", '已知"x"=2，求x'),
         ):
             with self.subTest(mineru=mineru):
                 self.assertFalse(witness_agrees({"stem": reading}, mineru))
@@ -103,7 +106,9 @@ class WitnessKeyTests(SimpleTestCase):
 
     def test_student_handwriting_in_ocr_blocks_the_shortcut(self):
         reading = {"stem": "下列各组数中，是勾股数的是（ ）", "options": {"A": "12,8,5", "B": "9,12,15"}}
-        self.assertFalse(witness_agrees(reading, "1. 下列各组数中，是勾股数的是（C）$\\frac{n5}{225}$ A. 12, 8, 5 B. 9,12,15"))
+        self.assertFalse(
+            witness_agrees(reading, "1. 下列各组数中，是勾股数的是（C）$\\frac{n5}{225}$ A. 12, 8, 5 B. 9,12,15")
+        )
 
 
 class WitnessOcrNoiseTests(SimpleTestCase):
@@ -121,8 +126,10 @@ class WitnessOcrNoiseTests(SimpleTestCase):
     def test_same_printed_mark_in_another_spelling(self):
         pairs = (
             (r"$\bar{z}+z$ 的值为多少", r"$\overline { { z } } + z$ 的值为多少"),
-            (r"约束条件 $\begin{cases} x\geq 0 \\ y\leq 1 \end{cases}$ 则",
-             r"约束条件 $\left\{ { \begin{array} { l } { x \geq 0 } \\ { y \leq 1 } \end{array} } \right.$ 则"),
+            (
+                r"约束条件 $\begin{cases} x\geq 0 \\ y\leq 1 \end{cases}$ 则",
+                r"约束条件 $\left\{ { \begin{array} { l } { x \geq 0 } \\ { y \leq 1 } \end{array} } \right.$ 则",
+            ),
             (r"$0.1212212221\ldots$（相邻两个", "0.1212212221...（相邻两个"),
             (r"$\frac{3}{4}$ 与 $x$ 的和为", r"$\scriptscriptstyle \frac{3}{4}$ 与 $~x$ 的和为"),
         )
@@ -131,8 +138,11 @@ class WitnessOcrNoiseTests(SimpleTestCase):
                 self.assertTrue(witness_agrees({"stem": reading}, mineru))
 
     def test_symbols_mineru_spells_differently(self):
-        self.assertTrue(witness_agrees({"stem": "且与 AE 重合，求 $\\triangle BDE$ 的面积."},
-                                       "且与 AE 重合，求 $\\Delta BDE$ 的面积."))
+        self.assertTrue(
+            witness_agrees(
+                {"stem": "且与 AE 重合，求 $\\triangle BDE$ 的面积."}, "且与 AE 重合，求 $\\Delta BDE$ 的面积."
+            )
+        )
         self.assertTrue(witness_agrees({"stem": "求证：△ABE≌△CDF"}, "求证：$\\triangle ABE \\cong \\triangle CDF$"))
         self.assertTrue(witness_agrees({"stem": "已知 BD=3√2，则 CD 的长为"}, "已知 $BD=3\\sqrt{2}$ ，则 CD 的长为"))
         # The Greek letter itself is not rewritten.
@@ -153,8 +163,12 @@ class WitnessOcrNoiseTests(SimpleTestCase):
         self.assertTrue(witness_agrees(pictures, "8.如图所示的几何体，其从上面看的图是( C )\nA.\nB.\nC.\nD."))
         # A label that carries text the reader does not have still disagrees.
         self.assertFalse(witness_agrees(reading, "7. 则 AH 等于（） A. 24/5 B. 48/5 C.4 D.5 E.6"))
-        self.assertFalse(witness_agrees({"stem": "则 AH 等于（ ）", "options": {"A": "24/5", "B": "48/5", "D": "5"}},
-                                        "7. 则 AH 等于（） A. 24/5 B. 48/5 C.4 D.5"))
+        self.assertFalse(
+            witness_agrees(
+                {"stem": "则 AH 等于（ ）", "options": {"A": "24/5", "B": "48/5", "D": "5"}},
+                "7. 则 AH 等于（） A. 24/5 B. 48/5 C.4 D.5",
+            )
+        )
 
     def test_punctuation_mineru_dropped_is_tolerated_only_where_it_cannot_change_maths(self):
         tolerated = (
@@ -202,8 +216,11 @@ class StemCleanupTests(SimpleTestCase):
         self.assertEqual(clean_stem("（1）求证\n2. 若 x=1", 2), "（1）求证\n2. 若 x=1")
         self.assertEqual(clean_stem("求 a 的值．\n\n[选修 4-5：不等式选讲]", 22), "求 a 的值．")
         self.assertEqual(
-            clean_stem("恒成立，求 a 的取值范围．\n\n（二）选考题：共 10 分，请考生在第 22、23 题中任选一题作答．"
-                       "\n\n[选修 4-4：坐标系与参数方程]", 21),
+            clean_stem(
+                "恒成立，求 a 的取值范围．\n\n（二）选考题：共 10 分，请考生在第 22、23 题中任选一题作答．"
+                "\n\n[选修 4-4：坐标系与参数方程]",
+                21,
+            ),
             "恒成立，求 a 的取值范围．",
         )
 
@@ -236,8 +253,8 @@ class WitnessChoiceTests(SimpleTestCase):
     def test_undecided_or_split_differences_defer_to_the_arbiter(self):
         a = {"stem": "已知 x=1，y=2，求 z"}
         b = {"stem": "已知 x=7，y=3，求 z"}
-        self.assertIsNone(witness_choice(a, b, "已知 x=1，y=3，求 z"))     # split vote
-        self.assertIsNone(witness_choice(a, b, "完全无关的文字"))            # no support
+        self.assertIsNone(witness_choice(a, b, "已知 x=1，y=3，求 z"))  # split vote
+        self.assertIsNone(witness_choice(a, b, "完全无关的文字"))  # no support
         self.assertIsNone(witness_choice(a, dict(a), "已知 x=1，y=2，求 z"))  # no difference
 
 
@@ -251,8 +268,7 @@ class WitnessPipelineTests(TestCase):
         env = mock.patch.dict("os.environ", {"MINIMAX_API_KEY": "test", "SILICONFLOW_API_KEY": "test2"})
         env.start()
         self.addCleanup(env.stop)
-        self.paper = Paper.objects.create(filename="卷.pdf", kind="pdf", sha256="w" * 64,
-                                          status=Paper.Status.READING)
+        self.paper = Paper.objects.create(filename="卷.pdf", kind="pdf", sha256="w" * 64, status=Paper.Status.READING)
         folder = self.temp / str(self.paper.id)
         folder.mkdir(parents=True)
         fake_page_pdf(folder / "source.pdf")
@@ -263,7 +279,9 @@ class WitnessPipelineTests(TestCase):
     def card(self, text: str) -> Question:
         self.paper.blocks.create(seq=1, type="text", page_idx=0, bbox=[60, 110, 470, 170], text=text)
         return Question.objects.create(
-            paper=self.paper, number=1, question_type="free_response",
+            paper=self.paper,
+            number=1,
+            question_type="free_response",
             regions=[{"page_idx": 0, "bbox": [50, 100, 480, 200]}],
             regions_auto=[{"page_idx": 0, "bbox": [50, 100, 480, 200]}],
         )
@@ -280,10 +298,12 @@ class WitnessPipelineTests(TestCase):
 
     def test_disagreeing_witness_keeps_the_primary_text_without_a_second_read(self):
         question = self.card("1. 已知函数 $f ( x ) = x ^ { 2 }$ 与 $g ( x )$ ，求 $f ( 2 )$ 的值。")
-        chat = ScriptedChat({
-            ("a", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
-            ("b", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
-        })
+        chat = ScriptedChat(
+            {
+                ("a", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
+                ("b", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
+            }
+        )
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
         question.refresh_from_db()
@@ -304,20 +324,20 @@ class WitnessPipelineTests(TestCase):
                 wants_first = (side == "reading") == reading_is_first
                 lines.append(f"{index}={'甲' if wants_first else '乙'}")
             return "\n".join(lines)
+
         return answer
 
     def test_clear_mineru_disagreement_is_saved_for_human_review(self):
         # 凤城高一第 19 题：the reader may confuse 1/x³ with 1/x².
         question = self.card("1. 已知函数 $f ( x ) = x ^ { 3 }$ ，求 $f ( 2 )$ 的值。")
-        chat = ScriptedChat({
-            ("a", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
-            ("spotcheck", 1): self.pick("mineru"),
-        })
+        chat = ScriptedChat(
+            {("a", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"), ("spotcheck", 1): self.pick("mineru")}
+        )
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
         question.refresh_from_db()
         self.assertEqual([call[0] for call in chat.calls], ["a"])
-        self.assertIn("x^2", question.stem)          # the text is not rewritten by the check
+        self.assertIn("x^2", question.stem)  # the text is not rewritten by the check
         self.assertEqual(question.state, Question.State.YELLOW)
         flag = next(flag for flag in question.flags if flag.startswith(pipeline.WITNESS_FLAG_PREFIX))
         self.assertIn("MinerU：3", flag)
@@ -338,17 +358,13 @@ class WitnessPipelineTests(TestCase):
 
     def test_no_spot_check_request_is_made_and_the_difference_stays_for_a_person(self):
         question = self.card("1. 已知函数 $f ( x ) = x ^ { 3 }$ ，求 $f ( 2 )$ 的值。")
-        chat = ScriptedChat({
-            ("a", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
-            ("spotcheck", 1): "1=不确定",
-        })
+        chat = ScriptedChat({("a", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"), ("spotcheck", 1): "1=不确定"})
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
         question.refresh_from_db()
         self.assertEqual(question.state, Question.State.YELLOW)
         self.assertEqual([call[0] for call in chat.calls], ["a"])
         self.assertTrue(question.read_c["unverified"])
-
 
     def figure_card(self):
         question = self.card("1. 如图，在菱形 $ABCD$ 中，$AC=8$，求 $BD$ 的长。")
@@ -361,10 +377,12 @@ class WitnessPipelineTests(TestCase):
 
     def test_unjudged_candidate_stays_visible_without_an_extra_ai_call(self):
         question = self.figure_card()
-        chat = ScriptedChat({
-            ("a", 1): tagged("如图，在菱形 $ABCD$ 中，$AC=8$，求 $BD$ 的长。", figures="1=题干"),
-            ("classify", 1): "2=无关",
-        })
+        chat = ScriptedChat(
+            {
+                ("a", 1): tagged("如图，在菱形 $ABCD$ 中，$AC=8$，求 $BD$ 的长。", figures="1=题干"),
+                ("classify", 1): "2=无关",
+            }
+        )
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
         question.refresh_from_db()
@@ -376,10 +394,12 @@ class WitnessPipelineTests(TestCase):
 
     def test_a_box_still_unjudged_keeps_the_card_for_a_person(self):
         question = self.figure_card()
-        chat = ScriptedChat({
-            ("a", 1): tagged("如图，在菱形 $ABCD$ 中，$AC=8$，求 $BD$ 的长。", figures="1=题干"),
-            ("classify", 1): "看不清",
-        })
+        chat = ScriptedChat(
+            {
+                ("a", 1): tagged("如图，在菱形 $ABCD$ 中，$AC=8$，求 $BD$ 的长。", figures="1=题干"),
+                ("classify", 1): "看不清",
+            }
+        )
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
         question.refresh_from_db()
@@ -387,10 +407,12 @@ class WitnessPipelineTests(TestCase):
 
     def test_failed_primary_is_reported_without_calling_a_second_reader(self):
         question = self.card("1. 已知函数 $f ( x ) = x ^ { 2 }$ ，求 $f ( 2 )$ 的值。")
-        chat = ScriptedChat({
-            ("a", 1): readers.ReaderError("MiniMax 接口返回 HTTP 500"),
-            ("b", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
-        })
+        chat = ScriptedChat(
+            {
+                ("a", 1): readers.ReaderError("MiniMax 接口返回 HTTP 500"),
+                ("b", 1): tagged("已知函数 $f(x)=x^2$，求 $f(2)$ 的值。"),
+            }
+        )
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
         question.refresh_from_db()
@@ -400,11 +422,13 @@ class WitnessPipelineTests(TestCase):
 
     def test_witness_does_not_replace_the_single_primary_reading(self):
         question = self.card("3. 在 $0 . 1 2 1 2 2 1 2 2 2 1 \\ldots$ 这些数中，无理数的个数是（ ）个")
-        chat = ScriptedChat({
-            ("a", 1): tagged("在 $0.12122122221\\ldots$ 这些数中，无理数的个数是（ ）个"),
-            ("b", 1): tagged("在 $0.1212212221\\ldots$ 这些数中，无理数的个数是（ ）个"),
-            ("arbiter", 1): tagged("在 $0.12122122221\\ldots$ 这些数中，无理数的个数是（ ）个"),
-        })
+        chat = ScriptedChat(
+            {
+                ("a", 1): tagged("在 $0.12122122221\\ldots$ 这些数中，无理数的个数是（ ）个"),
+                ("b", 1): tagged("在 $0.1212212221\\ldots$ 这些数中，无理数的个数是（ ）个"),
+                ("arbiter", 1): tagged("在 $0.12122122221\\ldots$ 这些数中，无理数的个数是（ ）个"),
+            }
+        )
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
         question.refresh_from_db()
@@ -416,6 +440,7 @@ class WitnessPipelineTests(TestCase):
 class WitnessObjectionTests(SimpleTestCase):
     def test_only_clean_substitutions_count(self):
         from .textnorm import witness_objections
+
         reading = {"stem": "当 $x>0$ 时，求 $y=2x+\\dfrac{1}{x^3}$ 最小值"}
         spots = witness_objections(reading, "当 $x > 0$ 时，求 $y = 2x + \\frac{1}{x^{2}}$ 最小值")
         self.assertEqual([(s["reading"], s["mineru"]) for s in spots], [("3", "2")])
@@ -427,8 +452,10 @@ class WitnessObjectionTests(SimpleTestCase):
 
 class SpotCheckParsingTests(SimpleTestCase):
     def test_answers_map_back_to_their_engines(self):
-        spots = [{"reading": "3", "mineru": "2", "before": "1/x", "after": "最小值"},
-                 {"reading": "要", "mineru": "用", "before": "至少需", "after": "_个小"}]
+        spots = [
+            {"reading": "3", "mineru": "2", "before": "1/x", "after": "最小值"},
+            {"reading": "要", "mineru": "用", "before": "至少需", "after": "_个小"},
+        ]
         prompt, order = readers.spot_check_prompt(spots)
         self.assertIn("第1处", prompt)
         self.assertNotIn("原誊录", prompt)
@@ -443,8 +470,10 @@ class ReadingFormTests(SimpleTestCase):
     """Two readings that print the same must not need an arbiter."""
 
     def test_options_written_inside_the_stem_are_split_out(self):
-        raw = ("【题型】单选题\n【题干】\n已知点 A(2,1,-1)，B(2,t,0)，则 |AB|=（C）"
-               "A. √23 B. √5 C. √26 D. √11\n【A】\n【B】\n【C】\n【D】\n【配图】无")
+        raw = (
+            "【题型】单选题\n【题干】\n已知点 A(2,1,-1)，B(2,t,0)，则 |AB|=（C）"
+            "A. √23 B. √5 C. √26 D. √11\n【A】\n【B】\n【C】\n【D】\n【配图】无"
+        )
         reading = readers.parse_reading(raw, 7)
         self.assertEqual(reading["stem"], "已知点 A(2,1,-1)，B(2,t,0)，则 |AB|=（　）")
         self.assertEqual(reading["options"], {"A": "√23", "B": "√5", "C": "√26", "D": "√11"})
@@ -455,6 +484,6 @@ class ReadingFormTests(SimpleTestCase):
 
     def test_square_root_sign_and_command_are_the_same_reading(self):
         from .textnorm import same_reading
+
         self.assertTrue(same_reading({"stem": "求 BD=3√2 时 CD 的长"}, {"stem": "求 $BD=3\\sqrt{2}$ 时 $CD$ 的长"}))
         self.assertFalse(same_reading({"stem": "求 BD=3√2 时"}, {"stem": "求 $BD=3\\sqrt{3}$ 时"}))
-

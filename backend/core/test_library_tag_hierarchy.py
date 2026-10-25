@@ -1,4 +1,5 @@
 """Isolated fictional data for tag ancestry and atomic per-question corrections."""
+
 import json
 import uuid
 from unittest.mock import patch
@@ -31,15 +32,38 @@ class LibraryTagHierarchyTests(TestCase):
     def publication(self):
         self.number += 1
         question = Question.objects.create(paper=self.paper, number=self.number, stem="虚构题", state="green")
-        content = {"stem": "虚构题", "options": {}, "figures": [], "answer": "", "analysis": "",
-                   "source_filename": self.paper.filename, "question_type": "single_choice", "origin": "", "sources": []}
-        return PublishedQuestion.objects.create(question=question, paper=self.paper, source_filename=self.paper.filename,
-            number=self.number, question_type="single_choice", version=1, content=content,
-            content_hash=library.content_hash(content), status="published")
+        content = {
+            "stem": "虚构题",
+            "options": {},
+            "figures": [],
+            "answer": "",
+            "analysis": "",
+            "source_filename": self.paper.filename,
+            "question_type": "single_choice",
+            "origin": "",
+            "sources": [],
+        }
+        return PublishedQuestion.objects.create(
+            question=question,
+            paper=self.paper,
+            source_filename=self.paper.filename,
+            number=self.number,
+            question_type="single_choice",
+            version=1,
+            content=content,
+            content_hash=library.content_hash(content),
+            status="published",
+        )
 
     def mutate(self, action, **values):
-        return library_tagging.catalogue_mutation({"action": action, "revision": library_tagging.catalogue_state().revision,
-            "request_id": str(uuid.uuid4()), **values})
+        return library_tagging.catalogue_mutation(
+            {
+                "action": action,
+                "revision": library_tagging.catalogue_state().revision,
+                "request_id": str(uuid.uuid4()),
+                **values,
+            }
+        )
 
     def parents(self, child, *parents):
         return self.mutate("set_parents", tag_id=str(child.pk), parent_ids=[str(tag.pk) for tag in parents])
@@ -48,7 +72,9 @@ class LibraryTagHierarchyTests(TestCase):
         return LibraryTagRelation.objects.create(parent=parent, child=child, relation_type=kind)
 
     def link(self, publication, tag, **values):
-        return LibraryTagAssignment.objects.create(publication=publication, tag=tag, scope=values.pop("scope", {"whole": True}), **values)
+        return LibraryTagAssignment.objects.create(
+            publication=publication, tag=tag, scope=values.pop("scope", {"whole": True}), **values
+        )
 
     def selected(self, **filters):
         values = QueryDict("", mutable=True)
@@ -56,9 +82,13 @@ class LibraryTagHierarchyTests(TestCase):
         return set(library_browse.library_rows(values).values_list("pk", flat=True))
 
     def replacement(self, publication, source, target):
-        return {"publication_ids": [str(publication.pk)], "replace": {"from_tag_id": str(source.pk), "to_tag_id": str(target.pk)},
+        return {
+            "publication_ids": [str(publication.pk)],
+            "replace": {"from_tag_id": str(source.pk), "to_tag_id": str(target.pk)},
             "expected_revisions": {str(publication.pk): publication.tag_revision},
-            "expected_catalogue_revision": library_tagging.catalogue_state().revision, "request_id": str(uuid.uuid4())}
+            "expected_catalogue_revision": library_tagging.catalogue_state().revision,
+            "request_id": str(uuid.uuid4()),
+        }
 
     def post(self, url, payload):
         return self.client.post(url, json.dumps(payload), content_type="application/json", HTTP_X_QB_REQUEST="1")
@@ -78,8 +108,8 @@ class LibraryTagHierarchyTests(TestCase):
         knowledge, method = self.tag("分类讨论"), self.tag("分类讨论法", "method")
         self.parents(method, knowledge)
         self.assertEqual(
-            set(LibraryTagRelation.objects.filter(child=method).values_list("parent_id", flat=True)),
-            {knowledge.pk})
+            set(LibraryTagRelation.objects.filter(child=method).values_list("parent_id", flat=True)), {knowledge.pk}
+        )
         row = next(tag for tag in library_tagging._catalogue_rows()["tags"] if tag["id"] == str(method.pk))
         self.assertEqual(row["parent_ids"], [str(knowledge.pk)], "目录里也要看得见这个上级")
         # 环还是要拦住的 —— 跟类型无关。
@@ -130,7 +160,9 @@ class LibraryTagHierarchyTests(TestCase):
         self.parents(child, root)
         self.mutate("set_related_methods", tag_id=str(root.pk), related_method_ids=[str(method.pk)])
         p1, p2, p3 = self.publication(), self.publication(), self.publication()
-        self.link(p1, root); self.link(p2, child); self.link(p3, method)
+        self.link(p1, root)
+        self.link(p2, child)
+        self.link(p3, method)
         self.assertEqual(self.selected(tag_all=str(root.pk)), {p1.pk, p2.pk})
         self.assertEqual(self.selected(tag_all=str(child.pk)), {p2.pk})
         row = next(tag for tag in library_tagging._catalogue_rows()["tags"] if tag["id"] == str(root.pk))
@@ -139,9 +171,13 @@ class LibraryTagHierarchyTests(TestCase):
 
     def test_descendant_filters_and_unique_counts(self):
         root, left, right, other = self.tag("函数"), self.tag("单调"), self.tag("奇偶"), self.tag("几何")
-        self.parents(left, root); self.parents(right, root)
+        self.parents(left, root)
+        self.parents(right, root)
         a, b = self.publication(), self.publication()
-        self.link(a, left); self.link(a, right); self.link(a, other); self.link(b, root)
+        self.link(a, left)
+        self.link(a, right)
+        self.link(a, other)
+        self.link(b, root)
         self.assertEqual(self.selected(tag_all=f"{root.pk},{other.pk}"), {a.pk})
         self.assertEqual(self.selected(tag_any=f"{root.pk},{other.pk}"), {a.pk, b.pk})
         self.assertEqual(self.selected(tag_not=str(left.pk)), {b.pk})
@@ -152,14 +188,17 @@ class LibraryTagHierarchyTests(TestCase):
     def test_pending_tags_do_not_match_exclusion_or_missing_knowledge(self):
         p = self.publication()
         pending, custom = self.tag("未核对知识"), self.tag("收藏题", "custom")
-        self.link(p, pending, needs_review=True); self.link(p, custom)
+        self.link(p, pending, needs_review=True)
+        self.link(p, custom)
         self.assertEqual(self.selected(tag_not=str(pending.pk)), {p.pk})
         self.assertEqual(self.selected(untagged_knowledge="true"), {p.pk})
 
     def test_delete_and_reset_restore_relations_and_assignment_identity(self):
         a, b, c = self.tag("几何"), self.tag("四边形"), self.tag("菱形")
-        self.parents(b, a); self.parents(c, b)
-        p = self.publication(); link = self.link(p, b)
+        self.parents(b, a)
+        self.parents(c, b)
+        p = self.publication()
+        link = self.link(p, b)
         impact = library_tagging._impact_data("delete_tag", b.pk)
         result = self.mutate("delete_tag", tag_id=str(b.pk), impact_token=impact["token"], confirmed=True)
         self.assertTrue(LibraryTag.objects.filter(pk=c.pk).exists())
@@ -175,21 +214,35 @@ class LibraryTagHierarchyTests(TestCase):
 
     def test_merge_redirects_relations_and_undo_restores(self):
         root, source, target, child = self.tag("函数"), self.tag("旧函数"), self.tag("新函数"), self.tag("最值")
-        self.parents(source, root); self.parents(child, source)
-        p = self.publication(); self.link(p, source)
+        self.parents(source, root)
+        self.parents(child, source)
+        p = self.publication()
+        self.link(p, source)
         impact = library_tagging._impact_data("merge_tags_batch", source_ids=[str(source.pk)], target_id=str(target.pk))
-        result = self.mutate("merge_tags_batch", source_ids=[str(source.pk)], target_id=str(target.pk),
-            impact_token=impact["token"], confirmed=True)
+        result = self.mutate(
+            "merge_tags_batch",
+            source_ids=[str(source.pk)],
+            target_id=str(target.pk),
+            impact_token=impact["token"],
+            confirmed=True,
+        )
         self.assertEqual(library_tagging.descendant_ids([root.pk]), {str(root.pk), str(target.pk), str(child.pk)})
         library_tagging.undo_catalogue_operation(LibraryTagOperation.objects.get(pk=result["operation_id"]))
         self.assertEqual(library_tagging.descendant_ids([root.pk]), {str(root.pk), str(source.pk), str(child.pk)})
 
     def test_merge_that_would_create_cycle_rolls_back(self):
         a, b, c = self.tag("甲"), self.tag("乙"), self.tag("丙")
-        self.parents(b, a); self.parents(c, b)
+        self.parents(b, a)
+        self.parents(c, b)
         impact = library_tagging._impact_data("merge_tags_batch", source_ids=[str(a.pk)], target_id=str(c.pk))
         with self.assertRaises(library_tagging.TaggingError):
-            self.mutate("merge_tags_batch", source_ids=[str(a.pk)], target_id=str(c.pk), impact_token=impact["token"], confirmed=True)
+            self.mutate(
+                "merge_tags_batch",
+                source_ids=[str(a.pk)],
+                target_id=str(c.pk),
+                impact_token=impact["token"],
+                confirmed=True,
+            )
         self.assertEqual(LibraryTag.objects.count(), 3)
         self.assertEqual(LibraryTagRelation.objects.count(), 2)
 
@@ -226,7 +279,9 @@ class LibraryTagHierarchyTests(TestCase):
 
     def test_replace_method_whole_scope_and_limit(self):
         a, b = self.tag("方法甲", "method"), self.tag("方法乙", "method")
-        p = self.publication(); self.link(p, a); self.link(p, b, scope={"subquestions": ["1"]})
+        p = self.publication()
+        self.link(p, a)
+        self.link(p, b, scope={"subquestions": ["1"]})
         library_tagging.assign(self.replacement(p, a, b))
         self.assertEqual(p.tag_assignments.get().scope, {"whole": True})
         p2 = self.publication()
@@ -238,7 +293,9 @@ class LibraryTagHierarchyTests(TestCase):
 
     def test_replace_pending_target_or_wrong_kind_rejected(self):
         a, b, method = self.tag("甲"), self.tag("乙"), self.tag("方法", "method")
-        p = self.publication(); self.link(p, a); self.link(p, b, needs_review=True)
+        p = self.publication()
+        self.link(p, a)
+        self.link(p, b, needs_review=True)
         for target in (b, method):
             with self.assertRaises(library_tagging.TaggingError):
                 library_tagging.assign(self.replacement(p, a, target))
@@ -246,15 +303,19 @@ class LibraryTagHierarchyTests(TestCase):
 
     def test_replace_stale_catalogue_source_missing_noop_and_request_lookup(self):
         a, b = self.tag("甲"), self.tag("乙")
-        p = self.publication(); self.link(p, a)
+        p = self.publication()
+        self.link(p, a)
         payload = self.replacement(p, a, b)
         self.parents(b, a)
         with self.assertRaises(library_tagging.TaggingError):
             library_tagging.assign(payload)
         noop = self.replacement(p, a, a)
         self.assertTrue(library_tagging.assign(noop)["noop"])
-        p.refresh_from_db(); self.assertEqual(p.tag_revision, 0)
-        response = self.client.get("/api/library/tags/operations", {"request_id": noop["request_id"]}, HTTP_X_QB_REQUEST="1")
+        p.refresh_from_db()
+        self.assertEqual(p.tag_revision, 0)
+        response = self.client.get(
+            "/api/library/tags/operations", {"request_id": noop["request_id"]}, HTTP_X_QB_REQUEST="1"
+        )
         self.assertEqual(response.json()["operations"][0]["revisions"], {str(p.pk): 0})
         source_missing = self.replacement(p, b, a)
         with self.assertRaises(library_tagging.TaggingError):
@@ -262,7 +323,8 @@ class LibraryTagHierarchyTests(TestCase):
 
     def test_replace_undo_conflict_and_no_implicit_ai(self):
         a, b, c = self.tag("甲"), self.tag("乙"), self.tag("丙")
-        p = self.publication(); self.link(p, a)
+        p = self.publication()
+        self.link(p, a)
         operation = library_tagging.assign(self.replacement(p, a, b))
         p.refresh_from_db()
         library_tagging.assign(self.replacement(p, b, c))
@@ -272,15 +334,33 @@ class LibraryTagHierarchyTests(TestCase):
 
     def test_new_ai_candidates_validate_parents_and_preserve_snapshot(self):
         a, method = self.tag("函数"), self.tag("换元", "method")
-        raw = {"status": "ok", "suggestions": [{"kind": "knowledge", "new_name": "二次函数最值",
-            "levels": ["高中"], "parent_ids": [str(a.pk)], "scope": {"whole": True}, "rationale": "虚构理由", "evidence": "虚构题面"}]}
+        raw = {
+            "status": "ok",
+            "suggestions": [
+                {
+                    "kind": "knowledge",
+                    "new_name": "二次函数最值",
+                    "levels": ["高中"],
+                    "parent_ids": [str(a.pk)],
+                    "scope": {"whole": True},
+                    "rationale": "虚构理由",
+                    "evidence": "虚构题面",
+                }
+            ],
+        }
         normalized = library_tagging.normalize_ai_output(raw, [a, method])
         self.assertEqual(normalized["suggestions"][0]["parent_ids"], [str(a.pk)])
         p = self.publication()
-        suggestion = LibraryTagSuggestion.objects.create(publication=p, taxonomy_revision=library_tagging.catalogue_state().revision,
-            assignment_revision=0, suggestions=normalized["suggestions"], catalogue_snapshot={"tags": [{"id": str(a.pk), "name": "函数"}]})
-        library_tagging.resolve_suggestion(suggestion.pk, {"action": "accept", "indices": [0], "expected_revision": 0,
-            "request_id": str(uuid.uuid4())})
+        suggestion = LibraryTagSuggestion.objects.create(
+            publication=p,
+            taxonomy_revision=library_tagging.catalogue_state().revision,
+            assignment_revision=0,
+            suggestions=normalized["suggestions"],
+            catalogue_snapshot={"tags": [{"id": str(a.pk), "name": "函数"}]},
+        )
+        library_tagging.resolve_suggestion(
+            suggestion.pk, {"action": "accept", "indices": [0], "expected_revision": 0, "request_id": str(uuid.uuid4())}
+        )
         self.assertEqual(p.tag_assignments.get().tag.incoming_relations.get().parent_id, a.pk)
         self.assertEqual(library_tagging.suggestion_json(suggestion)["catalogue_snapshot"]["tags"][0]["name"], "函数")
         raw["suggestions"][0]["parent_ids"] = [str(method.pk)]
@@ -305,49 +385,93 @@ class LibraryTagHierarchyTests(TestCase):
         a, b = self.tag("函数"), self.tag("二次函数")
         p = self.publication()
         revision = library_tagging.catalogue_state().revision
-        suggestion = LibraryTagSuggestion.objects.create(publication=p, taxonomy_revision=revision,
-            status="pending", suggestions=[{"tag_id": str(a.pk), "kind": "knowledge"}])
+        suggestion = LibraryTagSuggestion.objects.create(
+            publication=p,
+            taxonomy_revision=revision,
+            status="pending",
+            suggestions=[{"tag_id": str(a.pk), "kind": "knowledge"}],
+        )
         result = self.parents(b, a)
         moved = library_tagging.catalogue_state().revision
         self.assertGreater(moved, revision)
-        suggestion.refresh_from_db(); self.assertEqual(suggestion.status, "pending")
+        suggestion.refresh_from_db()
+        self.assertEqual(suggestion.status, "pending")
         self.assertEqual(suggestion.taxonomy_revision, moved)
         library_tagging.undo_catalogue_operation(LibraryTagOperation.objects.get(pk=result["operation_id"]))
         self.assertFalse(LibraryTagRelation.objects.exists())
-        suggestion.refresh_from_db(); self.assertEqual(suggestion.status, "pending")
+        suggestion.refresh_from_db()
+        self.assertEqual(suggestion.status, "pending")
         self.assertEqual(suggestion.taxonomy_revision, library_tagging.catalogue_state().revision)
 
     def test_new_ai_candidate_missing_parent_retains_pending_and_no_creation(self):
         self.tag("函数")
         p = self.publication()
-        proposal = {"kind": "knowledge", "new_name": "新候选", "name": "新候选", "levels": ["高中"],
-            "scope": {"whole": True}, "rationale": "虚构理由", "evidence": "虚构条件"}
-        suggestion = LibraryTagSuggestion.objects.create(publication=p, status="pending", assignment_revision=0,
-            taxonomy_revision=library_tagging.catalogue_state().revision, suggestions=[proposal])
+        proposal = {
+            "kind": "knowledge",
+            "new_name": "新候选",
+            "name": "新候选",
+            "levels": ["高中"],
+            "scope": {"whole": True},
+            "rationale": "虚构理由",
+            "evidence": "虚构条件",
+        }
+        suggestion = LibraryTagSuggestion.objects.create(
+            publication=p,
+            status="pending",
+            assignment_revision=0,
+            taxonomy_revision=library_tagging.catalogue_state().revision,
+            suggestions=[proposal],
+        )
         with self.assertRaises(library_tagging.TaggingError):
-            library_tagging.resolve_suggestion(suggestion.pk, {"action": "accept", "indices": [0],
-                "expected_revision": 0, "request_id": str(uuid.uuid4())})
-        suggestion.refresh_from_db(); p.refresh_from_db()
+            library_tagging.resolve_suggestion(
+                suggestion.pk,
+                {"action": "accept", "indices": [0], "expected_revision": 0, "request_id": str(uuid.uuid4())},
+            )
+        suggestion.refresh_from_db()
+        p.refresh_from_db()
         self.assertEqual(suggestion.status, "pending")
         self.assertNotIn("decision", suggestion.suggestions[0])
         self.assertFalse(LibraryTag.objects.filter(name="新候选").exists())
         self.assertEqual(p.tag_revision, 0)
 
     def test_template_dependencies_are_imported_and_repeat_preserves_user_hierarchy(self):
-        blueprint = {"sections": [{"key": "root", "name": "根章节", "kind": "knowledge", "position": 0, "color": ""},
-                                  {"key": "child", "name": "细章节", "kind": "knowledge", "position": 1, "color": ""}],
-            "tags": [{"key": "a", "name": "模板函数", "kind": "knowledge", "description": "", "levels": ["高中"],
-                       "aliases": [], "section_keys": ["root"], "parent_keys": []},
-                      {"key": "b", "name": "模板最值", "kind": "knowledge", "description": "", "levels": ["高中"],
-                       "aliases": [], "section_keys": ["child"], "parent_keys": ["a"]}]}
+        blueprint = {
+            "sections": [
+                {"key": "root", "name": "根章节", "kind": "knowledge", "position": 0, "color": ""},
+                {"key": "child", "name": "细章节", "kind": "knowledge", "position": 1, "color": ""},
+            ],
+            "tags": [
+                {
+                    "key": "a",
+                    "name": "模板函数",
+                    "kind": "knowledge",
+                    "description": "",
+                    "levels": ["高中"],
+                    "aliases": [],
+                    "section_keys": ["root"],
+                    "parent_keys": [],
+                },
+                {
+                    "key": "b",
+                    "name": "模板最值",
+                    "kind": "knowledge",
+                    "description": "",
+                    "levels": ["高中"],
+                    "aliases": [],
+                    "section_keys": ["child"],
+                    "parent_keys": ["a"],
+                },
+            ],
+        }
         # The fake blueprint carries its own parent table so the test does not
         # depend on the real curriculum's shape.
-        with patch("core.tag_catalogue_seed.template_blueprint", return_value=blueprint), \
-                patch("core.tag_catalogue_seed.blueprint_parents", return_value={"a": ["root"], "b": ["a", "child"]}):
+        with (
+            patch("core.tag_catalogue_seed.template_blueprint", return_value=blueprint),
+            patch("core.tag_catalogue_seed.blueprint_parents", return_value={"a": ["root"], "b": ["a", "child"]}),
+        ):
             result = self.mutate("apply_template", section_keys=["child"])
             # 细章节 + 模板函数（依赖上级）+ 模板最值。未选的根章节不会被顺手建出来。
-            self.assertEqual(set(LibraryTag.objects.values_list("system_key", flat=True)),
-                             {"child", "a", "b"})
+            self.assertEqual(set(LibraryTag.objects.values_list("system_key", flat=True)), {"child", "a", "b"})
             self.assertEqual(LibraryTagRelation.objects.count(), 2)
             operation = LibraryTagOperation.objects.get(pk=result["operation_id"])
             self.assertEqual(operation.after_snapshot["dependency_tag_count"], 1)
@@ -359,16 +483,31 @@ class LibraryTagHierarchyTests(TestCase):
             own = self.tag("我自己加的上级")
             self.parents(child, own)
             self.mutate("apply_template", section_keys=["child"])
-            self.assertEqual(set(child.incoming_relations.values_list("parent_id", flat=True)),
-                             {own.pk, LibraryTag.objects.get(system_key="a").pk,
-                              LibraryTag.objects.get(system_key="child").pk})
+            self.assertEqual(
+                set(child.incoming_relations.values_list("parent_id", flat=True)),
+                {own.pk, LibraryTag.objects.get(system_key="a").pk, LibraryTag.objects.get(system_key="child").pk},
+            )
 
     def test_chapter_without_a_concept_parent_hangs_the_tag_directly(self):
-        blueprint = {"sections": [{"key": "g", "name": "模板章节", "kind": "knowledge", "position": 0, "color": ""}],
-            "tags": [{"key": "a", "name": "模板函数", "kind": "knowledge", "description": "", "levels": ["高中"],
-                       "aliases": [], "section_keys": ["g"], "parent_keys": []}]}
-        with patch("core.tag_catalogue_seed.template_blueprint", return_value=blueprint), \
-                patch("core.tag_catalogue_seed.blueprint_parents", return_value={"a": ["g"]}):
+        blueprint = {
+            "sections": [{"key": "g", "name": "模板章节", "kind": "knowledge", "position": 0, "color": ""}],
+            "tags": [
+                {
+                    "key": "a",
+                    "name": "模板函数",
+                    "kind": "knowledge",
+                    "description": "",
+                    "levels": ["高中"],
+                    "aliases": [],
+                    "section_keys": ["g"],
+                    "parent_keys": [],
+                }
+            ],
+        }
+        with (
+            patch("core.tag_catalogue_seed.template_blueprint", return_value=blueprint),
+            patch("core.tag_catalogue_seed.blueprint_parents", return_value={"a": ["g"]}),
+        ):
             self.mutate("apply_template", section_keys=["g"])
         section = LibraryTag.objects.get(system_key="g")
         leaf = LibraryTag.objects.get(system_key="a")
@@ -378,35 +517,80 @@ class LibraryTagHierarchyTests(TestCase):
 
     def test_explicit_template_augments_flat_identity_without_overwriting_user_fields(self):
         old = self.tag("我修改的概念")
-        old.system_key = "b"; old.save()
+        old.system_key = "b"
+        old.save()
         own = self.tag("我自己加的上级")
         self.parents(old, own)
-        p = self.publication(); original = self.link(p, old)
-        blueprint = {"sections": [{"key": "g", "name": "模板章节", "kind": "knowledge", "position": 0, "color": ""}],
-            "tags": [{"key": "a", "name": "模板函数", "kind": "knowledge", "description": "", "levels": ["高中"],
-                       "aliases": [], "section_keys": ["g"], "parent_keys": []},
-                      {"key": "b", "name": "系统原概念", "kind": "knowledge", "description": "", "levels": ["高中"],
-                       "aliases": [], "section_keys": ["g"], "parent_keys": ["a"]}]}
-        with patch("core.tag_catalogue_seed.template_blueprint", return_value=blueprint), \
-                patch("core.tag_catalogue_seed.blueprint_parents", return_value={"a": ["g"], "b": ["a"]}):
+        p = self.publication()
+        original = self.link(p, old)
+        blueprint = {
+            "sections": [{"key": "g", "name": "模板章节", "kind": "knowledge", "position": 0, "color": ""}],
+            "tags": [
+                {
+                    "key": "a",
+                    "name": "模板函数",
+                    "kind": "knowledge",
+                    "description": "",
+                    "levels": ["高中"],
+                    "aliases": [],
+                    "section_keys": ["g"],
+                    "parent_keys": [],
+                },
+                {
+                    "key": "b",
+                    "name": "系统原概念",
+                    "kind": "knowledge",
+                    "description": "",
+                    "levels": ["高中"],
+                    "aliases": [],
+                    "section_keys": ["g"],
+                    "parent_keys": ["a"],
+                },
+            ],
+        }
+        with (
+            patch("core.tag_catalogue_seed.template_blueprint", return_value=blueprint),
+            patch("core.tag_catalogue_seed.blueprint_parents", return_value={"a": ["g"], "b": ["a"]}),
+        ):
             self.mutate("apply_template", section_keys=["g"])
             self.mutate("apply_template", section_keys=["g"])
         old.refresh_from_db()
         self.assertEqual(old.name, "我修改的概念")
-        self.assertEqual(set(old.incoming_relations.values_list("parent_id", flat=True)),
-                         {own.pk, LibraryTag.objects.get(system_key="a").pk})
+        self.assertEqual(
+            set(old.incoming_relations.values_list("parent_id", flat=True)),
+            {own.pk, LibraryTag.objects.get(system_key="a").pk},
+        )
         self.assertEqual(p.tag_assignments.get().pk, original.pk)
 
     def test_empty_directory_accepts_multiple_new_candidates_in_one_transaction(self):
         p = self.publication()
-        values = {"status": "ok", "suggestions": [{"kind": "knowledge", "new_name": name,
-            "levels": ["高中"], "parent_ids": [], "scope": {"whole": True},
-            "rationale": "虚构理由", "evidence": "虚构题面"} for name in ("概念甲", "概念乙")]}
+        values = {
+            "status": "ok",
+            "suggestions": [
+                {
+                    "kind": "knowledge",
+                    "new_name": name,
+                    "levels": ["高中"],
+                    "parent_ids": [],
+                    "scope": {"whole": True},
+                    "rationale": "虚构理由",
+                    "evidence": "虚构题面",
+                }
+                for name in ("概念甲", "概念乙")
+            ],
+        }
         normalized = library_tagging.normalize_ai_output(values, [])
-        suggestion = LibraryTagSuggestion.objects.create(publication=p, status="pending", assignment_revision=0,
-            taxonomy_revision=library_tagging.catalogue_state().revision, suggestions=normalized["suggestions"])
-        result = library_tagging.resolve_suggestion(suggestion.pk, {"action": "accept", "indices": [0, 1],
-            "expected_revision": 0, "request_id": str(uuid.uuid4())})
+        suggestion = LibraryTagSuggestion.objects.create(
+            publication=p,
+            status="pending",
+            assignment_revision=0,
+            taxonomy_revision=library_tagging.catalogue_state().revision,
+            suggestions=normalized["suggestions"],
+        )
+        result = library_tagging.resolve_suggestion(
+            suggestion.pk,
+            {"action": "accept", "indices": [0, 1], "expected_revision": 0, "request_id": str(uuid.uuid4())},
+        )
         self.assertEqual(LibraryTag.objects.count(), 2)
         self.assertEqual(p.tag_assignments.count(), 2)
         self.assertFalse(LibraryTagRelation.objects.exists())
@@ -416,30 +600,71 @@ class LibraryTagHierarchyTests(TestCase):
 
     def test_processed_method_does_not_block_remaining_knowledge_after_solution_changes(self):
         knowledge, method = self.tag("函数"), self.tag("构造函数", "method")
-        p = self.publication(); self.link(p, method)
-        suggestion = LibraryTagSuggestion.objects.create(publication=p, status="pending", assignment_revision=0,
-            taxonomy_revision=library_tagging.catalogue_state().revision, method_source={"solution_id": str(uuid.uuid4())},
-            suggestions=[{"kind": "method", "tag_id": str(method.pk), "decision": "accepted"},
-                         {"kind": "knowledge", "tag_id": str(knowledge.pk), "scope": {"whole": True}, "rationale": "虚构", "evidence": "虚构"}])
-        library_tagging.resolve_suggestion(suggestion.pk, {"action": "accept", "indices": [1],
-            "expected_revision": 0, "request_id": str(uuid.uuid4())})
+        p = self.publication()
+        self.link(p, method)
+        suggestion = LibraryTagSuggestion.objects.create(
+            publication=p,
+            status="pending",
+            assignment_revision=0,
+            taxonomy_revision=library_tagging.catalogue_state().revision,
+            method_source={"solution_id": str(uuid.uuid4())},
+            suggestions=[
+                {"kind": "method", "tag_id": str(method.pk), "decision": "accepted"},
+                {
+                    "kind": "knowledge",
+                    "tag_id": str(knowledge.pk),
+                    "scope": {"whole": True},
+                    "rationale": "虚构",
+                    "evidence": "虚构",
+                },
+            ],
+        )
+        library_tagging.resolve_suggestion(
+            suggestion.pk, {"action": "accept", "indices": [1], "expected_revision": 0, "request_id": str(uuid.uuid4())}
+        )
         self.assertTrue(p.tag_assignments.filter(tag=knowledge).exists())
-        suggestion.refresh_from_db(); self.assertEqual(suggestion.status, "accepted")
+        suggestion.refresh_from_db()
+        self.assertEqual(suggestion.status, "accepted")
 
     def test_manual_template_identity_binding_undo_and_repeat_after_rename(self):
         old = self.tag("模板最值")
-        p = self.publication(); link = self.link(p, old)
-        blueprint = {"sections": [{"key": "g", "name": "模板章节", "kind": "knowledge", "position": 0, "color": ""}],
-            "tags": [{"key": "a", "name": "模板函数", "kind": "knowledge", "description": "", "levels": ["高中"],
-                       "aliases": [], "section_keys": ["g"], "parent_keys": []},
-                      {"key": "b", "name": "模板最值", "kind": "knowledge", "description": "", "levels": ["高中"],
-                       "aliases": [], "section_keys": ["g"], "parent_keys": ["a"]}]}
-        with patch("core.tag_catalogue_seed.template_blueprint", return_value=blueprint), \
-                patch("core.tag_catalogue_seed.blueprint_parents", return_value={"a": ["g"], "b": ["a"]}):
+        p = self.publication()
+        link = self.link(p, old)
+        blueprint = {
+            "sections": [{"key": "g", "name": "模板章节", "kind": "knowledge", "position": 0, "color": ""}],
+            "tags": [
+                {
+                    "key": "a",
+                    "name": "模板函数",
+                    "kind": "knowledge",
+                    "description": "",
+                    "levels": ["高中"],
+                    "aliases": [],
+                    "section_keys": ["g"],
+                    "parent_keys": [],
+                },
+                {
+                    "key": "b",
+                    "name": "模板最值",
+                    "kind": "knowledge",
+                    "description": "",
+                    "levels": ["高中"],
+                    "aliases": [],
+                    "section_keys": ["g"],
+                    "parent_keys": ["a"],
+                },
+            ],
+        }
+        with (
+            patch("core.tag_catalogue_seed.template_blueprint", return_value=blueprint),
+            patch("core.tag_catalogue_seed.blueprint_parents", return_value={"a": ["g"], "b": ["a"]}),
+        ):
             result = self.mutate("apply_template", section_keys=["g"])
-            old.refresh_from_db(); self.assertEqual(old.system_key, "b")
+            old.refresh_from_db()
+            self.assertEqual(old.system_key, "b")
             library_tagging.undo_catalogue_operation(LibraryTagOperation.objects.get(pk=result["operation_id"]))
-            old.refresh_from_db(); self.assertIsNone(old.system_key)
+            old.refresh_from_db()
+            self.assertIsNone(old.system_key)
             self.assertEqual(p.tag_assignments.get().pk, link.pk)
             self.assertEqual(LibraryTag.objects.count(), 1)
             result = self.mutate("apply_template", section_keys=["g"])

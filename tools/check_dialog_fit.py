@@ -103,8 +103,10 @@ def run_dialog(page, selector: str, tag: str, shot: str | None = None) -> None:
 
     if data["outside"]:
         for item in data["outside"]:
-            problems.append(f"{tag} · {selector}「{title}」的「{item['label']}」滚到它面前还在屏幕外"
-                            f"（中心 y={item['y']}，视口高 {data['vh']}）")
+            problems.append(
+                f"{tag} · {selector}「{title}」的「{item['label']}」滚到它面前还在屏幕外"
+                f"（中心 y={item['y']}，视口高 {data['vh']}）"
+            )
         check(False, f"{tag}：{title} 有 {len(data['outside'])}/{data['total']} 个控件滚到面前还在屏外")
     else:
         check(True, f"{tag}：{title} 的 {data['total']} 个控件滚过去都露得出来")
@@ -151,8 +153,12 @@ def triggers(page) -> list[tuple[str, str]]:
     return out
 
 
-MAPPING = {"快捷键说明": "#keysDialog", "已归档的试卷": "#archivedPapersDialog",
-           "题卡回收站": "#trashDialog", "放大对照": "#viewerDialog"}
+MAPPING = {
+    "快捷键说明": "#keysDialog",
+    "已归档的试卷": "#archivedPapersDialog",
+    "题卡回收站": "#trashDialog",
+    "放大对照": "#viewerDialog",
+}
 
 
 def run_review(page, width: int, height: int) -> None:
@@ -175,7 +181,7 @@ def run_review(page, width: int, height: int) -> None:
 
     for name, how in triggers(page):
         if how.startswith("KEY:"):
-            page.locator("body").click(position={"x": 5, "y": 5})   # 先把焦点还给页面
+            page.locator("body").click(position={"x": 5, "y": 5})  # 先把焦点还给页面
             page.keyboard.press(how.split(":", 1)[1])
         else:
             open_paper_operations(page)
@@ -217,8 +223,9 @@ def run_library(page, width: int, height: int) -> None:
     if full.count() and full.first.is_visible():
         full.first.click()
         page.wait_for_timeout(500)
-        run_dialog(page, "dialog.question-viewer-dialog", label,
-                   shot=f"{SHOTS}/dialog_question_viewer_{width}x{height}.png")
+        run_dialog(
+            page, "dialog.question-viewer-dialog", label, shot=f"{SHOTS}/dialog_question_viewer_{width}x{height}.png"
+        )
         close_all(page)
         page.wait_for_timeout(300)
     else:
@@ -230,8 +237,7 @@ def run_library(page, width: int, height: int) -> None:
         return
     edit.first.click()
     page.wait_for_timeout(400)
-    run_dialog(page, "dialog.tag-editor-dialog", label,
-               shot=f"{SHOTS}/dialog_tag_editor_{width}x{height}.png")
+    run_dialog(page, "dialog.tag-editor-dialog", label, shot=f"{SHOTS}/dialog_tag_editor_{width}x{height}.png")
     close_all(page)
 
 

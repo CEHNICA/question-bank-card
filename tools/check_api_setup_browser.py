@@ -4,6 +4,7 @@
 API response is a Playwright fixture; no backend, database, credential store,
 worker, service test, AI generation or external HTTP request is used.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -25,19 +26,52 @@ from playwright.async_api import async_playwright, expect
 ROOT = Path(__file__).resolve().parents[1]
 READING_PROVIDERS = ("modelscope", "minimax", "siliconflow")
 READING_INPUTS = {
-    "mineru": "credentialMineruInput", "modelscope": "credentialModelscopeInput",
-    "minimax": "credentialMinimaxInput", "siliconflow": "credentialSiliconflowInput",
+    "mineru": "credentialMineruInput",
+    "modelscope": "credentialModelscopeInput",
+    "minimax": "credentialMinimaxInput",
+    "siliconflow": "credentialSiliconflowInput",
 }
 PROFILES = {
-    "deepseek": {"base_url": "https://api.deepseek.com", "model": "Offline-DeepSeek", "supports_images": False, "thinking": True},
-    "minimax": {"base_url": "https://api.minimax.cn/v1", "model": "Offline-MiniMax", "supports_images": True, "thinking": True},
-    "modelscope": {"base_url": "https://api-inference.modelscope.cn/v1", "model": "Offline-ModelScope", "supports_images": True, "thinking": True},
-    "siliconflow": {"base_url": "https://api.siliconflow.cn/v1", "model": "Offline-SiliconFlow", "supports_images": True, "thinking": False},
-    "doubao": {"base_url": "https://ark.cn-beijing.volces.com/api/v3", "model": "Offline-Doubao", "supports_images": False, "thinking": True},
-    "custom": {"base_url": "https://example.invalid/v1", "model": "Offline-Custom", "supports_images": False, "thinking": True},
+    "deepseek": {
+        "base_url": "https://api.deepseek.com",
+        "model": "Offline-DeepSeek",
+        "supports_images": False,
+        "thinking": True,
+    },
+    "minimax": {
+        "base_url": "https://api.minimax.cn/v1",
+        "model": "Offline-MiniMax",
+        "supports_images": True,
+        "thinking": True,
+    },
+    "modelscope": {
+        "base_url": "https://api-inference.modelscope.cn/v1",
+        "model": "Offline-ModelScope",
+        "supports_images": True,
+        "thinking": True,
+    },
+    "siliconflow": {
+        "base_url": "https://api.siliconflow.cn/v1",
+        "model": "Offline-SiliconFlow",
+        "supports_images": True,
+        "thinking": False,
+    },
+    "doubao": {
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "model": "Offline-Doubao",
+        "supports_images": False,
+        "thinking": True,
+    },
+    "custom": {
+        "base_url": "https://example.invalid/v1",
+        "model": "Offline-Custom",
+        "supports_images": False,
+        "thinking": True,
+    },
 }
 READING_CARD_IDS = {
-    "modelscope": "credentialModelscopeSection", "minimax": "credentialMinimaxSection",
+    "modelscope": "credentialModelscopeSection",
+    "minimax": "credentialMinimaxSection",
     "siliconflow": "credentialSiliconflowSection",
 }
 
@@ -50,7 +84,7 @@ class FrontendHandler(SimpleHTTPRequestHandler):
         if urlparse(self.path).path in ("/", "/settings", "/settings/"):
             self.path = "/index.html"
         elif urlparse(self.path).path.startswith("/static/"):
-            self.path = self.path[len("/static"):]
+            self.path = self.path[len("/static") :]
         super().do_GET()
 
 
@@ -60,8 +94,10 @@ def write_json(path, value):
 
 def redact(value):
     if isinstance(value, dict):
-        return {key: ("****************" if key in ("value", "accounts", "key_value") else redact(item))
-                for key, item in value.items()}
+        return {
+            key: ("****************" if key in ("value", "accounts", "key_value") else redact(item))
+            for key, item in value.items()
+        }
     if isinstance(value, list):
         return [redact(item) for item in value]
     return value
@@ -69,19 +105,34 @@ def redact(value):
 
 class Fixture:
     def __init__(self):
-        self.services = {provider: {"configured": provider != "mineru", "count": int(provider != "mineru")}
-                         for provider in READING_INPUTS}
-        self.models = {"primary": "modelscope_fake", "checker": "auto", "arbiter": "primary",
-                       "models": {provider: PROFILES[provider]["model"] for provider in READING_PROVIDERS},
-                       "plans": {"minimax": "auto"}}
+        self.services = {
+            provider: {"configured": provider != "mineru", "count": int(provider != "mineru")}
+            for provider in READING_INPUTS
+        }
+        self.models = {
+            "primary": "modelscope_fake",
+            "checker": "auto",
+            "arbiter": "primary",
+            "models": {provider: PROFILES[provider]["model"] for provider in READING_PROVIDERS},
+            "plans": {"minimax": "auto"},
+        }
         self.library = {
-            "mode": "api", "provider": "deepseek", **deepcopy(PROFILES["deepseek"]),
+            "mode": "api",
+            "provider": "deepseek",
+            **deepcopy(PROFILES["deepseek"]),
             "features": {"knowledge_tags": False, "ai_answer": False},
-            "on_intake": {"tags": False, "answer": False}, "verified": True,
+            "on_intake": {"tags": False, "answer": False},
+            "verified": True,
         }
         self.profiles = deepcopy(PROFILES)
-        self.keys = {provider: {"configured": provider == "deepseek", "count": int(provider == "deepseek"),
-                                "shared_with_reading": False} for provider in PROFILES}
+        self.keys = {
+            provider: {
+                "configured": provider == "deepseek",
+                "count": int(provider == "deepseek"),
+                "shared_with_reading": False,
+            }
+            for provider in PROFILES
+        }
         self.posts = []
         self.api_gets = []
         self.forbidden = []
@@ -93,33 +144,59 @@ class Fixture:
         configured = {provider: meta["configured"] for provider, meta in self.services.items()}
         primary = self.models["primary"]
         names = {"modelscope": "魔搭", "minimax": "MiniMax", "siliconflow": "硅基流动"}
-        return {"app_version": "isolated-api-setup-test", "mineru": configured["mineru"],
-                "upload_enabled": configured["mineru"], "assistant_mode": False, "configured": configured,
-                "reader": self.models["models"][primary.rsplit("_fake", 1)[0]],
-                "m3_available": False, "engines": {
-                    "saved": deepcopy(self.models), "selected": {key: self.models[key] for key in ("primary", "checker", "arbiter")},
-                    "primary": primary, "checker": self.models["checker"], "arbiter": self.models["arbiter"],
-                    "models": deepcopy(self.models["models"]), "plans": deepcopy(self.models["plans"]),
-                    "configured": configured, "choices": [
-                        {"key": provider + "_fake", "provider_key": provider, "provider": names[provider],
-                         "model": self.models["models"][provider], "available": configured[provider]}
-                        for provider in READING_PROVIDERS]}}
+        return {
+            "app_version": "isolated-api-setup-test",
+            "mineru": configured["mineru"],
+            "upload_enabled": configured["mineru"],
+            "assistant_mode": False,
+            "configured": configured,
+            "reader": self.models["models"][primary.rsplit("_fake", 1)[0]],
+            "m3_available": False,
+            "engines": {
+                "saved": deepcopy(self.models),
+                "selected": {key: self.models[key] for key in ("primary", "checker", "arbiter")},
+                "primary": primary,
+                "checker": self.models["checker"],
+                "arbiter": self.models["arbiter"],
+                "models": deepcopy(self.models["models"]),
+                "plans": deepcopy(self.models["plans"]),
+                "configured": configured,
+                "choices": [
+                    {
+                        "key": provider + "_fake",
+                        "provider_key": provider,
+                        "provider": names[provider],
+                        "model": self.models["models"][provider],
+                        "available": configured[provider],
+                    }
+                    for provider in READING_PROVIDERS
+                ],
+            },
+        }
 
     def library_status(self):
         body = deepcopy(self.library)
         configured = self.keys[body["provider"]]["configured"]
         verified = bool(configured and body["verified"])
-        body.update({
-            "configured": configured, "ready": verified, "api_ready": verified,
-            "key_configured": configured, "key_count": int(configured), "keys": deepcopy(self.keys),
-            "shareable_from_reading": ["minimax", "modelscope", "siliconflow"],
-            "provider_profiles": deepcopy(self.profiles), "reasoning_effort": "high",
-            "knowledge": {"total": 0, "chapters": 0, "file": ""},
-            "backlog": {"tags": 0, "answer": 0, "total": 0},
-            "verified_at": "fictional-offline-fixture" if verified else "", "resolved_model": "",
-            "status": "verified" if verified else "unverified" if configured else "missing",
-            "message": "虚构离线状态；没有调用服务。",
-        })
+        body.update(
+            {
+                "configured": configured,
+                "ready": verified,
+                "api_ready": verified,
+                "key_configured": configured,
+                "key_count": int(configured),
+                "keys": deepcopy(self.keys),
+                "shareable_from_reading": ["minimax", "modelscope", "siliconflow"],
+                "provider_profiles": deepcopy(self.profiles),
+                "reasoning_effort": "high",
+                "knowledge": {"total": 0, "chapters": 0, "file": ""},
+                "backlog": {"tags": 0, "answer": 0, "total": 0},
+                "verified_at": "fictional-offline-fixture" if verified else "",
+                "resolved_model": "",
+                "status": "verified" if verified else "unverified" if configured else "missing",
+                "message": "虚构离线状态；没有调用服务。",
+            }
+        )
         return body
 
     @staticmethod
@@ -127,7 +204,9 @@ class Fixture:
         if operation.get("action") != "replace":
             return
         values = operation.get("accounts") or [operation.get("value", "")]
-        assert values and all(isinstance(value, str) and value.startswith("fake-offline-") for value in values), "Only fabricated keys are permitted"
+        assert values and all(isinstance(value, str) and value.startswith("fake-offline-") for value in values), (
+            "Only fabricated keys are permitted"
+        )
 
     async def route(self, route, base):
         request = route.request
@@ -141,7 +220,8 @@ class Fixture:
             if path.startswith("/api/"):
                 self.api_gets.append(path)
             values = {
-                "/api/status": self.status(), "/api/papers": {"papers": []},
+                "/api/status": self.status(),
+                "/api/papers": {"papers": []},
                 "/api/settings/features": {"features": []},
                 "/api/settings/credentials": {"services": deepcopy(self.services)},
                 "/api/settings/library-ai": self.library_status(),
@@ -155,8 +235,12 @@ class Fixture:
             else:
                 await route.continue_()
             return
-        permitted = {"/api/settings/models", "/api/settings/credentials", "/api/settings/library-ai",
-                     "/api/settings/library-ai/share-reading-key"}
+        permitted = {
+            "/api/settings/models",
+            "/api/settings/credentials",
+            "/api/settings/library-ai",
+            "/api/settings/library-ai/share-reading-key",
+        }
         if method != "POST" or path not in permitted:
             self.forbidden.append({"kind": "unexpected-write", "method": method, "path": path})
             await route.abort()
@@ -180,14 +264,18 @@ class Fixture:
                     self.services[provider] = {"configured": True, "count": len(operation["accounts"])}
                 elif operation["action"] == "clear":
                     self.services[provider] = {"configured": False, "count": 0}
-            await route.fulfill(json={"services": deepcopy(self.services), "message": "虚构 API 配置已保存；没有网络测试。"})
+            await route.fulfill(
+                json={"services": deepcopy(self.services), "message": "虚构 API 配置已保存；没有网络测试。"}
+            )
         elif path.endswith("/share-reading-key"):
             assert set(payload) == {"provider"} and payload["provider"] in READING_PROVIDERS
             provider = payload["provider"]
             self.share_requests.append(provider)
             self.library.update(provider=provider, **deepcopy(PROFILES[provider]), verified=False)
             self.library["model"] = self.models["models"][provider]
-            self.profiles[provider] = {field: self.library[field] for field in ("base_url", "model", "supports_images", "thinking")}
+            self.profiles[provider] = {
+                field: self.library[field] for field in ("base_url", "model", "supports_images", "thinking")
+            }
             self.keys[provider] = {"configured": True, "count": 1, "shared_with_reading": True}
             await route.fulfill(json=self.library_status())
         else:
@@ -197,13 +285,24 @@ class Fixture:
                 self.fail_library = False
                 await route.fulfill(status=503, json={"error": "离线模拟答案配置保存失败"})
                 return
-            for field in ("provider", "base_url", "model", "supports_images", "thinking", "features", "on_intake", "mode"):
+            for field in (
+                "provider",
+                "base_url",
+                "model",
+                "supports_images",
+                "thinking",
+                "features",
+                "on_intake",
+                "mode",
+            ):
                 if field in payload:
                     self.library[field] = deepcopy(payload[field])
             for provider, profile in payload.get("provider_profiles", {}).items():
                 assert provider in self.profiles and provider != self.library["provider"]
                 self.profiles[provider] = deepcopy(profile)
-            self.profiles[self.library["provider"]] = {field: self.library[field] for field in ("base_url", "model", "supports_images", "thinking")}
+            self.profiles[self.library["provider"]] = {
+                field: self.library[field] for field in ("base_url", "model", "supports_images", "thinking")
+            }
             operations = deepcopy(payload.get("keys", {}))
             operations[self.library["provider"]] = payload.get("key", {"action": "keep"})
             for provider, operation in operations.items():
@@ -220,9 +319,18 @@ async def browser_check(output, port, report):
     base = f"http://127.0.0.1:{port}"
     errors = report["page_errors"]
     async with async_playwright() as pw:
-        binary = next((path for path in (Path(pw.chromium.executable_path),
-                      Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-                      Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if path.is_file()), None)
+        binary = next(
+            (
+                path
+                for path in (
+                    Path(pw.chromium.executable_path),
+                    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                )
+                if path.is_file()
+            ),
+            None,
+        )
         browser = await pw.chromium.launch(headless=True, **({"executable_path": str(binary)} if binary else {}))
         context = await browser.new_context(viewport={"width": 1366, "height": 768}, service_workers="block")
         await context.add_init_script("localStorage.setItem('qb-welcome-seen','1');localStorage.setItem('qb-lens','0')")
@@ -242,7 +350,9 @@ async def browser_check(output, port, report):
             # permanent controls instead of a temporary notification overlay.
             await expect(page.locator("#toast")).not_to_be_visible(timeout=8000)
             if overview:
-                await page.evaluate("() => {window.scrollTo(0,0); document.body.scrollTop=0; document.querySelectorAll('#credentialDialog .credential-body,#credentialDialog .library-ai-body').forEach(node=>node.scrollTop=0);}")
+                await page.evaluate(
+                    "() => {window.scrollTo(0,0); document.body.scrollTop=0; document.querySelectorAll('#credentialDialog .credential-body,#credentialDialog .library-ai-body').forEach(node=>node.scrollTop=0);}"
+                )
             if clip_selector:
                 await page.locator(clip_selector).screenshot(path=str(output / name))
             else:
@@ -271,7 +381,9 @@ async def browser_check(output, port, report):
 
         async def save_bar_in_view(button_id, label):
             await expect(page.locator("#" + button_id)).to_be_visible()
-            position = await page.locator("#" + button_id).evaluate("node => {const r=node.getBoundingClientRect();return {top:r.top,bottom:r.bottom,left:r.left,right:r.right,height:innerHeight,width:innerWidth};}")
+            position = await page.locator("#" + button_id).evaluate(
+                "node => {const r=node.getBoundingClientRect();return {top:r.top,bottom:r.bottom,left:r.left,right:r.right,height:innerHeight,width:innerWidth};}"
+            )
             assert position["top"] >= 0 and position["bottom"] <= position["height"] + 1, (label, position)
             assert position["left"] >= 0 and position["right"] <= position["width"] + 1, (label, position)
             report["save_bar_positions"].append({"label": label, **position})
@@ -281,14 +393,18 @@ async def browser_check(output, port, report):
             await expect(page.locator("#settingsGeneral .api-status-list")).to_have_count(0)
             # 1.26.9：配置直接平铺在设置页上，不再有那个按钮和弹窗。
             await expect(page.locator("#settingsCredentialHost #credentialUi")).to_be_visible()
-            await expect(page.locator('#credentialReadingPanel [data-service="mineru"]')).to_contain_text("云端自动切题必填")
+            await expect(page.locator('#credentialReadingPanel [data-service="mineru"]')).to_contain_text(
+                "云端自动切题必填"
+            )
             await expect(page.locator("#credentialVisionTitle")).to_be_visible()
             await expect(page.locator("#credentialVision-modelscope")).to_be_checked()
             await selected_reading("modelscope")
             await screenshot("api-reading-two-steps-desktop.png", overview=True)
             await page.locator("#credentialModelscopeSection").scroll_into_view_if_needed()
             await screenshot("api-reading-selected-key-desktop.png", clip_selector="#credentialModelscopeSection")
-            report["passed"].append("settings has one API entry and no four-provider status list; the real credential window presents the cloud-cut and selected vision-service steps")
+            report["passed"].append(
+                "settings has one API entry and no four-provider status list; the real credential window presents the cloud-cut and selected vision-service steps"
+            )
 
             reading_key = "fake-offline-reading-modelscope-draft"
             mineru_key = "fake-offline-mineru-draft"
@@ -299,7 +415,9 @@ async def browser_check(output, port, report):
             await selected_reading("modelscope")
             await expect(page.locator("#credentialModelscopeInput")).to_have_value(reading_key)
             assert not [post for post in fixture.posts if post["path"] == "/api/settings/credentials"]
-            report["passed"].append("only the selected reading provider key card is visible; changing providers keeps every unsaved password without saving or revealing it")
+            report["passed"].append(
+                "only the selected reading provider key card is visible; changing providers keeps every unsaved password without saving or revealing it"
+            )
 
             before_answer_open = len(fixture.posts)
             await answers()
@@ -313,10 +431,14 @@ async def browser_check(output, port, report):
                 await page.set_viewport_size({"width": width, "height": height})
                 await page.evaluate("() => document.querySelector('#credentialDialog .library-ai-body').scrollTop=0")
                 await expect(page.locator("#libraryAIUseReadingService")).to_be_visible()
-                reuse = await page.locator("#libraryAIUseReadingService").evaluate("node => {const r=node.getBoundingClientRect();return {top:r.top,bottom:r.bottom,left:r.left,right:r.right,height:innerHeight,width:innerWidth};}")
+                reuse = await page.locator("#libraryAIUseReadingService").evaluate(
+                    "node => {const r=node.getBoundingClientRect();return {top:r.top,bottom:r.bottom,left:r.left,right:r.right,height:innerHeight,width:innerWidth};}"
+                )
                 assert reuse["top"] >= 0 and reuse["bottom"] <= height, reuse
                 assert reuse["left"] >= 0 and reuse["right"] <= width, reuse
-                assert await page.locator("#libraryAIReadingReuse").evaluate("node => {const state=document.getElementById('libraryAIState'), features=document.querySelector('[aria-label=\"分别开启功能\"]'); return !!(state.compareDocumentPosition(node)&Node.DOCUMENT_POSITION_FOLLOWING) && !!(node.compareDocumentPosition(features)&Node.DOCUMENT_POSITION_FOLLOWING);}"), "Reuse action belongs between status and feature switches"
+                assert await page.locator("#libraryAIReadingReuse").evaluate(
+                    "node => {const state=document.getElementById('libraryAIState'), features=document.querySelector('[aria-label=\"分别开启功能\"]'); return !!(state.compareDocumentPosition(node)&Node.DOCUMENT_POSITION_FOLLOWING) && !!(node.compareDocumentPosition(features)&Node.DOCUMENT_POSITION_FOLLOWING);}"
+                ), "Reuse action belongs between status and feature switches"
                 report["reuse_action_positions"].append({"label": f"independent answers {width}x{height}", **reuse})
                 if width == 390:
                     await screenshot("api-independent-deepseek-390x844.png", overview=True)
@@ -349,11 +471,17 @@ async def browser_check(output, port, report):
             await answers()
             await expect(page.locator("#libraryAIKey-deepseek")).to_have_value(library_key)
             await screenshot("api-cross-tab-draft-retained.png")
-            report["passed"].append("opening optional answers preserves independent DeepSeek; only the selected key card is shown, both tabs retain drafts and each provider keeps its own unsaved model/address")
+            report["passed"].append(
+                "opening optional answers preserves independent DeepSeek; only the selected key card is shown, both tabs retain drafts and each provider keeps its own unsaved model/address"
+            )
 
             await reading()
             fixture.fail_credentials = True
-            async with page.expect_response(lambda response: response.request.method == "POST" and urlparse(response.url).path == "/api/settings/credentials") as failed:
+            async with page.expect_response(
+                lambda response: (
+                    response.request.method == "POST" and urlparse(response.url).path == "/api/settings/credentials"
+                )
+            ) as failed:
                 await page.locator("#credentialSave").click()
             assert (await failed.value).status == 503
             await expect(page.locator("#credentialResult")).to_contain_text("离线模拟保存失败")
@@ -364,13 +492,19 @@ async def browser_check(output, port, report):
             await page.wait_for_load_state("networkidle")
             assert len([post for post in fixture.posts if post["path"] == "/api/settings/credentials"]) == attempted
             await screenshot("api-reading-failure-retains-draft.png")
-            async with page.expect_response(lambda response: response.request.method == "POST" and urlparse(response.url).path == "/api/settings/credentials") as saved:
+            async with page.expect_response(
+                lambda response: (
+                    response.request.method == "POST" and urlparse(response.url).path == "/api/settings/credentials"
+                )
+            ) as saved:
                 await page.locator("#credentialSave").click()
             assert (await saved.value).ok
             await expect(page.locator("#credentialResult")).to_contain_text("已保存")
             await expect(page.locator("#credentialMineruInput")).to_have_value("")
             await expect(page.locator("#credentialModelscopeInput")).to_have_value("")
-            report["passed"].append("reading-key save failure preserves the draft without auto-retry; an explicit retry saves and clears only the now-saved input")
+            report["passed"].append(
+                "reading-key save failure preserves the draft without auto-retry; an explicit retry saves and clears only the now-saved input"
+            )
 
             await answers()
             await expect(page.locator("#libraryAIKey-deepseek")).to_have_value(library_key)
@@ -380,7 +514,11 @@ async def browser_check(output, port, report):
             await expect(page.locator("#libraryAIBaseURL")).to_have_value(library_url_draft)
             await page.locator("#libraryAIAnswer").check()
             fixture.fail_library = True
-            async with page.expect_response(lambda response: response.request.method == "POST" and urlparse(response.url).path == "/api/settings/library-ai") as failed:
+            async with page.expect_response(
+                lambda response: (
+                    response.request.method == "POST" and urlparse(response.url).path == "/api/settings/library-ai"
+                )
+            ) as failed:
                 await page.locator("#libraryAISave").click()
             assert (await failed.value).status == 503
             await expect(page.locator("#libraryAIResult")).to_contain_text("离线模拟答案配置保存失败")
@@ -394,17 +532,25 @@ async def browser_check(output, port, report):
             await screenshot("api-answers-failure-retains-draft.png")
             await page.locator("#libraryAIKey-deepseek").fill(library_key)
             await expect(page.locator("#libraryAISave")).to_be_enabled()
-            async with page.expect_response(lambda response: response.request.method == "POST" and urlparse(response.url).path == "/api/settings/library-ai") as saved:
+            async with page.expect_response(
+                lambda response: (
+                    response.request.method == "POST" and urlparse(response.url).path == "/api/settings/library-ai"
+                )
+            ) as saved:
                 await page.locator("#libraryAISave").click()
             assert (await saved.value).ok
             await expect(page.locator("#libraryAIKey-deepseek")).to_have_value("")
-            saved_payload = next(post["payload"] for post in reversed(fixture.posts) if post["path"] == "/api/settings/library-ai")
+            saved_payload = next(
+                post["payload"] for post in reversed(fixture.posts) if post["path"] == "/api/settings/library-ai"
+            )
             assert saved_payload["provider"] == "deepseek" and saved_payload["model"] == library_model_draft
             assert saved_payload["base_url"] == library_url_draft
             assert saved_payload["provider_profiles"]["minimax"]["model"] == minimax_model_draft
             assert saved_payload["provider_profiles"]["minimax"]["base_url"] == minimax_url_draft
             assert fixture.profiles["minimax"]["model"] == minimax_model_draft
-            report["passed"].append("optional-answer failure preserves nonsecret drafts and requires re-entry of the cleared key; retry saves active settings plus the other provider's cached profile in one payload")
+            report["passed"].append(
+                "optional-answer failure preserves nonsecret drafts and requires re-entry of the cleared key; retry saves active settings plus the other provider's cached profile in one payload"
+            )
 
             reading_metadata = deepcopy(fixture.services)
             for provider in READING_PROVIDERS:
@@ -413,7 +559,12 @@ async def browser_check(output, port, report):
                 await answers()
                 before_share = len(fixture.share_requests)
                 await expect(page.locator("#libraryAIUseReadingService")).to_be_enabled()
-                async with page.expect_response(lambda response: response.request.method == "POST" and urlparse(response.url).path == "/api/settings/library-ai/share-reading-key") as shared:
+                async with page.expect_response(
+                    lambda response: (
+                        response.request.method == "POST"
+                        and urlparse(response.url).path == "/api/settings/library-ai/share-reading-key"
+                    )
+                ) as shared:
                     await page.locator("#libraryAIUseReadingService").click()
                     if await page.locator("#confirmDialog").is_visible():
                         await page.locator("#confirmOk").click()
@@ -428,7 +579,9 @@ async def browser_check(output, port, report):
                 assert fixture.library["on_intake"] == {"tags": False, "answer": False}
                 await screenshot(f"api-explicit-use-reading-{provider}.png")
             assert fixture.share_requests == list(READING_PROVIDERS)
-            report["passed"].append("the explicit Use reading service action posts exactly once for ModelScope, MiniMax and SiliconFlow, selecting the matching service without changing reading keys or starting generation")
+            report["passed"].append(
+                "the explicit Use reading service action posts exactly once for ModelScope, MiniMax and SiliconFlow, selecting the matching service without changing reading keys or starting generation"
+            )
 
             for width, height in ((1366, 768), (390, 844)):
                 await page.set_viewport_size({"width": width, "height": height})
@@ -441,7 +594,9 @@ async def browser_check(output, port, report):
                 if width == 390:
                     bounds = await page.locator("#credentialDialog").bounding_box()
                     assert bounds and bounds["x"] <= 1 and bounds["x"] + bounds["width"] >= width - 1, bounds
-            report["passed"].append("reading and optional-answer save controls are visible inside the viewport at 1366x768 and 390x844")
+            report["passed"].append(
+                "reading and optional-answer save controls are visible inside the viewport at 1366x768 and 390x844"
+            )
 
             await page.set_viewport_size({"width": 1366, "height": 768})
             await page.locator("#credentialDialog [data-close]").first.click()
@@ -459,13 +614,17 @@ async def browser_check(output, port, report):
             await expect(page.locator("#libraryAIProvider-deepseek")).to_be_checked()
             assert len(fixture.posts) == before_legacy
             await screenshot("api-legacy-api-link.png")
-            report["passed"].append("legacy /settings#services and /settings#api remain valid entries in the same credential window and never auto-replace independent DeepSeek")
+            report["passed"].append(
+                "legacy /settings#services and /settings#api remain valid entries in the same credential window and never auto-replace independent DeepSeek"
+            )
 
             assert not errors, errors
             assert not fixture.forbidden, fixture.forbidden
             assert not any("reveal" in post["path"] or post["path"].endswith("/test") for post in fixture.posts)
             assert all(path.startswith("/api/settings/") for path in (post["path"] for post in fixture.posts))
-            report["passed"].append("all credentials are fictional and masked; no key reveal, API connection test, AI generation, real database, worker or outside request occurs")
+            report["passed"].append(
+                "all credentials are fictional and masked; no key reveal, API connection test, AI generation, real database, worker or outside request occurs"
+            )
             report["success"] = True
         except Exception as error:
             report.update(error=str(error) or type(error).__name__, traceback=traceback.format_exc())
@@ -474,8 +633,14 @@ async def browser_check(output, port, report):
             except Exception:
                 pass
         finally:
-            report.update({"fixture_posts": redact(fixture.posts), "fixture_api_gets": fixture.api_gets,
-                           "forbidden_requests": fixture.forbidden, "shared_reading_providers": fixture.share_requests})
+            report.update(
+                {
+                    "fixture_posts": redact(fixture.posts),
+                    "fixture_api_gets": fixture.api_gets,
+                    "forbidden_requests": fixture.forbidden,
+                    "shared_reading_providers": fixture.share_requests,
+                }
+            )
             await context.close()
             await browser.close()
             report["browser_stopped"] = True
@@ -491,11 +656,23 @@ def run(args):
     if not output.is_relative_to((ROOT / "tmp").resolve()) or output.exists():
         raise ValueError("Choose a new evidence folder under checkout/tmp; existing results are never overwritten")
     output.mkdir(parents=True)
-    report = {"success": False, "passed": [], "page_errors": [], "forbidden_requests": [], "save_bar_positions": [], "reuse_action_positions": [], "screenshots": [],
-              "frontend_directory": str(frontend),
-              "frontend_sha256": {name: hashlib.sha256((frontend / name).read_bytes()).hexdigest() for name in required},
-              "real_user_data_used": False, "real_credentials_used": False, "worker_started": False,
-              "cloud_called": False, "api_responses_are_browser_fixtures": True, "server_stopped": False}
+    report = {
+        "success": False,
+        "passed": [],
+        "page_errors": [],
+        "forbidden_requests": [],
+        "save_bar_positions": [],
+        "reuse_action_positions": [],
+        "screenshots": [],
+        "frontend_directory": str(frontend),
+        "frontend_sha256": {name: hashlib.sha256((frontend / name).read_bytes()).hexdigest() for name in required},
+        "real_user_data_used": False,
+        "real_credentials_used": False,
+        "worker_started": False,
+        "cloud_called": False,
+        "api_responses_are_browser_fixtures": True,
+        "server_stopped": False,
+    }
     server = None
     thread = None
     try:
@@ -515,9 +692,19 @@ def run(args):
             thread.join(timeout=5)
         report["server_stopped"] = thread is None or not thread.is_alive()
         write_json(output / "report.json", report)
-    print(json.dumps({"success": report["success"], "passed_groups": len(report["passed"]),
-                      "output": str(output), "error": report.get("error"),
-                      "server_stopped": report["server_stopped"]}, ensure_ascii=False), flush=True)
+    print(
+        json.dumps(
+            {
+                "success": report["success"],
+                "passed_groups": len(report["passed"]),
+                "output": str(output),
+                "error": report.get("error"),
+                "server_stopped": report["server_stopped"],
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
     return 0 if report["success"] and report["server_stopped"] else 1
 
 

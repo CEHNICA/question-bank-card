@@ -21,6 +21,7 @@ Word 那个要拿老师真正打开它的程序去量 —— 用 WPS 转成 PDF 
                                                              量出这条路的误差底线
     python tools/check_figure_controls_real.py <哪种> <文件夹>
 """
+
 import os
 import sys
 
@@ -40,7 +41,7 @@ CASES = {
         "pdf": "配图排版.pdf",
         "shaped": "第一、二张挤在一行，第三张换到下一行，两行都贴着左边距",
         "instruction": "第 1 张 100 毫米、整行靠左、第 3 张另起一行。"
-                       "100 + 3.70 + 39.1 = 142.8 放得下，再加 35.6 就到 182.1 超出版心",
+        "100 + 3.70 + 39.1 = 142.8 放得下，再加 35.6 就到 182.1 超出版心",
         "expected": [
             (16.0, 16.0 + 100.0, 100.0),
             (16.0 + 100.0 + GAP_MM, 16.0 + 100.0 + GAP_MM + 39.1, 39.1),
@@ -52,8 +53,7 @@ CASES = {
         "docx": "各占一行.docx",
         "pdf": "各占一行.pdf",
         "shaped": "三张图各占一行、都靠右；178 那张贴满版心，100 那两张右边缘同样顶到版心",
-        "instruction": "依次 178 / 100 / 100 毫米、整行靠右。宽度加起来一行放不下，"
-                       "Word 于是每张各占一段，不再拼成表格",
+        "instruction": "依次 178 / 100 / 100 毫米、整行靠右。宽度加起来一行放不下，Word 于是每张各占一段，不再拼成表格",
         "expected": [
             (16.0, RIGHT_EDGE, 178.0),
             (RIGHT_EDGE - 100.0, RIGHT_EDGE, 100.0),
@@ -77,6 +77,7 @@ PDF_TOLERANCE = 0.15
 
 def render_with_wps(docx, pdf):
     import win32com.client
+
     app = win32com.client.Dispatch("KWPS.Application")
     app.Visible = False
     try:
@@ -96,14 +97,16 @@ def measure(pdf):
     """Every image box in the PDF, in millimetres from the top-left of the text area."""
     sys.path.insert(0, os.path.join(ROOT, "packaging", ".build", "venv", "Lib", "site-packages"))
     import fitz
+
     document = fitz.open(pdf)
     point = 72 / 25.4
     boxes = []
     for number, page in enumerate(document, start=1):
         for info in page.get_image_info():
             box = info["bbox"]
-            boxes.append((number, round(box[0] / point, 2), round(box[2] / point, 2),
-                          round((box[2] - box[0]) / point, 2)))
+            boxes.append(
+                (number, round(box[0] / point, 2), round(box[2] / point, 2), round((box[2] - box[0]) / point, 2))
+            )
     document.close()
     return boxes
 
@@ -130,10 +133,8 @@ def judge(label, boxes, case, tolerance):
         if chosen is not None and abs(box[3] - chosen) > tolerance:
             problems.append(f"第 {index} 张，老师填的 {chosen} 毫米印出来是 {box[3]} 毫米")
         if abs(box[1] - want[0]) > tolerance or abs(box[2] - want[1]) > tolerance:
-            problems.append(f"第 {index} 张，位置 {box[1]}–{box[2]}，"
-                            f"预览上是 {want[0]}–{want[1]}")
-    print(f"  宽度最大差 {worst_width:.2f} 毫米，位置最大差 {worst_edge:.2f} 毫米"
-          f"（这一档容 {tolerance} 毫米）")
+            problems.append(f"第 {index} 张，位置 {box[1]}–{box[2]}，预览上是 {want[0]}–{want[1]}")
+    print(f"  宽度最大差 {worst_width:.2f} 毫米，位置最大差 {worst_edge:.2f} 毫米（这一档容 {tolerance} 毫米）")
     for text in problems:
         print("  [不一致] " + text)
     if not problems:
@@ -163,8 +164,7 @@ def check_case(name):
     pdf_ok = judge("PDF（软件自己排的）", pdf_boxes, case, PDF_TOLERANCE)
     pages_ok = check_pages(word_boxes, pdf_boxes)
     print()
-    print(f"预览 = Word = PDF（{case['shaped']}）"
-          if word_ok and pdf_ok and pages_ok else "有一处对不上")
+    print(f"预览 = Word = PDF（{case['shaped']}）" if word_ok and pdf_ok and pages_ok else "有一处对不上")
     return word_ok and pdf_ok and pages_ok
 
 
@@ -186,21 +186,22 @@ def check_baseline():
         print(f"缺少 {pdf}；先让运行中的软件导出一份什么都没调的")
         return False
     print(f"{os.path.basename(pdf)}：{os.path.getsize(pdf)} 字节")
-    print("老师一个字都没改，图按原尺寸印出来，理论宽度："
-          + " / ".join(f"{value:.2f}" for value in BASELINE_WIDTH_MM) + " 毫米\n")
+    print(
+        "老师一个字都没改，图按原尺寸印出来，理论宽度："
+        + " / ".join(f"{value:.2f}" for value in BASELINE_WIDTH_MM)
+        + " 毫米\n"
+    )
     boxes = measure(pdf)
     if len(boxes) < len(BASELINE_WIDTH_MM):
         print(f"只量到 {len(boxes)} 张图，这个文件不对")
         return False
-    print_boxes(boxes[:len(BASELINE_WIDTH_MM)])
+    print_boxes(boxes[: len(BASELINE_WIDTH_MM)])
     worst = 0.0
     for index, (box, want) in enumerate(zip(boxes, BASELINE_WIDTH_MM), start=1):
         worst = max(worst, abs(box[3] - want))
-        print(f"  第 {index} 张：量到 {box[3]:.2f} 毫米，理论 {want:.2f}，"
-              f"差 {box[3] - want:+.2f} 毫米")
+        print(f"  第 {index} 张：量到 {box[3]:.2f} 毫米，理论 {want:.2f}，差 {box[3] - want:+.2f} 毫米")
     print(f"\n一个字没改，宽度最大也差 {worst:.2f} 毫米 —— 这就是这条路的底线。")
-    print(f"PDF 那一档现在容 {PDF_TOLERANCE} 毫米。底线要是明显超过它，"
-          f"先查量法，再怀疑排版。")
+    print(f"PDF 那一档现在容 {PDF_TOLERANCE} 毫米。底线要是明显超过它，先查量法，再怀疑排版。")
     return worst <= PDF_TOLERANCE
 
 

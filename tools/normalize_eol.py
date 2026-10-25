@@ -7,6 +7,7 @@ working tree should still match the convention.
 
 Usage: python tools/normalize_eol.py [--check]
 """
+
 import pathlib
 import subprocess
 import sys
@@ -17,8 +18,7 @@ root = pathlib.Path(__file__).resolve().parents[1]
 CRLF = b"\r\n"
 
 names = subprocess.run(
-    ["git", "ls-files", "*.js", "*.py", "*.css", "*.html"],
-    capture_output=True, text=True, cwd=root, check=True,
+    ["git", "ls-files", "*.js", "*.py", "*.css", "*.html"], capture_output=True, text=True, cwd=root, check=True
 ).stdout.split()
 
 check_only = "--check" in sys.argv

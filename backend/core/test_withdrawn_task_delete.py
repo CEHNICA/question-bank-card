@@ -4,6 +4,7 @@
 删掉任务不会丢来源：PublishedQuestion.paper 是 SET_NULL，卷名字符串和题面快照
 都抄在记录自己身上。
 """
+
 import json
 from copy import deepcopy
 
@@ -20,16 +21,25 @@ class WithdrawnThenDeleteTaskTests(TempDataMixin, TestCase):
         self.paper = self.make_paper()
         self.paper.status = Paper.Status.READY
         self.paper.save(update_fields=["status"])
-        self.questions = [self.card(self.paper, number=n, question_type="free_response", stem=f"计算 ${n}+1$。")
-                          for n in (1, 2)]
+        self.questions = [
+            self.card(self.paper, number=n, question_type="free_response", stem=f"计算 ${n}+1$。") for n in (1, 2)
+        ]
 
     def approve(self, question):
-        return self.client.post(f"/api/questions/{question.pk}/approve", json.dumps({"approved": True}),
-                                content_type="application/json", HTTP_X_QB_REQUEST="1")
+        return self.client.post(
+            f"/api/questions/{question.pk}/approve",
+            json.dumps({"approved": True}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
 
     def withdraw(self, publication):
-        return self.client.post(f"/api/library/{publication.pk}/withdraw", json.dumps({}),
-                                content_type="application/json", HTTP_X_QB_REQUEST="1")
+        return self.client.post(
+            f"/api/library/{publication.pk}/withdraw",
+            json.dumps({}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
 
     def delete_task(self):
         return self.client.delete(f"/api/papers/{self.paper.pk}", HTTP_X_QB_REQUEST="1")
@@ -62,7 +72,8 @@ class WithdrawnThenDeleteTaskTests(TempDataMixin, TestCase):
             self.assertEqual(self.withdraw(publication).status_code, 200)
         self.assertEqual(PublishedQuestion.objects.filter(paper=self.paper).count(), 2)
         self.assertEqual(
-            PublishedQuestion.objects.filter(paper=self.paper, status=PublishedQuestion.Status.PUBLISHED).count(), 0)
+            PublishedQuestion.objects.filter(paper=self.paper, status=PublishedQuestion.Status.PUBLISHED).count(), 0
+        )
 
         deleted = self.delete_task()
         self.assertEqual(deleted.status_code, 200, deleted.content)
@@ -115,9 +126,12 @@ class WithdrawnThenDeleteTaskTests(TempDataMixin, TestCase):
         self.assertEqual((counts["approved"], counts["todo"]), (2, 0))
 
         for question in self.questions:
-            response = self.client.post(f"/api/questions/{question.pk}/approve",
-                                        json.dumps({"approved": False}),
-                                        content_type="application/json", HTTP_X_QB_REQUEST="1")
+            response = self.client.post(
+                f"/api/questions/{question.pk}/approve",
+                json.dumps({"approved": False}),
+                content_type="application/json",
+                HTTP_X_QB_REQUEST="1",
+            )
             self.assertEqual(response.status_code, 200, response.content)
         after = self.client.get(f"/api/papers/{self.paper.pk}").json()["paper"]["counts"]
         self.assertEqual((after["approved"], after["settled"], after["published"], after["todo"]), (0, 0, 0, 2))

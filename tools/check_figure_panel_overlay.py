@@ -87,8 +87,7 @@ async def main():
             await page.goto(f"{args.base}/", wait_until="domcontentloaded")
             await page.wait_for_selector(".paper-link", timeout=30000)
             await page.wait_for_timeout(2500)
-            titles = await page.evaluate(
-                "() => [...document.querySelectorAll('.paper-link')].map((b) => b.title)")
+            titles = await page.evaluate("() => [...document.querySelectorAll('.paper-link')].map((b) => b.title)")
             print(f"试卷 {len(titles)} 份，viewport {width}x{height}")
 
             for index, title in enumerate(titles):
@@ -100,8 +99,7 @@ async def main():
                 ):
                     await page.evaluate("(id) => document.getElementById(id)?.close()", dialog)
 
-                has_panel = await page.evaluate(
-                    "() => document.querySelectorAll('.card .figure-review').length")
+                has_panel = await page.evaluate("() => document.querySelectorAll('.card .figure-review').length")
                 if not has_panel:
                     print(f"  {title[:30]}: 没有配图面板，跳过")
                     continue
@@ -130,13 +128,14 @@ async def main():
             await browser.close()
     print(f"采样 {scanned} 次")
     for title, y, result in worst[:12]:
-        print(f"  FAIL {title[:24]} scrollY={y} {result['question']} "
-              f"inside={result['inside']} blocked={json.dumps(result['blocked'], ensure_ascii=False)}")
+        print(
+            f"  FAIL {title[:24]} scrollY={y} {result['question']} "
+            f"inside={result['inside']} blocked={json.dumps(result['blocked'], ensure_ascii=False)}"
+        )
     if len(worst) > 12:
         print(f"  ... 另有 {len(worst) - 12} 次")
     if chrome_hits:
-        print("  页面级吸顶件压到的点（正常滚动，不算失败）："
-              + json.dumps(chrome_hits, ensure_ascii=False))
+        print("  页面级吸顶件压到的点（正常滚动，不算失败）：" + json.dumps(chrome_hits, ensure_ascii=False))
     print("FAIL" if failures else "PASS", f"- {failures} 次被同一张卡片内的元素盖住")
     return 1 if failures else 0
 

@@ -43,8 +43,11 @@ def main() -> int:
     ap.add_argument("--material", default="exam")
     ap.add_argument("--env", action="append", default=[], help="extra KEY=VALUE for the run")
     ap.add_argument("--no-overlap", action="store_true", help="with --worker: no overlap lane")
-    ap.add_argument("--worker", action="store_true",
-                    help="queue every input first and run them like the app's worker (parse lane on)")
+    ap.add_argument(
+        "--worker",
+        action="store_true",
+        help="queue every input first and run them like the app's worker (parse lane on)",
+    )
     ap.add_argument("inputs", nargs="+")
     args = ap.parse_args()
 
@@ -86,10 +89,17 @@ def main() -> int:
             text = payload["messages"][0]["content"][0]["text"]
         except Exception:
             pass
-        kind = ("spotcheck" if "每一处空位上印的是甲还是乙" in text else
-                "arbiter" if "已经被独立誊录了两次" in text else
-                "locate" if "编号刻度" in text else
-                "read_fig" if "蓝色框" in text else "read")
+        kind = (
+            "spotcheck"
+            if "每一处空位上印的是甲还是乙" in text
+            else "arbiter"
+            if "已经被独立誊录了两次" in text
+            else "locate"
+            if "编号刻度" in text
+            else "read_fig"
+            if "蓝色框" in text
+            else "read"
+        )
         start = now()
         status = None
         try:
@@ -102,9 +112,17 @@ def main() -> int:
                 pass
             return response
         finally:
-            record(type="api", provider=url.split("/")[2], model=payload.get("model"), kind=kind,
-                   start=start, end=now(), status=status,
-                   usage=locals().get("usage", {}), thread=threading.get_ident())
+            record(
+                type="api",
+                provider=url.split("/")[2],
+                model=payload.get("model"),
+                kind=kind,
+                start=start,
+                end=now(),
+                status=status,
+                usage=locals().get("usage", {}),
+                thread=threading.get_ident(),
+            )
 
     readers._post = timed_post
 
@@ -120,8 +138,14 @@ def main() -> int:
 
         setattr(pipeline, name, inner)
 
-    for stage in ("parse", "segment_paper", "read_questions", "request_extract_file_from_pool",
-                  "_chunk_blocks", "prepare_photos"):
+    for stage in (
+        "parse",
+        "segment_paper",
+        "read_questions",
+        "request_extract_file_from_pool",
+        "_chunk_blocks",
+        "prepare_photos",
+    ):
         if hasattr(pipeline, stage):
             wrap_stage(stage)
 
@@ -132,10 +156,7 @@ def main() -> int:
         files = [Path(p) for p in spec.split("|")]
         label = files[0].stem if len(files) == 1 else f"{files[0].stem}+{len(files) - 1}"
         uploads = [SimpleUploadedFile(f.name, f.read_bytes()) for f in files]
-        response = client.post(
-            "/api/papers", {"file": uploads, "material_type": args.material},
-            HTTP_X_QB_REQUEST="1",
-        )
+        response = client.post("/api/papers", {"file": uploads, "material_type": args.material}, HTTP_X_QB_REQUEST="1")
         if response.status_code not in (200, 201):
             print("upload failed", spec, response.status_code, response.content[:300])
             return None
@@ -145,8 +166,12 @@ def main() -> int:
 
     def unblock(paper):
         if paper.status == Paper.Status.NEEDS_GROUPING:
-            r = client.post(f"/api/papers/{paper.id}/confirm-structure", "{}",
-                            content_type="application/json", HTTP_X_QB_REQUEST="1")
+            r = client.post(
+                f"/api/papers/{paper.id}/confirm-structure",
+                "{}",
+                content_type="application/json",
+                HTTP_X_QB_REQUEST="1",
+            )
             print(f"  confirm structure -> {r.status_code}", flush=True)
             paper.refresh_from_db()
             if paper.status == Paper.Status.NEEDS_GROUPING:
@@ -175,7 +200,9 @@ def main() -> int:
         folder.mkdir(parents=True, exist_ok=True)
         store = pipeline.PageStore(paper)
         cards = []
-        for q in Question.objects.filter(paper=paper).select_related("group").order_by("group__sequence", "number", "id"):
+        for q in (
+            Question.objects.filter(paper=paper).select_related("group").order_by("group__sequence", "number", "id")
+        ):
             crop_name = f"q{q.number:02d}_{q.id}.jpg"
             try:
                 if q.regions:
@@ -185,15 +212,31 @@ def main() -> int:
                     image.save(folder / crop_name, quality=85)
             except Exception as error:
                 crop_name = f"ERROR {error}"
-            cards.append({
-                "id": q.id, "number": q.number, "group": q.group_id, "section": q.section,
-                "group_sequence": q.group.sequence if q.group else None,
-                "type": q.question_type, "state": q.state, "flags": q.flags, "error": q.error,
-                "text_source": q.text_source, "stem": q.stem, "options": q.options,
-                "regions": q.regions, "figure_candidates": q.figure_candidates, "figures": q.figures,
-                "figure_review": q.figure_review, "read_a": q.read_a, "read_b": q.read_b, "read_c": q.read_c,
-                "source_kind": q.source_kind, "crop": crop_name,
-            })
+            cards.append(
+                {
+                    "id": q.id,
+                    "number": q.number,
+                    "group": q.group_id,
+                    "section": q.section,
+                    "group_sequence": q.group.sequence if q.group else None,
+                    "type": q.question_type,
+                    "state": q.state,
+                    "flags": q.flags,
+                    "error": q.error,
+                    "text_source": q.text_source,
+                    "stem": q.stem,
+                    "options": q.options,
+                    "regions": q.regions,
+                    "figure_candidates": q.figure_candidates,
+                    "figures": q.figures,
+                    "figure_review": q.figure_review,
+                    "read_a": q.read_a,
+                    "read_b": q.read_b,
+                    "read_c": q.read_c,
+                    "source_kind": q.source_kind,
+                    "crop": crop_name,
+                }
+            )
         for index in range(len(paper.pages)):
             try:
                 preview = store.preview(index)
@@ -201,10 +244,16 @@ def main() -> int:
             except Exception:
                 pass
         result = {
-            "label": label, "files": [str(f) for f in files], "paper_id": str(paper.id),
-            "status": paper.status, "error": paper.error, "pages": len(paper.pages),
-            "notes": paper.notes, "structure": paper.structure,
-            "elapsed": round(finished - started, 1), "cards": cards,
+            "label": label,
+            "files": [str(f) for f in files],
+            "paper_id": str(paper.id),
+            "status": paper.status,
+            "error": paper.error,
+            "pages": len(paper.pages),
+            "notes": paper.notes,
+            "structure": paper.structure,
+            "elapsed": round(finished - started, 1),
+            "cards": cards,
         }
         (folder / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
         states = {}
@@ -219,6 +268,7 @@ def main() -> int:
         # would; the worker's main lane reads while its parse lane runs ahead.
         from core.account_pool import lease_priority
         from core.management.commands import run_worker
+
         batch = [item for item in (upload(spec) for spec in args.inputs) if item]
         started = now()
         stop = threading.Event()
@@ -283,9 +333,11 @@ def main() -> int:
     api = [e for e in EVENTS if e["type"] == "api"]
     if api:
         durations = sorted(e["end"] - e["start"] for e in api)
-        print(f"API calls: {len(api)}, median {durations[len(durations)//2]:.1f}s, "
-              f"p90 {durations[int(len(durations)*0.9)]:.1f}s, max {durations[-1]:.1f}s, "
-              f"non-200: {sum(1 for e in api if e['status'] != 200)}")
+        print(
+            f"API calls: {len(api)}, median {durations[len(durations) // 2]:.1f}s, "
+            f"p90 {durations[int(len(durations) * 0.9)]:.1f}s, max {durations[-1]:.1f}s, "
+            f"non-200: {sum(1 for e in api if e['status'] != 200)}"
+        )
     print("DONE", flush=True)
     return 0
 

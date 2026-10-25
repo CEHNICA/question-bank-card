@@ -1,4 +1,5 @@
 """Explicit local, non-cached viewing of one saved API credential."""
+
 from urllib.parse import urlsplit
 
 from django.core.exceptions import DisallowedHost
@@ -21,8 +22,11 @@ def _local_reveal_guard(request):
         host = request.get_host()
         origin = request.headers.get("Origin", "")
         local = urlsplit(f"{request.scheme}://{host}").hostname in {"127.0.0.1", "localhost", "::1"}
-        allowed = (local and origin == f"{request.scheme}://{host}"
-                   and request.headers.get("Sec-Fetch-Site", "same-origin") == "same-origin")
+        allowed = (
+            local
+            and origin == f"{request.scheme}://{host}"
+            and request.headers.get("Sec-Fetch-Site", "same-origin") == "same-origin"
+        )
     except (DisallowedHost, ValueError):
         allowed = False
     if not allowed:
@@ -43,8 +47,11 @@ def reveal_view(request):
     payload = _body(request, limit=1024)
     if not isinstance(payload, dict) or set(payload) not in ({"provider"}, {"provider", "index"}):
         return JsonResponse({"error": "请明确选择要查看的服务商。"}, status=400)
-    if (not isinstance(payload["provider"], str) or payload["provider"] not in library_ai_settings.DEFAULTS
-            or ("index" in payload and (type(payload["index"]) is not int or payload["index"] != 0))):
+    if (
+        not isinstance(payload["provider"], str)
+        or payload["provider"] not in library_ai_settings.DEFAULTS
+        or ("index" in payload and (type(payload["index"]) is not int or payload["index"] != 0))
+    ):
         return JsonResponse({"error": "请选择有效的服务商和密钥序号。"}, status=400)
     with library_ai_settings._lock:
         config = library_ai_settings.saved_key_configuration(payload["provider"])
@@ -54,8 +61,7 @@ def reveal_view(request):
             key = library_ai_settings._key(config)
         except library_ai_settings.SettingsError:
             return JsonResponse({"error": "密钥无法读取，请重新填写并保存。"}, status=409)
-    return JsonResponse({"provider": config["provider"], "key": key}
-                        | ({"index": 0} if "index" in payload else {}))
+    return JsonResponse({"provider": config["provider"], "key": key} | ({"index": 0} if "index" in payload else {}))
 
 
 @csrf_exempt

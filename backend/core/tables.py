@@ -96,25 +96,26 @@ def markdown_tables(text: str) -> list[dict]:
         while end + 1 < len(lines) and _is_table_line(lines[end + 1]):
             end += 1
         if end > index:
-            rows = [split_cells(line) for line in lines[index:end + 1]]
-            header = len(rows) > 1 and all(_SEPARATOR_CELL.match(cell) for cell in rows[1] if cell) \
-                and any(rows[1])
+            rows = [split_cells(line) for line in lines[index : end + 1]]
+            header = len(rows) > 1 and all(_SEPARATOR_CELL.match(cell) for cell in rows[1] if cell) and any(rows[1])
             if header:
                 rows = [rows[0], *rows[2:]]
-            tables.append({
-                "start": starts[index],
-                "end": starts[end] + len(lines[end]),
-                "rows": rows,
-                "header": header,
-            })
+            tables.append(
+                {"start": starts[index], "end": starts[end] + len(lines[end]), "rows": rows, "header": header}
+            )
         index = end + 1
     return tables
 
 
 def html_tables(text: str) -> list[dict]:
-    return [{"start": match.start(), "end": match.end(), "rows": [
-        [cell["text"] for cell in row] for row in parse_html(match.group(0))
-    ]} for match in _HTML_TABLE.finditer(str(text or ""))]
+    return [
+        {
+            "start": match.start(),
+            "end": match.end(),
+            "rows": [[cell["text"] for cell in row] for row in parse_html(match.group(0))],
+        }
+        for match in _HTML_TABLE.finditer(str(text or ""))
+    ]
 
 
 def all_tables(text: str) -> list[dict]:
@@ -129,7 +130,7 @@ def without_tables(text: str) -> str:
     """The question text with its tables taken out (for comparing prose)."""
     value = str(text or "")
     for table in reversed(all_tables(value)):
-        value = value[:table["start"]] + value[table["end"]:]
+        value = value[: table["start"]] + value[table["end"] :]
     return re.sub(r"\n{3,}", "\n\n", value)
 
 
@@ -155,12 +156,14 @@ def parse_html(value: str) -> list[list[dict]]:
         cells = []
         for cell_match in _CELL.finditer(row_match.group(1)):
             spans = {name.lower(): int(number) for name, number in _SPAN.findall(cell_match.group(2))}
-            cells.append({
-                "text": _cell_text(cell_match.group(3)),
-                "rowspan": max(1, min(MAX_ROWS, spans.get("rowspan", 1))),
-                "colspan": max(1, min(MAX_COLS, spans.get("colspan", 1))),
-                "header": cell_match.group(1).lower() == "th",
-            })
+            cells.append(
+                {
+                    "text": _cell_text(cell_match.group(3)),
+                    "rowspan": max(1, min(MAX_ROWS, spans.get("rowspan", 1))),
+                    "colspan": max(1, min(MAX_COLS, spans.get("colspan", 1))),
+                    "header": cell_match.group(1).lower() == "th",
+                }
+            )
         if cells:
             rows.append(cells[:MAX_COLS])
         if len(rows) >= MAX_ROWS:
@@ -187,9 +190,7 @@ def to_text(value: str) -> str:
             cells = []
             for cell in row:
                 tag = "th" if cell["header"] else "td"
-                attrs = "".join(
-                    f' {name}="{cell[name]}"' for name in ("rowspan", "colspan") if cell[name] > 1
-                )
+                attrs = "".join(f' {name}="{cell[name]}"' for name in ("rowspan", "colspan") if cell[name] > 1)
                 cells.append(f"<{tag}{attrs}>{html_lib.escape(cell['text'], quote=False)}</{tag}>")
             body.append(f"<tr>{''.join(cells)}</tr>")
         return f"<table>{''.join(body)}</table>"
@@ -210,8 +211,11 @@ def archive_tables(archive: Path) -> list[dict]:
     """``{"page_idx", "bbox", "html"}`` for each table MinerU recognised."""
     try:
         with zipfile.ZipFile(archive) as bundle:
-            names = [n for n in bundle.namelist()
-                     if n.endswith("_content_list.json") and not n.endswith("_content_list_v2.json")]
+            names = [
+                n
+                for n in bundle.namelist()
+                if n.endswith("_content_list.json") and not n.endswith("_content_list_v2.json")
+            ]
             if len(names) != 1:
                 return []
             content = json.loads(bundle.read(names[0]))
@@ -223,10 +227,16 @@ def archive_tables(archive: Path) -> list[dict]:
             continue
         body = raw.get("table_body")
         bbox = raw.get("bbox")
-        if isinstance(body, str) and body.strip() and isinstance(raw.get("page_idx"), int) \
-                and isinstance(bbox, list) and len(bbox) == 4:
-            result.append({"page_idx": raw["page_idx"], "bbox": [float(v) for v in bbox],
-                           "html": body[:MAX_TABLE_HTML]})
+        if (
+            isinstance(body, str)
+            and body.strip()
+            and isinstance(raw.get("page_idx"), int)
+            and isinstance(bbox, list)
+            and len(bbox) == 4
+        ):
+            result.append(
+                {"page_idx": raw["page_idx"], "bbox": [float(v) for v in bbox], "html": body[:MAX_TABLE_HTML]}
+            )
     return result
 
 
@@ -252,15 +262,16 @@ def table_blocks(paper) -> list[dict]:
         for block in blocks:
             if block.html:
                 continue
-            match = next((item for item in found if item["page_idx"] == block.page_idx
-                          and _same_box(item["bbox"], block.bbox)), None)
+            match = next(
+                (item for item in found if item["page_idx"] == block.page_idx and _same_box(item["bbox"], block.bbox)),
+                None,
+            )
             if match:
                 block.html = match["html"]
                 block.save(update_fields=["html"])
         # A piece a page break cut off has no HTML of its own; look once per run.
         _CHECKED.add(paper.pk)
-    return [{"page_idx": block.page_idx, "bbox": block.bbox, "html": block.html, "seq": block.seq}
-            for block in blocks]
+    return [{"page_idx": block.page_idx, "bbox": block.bbox, "html": block.html, "seq": block.seq} for block in blocks]
 
 
 def continuations(block: dict, blocks: list[dict]) -> list[dict]:
@@ -295,10 +306,10 @@ def insert_table(stem: str, table: str, before: list[str], key=lambda value: val
         wanted = key(text)
         if len(wanted) < 2:
             continue
-        tail = wanted[-min(8, len(wanted)):]
+        tail = wanted[-min(8, len(wanted)) :]
         for index, line in enumerate(lines):
             if index not in occupied and tail in key(line):
-                return "\n".join([*lines[:index + 1], table, *lines[index + 1:]])
+                return "\n".join([*lines[: index + 1], table, *lines[index + 1 :]])
     return "\n".join([*lines, table]).strip("\n") if str(stem or "").strip() else table
 
 
@@ -313,8 +324,14 @@ def table_for_figure(paper, figure: dict, blocks: list[dict] | None = None) -> d
                 continue
             if block["html"]:
                 return block
-            head = next((item for item in reversed(blocks) if item["seq"] < block["seq"] and item["html"]
-                         and block in continuations(item, blocks)), None)
+            head = next(
+                (
+                    item
+                    for item in reversed(blocks)
+                    if item["seq"] < block["seq"] and item["html"] and block in continuations(item, blocks)
+                ),
+                None,
+            )
             if head:
                 return head
     return None

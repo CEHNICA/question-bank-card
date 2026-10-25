@@ -39,8 +39,13 @@ class RereadLaneTests(TestCase):
     def card(self, paper: Paper) -> Question:
         region = [{"page_idx": 0, "bbox": [50, 100, 480, 200]}]
         return Question.objects.create(
-            paper=paper, number=1, question_type="free_response", regions=region, regions_auto=region,
-            state=Question.State.WAITING, reread_requested=True,
+            paper=paper,
+            number=1,
+            question_type="free_response",
+            regions=region,
+            regions_auto=region,
+            state=Question.State.WAITING,
+            reread_requested=True,
         )
 
     def test_idle_only_rereads_skip_papers_still_in_progress(self):
@@ -74,8 +79,7 @@ class RereadLaneTests(TestCase):
 
         stop = OneTurn()
         chat = ScriptedChat({("*", 1): tagged("已知 $x=1$，求 $y$ 的值。")})
-        with mock.patch.object(readers, "chat", chat), \
-                mock.patch.object(run_worker, "close_old_connections"):
+        with mock.patch.object(readers, "chat", chat), mock.patch.object(run_worker, "close_old_connections"):
             run_worker.reread_lane(stop, 0)
         card.refresh_from_db()
         self.assertEqual(stop.turns, 1)
@@ -118,8 +122,10 @@ class ParseLaneTests(TestCase):
             Paper.objects.filter(pk=paper.pk).update(status=Paper.Status.SEGMENTING)
 
         self.assertTrue(run_worker.claim_for_main_lane(reading))
-        with mock.patch.object(pipeline, "parse", side_effect=fake_parse), \
-                mock.patch.object(run_worker, "close_old_connections"):
+        with (
+            mock.patch.object(pipeline, "parse", side_effect=fake_parse),
+            mock.patch.object(run_worker, "close_old_connections"),
+        ):
             run_worker.parse_lane(self.Turns(1), 0)
         queued.refresh_from_db()
         self.assertEqual(parsed, [queued.pk])
@@ -128,8 +134,7 @@ class ParseLaneTests(TestCase):
 
     def test_lane_waits_while_the_main_lane_is_idle(self):
         self.paper(Paper.Status.QUEUED, "queued")
-        with mock.patch.object(pipeline, "parse") as parse, \
-                mock.patch.object(run_worker, "close_old_connections"):
+        with mock.patch.object(pipeline, "parse") as parse, mock.patch.object(run_worker, "close_old_connections"):
             run_worker.parse_lane(self.Turns(1), 0)
         parse.assert_not_called()
 
@@ -185,8 +190,10 @@ class OverlapLaneTests(TestCase):
             self.assertEqual(account_pool.current_priority(), run_worker.paper_priority(paper))
             Paper.objects.filter(pk=paper.pk).update(status=Paper.Status.READY)
 
-        with mock.patch.object(run_worker, "process_paper", side_effect=fake_process), \
-                mock.patch.object(run_worker, "close_old_connections"):
+        with (
+            mock.patch.object(run_worker, "process_paper", side_effect=fake_process),
+            mock.patch.object(run_worker, "close_old_connections"),
+        ):
             run_worker.overlap_lane(ParseLaneTests.Turns(1), 0)
         self.assertIsNone(run_worker.OVERLAP_CURRENT["paper"])
         return seen
@@ -228,8 +235,10 @@ class OverlapLaneTests(TestCase):
 
     def test_settings_are_not_switched_under_a_paper_mid_read(self):
         run_worker.OVERLAP_CURRENT["paper"] = 12345
-        with mock.patch.object(run_worker, "apply_saved_credentials") as credentials, \
-                mock.patch.object(run_worker, "apply_saved_model_preferences") as models:
+        with (
+            mock.patch.object(run_worker, "apply_saved_credentials") as credentials,
+            mock.patch.object(run_worker, "apply_saved_model_preferences") as models,
+        ):
             self.assertFalse(run_worker.apply_saved_settings())
             credentials.assert_not_called()
             models.assert_not_called()
@@ -248,8 +257,10 @@ class OverlapLaneTests(TestCase):
             observed.append(pipeline.reading_tail(paper.pk))
             return {"state": Question.State.RED, "error": "x", "flags": []}
 
-        with mock.patch.object(pipeline, "_reader_parallelism", return_value=1), \
-                mock.patch.object(pipeline, "read_card", side_effect=fake_read):
+        with (
+            mock.patch.object(pipeline, "_reader_parallelism", return_value=1),
+            mock.patch.object(pipeline, "read_card", side_effect=fake_read),
+        ):
             pipeline.read_questions(paper, questions)
         self.assertEqual(observed, [False, False, True])
         self.assertFalse(pipeline.reading_tail(paper.pk))

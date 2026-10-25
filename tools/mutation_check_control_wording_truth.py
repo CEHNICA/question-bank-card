@@ -31,77 +31,96 @@ SETTINGS = ["node", "test_settings_ui.js"]
 SIDEBAR = ["node", "test_library_context_sidebar.js"]
 
 READINESS_LINE = '<p id="settingsServiceReadiness" class="settings-readiness" role="status">正在查看这台电脑的配置…</p>'
-MINERU_LINE = ('sentences.push(status.mineru ? "自动切题用 MinerU，已经配好。" '
-               ': "自动切题还没配 MinerU，上传后需要手工切题。");')
-TONE_LINE = 'return { tone: status.mineru && reading && reading.ready ? "ready" : "missing", text: sentences.join("") };'
-READER_BRANCH = ('`识读和生成答案还没配服务${reading && reading.label ? `（现在选的是「${reading.label}」但没有密钥）` : ""}，不影响上传和手工切题。`')
-TOGGLE_TITLE = ('toggle.title = disabled ? "先在左边点一道题，这里才有它的来源、标签和待核对建议"\n'
-                '      : `${label}：当前题目的来源、标签和待核对建议都写在这一栏`;')
+MINERU_LINE = (
+    'sentences.push(status.mineru ? "自动切题用 MinerU，已经配好。" : "自动切题还没配 MinerU，上传后需要手工切题。");'
+)
+TONE_LINE = (
+    'return { tone: status.mineru && reading && reading.ready ? "ready" : "missing", text: sentences.join("") };'
+)
+READER_BRANCH = '`识读和生成答案还没配服务${reading && reading.label ? `（现在选的是「${reading.label}」但没有密钥）` : ""}，不影响上传和手工切题。`'
+TOGGLE_TITLE = (
+    'toggle.title = disabled ? "先在左边点一道题，这里才有它的来源、标签和待核对建议"\n'
+    "      : `${label}：当前题目的来源、标签和待核对建议都写在这一栏`;"
+)
 TOGGLE_STATE = "const on = Boolean(open) && !disabled;"
 TOGGLE_LABEL = 'const label = disabled ? "先选中一道题" : (on ? "收起右侧详情" : "展开右侧详情");'
-SUMMARY_RULE = ('.library-page .question-inspector-preview > summary,\n'
-                '  .library-page .question-inspector-info > summary { display: flex; align-items: center; min-height: 30px; }')
+SUMMARY_RULE = (
+    ".library-page .question-inspector-preview > summary,\n"
+    "  .library-page .question-inspector-info > summary { display: flex; align-items: center; min-height: 30px; }"
+)
 
 # (file, description, original, mutation, command)
 MUTATIONS = [
-    ("frontend/index.html",
-     "the API tab goes back to answering nothing and only offering a button",
-     READINESS_LINE,
-     "",
-     SETTINGS),
-
-    ("frontend/app.js",
-     "a missing MinerU key stops being named, the page claims it is fine",
-     MINERU_LINE,
-     'sentences.push("自动切题用 MinerU，已经配好。");',
-     SETTINGS),
-
-    ("frontend/app.js",
-     "the page always reports everything as ready",
-     TONE_LINE,
-     'return { tone: "ready", text: sentences.join("") };',
-     SETTINGS),
-
-    ("frontend/app.js",
-     "a chosen-but-keyless service is no longer named",
-     READER_BRANCH,
-     '`识读和生成答案还没配服务，不影响上传和手工切题。`',
-     SETTINGS),
-
-    ("frontend/app.js",
-     "refreshing the status leaves that line on whatever it first said",
-     "    renderSettingsModels();\n    renderServiceReadiness();",
-     "    renderSettingsModels();",
-     SETTINGS),
-
-    ("frontend/library.js",
-     "the details toggle stops saying what lives in that panel",
-     TOGGLE_TITLE,
-     'toggle.title = disabled ? "先在左边点一道题" : label;',
-     SIDEBAR),
-
-    ("frontend/library.js",
-     "a greyed-out details toggle reports itself as open",
-     TOGGLE_STATE,
-     "const on = Boolean(open);",
-     SIDEBAR),
-
-    ("frontend/library.js",
-     "the toggle goes back to a fixed noun that never changes with its state",
-     TOGGLE_LABEL,
-     'const label = "题目详情";',
-     SIDEBAR),
-
-    ("frontend/library-reading.css",
-     "the second disclosure row goes back to being half the height of the first",
-     SUMMARY_RULE,
-     '.library-page .question-inspector-preview > summary { display: flex; align-items: center; min-height: 30px; }',
-     SIDEBAR),
+    (
+        "frontend/index.html",
+        "the API tab goes back to answering nothing and only offering a button",
+        READINESS_LINE,
+        "",
+        SETTINGS,
+    ),
+    (
+        "frontend/app.js",
+        "a missing MinerU key stops being named, the page claims it is fine",
+        MINERU_LINE,
+        'sentences.push("自动切题用 MinerU，已经配好。");',
+        SETTINGS,
+    ),
+    (
+        "frontend/app.js",
+        "the page always reports everything as ready",
+        TONE_LINE,
+        'return { tone: "ready", text: sentences.join("") };',
+        SETTINGS,
+    ),
+    (
+        "frontend/app.js",
+        "a chosen-but-keyless service is no longer named",
+        READER_BRANCH,
+        "`识读和生成答案还没配服务，不影响上传和手工切题。`",
+        SETTINGS,
+    ),
+    (
+        "frontend/app.js",
+        "refreshing the status leaves that line on whatever it first said",
+        "    renderSettingsModels();\n    renderServiceReadiness();",
+        "    renderSettingsModels();",
+        SETTINGS,
+    ),
+    (
+        "frontend/library.js",
+        "the details toggle stops saying what lives in that panel",
+        TOGGLE_TITLE,
+        'toggle.title = disabled ? "先在左边点一道题" : label;',
+        SIDEBAR,
+    ),
+    (
+        "frontend/library.js",
+        "a greyed-out details toggle reports itself as open",
+        TOGGLE_STATE,
+        "const on = Boolean(open);",
+        SIDEBAR,
+    ),
+    (
+        "frontend/library.js",
+        "the toggle goes back to a fixed noun that never changes with its state",
+        TOGGLE_LABEL,
+        'const label = "题目详情";',
+        SIDEBAR,
+    ),
+    (
+        "frontend/library-reading.css",
+        "the second disclosure row goes back to being half the height of the first",
+        SUMMARY_RULE,
+        ".library-page .question-inspector-preview > summary { display: flex; align-items: center; min-height: 30px; }",
+        SIDEBAR,
+    ),
 ]
 
 
 def run(command):
-    return subprocess.run(command, cwd=str(FRONTEND), capture_output=True, text=True, encoding="utf-8", errors="replace")
+    return subprocess.run(
+        command, cwd=str(FRONTEND), capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
 
 
 def apply(source: str, original: str, mutation: str) -> str:
@@ -148,8 +167,11 @@ def main():
         if not caught:
             print((broken.stdout or "")[-2000:] + (broken.stderr or "")[-2000:])
     survived = [item for item in results if not item[1]]
-    print(f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住" if not survived
-          else f"\n{len(survived)} 条变异漏过：{survived}")
+    print(
+        f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住"
+        if not survived
+        else f"\n{len(survived)} 条变异漏过：{survived}"
+    )
     return 1 if survived else 0
 
 

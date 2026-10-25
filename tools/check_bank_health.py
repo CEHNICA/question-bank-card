@@ -4,6 +4,7 @@ Looks for questions that no count can explain — not approved, not deleted, and
 not in any pending bucket — plus figures claimed by more than one question.
 Never writes.
 """
+
 import json
 import os
 import sqlite3
@@ -17,8 +18,7 @@ def question_number(cursor, question_id):
     """Turn the internal question id into the number printed on the card."""
     if question_id is None:
         return "?"
-    row = cursor.execute(
-        "select number from core_question where id = ?", (question_id,)).fetchone()
+    row = cursor.execute("select number from core_question where id = ?", (question_id,)).fetchone()
     return row[0] if row else "?"
 
 
@@ -30,13 +30,14 @@ def main():
     connection = sqlite3.connect("file:%s?mode=ro" % DB.replace("\\", "/"), uri=True)
     cursor = connection.cursor()
 
-    papers = cursor.execute(
-        "select id, filename, status from core_paper order by filename").fetchall()
+    papers = cursor.execute("select id, filename, status from core_paper order by filename").fetchall()
     print("== 每份卷子的题数对账 ==")
     for paper_id, filename, _status in papers:
         rows = cursor.execute(
             "select state, approved_at is not null as ok, deleted_at is not null as gone, count(*) "
-            "from core_question where paper_id = ? group by state, ok, gone", (paper_id,)).fetchall()
+            "from core_question where paper_id = ? group by state, ok, gone",
+            (paper_id,),
+        ).fetchall()
         tally = Counter()
         for state, ok, gone, count in rows:
             if gone:
@@ -46,8 +47,7 @@ def main():
             else:
                 tally["待办:" + str(state)] += count
         total = sum(tally.values())
-        print("  %-44s 共%4d  %s" % (filename[:44], total,
-              "  ".join("%s=%d" % kv for kv in sorted(tally.items()))))
+        print("  %-44s 共%4d  %s" % (filename[:44], total, "  ".join("%s=%d" % kv for kv in sorted(tally.items()))))
 
     print()
     print("== 既没入库、也没删掉、也不算待核的题 ==")
@@ -57,7 +57,8 @@ def main():
             "select number, state, question_type, approved_at, deleted_at from core_question "
             "where paper_id = ? and approved_at is null and deleted_at is null "
             "and state not in ('green', 'yellow', 'red', 'waiting', 'reading')",
-            (paper_id,)).fetchall()
+            (paper_id,),
+        ).fetchall()
         for number, state, kind, _approved_at, _deleted_at in odd:
             found += 1
             print("  %s 第 %s 题  状态=%s 题型=%s" % (filename[:36], number, state, kind))
@@ -67,8 +68,7 @@ def main():
     print()
     print("== 已被入库、但题目里写着有内容没并进来 ==")
     for paper_id, filename, _status in papers:
-        notes = cursor.execute(
-            "select notes from core_paper where id = ?", (paper_id,)).fetchone()[0]
+        notes = cursor.execute("select notes from core_paper where id = ?", (paper_id,)).fetchone()[0]
         try:
             values = json.loads(notes) if isinstance(notes, str) else (notes or [])
         except Exception:
@@ -76,8 +76,8 @@ def main():
         risky = [n for n in values if "待核查" in str(n) or "未并入" in str(n)]
         if risky:
             approved = cursor.execute(
-                "select count(*) from core_question where paper_id = ? and approved_at is not null",
-                (paper_id,)).fetchone()[0]
+                "select count(*) from core_question where paper_id = ? and approved_at is not null", (paper_id,)
+            ).fetchone()[0]
             print("  %s（已入库 %d 题）" % (filename[:40], approved))
             for note in risky:
                 print("     " + str(note)[:120])
@@ -87,7 +87,8 @@ def main():
     claims = defaultdict(list)
     for paper_id, _filename, _status in papers:
         for _qid, number, regions in cursor.execute(
-                "select id, number, regions from core_question where paper_id = ?", (paper_id,)):
+            "select id, number, regions from core_question where paper_id = ?", (paper_id,)
+        ):
             try:
                 rows = json.loads(regions) if isinstance(regions, str) else (regions or [])
             except Exception:
@@ -127,8 +128,7 @@ def main():
     conflicts = 0
     dropped = 0
     for paper_id, filename, _status in papers:
-        raw = cursor.execute(
-            "select processing_plan from core_paper where id = ?", (paper_id,)).fetchone()[0]
+        raw = cursor.execute("select processing_plan from core_paper where id = ?", (paper_id,)).fetchone()[0]
         try:
             plan = json.loads(raw) if isinstance(raw, str) else (raw or {})
         except Exception:
@@ -146,21 +146,16 @@ def main():
                 continue
             conflicts += 1
             mine += 1
-            where = "%s 页 %s" % (
-                figure.get("page_idx", "?"),
-                figure.get("key") or figure.get("bbox") or "?")
+            where = "%s 页 %s" % (figure.get("page_idx", "?"), figure.get("key") or figure.get("bbox") or "?")
             owners = []
             for claim in figure.get("claims") or []:
                 if isinstance(claim, dict):
                     qid = claim.get("question_id") or claim.get("id")
                     mark = "（这道已经锁定，改不了）" if claim.get("protected") else ""
-                    owners.append("第 %s 题（记录 %s）%s" % (
-                        question_number(cursor, qid), qid, mark))
+                    owners.append("第 %s 题（记录 %s）%s" % (question_number(cursor, qid), qid, mark))
                 else:
                     owners.append("题目记录 %s" % claim)
-            print("  %s  %s%s" % (
-                filename[:36], where,
-                ("  ← " + "、".join(owners)) if owners else ""))
+            print("  %s  %s%s" % (filename[:36], where, ("  ← " + "、".join(owners)) if owners else ""))
     if not conflicts:
         print("  没有")
     print("  （另有 %d 处候选图无人认领：那是切题时扫到的公式和文字被正常丢弃，不是问题）" % dropped)

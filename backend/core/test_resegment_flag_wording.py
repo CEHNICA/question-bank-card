@@ -9,6 +9,7 @@
 
 同样的判据套在重新切题会挂出的每一条旗标上。
 """
+
 from django.test import SimpleTestCase
 
 from . import pipeline
@@ -25,14 +26,12 @@ class ResegmentFlagWordingTests(SimpleTestCase):
     def test_every_flag_asks_the_teacher_to_check(self):
         for flag in RESEGMENT_FLAGS:
             with self.subTest(flag=flag):
-                self.assertIn("请", flag,
-                              f"旗标要告诉老师该做什么，不能只说系统做了什么：{flag}")
+                self.assertIn("请", flag, f"旗标要告诉老师该做什么，不能只说系统做了什么：{flag}")
 
     def test_no_flag_uses_internal_wording(self):
         for flag in RESEGMENT_FLAGS:
             with self.subTest(flag=flag):
-                self.assertNotIn("入库记录", flag,
-                                 f"「入库记录」是内部说法，界面上叫「已入库」：{flag}")
+                self.assertNotIn("入库记录", flag, f"「入库记录」是内部说法，界面上叫「已入库」：{flag}")
 
     def test_protected_flag_does_not_describe_its_own_colour(self):
         """卡片自己会变黄，旗标再说一遍「标黄」只是噪音。"""
@@ -41,13 +40,11 @@ class ResegmentFlagWordingTests(SimpleTestCase):
     def test_flags_stay_short_enough_to_read_on_a_card(self):
         for flag in RESEGMENT_FLAGS:
             with self.subTest(flag=flag):
-                self.assertLessEqual(len(flag), 80,
-                                     f"卡面上读不完的旗标：{flag}")
+                self.assertLessEqual(len(flag), 80, f"卡面上读不完的旗标：{flag}")
 
     def test_protected_flag_explains_why_nothing_changed(self):
         """老师看到「重切了但这张没动」会疑惑，得说清是系统没敢动。"""
         flag = pipeline.FLAG_RESEGMENT_RANGE_PROTECTED
         self.assertIn("范围", flag)
-        self.assertTrue("通过" in flag or "入库" in flag,
-                        f"要说清为什么这张卡没被改动：{flag}")
+        self.assertTrue("通过" in flag or "入库" in flag, f"要说清为什么这张卡没被改动：{flag}")
         self.assertIn("保留", flag)

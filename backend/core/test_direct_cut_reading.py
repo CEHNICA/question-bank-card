@@ -1,4 +1,5 @@
 """Hand-cut regions join normal reading/review, without an adoption step."""
+
 import json
 import tempfile
 from copy import deepcopy
@@ -33,12 +34,21 @@ class DirectCutReadingTests(TransactionTestCase):
         self.addCleanup(patch.stop)
 
     def cut(self, number=1, **fields):
-        defaults = {"paper": self.original, "number": number, "body_mode": "source_image", "processing_mode": "manual",
-            "question_type": "free_response", "state": "yellow", "regions": [{"page_idx": 0, "bbox": [40, 40, 900, 480]}]}
+        defaults = {
+            "paper": self.original,
+            "number": number,
+            "body_mode": "source_image",
+            "processing_mode": "manual",
+            "question_type": "free_response",
+            "state": "yellow",
+            "regions": [{"page_idx": 0, "bbox": [40, 40, 900, 480]}],
+        }
         return Question.objects.create(**{**defaults, **fields})
 
     def post(self, action, payload=None):
-        return self.client.post(action, json.dumps(payload or {}), content_type="application/json", HTTP_X_QB_REQUEST="1")
+        return self.client.post(
+            action, json.dumps(payload or {}), content_type="application/json", HTTP_X_QB_REQUEST="1"
+        )
 
     def queue(self, question):
         result = self.post(f"/api/papers/{self.original.pk}/read-cut-questions", {"question_ids": [question.pk]})
@@ -47,10 +57,20 @@ class DirectCutReadingTests(TransactionTestCase):
         return result
 
     def reading(self, **fields):
-        return {"stem": "Recognized question", "options": {}, "question_type": "free_response",
-            "state": "green", "flags": [], "error": "", "text_source": "single", "figures": [],
-            "read_a": {"stem": "Recognized question", "engine": "mock"}, "read_b": {"skipped": "disabled"},
-            "read_c": {}, **fields}
+        return {
+            "stem": "Recognized question",
+            "options": {},
+            "question_type": "free_response",
+            "state": "green",
+            "flags": [],
+            "error": "",
+            "text_source": "single",
+            "figures": [],
+            "read_a": {"stem": "Recognized question", "engine": "mock"},
+            "read_b": {"skipped": "disabled"},
+            "read_c": {},
+            **fields,
+        }
 
     def test_success_keeps_original_assets_and_normal_fields_without_approval(self):
         question = self.cut(answer="printed answer", analysis="printed explanation")
@@ -59,10 +79,14 @@ class DirectCutReadingTests(TransactionTestCase):
         self.queue(question)
         self.run_read(question, lambda *args: self.reading(origin="printed source"))
         question.refresh_from_db()
-        self.assertEqual((question.body_mode, question.stem, question.text_source, question.state),
-            ("text", "Recognized question", "single", "green"))
-        self.assertEqual((question.answer, question.analysis, question.origin),
-            ("printed answer", "printed explanation", "printed source"))
+        self.assertEqual(
+            (question.body_mode, question.stem, question.text_source, question.state),
+            ("text", "Recognized question", "single", "green"),
+        )
+        self.assertEqual(
+            (question.answer, question.analysis, question.origin),
+            ("printed answer", "printed explanation", "printed source"),
+        )
         self.assertEqual((question.source_key, question.regions), (key, regions))
         self.assertEqual(views.question_json(question)["question_images"], images)
         response = self.client.get(images[0]["url"])
@@ -70,16 +94,20 @@ class DirectCutReadingTests(TransactionTestCase):
             self.assertEqual(response.status_code, 200)
         finally:
             response.close()
-        self.assertFalse(question.approved or question.ocr_suggestion or question.ocr_pending or question.reread_requested)
+        self.assertFalse(
+            question.approved or question.ocr_suggestion or question.ocr_pending or question.reread_requested
+        )
         with self.assertRaisesRegex(ValueError, "还没有通过终审"):
             library.publish(question)
 
     def test_waiting_manual_edit_cannot_be_overwritten_even_if_external_writer_forgot_revision(self):
         question = self.cut()
         self.queue(question)
+
         def read(*args):
             Question.objects.filter(pk=question.pk).update(edited=True, stem="new manual correction")
             return self.reading()
+
         self.run_read(question, read)
         question.refresh_from_db()
         self.assertEqual(question.stem, "new manual correction")
@@ -90,12 +118,14 @@ class DirectCutReadingTests(TransactionTestCase):
         question = self.cut()
         self.queue(question)
         digest = []
+
         def read(*args):
             current = Question.objects.get(pk=question.pk)
             library.approve(current, now=timezone.now())
             current.save()
             digest.append(current.approved_content_hash)
             return self.reading()
+
         self.run_read(question, read)
         question.refresh_from_db()
         self.assertEqual((question.body_mode, question.stem), ("source_image", ""))
@@ -107,6 +137,7 @@ class DirectCutReadingTests(TransactionTestCase):
         question = self.cut()
         self.queue(question)
         saved = []
+
         def read(*args):
             current = Question.objects.get(pk=question.pk)
             library.approve(current, now=timezone.now())
@@ -116,6 +147,7 @@ class DirectCutReadingTests(TransactionTestCase):
             saved.append((publication, deepcopy(publication.content)))
             Question.objects.filter(pk=question.pk).update(approved=False, approved_content_hash="")
             return self.reading()
+
         self.run_read(question, read)
         question.refresh_from_db()
         self.assertEqual((question.body_mode, question.stem), ("source_image", ""))
@@ -135,9 +167,11 @@ class DirectCutReadingTests(TransactionTestCase):
     def test_actual_source_file_change_rejects_late_text(self):
         question = self.cut()
         self.queue(question)
+
         def read(*args):
             Path(self.original.source_path).write_bytes(manual_review.original_pdf(pages=3))
             return self.reading()
+
         self.run_read(question, read)
         question.refresh_from_db()
         self.assertEqual((question.body_mode, question.stem), ("source_image", ""))
@@ -150,28 +184,39 @@ class DirectCutReadingTests(TransactionTestCase):
         candidate.pop("read_b")
         candidate.pop("read_c")
         candidate["revision"] = 0
-        question = self.cut(ocr_suggestion=candidate, read_a={"engine": "old saved model", "stem": "Recognized question"},
-            read_b={"skipped": "disabled"}, answer="printed answer")
-        with mock.patch.object(views, "_vision_ready", return_value=False), mock.patch.object(pipeline.readers, "chat") as chat:
+        question = self.cut(
+            ocr_suggestion=candidate,
+            read_a={"engine": "old saved model", "stem": "Recognized question"},
+            read_b={"skipped": "disabled"},
+            answer="printed answer",
+        )
+        with (
+            mock.patch.object(views, "_vision_ready", return_value=False),
+            mock.patch.object(pipeline.readers, "chat") as chat,
+        ):
             result = self.queue(question)
         chat.assert_not_called()
         self.assertEqual(result.json()["converted_ids"], [question.pk])
         self.assertEqual(result.json()["queued"], 0)
         question.refresh_from_db()
-        self.assertEqual((question.body_mode, question.stem, question.read_a["engine"], question.content_revision),
-            ("text", "Recognized question", "old saved model", 1))
+        self.assertEqual(
+            (question.body_mode, question.stem, question.read_a["engine"], question.content_revision),
+            ("text", "Recognized question", "old saved model", 1),
+        )
         self.assertEqual(question.answer, "printed answer")
         self.assertFalse(question.approved or question.ocr_suggestion)
         self.assertEqual(pipeline.promote_saved_readings(), [])
 
     def test_legacy_stale_failed_reviewed_published_edited_or_pending_results_are_untouched(self):
         base = {**self.reading(), "revision": 0}
-        protected = [self.cut(ocr_suggestion={**base, "revision": 1}),
+        protected = [
+            self.cut(ocr_suggestion={**base, "revision": 1}),
             self.cut(2, ocr_suggestion={**base, "error": "failed"}),
             self.cut(3, ocr_suggestion=base, approved=True),
             self.cut(4, ocr_suggestion=base, edited=True, stem="human text"),
             self.cut(5, ocr_suggestion=base, ocr_pending=True),
-            self.cut(6, ocr_suggestion={**base, "paper_revision": 44})]
+            self.cut(6, ocr_suggestion={**base, "paper_revision": 44}),
+        ]
         before = {q.pk: deepcopy(Question.objects.values().get(pk=q.pk)) for q in protected}
         self.assertEqual(pipeline.promote_saved_readings(), [])
         for q in protected:
@@ -179,8 +224,12 @@ class DirectCutReadingTests(TransactionTestCase):
 
     def test_legacy_locked_type_and_manual_figures_follow_normal_preservation_rules(self):
         figure = {"page_idx": 0, "bbox": [100, 100, 250, 250], "slot": "stem", "source": "manual"}
-        candidate = {**self.reading(question_type="single_choice"), "revision": 0,
-            "flags": ["配图提醒"], "figure_review": {"status": "blocked_missing"}}
+        candidate = {
+            **self.reading(question_type="single_choice"),
+            "revision": 0,
+            "flags": ["配图提醒"],
+            "figure_review": {"status": "blocked_missing"},
+        }
         question = self.cut(type_locked=True, figures=[figure], ocr_suggestion=candidate)
         self.assertEqual(pipeline.promote_saved_readings(), [question.pk])
         question.refresh_from_db()
@@ -197,10 +246,12 @@ class DirectCutReadingTests(TransactionTestCase):
         self.assertEqual(result.status_code, 200, result.content)
         question.refresh_from_db()
         self.assertTrue(question.ocr_pending)
+
         def read(*args):
             stopped = self.post(f"/api/papers/{self.original.pk}/stop-cut-reading", {"question_ids": [question.pk]})
             self.assertEqual(stopped.json()["stopped_ids"], [question.pk])
             return self.reading(stem="late replacement")
+
         self.run_read(question, read)
         question.refresh_from_db()
         self.assertEqual((question.body_mode, question.stem, question.state), ("text", "Recognized question", "green"))
@@ -223,7 +274,9 @@ class DirectCutReadingTests(TransactionTestCase):
         self.assertEqual(self.queue(question).json()["queued"], 1)
         self.run_read(question, lambda *args: self.reading(question_type="single_choice"))
         question.refresh_from_db()
-        self.assertEqual((question.body_mode, question.stem, question.question_type),
-            ("text", "Recognized question", "free_response"))
+        self.assertEqual(
+            (question.body_mode, question.stem, question.question_type),
+            ("text", "Recognized question", "free_response"),
+        )
         self.assertEqual(question.figures, [figure])
         self.assertFalse(question.edited or question.approved)

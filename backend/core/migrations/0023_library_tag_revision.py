@@ -4,15 +4,10 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
-    dependencies = [
-        ('core', '0022_library_tags_v2'),
-    ]
+    dependencies = [("core", "0022_library_tags_v2")]
 
     operations = [
         migrations.AddField(
-            model_name='publishedquestion',
-            name='tag_revision',
-            field=models.PositiveIntegerField(default=0),
-        ),
+            model_name="publishedquestion", name="tag_revision", field=models.PositiveIntegerField(default=0)
+        )
     ]

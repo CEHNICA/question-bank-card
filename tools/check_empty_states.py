@@ -86,12 +86,14 @@ def run(page, width: int, height: int) -> None:
     none = report(page, f"{tag} 搜不到", f"{SHOTS}/empty_{width}x{height}_noresult.png")
     check(none["cards"] == 0, f"{tag}：搜不到时列表真的空了（{none['cards']} 张）")
     check(bool(none["emptyText"]), f"{tag}：搜不到时有一句能看懂的提示（「{none['emptyText']}」）")
-    check(bool(none["active"] and none["active"]["clickable"]),
-          f"{tag}：搜不到时「当前筛选」这一行还点得到（用户才知道自己筛了什么）")
-    check(bool(none["handle"] and none["handle"]["clickable"]),
-          f"{tag}：搜不到时篮把手还点得到")
-    check(not (none["more"] and none["more"]["w"] > 0 and none["more"]["h"] > 0),
-          f"{tag}：搜不到时「加载更多」收起来了")
+    check(
+        bool(none["active"] and none["active"]["clickable"]),
+        f"{tag}：搜不到时「当前筛选」这一行还点得到（用户才知道自己筛了什么）",
+    )
+    check(bool(none["handle"] and none["handle"]["clickable"]), f"{tag}：搜不到时篮把手还点得到")
+    check(
+        not (none["more"] and none["more"]["w"] > 0 and none["more"]["h"] > 0), f"{tag}：搜不到时「加载更多」收起来了"
+    )
     check(none["bodyOverflow"] <= 0, f"{tag}：搜不到时整页没有横向溢出（{none['bodyOverflow']}px）")
 
     # 2. 清掉搜索，打开空篮（顶部进入按钮在篮空时不出现，这里走右边缘把手）
@@ -100,10 +102,8 @@ def run(page, width: int, height: int) -> None:
     page.locator("#basketHandle").click()
     page.wait_for_timeout(900)
     empty_basket = report(page, f"{tag} 篮是空的", f"{SHOTS}/empty_{width}x{height}_nobasket.png")
-    check(bool(empty_basket["emptyText"]),
-          f"{tag}：篮空着时有一句提示（「{empty_basket['emptyText']}」）")
-    check(bool(empty_basket["handle"] and empty_basket["handle"]["clickable"]),
-          f"{tag}：篮空着时篮把手还点得到")
+    check(bool(empty_basket["emptyText"]), f"{tag}：篮空着时有一句提示（「{empty_basket['emptyText']}」）")
+    check(bool(empty_basket["handle"] and empty_basket["handle"]["clickable"]), f"{tag}：篮空着时篮把手还点得到")
     page.locator("#basketHandle").click()
     page.wait_for_timeout(800)
 
@@ -111,10 +111,8 @@ def run(page, width: int, height: int) -> None:
     search.fill("长" * 200)
     page.wait_for_timeout(900)
     long_q = report(page, f"{tag} 超长搜索词", f"{SHOTS}/empty_{width}x{height}_long.png")
-    check(long_q["bodyOverflow"] <= 0,
-          f"{tag}：搜索框里塞 200 字整页不横向溢出（{long_q['bodyOverflow']}px）")
-    check(long_q["railOverflow"] <= 0,
-          f"{tag}：搜索框里塞 200 字侧栏不横向溢出（{long_q['railOverflow']}px）")
+    check(long_q["bodyOverflow"] <= 0, f"{tag}：搜索框里塞 200 字整页不横向溢出（{long_q['bodyOverflow']}px）")
+    check(long_q["railOverflow"] <= 0, f"{tag}：搜索框里塞 200 字侧栏不横向溢出（{long_q['railOverflow']}px）")
     search.fill("")
     page.wait_for_timeout(800)
 
@@ -136,10 +134,11 @@ def run(page, width: int, height: int) -> None:
     check(one["cards"] >= 1, f"{tag}：按知识点筛完还剩 {one['cards']} 张（至少 1 张，不是空）")
     check(one["bodyOverflow"] <= 0, f"{tag}：只剩一张卡时整页不横向溢出（{one['bodyOverflow']}px）")
     check(one["railOverflow"] <= 0, f"{tag}：只剩一张卡时侧栏不横向溢出（{one['railOverflow']}px）")
-    check(bool(one["active"] and one["active"]["clickable"]),
-          f"{tag}：只剩一张卡时「当前筛选」还点得到（告诉用户正在按知识点筛）")
-    check(bool(one["handle"] and one["handle"]["clickable"]),
-          f"{tag}：只剩一张卡时篮把手还点得到")
+    check(
+        bool(one["active"] and one["active"]["clickable"]),
+        f"{tag}：只剩一张卡时「当前筛选」还点得到（告诉用户正在按知识点筛）",
+    )
+    check(bool(one["handle"] and one["handle"]["clickable"]), f"{tag}：只剩一张卡时篮把手还点得到")
 
 
 def main() -> int:

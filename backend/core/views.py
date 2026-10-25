@@ -105,6 +105,7 @@ SLOTS = {"stem", "A", "B", "C", "D", "E"}
 
 # ---------------------------------------------------------------- 工具
 
+
 def _error(message: str, status: int = 400) -> JsonResponse:
     return JsonResponse({"error": message}, status=status)
 
@@ -164,7 +165,7 @@ def _candidate_key(item: dict) -> str | None:
 
 def _candidate_keys(question: Question) -> set[str]:
     keys: set[str] = set()
-    for item in (question.figure_candidates or []):
+    for item in question.figure_candidates or []:
         for key in (figure_candidate_key(item), legacy_candidate_key(item)):
             if key:
                 keys.add(key)
@@ -174,14 +175,15 @@ def _candidate_keys(question: Question) -> set[str]:
 def _saved_ignored_candidates(question: Question, review: dict | None = None) -> list[str]:
     """Return only still-valid ignored candidate keys from a saved review."""
     available = _candidate_keys(question)
-    review = review if isinstance(review, dict) else (
-        question.figure_review if isinstance(question.figure_review, dict) else {}
+    review = (
+        review
+        if isinstance(review, dict)
+        else (question.figure_review if isinstance(question.figure_review, dict) else {})
     )
     raw = review.get("ignored_candidates")
     if not isinstance(raw, list):
         return []
-    return sorted({canonical_candidate_key(value) for value in raw
-                   if isinstance(value, str) and value in available})
+    return sorted({canonical_candidate_key(value) for value in raw if isinstance(value, str) and value in available})
 
 
 def _selected_candidate_keys(question: Question, figures: list[dict] | None = None) -> set[str]:
@@ -210,7 +212,7 @@ def _selected_candidate_keys(question: Question, figures: list[dict] | None = No
 
 
 def _unclassified_candidate_details(
-    question: Question, *, figures: list[dict] | None = None, ignored_candidates: list[str] | None = None,
+    question: Question, *, figures: list[dict] | None = None, ignored_candidates: list[str] | None = None
 ) -> list[dict]:
     """Identify the concrete candidates behind ``candidate_unclassified``.
 
@@ -220,28 +222,28 @@ def _unclassified_candidate_details(
     list.  The result is safe to expose to the editor and lets the write path
     prove that a conflict was actually resolved instead of merely hidden.
     """
-    readings = [
-        value for value in (question.read_a, question.read_b, question.read_c)
-        if isinstance(value, dict)
-    ]
+    readings = [value for value in (question.read_a, question.read_b, question.read_c) if isinstance(value, dict)]
     primary = next((value for value in readings if "stem" in value or "figures" in value), {})
-    assignments = {
-        str(label): str(role) for label, role in (primary.get("figures") or {}).items()
-    } if isinstance(primary.get("figures"), dict) else {}
+    assignments = (
+        {str(label): str(role) for label, role in (primary.get("figures") or {}).items()}
+        if isinstance(primary.get("figures"), dict)
+        else {}
+    )
     # 跟 figure_policy.automatic_review 同步：任何「不是本题的图」都视为已分清。
     # 老的只认 {"none", "table"} + q<digits>，把 decoration/row/other/page_border
     # 等都漏成「未处理」，与策略口径冲突。strict 正则卡住 q<digits>，避免
     # q / qOtherQuestion 这种坏值被放过。
     import re as _re
+
     _foreign_q = _re.compile(r"^q\d+$")
     _bound = {"stem", "A", "B", "C", "D", "E"}
     resolved_elsewhere_labels = {
-        label for label, role in assignments.items()
+        label
+        for label, role in assignments.items()
         if role not in _bound and role != "table" and not _foreign_q.match(role)
     }
     selected = _selected_candidate_keys(question, figures)
-    ignored = set(ignored_candidates if isinstance(ignored_candidates, list)
-                  else _saved_ignored_candidates(question))
+    ignored = set(ignored_candidates if isinstance(ignored_candidates, list) else _saved_ignored_candidates(question))
     result = []
     for candidate in question.figure_candidates or []:
         if not isinstance(candidate, dict):
@@ -250,10 +252,9 @@ def _unclassified_candidate_details(
         key = _candidate_key(candidate)
         if key is None or label in resolved_elsewhere_labels or key in selected or key in ignored:
             continue
-        result.append({
-            "key": key, "label": label, "page_idx": candidate.get("page_idx"),
-            "bbox": candidate.get("bbox"),
-        })
+        result.append(
+            {"key": key, "label": label, "page_idx": candidate.get("page_idx"), "bbox": candidate.get("bbox")}
+        )
     return result
 
 
@@ -291,12 +292,7 @@ def _valid_paper_name(value) -> str | None:
 
 # ---------------------------------------------------------------- JSON
 
-_ACTIVE_PAPER_STATUSES = (
-    Paper.Status.QUEUED,
-    Paper.Status.PARSING,
-    Paper.Status.SEGMENTING,
-    Paper.Status.READING,
-)
+_ACTIVE_PAPER_STATUSES = (Paper.Status.QUEUED, Paper.Status.PARSING, Paper.Status.SEGMENTING, Paper.Status.READING)
 
 
 def _processing_json(paper: Paper) -> dict | None:
@@ -326,10 +322,11 @@ def _processing_json(paper: Paper) -> dict | None:
         "total": None,
         "unit": "",
     }
-    ahead = Paper.objects.filter(
-        status__in=_ACTIVE_PAPER_STATUSES,
-        created_at__lt=paper.created_at,
-    ).exclude(pk=paper.pk).count()
+    ahead = (
+        Paper.objects.filter(status__in=_ACTIVE_PAPER_STATUSES, created_at__lt=paper.created_at)
+        .exclude(pk=paper.pk)
+        .count()
+    )
     if paper.status == Paper.Status.QUEUED:
         progress["queue_ahead"] = ahead
     elif ahead and paper.status in (Paper.Status.PARSING, Paper.Status.SEGMENTING):
@@ -344,46 +341,41 @@ def _processing_json(paper: Paper) -> dict | None:
         if chunks:
             parsed = sum(chunk.status == ImportChunk.Status.PARSED for chunk in chunks)
             active = [
-                {
-                    "sequence": chunk.sequence,
-                    "page_start": chunk.source_page_start,
-                    "page_end": chunk.source_page_end,
-                }
-                for chunk in chunks if chunk.status == ImportChunk.Status.PARSING
+                {"sequence": chunk.sequence, "page_start": chunk.source_page_start, "page_end": chunk.source_page_end}
+                for chunk in chunks
+                if chunk.status == ImportChunk.Status.PARSING
             ]
-            progress.update({
-                "determinate": True,
-                "completed": parsed,
-                "total": len(chunks),
-                "unit": "chunk",
-                "chunks": {
-                    "parsed": parsed,
-                    "parsing": sum(chunk.status == ImportChunk.Status.PARSING for chunk in chunks),
-                    "queued": sum(chunk.status == ImportChunk.Status.QUEUED for chunk in chunks),
-                    "failed": sum(chunk.status == ImportChunk.Status.FAILED for chunk in chunks),
-                    "active_ranges": active,
-                },
-            })
+            progress.update(
+                {
+                    "determinate": True,
+                    "completed": parsed,
+                    "total": len(chunks),
+                    "unit": "chunk",
+                    "chunks": {
+                        "parsed": parsed,
+                        "parsing": sum(chunk.status == ImportChunk.Status.PARSING for chunk in chunks),
+                        "queued": sum(chunk.status == ImportChunk.Status.QUEUED for chunk in chunks),
+                        "failed": sum(chunk.status == ImportChunk.Status.FAILED for chunk in chunks),
+                        "active_ranges": active,
+                    },
+                }
+            )
         else:
             # 1.10.6: one file at MinerU — show what MinerU says (queueing, page n of N…).
             note = mineru.read_state(paper_dir(paper) / mineru.MINERU_STATE_FILE)
             if note:
                 progress["mineru"] = note
                 if note["state"] == "running" and note.get("total_pages"):
-                    progress.update({"determinate": True, "completed": note["pages"],
-                                     "total": note["total_pages"], "unit": "page"})
+                    progress.update(
+                        {"determinate": True, "completed": note["pages"], "total": note["total_pages"], "unit": "page"}
+                    )
     elif paper.status == Paper.Status.READING and paper.total:
-        progress.update({
-            "determinate": True,
-            "completed": paper.progress,
-            "total": paper.total,
-            "unit": "question",
-        })
+        progress.update({"determinate": True, "completed": paper.progress, "total": paper.total, "unit": "question"})
         # A measured estimate, not a promise: the pace between the first and
         # the latest finished card of this run.  Needs a few finished cards.
-        finished = paper.questions.exclude(
-            state__in=[Question.State.WAITING, Question.State.READING],
-        ).aggregate(first=models.Min("updated_at"), last=models.Max("updated_at"), count=models.Count("id"))
+        finished = paper.questions.exclude(state__in=[Question.State.WAITING, Question.State.READING]).aggregate(
+            first=models.Min("updated_at"), last=models.Max("updated_at"), count=models.Count("id")
+        )
         remaining = max(0, paper.total - paper.progress)
         if remaining and finished["count"] >= 4 and finished["first"] and finished["last"]:
             span = (finished["last"] - finished["first"]).total_seconds()
@@ -409,7 +401,8 @@ def _live_publications(paper: Paper) -> dict[int, PublishedQuestion]:
     """The version the library is currently serving for each card, newest first."""
     latest: dict[int, PublishedQuestion] = {}
     for publication in PublishedQuestion.objects.filter(
-            paper=paper, status=PublishedQuestion.Status.PUBLISHED).order_by("question_id", "-version"):
+        paper=paper, status=PublishedQuestion.Status.PUBLISHED
+    ).order_by("question_id", "-version"):
         latest.setdefault(publication.question_id, publication)
     return latest
 
@@ -436,14 +429,17 @@ def card_verdicts(paper: Paper, rows: list[Question] | None = None) -> list[tupl
         with reusing_reviews():
             return [(row.pk, *_verdict(row, live.get(row.pk))) for row in rows]
     json_fields = [field.attname for field in Question._meta.concrete_fields if isinstance(field, models.JSONField)]
-    plain_fields = [field.attname for field in Question._meta.concrete_fields
-                    if not isinstance(field, models.JSONField)]
+    plain_fields = [
+        field.attname for field in Question._meta.concrete_fields if not isinstance(field, models.JSONField)
+    ]
     raw = list(
-        paper.questions.annotate(**{f"raw_{name}": Cast(name, models.TextField()) for name in json_fields})
-        .values_list(*plain_fields, *[f"raw_{name}" for name in json_fields])
+        paper.questions.annotate(**{f"raw_{name}": Cast(name, models.TextField()) for name in json_fields}).values_list(
+            *plain_fields, *[f"raw_{name}" for name in json_fields]
+        )
     )
     groups = {group.pk: (group.title, group.sequence) for group in paper.question_groups.all()}
     pk_at, group_at = (plain_fields.index(name) for name in ("id", "group_id"))
+
     # The library copy is part of the answer, so a card that was published (or
     # withdrawn) must not be answered from a cache entry taken before it was.
     def served(pk: int) -> tuple:
@@ -451,7 +447,9 @@ def card_verdicts(paper: Paper, rows: list[Question] | None = None) -> list[tupl
         return () if publication is None else (publication.pk, publication.version, publication.content_hash)
 
     fingerprints = {
-        row[pk_at]: hashlib.sha1(repr((row, groups.get(row[group_at]), paper.display_name, served(row[pk_at]))).encode()).hexdigest()
+        row[pk_at]: hashlib.sha1(
+            repr((row, groups.get(row[group_at]), paper.display_name, served(row[pk_at]))).encode()
+        ).hexdigest()
         for row in raw
     }
     known: dict[int, tuple[str, bool, bool, bool]] = {}
@@ -465,7 +463,7 @@ def card_verdicts(paper: Paper, rows: list[Question] | None = None) -> list[tupl
     if missing:
         with reusing_reviews():
             for start in range(0, len(missing), 500):
-                for row in paper.questions.select_related("paper", "group").filter(pk__in=missing[start:start + 500]):
+                for row in paper.questions.select_related("paper", "group").filter(pk__in=missing[start : start + 500]):
                     known[row.pk] = _verdict(row, live.get(row.pk))
         with _VERDICTS_LOCK:
             for pk in missing:
@@ -482,23 +480,32 @@ def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] |
     # object's age. A response must expose the current token, not a stale one.
     paper.refresh_from_db(fields=["layout_revision", "layout_page_epoch"])
     info = paper.photos or {}
-    quota_paused = (
-        paper.status == Paper.Status.FAILED
-        and paper.error == readers.TOKEN_PLAN_EXHAUSTED_MESSAGE
-    )
+    quota_paused = paper.status == Paper.Status.FAILED and paper.error == readers.TOKEN_PLAN_EXHAUSTED_MESSAGE
     stopped = paper.status == Paper.Status.FAILED and paper.error == mineru.STOPPED_MESSAGE
     data = {
-        "id": str(paper.id), "name": paper.display_name, "filename": paper.filename,
-        "original_filename": paper.filename, "kind": paper.kind, "status": paper.status,
-        "material_type": paper.material_type, "archived": paper.archived,
-        "layout_revision": paper.layout_revision, "layout_page_epoch": paper.layout_page_epoch,
-        "status_label": "额度不足，已暂停" if quota_paused else "已停止" if stopped
+        "id": str(paper.id),
+        "name": paper.display_name,
+        "filename": paper.filename,
+        "original_filename": paper.filename,
+        "kind": paper.kind,
+        "status": paper.status,
+        "material_type": paper.material_type,
+        "archived": paper.archived,
+        "layout_revision": paper.layout_revision,
+        "layout_page_epoch": paper.layout_page_epoch,
+        "status_label": "额度不足，已暂停"
+        if quota_paused
+        else "已停止"
+        if stopped
         else Paper.Status(paper.status).label,
         "recoverable_pause": quota_paused,
         "stopped": stopped,
-        "progress": paper.progress, "total": paper.total,
+        "progress": paper.progress,
+        "total": paper.total,
         "trash_count": question_layout.ordinary_deleted(paper).count(),
-        "error": paper.error, "notes": [*(info.get("notes") or []), *paper.notes], "pages": paper.pages,
+        "error": paper.error,
+        "notes": [*(info.get("notes") or []), *paper.notes],
+        "pages": paper.pages,
         "structure": paper.structure or {},
         "processing_plan": paper.processing_plan or {},
         "parse_mode": (paper.processing_plan or {}).get("mode", "mineru"),
@@ -515,7 +522,8 @@ def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] |
             for group in paper.question_groups.order_by("sequence", "id")
         ],
         "pages_version": photos.order_version(info),
-        "imported_from_m3": bool(paper.imported_from), "created_at": paper.created_at.isoformat(),
+        "imported_from_m3": bool(paper.imported_from),
+        "created_at": paper.created_at.isoformat(),
         "processing": _processing_json(paper),
         "photos": {
             "count": len(info.get("files", [])),
@@ -524,7 +532,9 @@ def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] |
             "ranges": [info["ranges"].get(str(index)) for index in info["order"]] if info.get("ranges") else None,
             "check": info.get("check", ""),
             "manual": bool(info.get("manual")),
-        } if info else None,
+        }
+        if info
+        else None,
     }
     if with_counts:
         # ``rows``: the cards the caller already loaded (the review page), so they are not read twice.
@@ -540,16 +550,29 @@ def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] |
         # that has one is refused so the source stays traceable.  ``settled`` is
         # the stronger claim the card prints — the library holds *exactly* what
         # is on screen, so there is nothing left to look at.
-        published = PublishedQuestion.objects.filter(paper=paper, status=PublishedQuestion.Status.PUBLISHED)\
-            .values("question_id").distinct().count()
+        published = (
+            PublishedQuestion.objects.filter(paper=paper, status=PublishedQuestion.Status.PUBLISHED)
+            .values("question_id")
+            .distinct()
+            .count()
+        )
         pending = approved_ids | settled_ids
         waiting = sum(1 for r in rows if r.state in (Question.State.WAITING, Question.State.READING))
         data["counts"] = {
             "total": len(rows),
-            "green": sum(1 for r in rows if r.state == Question.State.GREEN and r.pk not in approved_ids
-                         and r.pk not in figure_blocked_ids and r.pk not in settled_ids),
-            "yellow": sum(1 for r in rows if (r.state == Question.State.YELLOW or r.pk in figure_blocked_ids)
-                          and r.pk not in pending),
+            "green": sum(
+                1
+                for r in rows
+                if r.state == Question.State.GREEN
+                and r.pk not in approved_ids
+                and r.pk not in figure_blocked_ids
+                and r.pk not in settled_ids
+            ),
+            "yellow": sum(
+                1
+                for r in rows
+                if (r.state == Question.State.YELLOW or r.pk in figure_blocked_ids) and r.pk not in pending
+            ),
             "red": sum(1 for r in rows if r.state == Question.State.RED and r.pk not in pending),
             "waiting": waiting,
             "approved": len(approved_ids),
@@ -567,9 +590,11 @@ def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] |
 
 def _reading(value: dict) -> dict:
     value = fix_reading_symbols(value)
-    return {k: value.get(k) for k in ("engine", "stem", "options", "error", "witness", "chosen", "objections", "answers",
-                                      "spotwise")
-            if k in value}
+    return {
+        k: value.get(k)
+        for k in ("engine", "stem", "options", "error", "witness", "chosen", "objections", "answers", "spotwise")
+        if k in value
+    }
 
 
 def question_json(question: Question, table_blocks: list[dict] | None = None) -> dict:
@@ -591,21 +616,12 @@ def question_json(question: Question, table_blocks: list[dict] | None = None) ->
             known_anywhere = valid_candidate_keys | paper_candidate_keys(question.paper)
             kept = [value for value in raw if isinstance(value, str) and value in known_anywhere]
         ignored = sorted(set(kept))
-        figure_review = {
-            **figure_review,
-            "ignored_candidates": ignored,
-            "excluded_count": len(ignored),
-        }
-    if (isinstance(figure_review, dict)
-            and "candidate_unclassified" in (figure_review.get("signals") or [])):
+        figure_review = {**figure_review, "ignored_candidates": ignored, "excluded_count": len(ignored)}
+    if isinstance(figure_review, dict) and "candidate_unclassified" in (figure_review.get("signals") or []):
         details = _unclassified_candidate_details(
-            question, ignored_candidates=_saved_ignored_candidates(question, figure_review),
+            question, ignored_candidates=_saved_ignored_candidates(question, figure_review)
         )
-        figure_review = {
-            **figure_review,
-            "unclassified_candidates": details,
-            "unclassified_count": len(details),
-        }
+        figure_review = {**figure_review, "unclassified_candidates": details, "unclassified_count": len(details)}
     approval_valid = library.approval_is_current(question)
     figures = []
     for index, figure in enumerate(question.figures):
@@ -615,9 +631,15 @@ def question_json(question: Question, table_blocks: list[dict] | None = None) ->
             shown_figure.pop("candidate_key", None)
         if "parts" in shown_figure:
             shown_figure["parts"] = [
-                {"page_idx": part["page_idx"], "bbox": part["bbox"],
-                 **({"candidate_key": part["candidate_key"]}
-                    if part.get("candidate_key") in valid_candidate_keys else {})}
+                {
+                    "page_idx": part["page_idx"],
+                    "bbox": part["bbox"],
+                    **(
+                        {"candidate_key": part["candidate_key"]}
+                        if part.get("candidate_key") in valid_candidate_keys
+                        else {}
+                    ),
+                }
                 for part in (figure.get("parts") or [])
                 if isinstance(part, dict) and "page_idx" in part and "bbox" in part
             ]
@@ -633,35 +655,57 @@ def question_json(question: Question, table_blocks: list[dict] | None = None) ->
             pass  # Missing originals block approval, but the task remains editable.
     suggestion = deepcopy(question.ocr_suggestion or {})
     if suggestion.get("revision") == question.content_revision:
-        suggestion["figures"] = [{**figure, "url": f"/api/questions/{question.pk}/ocr-figures/{index}?v={question.content_revision}"}
-                                 for index, figure in enumerate(suggestion.get("figures") or [])]
+        suggestion["figures"] = [
+            {**figure, "url": f"/api/questions/{question.pk}/ocr-figures/{index}?v={question.content_revision}"}
+            for index, figure in enumerate(suggestion.get("figures") or [])
+        ]
     else:
         suggestion = {}
     return {
-        "id": question.id, "source_key": str(question.source_key), "number": question.number,
-        "color_index": question.color_index, "layout_fingerprint": layout_fingerprint,
-        "body_mode": question.body_mode, "processing_mode": question.processing_mode,
-        "content_revision": question.content_revision, "ocr_suggestion": suggestion,
+        "id": question.id,
+        "source_key": str(question.source_key),
+        "number": question.number,
+        "color_index": question.color_index,
+        "layout_fingerprint": layout_fingerprint,
+        "body_mode": question.body_mode,
+        "processing_mode": question.processing_mode,
+        "content_revision": question.content_revision,
+        "ocr_suggestion": suggestion,
         "ocr_pending": question.ocr_pending,
         "question_images": question_images,
-        "group": ({"id": question.group_id, "title": question.group.title,
-                   "sequence": question.group.sequence} if question.group_id else None),
+        "group": (
+            {"id": question.group_id, "title": question.group.title, "sequence": question.group.sequence}
+            if question.group_id
+            else None
+        ),
         "section": question.section,
-        "question_type": question.question_type, "regions": question.regions,
-        "regions_changed": question.regions != question.regions_auto, "start_source": question.start_source,
-        "source_kind": question.source_kind, "source_anchor_seq": question.source_anchor_seq,
-        "figure_candidates": question.figure_candidates, "figures": figures,
-        "figure_review": figure_review, "figure_blocked": blocks_approval(figure_review),
-        "stem": question.stem, "options": question.options, "text_source": question.text_source,
-        "state": question.state, "flags": question.flags, "error": question.error,
-        "edited": question.edited, "approved": approval_valid,
+        "question_type": question.question_type,
+        "regions": question.regions,
+        "regions_changed": question.regions != question.regions_auto,
+        "start_source": question.start_source,
+        "source_kind": question.source_kind,
+        "source_anchor_seq": question.source_anchor_seq,
+        "figure_candidates": question.figure_candidates,
+        "figures": figures,
+        "figure_review": figure_review,
+        "figure_blocked": blocks_approval(figure_review),
+        "stem": question.stem,
+        "options": question.options,
+        "text_source": question.text_source,
+        "state": question.state,
+        "flags": question.flags,
+        "error": question.error,
+        "edited": question.edited,
+        "approved": approval_valid,
         "approval_valid": approval_valid,
         "approval_stale": bool(question.approved and not approval_valid),
         # human = 人对照原卷打的勾；ai = AI 助手打的勾（显示成“AI 已通过 · 待你核对”）。
         "approved_by": library.approval_source(question),
         "approval_agent": question.approval_agent if library.approval_source(question) == "ai" else "",
         "approved_at": question.approved_at.isoformat() if question.approved_at else None,
-        "answer": question.answer, "analysis": question.analysis, "origin": question.origin,
+        "answer": question.answer,
+        "analysis": question.analysis,
+        "origin": question.origin,
         "type_blocked": library.type_blocks_approval(question),
         "reads": {"a": _reading(question.read_a), "b": _reading(question.read_b), "c": _reading(question.read_c)},
         # 1.10.2: the spots “MinerU 读法不同” names — boxed on the crop, marked in the text.
@@ -677,11 +721,9 @@ _QUESTION_MUTATION_STATUSES = {Paper.Status.READY}
 
 def _question_trash_json(batch: QuestionDeletionBatch) -> dict:
     rows = list(
-        Question.all_objects.filter(
-            paper_id=batch.paper_id,
-            deletion_batch=batch,
-            deleted_at__isnull=False,
-        ).select_related("group").order_by("group__sequence", "number", "id")
+        Question.all_objects.filter(paper_id=batch.paper_id, deletion_batch=batch, deleted_at__isnull=False)
+        .select_related("group")
+        .order_by("group__sequence", "number", "id")
     )
     return {
         "id": str(batch.pk),
@@ -694,11 +736,11 @@ def _question_trash_json(batch: QuestionDeletionBatch) -> dict:
             {
                 "id": question.pk,
                 "number": question.number,
-                "group": ({
-                    "id": question.group_id,
-                    "title": question.group.title,
-                    "sequence": question.group.sequence,
-                } if question.group_id else None),
+                "group": (
+                    {"id": question.group_id, "title": question.group.title, "sequence": question.group.sequence}
+                    if question.group_id
+                    else None
+                ),
                 "section": question.section,
                 "stem": question.stem[:160],
                 "deleted_at": question.deleted_at.isoformat(),
@@ -712,9 +754,7 @@ def _sync_paper_question_counts(paper: Paper) -> None:
     """Keep the persisted progress fields aligned with the visible cards."""
     active = paper.questions.all()
     paper.total = active.count()
-    paper.progress = active.exclude(
-        state__in=[Question.State.WAITING, Question.State.READING],
-    ).count()
+    paper.progress = active.exclude(state__in=[Question.State.WAITING, Question.State.READING]).count()
     paper.updated_at = timezone.now()
     paper.save(update_fields=["total", "progress", "updated_at"])
 
@@ -731,8 +771,7 @@ def _soft_delete_questions(paper: Paper, question_ids: list[int]) -> tuple[Quest
         if paper.status not in _QUESTION_MUTATION_STATUSES:
             raise ValueError("只有待终审状态可以删除题卡；处理中或失败的任务不能修改")
         rows = list(
-            Question.all_objects.select_for_update().select_related("paper", "group")
-            .filter(pk__in=question_ids)
+            Question.all_objects.select_for_update().select_related("paper", "group").filter(pk__in=question_ids)
         )
         if len(rows) != len(question_ids) or any(row.paper_id != paper.pk for row in rows):
             raise LookupError("所选题卡不存在，或不属于当前任务")
@@ -744,30 +783,23 @@ def _soft_delete_questions(paper: Paper, question_ids: list[int]) -> tuple[Quest
                 if sorted(question_ids) == sorted(batch.question_ids):
                     return batch, 0
             raise ValueError("所选题卡中包含已经删除的项目，请刷新页面后重试")
-        if any(row.state in {Question.State.WAITING, Question.State.READING}
-               or row.reread_requested for row in rows):
+        if any(row.state in {Question.State.WAITING, Question.State.READING} or row.reread_requested for row in rows):
             raise ValueError("所选题卡仍在识读或等待重读，请完成处理后再删除")
         if PublishedQuestion.objects.filter(
-            question_id__in=question_ids,
-            status=PublishedQuestion.Status.PUBLISHED,
+            question_id__in=question_ids, status=PublishedQuestion.Status.PUBLISHED
         ).exists():
             raise ValueError("所选题卡中有已经入库的题目，请先在正式题库中撤回")
 
-        batch = QuestionDeletionBatch.objects.create(
-            paper=paper,
-            question_ids=sorted(question_ids),
-        )
+        batch = QuestionDeletionBatch.objects.create(paper=paper, question_ids=sorted(question_ids))
         deleted_at = timezone.now()
-        Question.all_objects.filter(pk__in=question_ids).update(
-            deleted_at=deleted_at,
-            deletion_batch=batch,
-        )
+        Question.all_objects.filter(pk__in=question_ids).update(deleted_at=deleted_at, deletion_batch=batch)
         question_layout.bump(paper.pk)
         _sync_paper_question_counts(paper)
     return batch, len(rows)
 
 
 # ---------------------------------------------------------------- 页面与静态文件
+
 
 def _frontend(name: str, content_type: str):
     def view(request):
@@ -778,6 +810,7 @@ def _frontend(name: str, content_type: str):
         # 可能还是上一版的界面（真的撞上过）。要求每次都向本机服务核对。
         response["Cache-Control"] = "no-cache"
         return response
+
     return view
 
 
@@ -825,6 +858,7 @@ def katex_asset(request, asset: str):
 
 # ---------------------------------------------------------------- 状态
 
+
 def health(request):
     return JsonResponse({"ok": True, "app": "question-bank-card"})
 
@@ -854,26 +888,30 @@ def status(request):
         }
         current = {**engines["selected"], "models": engines["models"], "plans": engines["plans"]}
         engines["pending_change"] = engines["saved"] != current
-    return JsonResponse({
-        # AI 助手读题只需要 MinerU：题卡先用 MinerU 的文字，再由 AI 助手对照原卷核对。
-        # Both follow the saved choice, which the next paper will use.
-        "upload_enabled": True,
-        "automatic_parse_ready": readers.configured("mineru") and _reading_ready(),
-        "assistant_mode": readers.assistant_mode(saved_preferences)
-        if saved_preferences is not None else readers.assistant_mode(applied_preferences),
-        "mineru": readers.configured("mineru"),
-        "reader": primary.label if primary else None,
-        "checker": checker.label if checker else None,
-        "arbiter": arbiter.label if arbiter else None,
-        "independent_checker": bool(checker and primary and checker.provider != primary.provider),
-        "engines": engines,
-        # Why the reader can or cannot run, and which service will really read:
-        # a switch the user did not type has to be visible, not silent.
-        "reader_readiness": {key: readiness[key] for key in
-                             ("ready", "reason", "selected", "label", "used", "fallback_available")},
-        "m3_available": m3import.m3_backend() is not None,
-        "app_version": APP_VERSION,
-    })
+    return JsonResponse(
+        {
+            # AI 助手读题只需要 MinerU：题卡先用 MinerU 的文字，再由 AI 助手对照原卷核对。
+            # Both follow the saved choice, which the next paper will use.
+            "upload_enabled": True,
+            "automatic_parse_ready": readers.configured("mineru") and _reading_ready(),
+            "assistant_mode": readers.assistant_mode(saved_preferences)
+            if saved_preferences is not None
+            else readers.assistant_mode(applied_preferences),
+            "mineru": readers.configured("mineru"),
+            "reader": primary.label if primary else None,
+            "checker": checker.label if checker else None,
+            "arbiter": arbiter.label if arbiter else None,
+            "independent_checker": bool(checker and primary and checker.provider != primary.provider),
+            "engines": engines,
+            # Why the reader can or cannot run, and which service will really read:
+            # a switch the user did not type has to be visible, not silent.
+            "reader_readiness": {
+                key: readiness[key] for key in ("ready", "reason", "selected", "label", "used", "fallback_available")
+            },
+            "m3_available": m3import.m3_backend() is not None,
+            "app_version": APP_VERSION,
+        }
+    )
 
 
 @csrf_exempt
@@ -892,10 +930,7 @@ def credential_settings_view(request):
     try:
         if request.method == "GET":
             services = credential_settings.public_environment_status()
-            return JsonResponse({
-                "services": services,
-                "max_accounts": credential_settings.MAX_ACCOUNT_POOL_SIZE,
-            })
+            return JsonResponse({"services": services, "max_accounts": credential_settings.MAX_ACCOUNT_POOL_SIZE})
 
         rejected = _guard(request)
         if rejected:
@@ -912,13 +947,15 @@ def credential_settings_view(request):
             message = "API 配置已加密保存；本次 MinerU Token 尚未核验。是否有效和服务是否可用，请查看 API 管理页及下一次解析任务的实际返回。"
         else:
             message = "API 配置已加密保存；新任务或下一次重读开始时生效，当前任务不会中途换账号。"
-        return JsonResponse({
-            "services": services,
-            "max_accounts": credential_settings.MAX_ACCOUNT_POOL_SIZE,
-            "restart_required": False,
-            "mineru_verification": mineru_verification,
-            "message": message,
-        })
+        return JsonResponse(
+            {
+                "services": services,
+                "max_accounts": credential_settings.MAX_ACCOUNT_POOL_SIZE,
+                "restart_required": False,
+                "mineru_verification": mineru_verification,
+                "message": message,
+            }
+        )
     except credential_settings.CredentialValidationError as exc:
         return _error(str(exc), 400)
     except credential_settings.CredentialStoreError as exc:
@@ -951,8 +988,11 @@ def model_settings(request):
     try:
         current = preferences.load_configuration()
     except preferences.PreferenceError:
-        current = {"roles": dict(preferences.DEFAULTS), "models": dict(preferences.DEFAULT_MODELS),
-                   "plans": dict(preferences.DEFAULT_PLANS)}
+        current = {
+            "roles": dict(preferences.DEFAULTS),
+            "models": dict(preferences.DEFAULT_MODELS),
+            "plans": dict(preferences.DEFAULT_PLANS),
+        }
     raw_models = payload.get("models", current["models"])
     normalized_models = preferences.normalize_models(raw_models, defaults=current["models"])
     if normalized_models is None:
@@ -967,20 +1007,23 @@ def model_settings(request):
     except preferences.PreferenceError as exc:
         return _error(str(exc), 500)
     saved_roles = saved["roles"]
-    return JsonResponse({
-        "saved": {
-            "primary": saved_roles["primary_engine"],
-            "checker": saved_roles["checker_engine"],
-            "arbiter": saved_roles["arbiter_engine"],
-            "models": saved["models"],
-            "plans": saved["plans"],
-        },
-        "restart_required": False,
-        "message": "模型选择已保存；下一份任务或下一次重读开始时生效，正在处理的任务不会中途换模型。",
-    })
+    return JsonResponse(
+        {
+            "saved": {
+                "primary": saved_roles["primary_engine"],
+                "checker": saved_roles["checker_engine"],
+                "arbiter": saved_roles["arbiter_engine"],
+                "models": saved["models"],
+                "plans": saved["plans"],
+            },
+            "restart_required": False,
+            "message": "模型选择已保存；下一份任务或下一次重读开始时生效，正在处理的任务不会中途换模型。",
+        }
+    )
 
 
 # ---------------------------------------------------------------- 试卷
+
 
 @csrf_exempt
 def _find_duplicate(sha256_value, material_type: str):
@@ -989,9 +1032,12 @@ def _find_duplicate(sha256_value, material_type: str):
     1.12.6 之前这里带 ``archived=False``，于是归档过的卷再传一次就会新建任务，
     题库里留下两份同名来源。命中时优先回未归档的那份，那是用户还看得见的。
     """
-    return Paper.objects.filter(sha256=sha256_value, material_type=material_type)\
-        .exclude(Q(status=Paper.Status.FAILED) & ~Q(error__startswith=CUT_PRODUCED_NOTHING))\
-        .order_by("archived", "-created_at").first()
+    return (
+        Paper.objects.filter(sha256=sha256_value, material_type=material_type)
+        .exclude(Q(status=Paper.Status.FAILED) & ~Q(error__startswith=CUT_PRODUCED_NOTHING))
+        .order_by("archived", "-created_at")
+        .first()
+    )
 
 
 def _distinct_task_name(filename: str) -> str:
@@ -1013,11 +1059,13 @@ def papers(request):
                 return _error("归档列表的位置不正确")
             if not 0 <= offset <= 2_147_483_647:
                 return _error("归档列表的位置不正确")
-            rows = list(Paper.objects.filter(archived=True).order_by("-created_at", "-id")[offset:offset + 201])
-            return JsonResponse({
-                "papers": [paper_json(p) for p in rows[:200]],
-                "next_offset": offset + 200 if len(rows) > 200 else None,
-            })
+            rows = list(Paper.objects.filter(archived=True).order_by("-created_at", "-id")[offset : offset + 201])
+            return JsonResponse(
+                {
+                    "papers": [paper_json(p) for p in rows[:200]],
+                    "next_offset": offset + 200 if len(rows) > 200 else None,
+                }
+            )
         include_archived = request.GET.get("archived") == "1"
         queryset = Paper.objects.all() if include_archived else Paper.objects.filter(archived=False)
         return JsonResponse({"papers": [paper_json(p) for p in queryset[:200]]})
@@ -1030,9 +1078,11 @@ def papers(request):
     if mode not in intake.MODES:
         return _error("请选择自动准备、手工框题、本地文字 PDF 或 MinerU 自动解析")
     if mode == "mineru" and (not readers.configured("mineru") or not _reading_ready()):
-        return _error("上传新资料需要 MinerU Token，以及一家看图读题的密钥（魔搭有免费的）；"
-                      "也可以在“设置 → 读题模型”里选“AI 助手读题”，只用 MinerU。"
-                      "密钥在“设置 → 服务与密钥”里填写")
+        return _error(
+            "上传新资料需要 MinerU Token，以及一家看图读题的密钥（魔搭有免费的）；"
+            "也可以在“设置 → 读题模型”里选“AI 助手读题”，只用 MinerU。"
+            "密钥在“设置 → 服务与密钥”里填写"
+        )
     uploads = request.FILES.getlist("file")
     if not uploads:
         return _error("请选择文件")
@@ -1065,7 +1115,9 @@ def papers(request):
     # 再决定：40 页以上按书/讲义（本机不自动切题，避免各章重复题号被合并），其余按试卷。
     # 判断写在试卷上（材料的类型和未切题的原因都会显示），判错了还能在「试卷操作」改。
     paper = Paper(
-        filename=filename, kind=kind, sha256=digest.hexdigest(),
+        filename=filename,
+        kind=kind,
+        sha256=digest.hexdigest(),
         material_type=Paper.MaterialType.EXAM if material_type == "auto" else material_type,
         task_name="",
         processing_plan={"schema": 1, "mode": mode, "revision": 0},
@@ -1104,8 +1156,7 @@ def papers(request):
     existing = _find_duplicate(digest.hexdigest(), paper.material_type)
     if existing and not (existing.archived and request.POST.get("force") == "1"):
         shutil.rmtree(staged, ignore_errors=True)
-        return JsonResponse({"paper": paper_json(existing), "duplicate": True,
-                             "archived": bool(existing.archived)})
+        return JsonResponse({"paper": paper_json(existing), "duplicate": True, "archived": bool(existing.archived)})
     if existing:
         paper.task_name = _distinct_task_name(filename)
     try:
@@ -1113,16 +1164,18 @@ def papers(request):
         paper.source_path = str(folder / target.name)
         with transaction.atomic():
             paper.save()
-            if mode == "mineru" and kind == "pdf" and import_planning.pdf_requires_chunks(
-                len(paper.pages), paper.material_type, mineru.MAX_PDF_PAGES,
+            if (
+                mode == "mineru"
+                and kind == "pdf"
+                and import_planning.pdf_requires_chunks(len(paper.pages), paper.material_type, mineru.MAX_PDF_PAGES)
             ):
-                chunk_limit = import_planning.pdf_chunk_page_limit(
-                    paper.material_type, mineru.MAX_PDF_PAGES,
+                chunk_limit = import_planning.pdf_chunk_page_limit(paper.material_type, mineru.MAX_PDF_PAGES)
+                ImportChunk.objects.bulk_create(
+                    [
+                        ImportChunk(paper=paper, **chunk.as_record())
+                        for chunk in import_planning.plan_pdf_chunks(len(paper.pages), chunk_limit)
+                    ]
                 )
-                ImportChunk.objects.bulk_create([
-                    ImportChunk(paper=paper, **chunk.as_record())
-                    for chunk in import_planning.plan_pdf_chunks(len(paper.pages), chunk_limit)
-                ])
     except Exception:
         if folder.exists() and not staged.exists():
             try:
@@ -1138,17 +1191,23 @@ def papers(request):
     if mode != "mineru":
         try:
             if mode == "auto":
-                paper = intake.prepare_auto(paper, allow_cloud=request.POST.get("allow_cloud") == "1",
-                    cloud_ready=_cloud_cut_ready())
+                paper = intake.prepare_auto(
+                    paper, allow_cloud=request.POST.get("allow_cloud") == "1", cloud_ready=_cloud_cut_ready()
+                )
             else:
                 intake.prepare(paper, mode)
         except Exception as exc:
-            paper.status, paper.error = Paper.Status.FAILED, f"本地准备失败（{type(exc).__name__}），原文件已保留，可转手工重试。"
+            paper.status, paper.error = (
+                Paper.Status.FAILED,
+                f"本地准备失败（{type(exc).__name__}），原文件已保留，可转手工重试。",
+            )
             paper.save(update_fields=["status", "error", "updated_at"])
     return JsonResponse({"paper": paper_json(paper)}, status=201)
 
 
-def _upload_photos(request, uploads, *, material_type: str = Paper.MaterialType.EXAM, parse_mode: str = "auto") -> JsonResponse:
+def _upload_photos(
+    request, uploads, *, material_type: str = Paper.MaterialType.EXAM, parse_mode: str = "auto"
+) -> JsonResponse:
     """一张或几张照片合成一份试卷。页序先按拍摄时间/文件名粗排，MinerU 读完后按卷面题号排定。"""
     if len(uploads) > photos.MAX_PHOTOS:
         return _error(f"一份试卷最多 {photos.MAX_PHOTOS} 张照片")
@@ -1164,19 +1223,21 @@ def _upload_photos(request, uploads, *, material_type: str = Paper.MaterialType.
     # 同一组照片（不论选择顺序）、同样的处理方式算同一份卷；不做扫描件效果再传一次会得到另一份卷。
     # “自动切题没切出题”不算失败到可以重传的形状：这份卷已经在库里了，再传一次
     # 应该打开它，而不是多出一份一模一样的任务。
-    combined = hashlib.sha256(
-        f"photos:{material_type}:{int(enhance)}:{','.join(sorted(digests))}".encode()
-    ).hexdigest()
+    combined = hashlib.sha256(f"photos:{material_type}:{int(enhance)}:{','.join(sorted(digests))}".encode()).hexdigest()
     existing = _find_duplicate(combined, material_type)
     if existing and not (existing.archived and request.POST.get("force") == "1"):
-        return JsonResponse({"paper": paper_json(existing), "duplicate": True,
-                             "archived": bool(existing.archived)})
+        return JsonResponse({"paper": paper_json(existing), "duplicate": True, "archived": bool(existing.archived)})
     first = Path(uploads[0].name).name
     name = first if len(uploads) == 1 else f"{Path(first).stem} 等 {len(uploads)} 张照片"
-    paper = Paper(filename=name[:255], kind="image", sha256=combined, material_type=material_type,
-                  task_name=_distinct_task_name(name) if existing else "",
-                  processing_plan={"schema": 1, "mode": parse_mode, "revision": 0},
-                  status=Paper.Status.READY if parse_mode != "mineru" else Paper.Status.QUEUED)
+    paper = Paper(
+        filename=name[:255],
+        kind="image",
+        sha256=combined,
+        material_type=material_type,
+        task_name=_distinct_task_name(name) if existing else "",
+        processing_plan={"schema": 1, "mode": parse_mode, "revision": 0},
+        status=Paper.Status.READY if parse_mode != "mineru" else Paper.Status.QUEUED,
+    )
     folder = settings.DATA_ROOT / str(paper.id)
     folder.mkdir(parents=True, exist_ok=False)
     files = []
@@ -1199,8 +1260,9 @@ def _upload_photos(request, uploads, *, material_type: str = Paper.MaterialType.
     if parse_mode != "mineru":
         try:
             if parse_mode == "auto":
-                paper = intake.prepare_auto(paper, allow_cloud=request.POST.get("allow_cloud") == "1",
-                    cloud_ready=_cloud_cut_ready())
+                paper = intake.prepare_auto(
+                    paper, allow_cloud=request.POST.get("allow_cloud") == "1", cloud_ready=_cloud_cut_ready()
+                )
             else:
                 intake.prepare(paper, parse_mode)
         except Exception as exc:
@@ -1223,13 +1285,17 @@ def paper_page_order(request, paper_id):
         return _error("只有几张照片合成的试卷可以调整页序")
     if question_layout.ordinary_deleted(paper).exists():
         return _error("回收站里还有题卡；请先恢复这些题卡，再调整页序", 409)
-    if paper.status not in (Paper.Status.READY, Paper.Status.FAILED, Paper.Status.NEEDS_GROUPING) \
-            or (not paper.blocks.exists() and (paper.processing_plan or {}).get("mode") not in {"manual", "native"}):
+    if paper.status not in (Paper.Status.READY, Paper.Status.FAILED, Paper.Status.NEEDS_GROUPING) or (
+        not paper.blocks.exists() and (paper.processing_plan or {}).get("mode") not in {"manual", "native"}
+    ):
         return _error("这份试卷还在处理中，稍后再调整页序")
     payload = _body(request) or {}
     order = payload.get("order")
-    if not isinstance(order, list) or sorted(order) != list(range(count)) \
-            or any(isinstance(v, bool) or not isinstance(v, int) for v in order):
+    if (
+        not isinstance(order, list)
+        or sorted(order) != list(range(count))
+        or any(isinstance(v, bool) or not isinstance(v, int) for v in order)
+    ):
         return _error("页序不正确")
     if order == list(range(count)):
         info = dict(paper.photos)
@@ -1279,12 +1345,7 @@ def _remap_page_items(items, page_mapping: dict[int, int], seq_mapping: dict[int
 
 
 def _copy_split_question(
-    question: Question,
-    *,
-    paper: Paper,
-    group: QuestionGroup,
-    page_mapping: dict[int, int],
-    seq_mapping: dict[int, int],
+    question: Question, *, paper: Paper, group: QuestionGroup, page_mapping: dict[int, int], seq_mapping: dict[int, int]
 ) -> Question | None:
     """Preserve an already-read card only when all of its source regions stay together."""
     source_items = [
@@ -1306,8 +1367,9 @@ def _copy_split_question(
         regions_auto=_remap_page_items(question.regions_auto, page_mapping),
         start_source=question.start_source,
         source_kind=question.source_kind,
-        source_anchor_seq=(seq_mapping.get(question.source_anchor_seq)
-                           if question.source_anchor_seq is not None else None),
+        source_anchor_seq=(
+            seq_mapping.get(question.source_anchor_seq) if question.source_anchor_seq is not None else None
+        ),
         figure_candidates=_remap_page_items(question.figure_candidates, page_mapping, seq_mapping),
         figures=_remap_page_items(question.figures, page_mapping),
         figure_review=deepcopy(question.figure_review),
@@ -1354,9 +1416,7 @@ def paper_split(request, paper_id):
     is_pdf_source = paper.kind in {"pdf", "docx"} and render_source.suffix.lower() == ".pdf"
     if not is_photo_source and not is_pdf_source:
         return _error("这项任务没有可安全拆分的照片或 PDF 原稿")
-    if is_pdf_source and any(
-        group != list(range(min(group), max(group) + 1)) for group in groups
-    ):
+    if is_pdf_source and any(group != list(range(min(group), max(group) + 1)) for group in groups):
         return _error("PDF 只能按连续页段拆分，请重新核对分组")
     if paper.archived:
         return _error("这项任务已经归档，不能重复拆分")
@@ -1400,13 +1460,31 @@ def paper_split(request, paper_id):
                     sha256=hashlib.sha256(
                         f"{paper.sha256}:split:{','.join(map(str, source_pages))}".encode()
                     ).hexdigest(),
-                    status=(Paper.Status.READY if (paper.processing_plan or {}).get("mode") in {"manual", "native"}
-                            else Paper.Status.SEGMENTING if selected_blocks else Paper.Status.QUEUED),
-                    processing_plan=({"schema": 1, "revision": 0, "mode": paper.processing_plan["mode"],
-                        "pages": [{"page_idx": page_mapping[item["page_idx"]], "mode": item.get("mode", "manual"),
-                                   "warnings": deepcopy(item.get("warnings", []))}
-                                  for item in paper.processing_plan.get("pages", []) if item["page_idx"] in page_mapping]}
-                        if (paper.processing_plan or {}).get("mode") in {"manual", "native"} else {}),
+                    status=(
+                        Paper.Status.READY
+                        if (paper.processing_plan or {}).get("mode") in {"manual", "native"}
+                        else Paper.Status.SEGMENTING
+                        if selected_blocks
+                        else Paper.Status.QUEUED
+                    ),
+                    processing_plan=(
+                        {
+                            "schema": 1,
+                            "revision": 0,
+                            "mode": paper.processing_plan["mode"],
+                            "pages": [
+                                {
+                                    "page_idx": page_mapping[item["page_idx"]],
+                                    "mode": item.get("mode", "manual"),
+                                    "warnings": deepcopy(item.get("warnings", [])),
+                                }
+                                for item in paper.processing_plan.get("pages", [])
+                                if item["page_idx"] in page_mapping
+                            ],
+                        }
+                        if (paper.processing_plan or {}).get("mode") in {"manual", "native"}
+                        else {}
+                    ),
                     structure={
                         "confirmed": True,
                         "confirmed_groups": [list(range(len(source_pages)))],
@@ -1415,8 +1493,10 @@ def paper_split(request, paper_id):
                         "source_pages": [page + 1 for page in source_pages],
                         "signals": [],
                     },
-                    notes=[f"由任务“{paper.display_name}”无损拆分；对应原任务第 "
-                           f"{'、'.join(str(page + 1) for page in source_pages)} 页。"],
+                    notes=[
+                        f"由任务“{paper.display_name}”无损拆分；对应原任务第 "
+                        f"{'、'.join(str(page + 1) for page in source_pages)} 页。"
+                    ],
                 )
                 final_folder = data_root / str(child.id)
                 staged = data_root / f".splitting-{child.id}-{uuid.uuid4().hex}"
@@ -1443,7 +1523,7 @@ def paper_split(request, paper_id):
                             shutil.copy2(source_page_file, target_page_file)
                         else:
                             image, straightened = photos.process_photo(
-                                target_raw, clean=source_info.get("enhance", True),
+                                target_raw, clean=source_info.get("enhance", True)
                             )
                             record["straightened"] = straightened
                             image.save(target_page_file, format="JPEG", quality=90, optimize=True)
@@ -1466,12 +1546,7 @@ def paper_split(request, paper_id):
                     child.source_path = str(final_folder / child_files[0]["file"])
                 else:
                     render = staged / "source.pdf"
-                    mineru.write_pdf_slice(
-                        render_source,
-                        render,
-                        min(source_pages),
-                        max(source_pages) + 1,
-                    )
+                    mineru.write_pdf_slice(render_source, render, min(source_pages), max(source_pages) + 1)
                     child.source_path = str(final_folder / render.name)
                 child.pages = imaging.page_sizes(render, "pdf")
                 child.render_path = str(final_folder / render.name)
@@ -1480,44 +1555,50 @@ def paper_split(request, paper_id):
                 question_group = QuestionGroup.objects.create(
                     paper=child,
                     title=child.display_name,
-                    kind=(QuestionGroup.Kind.CHAPTER if child.material_type == Paper.MaterialType.BOOK
-                          else QuestionGroup.Kind.EXAM),
+                    kind=(
+                        QuestionGroup.Kind.CHAPTER
+                        if child.material_type == Paper.MaterialType.BOOK
+                        else QuestionGroup.Kind.EXAM
+                    ),
                     sequence=0,
                     page_start=1,
                     page_end=len(source_pages),
-                    metadata={"pages": list(range(len(source_pages))),
-                              "source_pages": [page + 1 for page in source_pages]},
+                    metadata={
+                        "pages": list(range(len(source_pages))),
+                        "source_pages": [page + 1 for page in source_pages],
+                    },
                 )
                 seq_mapping = {block.seq: sequence for sequence, block in enumerate(selected_blocks)}
-                Block.objects.bulk_create([
-                    Block(
-                        paper=child,
-                        seq=seq_mapping[block.seq],
-                        type=block.type,
-                        page_idx=page_mapping[block.page_idx],
-                        bbox=deepcopy(block.bbox),
-                        text=block.text,
-                    )
-                    for block in selected_blocks
-                ], batch_size=300)
+                Block.objects.bulk_create(
+                    [
+                        Block(
+                            paper=child,
+                            seq=seq_mapping[block.seq],
+                            type=block.type,
+                            page_idx=page_mapping[block.page_idx],
+                            bbox=deepcopy(block.bbox),
+                            text=block.text,
+                        )
+                        for block in selected_blocks
+                    ],
+                    batch_size=300,
+                )
                 for question in source_questions:
                     _copy_split_question(
-                        question,
-                        paper=child,
-                        group=question_group,
-                        page_mapping=page_mapping,
-                        seq_mapping=seq_mapping,
+                        question, paper=child, group=question_group, page_mapping=page_mapping, seq_mapping=seq_mapping
                     )
                 pending_moves.append((staged, final_folder))
                 children.append(child)
 
             structure = deepcopy(paper.structure or {})
-            structure.update({
-                "confirmed": True,
-                "split_children": [str(child.id) for child in children],
-                "split_groups": groups,
-                "split_at": timezone.now().isoformat(),
-            })
+            structure.update(
+                {
+                    "confirmed": True,
+                    "split_children": [str(child.id) for child in children],
+                    "split_groups": groups,
+                    "split_at": timezone.now().isoformat(),
+                }
+            )
             paper.archived = True
             paper.structure = structure
             paper.notes = [*(paper.notes or []), f"已无损拆成 {len(children)} 项任务；原任务保留为归档来源。"]
@@ -1541,11 +1622,14 @@ def paper_split(request, paper_id):
             shutil.rmtree(folder, ignore_errors=True)
         raise
 
-    return JsonResponse({
-        "papers": [paper_json(child) for child in children],
-        "source": paper_json(paper),
-        "message": f"已拆成 {len(children)} 项任务；每一页都已核对且原任务已归档保留。",
-    }, status=201)
+    return JsonResponse(
+        {
+            "papers": [paper_json(child) for child in children],
+            "source": paper_json(paper),
+            "message": f"已拆成 {len(children)} 项任务；每一页都已核对且原任务已归档保留。",
+        },
+        status=201,
+    )
 
 
 @csrf_exempt
@@ -1569,24 +1653,25 @@ def paper_confirm_structure(request, paper_id):
         structure = deepcopy(paper.structure or {})
         groups = structure.get("suggested_groups") or [list(range(len(paper.pages)))]
         scopes = structure.get("suggested_scopes") or []
-        structure.update({
-            "confirmed": True,
-            "confirmed_groups": groups,
-            "confirmed_scopes": scopes,
-            "confirmed_at": timezone.now().isoformat(),
-            # Existing groups may describe the page order before a human
-            # rearrangement. The worker will safely reconcile them with these
-            # confirmed scopes before cutting any card.
-            "groups_need_rebuild": True,
-        })
+        structure.update(
+            {
+                "confirmed": True,
+                "confirmed_groups": groups,
+                "confirmed_scopes": scopes,
+                "confirmed_at": timezone.now().isoformat(),
+                # Existing groups may describe the page order before a human
+                # rearrangement. The worker will safely reconcile them with these
+                # confirmed scopes before cutting any card.
+                "groups_need_rebuild": True,
+            }
+        )
         paper.structure = structure
         paper.status = Paper.Status.SEGMENTING
         paper.error = ""
         paper.save(update_fields=["structure", "status", "error", "updated_at"])
-    return JsonResponse({
-        "paper": paper_json(paper),
-        "message": "已确认属于同一份资料；重复题号会分属不同题组，现已继续切题。",
-    })
+    return JsonResponse(
+        {"paper": paper_json(paper), "message": "已确认属于同一份资料；重复题号会分属不同题组，现已继续切题。"}
+    )
 
 
 @csrf_exempt
@@ -1597,9 +1682,7 @@ def paper_archive(request, paper_id):
     if rejected:
         return rejected
     paper = get_object_or_404(Paper, pk=paper_id)
-    if paper.status in {
-        Paper.Status.QUEUED, Paper.Status.PARSING, Paper.Status.SEGMENTING, Paper.Status.READING,
-    }:
+    if paper.status in {Paper.Status.QUEUED, Paper.Status.PARSING, Paper.Status.SEGMENTING, Paper.Status.READING}:
         return _error("任务正在处理中，完成或失败后再归档")
     if question_layout.ordinary_deleted(paper).exists():
         return _error("回收站里还有题卡；请先恢复这些题卡，再归档任务", 409)
@@ -1659,12 +1742,13 @@ def paper_detail(request, paper_id):
                 live_publications = paper.publications.filter(status=PublishedQuestion.Status.PUBLISHED)
                 if live_publications.exists():
                     count = live_publications.values("question_id").distinct().count()
-                    return _error(
-                        f"这项任务还有 {count} 道题在正式题库里；先在正式题库撤回这几道，才能删除这项任务")
+                    return _error(f"这项任务还有 {count} 道题在正式题库里；先在正式题库撤回这几道，才能删除这项任务")
                 structure = paper.structure or {}
-                if structure.get("split_from") or structure.get("split_children") or Paper.objects.filter(
-                    structure__split_from=paper_id_text,
-                ).exists():
+                if (
+                    structure.get("split_from")
+                    or structure.get("split_children")
+                    or Paper.objects.filter(structure__split_from=paper_id_text).exists()
+                ):
                     return _error("这项任务属于拆分资料，必须保留原稿与追溯关系；可以归档，但不能永久删除")
                 if folder.exists():
                     folder.replace(staged)
@@ -1721,8 +1805,12 @@ def paper_questions_delete(request, paper_id):
         return rejected
     payload = _body(request)
     raw_ids = payload.get("question_ids") if payload is not None else None
-    if (not isinstance(raw_ids, list) or not raw_ids or len(raw_ids) > 1000
-            or any(type(value) is not int or value < 1 for value in raw_ids)):
+    if (
+        not isinstance(raw_ids, list)
+        or not raw_ids
+        or len(raw_ids) > 1000
+        or any(type(value) is not int or value < 1 for value in raw_ids)
+    ):
         return _error("请选择 1–1000 道需要删除的题目")
     question_ids = list(dict.fromkeys(raw_ids))
     paper = get_object_or_404(Paper, pk=paper_id)
@@ -1733,12 +1821,14 @@ def paper_questions_delete(request, paper_id):
     except ValueError as error:
         return _error(str(error), 409)
     batch.refresh_from_db()
-    return JsonResponse({
-        "deleted": deleted,
-        "already_deleted": deleted == 0,
-        "undo_batch": _question_trash_json(batch),
-        "paper": paper_json(Paper.objects.get(pk=paper_id)),
-    })
+    return JsonResponse(
+        {
+            "deleted": deleted,
+            "already_deleted": deleted == 0,
+            "undo_batch": _question_trash_json(batch),
+            "paper": paper_json(Paper.objects.get(pk=paper_id)),
+        }
+    )
 
 
 def paper_question_trash(request, paper_id):
@@ -1746,11 +1836,12 @@ def paper_question_trash(request, paper_id):
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
     paper = get_object_or_404(Paper, pk=paper_id)
-    batches = QuestionDeletionBatch.objects.filter(
-        paper=paper,
-        restored_at__isnull=True,
-        questions__deleted_at__isnull=False,
-    ).exclude(origin=QuestionDeletionBatch.Origin.LAYOUT).distinct().order_by("-created_at")
+    batches = (
+        QuestionDeletionBatch.objects.filter(paper=paper, restored_at__isnull=True, questions__deleted_at__isnull=False)
+        .exclude(origin=QuestionDeletionBatch.Origin.LAYOUT)
+        .distinct()
+        .order_by("-created_at")
+    )
     return JsonResponse({"batches": [_question_trash_json(batch) for batch in batches]})
 
 
@@ -1768,18 +1859,14 @@ def question_deletion_restore(request, paper_id, batch_id):
         paper = get_object_or_404(Paper.objects.select_for_update(), pk=paper_id)
         if paper.status not in _QUESTION_MUTATION_STATUSES:
             return _error("任务正在处理中；只有待终审状态可以恢复题卡", 409)
-        batch = get_object_or_404(
-            QuestionDeletionBatch.objects.select_for_update(), pk=batch_id, paper=paper,
-        )
+        batch = get_object_or_404(QuestionDeletionBatch.objects.select_for_update(), pk=batch_id, paper=paper)
         if batch.origin == QuestionDeletionBatch.Origin.LAYOUT:
             return _error("这是原卷布局历史，请在原卷窗口撤销整次操作，不能单独恢复源题。", 409)
         if batch.restored_at is not None:
             restored = 0
         else:
             rows = Question.all_objects.select_for_update().filter(
-                paper=paper,
-                deletion_batch=batch,
-                deleted_at__isnull=False,
+                paper=paper, deletion_batch=batch, deleted_at__isnull=False
             )
             restored = rows.count()
             rows.update(deleted_at=None, deletion_batch=None)
@@ -1788,17 +1875,20 @@ def question_deletion_restore(request, paper_id, batch_id):
             batch.save(update_fields=["restored_at"])
             _sync_paper_question_counts(paper)
     batch.refresh_from_db()
-    return JsonResponse({
-        "restored": restored,
-        "already_restored": restored == 0,
-        "undo_batch": _question_trash_json(batch),
-        "questions": [
-            question_json(question)
-            for question in Question.objects.filter(pk__in=batch.question_ids)
-            .select_related("group").order_by("group__sequence", "number", "id")
-        ],
-        "paper": paper_json(Paper.objects.get(pk=paper_id)),
-    })
+    return JsonResponse(
+        {
+            "restored": restored,
+            "already_restored": restored == 0,
+            "undo_batch": _question_trash_json(batch),
+            "questions": [
+                question_json(question)
+                for question in Question.objects.filter(pk__in=batch.question_ids)
+                .select_related("group")
+                .order_by("group__sequence", "number", "id")
+            ],
+            "paper": paper_json(Paper.objects.get(pk=paper_id)),
+        }
+    )
 
 
 def page_preview(request, paper_id, page: int):
@@ -1858,20 +1948,27 @@ def paper_stop(request, paper_id):
             paper.save(update_fields=["processing_plan", "status", "error", "updated_at"])
             # Pending reads become obsolete; completed/manual bodies and every
             # approval/publication remain untouched.
-            paper.questions.filter(models.Q(ocr_pending=True) | models.Q(reread_requested=True) | models.Q(
-                processing_mode="auto", state__in=[Question.State.WAITING, Question.State.READING]
-            )).update(content_revision=models.F("content_revision") + 1,
-                reread_requested=False, ocr_pending=False)
+            paper.questions.filter(
+                models.Q(ocr_pending=True)
+                | models.Q(reread_requested=True)
+                | models.Q(processing_mode="auto", state__in=[Question.State.WAITING, Question.State.READING])
+            ).update(content_revision=models.F("content_revision") + 1, reread_requested=False, ocr_pending=False)
             RegionRead.objects.filter(question__paper=paper, status__in=region_reads.ACTIVE).update(
-                status=RegionRead.Status.FAILED, error="已停止本机处理，框选结果不再采用。", updated_at=timezone.now())
+                status=RegionRead.Status.FAILED, error="已停止本机处理，框选结果不再采用。", updated_at=timezone.now()
+            )
         try:
             # Also wake callers holding an account lease in this worker. The
             # revision is authoritative, so failure to write cannot block stop.
             (paper_dir(paper) / mineru.CANCEL_FILE).write_text("stop", encoding="utf-8")
         except OSError:
             pass
-    return JsonResponse({"paper": paper_json(paper), "stopped": True,
-        "message": "已停止本机处理，原文件和已有成果已保留。可以重试或删除未入库任务。"})
+    return JsonResponse(
+        {
+            "paper": paper_json(paper),
+            "stopped": True,
+            "message": "已停止本机处理，原文件和已有成果已保留。可以重试或删除未入库任务。",
+        }
+    )
 
 
 @csrf_exempt
@@ -1886,12 +1983,18 @@ def paper_read_cut_questions(request, paper_id):
     if payload is None:
         return _error("请求内容不正确")
     ids = payload.get("question_ids", [])
-    if (not isinstance(ids, list) or len(ids) > 2000
-            or any(type(value) is not int or value < 1 for value in ids) or len(set(ids)) != len(ids)):
+    if (
+        not isinstance(ids, list)
+        or len(ids) > 2000
+        or any(type(value) is not int or value < 1 for value in ids)
+        or len(set(ids)) != len(ids)
+    ):
         return _error("请提供不重复的题目编号列表")
     revisions = payload.get("revisions", {})
-    if (not isinstance(revisions, dict) or any(not isinstance(key, str) or not re.fullmatch(r"[1-9][0-9]*", key)
-            or type(value) is not int or value < 0 for key, value in revisions.items())):
+    if not isinstance(revisions, dict) or any(
+        not isinstance(key, str) or not re.fullmatch(r"[1-9][0-9]*", key) or type(value) is not int or value < 0
+        for key, value in revisions.items()
+    ):
         return _error("题目版本格式不正确")
     skipped, queued_ids, question_revisions = [], [], {}
     with transaction.atomic():
@@ -1909,13 +2012,23 @@ def paper_read_cut_questions(request, paper_id):
         if (ids and selected_ids != set(ids)) or not {int(key) for key in revisions}.issubset(selected_ids):
             return _error("所选题目不属于当前资料或已在回收站，请刷新后重选", 409)
         if demo.is_demo(paper):
-            return JsonResponse({"paper": paper_json(paper), "queued": 0, "queued_ids": [],
-                "converted_ids": [], "question_revisions": {}, "skipped": [],
-                "message": "练习范围已保存，可直接对照原图核对；练习不调用 AI 识读。"})
+            return JsonResponse(
+                {
+                    "paper": paper_json(paper),
+                    "queued": 0,
+                    "queued_ids": [],
+                    "converted_ids": [],
+                    "question_revisions": {},
+                    "skipped": [],
+                    "message": "练习范围已保存，可直接对照原图核对；练习不调用 AI 识读。",
+                }
+            )
         converted_ids = promote_saved_readings(paper.pk)
         if converted_ids:
             questions = list(query.order_by("number", "id"))
-        published_ids = set(PublishedQuestion.objects.filter(question_id__in=selected_ids).values_list("question_id", flat=True))
+        published_ids = set(
+            PublishedQuestion.objects.filter(question_id__in=selected_ids).values_list("question_id", flat=True)
+        )
         candidates = []
         for question in questions:
             suggestion = question.ocr_suggestion if isinstance(question.ocr_suggestion, dict) else {}
@@ -1925,8 +2038,12 @@ def paper_read_cut_questions(request, paper_id):
                 reason = "已有文字正文，已保留"
             elif question.ocr_pending or question.reread_requested:
                 reason = "已在识读队列中"
-            elif (suggestion.get("revision") == question.content_revision and not suggestion.get("error")
-                    and isinstance(suggestion.get("stem"), str) and suggestion["stem"].strip()):
+            elif (
+                suggestion.get("revision") == question.content_revision
+                and not suggestion.get("error")
+                and isinstance(suggestion.get("stem"), str)
+                and suggestion["stem"].strip()
+            ):
                 reason = "已有识读结果，但当前原卷或人工内容受保护，请对照原卷检查"
             elif question.edited and (question.stem.strip() or question.options):
                 reason = "已有人工修改的文字，已保留"
@@ -1942,9 +2059,11 @@ def paper_read_cut_questions(request, paper_id):
                     return _error("所选题目的范围或内容已发生变化，请刷新后再识读", 409)
                 candidates.append(question)
         if candidates and not _vision_ready(paper):
-            return _error(_reader_unavailable_sentence(paper)
-                + "请在“设置 → 服务与密钥”里补上密钥；也可以直接原图审核，"
-                "或由当前 AI 助手对照原图改字。", 409)
+            return _error(
+                _reader_unavailable_sentence(paper) + "请在“设置 → 服务与密钥”里补上密钥；也可以直接原图审核，"
+                "或由当前 AI 助手对照原图改字。",
+                409,
+            )
         now = timezone.now()
         for question in candidates:
             # Same invalidation as a single reread, once per newly queued card.
@@ -1956,13 +2075,24 @@ def paper_read_cut_questions(request, paper_id):
             question.save(update_fields=["content_revision", "reread_requested", "ocr_pending", "updated_at"])
             queued_ids.append(question.pk)
             question_revisions[str(question.pk)] = question.content_revision
-    message = (f"已提交 {len(queued_ids)} 道已切题目，识读完成后可直接审核。"
-               if queued_ids else "没有新的题目需要识读；可直接查看、审核已有结果。")
+    message = (
+        f"已提交 {len(queued_ids)} 道已切题目，识读完成后可直接审核。"
+        if queued_ids
+        else "没有新的题目需要识读；可直接查看、审核已有结果。"
+    )
     if converted_ids:
         message = f"已恢复 {len(converted_ids)} 道已有识读结果，无需重新识读。" + message
-    return JsonResponse({"paper": paper_json(paper), "queued": len(queued_ids), "queued_ids": queued_ids,
-                         "converted_ids": converted_ids, "question_revisions": question_revisions,
-                         "skipped": skipped, "message": message})
+    return JsonResponse(
+        {
+            "paper": paper_json(paper),
+            "queued": len(queued_ids),
+            "queued_ids": queued_ids,
+            "converted_ids": converted_ids,
+            "question_revisions": question_revisions,
+            "skipped": skipped,
+            "message": message,
+        }
+    )
 
 
 @csrf_exempt
@@ -1977,12 +2107,18 @@ def paper_stop_cut_reading(request, paper_id):
     if payload is None:
         return _error("请求内容不正确")
     ids = payload.get("question_ids", [])
-    if (not isinstance(ids, list) or len(ids) > 2000
-            or any(type(value) is not int or value < 1 for value in ids) or len(set(ids)) != len(ids)):
+    if (
+        not isinstance(ids, list)
+        or len(ids) > 2000
+        or any(type(value) is not int or value < 1 for value in ids)
+        or len(set(ids)) != len(ids)
+    ):
         return _error("请提供不重复的题目编号列表")
     revisions = payload.get("revisions", {})
-    if (not isinstance(revisions, dict) or any(not isinstance(key, str) or not re.fullmatch(r"[1-9][0-9]*", key)
-            or type(value) is not int or value < 0 for key, value in revisions.items())):
+    if not isinstance(revisions, dict) or any(
+        not isinstance(key, str) or not re.fullmatch(r"[1-9][0-9]*", key) or type(value) is not int or value < 0
+        for key, value in revisions.items()
+    ):
         return _error("题目版本格式不正确")
     stopped_ids, question_revisions = [], {}
     with transaction.atomic():
@@ -1997,10 +2133,16 @@ def paper_stop_cut_reading(request, paper_id):
         selected_ids = {question.pk for question in questions}
         if (ids and selected_ids != set(ids)) or not {int(key) for key in revisions}.issubset(selected_ids):
             return _error("所选题目不属于当前资料或已在回收站，请刷新后重选", 409)
-        pending = [question for question in questions if
-                   (source_images.is_image(question) and (question.ocr_pending or question.reread_requested))
-                   or (question.processing_mode == "manual" and question.body_mode == "text" and question.ocr_pending)]
-        if any(revisions.get(str(question.pk), question.content_revision) != question.content_revision for question in pending):
+        pending = [
+            question
+            for question in questions
+            if (source_images.is_image(question) and (question.ocr_pending or question.reread_requested))
+            or (question.processing_mode == "manual" and question.body_mode == "text" and question.ocr_pending)
+        ]
+        if any(
+            revisions.get(str(question.pk), question.content_revision) != question.content_revision
+            for question in pending
+        ):
             return _error("识读请求已发生变化，请刷新后再停止", 409)
         for question in pending:
             question.content_revision += 1
@@ -2011,10 +2153,17 @@ def paper_stop_cut_reading(request, paper_id):
             question.save(update_fields=["content_revision", "ocr_pending", "reread_requested", "state", "updated_at"])
             stopped_ids.append(question.pk)
             question_revisions[str(question.pk)] = question.content_revision
-    return JsonResponse({"paper": paper_json(paper), "stopped": len(stopped_ids), "stopped_ids": stopped_ids,
-        "question_revisions": question_revisions,
-        "message": "已停止本机识读，原图和已有成果已保留；本机不再采用本轮结果，已发出的远端请求可能仍在结束。"
-                   if stopped_ids else "没有正在等待的已切题目识读，已有成果已保留。"})
+    return JsonResponse(
+        {
+            "paper": paper_json(paper),
+            "stopped": len(stopped_ids),
+            "stopped_ids": stopped_ids,
+            "question_revisions": question_revisions,
+            "message": "已停止本机识读，原图和已有成果已保留；本机不再采用本轮结果，已发出的远端请求可能仍在结束。"
+            if stopped_ids
+            else "没有正在等待的已切题目识读，已有成果已保留。",
+        }
+    )
 
 
 @csrf_exempt
@@ -2072,24 +2221,32 @@ def paper_retry(request, paper_id):
                 fields.append("notes")
         # 0009 之前失败的教材没有 ImportChunk 记录。重试时按现行策略补建，
         # 避免再次把整本书作为一次 MinerU 请求发送。
-        if paper.kind == "pdf" and paper.pages and not paper.import_chunks.exists() and \
-                import_planning.pdf_requires_chunks(
-                    len(paper.pages), paper.material_type, mineru.MAX_PDF_PAGES,
-                ):
-            chunk_limit = import_planning.pdf_chunk_page_limit(
-                paper.material_type, mineru.MAX_PDF_PAGES,
+        if (
+            paper.kind == "pdf"
+            and paper.pages
+            and not paper.import_chunks.exists()
+            and import_planning.pdf_requires_chunks(len(paper.pages), paper.material_type, mineru.MAX_PDF_PAGES)
+        ):
+            chunk_limit = import_planning.pdf_chunk_page_limit(paper.material_type, mineru.MAX_PDF_PAGES)
+            ImportChunk.objects.bulk_create(
+                [
+                    ImportChunk(paper=paper, **chunk.as_record())
+                    for chunk in import_planning.plan_pdf_chunks(len(paper.pages), chunk_limit)
+                ]
             )
-            ImportChunk.objects.bulk_create([
-                ImportChunk(paper=paper, **chunk.as_record())
-                for chunk in import_planning.plan_pdf_chunks(len(paper.pages), chunk_limit)
-            ])
         # Continuing missing cuts keeps old manual cards alongside a fresh
         # MinerU parse.  Their presence is not evidence that parsing succeeded:
         # a failed submit/poll/download must retry parsing before reading cards.
         retry_continued_parse = not has_blocks and plan.get("continue_preserve_existing") is True
-        paper.status = Paper.Status.QUEUED if retry_continued_parse else \
-            Paper.Status.SEGMENTING if has_blocks and not has_questions else \
-            Paper.Status.READING if has_questions else Paper.Status.QUEUED
+        paper.status = (
+            Paper.Status.QUEUED
+            if retry_continued_parse
+            else Paper.Status.SEGMENTING
+            if has_blocks and not has_questions
+            else Paper.Status.READING
+            if has_questions
+            else Paper.Status.QUEUED
+        )
         paper.error = ""
         paper.save(update_fields=fields)
         # A stop request the worker never saw must not stop the retry (1.10.8).
@@ -2098,11 +2255,12 @@ def paper_retry(request, paper_id):
         if plan.get("continue_preserve_existing") is True:
             retry_cards = retry_cards.exclude(pk__in=plan.get("continue_existing_question_ids") or [])
         retry_cards.update(state=Question.State.WAITING)
-    return JsonResponse({
-        "paper": paper_json(paper),
-        "message": "已按教材模式分片重试" if requested_type == Paper.MaterialType.BOOK
-        else "已重试处理",
-    })
+    return JsonResponse(
+        {
+            "paper": paper_json(paper),
+            "message": "已按教材模式分片重试" if requested_type == Paper.MaterialType.BOOK else "已重试处理",
+        }
+    )
 
 
 @csrf_exempt
@@ -2136,8 +2294,7 @@ def _resegment_safety_error(paper: Paper) -> str:
     if question_layout.ordinary_deleted(paper).exists():
         return "回收站里还有题卡；请先恢复这些题卡，再重新切题"
     if paper.questions.filter(
-        models.Q(state__in=[Question.State.WAITING, Question.State.READING])
-        | models.Q(reread_requested=True)
+        models.Q(state__in=[Question.State.WAITING, Question.State.READING]) | models.Q(reread_requested=True)
     ).exists():
         return "仍有题卡正在识读或等待重读；完成后再重新切题"
     return ""
@@ -2163,7 +2320,12 @@ def paper_resegment(request, paper_id):
         fields = ["status", "error", "updated_at"]
         if (paper.processing_plan or {}).get("continue_preserve_existing") is True:
             plan = deepcopy(paper.processing_plan)
-            for key in ("continue_preserve_existing", "continue_revision", "continue_existing_question_ids", "continue_render_sha256"):
+            for key in (
+                "continue_preserve_existing",
+                "continue_revision",
+                "continue_existing_question_ids",
+                "continue_render_sha256",
+            ):
                 plan.pop(key, None)
             paper.processing_plan = plan
             fields.append("processing_plan")
@@ -2193,9 +2355,11 @@ def approve_green(request, paper_id):
         # Yellow too: a figure review saved under an older rule can make a card
         # green on screen (“已自动排除疑似多余图”) while the database still says
         # yellow.  Such cards were shown as green and left out here (1.10.4).
-        questions = list(paper.questions.select_for_update().select_related("paper").filter(
-            state__in=[Question.State.GREEN, Question.State.YELLOW],
-        ))
+        questions = list(
+            paper.questions.select_for_update()
+            .select_related("paper")
+            .filter(state__in=[Question.State.GREEN, Question.State.YELLOW])
+        )
         # Approving changes nothing the figure review reads, so each card's is worked out once.
         with reusing_reviews():
             for question in questions:
@@ -2206,11 +2370,14 @@ def approve_green(request, paper_id):
                 # is why bulk approval looked like it did nothing.
                 if question.state != Question.State.GREEN:
                     pending = [str(flag) for flag in (question.flags or [])][:3]
-                    skipped.append({
-                        "number": question.number,
-                        "reason": ("还有待核查的提醒：" + "；".join(pending)) if pending
-                                  else "这道题还有待核查的提醒，请先处理",
-                    })
+                    skipped.append(
+                        {
+                            "number": question.number,
+                            "reason": ("还有待核查的提醒：" + "；".join(pending))
+                            if pending
+                            else "这道题还有待核查的提醒，请先处理",
+                        }
+                    )
                     continue
                 if not question.stem.strip():
                     skipped.append({"number": question.number, "reason": "还没读出题干，请先改字或重新识读"})
@@ -2222,19 +2389,31 @@ def approve_green(request, paper_id):
                     skipped.append({"number": question.number, "reason": "题型还没定，请先在题号旁边选一下题型"})
                     continue
                 # Already passed by the same kind of reviewer (or by a person): nothing to do.
-                if library.approval_is_current(question) \
-                        and library.approval_source(question) in {approver[0], "human"}:
+                if library.approval_is_current(question) and library.approval_source(question) in {
+                    approver[0],
+                    "human",
+                }:
                     continue
                 if not library.approve(question, now=now, source=approver[0], agent=approver[1]):
                     skipped.append({"number": question.number, "reason": "这道题的通过状态没能更新，请重试"})
                     continue
                 question.updated_at = now
                 changed.append(question)
-        Question.objects.bulk_update(changed, [
-            "approved", "approved_at", "approved_content_hash", "approval_source", "approval_agent", "updated_at",
-            # the review as shown (and approved), so the card stays green
-            "figure_review", "flags", "state",
-        ])
+        Question.objects.bulk_update(
+            changed,
+            [
+                "approved",
+                "approved_at",
+                "approved_content_hash",
+                "approval_source",
+                "approval_agent",
+                "updated_at",
+                # the review as shown (and approved), so the card stays green
+                "figure_review",
+                "flags",
+                "state",
+            ],
+        )
         for question in changed:
             library.confirm_published_review(question)
             if not demo.is_demo(paper):
@@ -2247,8 +2426,9 @@ def approve_green(request, paper_id):
                     question.save()
                     publication_problems.append(f"第 {question.number} 题保存未完成，请重试或修复来源图片。")
     count = sum(question.approved for question in changed)
-    return JsonResponse({"approved": count, "problems": publication_problems,
-                         "skipped": skipped, "paper": paper_json(paper)})
+    return JsonResponse(
+        {"approved": count, "problems": publication_problems, "skipped": skipped, "paper": paper_json(paper)}
+    )
 
 
 @csrf_exempt
@@ -2267,13 +2447,25 @@ def publish_paper(request, paper_id):
     # 1.10.5: the page sends the cards in small batches (question_ids) so it can
     # show how far it got; without them every approved card is taken (tiyouju).
     ids = payload.get("question_ids")
-    if ids is not None and (not isinstance(ids, list) or len(ids) > 200
-                            or not all(isinstance(value, int) and not isinstance(value, bool) for value in ids)):
+    if ids is not None and (
+        not isinstance(ids, list)
+        or len(ids) > 200
+        or not all(isinstance(value, int) and not isinstance(value, bool) for value in ids)
+    ):
         return _error("question_ids 需为最多 200 个题卡编号")
-    questions = paper.questions.filter(approved=True).select_related("paper", "group").prefetch_related(
-        Prefetch("publications", queryset=PublishedQuestion.objects.only(*library.LIVE_PUBLICATION_FIELDS,
-                                                                          "review_source").order_by("-version"),
-                 to_attr="versions"))
+    questions = (
+        paper.questions.filter(approved=True)
+        .select_related("paper", "group")
+        .prefetch_related(
+            Prefetch(
+                "publications",
+                queryset=PublishedQuestion.objects.only(*library.LIVE_PUBLICATION_FIELDS, "review_source").order_by(
+                    "-version"
+                ),
+                to_attr="versions",
+            )
+        )
+    )
     if ids is not None:
         questions = questions.filter(pk__in=ids)
     created, unchanged, problems = 0, 0, []
@@ -2288,8 +2480,7 @@ def publish_paper(request, paper_id):
             continue
         created += int(is_new)
         unchanged += int(not is_new)
-    return JsonResponse({"created": created, "unchanged": unchanged, "problems": problems,
-                         "paper": paper_json(paper)})
+    return JsonResponse({"created": created, "unchanged": unchanged, "problems": problems, "paper": paper_json(paper)})
 
 
 @csrf_exempt
@@ -2308,10 +2499,14 @@ def demo_paper(request):
         paper = demo.create_demo_paper(reset=payload.get("reset") is True, course=course)
     except FileNotFoundError as error:
         return _error(str(error), 500)
-    return JsonResponse({"paper": paper_json(paper),
-        "restart_required": course == "basics" and (paper.structure or {}).get("course") != "basics",
-        "practice": {
-        "library_url": f"/practice/{paper.pk}", "export_url": f"/api/demo/{paper.pk}/export-pdf"}}, status=201)
+    return JsonResponse(
+        {
+            "paper": paper_json(paper),
+            "restart_required": course == "basics" and (paper.structure or {}).get("course") != "basics",
+            "practice": {"library_url": f"/practice/{paper.pk}", "export_url": f"/api/demo/{paper.pk}/export-pdf"},
+        },
+        status=201,
+    )
 
 
 @csrf_exempt
@@ -2326,11 +2521,19 @@ def add_question(request, paper_id):
     if payload is None:
         return _error("请求内容不正确")
     try:
-        operation, repeated = question_layout.mutate(paper.pk, {
-            "kind": "add", "layout_revision": payload.get("layout_revision", paper.layout_revision),
-            "client_request_id": payload.get("client_request_id", str(uuid.uuid4())), "sources": [],
-            "targets": [{key: payload[key] for key in ("number", "group_id", "question_type", "regions") if key in payload}],
-        }, request_payload={"route": "legacy-add", "payload": payload})
+        operation, repeated = question_layout.mutate(
+            paper.pk,
+            {
+                "kind": "add",
+                "layout_revision": payload.get("layout_revision", paper.layout_revision),
+                "client_request_id": payload.get("client_request_id", str(uuid.uuid4())),
+                "sources": [],
+                "targets": [
+                    {key: payload[key] for key in ("number", "group_id", "question_type", "regions") if key in payload}
+                ],
+            },
+            request_payload={"route": "legacy-add", "payload": payload},
+        )
         data = _layout_response(paper.pk, operation, already_applied=repeated)
         question = Question.objects.filter(pk__in=operation.target_ids).select_related("paper", "group").first()
         data["question"] = question_json(question) if question else None
@@ -2349,11 +2552,14 @@ def _layout_response(paper_id, operation=None, **extra):
     questions = list(paper.questions.select_related("paper", "group").order_by("group__sequence", "number", "id"))
     question_layout.prepare_fingerprints(questions)
     latest = question_layout._latest(paper)
-    return {"paper": paper_json(paper), "questions": [question_json(row) for row in questions],
-            "layout_revision": paper.layout_revision,
-            "operation": question_layout.operation_json(operation, paper) if operation else None,
-            "latest_operation": question_layout.operation_json(latest, paper, snapshots=False) if latest else None,
-            **extra}
+    return {
+        "paper": paper_json(paper),
+        "questions": [question_json(row) for row in questions],
+        "layout_revision": paper.layout_revision,
+        "operation": question_layout.operation_json(operation, paper) if operation else None,
+        "latest_operation": question_layout.operation_json(latest, paper, snapshots=False) if latest else None,
+        **extra,
+    }
 
 
 @csrf_exempt
@@ -2393,6 +2599,7 @@ def paper_question_layout_undo(request, paper_id, operation_id):
 
 
 # ---------------------------------------------------------------- 题卡
+
 
 def _question(question_id) -> Question:
     return get_object_or_404(Question.objects.select_related("paper"), pk=question_id)
@@ -2461,8 +2668,11 @@ def _reader_unavailable_sentence(paper: Paper | None) -> str:
     """
     readiness = _reader_readiness(paper)
     service = str(readiness.get("label") or "")
-    return (f"还没有可用的看图读题模型：所选的“{service}”还没有 API Key，本机也没有其他已配置的服务。" if service
-        else "还没有可用的看图读题模型，本机没有已配置的服务。")
+    return (
+        f"还没有可用的看图读题模型：所选的“{service}”还没有 API Key，本机也没有其他已配置的服务。"
+        if service
+        else "还没有可用的看图读题模型，本机没有已配置的服务。"
+    )
 
 
 def _clear_approval(question: Question) -> None:
@@ -2500,12 +2710,12 @@ def _apply_figure_review(question: Question, review: dict) -> None:
         # 属于本题，请确认是否需要” is answered (it stayed on cards confirmed 无图).
         question.flags = [flag for flag in question.flags if flag not in DECISION_FLAGS]
     if review.get("status") == BLOCKED_MISSING:
-        question.flags.append(FLAG_NO_FIGURE if review.get("cue_matches") and not question.figures
-                              else FLAG_UNFOUND_FIGURE)
+        question.flags.append(
+            FLAG_NO_FIGURE if review.get("cue_matches") and not question.figures else FLAG_UNFOUND_FIGURE
+        )
     elif review.get("status") == CONFLICT:
         question.flags.append(
-            FLAG_UNFOUND_FIGURE if "candidate_unclassified" in (review.get("signals") or [])
-            else FLAG_UNCUED_FIGURE
+            FLAG_UNFOUND_FIGURE if "candidate_unclassified" in (review.get("signals") or []) else FLAG_UNCUED_FIGURE
         )
     if question.state in library.REVIEWABLE_STATES:
         question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
@@ -2526,7 +2736,9 @@ def question_region_read(request, question_id):
     if request.method == "POST" and demo.is_demo(question.paper):
         return _error("示例练习不调用云服务。可以练习画框，再对照原卷手工改字。", 409)
     request_id = payload.get("client_request_id")
-    if request_id is not None and (not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", request_id)):
+    if request_id is not None and (
+        not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", request_id)
+    ):
         return _error("识读请求编号不正确")
     if request.method == "DELETE":
         read_id = payload.get("read_id")
@@ -2539,7 +2751,10 @@ def question_region_read(request, question_id):
                 jobs = jobs.filter(pk=read_id)
             if request_id is not None:
                 matched = jobs.filter(recommendation__client_request_id=request_id).first()
-                if matched is None and not question.region_reads.filter(recommendation__client_request_id=request_id).exists():
+                if (
+                    matched is None
+                    and not question.region_reads.filter(recommendation__client_request_id=request_id).exists()
+                ):
                     matched = RegionRead(question=question, page_idx=0, bbox=[], target="auto")
                 if matched is not None:
                     matched.status, matched.error = RegionRead.Status.FAILED, "已取消本机等待"
@@ -2548,7 +2763,9 @@ def question_region_read(request, question_id):
             else:
                 jobs.delete()
         return JsonResponse({"question": question_json(question)})
-    if "revision" in payload and (type(payload["revision"]) is not int or payload["revision"] != question.content_revision):
+    if "revision" in payload and (
+        type(payload["revision"]) is not int or payload["revision"] != question.content_revision
+    ):
         return _error("题目已发生变化，请刷新后重新框选", 409)
     target = payload.get("target", "auto")
     if target not in region_reads.TARGETS:
@@ -2566,14 +2783,18 @@ def question_region_read(request, question_id):
         question = get_object_or_404(Question.objects.select_for_update().select_related("paper"), pk=question_id)
         if "revision" in payload and payload["revision"] != question.content_revision:
             return _error("题目已发生变化，请刷新后重新框选", 409)
-        if request_id is not None and question.region_reads.filter(recommendation__client_request_id=request_id).exists():
+        if (
+            request_id is not None
+            and question.region_reads.filter(recommendation__client_request_id=request_id).exists()
+        ):
             return JsonResponse({"question": question_json(question)})
         question.region_reads.exclude(recommendation__cancelled=True, recommendation__has_key="cancelled").delete()
         recommendation = region_reads.queued_recommendation(question)
         if request_id is not None:
             recommendation["client_request_id"] = request_id
-        RegionRead.objects.create(question=question, page_idx=page_idx, bbox=bbox, target=target,
-                                  recommendation=recommendation)
+        RegionRead.objects.create(
+            question=question, page_idx=page_idx, bbox=bbox, target=target, recommendation=recommendation
+        )
     return JsonResponse({"question": question_json(question)})
 
 
@@ -2593,13 +2814,23 @@ def question_action(request, question_id, action: str):
         if actor is None:
             return _error("by 只能是 human 或 ai")
         try:
-            operation, repeated = question_layout.mutate(question.paper_id, {
-                "kind": "regions", "layout_revision": payload.get("layout_revision", question.paper.layout_revision),
-                "client_request_id": payload.get("client_request_id", str(uuid.uuid4())),
-                "sources": [{"id": question.pk, "revision": payload.get("revision", question.content_revision),
-                             "fingerprint": payload.get("fingerprint", question_layout.fingerprint(question))}],
-                "targets": [{"regions": payload.get("regions")}],
-            }, request_payload={"route": "legacy-regions", "question_id": question.pk, "payload": payload})
+            operation, repeated = question_layout.mutate(
+                question.paper_id,
+                {
+                    "kind": "regions",
+                    "layout_revision": payload.get("layout_revision", question.paper.layout_revision),
+                    "client_request_id": payload.get("client_request_id", str(uuid.uuid4())),
+                    "sources": [
+                        {
+                            "id": question.pk,
+                            "revision": payload.get("revision", question.content_revision),
+                            "fingerprint": payload.get("fingerprint", question_layout.fingerprint(question)),
+                        }
+                    ],
+                    "targets": [{"regions": payload.get("regions")}],
+                },
+                request_payload={"route": "legacy-regions", "question_id": question.pk, "payload": payload},
+            )
             data = _layout_response(question.paper_id, operation, already_applied=repeated)
             question.refresh_from_db()
             data["question"] = question_json(question)
@@ -2608,13 +2839,13 @@ def question_action(request, question_id, action: str):
             return _layout_error(error, question.paper_id)
     now = timezone.now()
     with transaction.atomic():
-        question = get_object_or_404(
-            Question.objects.select_for_update().select_related("paper"), pk=question_id,
-        )
+        question = get_object_or_404(Question.objects.select_for_update().select_related("paper"), pk=question_id)
         actor = _approver(payload)
         if actor is None:
             return _error("by 只能是 human 或 ai")
-        if "revision" in payload and (type(payload["revision"]) is not int or payload["revision"] != question.content_revision):
+        if "revision" in payload and (
+            type(payload["revision"]) is not int or payload["revision"] != question.content_revision
+        ):
             return _error("题目已发生变化，请刷新后再操作", 409)
         if action == "approve":
             if question.paper.status == Paper.Status.NEEDS_GROUPING:
@@ -2661,8 +2892,11 @@ def question_action(request, question_id, action: str):
             options = payload.get("options", {})
             if not isinstance(stem, str) or not stem.strip() or len(stem) > 20000:
                 return _error("题干不能为空")
-            if not isinstance(options, dict) or set(options) - set(library.OPTION_KEYS) \
-                    or not all(isinstance(v, str) and len(v) <= 4000 for v in options.values()):
+            if (
+                not isinstance(options, dict)
+                or set(options) - set(library.OPTION_KEYS)
+                or not all(isinstance(v, str) and len(v) <= 4000 for v in options.values())
+            ):
                 return _error("选项格式不正确")
             kind = payload.get("question_type", question.question_type)
             if kind not in TYPES:
@@ -2673,13 +2907,16 @@ def question_action(request, question_id, action: str):
             if "origin" in payload and (not isinstance(payload["origin"], str) or len(payload["origin"]) > 400):
                 return _error("题源格式不正确")
             origin = prose.clean_origin(payload["origin"]) if "origin" in payload else question.origin
-            tidied = prose.tidy_fields({
-                "stem": fix_symbols(stem.strip()),
-                "options": {k: fix_symbols(v.strip()) for k, v in options.items() if v.strip()},
-                "question_type": kind,
-                "answer": fix_symbols(payload.get("answer", question.answer).strip()),
-                "analysis": fix_symbols(payload.get("analysis", question.analysis).strip()),
-            }, origin=origin)
+            tidied = prose.tidy_fields(
+                {
+                    "stem": fix_symbols(stem.strip()),
+                    "options": {k: fix_symbols(v.strip()) for k, v in options.items() if v.strip()},
+                    "question_type": kind,
+                    "answer": fix_symbols(payload.get("answer", question.answer).strip()),
+                    "analysis": fix_symbols(payload.get("analysis", question.analysis).strip()),
+                },
+                origin=origin,
+            )
             previous_type = question.question_type
             question.stem = tidied["stem"].strip()
             question.options = tidied["options"]
@@ -2695,16 +2932,13 @@ def question_action(request, question_id, action: str):
             # “assistant”：AI 助手（tiyouju）改的字，题卡上不说成“人工修改”。
             question.text_source = "assistant" if actor[0] == "ai" else "human"
             # 只留下截图范围的提醒；“MinerU 初稿”这类提醒随这次改字一起解决。
-            question.flags = [f for f in question.flags
-                              if not figure_flag(f) and "截图" in f and f not in TEXT_DRAFT_FLAGS]
+            question.flags = [
+                f for f in question.flags if not figure_flag(f) and "截图" in f and f not in TEXT_DRAFT_FLAGS
+            ]
             question.figure_review = {}
             review = stored_or_derived_review(question, ignored_candidates=previous_ignored)
             if previous_ignored:
-                review = {
-                    **review,
-                    "ignored_candidates": previous_ignored,
-                    "excluded_count": len(previous_ignored),
-                }
+                review = {**review, "ignored_candidates": previous_ignored, "excluded_count": len(previous_ignored)}
             _apply_figure_review(question, review)
             question.flags = qtypes.with_flag(question.flags, question.question_type)
             question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
@@ -2727,29 +2961,40 @@ def question_action(request, question_id, action: str):
         elif action == "reread":
             if demo.is_demo(question.paper):
                 return _error("示例练习不调用云服务。请对照原卷手工改字。", 409)
-            if source_images.is_image(question) and (question.paper.archived or question.paper.status != Paper.Status.READY):
+            if source_images.is_image(question) and (
+                question.paper.archived or question.paper.status != Paper.Status.READY
+            ):
                 return _error("请先完成原卷处理、继续手工或重试，再识读已切题目。", 409)
-            if (source_images.is_image(question) and (question.approved or question.publications.exists()
-                    or (question.edited and (question.stem.strip() or question.options)))):
+            if source_images.is_image(question) and (
+                question.approved
+                or question.publications.exists()
+                or (question.edited and (question.stem.strip() or question.options))
+            ):
                 return _error("这道原图题已有审核、入库或人工文字，已保留；请对照原卷手动修改。", 409)
-            if (not source_images.is_image(question) and actor[0] == "ai"
-                    and library.approval_source(question) == "human" and library.approval_is_current(question)
-                    and payload.get("force") is not True):
+            if (
+                not source_images.is_image(question)
+                and actor[0] == "ai"
+                and library.approval_source(question) == "human"
+                and library.approval_is_current(question)
+                and payload.get("force") is not True
+            ):
                 return _error("这道题已由使用者人工通过；需要使用者明确要求重新识读，才能撤销当前审核。", 409)
             if (source_images.is_image(question) or question.processing_mode == "manual") and (
-                    not _vision_ready(question.paper) or readers.assistant_mode()):
-                return _error(_reader_unavailable_sentence(question.paper)
-                    + "请在“设置 → 服务与密钥”里补上密钥后重新识读；也可以直接由当前 AI 助手对照原图改字，原图始终保留。", 409)
+                not _vision_ready(question.paper) or readers.assistant_mode()
+            ):
+                return _error(
+                    _reader_unavailable_sentence(question.paper)
+                    + "请在“设置 → 服务与密钥”里补上密钥后重新识读；也可以直接由当前 AI 助手对照原图改字，原图始终保留。",
+                    409,
+                )
             if not source_images.is_image(question):
                 question.edited = False
             current_review = question.figure_review if isinstance(question.figure_review, dict) else {}
             has_manual_figure = any(
-                isinstance(figure, dict) and figure.get("source") == "manual"
-                for figure in (question.figures or [])
+                isinstance(figure, dict) and figure.get("source") == "manual" for figure in (question.figures or [])
             )
             has_human_no_figure = (
-                current_review.get("source") == "human"
-                and current_review.get("status") == CONFIRMED_NO_FIGURE
+                current_review.get("source") == "human" and current_review.get("status") == CONFIRMED_NO_FIGURE
             )
             if not has_manual_figure and not has_human_no_figure:
                 question.figure_review = {}
@@ -2774,20 +3019,34 @@ def question_action(request, question_id, action: str):
                 figure_pieces = [figure, *[p for p in (figure.get("parts") or []) if isinstance(p, dict)]]
                 target = kept
                 if figure is question.figures[index] or any(
-                        tables.covers(piece, item) for piece in pieces for item in figure_pieces):
+                    tables.covers(piece, item) for piece in pieces for item in figure_pieces
+                ):
                     target = removed
                 target.append(figure)
             before = [
-                text for text in Block.objects.filter(paper=question.paper, seq__lt=block["seq"])
-                .exclude(type__in=["image", "table", "chart", "header", "footer", "page_number",
-                                   "page_footnote", "aside_text"])
-                .order_by("-seq").values_list("text", flat=True)[:2]
+                text
+                for text in Block.objects.filter(paper=question.paper, seq__lt=block["seq"])
+                .exclude(
+                    type__in=[
+                        "image",
+                        "table",
+                        "chart",
+                        "header",
+                        "footer",
+                        "page_number",
+                        "page_footnote",
+                        "aside_text",
+                    ]
+                )
+                .order_by("-seq")
+                .values_list("text", flat=True)[:2]
                 if text and text.strip()
             ]
             question.stem = tables.insert_table(question.stem, table_text, before, key=witness_key)
             candidate_keys = _candidate_keys(question)
             resolved = {
-                key for piece in pieces
+                key
+                for piece in pieces
                 for candidate in (question.figure_candidates or [])
                 if tables.covers(piece, candidate) and (key := _candidate_key(candidate)) in candidate_keys
             } | _selected_candidate_keys(question, removed)
@@ -2810,8 +3069,11 @@ def question_action(request, question_id, action: str):
             candidate_keys = _candidate_keys(question)
             previous_ignored = _saved_ignored_candidates(question)
             ignored_candidates = payload.get("ignored_candidates", previous_ignored)
-            if (not isinstance(ignored_candidates, list) or len(ignored_candidates) > 200
-                    or not all(isinstance(value, str) for value in ignored_candidates)):
+            if (
+                not isinstance(ignored_candidates, list)
+                or len(ignored_candidates) > 200
+                or not all(isinstance(value, str) for value in ignored_candidates)
+            ):
                 return _error("无关候选图格式不正确")
             # 1.25.97：「这张图与本题无关」是老师看着原卷做下的判断。改了题目范围之后，
             # 那张图可能已经落在范围外、不再是本题的候选图 —— 判断本身没错，但以前
@@ -2831,9 +3093,7 @@ def question_action(request, question_id, action: str):
                 bbox = _valid_bbox(item.get("bbox")) if isinstance(item, dict) else None
                 if bbox is None or item.get("page_idx") not in pages or item.get("slot") not in SLOTS:
                     return _error("配图格式不正确")
-                cleaned_item = {
-                    "slot": item["slot"], "page_idx": item["page_idx"], "bbox": bbox, "source": "manual",
-                }
+                cleaned_item = {"slot": item["slot"], "page_idx": item["page_idx"], "bbox": bbox, "source": "manual"}
                 if "label_offset" in item:
                     label_offset = _valid_label_offset(item.get("label_offset"))
                     if label_offset is None:
@@ -2875,20 +3135,26 @@ def question_action(request, question_id, action: str):
                 cleaned.append(cleaned_item)
             selected_candidate_keys = {
                 canonical_candidate_key(piece["candidate_key"])
-                for item in cleaned for piece in (item, *item.get("parts", []))
+                for item in cleaned
+                for piece in (item, *item.get("parts", []))
                 if "candidate_key" in piece
             }
             if selected_candidate_keys.intersection(ignored_candidates):
                 return _error("同一张候选图不能同时设为配图和无关")
             current_review = stored_or_derived_review(question)
-            if (cleaned and "candidate_unclassified" in (current_review.get("signals") or [])):
+            if cleaned and "candidate_unclassified" in (current_review.get("signals") or []):
                 remaining = _unclassified_candidate_details(
-                    question, figures=cleaned, ignored_candidates=ignored_candidates,
+                    question, figures=cleaned, ignored_candidates=ignored_candidates
                 )
                 if remaining:
-                    pages = sorted({int(item["page_idx"]) + 1 for item in remaining
-                                    if isinstance(item.get("page_idx"), int)})
-                    page_text = f"（第 {'、'.join(map(str, pages[:6]))}{' 等页' if len(pages) > 6 else ' 页'}）" if pages else ""
+                    pages = sorted(
+                        {int(item["page_idx"]) + 1 for item in remaining if isinstance(item.get("page_idx"), int)}
+                    )
+                    page_text = (
+                        f"（第 {'、'.join(map(str, pages[:6]))}{' 等页' if len(pages) > 6 else ' 页'}）"
+                        if pages
+                        else ""
+                    )
                     return _error(
                         f"还有 {len(remaining)} 张候选图尚未处理{page_text}；"
                         "请逐张选择题干/选项/无关，或明确确认其余候选均无关"
@@ -2897,18 +3163,24 @@ def question_action(request, question_id, action: str):
             question.figures = cleaned
             if cleaned:
                 review = {
-                    "status": OK, "source": "human", "reason": "配图已经由人工设置",
-                    "signals": ["manual_figure"], "cue_matches": cue_matches(question.stem, question.options),
+                    "status": OK,
+                    "source": "human",
+                    "reason": "配图已经由人工设置",
+                    "signals": ["manual_figure"],
+                    "cue_matches": cue_matches(question.stem, question.options),
                     "excluded_count": len(ignored_candidates),
                     "ignored_candidates": ignored_candidates,
                     "confirmed_at": now.isoformat(),
                 }
             else:
                 review = {
-                    "status": CONFIRMED_NO_FIGURE, "source": "human", "reason": "已人工确认本题确实无图",
+                    "status": CONFIRMED_NO_FIGURE,
+                    "source": "human",
+                    "reason": "已人工确认本题确实无图",
                     "signals": ["human_confirmed_no_figure"],
                     "cue_matches": cue_matches(question.stem, question.options),
-                    "excluded_count": len(question.figure_candidates or []), "confirmed_at": now.isoformat(),
+                    "excluded_count": len(question.figure_candidates or []),
+                    "confirmed_at": now.isoformat(),
                     "ignored_candidates": sorted(candidate_keys),
                     "previous_ignored_candidates": previous_ignored,
                     "previous_figures": previous_figures,
@@ -2925,15 +3197,24 @@ def question_action(request, question_id, action: str):
                 previous_figures = list(question.figures or [])
                 previous_ignored = _saved_ignored_candidates(question)
                 question.figures = []
-                _apply_figure_review(question, _decided_by({
-                    "status": CONFIRMED_NO_FIGURE, "source": "human", "reason": "已人工确认本题确实无图",
-                    "signals": ["human_confirmed_no_figure"],
-                    "cue_matches": cue_matches(question.stem, question.options),
-                    "excluded_count": len(question.figure_candidates or []), "confirmed_at": now.isoformat(),
-                    "ignored_candidates": sorted(_candidate_keys(question)),
-                    "previous_ignored_candidates": previous_ignored,
-                    "previous_figures": previous_figures,
-                }, actor))
+                _apply_figure_review(
+                    question,
+                    _decided_by(
+                        {
+                            "status": CONFIRMED_NO_FIGURE,
+                            "source": "human",
+                            "reason": "已人工确认本题确实无图",
+                            "signals": ["human_confirmed_no_figure"],
+                            "cue_matches": cue_matches(question.stem, question.options),
+                            "excluded_count": len(question.figure_candidates or []),
+                            "confirmed_at": now.isoformat(),
+                            "ignored_candidates": sorted(_candidate_keys(question)),
+                            "previous_ignored_candidates": previous_ignored,
+                            "previous_figures": previous_figures,
+                        },
+                        actor,
+                    ),
+                )
             else:
                 current_review = stored_or_derived_review(question)
                 if current_review.get("status") != CONFIRMED_NO_FIGURE:
@@ -2942,30 +3223,39 @@ def question_action(request, question_id, action: str):
                 restored = []
                 for item in current_review.get("previous_figures") or []:
                     bbox = _valid_bbox(item.get("bbox")) if isinstance(item, dict) else None
-                    if (bbox is not None and item.get("page_idx") in pages and item.get("slot") in SLOTS
-                            and item.get("source") in {"auto", "manual", "other", "row"}):
-                        restored.append({
-                            "slot": item["slot"], "page_idx": item["page_idx"], "bbox": bbox,
-                            "source": item["source"],
-                            **({"label_offset": item["label_offset"]}
-                               if _valid_label_offset(item.get("label_offset")) is not None else {}),
-                            **({"candidate_key": item["candidate_key"]}
-                               if isinstance(item.get("candidate_key"), str)
-                               and item["candidate_key"] in _candidate_keys(question) else {}),
-                        })
+                    if (
+                        bbox is not None
+                        and item.get("page_idx") in pages
+                        and item.get("slot") in SLOTS
+                        and item.get("source") in {"auto", "manual", "other", "row"}
+                    ):
+                        restored.append(
+                            {
+                                "slot": item["slot"],
+                                "page_idx": item["page_idx"],
+                                "bbox": bbox,
+                                "source": item["source"],
+                                **(
+                                    {"label_offset": item["label_offset"]}
+                                    if _valid_label_offset(item.get("label_offset")) is not None
+                                    else {}
+                                ),
+                                **(
+                                    {"candidate_key": item["candidate_key"]}
+                                    if isinstance(item.get("candidate_key"), str)
+                                    and item["candidate_key"] in _candidate_keys(question)
+                                    else {}
+                                ),
+                            }
+                        )
                 previous_ignored = _saved_ignored_candidates(
-                    question,
-                    {"ignored_candidates": current_review.get("previous_ignored_candidates", [])},
+                    question, {"ignored_candidates": current_review.get("previous_ignored_candidates", [])}
                 )
                 question.figures = restored
                 question.figure_review = {}
                 review = stored_or_derived_review(question, ignored_candidates=previous_ignored)
                 if previous_ignored:
-                    review = {
-                        **review,
-                        "ignored_candidates": previous_ignored,
-                        "excluded_count": len(previous_ignored),
-                    }
+                    review = {**review, "ignored_candidates": previous_ignored, "excluded_count": len(previous_ignored)}
                 _apply_figure_review(question, review)
                 # The figures put back still came from another card's reading or a shared row.
                 for source, flag in (("other", FLAG_FOREIGN_FIGURE), ("row", FLAG_ROW_FIGURE)):
@@ -3005,12 +3295,14 @@ def question_delete(request, question_id):
     except ValueError as error:
         return _error(str(error), 409)
     batch.refresh_from_db()
-    return JsonResponse({
-        "deleted": bool(deleted),
-        "already_deleted": deleted == 0,
-        "undo_batch": _question_trash_json(batch),
-        "paper": paper_json(Paper.objects.get(pk=paper.pk)),
-    })
+    return JsonResponse(
+        {
+            "deleted": bool(deleted),
+            "already_deleted": deleted == 0,
+            "undo_batch": _question_trash_json(batch),
+            "paper": paper_json(Paper.objects.get(pk=paper.pk)),
+        }
+    )
 
 
 def question_crop(request, question_id):
@@ -3115,11 +3407,18 @@ def paper_processing(request, paper_id):
     except (intake.ManualSwitchConflict, intake.ManualPreparationError) as exc:
         paper.refresh_from_db()
         return JsonResponse({"error": str(exc), "paper": paper_json(paper), "manual_ready": False}, status=409)
-    return JsonResponse({"paper": paper_json(paper), "changed": changed, "manual_ready": True,
-        "message": "已停止 MinerU，原卷和已有成果已保留，可以继续手工切题。" if changed else "已可继续手工切题。"})
+    return JsonResponse(
+        {
+            "paper": paper_json(paper),
+            "changed": changed,
+            "manual_ready": True,
+            "message": "已停止 MinerU，原卷和已有成果已保留，可以继续手工切题。" if changed else "已可继续手工切题。",
+        }
+    )
 
 
 # ---------------------------------------------------------------- M3 导入
+
 
 @csrf_exempt
 def m3_papers(request):
@@ -3139,6 +3438,7 @@ def m3_papers(request):
 
 
 # ---------------------------------------------------------------- 正式题库
+
 
 def _library_rows(request):
     rows = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
@@ -3172,6 +3472,7 @@ def _library_rows(request):
 
 def library_list(request):
     from .library_browse import library_list as browse
+
     return browse(request)
 
 
@@ -3200,10 +3501,7 @@ def library_detail(request, publication_id):
         # 「历史没被改过」这条断言看着像坏了，其实比的是两回事。
         snapshot = library.publication_json(before)
         snapshot["content"] = before.content or {}
-        body["comparison"] = {
-            "publication": snapshot,
-            "changes": library.publication_changes(before, publication),
-        }
+        body["comparison"] = {"publication": snapshot, "changes": library.publication_changes(before, publication)}
     return JsonResponse(body)
 
 
@@ -3220,7 +3518,9 @@ def library_question_image(request, publication_id, name):
     publication = get_object_or_404(PublishedQuestion, pk=publication_id)
     if not re.fullmatch(r"question-\d{1,2}\.png", name):
         raise Http404
-    image = next((item for item in (publication.content or {}).get("question_images", []) if item.get("file") == name), None)
+    image = next(
+        (item for item in (publication.content or {}).get("question_images", []) if item.get("file") == name), None
+    )
     if (publication.content or {}).get("body_mode") != "source_image" or image is None:
         raise Http404
     path = settings.DATA_ROOT / "library" / str(publication_id) / name
@@ -3238,7 +3538,9 @@ def library_source_page(request, publication_id, page):
         return HttpResponseNotAllowed(["GET"])
     publication = get_object_or_404(PublishedQuestion, pk=publication_id)
     sources = (publication.content or {}).get("sources") or []
-    if not publication.paper_id or not any(isinstance(source, dict) and source.get("page_idx") == page for source in sources):
+    if not publication.paper_id or not any(
+        isinstance(source, dict) and source.get("page_idx") == page for source in sources
+    ):
         raise Http404("这道入库题没有引用这一页原卷")
     return page_preview(request, publication.paper_id, page)
 
@@ -3247,6 +3549,7 @@ def library_crop(request, publication_id):
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
     from . import library_assistant
+
     try:
         response = HttpResponse(library_assistant.crop_png(publication_id), content_type="image/png")
         response["Cache-Control"] = "no-store"
@@ -3281,6 +3584,7 @@ def library_withdraw_batch(request):
     if rejected:
         return rejected
     from . import library_browse
+
     try:
         ids = library_browse.normalize_ids((_body(request) or {}).get("ids"))
     except library_browse.BrowseError as error:
@@ -3308,9 +3612,11 @@ def library_withdraw_batch(request):
 
 # ---------------------------------------------------------------- 功能开关与题库任务
 
+
 @csrf_exempt
 def library_ai_settings_view(request):
     from . import library_ai_settings
+
     if request.method not in {"GET", "POST"}:
         return HttpResponseNotAllowed(["GET", "POST"])
     if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
@@ -3335,6 +3641,7 @@ def _ai_settings_with_backlog(status: dict | None = None) -> dict:
     别让题库页和设置页各数一遍、又说出两句互相矛盾的话。
     """
     from . import library_ai_settings
+
     body = dict(status or library_ai_settings.public_status())
     body["backlog"] = library.generation_backlog()
     return body
@@ -3348,6 +3655,7 @@ def library_ai_share_reading_key_view(request):
     answers side had: the teacher has to mean it.
     """
     from . import library_ai_settings
+
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
     if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
@@ -3358,8 +3666,9 @@ def library_ai_share_reading_key_view(request):
     payload = _body(request) or {}
     try:
         # 1.26.6：和「读取设置」同一个形状（前端用同一把尺子校验每个答复）。
-        return JsonResponse(_ai_settings_with_backlog(
-            library_ai_settings.share_reading_key(payload.get("provider", "minimax"))))
+        return JsonResponse(
+            _ai_settings_with_backlog(library_ai_settings.share_reading_key(payload.get("provider", "minimax")))
+        )
     except library_ai_settings.ServiceError as error:
         return _error(str(error), 409)
     except library_ai_settings.SettingsError as error:
@@ -3369,6 +3678,7 @@ def library_ai_share_reading_key_view(request):
 @csrf_exempt
 def library_ai_test_view(request):
     from . import library_ai_settings
+
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
     if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
@@ -3387,6 +3697,7 @@ def library_ai_test_view(request):
     except library_ai_settings.SettingsError as error:
         return _error(str(error), 400)
 
+
 @csrf_exempt
 def credential_connection_test_view(request):
     """1.26.13：测一下「看图读题」这一段的密钥能不能用。
@@ -3395,6 +3706,7 @@ def credential_connection_test_view(request):
     """
 
     from . import reader_test
+
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
     if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
@@ -3420,9 +3732,11 @@ def feature_settings(request):
     """GET 读、POST 改设置里的“功能开关”（没有密钥，网页和工作者共用）。"""
     if request.method == "GET":
         from .library_tagging import knowledge_directory
+
         points = knowledge_directory()
-        return JsonResponse({"features": features.describe(), "catalogue_source": "正式题库标签目录",
-                             "knowledge_total": len(points)})
+        return JsonResponse(
+            {"features": features.describe(), "catalogue_source": "正式题库标签目录", "knowledge_total": len(points)}
+        )
     if request.method != "POST":
         return HttpResponseNotAllowed(["GET", "POST"])
     rejected = _guard(request)
@@ -3437,9 +3751,16 @@ def feature_settings(request):
         return _error("开关没能保存，请检查数据目录是否可写", 500)
     message = "已保存。题源和引号的整理对新读的题、改字保存的题立即生效；老题在下次启动时整理。"
     from .library_tagging import knowledge_directory
+
     points = knowledge_directory()
-    return JsonResponse({"features": features.describe(), "catalogue_source": "正式题库标签目录",
-                         "knowledge_total": len(points), "message": message})
+    return JsonResponse(
+        {
+            "features": features.describe(),
+            "catalogue_source": "正式题库标签目录",
+            "knowledge_total": len(points),
+            "message": message,
+        }
+    )
 
 
 @csrf_exempt
@@ -3451,15 +3772,23 @@ def knowledge_catalogue(request):
     if rejected:
         return rejected
     from .library_tagging import knowledge_directory
+
     points = knowledge_directory()
-    return JsonResponse({"source": "正式题库标签目录", "points": points, "total": len(points),
-                         "chapters": len({item["chapter"] for item in points if item["chapter"]})})
+    return JsonResponse(
+        {
+            "source": "正式题库标签目录",
+            "points": points,
+            "total": len(points),
+            "chapters": len({item["chapter"] for item in points if item["chapter"]}),
+        }
+    )
 
 
 @csrf_exempt
 def library_jobs_view(request):
     """排队补知识点或 AI 参考答案：{kind, ids} 或 {kind, missing: true}（所有还没有的）。"""
     from . import library_job_control
+
     if request.method == "GET":
         ids = request.GET.get("ids", "").split(",")
         if not 1 <= len(ids) <= 500 or any(not value for value in ids):
@@ -3471,10 +3800,17 @@ def library_jobs_view(request):
         scoped = request.GET.get("solution_scope") == "true"
         tag_scoped = request.GET.get("tag_scope") == "true"
         library_job_control.expire_api_jobs()
-        rows = list(LibraryJob.objects.filter(publication_id__in=wanted, solution_scope=scoped,
-            tag_scope=tag_scoped).order_by("-created_at")[:1000])
-        return JsonResponse({"jobs": [library_job_control.job_json(row) for row in rows],
-                             "assistant_handoff": library_job_control.assistant_handoff(rows)})
+        rows = list(
+            LibraryJob.objects.filter(publication_id__in=wanted, solution_scope=scoped, tag_scope=tag_scoped).order_by(
+                "-created_at"
+            )[:1000]
+        )
+        return JsonResponse(
+            {
+                "jobs": [library_job_control.job_json(row) for row in rows],
+                "assistant_handoff": library_job_control.assistant_handoff(rows),
+            }
+        )
     if request.method != "POST":
         return HttpResponseNotAllowed(["GET", "POST"])
     rejected = _guard(request)
@@ -3494,6 +3830,7 @@ def library_jobs_view(request):
         return _error("api_only 应为 true 或 false")
     if payload.get("api_only") is True:
         from . import library_ai_settings
+
         try:
             library_ai_settings.ensure_api_ready()
         except library_ai_settings.SettingsError as error:
@@ -3508,18 +3845,38 @@ def library_jobs_view(request):
         if kind != LibraryJob.Kind.TAGS or not isinstance(payload.get("filters"), dict):
             return _error("只处理当前这批只支持知识点标签建议，并需要完整的筛选条件")
         from . import library_browse
-        allowed = {"q", "document", "type", "review", "answer", "tag", "tag_all", "tag_any", "tag_not",
-                   "tag_mode", "untagged_knowledge", "tag_review"}
+
+        allowed = {
+            "q",
+            "document",
+            "type",
+            "review",
+            "answer",
+            "tag",
+            "tag_all",
+            "tag_any",
+            "tag_not",
+            "tag_mode",
+            "untagged_knowledge",
+            "tag_review",
+        }
         filters = {key: value for key, value in payload["filters"].items() if key in allowed}
         targets = list(library_browse.library_rows(filters).order_by("published_at", "id"))
     elif payload.get("missing") is True:
         if kind == LibraryJob.Kind.TAGS:
-            targets = list(live.exclude(tag_assignments__tag__kind="knowledge",
-                tag_assignments__needs_review=False).exclude(tag_suggestions__status__in=[
-                    "queued", "running", "pending"]).order_by("published_at", "id").distinct())
+            targets = list(
+                live.exclude(tag_assignments__tag__kind="knowledge", tag_assignments__needs_review=False)
+                .exclude(tag_suggestions__status__in=["queued", "running", "pending"])
+                .order_by("published_at", "id")
+                .distinct()
+            )
         else:
-            targets = [item for item in live if not str((item.content or {}).get("answer") or "").strip()
-                       and not (item.extras or {}).get("ai_answer")]
+            targets = [
+                item
+                for item in live
+                if not str((item.content or {}).get("answer") or "").strip()
+                and not (item.extras or {}).get("ai_answer")
+            ]
     else:
         ids = payload.get("ids")
         if not isinstance(ids, list) or not ids or len(ids) > 500:
@@ -3529,27 +3886,58 @@ def library_jobs_view(request):
         except ValueError:
             return _error("题库条目编号格式不正确")
         targets = list(live.filter(pk__in=wanted))
-        targets = targets if solution_scope or tag_scope else [item for item in targets if not library.tags_of(item.extras)] if kind == LibraryJob.Kind.TAGS else [
-            item for item in targets if not str((item.content or {}).get("answer") or "").strip()
-            and not (item.extras or {}).get("ai_answer")]
+        targets = (
+            targets
+            if solution_scope or tag_scope
+            else [item for item in targets if not library.tags_of(item.extras)]
+            if kind == LibraryJob.Kind.TAGS
+            else [
+                item
+                for item in targets
+                if not str((item.content or {}).get("answer") or "").strip()
+                and not (item.extras or {}).get("ai_answer")
+            ]
+        )
     requested = len(targets)
     if tag_scope:
         from . import library_tagging
         from .models import LibraryTagSuggestion
+
         catalogue = library_tagging.catalogue_state()
         eligible = []
         for item in targets:
             context = library_tagging.current_method_source(item)
-            method_snapshot = ({key: context[key] for key in ("source", "solution_id", "publication_id", "analysis_hash", "image_hashes") if key in context}
-                               if context else {})
+            method_snapshot = (
+                {
+                    key: context[key]
+                    for key in ("source", "solution_id", "publication_id", "analysis_hash", "image_hashes")
+                    if key in context
+                }
+                if context
+                else {}
+            )
             fingerprint = library.generation_fingerprint(item.content or {}, item.pk)
             latest = LibraryTagSuggestion.objects.filter(publication=item).order_by("-created_at", "-id").first()
-            active = LibraryJob.objects.filter(publication=item, kind="tags", tag_scope=True,
-                status__in=[LibraryJob.Status.QUEUED, LibraryJob.Status.RUNNING]).exists()
-            already_handled = bool(latest and latest.question_fingerprint == fingerprint
-                and latest.taxonomy_revision == catalogue.revision and latest.method_source == method_snapshot
-                and latest.status in {LibraryTagSuggestion.Status.PENDING, LibraryTagSuggestion.Status.NO_MATCH,
-                    LibraryTagSuggestion.Status.REVIEW, LibraryTagSuggestion.Status.ACCEPTED, LibraryTagSuggestion.Status.REJECTED})
+            active = LibraryJob.objects.filter(
+                publication=item,
+                kind="tags",
+                tag_scope=True,
+                status__in=[LibraryJob.Status.QUEUED, LibraryJob.Status.RUNNING],
+            ).exists()
+            already_handled = bool(
+                latest
+                and latest.question_fingerprint == fingerprint
+                and latest.taxonomy_revision == catalogue.revision
+                and latest.method_source == method_snapshot
+                and latest.status
+                in {
+                    LibraryTagSuggestion.Status.PENDING,
+                    LibraryTagSuggestion.Status.NO_MATCH,
+                    LibraryTagSuggestion.Status.REVIEW,
+                    LibraryTagSuggestion.Status.ACCEPTED,
+                    LibraryTagSuggestion.Status.REJECTED,
+                }
+            )
             if active or (already_handled and not retry):
                 continue
             eligible.append(item)
@@ -3578,12 +3966,26 @@ def library_jobs_view(request):
     except library_jobs.JobError as error:
         return _error(str(error), 409)
     from . import library_ai_settings
-    mode = next(iter(executors)) if len(executors) == 1 else "mixed" if executors else library_ai_settings.public_status()["mode"]
-    return JsonResponse({"queued": queued, "skipped": requested - queued, "executor": mode,
-                         "jobs": [library_job_control.job_json(job) for job in jobs[:100]],
-                         "assistant_handoff": library_job_control.assistant_handoff(jobs),
-                         "message": "已加入待助手处理；请让正在操作软件的豆包或 AI 助手领取并写回。" if mode == "assistant"
-                         else "已加入独立模型任务队列。"})
+
+    mode = (
+        next(iter(executors))
+        if len(executors) == 1
+        else "mixed"
+        if executors
+        else library_ai_settings.public_status()["mode"]
+    )
+    return JsonResponse(
+        {
+            "queued": queued,
+            "skipped": requested - queued,
+            "executor": mode,
+            "jobs": [library_job_control.job_json(job) for job in jobs[:100]],
+            "assistant_handoff": library_job_control.assistant_handoff(jobs),
+            "message": "已加入待助手处理；请让正在操作软件的豆包或 AI 助手领取并写回。"
+            if mode == "assistant"
+            else "已加入独立模型任务队列。",
+        }
+    )
 
 
 @csrf_exempt
@@ -3594,6 +3996,7 @@ def library_jobs_cancel(request):
     if rejected:
         return rejected
     from . import library_job_control
+
     try:
         return JsonResponse(library_job_control.cancel_jobs(_body(request)))
     except library_job_control.ControlError as error:
@@ -3605,6 +4008,7 @@ def library_assistant_tasks(request):
     """Read the local assistant inbox without starting any cloud generation."""
     from . import library_assistant
     from .library_browse import BrowseError, normalize_ids
+
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
     if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
@@ -3634,6 +4038,7 @@ def library_assistant_complete(request):
 
 def _library_assistant_action(request, action):
     from . import library_assistant
+
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
     if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:

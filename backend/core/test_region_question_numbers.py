@@ -13,6 +13,7 @@ r"""卡的范围罩住了后面的题：书上印着第 N 题，库里却没有�
 
 判据只看这张卡自己的范围里印着什么，不依赖切题结果。
 """
+
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
@@ -21,8 +22,13 @@ from . import pipeline, textnorm
 from .models import Question
 
 READING = {
-    "stem": "", "options": {}, "content_kind": "question", "figures": {},
-    "missing_figure": False, "number_seen": 1, "figure_descriptions": [],
+    "stem": "",
+    "options": {},
+    "content_kind": "question",
+    "figures": {},
+    "missing_figure": False,
+    "number_seen": 1,
+    "figure_descriptions": [],
     "unclear": False,
 }
 
@@ -41,12 +47,22 @@ WIDOW_SPAN = """习题 7.1
 
 def snapshot(**changes):
     base = {
-        "id": 1, "number": 2, "group_id": None,
+        "id": 1,
+        "number": 2,
+        "group_id": None,
         "regions": [{"page_idx": 0, "bbox": [80, 160, 900, 940]}],
-        "candidates": [], "question_type": "free_response", "stem": "", "options": {},
-        "edited": False, "source_kind": Question.SourceKind.UNKNOWN,
-        "source_anchor_seq": 1, "segmentation_flags": [], "body_mode": "text",
-        "start_source": "mineru", "is_book": True, "witness": "",
+        "candidates": [],
+        "question_type": "free_response",
+        "stem": "",
+        "options": {},
+        "edited": False,
+        "source_kind": Question.SourceKind.UNKNOWN,
+        "source_anchor_seq": 1,
+        "segmentation_flags": [],
+        "body_mode": "text",
+        "start_source": "mineru",
+        "is_book": True,
+        "witness": "",
     }
     base.update(changes)
     return base
@@ -88,20 +104,20 @@ class SwallowedQuestionFlagTests(SimpleTestCase):
     store = staticmethod(type("Store", (), {"load": lambda self, page: object()})())
 
     def run_card(self, stem, number=2, number_seen=2, **changes):
-        with patch.object(pipeline.readers, "primary_engine", return_value=object()), \
-                patch.object(pipeline.readers, "read_question",
-                             return_value={**READING, "stem": stem, "number_seen": number_seen}), \
-                patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])), \
-                patch.object(pipeline.imaging, "jpeg_data_url",
-                             return_value="data:image/jpeg;base64,x"):
+        with (
+            patch.object(pipeline.readers, "primary_engine", return_value=object()),
+            patch.object(
+                pipeline.readers, "read_question", return_value={**READING, "stem": stem, "number_seen": number_seen}
+            ),
+            patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])),
+            patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:image/jpeg;base64,x"),
+        ):
             return pipeline.read_card(snapshot(number=number, **changes), self.store)
 
     def test_a_range_that_swallowed_another_question_is_not_green(self):
-        result = self.run_card("计算：\n（1）$(\\sqrt{3a^3})^2$（$a\\geq 0$）；",
-                               witness=WIDOW_SPAN)
+        result = self.run_card("计算：\n（1）$(\\sqrt{3a^3})^2$（$a\\geq 0$）；", witness=WIDOW_SPAN)
 
-        self.assertTrue(any("范围里还印着第 3 题" in flag for flag in result["flags"]),
-                        result["flags"])
+        self.assertTrue(any("范围里还印着第 3 题" in flag for flag in result["flags"]), result["flags"])
         self.assertEqual(result["state"], Question.State.YELLOW)
 
     def test_an_ordinary_range_stays_green(self):
@@ -114,8 +130,13 @@ class SwallowedQuestionFlagTests(SimpleTestCase):
     def test_an_exam_paper_is_not_judged_by_printed_numbers(self):
         # 一张卷分几道大题、各自从 1 重新编号：卷内第 23 题面上印的是「5.」
         witness = "5.（10分）如图，BN，CM分别是△ABC的两条高。\n(1) 求证：DE⊥MN；"
-        result = self.run_card("点 $D$、$E$ 分别是 $BC$、$MN$ 的中点，求证：$DE\\perp MN$。",
-                               number=23, number_seen=23, is_book=False, witness=witness)
+        result = self.run_card(
+            "点 $D$、$E$ 分别是 $BC$、$MN$ 的中点，求证：$DE\\perp MN$。",
+            number=23,
+            number_seen=23,
+            is_book=False,
+            witness=witness,
+        )
 
         self.assertFalse(any("范围里还印着" in flag for flag in result["flags"]), result["flags"])
         self.assertEqual(result["state"], Question.State.GREEN, result["flags"])

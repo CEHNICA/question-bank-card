@@ -43,27 +43,50 @@ class RealignUntouchedSuggestionsTests(TestCase):
     def publication(self):
         self.serial += 1
         stem = "虚构数学题 %s：已知三角形的内角和，求第三角。" % self.serial
-        question = Question.objects.create(paper=self.paper, number=self.serial, question_type="single_choice",
-                                           stem=stem, state="green")
-        content = {"stem": stem, "options": {}, "answer": "", "analysis": "",
-                   "figures": [], "sources": [], "origin": "虚构出处", "source_filename": "虚构卷.pdf",
-                   "question_type": "single_choice"}
-        return PublishedQuestion.objects.create(paper=self.paper, question=question, number=self.serial,
-            source_filename="虚构卷.pdf", question_type="single_choice", version=1, status="published",
-            review_source="human", content=content, content_hash=library.content_hash(content),
-            search_text=library.search_key(stem), extras={})
+        question = Question.objects.create(
+            paper=self.paper, number=self.serial, question_type="single_choice", stem=stem, state="green"
+        )
+        content = {
+            "stem": stem,
+            "options": {},
+            "answer": "",
+            "analysis": "",
+            "figures": [],
+            "sources": [],
+            "origin": "虚构出处",
+            "source_filename": "虚构卷.pdf",
+            "question_type": "single_choice",
+        }
+        return PublishedQuestion.objects.create(
+            paper=self.paper,
+            question=question,
+            number=self.serial,
+            source_filename="虚构卷.pdf",
+            question_type="single_choice",
+            version=1,
+            status="published",
+            review_source="human",
+            content=content,
+            content_hash=library.content_hash(content),
+            search_text=library.search_key(stem),
+            extras={},
+        )
 
     def tag(self, name):
         return LibraryTag.objects.create(name=name, kind="knowledge", levels=["高中"])
 
     def suggestion(self, publication, proposals, revision=None):
-        return LibraryTagSuggestion.objects.create(publication=publication,
+        return LibraryTagSuggestion.objects.create(
+            publication=publication,
             question_fingerprint=library.generation_fingerprint(publication.content, publication.pk),
-            taxonomy_revision=revision if revision is not None
-            else LibraryTagCatalogue.objects.get(pk=1).revision,
-            assignment_revision=publication.tag_revision, method_source={}, suggestions=proposals,
-            status=LibraryTagSuggestion.Status.PENDING, message="逐条核对 AI 候选。",
-            generation_source="隔离测试模型")
+            taxonomy_revision=revision if revision is not None else LibraryTagCatalogue.objects.get(pk=1).revision,
+            assignment_revision=publication.tag_revision,
+            method_source={},
+            suggestions=proposals,
+            status=LibraryTagSuggestion.Status.PENDING,
+            message="逐条核对 AI 候选。",
+            generation_source="隔离测试模型",
+        )
 
     def _touch_catalogue(self):
         """模拟 0028 干的事：重组层级树，版本号 +1，不动任何已有标签。"""
@@ -76,9 +99,19 @@ class RealignUntouchedSuggestionsTests(TestCase):
     def test_a_tree_regrouping_leaves_every_untouched_proposal_actionable(self):
         publication = self.publication()
         tag = self.tag("三角形内角和")
-        suggestion = self.suggestion(publication,
-            [{"kind": "knowledge", "tag_id": str(tag.pk), "name": tag.name,
-              "rationale": "题面直接考内角和。", "evidence": "题干", "scope": {"whole": True}}])
+        suggestion = self.suggestion(
+            publication,
+            [
+                {
+                    "kind": "knowledge",
+                    "tag_id": str(tag.pk),
+                    "name": tag.name,
+                    "rationale": "题面直接考内角和。",
+                    "evidence": "题干",
+                    "scope": {"whole": True},
+                }
+            ],
+        )
         self._touch_catalogue()
         # 迁移之前：目录版本抬了，建议没跟上，界面上「现在就能采纳」是 0。
         self.assertEqual(library_browse.tag_work_counts()["pending_actionable"], 0)
@@ -97,10 +130,13 @@ class RealignUntouchedSuggestionsTests(TestCase):
         publication = self.publication()
         alive = self.tag("还活着的知识点")
         retired = self.tag("已经停用的知识点")
-        alive_suggestion = self.suggestion(publication,
-            [{"kind": "knowledge", "tag_id": str(alive.pk), "name": alive.name, "scope": {"whole": True}}])
-        broken_suggestion = self.suggestion(self.publication(),
-            [{"kind": "knowledge", "tag_id": str(retired.pk), "name": retired.name, "scope": {"whole": True}}])
+        alive_suggestion = self.suggestion(
+            publication, [{"kind": "knowledge", "tag_id": str(alive.pk), "name": alive.name, "scope": {"whole": True}}]
+        )
+        broken_suggestion = self.suggestion(
+            self.publication(),
+            [{"kind": "knowledge", "tag_id": str(retired.pk), "name": retired.name, "scope": {"whole": True}}],
+        )
         retired.active = False
         retired.save(update_fields=["active"])
         self._touch_catalogue()
@@ -119,9 +155,18 @@ class RealignUntouchedSuggestionsTests(TestCase):
         publication = self.publication()
         child = self.tag("子概念")
         gone_parent = self.tag("已经不存在的父概念")
-        suggestion = self.suggestion(publication,
-            [{"kind": "knowledge", "new_name": "新概念", "name": "新概念",
-              "parent_ids": [str(gone_parent.pk)], "scope": {"whole": True}}])
+        suggestion = self.suggestion(
+            publication,
+            [
+                {
+                    "kind": "knowledge",
+                    "new_name": "新概念",
+                    "name": "新概念",
+                    "parent_ids": [str(gone_parent.pk)],
+                    "scope": {"whole": True},
+                }
+            ],
+        )
         gone_parent.delete()
         self._touch_catalogue()
 
@@ -134,13 +179,16 @@ class RealignUntouchedSuggestionsTests(TestCase):
     def test_running_twice_changes_nothing(self):
         publication = self.publication()
         tag = self.tag("幂等检查用知识点")
-        suggestion = self.suggestion(publication,
-            [{"kind": "knowledge", "tag_id": str(tag.pk), "name": tag.name, "scope": {"whole": True}}])
+        suggestion = self.suggestion(
+            publication, [{"kind": "knowledge", "tag_id": str(tag.pk), "name": tag.name, "scope": {"whole": True}}]
+        )
         self._touch_catalogue()
 
         migration_0029.forwards(current_apps, None)
         first = LibraryTagSuggestion.objects.get(pk=suggestion.pk).taxonomy_revision
         migration_0029.forwards(current_apps, None)
         self.assertEqual(LibraryTagSuggestion.objects.get(pk=suggestion.pk).taxonomy_revision, first)
-        self.assertFalse(LibraryTagAssignment.objects.filter(publication=publication).exists(),
-                         "重新对齐只是把版本号追平，不应该顺手贴上任何标签")
+        self.assertFalse(
+            LibraryTagAssignment.objects.filter(publication=publication).exists(),
+            "重新对齐只是把版本号追平，不应该顺手贴上任何标签",
+        )

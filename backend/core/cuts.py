@@ -29,17 +29,17 @@ from __future__ import annotations
 
 from PIL import Image
 
-INK_LEVEL = 170       # 灰度低于此值算有墨迹（与 imaging.trim_regions 一致）
-CLEAN = 0.010         # 一行里有墨迹的像素不超过 1% 算空白（容得下页边一两道竖笔）
-DENSE = 0.03          # 至少 3%：印刷文字行里的一行
-MIN_RUN = 1.5         # 空白至少这么高才算行间空隙（分式线和分子之间的缝更窄）
-BELOW = 8.0           # 看不到下一题题号时，下沿最多挪到原起点以下这么远
-NUMBER_WIDTH = 30.0   # 题号所在的窄条宽度（从文字框左边算）
-NUMBER_DENSE = 0.08   # 窄条里这么黑的一行，算是题号那一行
-NUMBER_REACH = 30.0   # 题号（标题）的字可能比 MinerU 的框低这么多
-LINE_DENSE = 0.05     # 连续这么黑、至少 LINE_MIN 高的几行，是一行字
+INK_LEVEL = 170  # 灰度低于此值算有墨迹（与 imaging.trim_regions 一致）
+CLEAN = 0.010  # 一行里有墨迹的像素不超过 1% 算空白（容得下页边一两道竖笔）
+DENSE = 0.03  # 至少 3%：印刷文字行里的一行
+MIN_RUN = 1.5  # 空白至少这么高才算行间空隙（分式线和分子之间的缝更窄）
+BELOW = 8.0  # 看不到下一题题号时，下沿最多挪到原起点以下这么远
+NUMBER_WIDTH = 30.0  # 题号所在的窄条宽度（从文字框左边算）
+NUMBER_DENSE = 0.08  # 窄条里这么黑的一行，算是题号那一行
+NUMBER_REACH = 30.0  # 题号（标题）的字可能比 MinerU 的框低这么多
+LINE_DENSE = 0.05  # 连续这么黑、至少 LINE_MIN 高的几行，是一行字
 LINE_MIN = 3.0
-START_PAD = 9.0       # segment.START_PAD：题号上方原本留的白
+START_PAD = 9.0  # segment.START_PAD：题号上方原本留的白
 SNAPPABLE_SOURCES = {"mineru", "repaired", "inferred"}
 
 
@@ -77,8 +77,8 @@ def _local_ink_level(gray: Image.Image) -> int:
     dark_count, dark_sum, dark_squared = moments
     light_count = total - dark_count
     dark_mean, light_mean = dark_sum / dark_count, (weighted - dark_sum) / light_count
-    dark_std = max(0.0, dark_squared / dark_count - dark_mean ** 2) ** 0.5
-    light_std = max(0.0, (squared - dark_squared) / light_count - light_mean ** 2) ** 0.5
+    dark_std = max(0.0, dark_squared / dark_count - dark_mean**2) ** 0.5
+    light_std = max(0.0, (squared - dark_squared) / light_count - light_mean**2) ** 0.5
     contrast = light_mean - dark_mean
     # Neither a speck nor two large illumination zones prove a text/paper
     # separation. A broad lighter group is also consistent with a shadow.
@@ -265,17 +265,29 @@ def _snap_heading_bottom(item: dict, headings: list[dict], page_loader) -> bool:
         return False
     last = item["regions"][-1]
     a = last["bbox"]
-    heading = next((h for h in headings
-                    if int(h.get("page", -1)) == last["page_idx"] and abs(float(h["y"]) - 2 - a[3]) < 0.6
-                    and a[0] - 1 <= float(h.get("x", a[0])) < a[2]), None)
+    heading = next(
+        (
+            h
+            for h in headings
+            if int(h.get("page", -1)) == last["page_idx"]
+            and abs(float(h["y"]) - 2 - a[3]) < 0.6
+            and a[0] - 1 <= float(h.get("x", a[0])) < a[2]
+        ),
+        None,
+    )
     if heading is None:
         return False
     page = page_loader(last["page_idx"])
     stop = float(heading["y"])
     x = heading.get("x")
     if x is not None and _ink_touches(
-            [(y, v) for y, v in row_ink(page, max(0.0, x - 2), min(1000.0, x + NUMBER_WIDTH), a[3] - 1, a[3] + 3)
-             if v >= NUMBER_DENSE], a[3]):
+        [
+            (y, v)
+            for y, v in row_ink(page, max(0.0, x - 2), min(1000.0, x + NUMBER_WIDTH), a[3] - 1, a[3] + 3)
+            if v >= NUMBER_DENSE
+        ],
+        a[3],
+    ):
         return False  # 下沿碰到的是标题本身的字（标题框比字低）：不动
     printed = number_top(page, x, stop - 12, stop + NUMBER_REACH, stop - 2)
     # Without the heading's own first line in sight, do not go past its box.
@@ -325,9 +337,14 @@ def snap_cuts(items: list[dict], page_loader, layout=None) -> int:
     Any failure to read a page leaves that cut as it was.
     """
     moved = 0
-    ordered = sorted(items, key=lambda item: (
-        (item.get("start") or {}).get("page", 0), (item.get("start") or {}).get("col", 0),
-        (item.get("start") or {}).get("y", 0)))
+    ordered = sorted(
+        items,
+        key=lambda item: (
+            (item.get("start") or {}).get("page", 0),
+            (item.get("start") or {}).get("col", 0),
+            (item.get("start") or {}).get("y", 0),
+        ),
+    )
     paired: set[int] = set()
     for position, (previous, following) in enumerate(zip(ordered, ordered[1:])):
         try:

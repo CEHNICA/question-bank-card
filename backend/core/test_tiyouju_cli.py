@@ -29,8 +29,7 @@ _spec.loader.exec_module(cli)
 
 def run(*argv: str) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
-            mock.patch.object(cli, "configure_streams"):
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), mock.patch.object(cli, "configure_streams"):
         code = cli.main(list(argv))
     return code, out.getvalue(), err.getvalue()
 
@@ -54,16 +53,25 @@ class TiyoujuCliTests(LiveServerTestCase):
         override = override_settings(DATA_ROOT=self.temp / "data")
         override.enable()
         self.addCleanup(override.disable)
-        environment = mock.patch.dict(os.environ, {
-            "TIYOUJU_URL": self.live_server_url, "TIYOUJU_AGENT": "",
-            "QB_MINERU_CONFIGURED": "1", "QB_MINIMAX_CONFIGURED": "1",
-        })
+        environment = mock.patch.dict(
+            os.environ,
+            {
+                "TIYOUJU_URL": self.live_server_url,
+                "TIYOUJU_AGENT": "",
+                "QB_MINERU_CONFIGURED": "1",
+                "QB_MINIMAX_CONFIGURED": "1",
+            },
+        )
         environment.start()
         self.addCleanup(environment.stop)
         self.paper = Paper.objects.create(
-            filename="期中卷.pdf", kind="pdf", sha256="b" * 64,
-            source_path=str(self.temp / "s.pdf"), render_path=str(self.temp / "s.pdf"),
-            pages=[{"page_idx": 0, "width": 1000, "height": 1000}], status=Paper.Status.READY,
+            filename="期中卷.pdf",
+            kind="pdf",
+            sha256="b" * 64,
+            source_path=str(self.temp / "s.pdf"),
+            render_path=str(self.temp / "s.pdf"),
+            pages=[{"page_idx": 0, "width": 1000, "height": 1000}],
+            status=Paper.Status.READY,
         )
         pages = paper_dir(self.paper) / "pages"
         pages.mkdir(parents=True)
@@ -72,19 +80,33 @@ class TiyoujuCliTests(LiveServerTestCase):
         image.save(pages / "page_0.png")
         candidate = {"page_idx": 0, "bbox": [600, 300, 900, 600]}
         self.q1 = Question.objects.create(
-            paper=self.paper, number=1, question_type="single_choice", state=Question.State.GREEN,
-            stem="计算 $1+1$。", options={"A": "1", "B": "2"},
+            paper=self.paper,
+            number=1,
+            question_type="single_choice",
+            state=Question.State.GREEN,
+            stem="计算 $1+1$。",
+            options={"A": "1", "B": "2"},
             regions=[{"page_idx": 0, "bbox": [50, 50, 950, 250]}],
         )
         self.q2 = Question.objects.create(
-            paper=self.paper, number=2, question_type="free_response", state=Question.State.YELLOW,
-            stem="如图，求 $x$。", flags=["两次识读不一致，请核对题面中标黄的位置"],
-            regions=[{"page_idx": 0, "bbox": [50, 260, 950, 700]}], figure_candidates=[candidate],
-            read_a={"stem": "如图，求 $x$。"}, read_b={"stem": "如图，求 $y$。"},
+            paper=self.paper,
+            number=2,
+            question_type="free_response",
+            state=Question.State.YELLOW,
+            stem="如图，求 $x$。",
+            flags=["两次识读不一致，请核对题面中标黄的位置"],
+            regions=[{"page_idx": 0, "bbox": [50, 260, 950, 700]}],
+            figure_candidates=[candidate],
+            read_a={"stem": "如图，求 $x$。"},
+            read_b={"stem": "如图，求 $y$。"},
         )
         self.q3 = Question.objects.create(
-            paper=self.paper, number=3, question_type="fill_blank", state=Question.State.GREEN,
-            stem="$2+2=$____。", regions=[{"page_idx": 0, "bbox": [50, 710, 950, 900]}],
+            paper=self.paper,
+            number=3,
+            question_type="fill_blank",
+            state=Question.State.GREEN,
+            stem="$2+2=$____。",
+            regions=[{"page_idx": 0, "bbox": [50, 710, 950, 900]}],
         )
 
     def test_status_papers_and_card_lists(self):
@@ -177,8 +199,12 @@ class TiyoujuCliTests(LiveServerTestCase):
         self.assertEqual(self.q2.origin, "2026·滕州二中月考")
 
     def test_a_persons_approval_is_left_alone(self):
-        self.client.post(f"/api/questions/{self.q1.pk}/approve", data=json.dumps({"approved": True}),
-                         content_type="application/json", HTTP_X_QB_REQUEST="1")
+        self.client.post(
+            f"/api/questions/{self.q1.pk}/approve",
+            data=json.dumps({"approved": True}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
         code, result = run_json("fix", "期中", "1", "--stem", "改掉")
         self.assertEqual(code, cli.EXIT_NEEDS_USER)
         self.assertIn("人工通过", result["error"])
@@ -193,15 +219,21 @@ class TiyoujuCliTests(LiveServerTestCase):
     def test_explicit_force_can_reread_manual_text_without_changing_published_version(self):
         self.q1.processing_mode = "manual"
         self.q1.save()
-        result = self.client.post(f"/api/questions/{self.q1.pk}/approve", data=json.dumps({"approved": True}),
-            content_type="application/json", HTTP_X_QB_REQUEST="1")
+        result = self.client.post(
+            f"/api/questions/{self.q1.pk}/approve",
+            data=json.dumps({"approved": True}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
         self.assertEqual(result.status_code, 200, result.content)
         code, published = run_json("publish", "期中")
         self.assertEqual(code, 0, published)
         publication = PublishedQuestion.objects.get(question=self.q1)
         content = json.dumps(publication.content, ensure_ascii=False, sort_keys=True)
-        with mock.patch("core.views._vision_ready", return_value=True), \
-                mock.patch("core.readers.assistant_mode", return_value=False):
+        with (
+            mock.patch("core.views._vision_ready", return_value=True),
+            mock.patch("core.readers.assistant_mode", return_value=False),
+        ):
             code, refused = run_json("reread", "期中", "1")
             self.assertEqual(code, cli.EXIT_NEEDS_USER, refused)
             code, requested = run_json("reread", "期中", "1", "--force")
@@ -259,16 +291,32 @@ class TiyoujuCliTests(LiveServerTestCase):
 
     def test_mcp_lists_tools_and_returns_the_crop_as_an_image(self):
         lines = [
-            {"jsonrpc": "2.0", "id": 1, "method": "initialize",
-             "params": {"protocolVersion": "2025-06-18", "clientInfo": {"name": "cherry-studio"}}},
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {"protocolVersion": "2025-06-18", "clientInfo": {"name": "cherry-studio"}},
+            },
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
             {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-            {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-             "params": {"name": "show_card", "arguments": {"paper": "期中", "card": "2"}}},
-            {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
-             "params": {"name": "approve_cards", "arguments": {"paper": "期中", "cards": ["1"]}}},
-            {"jsonrpc": "2.0", "id": 5, "method": "tools/call",
-             "params": {"name": "list_cards", "arguments": {"paper": "不存在"}}},
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {"name": "show_card", "arguments": {"paper": "期中", "card": "2"}},
+            },
+            {
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {"name": "approve_cards", "arguments": {"paper": "期中", "cards": ["1"]}},
+            },
+            {
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "tools/call",
+                "params": {"name": "list_cards", "arguments": {"paper": "不存在"}},
+            },
             {"jsonrpc": "2.0", "id": 6, "method": "nope"},
         ]
         stdin = io.StringIO("\n".join(json.dumps(line, ensure_ascii=False) for line in lines) + "\n")
@@ -279,7 +327,9 @@ class TiyoujuCliTests(LiveServerTestCase):
         self.assertEqual(sorted(replies), [1, 2, 3, 4, 5, 6])
         self.assertEqual(replies[1]["result"]["serverInfo"]["name"], "tiyouju")
         names = {tool["name"] for tool in replies[2]["result"]["tools"]}
-        self.assertTrue({"upload_paper", "show_card", "fix_card", "set_figures", "approve_cards", "publish_paper"} <= names)
+        self.assertTrue(
+            {"upload_paper", "show_card", "fix_card", "set_figures", "approve_cards", "publish_paper"} <= names
+        )
         content = replies[3]["result"]["content"]
         self.assertEqual([item["type"] for item in content], ["text", "image"])
         self.assertEqual(content[1]["mimeType"], "image/png")
@@ -288,7 +338,6 @@ class TiyoujuCliTests(LiveServerTestCase):
         self.assertEqual(self.q1.approval_agent, "cherry-studio")
         self.assertTrue(replies[5]["result"]["isError"])
         self.assertEqual(replies[6]["error"]["code"], -32601)
-
 
     def test_status_names_the_free_keys_still_missing(self):
         nothing = {"QB_MODEL_PREFERENCES_FILE": str(self.temp / "prefs.json")}
@@ -340,18 +389,21 @@ class TiyoujuOfflineTests(SimpleTestCase):
             "software": {"installed": True, "version": "1.10.14", "version_verified": True},
             "skill": {"verified": False, "available": True},
             "desktop": {"changed": False, "verified": True, "status": "hidden"},
-            "questions": [{"id": "install_skill", "text": "要安装技能吗？"},
-                          {"id": "desktop_icon", "text": "桌面图标要显示还是隐藏？"}],
+            "questions": [
+                {"id": "install_skill", "text": "要安装技能吗？"},
+                {"id": "desktop_icon", "text": "桌面图标要显示还是隐藏？"},
+            ],
             "invitation": "以后有题目可以发给我。",
         }
-        with mock.patch.object(cli, "Client", side_effect=AssertionError("setup must stay offline")), \
-                mock.patch.object(cli, "app_executable", return_value=Path("C:/Apps/QuestionBankCard.exe")), \
-                mock.patch.object(cli.setup, "assistant_setup", return_value=report) as finish:
+        with (
+            mock.patch.object(cli, "Client", side_effect=AssertionError("setup must stay offline")),
+            mock.patch.object(cli, "app_executable", return_value=Path("C:/Apps/QuestionBankCard.exe")),
+            mock.patch.object(cli.setup, "assistant_setup", return_value=report) as finish,
+        ):
             code, result = run_json("assistant-setup")
             self.assertEqual(code, 0)
             self.assertEqual(result, report)
-            self.assertEqual(finish.call_args.kwargs,
-                             {"skill_dir": None, "replace_skill": False, "desktop": None})
+            self.assertEqual(finish.call_args.kwargs, {"skill_dir": None, "replace_skill": False, "desktop": None})
             code, text, _err = run("assistant-setup")
             self.assertEqual(code, 0)
             self.assertIn("1.10.14", text)
@@ -359,17 +411,19 @@ class TiyoujuOfflineTests(SimpleTestCase):
             self.assertIn("桌面图标要显示还是隐藏", text)
 
     def test_assistant_setup_passes_only_explicit_choices_and_reports_safety_failures(self):
-        with tempfile.TemporaryDirectory() as folder, \
-                mock.patch.object(cli, "Client", side_effect=AssertionError("setup must stay offline")), \
-                mock.patch.object(cli, "app_executable", return_value=None), \
-                mock.patch.object(cli.setup, "assistant_setup", side_effect=cli.setup.SetupError("未覆盖用户技能")) as finish:
-            code, result = run_json("assistant-setup", "--skill-dir", folder,
-                                    "--replace-skill", "--desktop", "hide")
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            mock.patch.object(cli, "Client", side_effect=AssertionError("setup must stay offline")),
+            mock.patch.object(cli, "app_executable", return_value=None),
+            mock.patch.object(
+                cli.setup, "assistant_setup", side_effect=cli.setup.SetupError("未覆盖用户技能")
+            ) as finish,
+        ):
+            code, result = run_json("assistant-setup", "--skill-dir", folder, "--replace-skill", "--desktop", "hide")
         self.assertEqual(code, cli.EXIT_NEEDS_USER)
         self.assertEqual(result["code"], cli.EXIT_NEEDS_USER)
         self.assertIn("未覆盖", result["error"])
-        self.assertEqual(finish.call_args.kwargs,
-                         {"skill_dir": Path(folder), "replace_skill": True, "desktop": "hide"})
+        self.assertEqual(finish.call_args.kwargs, {"skill_dir": Path(folder), "replace_skill": True, "desktop": "hide"})
 
     def test_a_closed_app_is_reported_with_its_own_exit_code(self):
         with mock.patch.dict(os.environ, {"TIYOUJU_URL": "http://127.0.0.1:9"}):
@@ -389,9 +443,12 @@ class TiyoujuOfflineTests(SimpleTestCase):
 
     def test_candidate_keys_match_the_app(self):
         from .figure_policy import candidate_key
-        for item in ({"page_idx": 0, "bbox": [600, 300, 900, 600]},
-                     {"page_idx": 2, "bbox": [142.04, 233.0, 843.25, 294.96]},
-                     {"page_idx": 1, "bbox": [-5, 0, 1004, 2]}):
+
+        for item in (
+            {"page_idx": 0, "bbox": [600, 300, 900, 600]},
+            {"page_idx": 2, "bbox": [142.04, 233.0, 843.25, 294.96]},
+            {"page_idx": 1, "bbox": [-5, 0, 1004, 2]},
+        ):
             self.assertEqual(cli.candidate_key(item), candidate_key(item))
 
     def test_figure_choices_are_parsed(self):

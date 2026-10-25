@@ -4,6 +4,7 @@ The unit tests can only see the XML they asked for. This produces an actual
 document through library_export's own code path, so Word itself can be asked
 where every picture lands. Run tools/measure_word_pictures.ps1 on the output.
 """
+
 import io
 import os
 import sys
@@ -43,8 +44,8 @@ def build(path):
     # an otherwise centred table.
     wrapped = [picture((415, 231)), picture((419, 228)), picture((419, 228))]
     wrap_lines = _figure_row_lines(wrapped)
-    _write_figure_line(document, wrapped[:wrap_lines[0]])
-    _write_figure_line(document, wrapped[wrap_lines[0]:])
+    _write_figure_line(document, wrapped[: wrap_lines[0]])
+    _write_figure_line(document, wrapped[wrap_lines[0] :])
 
     # A lone stem figure: the case that was hugging the left margin.
     _write_images(document, {"images": [picture((294, 201))]}, "stem")
@@ -58,7 +59,6 @@ def build(path):
 
 
 if __name__ == "__main__":
-    target = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
-        tempfile.gettempdir(), "qb-figure-centring.docx")
+    target = sys.argv[1] if len(sys.argv) > 1 else os.path.join(tempfile.gettempdir(), "qb-figure-centring.docx")
     columns = build(target)
     print(f"wrote {target} (first figure row splits {columns})")

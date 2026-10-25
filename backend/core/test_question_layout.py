@@ -3,6 +3,7 @@
 Every original document and database row is synthesized in a temporary root.
 The browser and model services are never used by this module.
 """
+
 import json
 import tempfile
 import uuid
@@ -53,34 +54,56 @@ class QuestionLayoutTests(TestCase):
         self.addCleanup(settings.disable)
         guards = ExitStack()
         self.addCleanup(guards.close)
-        self.network = guards.enter_context(mock.patch(
-            "requests.sessions.Session.request", side_effect=AssertionError("Unexpected external request")))
-        self.model = guards.enter_context(mock.patch.object(
-            readers, "chat", side_effect=AssertionError("Unexpected model invocation")))
-        self.cloud = guards.enter_context(mock.patch.object(
-            pipeline, "request_extract_file_from_pool", side_effect=AssertionError("Unexpected cloud extraction")))
+        self.network = guards.enter_context(
+            mock.patch("requests.sessions.Session.request", side_effect=AssertionError("Unexpected external request"))
+        )
+        self.model = guards.enter_context(
+            mock.patch.object(readers, "chat", side_effect=AssertionError("Unexpected model invocation"))
+        )
+        self.cloud = guards.enter_context(
+            mock.patch.object(
+                pipeline, "request_extract_file_from_pool", side_effect=AssertionError("Unexpected cloud extraction")
+            )
+        )
         self.paper = self.paper_fixture()
         self.group = QuestionGroup.objects.create(
-            paper=self.paper, title="合成题组", kind="exam", sequence=0,
-            page_start=1, page_end=2, metadata={"pages": [0, 1]})
+            paper=self.paper,
+            title="合成题组",
+            kind="exam",
+            sequence=0,
+            page_start=1,
+            page_end=2,
+            metadata={"pages": [0, 1]},
+        )
         self.first = self.question(1)
         self.second = self.question(2, regions=self.pieces(top=300))
 
     @staticmethod
     def pieces(*, page=0, top=80, count=1):
-        return [{"page_idx": page, "bbox": [40, top + i * 25, 900, top + i * 25 + 20]}
-                for i in range(count)]
+        return [{"page_idx": page, "bbox": [40, top + i * 25, 900, top + i * 25 + 20]} for i in range(count)]
 
     def question(self, number=1, **fields):
         regions = fields.pop("regions", self.pieces())
         values = {
-            "paper": self.paper, "group": self.group, "number": number, "regions": deepcopy(regions),
-            "regions_auto": deepcopy(regions), "stem": f"合成且人工改过的第 {number} 题",
-            "options": {"A": "甲", "B": "乙"}, "question_type": "single_choice",
-            "body_mode": "text", "processing_mode": "manual", "start_source": "manual",
-            "source_kind": Question.SourceKind.MANUAL, "edited": True, "text_source": "human",
-            "state": Question.State.GREEN, "type_locked": True,
-            "figures": [], "figure_review": {"status": "confirmed_no_figure", "source": "human"}}
+            "paper": self.paper,
+            "group": self.group,
+            "number": number,
+            "regions": deepcopy(regions),
+            "regions_auto": deepcopy(regions),
+            "stem": f"合成且人工改过的第 {number} 题",
+            "options": {"A": "甲", "B": "乙"},
+            "question_type": "single_choice",
+            "body_mode": "text",
+            "processing_mode": "manual",
+            "start_source": "manual",
+            "source_kind": Question.SourceKind.MANUAL,
+            "edited": True,
+            "text_source": "human",
+            "state": Question.State.GREEN,
+            "type_locked": True,
+            "figures": [],
+            "figure_review": {"status": "confirmed_no_figure", "source": "human"},
+        }
         return Question.objects.create(**{**values, **fields})
 
     def post(self, url, payload):
@@ -101,10 +124,17 @@ class QuestionLayoutTests(TestCase):
     def publication(self, question, *, status=PublishedQuestion.Status.PUBLISHED, version=1):
         content = library.final_content(question)
         return PublishedQuestion.objects.create(
-            paper=self.paper, question=question, source_filename=self.paper.filename,
-            number=question.number, question_type=question.question_type, version=version,
-            status=status, content=deepcopy(content), content_hash=library.content_hash(content),
-            extras={"synthetic_history": {"retained": True}})
+            paper=self.paper,
+            question=question,
+            source_filename=self.paper.filename,
+            number=question.number,
+            question_type=question.question_type,
+            version=version,
+            status=status,
+            content=deepcopy(content),
+            content_hash=library.content_hash(content),
+            extras={"synthetic_history": {"retained": True}},
+        )
 
     def approve(self, question):
         library.approve(question, now=timezone.now())
@@ -123,7 +153,8 @@ class QuestionLayoutTests(TestCase):
     def payload(self, kind="regions", *, sources=None, targets=None, request_id=None):
         self.paper.refresh_from_db()
         return {
-            "kind": kind, "layout_revision": self.paper.layout_revision,
+            "kind": kind,
+            "layout_revision": self.paper.layout_revision,
             "client_request_id": str(request_id or uuid.uuid4()),
             "sources": [self.source(question) for question in (sources if sources is not None else [self.first])],
             "targets": targets if targets is not None else [{"regions": self.pieces(top=100)}],
@@ -131,10 +162,24 @@ class QuestionLayoutTests(TestCase):
 
     def split_payload(self, question=None, *, second_number=3):
         question = question or self.first
-        return self.payload("split", sources=[question], targets=[
-            {"number": question.number, "group_id": question.group_id, "question_type": "single_choice", "regions": self.pieces(top=90)},
-            {"number": second_number, "group_id": question.group_id, "question_type": "free_response", "regions": self.pieces(page=1, top=150)},
-        ])
+        return self.payload(
+            "split",
+            sources=[question],
+            targets=[
+                {
+                    "number": question.number,
+                    "group_id": question.group_id,
+                    "question_type": "single_choice",
+                    "regions": self.pieces(top=90),
+                },
+                {
+                    "number": second_number,
+                    "group_id": question.group_id,
+                    "question_type": "free_response",
+                    "regions": self.pieces(page=1, top=150),
+                },
+            ],
+        )
 
     def mutate(self, payload):
         operation, repeated = layout.mutate(self.paper.pk, payload)
@@ -182,16 +227,36 @@ class QuestionLayoutTests(TestCase):
     def test_range_save_preserves_manual_text_type_figures_and_never_queues_recognition(self):
         for index, mode in enumerate(("manual", "auto", "assistant")):
             with self.subTest(mode=mode):
-                question = self.question(10 + index, processing_mode=mode, start_source="mineru",
-                    read_a={"stem": "原识读记录"}, figures=[{"slot": "stem", "page_idx": 0,
-                        "bbox": [60, 100, 180, 180], "source": "manual"}],
-                    answer="人工答案", analysis="人工解析", origin="虚构出处")
+                question = self.question(
+                    10 + index,
+                    processing_mode=mode,
+                    start_source="mineru",
+                    read_a={"stem": "原识读记录"},
+                    figures=[{"slot": "stem", "page_idx": 0, "bbox": [60, 100, 180, 180], "source": "manual"}],
+                    answer="人工答案",
+                    analysis="人工解析",
+                    origin="虚构出处",
+                )
                 before = deepcopy(Question.objects.values().get(pk=question.pk))
                 operation, repeated = self.mutate(self.payload(sources=[question]))
                 self.assertFalse(repeated)
                 question.refresh_from_db()
-                for name in ("stem", "options", "question_type", "type_locked", "figures", "figure_review",
-                             "edited", "answer", "analysis", "origin", "read_a", "body_mode", "processing_mode", "color_index"):
+                for name in (
+                    "stem",
+                    "options",
+                    "question_type",
+                    "type_locked",
+                    "figures",
+                    "figure_review",
+                    "edited",
+                    "answer",
+                    "analysis",
+                    "origin",
+                    "read_a",
+                    "body_mode",
+                    "processing_mode",
+                    "color_index",
+                ):
                     self.assertEqual(getattr(question, name), before[name], name)
                 self.assertEqual(question.regions, self.pieces(top=100))
                 self.assertGreater(question.content_revision, before["content_revision"])
@@ -217,8 +282,11 @@ class QuestionLayoutTests(TestCase):
         self.approve(self.first)
         publication = self.publication(self.first)
         job = LibraryJob.objects.create(publication=publication, kind="answer", status="running")
-        Question.objects.filter(pk=self.first.pk).update(ocr_pending=True, reread_requested=True,
-            ocr_suggestion={"revision": self.first.content_revision, "stem": "旧OCR建议"})
+        Question.objects.filter(pk=self.first.pk).update(
+            ocr_pending=True,
+            reread_requested=True,
+            ocr_suggestion={"revision": self.first.content_revision, "stem": "旧OCR建议"},
+        )
         content = deepcopy(publication.content)
         self.mutate(self.payload())
         self.first.refresh_from_db()
@@ -232,15 +300,24 @@ class QuestionLayoutTests(TestCase):
 
     def test_add_creates_new_manual_source_identity_with_ordered_cross_page_crops(self):
         ordered = [*self.pieces(page=1, top=180), *self.pieces(page=0, top=120)]
-        operation, repeated = self.mutate(self.payload("add", sources=[], targets=[{
-            "number": 3, "group_id": self.group.pk, "question_type": "free_response", "regions": ordered}]))
+        operation, repeated = self.mutate(
+            self.payload(
+                "add",
+                sources=[],
+                targets=[
+                    {"number": 3, "group_id": self.group.pk, "question_type": "free_response", "regions": ordered}
+                ],
+            )
+        )
         self.assertFalse(repeated)
         self.assertEqual(operation.source_ids, [])
         self.assertEqual(len(operation.target_ids), 1)
         added = Question.objects.get(pk=operation.target_ids[0])
         self.assertEqual((added.number, added.group_id, added.regions), (3, self.group.pk, ordered))
-        self.assertEqual((added.start_source, added.source_kind, added.body_mode, added.processing_mode),
-                         ("manual", "manual", "source_image", "manual"))
+        self.assertEqual(
+            (added.start_source, added.source_kind, added.body_mode, added.processing_mode),
+            ("manual", "manual", "source_image", "manual"),
+        )
         self.assertEqual(added.state, Question.State.YELLOW)
         self.assertFalse(added.approved or added.reread_requested or added.ocr_pending)
         self.assertNotIn(added.source_key, {self.first.source_key, self.second.source_key})
@@ -260,16 +337,28 @@ class QuestionLayoutTests(TestCase):
         self.assertEqual(len({question.source_key for question in new}), 2)
         self.assertTrue(all(question.source_key != self.first.source_key for question in new))
         self.assertTrue(all(question.pk != self.first.pk for question in new))
-        self.assertTrue(all(question.body_mode == "source_image" and question.processing_mode == "manual" for question in new))
+        self.assertTrue(
+            all(question.body_mode == "source_image" and question.processing_mode == "manual" for question in new)
+        )
         self.assertTrue(all(not question.stem and not question.options for question in new))
         saved = operation.before_snapshot["questions"]
-        self.assertTrue(any(row["id"] == self.first.pk and row["stem"] == before["stem"] and row["options"] == before["options"] for row in saved))
-        self.assertEqual(Question.objects.get(pk=self.second.pk).number, 2, "Split must not renumber the rest of the paper")
+        self.assertTrue(
+            any(
+                row["id"] == self.first.pk and row["stem"] == before["stem"] and row["options"] == before["options"]
+                for row in saved
+            )
+        )
+        self.assertEqual(
+            Question.objects.get(pk=self.second.pk).number, 2, "Split must not renumber the rest of the paper"
+        )
 
     def test_merge_retires_sources_and_preserves_explicit_piece_order(self):
         ordered = [*self.pieces(page=1, top=200), *self.pieces(page=0, top=80), *self.pieces(top=300)]
-        payload = self.payload("merge", sources=[self.first, self.second], targets=[{
-            "number": 1, "group_id": self.group.pk, "question_type": "free_response", "regions": ordered}])
+        payload = self.payload(
+            "merge",
+            sources=[self.first, self.second],
+            targets=[{"number": 1, "group_id": self.group.pk, "question_type": "free_response", "regions": ordered}],
+        )
         operation, _ = self.mutate(payload)
         merged = Question.objects.get(pk=operation.target_ids[0])
         self.assertEqual(merged.regions, ordered)
@@ -280,45 +369,84 @@ class QuestionLayoutTests(TestCase):
 
     def test_all_validation_errors_are_atomic(self):
         cases = []
-        for regions in ([], self.pieces(count=13), [{"page_idx": 9, "bbox": [40, 80, 900, 100]}],
-                        [{"page_idx": True, "bbox": [40, 80, 900, 100]}],
-                        [{"page_idx": 0, "bbox": [40, 80, float("nan"), 100]}]):
-            cases.append((self.payload("add", sources=[], targets=[{"number": 3, "group_id": self.group.pk, "regions": regions}]), 400))
+        for regions in (
+            [],
+            self.pieces(count=13),
+            [{"page_idx": 9, "bbox": [40, 80, 900, 100]}],
+            [{"page_idx": True, "bbox": [40, 80, 900, 100]}],
+            [{"page_idx": 0, "bbox": [40, 80, float("nan"), 100]}],
+        ):
+            cases.append(
+                (
+                    self.payload(
+                        "add", sources=[], targets=[{"number": 3, "group_id": self.group.pk, "regions": regions}]
+                    ),
+                    400,
+                )
+            )
         for number in (0, True, "3"):
             cases.append((self.payload("add", sources=[], targets=[{"number": number, "regions": self.pieces()}]), 400))
-        cases.extend([
-            (self.payload("add", sources=[], targets=[{"number": 2, "group_id": self.group.pk, "regions": self.pieces()}]), 409),
-            (self.payload("split", targets=[{"number": 3, "regions": self.pieces()}]), 400),
-            (self.payload("merge", sources=[self.first], targets=[{"number": 3, "regions": self.pieces()}]), 400),
-        ])
+        cases.extend(
+            [
+                (
+                    self.payload(
+                        "add", sources=[], targets=[{"number": 2, "group_id": self.group.pk, "regions": self.pieces()}]
+                    ),
+                    409,
+                ),
+                (self.payload("split", targets=[{"number": 3, "regions": self.pieces()}]), 400),
+                (self.payload("merge", sources=[self.first], targets=[{"number": 3, "regions": self.pieces()}]), 400),
+            ]
+        )
         for payload, status in cases:
             with self.subTest(payload=payload):
                 self.rejected(payload, status)
 
     def test_sources_cannot_be_duplicated_deleted_or_from_another_paper(self):
         other_paper = self.paper_fixture()
-        other_group = QuestionGroup.objects.create(paper=other_paper, title="另卷", sequence=0, page_start=1, page_end=2, metadata={"pages": [0, 1]})
+        other_group = QuestionGroup.objects.create(
+            paper=other_paper, title="另卷", sequence=0, page_start=1, page_end=2, metadata={"pages": [0, 1]}
+        )
         foreign = self.question(1, paper=other_paper, group=other_group)
         deleted = self.question(3, deleted_at=timezone.now())
-        duplicate = self.payload("merge", sources=[self.first, self.first], targets=[{"number": 1, "group_id": self.group.pk, "regions": self.pieces()}])
+        duplicate = self.payload(
+            "merge",
+            sources=[self.first, self.first],
+            targets=[{"number": 1, "group_id": self.group.pk, "regions": self.pieces()}],
+        )
         self.rejected(duplicate, 400)
         for question in (foreign, deleted):
             with self.subTest(question=question.pk):
                 self.rejected(self.payload(sources=[question]))
 
     def test_ambiguous_group_and_cross_group_merge_are_rejected_without_renumbering(self):
-        other_group = QuestionGroup.objects.create(paper=self.paper, title="重叠题组", sequence=1,
-            page_start=1, page_end=2, metadata={"pages": [0, 1]})
+        other_group = QuestionGroup.objects.create(
+            paper=self.paper, title="重叠题组", sequence=1, page_start=1, page_end=2, metadata={"pages": [0, 1]}
+        )
         self.rejected(self.payload("add", sources=[], targets=[{"number": 3, "regions": self.pieces()}]), 400)
         other = self.question(1, group=other_group)
-        self.rejected(self.payload("merge", sources=[self.first, other], targets=[{
-            "number": 3, "group_id": self.group.pk, "regions": self.pieces()}]))
+        self.rejected(
+            self.payload(
+                "merge",
+                sources=[self.first, other],
+                targets=[{"number": 3, "group_id": self.group.pk, "regions": self.pieces()}],
+            )
+        )
 
     def test_twelve_ordered_pieces_are_kept_and_thirteen_are_never_truncated(self):
         ordered = [*self.pieces(page=1, top=60, count=6), *self.pieces(page=0, top=60, count=6)]
-        operation, _ = self.mutate(self.payload("add", sources=[], targets=[{"number": 3, "group_id": self.group.pk, "regions": ordered}]))
+        operation, _ = self.mutate(
+            self.payload("add", sources=[], targets=[{"number": 3, "group_id": self.group.pk, "regions": ordered}])
+        )
         self.assertEqual(Question.objects.get(pk=operation.target_ids[0]).regions, ordered)
-        self.rejected(self.payload("add", sources=[], targets=[{"number": 4, "group_id": self.group.pk, "regions": [*ordered, *self.pieces(top=500)]}]), 400)
+        self.rejected(
+            self.payload(
+                "add",
+                sources=[],
+                targets=[{"number": 4, "group_id": self.group.pk, "regions": [*ordered, *self.pieces(top=500)]}],
+            ),
+            400,
+        )
 
     def test_client_request_requires_uuid_revision_and_complete_source_tokens(self):
         for field in ("client_request_id", "layout_revision"):
@@ -356,9 +484,19 @@ class QuestionLayoutTests(TestCase):
                 question = self.question(10 if update == "ocr" else 11)
                 payload = self.payload(sources=[question])
                 if update == "ocr":
-                    Question.objects.filter(pk=question.pk).update(ocr_suggestion={"revision": question.content_revision, "stem": "新的识读建议"})
+                    Question.objects.filter(pk=question.pk).update(
+                        ocr_suggestion={"revision": question.content_revision, "stem": "新的识读建议"}
+                    )
                 else:
-                    RegionRead.objects.create(question=question, page_idx=0, bbox=[50, 80, 200, 100], target="stem", status="done", text="新的框选识读", recommendation={"revision": question.content_revision})
+                    RegionRead.objects.create(
+                        question=question,
+                        page_idx=0,
+                        bbox=[50, 80, 200, 100],
+                        target="stem",
+                        status="done",
+                        text="新的框选识读",
+                        recommendation={"revision": question.content_revision},
+                    )
                 self.rejected(payload)
 
     def test_exact_request_retry_returns_same_receipt_even_after_revision_changes(self):
@@ -387,7 +525,9 @@ class QuestionLayoutTests(TestCase):
     def test_receipt_failure_rolls_back_retire_create_withdraw_and_job_cancellation(self):
         publication = self.publication(self.first)
         LibraryJob.objects.create(publication=publication, kind="answer", status="running")
-        RegionRead.objects.create(question=self.first, page_idx=0, bbox=[50, 80, 200, 100], target="stem", status="running")
+        RegionRead.objects.create(
+            question=self.first, page_idx=0, bbox=[50, 80, 200, 100], target="stem", status="running"
+        )
         payload = self.split_payload()
         before = self.state()
         with mock.patch.object(QuestionLayoutOperation, "save", side_effect=RuntimeError("synthetic receipt failure")):
@@ -399,10 +539,12 @@ class QuestionLayoutTests(TestCase):
         payload = self.split_payload()
         before = self.state()
         original = QuerySet.update
+
         def fail_layout_claim(queryset, **fields):
             if queryset.model is Paper and "layout_revision" in fields:
                 return 0
             return original(queryset, **fields)
+
         with mock.patch.object(QuerySet, "update", new=fail_layout_claim):
             with self.assertRaises(layout.LayoutError) as failure:
                 layout.mutate(self.paper.pk, payload)
@@ -415,11 +557,24 @@ class QuestionLayoutTests(TestCase):
         historical = self.publication(self.first, status="superseded", version=2)
         original_publication = deepcopy(PublishedQuestion.objects.values().get(pk=publication.pk))
         original_historical = deepcopy(PublishedQuestion.objects.values().get(pk=historical.pk))
-        jobs = [LibraryJob.objects.create(publication=publication, kind="answer", status=status,
-            result={"retained": status}) for status in ("queued", "running", "done", "failed")]
-        reads = [RegionRead.objects.create(question=self.first, page_idx=0, bbox=[50, 80, 200, 100],
-            target="stem", status=status, text="retained history", recommendation={"revision": self.first.content_revision})
-            for status in ("queued", "running", "done", "failed")]
+        jobs = [
+            LibraryJob.objects.create(
+                publication=publication, kind="answer", status=status, result={"retained": status}
+            )
+            for status in ("queued", "running", "done", "failed")
+        ]
+        reads = [
+            RegionRead.objects.create(
+                question=self.first,
+                page_idx=0,
+                bbox=[50, 80, 200, 100],
+                target="stem",
+                status=status,
+                text="retained history",
+                recommendation={"revision": self.first.content_revision},
+            )
+            for status in ("queued", "running", "done", "failed")
+        ]
         self.mutate(self.split_payload())
         publication.refresh_from_db()
         historical.refresh_from_db()
@@ -447,8 +602,14 @@ class QuestionLayoutTests(TestCase):
         self.approve(self.first)
         publication = self.publication(self.first)
         job = LibraryJob.objects.create(publication=publication, kind="answer", status="running")
-        read = RegionRead.objects.create(question=self.first, page_idx=0, bbox=[50, 80, 200, 100], target="stem", status="running")
-        old_regions, old_key, old_revision = deepcopy(self.first.regions), self.first.source_key, self.first.content_revision
+        read = RegionRead.objects.create(
+            question=self.first, page_idx=0, bbox=[50, 80, 200, 100], target="stem", status="running"
+        )
+        old_regions, old_key, old_revision = (
+            deepcopy(self.first.regions),
+            self.first.source_key,
+            self.first.content_revision,
+        )
         operation, _ = self.mutate(self.split_payload())
         undone, repeated = self.undo(operation)
         self.assertFalse(repeated)
@@ -458,10 +619,14 @@ class QuestionLayoutTests(TestCase):
         self.assertGreater(restored.content_revision, old_revision)
         self.assertFalse(restored.approved)
         self.assertIsNone(restored.approved_at)
-        self.assertEqual((restored.approved_content_hash, restored.approval_source, restored.approval_agent), ("", "", ""))
+        self.assertEqual(
+            (restored.approved_content_hash, restored.approval_source, restored.approval_agent), ("", "", "")
+        )
         self.assertFalse(restored.reread_requested or restored.ocr_pending)
         self.assertFalse(Question.objects.filter(pk__in=operation.target_ids).exists())
-        publication.refresh_from_db(); job.refresh_from_db(); read.refresh_from_db()
+        publication.refresh_from_db()
+        job.refresh_from_db()
+        read.refresh_from_db()
         self.assertEqual((publication.status, job.status, read.status), ("withdrawn", "failed", "failed"))
         after = self.state()
         _, repeated = self.undo(operation)
@@ -481,9 +646,18 @@ class QuestionLayoutTests(TestCase):
                 elif change == "publication":
                     self.publication(question)
                 elif change == "ocr":
-                    Question.objects.filter(pk=question.pk).update(ocr_suggestion={"revision": question.content_revision, "stem": "后来完成的识读建议"})
+                    Question.objects.filter(pk=question.pk).update(
+                        ocr_suggestion={"revision": question.content_revision, "stem": "后来完成的识读建议"}
+                    )
                 else:
-                    RegionRead.objects.create(question=question, page_idx=0, bbox=[50, 80, 200, 100], target="stem", status="done", text="后来完成的框选识读")
+                    RegionRead.objects.create(
+                        question=question,
+                        page_idx=0,
+                        bbox=[50, 80, 200, 100],
+                        target="stem",
+                        status="done",
+                        text="后来完成的框选识读",
+                    )
                 self.rejected_undo(operation)
 
     def test_undo_refuses_later_changes_to_retired_original_and_publication_job(self):
@@ -503,8 +677,20 @@ class QuestionLayoutTests(TestCase):
 
     def test_add_undo_hides_only_its_new_identity_and_preserves_existing_cards(self):
         original_ids = set(Question.objects.filter(paper=self.paper).values_list("id", flat=True))
-        operation, _ = self.mutate(self.payload("add", sources=[], targets=[{
-            "number": 3, "group_id": self.group.pk, "question_type": "free_response", "regions": self.pieces(top=450)}]))
+        operation, _ = self.mutate(
+            self.payload(
+                "add",
+                sources=[],
+                targets=[
+                    {
+                        "number": 3,
+                        "group_id": self.group.pk,
+                        "question_type": "free_response",
+                        "regions": self.pieces(top=450),
+                    }
+                ],
+            )
+        )
         created = Question.objects.get(pk=operation.target_ids[0])
         key, revision = created.source_key, created.content_revision
         self.undo(operation)
@@ -517,8 +703,13 @@ class QuestionLayoutTests(TestCase):
     def test_ordinary_trash_reserves_its_number_and_cannot_be_silently_replaced_by_add(self):
         deletion = self.post(f"/api/papers/{self.paper.pk}/questions/delete", {"question_ids": [self.second.pk]})
         self.assertEqual(deletion.status_code, 200, deletion.content)
-        self.rejected(self.payload("add", sources=[], targets=[{
-            "number": self.second.number, "group_id": self.group.pk, "regions": self.pieces(top=500)}]))
+        self.rejected(
+            self.payload(
+                "add",
+                sources=[],
+                targets=[{"number": self.second.number, "group_id": self.group.pk, "regions": self.pieces(top=500)}],
+            )
+        )
 
     def test_newer_layout_operation_blocks_undo_of_an_earlier_saved_operation(self):
         previous, _ = self.mutate(self.payload())
@@ -594,11 +785,23 @@ class QuestionLayoutTests(TestCase):
         self.first.save(update_fields=["processing_mode"])
         before_text = self.first.stem
         operations = []
+
         def late_read(*unused):
             operations.append(self.mutate(self.payload())[0])
-            return {"stem": "迟到结果不得覆盖人工正文", "options": {}, "question_type": "free_response",
-                    "state": "green", "flags": [], "error": "", "text_source": "single", "figures": [],
-                    "read_a": {"stem": "迟到结果"}, "read_b": {}, "read_c": {}}
+            return {
+                "stem": "迟到结果不得覆盖人工正文",
+                "options": {},
+                "question_type": "free_response",
+                "state": "green",
+                "flags": [],
+                "error": "",
+                "text_source": "single",
+                "figures": [],
+                "read_a": {"stem": "迟到结果"},
+                "read_b": {},
+                "read_c": {},
+            }
+
         manual_review.ManualIntakeReviewTests.run_read(self, self.first, late_read)
         self.first.refresh_from_db()
         self.assertEqual(self.first.regions, self.pieces(top=100))
@@ -646,7 +849,10 @@ class QuestionLayoutTests(TestCase):
         result = self.post(url, payload)
         self.assertEqual(result.status_code, 200, result.content)
         data = result.json()
-        self.assertEqual({row["id"] for row in data["questions"]}, set(Question.objects.filter(paper=self.paper).values_list("id", flat=True)))
+        self.assertEqual(
+            {row["id"] for row in data["questions"]},
+            set(Question.objects.filter(paper=self.paper).values_list("id", flat=True)),
+        )
         self.assertFalse(data["already_applied"])
         repeated = self.post(url, payload)
         self.assertEqual(repeated.status_code, 200, repeated.content)
@@ -662,9 +868,14 @@ class QuestionLayoutTests(TestCase):
         for index, mode in enumerate(("manual", "auto", "assistant")):
             for explicit_flag in (False, True):
                 with self.subTest(mode=mode, explicit_flag=explicit_flag):
-                    question = self.question(30 + index * 2 + int(explicit_flag), processing_mode=mode,
-                        start_source="mineru", answer="人工答案", analysis="人工解析",
-                        figures=[{"slot": "stem", "page_idx": 0, "bbox": [60, 100, 180, 180], "source": "manual"}])
+                    question = self.question(
+                        30 + index * 2 + int(explicit_flag),
+                        processing_mode=mode,
+                        start_source="mineru",
+                        answer="人工答案",
+                        analysis="人工解析",
+                        figures=[{"slot": "stem", "page_idx": 0, "bbox": [60, 100, 180, 180], "source": "manual"}],
+                    )
                     self.approve(question)
                     before = deepcopy(Question.objects.values().get(pk=question.pk))
                     before_count = QuestionLayoutOperation.objects.count()
@@ -675,8 +886,20 @@ class QuestionLayoutTests(TestCase):
                     self.assertEqual(result.status_code, 200, result.content)
                     question.refresh_from_db()
                     self.assertEqual(question.regions, self.pieces(top=200))
-                    for name in ("stem", "options", "question_type", "type_locked", "figures", "edited",
-                                 "answer", "analysis", "read_a", "body_mode", "processing_mode", "color_index"):
+                    for name in (
+                        "stem",
+                        "options",
+                        "question_type",
+                        "type_locked",
+                        "figures",
+                        "edited",
+                        "answer",
+                        "analysis",
+                        "read_a",
+                        "body_mode",
+                        "processing_mode",
+                        "color_index",
+                    ):
                         self.assertEqual(getattr(question, name), before[name], name)
                     self.assertFalse(question.approved or question.reread_requested or question.ocr_pending)
                     self.assertEqual(QuestionLayoutOperation.objects.count(), before_count + 1)
@@ -693,15 +916,23 @@ class QuestionLayoutTests(TestCase):
 
     def test_legacy_add_is_manual_and_uses_durable_idempotent_layout_history(self):
         self.paper.refresh_from_db()
-        payload = {"number": 3, "group_id": self.group.pk, "question_type": "free_response",
-                   "regions": [*self.pieces(page=1, top=200), *self.pieces(top=100)],
-                   "processing_mode": "auto", "body_mode": "text",
-                   "layout_revision": self.paper.layout_revision, "client_request_id": str(uuid.uuid4())}
+        payload = {
+            "number": 3,
+            "group_id": self.group.pk,
+            "question_type": "free_response",
+            "regions": [*self.pieces(page=1, top=200), *self.pieces(top=100)],
+            "processing_mode": "auto",
+            "body_mode": "text",
+            "layout_revision": self.paper.layout_revision,
+            "client_request_id": str(uuid.uuid4()),
+        }
         url = f"/api/papers/{self.paper.pk}/questions"
         result = self.post(url, payload)
         self.assertEqual(result.status_code, 201, result.content)
         added = Question.objects.get(pk=result.json()["question"]["id"])
-        self.assertEqual((added.processing_mode, added.body_mode, added.start_source), ("manual", "source_image", "manual"))
+        self.assertEqual(
+            (added.processing_mode, added.body_mode, added.start_source), ("manual", "source_image", "manual")
+        )
         self.assertFalse(added.reread_requested or added.ocr_pending)
         operation = QuestionLayoutOperation.objects.get(client_request_id=payload["client_request_id"])
         self.assertEqual(operation.target_ids, [added.pk])
@@ -735,8 +966,13 @@ class QuestionLayoutTests(TestCase):
         self.assertEqual(self.state(), before, "Reading history must not update any persistent state")
 
     def test_legacy_add_retry_without_optional_version_tokens_is_idempotent(self):
-        payload = {"number": 3, "group_id": self.group.pk, "question_type": "free_response",
-                   "regions": self.pieces(page=1), "client_request_id": str(uuid.uuid4())}
+        payload = {
+            "number": 3,
+            "group_id": self.group.pk,
+            "question_type": "free_response",
+            "regions": self.pieces(page=1),
+            "client_request_id": str(uuid.uuid4()),
+        }
         url = f"/api/papers/{self.paper.pk}/questions"
         saved = self.post(url, payload)
         self.assertEqual(saved.status_code, 201, saved.content)
@@ -796,19 +1032,50 @@ class QuestionLayoutMigrationTests(TransactionTestCase):
         executor.migrate(self.migrate_from)
         old = executor.loader.project_state(self.migrate_from).apps
         OldPaper, OldQuestion = old.get_model("core", "Paper"), old.get_model("core", "Question")
-        paper = OldPaper.objects.create(filename="synthetic-upgrade.pdf", kind="pdf", sha256="a" * 64,
-            status="ready", pages=[{"page_idx": 0, "width": 595, "height": 842}])
+        paper = OldPaper.objects.create(
+            filename="synthetic-upgrade.pdf",
+            kind="pdf",
+            sha256="a" * 64,
+            status="ready",
+            pages=[{"page_idx": 0, "width": 595, "height": 842}],
+        )
         records = []
         for number, deleted in ((1, False), (2, True)):
-            question = OldQuestion.all_objects.create(paper=paper, number=number, stem=f"保留的人工内容 {number}",
-                options={"A": "甲"}, state="green", edited=True, approved=True,
-                approved_at=timezone.now(), approved_content_hash=str(number) * 64,
-                approval_source="human", content_revision=number,
+            question = OldQuestion.all_objects.create(
+                paper=paper,
+                number=number,
+                stem=f"保留的人工内容 {number}",
+                options={"A": "甲"},
+                state="green",
+                edited=True,
+                approved=True,
+                approved_at=timezone.now(),
+                approved_content_hash=str(number) * 64,
+                approval_source="human",
+                content_revision=number,
                 deleted_at=timezone.now() if deleted else None,
-                regions=[{"page_idx": 0, "bbox": [40, 80, 900, 100]}])
-            records.append((question.pk, {key: getattr(question, key) for key in (
-                "stem", "options", "approved", "approved_at", "approved_content_hash", "approval_source",
-                "content_revision", "deleted_at", "regions", "source_key")}))
+                regions=[{"page_idx": 0, "bbox": [40, 80, 900, 100]}],
+            )
+            records.append(
+                (
+                    question.pk,
+                    {
+                        key: getattr(question, key)
+                        for key in (
+                            "stem",
+                            "options",
+                            "approved",
+                            "approved_at",
+                            "approved_content_hash",
+                            "approval_source",
+                            "content_revision",
+                            "deleted_at",
+                            "regions",
+                            "source_key",
+                        )
+                    },
+                )
+            )
         executor = MigrationExecutor(connection)
         executor.migrate(self.migrate_to)
         new = executor.loader.project_state(self.migrate_to).apps

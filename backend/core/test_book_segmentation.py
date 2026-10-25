@@ -2,27 +2,15 @@ from django.test import SimpleTestCase
 
 from . import segment
 
-PAGES = [
-    {"page_idx": index, "width": 1000, "height": 1400}
-    for index in range(8)
-]
+PAGES = [{"page_idx": index, "width": 1000, "height": 1400} for index in range(8)]
 
 
 def block(seq, page, y, text, kind="text", x0=80, x1=920, height=45):
-    return {
-        "seq": seq,
-        "type": kind,
-        "page_idx": page,
-        "bbox": [x0, y, x1, y + height],
-        "text": text,
-    }
+    return {"seq": seq, "type": kind, "page_idx": page, "bbox": [x0, y, x1, y + height], "text": text}
 
 
 def contains(regions, page, y):
-    return any(
-        item["page_idx"] == page and item["bbox"][1] <= y <= item["bbox"][3]
-        for item in regions
-    )
+    return any(item["page_idx"] == page and item["bbox"][1] <= y <= item["bbox"][3] for item in regions)
 
 
 class BookTypedMarkerTests(SimpleTestCase):
@@ -39,9 +27,9 @@ class BookTypedMarkerTests(SimpleTestCase):
 
         result = segment.segment_book(PAGES[:1], blocks)
 
-        self.assertEqual([(item["source_kind"], item["number"]) for item in result["questions"]], [
-            ("example", 3), ("example", 4),
-        ])
+        self.assertEqual(
+            [(item["source_kind"], item["number"]) for item in result["questions"]], [("example", 3), ("example", 4)]
+        )
         first = result["questions"][0]
         self.assertFalse(contains(first["regions"], 0, 320))
         self.assertFalse(contains(first["regions"], 0, 400))
@@ -59,9 +47,14 @@ class BookTypedMarkerTests(SimpleTestCase):
         # 例题只能一路吃到下一个印刷题号，解答就原样留在卡上、印到学生卷上。
         blocks = [
             block(0, 0, 100, "例1 如图 2-19，在 Rt△ABC 中，已知 ∠C=90°，a=4，c=8。"),
-            block(1, 0, 180,
-                  "$$\\begin{array}{r l} & {\\text {解：在} \\mathrm{Rt} \\triangle ABC ...}$$",
-                  kind="equation", height=300),
+            block(
+                1,
+                0,
+                180,
+                "$$\\begin{array}{r l} & {\\text {解：在} \\mathrm{Rt} \\triangle ABC ...}$$",
+                kind="equation",
+                height=300,
+            ),
             block(2, 0, 560, "例2 在 Rt△ABC 中，已知 ∠C=90°，a=3，c=5。"),
             block(3, 0, 640, "解：在 Rt△ABC 中，"),
         ]
@@ -83,8 +76,7 @@ class BookTypedMarkerTests(SimpleTestCase):
         # must not be mistaken for a boundary; the example keeps its full range.
         blocks = [
             block(0, 0, 100, "例1 计算下列各式的值。"),
-            block(1, 0, 180, "$$\\begin{array}{r l} & 2x + 3y = 7 \\end{array}$$",
-                  kind="equation", height=120),
+            block(1, 0, 180, "$$\\begin{array}{r l} & 2x + 3y = 7 \\end{array}$$", kind="equation", height=120),
             block(2, 0, 560, "例2 比较下列各数大小。"),
         ]
 
@@ -133,13 +125,10 @@ class BookTypedMarkerTests(SimpleTestCase):
         first = result["questions"][0]
         self.assertFalse(segment.center_in_regions(0, blocks[2]["bbox"], first["regions"]))
         self.assertFalse(segment.center_in_regions(0, blocks[3]["bbox"], first["regions"]))
-        self.assertEqual(first["regions"][1], {
-            "page_idx": 0, "bbox": blocks[4]["bbox"],
-        })
-        self.assertEqual(first["figure_candidates"], [{
-            "seq": 4, "page_idx": 0, "bbox": blocks[4]["bbox"],
-            "recovered_input": True,
-        }])
+        self.assertEqual(first["regions"][1], {"page_idx": 0, "bbox": blocks[4]["bbox"]})
+        self.assertEqual(
+            first["figure_candidates"], [{"seq": 4, "page_idx": 0, "bbox": blocks[4]["bbox"], "recovered_input": True}]
+        )
         self.assertEqual(first["segmentation"]["recovered_input_figure_seqs"], [4])
 
     def test_solution_visual_is_not_recovered_without_numbered_stem_reference(self):
@@ -204,9 +193,10 @@ class BookTypedMarkerTests(SimpleTestCase):
 
         result = segment.segment_book(PAGES[:1], blocks)
 
-        self.assertEqual([(item["source_kind"], item["number"]) for item in result["questions"]], [
-            ("exercise", 1), ("exercise", 2), ("example", 7),
-        ])
+        self.assertEqual(
+            [(item["source_kind"], item["number"]) for item in result["questions"]],
+            [("exercise", 1), ("exercise", 2), ("example", 7)],
+        )
         second = result["questions"][1]
         self.assertFalse(contains(second["regions"], 0, 390))
         self.assertFalse(contains(result["questions"][2]["regions"], 0, 470))
@@ -215,7 +205,9 @@ class BookTypedMarkerTests(SimpleTestCase):
         blocks = [
             block(0, 0, 70, "练习", kind="header"),
             block(
-                1, 0, 130,
+                1,
+                0,
+                130,
                 r"6. 某种细菌每十分钟分裂一次，那么经过一小时，"
                 r"一个这种细菌可以分裂成 \_\_\_\_ 个。",
             ),
@@ -226,8 +218,7 @@ class BookTypedMarkerTests(SimpleTestCase):
         result = segment.segment_book(PAGES[:1], blocks)
 
         self.assertEqual(
-            [(item["number"], item["source_anchor_seq"]) for item in result["questions"]],
-            [(6, 1), (7, 2)],
+            [(item["number"], item["source_anchor_seq"]) for item in result["questions"]], [(6, 1), (7, 2)]
         )
 
     def test_exercise_ranges_are_not_shortened_by_solution_labels(self):
@@ -241,9 +232,7 @@ class BookTypedMarkerTests(SimpleTestCase):
 
         result = segment.segment_book(PAGES[:1], blocks)
 
-        self.assertEqual([item["source_kind"] for item in result["questions"]], [
-            "exercise", "exercise",
-        ])
+        self.assertEqual([item["source_kind"] for item in result["questions"]], ["exercise", "exercise"])
         first = result["questions"][0]
         self.assertTrue(contains(first["regions"], 0, 220))
         self.assertTrue(contains(first["regions"], 0, 300))
@@ -280,11 +269,7 @@ class BookTypedMarkerTests(SimpleTestCase):
 
     def test_solution_merged_into_example_text_block_still_ends_the_stem(self):
         blocks = [
-            block(
-                0, 0, 80,
-                "例1 求函数的最大值。\n分析：先研究单调性。\n解：最大值为 1。",
-                height=180,
-            ),
+            block(0, 0, 80, "例1 求函数的最大值。\n分析：先研究单调性。\n解：最大值为 1。", height=180),
             block(1, 0, 360, "例2 求函数的最小值。"),
         ]
 
@@ -298,11 +283,7 @@ class BookTypedMarkerTests(SimpleTestCase):
 
     def test_inline_solution_and_numbered_solution_method_end_examples(self):
         blocks = [
-            block(
-                0, 0, 80,
-                "例2 已知 $x=1$，求 $x+1$ 的值. 解：代入可得 2。",
-                height=100,
-            ),
+            block(0, 0, 80, "例2 已知 $x=1$，求 $x+1$ 的值. 解：代入可得 2。", height=100),
             block(1, 0, 260, "例3 已知三角形 ABC，求角 A。"),
             block(2, 0, 340, "解法 1：先使用余弦定理。"),
             block(3, 0, 500, "例4 求证恒等式。"),
@@ -337,16 +318,11 @@ class BookTypedMarkerTests(SimpleTestCase):
 
         result = segment.segment_book(PAGES[:1], blocks)
 
-        self.assertEqual([(item["source_kind"], item["number"]) for item in result["questions"]], [
-            ("example", 6),
-        ])
+        self.assertEqual([(item["source_kind"], item["number"]) for item in result["questions"]], [("example", 6)])
         self.assertGreaterEqual(len(result["layout"].boundaries), 4)
 
     def test_heading_only_scope_has_columns_and_builds_no_cards(self):
-        blocks = [
-            block(0, 0, 80, "一、知识讲解"),
-            block(1, 0, 180, "这里是教材正文，不是一道题。"),
-        ]
+        blocks = [block(0, 0, 80, "一、知识讲解"), block(1, 0, 180, "这里是教材正文，不是一道题。")]
 
         layout, starts = segment.analyse_book(PAGES[:1], blocks)
 
@@ -419,10 +395,9 @@ class BookTypedMarkerTests(SimpleTestCase):
         self.assertEqual([item["seq"] for item in by_anchor[2]["figure_candidates"]], [4])
         self.assertEqual([item["seq"] for item in by_anchor[3]["figure_candidates"]], [6])
         self.assertTrue(any(region["bbox"] == blocks[4]["bbox"] for region in by_anchor[2]["regions"]))
-        self.assertFalse(any(
-            segment.center_in_regions(1, blocks[4]["bbox"], [region])
-            for region in by_anchor[3]["regions"]
-        ))
+        self.assertFalse(
+            any(segment.center_in_regions(1, blocks[4]["bbox"], [region]) for region in by_anchor[3]["regions"])
+        )
 
     def test_numbered_question_caption_moves_right_side_visual_to_that_question(self):
         blocks = [
@@ -478,30 +453,20 @@ class BookTypedMarkerTests(SimpleTestCase):
 
         result = segment.segment_book(PAGES[:1], blocks)
 
-        self.assertEqual(
-            [(item["number"], item["source_anchor_seq"]) for item in result["questions"]],
-            [(1, 11)],
-        )
+        self.assertEqual([(item["number"], item["source_anchor_seq"]) for item in result["questions"]], [(1, 11)])
 
     def test_modelling_context_heading_recovers_the_real_following_problem(self):
         blocks = [
             block(0, 0, 80, "一、数学建模活动的一个实例"),
             block(1, 0, 140, "1. 观察实际情景，发现和提出问题"),
-            block(
-                2, 0, 210,
-                "某种绿茶在 60 ℃ 时口感最佳，那么在室温下大约要放置多长时间？",
-                height=80,
-            ),
+            block(2, 0, 210, "某种绿茶在 60 ℃ 时口感最佳，那么在室温下大约要放置多长时间？", height=80),
             block(3, 0, 330, "显然，可以先记录温度随时间变化的数据。"),
             block(4, 0, 430, "2. 收集数据"),
         ]
 
         result = segment.segment_book(PAGES[:1], blocks)
 
-        self.assertEqual(
-            [(item["number"], item["source_anchor_seq"]) for item in result["questions"]],
-            [(1, 2)],
-        )
+        self.assertEqual([(item["number"], item["source_anchor_seq"]) for item in result["questions"]], [(1, 2)])
         question = result["questions"][0]
         self.assertTrue(contains(question["regions"], 0, 210))
         self.assertFalse(contains(question["regions"], 0, 330))
@@ -518,29 +483,19 @@ class BookTypedMarkerTests(SimpleTestCase):
 
         result = segment.segment_book(PAGES[:1], blocks)
 
-        self.assertEqual(
-            [(item["number"], item["source_anchor_seq"]) for item in result["questions"]],
-            [(1, 4)],
-        )
+        self.assertEqual([(item["number"], item["source_anchor_seq"]) for item in result["questions"]], [(1, 4)])
 
     def test_referenced_chapter_problem_is_kept_but_its_explanation_is_not(self):
         blocks = [
             block(0, 0, 70, "4.3 对数"),
-            block(
-                1, 0, 180,
-                "在 4.2.1 的问题 1 中，我们能求出游客人次。反之，达到 2 倍该如何解决？",
-                height=90,
-            ),
+            block(1, 0, 180, "在 4.2.1 的问题 1 中，我们能求出游客人次。反之，达到 2 倍该如何解决？", height=90),
             block(2, 0, 290, "4.3.1 对数的概念"),
             block(3, 0, 360, "显然，可以利用换底公式计算并得到结论。"),
         ]
 
         result = segment.segment_book(PAGES[:1], blocks)
 
-        self.assertEqual(
-            [(item["number"], item["source_anchor_seq"]) for item in result["questions"]],
-            [(1, 1)],
-        )
+        self.assertEqual([(item["number"], item["source_anchor_seq"]) for item in result["questions"]], [(1, 1)])
         question = result["questions"][0]
         self.assertTrue(contains(question["regions"], 0, 180))
         self.assertFalse(contains(question["regions"], 0, 360))
@@ -549,20 +504,13 @@ class BookTypedMarkerTests(SimpleTestCase):
         blocks = [
             block(0, 0, 80, "4.4.1 对数函数的概念"),
             block(1, 0, 150, "思考"),
-            block(
-                2, 0, 200,
-                "在 4.2.1 的问题 2 中，已知碳 14 含量，如何得知死亡时间呢？",
-                height=80,
-            ),
+            block(2, 0, 200, "在 4.2.1 的问题 2 中，已知碳 14 含量，如何得知死亡时间呢？", height=80),
             block(3, 0, 310, "根据指数与对数的关系，可以建立函数。"),
         ]
 
         result = segment.segment_book(PAGES[:1], blocks)
 
-        self.assertEqual(
-            [(item["number"], item["source_anchor_seq"]) for item in result["questions"]],
-            [(2, 2)],
-        )
+        self.assertEqual([(item["number"], item["source_anchor_seq"]) for item in result["questions"]], [(2, 2)])
         self.assertFalse(contains(result["questions"][0]["regions"], 0, 310))
 
     def test_missing_number_before_table_is_recovered_between_one_and_three(self):
@@ -579,8 +527,7 @@ class BookTypedMarkerTests(SimpleTestCase):
         result = segment.segment_book(PAGES[:1], blocks)
 
         self.assertEqual(
-            [(item["number"], item["source_anchor_seq"]) for item in result["questions"]],
-            [(1, 2), (2, 4), (3, 6)],
+            [(item["number"], item["source_anchor_seq"]) for item in result["questions"]], [(1, 2), (2, 4), (3, 6)]
         )
         first, recovered, _third = result["questions"]
         self.assertNotIn(4, [item["seq"] for item in first["figure_candidates"]])
@@ -600,8 +547,7 @@ class BookTypedMarkerTests(SimpleTestCase):
         result = segment.segment_book(PAGES[:1], blocks)
 
         self.assertEqual(
-            [(item["number"], item["source_anchor_seq"]) for item in result["questions"]],
-            [(1, 4), (2, 5)],
+            [(item["number"], item["source_anchor_seq"]) for item in result["questions"]], [(1, 4), (2, 5)]
         )
 
     def test_known_textbook_boundaries_stop_cross_chapter_leakage(self):
@@ -638,16 +584,16 @@ class BookTypedMarkerTests(SimpleTestCase):
             block(2, 0, 342, "(1) 写出定义域。", x0=130, x1=430, height=24),
             block(3, 0, 376, "(2) 证明你的结论。", x0=130, x1=560, height=24),
             block(
-                4, 0, 270,
+                4,
+                0,
+                270,
                 "通过观察图象并进行逻辑推理，可以研究函数具有的各种性质，"
                 "这是一段放在右栏的较长教材说明文字，不属于左边的练习题。",
-                x0=675, x1=900, height=130,
+                x0=675,
+                x1=900,
+                height=130,
             ),
-            block(
-                5, 0, 440,
-                "再来观察下一节的图象，这一整段是后续教材正文，不属于第4题。",
-                x0=105, x1=900, height=70,
-            ),
+            block(5, 0, 440, "再来观察下一节的图象，这一整段是后续教材正文，不属于第4题。", x0=105, x1=900, height=70),
             block(6, 0, 560, "思考"),
         ]
 
@@ -663,9 +609,10 @@ class BookTypedMarkerTests(SimpleTestCase):
             block(0, 0, 60, "练习"),
             block(1, 0, 120, "3. 根据图象回答问题。"),
             block(
-                2, 0, 210,
-                "函数是否为从集合 A 到集合 B 的函数？4. 构建一个问题情境，"
-                "使变量关系能用 y=√x 描述。",
+                2,
+                0,
+                210,
+                "函数是否为从集合 A 到集合 B 的函数？4. 构建一个问题情境，使变量关系能用 y=√x 描述。",
                 height=90,
             ),
             block(3, 0, 380, "下一节教材正文。"),
@@ -674,8 +621,7 @@ class BookTypedMarkerTests(SimpleTestCase):
         result = segment.segment_book(PAGES[:1], blocks)
 
         self.assertEqual(
-            [(item["number"], item["source_anchor_seq"]) for item in result["questions"]],
-            [(3, 1), (4, 2)],
+            [(item["number"], item["source_anchor_seq"]) for item in result["questions"]], [(3, 1), (4, 2)]
         )
         self.assertLess(result["questions"][0]["regions"][0]["bbox"][3], 300)
         self.assertLessEqual(result["questions"][1]["regions"][0]["bbox"][3], 300)
@@ -693,10 +639,7 @@ class BookTypedMarkerTests(SimpleTestCase):
         result = segment.segment_book(PAGES[:1], blocks)
 
         self.assertEqual(result["questions"][0]["figure_candidates"], [])
-        self.assertEqual(
-            [item["seq"] for item in result["questions"][1]["figure_candidates"]],
-            [3],
-        )
+        self.assertEqual([item["seq"] for item in result["questions"][1]["figure_candidates"]], [3])
 
     def test_book_scopes_separate_examples_and_exercises_with_repeated_numbers(self):
         blocks = [
@@ -728,17 +671,17 @@ class BookTypedMarkerTests(SimpleTestCase):
         scopes = segment.book_numbering_scopes(PAGES[:1], blocks)
 
         self.assertEqual([scope["seq_start"] for scope in scopes], [None, 3, 6])
-        self.assertFalse(any(
-            scope["seq_start"] is not None and scope["seq_end"] is not None
-            and scope["seq_start"] > scope["seq_end"]
-            for scope in scopes
-        ))
+        self.assertFalse(
+            any(
+                scope["seq_start"] is not None
+                and scope["seq_end"] is not None
+                and scope["seq_start"] > scope["seq_end"]
+                for scope in scopes
+            )
+        )
 
     def test_exam_segmenter_behavior_is_unchanged(self):
-        blocks = [
-            block(0, 0, 80, "1. 已知 x=1，求 x+1。"),
-            block(1, 0, 300, "2. 已知 y=2，求 y+1。"),
-        ]
+        blocks = [block(0, 0, 80, "1. 已知 x=1，求 x+1。"), block(1, 0, 300, "2. 已知 y=2，求 y+1。")]
 
         result = segment.segment(PAGES[:1], blocks)
 

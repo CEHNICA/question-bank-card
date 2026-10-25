@@ -9,6 +9,7 @@
 （frontend/exam-export.js 的 sectionHeading）和这一侧
 （core/library_export.py 的 _section_heading）都读它 —— 改一边就会红。
 """
+
 import json
 import pathlib
 
@@ -16,8 +17,7 @@ from django.test import TestCase
 
 from core import library_export as export
 
-FIXTURE = (pathlib.Path(__file__).resolve().parents[2]
-           / "frontend" / "testdata" / "paper_section_headings.json")
+FIXTURE = pathlib.Path(__file__).resolve().parents[2] / "frontend" / "testdata" / "paper_section_headings.json"
 
 
 class PaperSectionHeadingTests(TestCase):
@@ -27,8 +27,8 @@ class PaperSectionHeadingTests(TestCase):
         for case in cases:
             group = [{"content": {"section": section}} for section in case["sections"]]
             self.assertEqual(
-                export._section_heading(group, case["index"], case["group_name"]),
-                case["expected"], case["name"])
+                export._section_heading(group, case["index"], case["group_name"]), case["expected"], case["name"]
+            )
 
     def test_the_original_wording_never_reaches_the_paper(self):
         # 原卷那一整行带着原卷的题数、分值和题号范围，跟老师挑的这几道题对不上，

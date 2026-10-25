@@ -9,8 +9,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-PAGE_LONG_SIDE = 3000       # 本地保存的原页图（读题、裁图用）
-PREVIEW_LONG_SIDE = 2000    # 网页显示用
+PAGE_LONG_SIDE = 3000  # 本地保存的原页图（读题、裁图用）
+PREVIEW_LONG_SIDE = 2000  # 网页显示用
 SEGMENT_GAP = 18
 
 
@@ -30,18 +30,13 @@ class NotAPdfFile(ValueError):
 
 
 # PyMuPDF 自报的实际格式 -> 老师看得懂的一句话。
-_WRONG_PDF_FORMATS = {
-    "HTML5": "这其实是一个网页",
-    "Image": "这其实是一张图片",
-    "SVG": "这其实是一张矢量图",
-}
+_WRONG_PDF_FORMATS = {"HTML5": "这其实是一个网页", "Image": "这其实是一张图片", "SVG": "这其实是一张矢量图"}
 
 
 def _not_pdf_message(pdf) -> str:
     actual = (pdf.metadata or {}).get("format") or "别的格式"
     what = _WRONG_PDF_FORMATS.get(actual, "这不是 PDF")
-    return (f"{what}，只是文件名叫 .pdf。"
-            "请把原文件另存为真正的 PDF 再传；如果是试卷照片，直接上传照片即可。")
+    return f"{what}，只是文件名叫 .pdf。请把原文件另存为真正的 PDF 再传；如果是试卷照片，直接上传照片即可。"
 
 
 def render_source_page(source: Path, kind: str, page_idx: int, long_side: int = PAGE_LONG_SIDE) -> Image.Image:
@@ -74,8 +69,10 @@ def page_sizes(source: Path, kind: str) -> list[dict]:
     with fitz.open(source) as pdf:
         if not pdf.is_pdf:
             raise NotAPdfFile(_not_pdf_message(pdf))
-        return [{"page_idx": i, "width": round(p.rect.width, 2), "height": round(p.rect.height, 2)}
-                for i, p in enumerate(pdf)]
+        return [
+            {"page_idx": i, "width": round(p.rect.width, 2), "height": round(p.rect.height, 2)}
+            for i, p in enumerate(pdf)
+        ]
 
 
 def _finite_box(bbox) -> tuple[float, float, float, float] | None:
@@ -133,7 +130,7 @@ def to_pixels(bbox: list[float], size: tuple[int, int]) -> tuple[int, int, int, 
 # 所以裁之前把边往外让一点，让到边上没有墨为止。原页长边 3000 像素，一行正文
 # 约 40 像素，让 56 像素足够把一整行图注收进来，又不会碰到下一段正文。
 FIGURE_CROP_SLACK_PX = 56
-INK_MAX = 200          # 亮度高于这个算「白」。浅蓝方格线约 147，也算有墨——
+INK_MAX = 200  # 亮度高于这个算「白」。浅蓝方格线约 147，也算有墨——
 # 方格线让进来只是几像素白边，无所谓；真正的目标是别把字切掉。
 
 
@@ -142,8 +139,7 @@ def _edge_has_ink(page: Image.Image, box: tuple[int, int, int, int]) -> bool:
     return page.crop(box).convert("L").getextrema()[0] < INK_MAX
 
 
-def crop_figure(page: Image.Image, box: tuple[int, int, int, int],
-                slack: int = FIGURE_CROP_SLACK_PX) -> Image.Image:
+def crop_figure(page: Image.Image, box: tuple[int, int, int, int], slack: int = FIGURE_CROP_SLACK_PX) -> Image.Image:
     """按框裁图，但把切到字的那几条边往外让开，让到边上干净为止。
 
     四条边各自独立判断：有墨的那条才让，别的边一动不动，所以整张图不会平白
@@ -187,8 +183,9 @@ def stack_figure_pieces(pieces: list[tuple[Image.Image, tuple[int, int, int, int
         crop = page.crop(box).convert("RGB")
         scale = base_width / max(1, page.width)
         if abs(scale - 1) > 0.02:
-            crop = crop.resize((max(1, round(crop.width * scale)), max(1, round(crop.height * scale))),
-                               Image.Resampling.LANCZOS)
+            crop = crop.resize(
+                (max(1, round(crop.width * scale)), max(1, round(crop.height * scale))), Image.Resampling.LANCZOS
+            )
         placed.append((crop, round(box[0] * scale)))
     left_most = min(left for _, left in placed)
     width = max(left - left_most + crop.width for crop, left in placed)
@@ -248,7 +245,7 @@ def stack_regions(regions: list[dict], page_loader, marks: list[dict] | None = N
     return canvas, layout
 
 
-TRIM_MIN_BLANK = 30.0   # 页面坐标（0–1000）：底部空白至少这么高才裁掉
+TRIM_MIN_BLANK = 30.0  # 页面坐标（0–1000）：底部空白至少这么高才裁掉
 
 
 def trim_regions(regions: list[dict], page_loader) -> list[dict]:
@@ -324,7 +321,7 @@ def jpeg_data_url(image: Image.Image, long_side: int = 2000, quality: int = 88) 
 _FONT_CACHE: dict[int, ImageFont.ImageFont] = {}
 
 
-STRIP_TILE_HEIGHT = 560   # 每幅候选图归一到这个高度（页面短边单位）
+STRIP_TILE_HEIGHT = 560  # 每幅候选图归一到这个高度（页面短边单位）
 STRIP_GAP = 24
 STRIP_MAX_ZOOM = 3.0
 
@@ -355,11 +352,13 @@ def figure_strip(page_loader, figures: list[dict]) -> Image.Image | None:
             # 同样是不给图，而不是让整条流水线带着这一道题崩掉。
             return None
         x0, y0, x1, y1 = box_in_page
-        pad = max(2.0, (y1 - y0) * .04)
-        box = (max(0, min(width - 1, math.floor((x0 - pad) * width / 1000))),
-               max(0, min(height - 1, math.floor((y0 - pad) * height / 1000))),
-               max(1, min(width, math.ceil((x1 + pad) * width / 1000))),
-               max(1, min(height, math.ceil((y1 + pad) * height / 1000))))
+        pad = max(2.0, (y1 - y0) * 0.04)
+        box = (
+            max(0, min(width - 1, math.floor((x0 - pad) * width / 1000))),
+            max(0, min(height - 1, math.floor((y0 - pad) * height / 1000))),
+            max(1, min(width, math.ceil((x1 + pad) * width / 1000))),
+            max(1, min(height, math.ceil((y1 + pad) * height / 1000))),
+        )
         if box[2] <= box[0] or box[3] <= box[1]:
             return None
         tiles.append((index, page.crop(box).convert("RGB")))
@@ -369,19 +368,20 @@ def figure_strip(page_loader, figures: list[dict]) -> Image.Image | None:
     scaled = []
     for index, tile in tiles:
         factor = min(STRIP_MAX_ZOOM, STRIP_TILE_HEIGHT / max(1, tile.height))
-        if abs(factor - 1) > .01:
-            tile = tile.resize((max(1, round(tile.width * factor)), STRIP_TILE_HEIGHT),
-                               Image.Resampling.LANCZOS)
+        if abs(factor - 1) > 0.01:
+            tile = tile.resize((max(1, round(tile.width * factor)), STRIP_TILE_HEIGHT), Image.Resampling.LANCZOS)
         scaled.append((index, tile))
-    canvas = Image.new("RGB", (sum(tile.width for _, tile in scaled)
-                               + STRIP_GAP * (len(scaled) + 1), STRIP_TILE_HEIGHT), "white")
+    canvas = Image.new(
+        "RGB", (sum(tile.width for _, tile in scaled) + STRIP_GAP * (len(scaled) + 1), STRIP_TILE_HEIGHT), "white"
+    )
     draw = ImageDraw.Draw(canvas)
     font = _font(max(24, STRIP_TILE_HEIGHT // 12))
     x = STRIP_GAP
     for index, tile in scaled:
         canvas.paste(tile, (x, 0))
-        draw.rectangle([x, 0, x + tile.width - 1, STRIP_TILE_HEIGHT - 1],
-                       outline=(0, 90, 255), width=max(3, tile.width // 300))
+        draw.rectangle(
+            [x, 0, x + tile.width - 1, STRIP_TILE_HEIGHT - 1], outline=(0, 90, 255), width=max(3, tile.width // 300)
+        )
         draw.rectangle([x, 0, x + font.size + 26, font.size + 12], fill=(0, 90, 255))
         draw.text((x + 12, 6), str(index), fill=(255, 255, 255), font=font)
         x += tile.width + STRIP_GAP

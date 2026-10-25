@@ -31,8 +31,15 @@ def protected_test_bytes(data, *, protect):
 
 def answer_response(text="【答案】2【图示】2", *, model="doubao-offline-pro", thinking=True, status=200):
     response = mock.Mock(status_code=status)
-    response.json.return_value = {"model": model, "choices": [{"finish_reason": "stop", "message": {
-        "content": text, "reasoning_content": "offline reasoning" if thinking else ""}}]}
+    response.json.return_value = {
+        "model": model,
+        "choices": [
+            {
+                "finish_reason": "stop",
+                "message": {"content": text, "reasoning_content": "offline reasoning" if thinking else ""},
+            }
+        ],
+    }
     return response
 
 
@@ -43,12 +50,15 @@ class IndependentAISettingsTests(TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        environment = mock.patch.dict(os.environ, {
-            "QB_LIBRARY_AI_SETTINGS_FILE": str(self.root / "settings.json"),
-            "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.root / "library-ai.dat"),
-            "QB_FEATURES_FILE": str(self.root / "features.json"),
-            "QB_CREDENTIAL_FILE": str(self.root / "ocr-credentials.dat"),
-        })
+        environment = mock.patch.dict(
+            os.environ,
+            {
+                "QB_LIBRARY_AI_SETTINGS_FILE": str(self.root / "settings.json"),
+                "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.root / "library-ai.dat"),
+                "QB_FEATURES_FILE": str(self.root / "features.json"),
+                "QB_CREDENTIAL_FILE": str(self.root / "ocr-credentials.dat"),
+            },
+        )
         environment.start()
         self.addCleanup(environment.stop)
         transform = mock.patch.object(service.credential_settings.store, "_transform", side_effect=protected_test_bytes)
@@ -59,14 +69,25 @@ class IndependentAISettingsTests(TestCase):
         self.addCleanup(network.stop)
 
     def configure(self, **extra):
-        payload = {"mode": "api", "endpoint_id": "ep-offline-pro", "supports_images": True, "thinking": True,
-                   "key": {"action": "replace", "value": "offline-key-never-print"}}
+        payload = {
+            "mode": "api",
+            "endpoint_id": "ep-offline-pro",
+            "supports_images": True,
+            "thinking": True,
+            "key": {"action": "replace", "value": "offline-key-never-print"},
+        }
         payload.update(extra)
         return service.save(payload)
 
     def configure_minimax(self, **extra):
-        return service.save({"mode": "api", "provider": "minimax",
-                             "key": {"action": "replace", "value": "offline-minimax-subscription-key"}, **extra})
+        return service.save(
+            {
+                "mode": "api",
+                "provider": "minimax",
+                "key": {"action": "replace", "value": "offline-minimax-subscription-key"},
+                **extra,
+            }
+        )
 
     def verify(self):
         self.network.side_effect = None
@@ -103,12 +124,17 @@ class IndependentAISettingsTests(TestCase):
         self.transform.reset_mock()
         result = self.client.get("/api/settings/library-ai").json()
         self.assertEqual(list(result["keys"]), ["deepseek", "minimax", "doubao", "custom", "modelscope", "siliconflow"])
-        self.assertEqual(result["keys"], {"deepseek": {"configured": True, "count": 1, "shared_with_reading": False},
-            "minimax": {"configured": True, "count": 1, "shared_with_reading": False},
-            "doubao": {"configured": False, "count": 0, "shared_with_reading": False},
-            "custom": {"configured": False, "count": 0, "shared_with_reading": False},
-            "modelscope": {"configured": False, "count": 0, "shared_with_reading": False},
-            "siliconflow": {"configured": False, "count": 0, "shared_with_reading": False}})
+        self.assertEqual(
+            result["keys"],
+            {
+                "deepseek": {"configured": True, "count": 1, "shared_with_reading": False},
+                "minimax": {"configured": True, "count": 1, "shared_with_reading": False},
+                "doubao": {"configured": False, "count": 0, "shared_with_reading": False},
+                "custom": {"configured": False, "count": 0, "shared_with_reading": False},
+                "modelscope": {"configured": False, "count": 0, "shared_with_reading": False},
+                "siliconflow": {"configured": False, "count": 0, "shared_with_reading": False},
+            },
+        )
         self.assertEqual(result["provider"], "minimax")
         self.assertEqual(result["key_count"], 1)
         self.assertNotIn("synthetic-deepseek", json.dumps(result))
@@ -124,8 +150,12 @@ class IndependentAISettingsTests(TestCase):
         self.transform.reset_mock()
         result = service.public_status()
         self.assertEqual(result["key_count"], 0)
-        self.assertTrue(all(item == {"configured": False, "count": 0, "shared_with_reading": False}
-                            for item in result["keys"].values()))
+        self.assertTrue(
+            all(
+                item == {"configured": False, "count": 0, "shared_with_reading": False}
+                for item in result["keys"].values()
+            )
+        )
         self.transform.assert_not_called()
         self.network.assert_not_called()
 
@@ -144,27 +174,37 @@ class IndependentAISettingsTests(TestCase):
 
     def test_closing_a_feature_also_closes_its_on_intake_switch(self):
         # 标签 AI 只能由用户在正式题库主动发起；兼容字段不能重新启用自动贴标。
-        service.save({"features": {"knowledge_tags": True, "ai_answer": True},
-                      "on_intake": {"tags": True, "answer": True}})
+        service.save(
+            {"features": {"knowledge_tags": True, "ai_answer": True}, "on_intake": {"tags": True, "answer": True}}
+        )
         self.assertEqual(service.public_status()["on_intake"], {"tags": False, "answer": True})
         saved = service.save({"features": {"knowledge_tags": False, "ai_answer": False}})
         self.assertEqual(saved["features"], {"knowledge_tags": False, "ai_answer": False})
         self.assertFalse(saved["on_intake"]["tags"], "AI 标签只能由用户在正式题库主动发起")
-        self.assertEqual(saved["on_intake"], {"tags": False, "answer": False},
-                         "功能关掉时，入库时生成必须跟着关掉")
+        self.assertEqual(saved["on_intake"], {"tags": False, "answer": False}, "功能关掉时，入库时生成必须跟着关掉")
         self.assertEqual(service.public_status()["on_intake"], {"tags": False, "answer": False})
 
     def test_on_intake_feature_map_agrees_with_the_worker(self):
         # 两处各写了一份「任务种类 → 功能开关」的对应关系：这里改一处、那里忘了改，
         # 就会出现「标签按 ai_answer 开关决定要不要生成」这种错位。
-        self.assertEqual({str(kind): feature for kind, feature in library_jobs.FEATURE_OF.items()},
-                         service.ON_INTAKE_FEATURE)
+        self.assertEqual(
+            {str(kind): feature for kind, feature in library_jobs.FEATURE_OF.items()}, service.ON_INTAKE_FEATURE
+        )
 
     def test_legacy_v1_provider_metadata_remains_visible_without_migration(self):
         # v1 is the old single Doubao credential. Reading metadata neither
         # upgrades settings nor opens the encrypted file.
-        service.path().write_text(json.dumps({"version": 1, "endpoint_id": "ep-legacy-test",
-            "key_configured": True, "key_revision": "legacy-test-revision"}), encoding="utf-8")
+        service.path().write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "endpoint_id": "ep-legacy-test",
+                    "key_configured": True,
+                    "key_revision": "legacy-test-revision",
+                }
+            ),
+            encoding="utf-8",
+        )
         service.key_path("doubao").write_bytes(b"legacy-opaque-test-key")
         before = service.path().read_bytes()
         result = service.public_status()
@@ -197,8 +237,18 @@ class IndependentAISettingsTests(TestCase):
         ocr = self.root / "ocr-credentials.dat"
         ocr.write_bytes(b"opaque synthetic reader credentials")
         for provider, base, model, thinking in (
-            ("modelscope", readers.MODELSCOPE_URL.removesuffix("/chat/completions"), readers.preferences.DEFAULT_MODELS["modelscope"], True),
-            ("siliconflow", readers.SILICONFLOW_URL.removesuffix("/chat/completions"), readers.preferences.DEFAULT_MODELS["siliconflow"], False),
+            (
+                "modelscope",
+                readers.MODELSCOPE_URL.removesuffix("/chat/completions"),
+                readers.preferences.DEFAULT_MODELS["modelscope"],
+                True,
+            ),
+            (
+                "siliconflow",
+                readers.SILICONFLOW_URL.removesuffix("/chat/completions"),
+                readers.preferences.DEFAULT_MODELS["siliconflow"],
+                False,
+            ),
         ):
             with self.subTest(provider=provider):
                 result = service.save({"provider": provider})
@@ -221,10 +271,19 @@ class IndependentAISettingsTests(TestCase):
         self.configure()
         original = service.path().read_bytes()
         for provider in ("modelscope", "siliconflow"):
-            for address in ("https://other-service.invalid/v1", "https://api-inference.modelscope.cn/v1/extra", "http://localhost/v1"):
+            for address in (
+                "https://other-service.invalid/v1",
+                "https://api-inference.modelscope.cn/v1/extra",
+                "http://localhost/v1",
+            ):
                 with self.subTest(provider=provider, address=address), self.assertRaises(service.SettingsError):
-                    service.save({"provider": provider, "base_url": address,
-                                  "key": {"action": "replace", "value": "offline-key"}})
+                    service.save(
+                        {
+                            "provider": provider,
+                            "base_url": address,
+                            "key": {"action": "replace", "value": "offline-key"},
+                        }
+                    )
                 self.assertEqual(service.path().read_bytes(), original)
                 self.assertFalse(service.key_path(provider).exists())
             base = service.DEFAULTS[provider]["base_url"]
@@ -241,9 +300,15 @@ class IndependentAISettingsTests(TestCase):
                 with self.subTest(provider=provider, thinking=thinking):
                     self.network.reset_mock()
                     self.network.return_value = answer_response(model="offline-vision-model", thinking=thinking)
-                    service.save({"mode": "api", "provider": provider, "thinking": thinking,
-                                  "features": {"ai_answer": True},
-                                  "key": {"action": "replace", "value": "synthetic-independent-key"}})
+                    service.save(
+                        {
+                            "mode": "api",
+                            "provider": provider,
+                            "thinking": thinking,
+                            "features": {"ai_answer": True},
+                            "key": {"action": "replace", "value": "synthetic-independent-key"},
+                        }
+                    )
                     self.network.assert_not_called()
                     self.assertTrue(service.test_connection({"confirm": True})["verified"])
                     args, kwargs = self.network.call_args
@@ -254,19 +319,37 @@ class IndependentAISettingsTests(TestCase):
                         self.assertNotIn(unsupported, sent)
                     self.assertEqual(sent["max_tokens"], 12000)
                     self.assertFalse(kwargs["allow_redirects"])
-                    image = next(part["image_url"]["url"] for part in sent["messages"][0]["content"] if part["type"] == "image_url")
+                    image = next(
+                        part["image_url"]["url"]
+                        for part in sent["messages"][0]["content"]
+                        if part["type"] == "image_url"
+                    )
                     with Image.open(io.BytesIO(base64.b64decode(image.split(",", 1)[1]))) as rendered:
                         self.assertEqual(rendered.size, (120, 70))
                     service.chat("synthetic answer question", [], kind="answer")
                     self.assertIs(self.network.call_args.kwargs["json"]["enable_thinking"], thinking)
 
     def test_per_provider_profiles_preserve_existing_independent_models_and_keys(self):
-        service.save({"mode": "api", "provider": "custom", "base_url": "https://synthetic-custom.invalid/v1",
-                      "model": "existing-custom-math", "supports_images": True, "thinking": False,
-                      "key": {"action": "replace", "value": "offline-custom-profile-key"}})
+        service.save(
+            {
+                "mode": "api",
+                "provider": "custom",
+                "base_url": "https://synthetic-custom.invalid/v1",
+                "model": "existing-custom-math",
+                "supports_images": True,
+                "thinking": False,
+                "key": {"action": "replace", "value": "offline-custom-profile-key"},
+            }
+        )
         original_custom = service.key_path("custom").read_bytes()
-        service.save({"provider": "modelscope", "model": "Qwen/explicit-custom-vision", "thinking": False,
-                      "key": {"action": "replace", "value": "offline-modelscope-profile-key"}})
+        service.save(
+            {
+                "provider": "modelscope",
+                "model": "Qwen/explicit-custom-vision",
+                "thinking": False,
+                "key": {"action": "replace", "value": "offline-modelscope-profile-key"},
+            }
+        )
         result = service.save({"provider": "custom"})
         self.assertEqual(result["model"], "existing-custom-math")
         self.assertEqual(result["base_url"], "https://synthetic-custom.invalid/v1")
@@ -282,8 +365,11 @@ class IndependentAISettingsTests(TestCase):
     def test_provider_profile_status_exposes_only_supported_nonsecret_fields(self):
         self.configure()
         config = service._load()
-        config["provider_profiles"]["modelscope"] = {**service.DEFAULTS["modelscope"],
-            "key": "synthetic-should-never-be-exposed", "accounts": ["synthetic-account"]}
+        config["provider_profiles"]["modelscope"] = {
+            **service.DEFAULTS["modelscope"],
+            "key": "synthetic-should-never-be-exposed",
+            "accounts": ["synthetic-account"],
+        }
         config["provider_profiles"]["unknown"] = {"key": "synthetic-unknown-secret"}
         service._write_settings(config)
         self.transform.reset_mock()
@@ -300,9 +386,18 @@ class IndependentAISettingsTests(TestCase):
         self.verify()
         before = service.execution_snapshot()
         key = service.key_path("minimax").read_bytes()
-        result = service.save({"provider_profiles": {
-            "modelscope": {"model": "Qwen/synthetic-inactive-profile", "thinking": False},
-            "custom": {"base_url": "https://synthetic-inactive.invalid/v1", "model": "inactive-math-model", "supports_images": True}}})
+        result = service.save(
+            {
+                "provider_profiles": {
+                    "modelscope": {"model": "Qwen/synthetic-inactive-profile", "thinking": False},
+                    "custom": {
+                        "base_url": "https://synthetic-inactive.invalid/v1",
+                        "model": "inactive-math-model",
+                        "supports_images": True,
+                    },
+                }
+            }
+        )
         self.assertTrue(result["verified"])
         self.assertEqual(service.execution_snapshot(), before)
         self.assertEqual(service.key_path("minimax").read_bytes(), key)
@@ -320,20 +415,36 @@ class IndependentAISettingsTests(TestCase):
         before = {target.name: target.read_bytes() for target in self.root.iterdir() if target.is_file()}
         for profiles in (
             {"minimax": {"model": "cannot-edit-active-here"}},
-            {"unknown": {}}, {"modelscope": {"key": "never-an-accepted-field"}},
+            {"unknown": {}},
+            {"modelscope": {"key": "never-an-accepted-field"}},
             {"modelscope": {"base_url": "https://other-provider.invalid/v1"}},
             {"modelscope": {"model": "contains whitespace"}},
-            {"siliconflow": {"thinking": "true"}}, {"custom": {"reasoning_effort": "low"}},
-            {"doubao": {"model": "bad-endpoint"}}, ["not-a-mapping"], {"custom": "bad-profile"},
+            {"siliconflow": {"thinking": "true"}},
+            {"custom": {"reasoning_effort": "low"}},
+            {"doubao": {"model": "bad-endpoint"}},
+            ["not-a-mapping"],
+            {"custom": "bad-profile"},
         ):
             with self.subTest(profiles=profiles), self.assertRaises(service.SettingsError):
                 service.save({"provider_profiles": profiles})
-            self.assertEqual({target.name: target.read_bytes() for target in self.root.iterdir() if target.is_file()}, before)
+            self.assertEqual(
+                {target.name: target.read_bytes() for target in self.root.iterdir() if target.is_file()}, before
+            )
         self.network.assert_not_called()
 
     def assert_failed_storage_preserved(self, config, key_bytes, snapshot):
         after = service._load()
-        for field in ("provider", "mode", "base_url", "model", "supports_images", "thinking", "key_revision", "on_intake", "provider_profiles"):
+        for field in (
+            "provider",
+            "mode",
+            "base_url",
+            "model",
+            "supports_images",
+            "thinking",
+            "key_revision",
+            "on_intake",
+            "provider_profiles",
+        ):
             self.assertEqual(after[field], config[field], field)
         self.assertFalse(after["verified"])
         self.assertNotEqual(after["revision"], config["revision"])
@@ -351,16 +462,22 @@ class IndependentAISettingsTests(TestCase):
         old_key = service.key_path("minimax").read_bytes()
         write = service._write_settings
         count = 0
+
         def fail_final(value):
             nonlocal count
             count += 1
             if count == 2:
                 raise OSError("synthetic storage failure must be redacted")
             return write(value)
+
         with mock.patch.object(service, "_write_settings", side_effect=fail_final):
             with self.assertRaisesRegex(service.SettingsError, "原密钥和设置已保留.*重新测试连接"):
-                service.save({"key": {"action": "replace", "value": "synthetic-replacement-key"},
-                              "provider_profiles": {"modelscope": {"model": "Qwen/unsaved-draft"}}})
+                service.save(
+                    {
+                        "key": {"action": "replace", "value": "synthetic-replacement-key"},
+                        "provider_profiles": {"modelscope": {"model": "Qwen/unsaved-draft"}},
+                    }
+                )
         self.assert_failed_storage_preserved(config, {"minimax": old_key}, snapshot)
         self.assertFalse(any(self.root.glob(".library-ai-rollback-*")))
         self.network.assert_not_called()
@@ -373,35 +490,51 @@ class IndependentAISettingsTests(TestCase):
         snapshot = service.execution_snapshot()
         old_keys = {provider: service.key_path(provider).read_bytes() for provider in ("minimax", "deepseek")}
         write = service._write_provider_key
+
         def fail_second(provider, action, key):
             if provider == "modelscope":
                 raise OSError("synthetic second provider failure")
             return write(provider, action, key)
+
         with mock.patch.object(service, "_write_provider_key", side_effect=fail_second):
             with self.assertRaises(service.SettingsError):
-                service.save({"key": {"action": "replace", "value": "synthetic-new-minimax"}, "keys": {
-                    "deepseek": {"action": "replace", "value": "synthetic-new-deepseek"},
-                    "modelscope": {"action": "replace", "value": "synthetic-new-modelscope"}}})
+                service.save(
+                    {
+                        "key": {"action": "replace", "value": "synthetic-new-minimax"},
+                        "keys": {
+                            "deepseek": {"action": "replace", "value": "synthetic-new-deepseek"},
+                            "modelscope": {"action": "replace", "value": "synthetic-new-modelscope"},
+                        },
+                    }
+                )
         self.assert_failed_storage_preserved(config, old_keys, snapshot)
         self.assertFalse(service.key_path("modelscope").exists())
         self.network.assert_not_called()
 
     def test_feature_write_failure_restores_keys_switches_and_intake_timing(self):
-        self.configure_minimax(features={"ai_answer": True, "knowledge_tags": True}, on_intake={"answer": True, "tags": True})
+        self.configure_minimax(
+            features={"ai_answer": True, "knowledge_tags": True}, on_intake={"answer": True, "tags": True}
+        )
         self.verify()
         config = service._load()
         snapshot = service.execution_snapshot()
         old_key = service.key_path("minimax").read_bytes()
         old_switches = features.path().read_bytes()
         save_features = features.save
+
         def fail_after_feature_write(changes):
             save_features(changes)
             raise OSError("synthetic failure after feature write")
+
         with mock.patch.object(features, "save", side_effect=fail_after_feature_write):
             with self.assertRaises(service.SettingsError):
-                service.save({"key": {"action": "replace", "value": "synthetic-new-key"},
-                              "features": {"ai_answer": False, "knowledge_tags": False},
-                              "on_intake": {"answer": False, "tags": False}})
+                service.save(
+                    {
+                        "key": {"action": "replace", "value": "synthetic-new-key"},
+                        "features": {"ai_answer": False, "knowledge_tags": False},
+                        "on_intake": {"answer": False, "tags": False},
+                    }
+                )
         self.assert_failed_storage_preserved(config, {"minimax": old_key}, snapshot)
         self.assertEqual(features.path().read_bytes(), old_switches)
         self.assertTrue(features.enabled("ai_answer"))
@@ -413,12 +546,16 @@ class IndependentAISettingsTests(TestCase):
         self.verify()
         snapshot = service.execution_snapshot()
         original_replace = service.os.replace
+
         def fail_settings_restore(source, target):
             if Path(source).name.startswith(".library-ai-rollback-") and Path(target) == service.path():
                 raise OSError("synthetic-sensitive-value-in-storage-error")
             return original_replace(source, target)
-        with mock.patch.object(service, "_write_settings", side_effect=OSError("synthetic-secret-storage-message")), \
-             mock.patch.object(service.os, "replace", side_effect=fail_settings_restore):
+
+        with (
+            mock.patch.object(service, "_write_settings", side_effect=OSError("synthetic-secret-storage-message")),
+            mock.patch.object(service.os, "replace", side_effect=fail_settings_restore),
+        ):
             with self.assertRaises(service.SettingsError) as caught:
                 service.save({"key": {"action": "replace", "value": "synthetic-new-key"}})
         self.assertIn("未能全部恢复", str(caught.exception))
@@ -502,7 +639,12 @@ class IndependentAISettingsTests(TestCase):
     def test_minimax_m3_and_m2_never_send_unsupported_effort_or_assume_vision(self):
         self.network.side_effect = None
         self.network.return_value = answer_response(text="【答案】2", thinking=False, model="MiniMax-M3")
-        for model, thinking in [("MiniMax-M3", True), ("MiniMax-M3", False), ("MiniMax-M2.7", True), ("future-explicit-model", True)]:
+        for model, thinking in [
+            ("MiniMax-M3", True),
+            ("MiniMax-M3", False),
+            ("MiniMax-M2.7", True),
+            ("future-explicit-model", True),
+        ]:
             with self.subTest(model=model, thinking=thinking):
                 self.configure_minimax(model=model, thinking=thinking, supports_images=False)
                 self.assertTrue(service.test_connection({"confirm": True})["ready"])
@@ -572,10 +714,13 @@ class IndependentAISettingsTests(TestCase):
     def test_invalid_settings_do_not_overwrite_existing_credentials(self):
         self.configure()
         original = service.key_path().read_bytes()
-        for payload in [{"thinking": "yes"}, {"features": {"ai_answer": "yes"}},
-                        {"endpoint_id": "https://untrusted.invalid/secret"},
-                        {"key": {"action": "replace", "value": "private key\n"}},
-                        {"key": {"action": "clear", "value": "private-key"}}]:
+        for payload in [
+            {"thinking": "yes"},
+            {"features": {"ai_answer": "yes"}},
+            {"endpoint_id": "https://untrusted.invalid/secret"},
+            {"key": {"action": "replace", "value": "private key\n"}},
+            {"key": {"action": "clear", "value": "private-key"}},
+        ]:
             with self.subTest(payload_keys=list(payload)):
                 with self.assertRaises(service.SettingsError) as caught:
                     service.save(payload)
@@ -585,8 +730,10 @@ class IndependentAISettingsTests(TestCase):
 
     def test_unverified_or_desktop_assistant_never_enables_generation(self):
         self.configure(features={"ai_answer": True})
-        with mock.patch.dict(os.environ, {"QB_PRIMARY_ENGINE": "assistant", "MINIMAX_API_KEY": "offline-ocr-key"}), \
-                mock.patch.object(readers, "chat", side_effect=AssertionError("OCR fallback")):
+        with (
+            mock.patch.dict(os.environ, {"QB_PRIMARY_ENGINE": "assistant", "MINIMAX_API_KEY": "offline-ocr-key"}),
+            mock.patch.object(readers, "chat", side_effect=AssertionError("OCR fallback")),
+        ):
             with self.assertRaisesRegex(service.ServiceError, "通过显式测试"):
                 service.chat("fake maths", [], kind="answer")
         self.network.assert_not_called()
@@ -632,8 +779,11 @@ class IndependentAISettingsTests(TestCase):
         self.network.assert_not_called()
 
     def test_replace_clear_or_endpoint_change_invalidates_probe_without_network(self):
-        for change in [{"endpoint_id": "ep-offline-new"}, {"key": {"action": "replace", "value": "replacement-offline"}},
-                       {"key": {"action": "clear"}}]:
+        for change in [
+            {"endpoint_id": "ep-offline-new"},
+            {"key": {"action": "replace", "value": "replacement-offline"}},
+            {"key": {"action": "clear"}},
+        ]:
             self.configure()
             self.verify()
             result = service.save(change)
@@ -656,9 +806,11 @@ class IndependentAISettingsTests(TestCase):
 
     def test_configuration_changed_during_probe_does_not_mark_new_config_verified(self):
         self.configure()
+
         def changed(*_args, **_kwargs):
             service.save({"endpoint_id": "ep-offline-new"})
             return answer_response()
+
         self.network.side_effect = changed
         with self.assertRaisesRegex(service.ServiceError, "设置已变化"):
             service.test_connection({"confirm": True})
@@ -667,12 +819,22 @@ class IndependentAISettingsTests(TestCase):
     def test_settings_api_is_local_guarded_and_never_returns_a_secret(self):
         client = Client()
         self.assertEqual(client.get("/api/settings/library-ai", REMOTE_ADDR="198.51.100.1").status_code, 403)
-        self.assertEqual(client.post("/api/settings/library-ai", data="{}", content_type="application/json").status_code, 403)
-        response = client.post("/api/settings/library-ai", data=json.dumps({
-            "mode": "api",
-            "features": {"knowledge_tags": True, "ai_answer": False},
-            "endpoint_id": "ep-offline-pro", "key": {"action": "replace", "value": "offline-api-secret"},
-        }), content_type="application/json", HTTP_X_QB_REQUEST="1")
+        self.assertEqual(
+            client.post("/api/settings/library-ai", data="{}", content_type="application/json").status_code, 403
+        )
+        response = client.post(
+            "/api/settings/library-ai",
+            data=json.dumps(
+                {
+                    "mode": "api",
+                    "features": {"knowledge_tags": True, "ai_answer": False},
+                    "endpoint_id": "ep-offline-pro",
+                    "key": {"action": "replace", "value": "offline-api-secret"},
+                }
+            ),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "unverified")
         self.assertFalse(response.json()["ready"])
@@ -687,10 +849,19 @@ class IndependentAISettingsTests(TestCase):
     def test_probe_api_rejects_implicit_calls_and_unavailable_service_without_network(self):
         client = Client()
         self.assertEqual(client.get("/api/settings/library-ai/test").status_code, 405)
-        self.assertEqual(client.post("/api/settings/library-ai/test", data="{}", content_type="application/json").status_code, 403)
-        response = client.post("/api/settings/library-ai/test", data="{}", content_type="application/json", HTTP_X_QB_REQUEST="1")
+        self.assertEqual(
+            client.post("/api/settings/library-ai/test", data="{}", content_type="application/json").status_code, 403
+        )
+        response = client.post(
+            "/api/settings/library-ai/test", data="{}", content_type="application/json", HTTP_X_QB_REQUEST="1"
+        )
         self.assertEqual(response.status_code, 400)
-        response = client.post("/api/settings/library-ai/test", data='{"confirm": true}', content_type="application/json", HTTP_X_QB_REQUEST="1")
+        response = client.post(
+            "/api/settings/library-ai/test",
+            data='{"confirm": true}',
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
         self.assertEqual(response.status_code, 409)
         self.assertIn("通过显式测试", response.json()["error"])
         self.network.assert_not_called()
@@ -699,8 +870,12 @@ class IndependentAISettingsTests(TestCase):
         self.configure()
         self.network.side_effect = None
         self.network.return_value = answer_response()
-        response = Client().post("/api/settings/library-ai/test", data='{"confirm": true}',
-                                 content_type="application/json", HTTP_X_QB_REQUEST="1")
+        response = Client().post(
+            "/api/settings/library-ai/test",
+            data='{"confirm": true}',
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["ready"])
         self.assertNotIn("offline-key-never-print", response.content.decode())
@@ -717,13 +892,23 @@ class IndependentAISettingsTests(TestCase):
         self.configure()
         self.network.side_effect = None
         self.network.return_value = answer_response()
-        service.credential_settings.save_actions({"modelscope": {"action": "replace", "accounts": ["synthetic-reused-key"]}})
+        service.credential_settings.save_actions(
+            {"modelscope": {"action": "replace", "accounts": ["synthetic-reused-key"]}}
+        )
         client = Client()
         read = client.get("/api/settings/library-ai").json()
-        tested = client.post("/api/settings/library-ai/test", data='{"confirm": true}',
-                             content_type="application/json", HTTP_X_QB_REQUEST="1").json()
-        shared = client.post("/api/settings/library-ai/share-reading-key", data=json.dumps({"provider": "modelscope"}),
-                             content_type="application/json", HTTP_X_QB_REQUEST="1")
+        tested = client.post(
+            "/api/settings/library-ai/test",
+            data='{"confirm": true}',
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        ).json()
+        shared = client.post(
+            "/api/settings/library-ai/share-reading-key",
+            data=json.dumps({"provider": "modelscope"}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
         self.assertEqual(shared.status_code, 200, shared.content)
         for name, body in (("测试连接", tested), ("共用密钥", shared.json())):
             self.assertEqual(set(body), set(read), f"「{name}」的答复和「读取设置」不是同一个形状")
@@ -742,24 +927,34 @@ class GenerationBindingTests(TempDataMixin, TransactionTestCase):
         self.question.save()
         self.publication = library.publish(self.question)[0]
         features.save({"ai_answer": True, "knowledge_tags": True})
-        isolated = mock.patch.dict(os.environ, {"QB_LIBRARY_AI_SETTINGS_FILE": str(self.temp / "settings.json"),
-                                                "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.temp / "library-ai.dat")})
+        isolated = mock.patch.dict(
+            os.environ,
+            {
+                "QB_LIBRARY_AI_SETTINGS_FILE": str(self.temp / "settings.json"),
+                "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.temp / "library-ai.dat"),
+            },
+        )
         isolated.start()
         self.addCleanup(isolated.stop)
         ready = mock.patch.object(service, "ensure_ready", return_value={"ready": True, "mode": "api"})
         ready.start()
         self.addCleanup(ready.stop)
-        snapshot = mock.patch.object(service, "execution_snapshot", return_value={"mode": "api", "revision": "offline-test"})
+        snapshot = mock.patch.object(
+            service, "execution_snapshot", return_value={"mode": "api", "revision": "offline-test"}
+        )
         snapshot.start()
         self.addCleanup(snapshot.stop)
-        self.transport = mock.patch.object(service.requests, "post", side_effect=AssertionError("unexpected paid request"))
+        self.transport = mock.patch.object(
+            service.requests, "post", side_effect=AssertionError("unexpected paid request")
+        )
         self.transport.start()
         self.addCleanup(self.transport.stop)
 
     def run_job(self, *, kind="answer", side_effect=None):
         job = library_jobs.enqueue(self.publication, kind)
-        with mock.patch.object(service, "chat", side_effect=side_effect,
-                               return_value=("【答案】2【解析】合成测试", "模拟豆包 Pro")) as chat:
+        with mock.patch.object(
+            service, "chat", side_effect=side_effect, return_value=("【答案】2【解析】合成测试", "模拟豆包 Pro")
+        ) as chat:
             library_jobs.process_pending()
         job.refresh_from_db()
         self.publication.refresh_from_db()
@@ -788,6 +983,7 @@ class GenerationBindingTests(TempDataMixin, TransactionTestCase):
 
     def test_changed_task_and_replaced_version_never_receive_old_async_result(self):
         newer = []
+
         def changed(*_args, **_kwargs):
             question = Question.objects.select_related("paper").get(pk=self.question.pk)
             question.stem = "计算 $1+2$。"
@@ -795,6 +991,7 @@ class GenerationBindingTests(TempDataMixin, TransactionTestCase):
             question.save()
             newer.append(library.publish(question)[0])
             return "【答案】2【解析】旧题结果", "模拟豆包 Pro"
+
         job, _chat = self.run_job(side_effect=changed)
         self.assertEqual(job.status, "failed")
         self.assertEqual(job.publication_id, self.publication.pk)
@@ -804,8 +1001,11 @@ class GenerationBindingTests(TempDataMixin, TransactionTestCase):
 
     def test_same_publication_content_mutation_discards_the_result(self):
         def changed(*_args, **_kwargs):
-            PublishedQuestion.objects.filter(pk=self.publication.pk).update(content={**self.publication.content, "stem": "新题面"})
+            PublishedQuestion.objects.filter(pk=self.publication.pk).update(
+                content={**self.publication.content, "stem": "新题面"}
+            )
             return "【答案】2", "模拟豆包 Pro"
+
         job, _chat = self.run_job(side_effect=changed)
         self.assertEqual(job.status, "failed")
         self.assertNotIn("ai_answer", self.publication.extras)
@@ -813,16 +1013,25 @@ class GenerationBindingTests(TempDataMixin, TransactionTestCase):
     def figure(self):
         target = self.temp / "library" / str(self.publication.pk) / "figure-1.png"
         Image.new("RGB", (12, 12), "white").save(target)
-        self.publication.content["figures"] = [{"slot": "stem", "page_idx": 0, "bbox": [0, 0, 10, 10],
-                                                "file": target.name, "url": f"/api/library/{self.publication.pk}/figures/{target.name}"}]
+        self.publication.content["figures"] = [
+            {
+                "slot": "stem",
+                "page_idx": 0,
+                "bbox": [0, 0, 10, 10],
+                "file": target.name,
+                "url": f"/api/library/{self.publication.pk}/figures/{target.name}",
+            }
+        ]
         self.publication.save()
         return target
 
     def test_image_bytes_changed_during_call_are_detected_even_with_identical_content_hash(self):
         target = self.figure()
+
         def changed(*_args, **_kwargs):
             Image.new("RGB", (12, 12), "black").save(target)
             return "【答案】2", "模拟豆包 Pro"
+
         job, _chat = self.run_job(side_effect=changed)
         self.assertEqual(job.status, "failed")
         self.assertNotIn("ai_answer", self.publication.extras)
@@ -837,6 +1046,7 @@ class GenerationBindingTests(TempDataMixin, TransactionTestCase):
         def closed(*_args, **_kwargs):
             features.save({"ai_answer": False})
             return "【答案】2", "模拟豆包 Pro"
+
         # ensure_ready is mocked for service configuration; the worker must
         # independently enforce its own feature gate again before writing.
         job, _chat = self.run_job(side_effect=closed)
@@ -854,7 +1064,9 @@ class GenerationBindingTests(TempDataMixin, TransactionTestCase):
         self.assertNotIn("ai_answer", library.carried_extras(self.publication, changed))
         self.figure()
         content = deepcopy(self.publication.content)
-        self.publication.extras["ai_answer"]["fingerprint"] = library.generation_fingerprint(content, self.publication.pk)
+        self.publication.extras["ai_answer"]["fingerprint"] = library.generation_fingerprint(
+            content, self.publication.pk
+        )
         content["figures"][0]["bbox"] = [0, 0, 11, 10]
         self.assertNotIn("ai_answer", library.carried_extras(self.publication, content))
 
@@ -870,17 +1082,23 @@ class GenerationBindingTests(TempDataMixin, TransactionTestCase):
 
     def test_api_configuration_snapshot_is_checked_before_request_and_after_response(self):
         job = library_jobs.enqueue(self.publication, "answer")
-        with mock.patch.object(service, "execution_snapshot", return_value={"mode": "api", "revision": "changed"}), \
-                mock.patch.object(service, "chat") as chat:
+        with (
+            mock.patch.object(service, "execution_snapshot", return_value={"mode": "api", "revision": "changed"}),
+            mock.patch.object(service, "chat") as chat,
+        ):
             library_jobs.process_pending()
             chat.assert_not_called()
         job.refresh_from_db()
         self.assertEqual(job.status, "failed")
+
         def changed(*_args, **_kwargs):
-            self.changed_snapshot = mock.patch.object(service, "execution_snapshot", return_value={"mode": "api", "revision": "changed"})
+            self.changed_snapshot = mock.patch.object(
+                service, "execution_snapshot", return_value={"mode": "api", "revision": "changed"}
+            )
             self.changed_snapshot.start()
             self.addCleanup(self.changed_snapshot.stop)
             return "【答案】2", "离线 API"
+
         job, _chat = self.run_job(side_effect=changed)
         self.assertEqual(job.status, "failed")
         self.assertNotIn("ai_answer", self.publication.extras)
@@ -908,8 +1126,7 @@ class SharedMiniMaxKeyTests(IndependentAISettingsTests):
     """
 
     def save_reading_key(self, *accounts):
-        return service.credential_settings.save_actions(
-            {"minimax": {"action": "replace", "accounts": list(accounts)}})
+        return service.credential_settings.save_actions({"minimax": {"action": "replace", "accounts": list(accounts)}})
 
     def test_the_reading_key_can_be_copied_over_once_instead_of_typed_twice(self):
         self.save_reading_key("reading-minimax-key-one", "reading-minimax-key-two")
@@ -945,8 +1162,11 @@ class SharedMiniMaxKeyTests(IndependentAISettingsTests):
 
     def test_nothing_is_offered_when_the_reading_side_has_no_minimax_key(self):
         self.configure_minimax()
-        self.assertNotIn("reading_key_available", service.public_status(),
-                         "the answers status must never open the reading credential store")
+        self.assertNotIn(
+            "reading_key_available",
+            service.public_status(),
+            "the answers status must never open the reading credential store",
+        )
         with self.assertRaises(service.SettingsError):
             service.share_reading_key("minimax")
 
@@ -959,11 +1179,23 @@ class SharedMiniMaxKeyTests(IndependentAISettingsTests):
     def test_explicit_reuse_selects_each_reading_service_but_keeps_independent_keys_and_switches(self):
         for provider in ("minimax", "modelscope", "siliconflow"):
             with self.subTest(provider=provider):
-                service.save({"mode": "api", "provider": "deepseek", "model": "deepseek-existing-math",
-                              "key": {"action": "replace", "value": "synthetic-existing-deepseek-key"}})
+                service.save(
+                    {
+                        "mode": "api",
+                        "provider": "deepseek",
+                        "model": "deepseek-existing-math",
+                        "key": {"action": "replace", "value": "synthetic-existing-deepseek-key"},
+                    }
+                )
                 independent_key = service.key_path("deepseek").read_bytes()
-                service.credential_settings.save_actions({provider: {"action": "replace", "accounts": [
-                    f"synthetic-{provider}-first", f"synthetic-{provider}-second"]}})
+                service.credential_settings.save_actions(
+                    {
+                        provider: {
+                            "action": "replace",
+                            "accounts": [f"synthetic-{provider}-first", f"synthetic-{provider}-second"],
+                        }
+                    }
+                )
                 result = service.share_reading_key(provider)
                 self.assertEqual(result["provider"], provider)
                 self.assertEqual(result["mode"], "api")
@@ -987,18 +1219,27 @@ class SharedMiniMaxKeyTests(IndependentAISettingsTests):
     def test_reuse_retains_the_saved_target_profile_and_invalidates_its_probe(self):
         for provider in ("modelscope", "siliconflow"):
             with self.subTest(provider=provider):
-                service.save({"mode": "api", "provider": provider, "model": "Qwen/synthetic-saved-model",
-                              "thinking": False, "supports_images": False,
-                              "key": {"action": "replace", "value": "synthetic-target-independent-key"},
-                              "features": {"knowledge_tags": True, "ai_answer": True},
-                              "on_intake": {"tags": False, "answer": True}})
+                service.save(
+                    {
+                        "mode": "api",
+                        "provider": provider,
+                        "model": "Qwen/synthetic-saved-model",
+                        "thinking": False,
+                        "supports_images": False,
+                        "key": {"action": "replace", "value": "synthetic-target-independent-key"},
+                        "features": {"knowledge_tags": True, "ai_answer": True},
+                        "on_intake": {"tags": False, "answer": True},
+                    }
+                )
                 self.network.side_effect = None
                 self.network.return_value = answer_response(text="【答案】2", thinking=False)
                 self.assertTrue(service.test_connection({"confirm": True})["verified"])
                 self.network.reset_mock()
                 self.network.side_effect = AssertionError("unexpected paid request")
                 service.save({"provider": "deepseek"})
-                service.credential_settings.save_actions({provider: {"action": "replace", "accounts": ["synthetic-shared-key"]}})
+                service.credential_settings.save_actions(
+                    {provider: {"action": "replace", "accounts": ["synthetic-shared-key"]}}
+                )
                 result = service.share_reading_key(provider)
                 self.assertEqual(result["model"], "Qwen/synthetic-saved-model")
                 self.assertFalse(result["thinking"])
@@ -1011,10 +1252,14 @@ class SharedMiniMaxKeyTests(IndependentAISettingsTests):
     def test_shared_copy_never_follows_changes_and_keep_does_not_erase_its_source_mark(self):
         for provider in ("minimax", "modelscope", "siliconflow"):
             with self.subTest(provider=provider):
-                service.credential_settings.save_actions({provider: {"action": "replace", "accounts": ["synthetic-source-old"]}})
+                service.credential_settings.save_actions(
+                    {provider: {"action": "replace", "accounts": ["synthetic-source-old"]}}
+                )
                 service.share_reading_key(provider)
                 initial_revision = service._load()["key_revision"]
-                service.credential_settings.save_actions({provider: {"action": "replace", "accounts": ["synthetic-source-new"]}})
+                service.credential_settings.save_actions(
+                    {provider: {"action": "replace", "accounts": ["synthetic-source-new"]}}
+                )
                 result = service.save({"key": {"action": "keep"}})
                 self.assertEqual(service._key(service._load()), "synthetic-source-old")
                 self.assertEqual(service._load()["key_revision"], initial_revision)
@@ -1037,9 +1282,16 @@ class SharedMiniMaxKeyTests(IndependentAISettingsTests):
 
     def test_http_reuse_selects_modelscope_from_an_independent_answer_service_without_secret_response(self):
         self.configure()
-        service.credential_settings.save_actions({"modelscope": {"action": "replace", "accounts": ["synthetic-http-reused-key"]}})
-        response = self.client.post("/api/settings/library-ai/share-reading-key", data=json.dumps({"provider": "modelscope"}),
-            content_type="application/json", HTTP_X_QB_REQUEST="1", REMOTE_ADDR="127.0.0.1")
+        service.credential_settings.save_actions(
+            {"modelscope": {"action": "replace", "accounts": ["synthetic-http-reused-key"]}}
+        )
+        response = self.client.post(
+            "/api/settings/library-ai/share-reading-key",
+            data=json.dumps({"provider": "modelscope"}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+            REMOTE_ADDR="127.0.0.1",
+        )
         self.assertEqual(response.status_code, 200, response.content)
         result = response.json()
         self.assertEqual(result["provider"], "modelscope")
@@ -1050,14 +1302,21 @@ class SharedMiniMaxKeyTests(IndependentAISettingsTests):
 
     def test_failed_share_restores_target_key_and_active_service_without_reviving_old_snapshot(self):
         self.configure_minimax()
-        service.save({"provider": "modelscope", "model": "Qwen/synthetic-original-profile",
-                      "key": {"action": "replace", "value": "synthetic-independent-modelscope"}})
+        service.save(
+            {
+                "provider": "modelscope",
+                "model": "Qwen/synthetic-original-profile",
+                "key": {"action": "replace", "value": "synthetic-independent-modelscope"},
+            }
+        )
         service.save({"provider": "minimax"})
         self.verify()
         config = service._load()
         snapshot = service.execution_snapshot()
         old_keys = {provider: service.key_path(provider).read_bytes() for provider in ("modelscope", "minimax")}
-        service.credential_settings.save_actions({"modelscope": {"action": "replace", "accounts": ["synthetic-shared-copy"]}})
+        service.credential_settings.save_actions(
+            {"modelscope": {"action": "replace", "accounts": ["synthetic-shared-copy"]}}
+        )
         with mock.patch.object(service, "_write_settings", side_effect=OSError("synthetic-private-storage-error")):
             with self.assertRaisesRegex(service.SettingsError, "原密钥和设置已保留.*重新测试连接"):
                 service.share_reading_key("modelscope")
@@ -1077,14 +1336,21 @@ class SharedMiniMaxKeyTests(IndependentAISettingsTests):
         self.save_reading_key("reading-minimax-key-one")
         self.configure_minimax()
         client = Client()
-        remote = client.post("/api/settings/library-ai/share-reading-key", data="{}",
-                             content_type="application/json", HTTP_X_QB_REQUEST="1",
-                             REMOTE_ADDR="203.0.113.9")
+        remote = client.post(
+            "/api/settings/library-ai/share-reading-key",
+            data="{}",
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+            REMOTE_ADDR="203.0.113.9",
+        )
         self.assertEqual(remote.status_code, 403)
-        local = client.post("/api/settings/library-ai/share-reading-key",
-                            data=json.dumps({"provider": "minimax"}),
-                            content_type="application/json", HTTP_X_QB_REQUEST="1",
-                            REMOTE_ADDR="127.0.0.1")
+        local = client.post(
+            "/api/settings/library-ai/share-reading-key",
+            data=json.dumps({"provider": "minimax"}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+            REMOTE_ADDR="127.0.0.1",
+        )
         self.assertEqual(local.status_code, 200, local.content)
         self.assertTrue(local.json()["keys"]["minimax"]["shared_with_reading"])
 
@@ -1099,7 +1365,8 @@ class PerServiceKeyTests(IndependentAISettingsTests):
 
     def stored(self, provider):
         return service.credential_settings.store._transform(
-            service.key_path(provider).read_bytes(), protect=False).decode("utf-8")
+            service.key_path(provider).read_bytes(), protect=False
+        ).decode("utf-8")
 
     def test_a_second_service_is_stored_without_switching_the_one_in_use(self):
         self.configure_minimax()
@@ -1115,17 +1382,35 @@ class PerServiceKeyTests(IndependentAISettingsTests):
 
     def test_several_services_can_be_filled_in_one_save(self):
         self.configure()
-        result = service.save({"keys": {"deepseek": {"action": "replace", "value": "offline-deepseek-key"},
-                                        "minimax": {"action": "replace", "value": "offline-minimax-key"},
-                                        "custom": {"action": "replace", "value": "offline-custom-key"}}})
-        self.assertEqual([result["keys"][name]["configured"] for name in ("deepseek", "minimax", "custom")], [True, True, True])
-        for provider, expected in (("deepseek", "offline-deepseek-key"), ("minimax", "offline-minimax-key"), ("custom", "offline-custom-key")):
+        result = service.save(
+            {
+                "keys": {
+                    "deepseek": {"action": "replace", "value": "offline-deepseek-key"},
+                    "minimax": {"action": "replace", "value": "offline-minimax-key"},
+                    "custom": {"action": "replace", "value": "offline-custom-key"},
+                }
+            }
+        )
+        self.assertEqual(
+            [result["keys"][name]["configured"] for name in ("deepseek", "minimax", "custom")], [True, True, True]
+        )
+        for provider, expected in (
+            ("deepseek", "offline-deepseek-key"),
+            ("minimax", "offline-minimax-key"),
+            ("custom", "offline-custom-key"),
+        ):
             self.assertIn(expected, self.stored(provider))
 
     def test_replacing_and_clearing_another_service_touches_only_its_own_file(self):
         self.configure()
-        service.save({"keys": {"deepseek": {"action": "replace", "value": "offline-deepseek-one"},
-                               "custom": {"action": "replace", "value": "offline-custom-one"}}})
+        service.save(
+            {
+                "keys": {
+                    "deepseek": {"action": "replace", "value": "offline-deepseek-one"},
+                    "custom": {"action": "replace", "value": "offline-custom-one"},
+                }
+            }
+        )
         service.save({"keys": {"deepseek": {"action": "replace", "value": "offline-deepseek-two"}}})
         self.assertIn("offline-deepseek-two", self.stored("deepseek"))
         self.assertIn("offline-custom-one", self.stored("custom"), "an untouched service keeps its key")
@@ -1152,13 +1437,15 @@ class PerServiceKeyTests(IndependentAISettingsTests):
     def test_unknown_services_and_broken_instructions_are_refused_before_anything_is_written(self):
         self.configure()
         before = service.path().read_bytes()
-        for payload in ({"keys": {"openai": {"action": "clear"}}},
-                        {"keys": {"deepseek": {"action": "delete"}}},
-                        {"keys": {"deepseek": {"action": "keep", "value": "offline-x"}}},
-                        {"keys": {"deepseek": {"action": "replace", "value": "offline with spaces"}}},
-                        {"keys": {"deepseek": {"action": "replace", "value": ""}}},
-                        {"keys": "deepseek"},
-                        {"keys": {"deepseek": "offline-key"}}):
+        for payload in (
+            {"keys": {"openai": {"action": "clear"}}},
+            {"keys": {"deepseek": {"action": "delete"}}},
+            {"keys": {"deepseek": {"action": "keep", "value": "offline-x"}}},
+            {"keys": {"deepseek": {"action": "replace", "value": "offline with spaces"}}},
+            {"keys": {"deepseek": {"action": "replace", "value": ""}}},
+            {"keys": "deepseek"},
+            {"keys": {"deepseek": "offline-key"}},
+        ):
             with self.subTest(payload=payload), self.assertRaises(service.SettingsError):
                 service.save(payload)
         self.assertEqual(service.path().read_bytes(), before)
@@ -1167,14 +1454,22 @@ class PerServiceKeyTests(IndependentAISettingsTests):
     def test_the_http_route_accepts_the_same_multi_service_save(self):
         self.configure_minimax()
         client = Client()
-        remote = client.post("/api/settings/library-ai", data=json.dumps(
-            {"keys": {"deepseek": {"action": "replace", "value": "offline-remote-key"}}}),
-            content_type="application/json", HTTP_X_QB_REQUEST="1", REMOTE_ADDR="203.0.113.9")
+        remote = client.post(
+            "/api/settings/library-ai",
+            data=json.dumps({"keys": {"deepseek": {"action": "replace", "value": "offline-remote-key"}}}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+            REMOTE_ADDR="203.0.113.9",
+        )
         self.assertEqual(remote.status_code, 403)
         self.assertFalse(service.key_path("deepseek").exists(), "a remote caller stores nothing")
-        local = client.post("/api/settings/library-ai", data=json.dumps(
-            {"keys": {"deepseek": {"action": "replace", "value": "offline-local-key"}}}),
-            content_type="application/json", HTTP_X_QB_REQUEST="1", REMOTE_ADDR="127.0.0.1")
+        local = client.post(
+            "/api/settings/library-ai",
+            data=json.dumps({"keys": {"deepseek": {"action": "replace", "value": "offline-local-key"}}}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+            REMOTE_ADDR="127.0.0.1",
+        )
         self.assertEqual(local.status_code, 200, local.content)
         body = local.json()
         self.assertTrue(body["keys"]["deepseek"]["configured"])

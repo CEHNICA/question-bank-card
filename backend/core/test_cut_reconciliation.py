@@ -25,8 +25,7 @@ def scan_pdf() -> bytes:
     buffer = io.BytesIO()
     Image.new("RGB", (595, 842), "white").save(buffer, format="PNG")
     with fitz.open() as document:
-        document.new_page(width=595, height=842).insert_image(
-            fitz.Rect(0, 0, 595, 842), stream=buffer.getvalue())
+        document.new_page(width=595, height=842).insert_image(fitz.Rect(0, 0, 595, 842), stream=buffer.getvalue())
         return document.tobytes()
 
 
@@ -35,12 +34,25 @@ class NothingWasCutCase(TestCase):
     paper = manual_review.ManualIntakeReviewTests.paper
 
     def paper_with_cards(self, paper, *numbers):
-        group = QuestionGroup.objects.create(paper=paper, title=paper.display_name, sequence=0,
-            page_start=1, page_end=len(paper.pages), metadata={"pages": [0], "source": "manual"})
+        group = QuestionGroup.objects.create(
+            paper=paper,
+            title=paper.display_name,
+            sequence=0,
+            page_start=1,
+            page_end=len(paper.pages),
+            metadata={"pages": [0], "source": "manual"},
+        )
         for number in numbers:
-            Question.objects.create(paper=paper, group=group, number=number, body_mode="source_image",
-                processing_mode="manual", question_type="free_response", state=Question.State.YELLOW,
-                regions=[{"page_idx": 0, "bbox": [40.0, 60.0, 540.0, 200.0]}])
+            Question.objects.create(
+                paper=paper,
+                group=group,
+                number=number,
+                body_mode="source_image",
+                processing_mode="manual",
+                question_type="free_response",
+                state=Question.State.YELLOW,
+                regions=[{"page_idx": 0, "bbox": [40.0, 60.0, 540.0, 200.0]}],
+            )
         return paper
 
 
@@ -75,11 +87,17 @@ class FailWhenNothingWasCutTests(NothingWasCutCase):
         paper = self.paper(data=scan_pdf())
         paper.status, paper.processing_plan = Paper.Status.QUEUED, {"revision": 3, "mode": "mineru"}
         paper.save()
-        with mock.patch.object(pipeline, "parse",
-                side_effect=lambda target, revision: pipeline._set(target, status=Paper.Status.SEGMENTING)), \
-                mock.patch.object(pipeline, "segment_paper",
-                side_effect=lambda target: pipeline._set(target, status=Paper.Status.READING)), \
-                mock.patch.object(pipeline, "read_questions") as reading:
+        with (
+            mock.patch.object(
+                pipeline,
+                "parse",
+                side_effect=lambda target, revision: pipeline._set(target, status=Paper.Status.SEGMENTING),
+            ),
+            mock.patch.object(
+                pipeline, "segment_paper", side_effect=lambda target: pipeline._set(target, status=Paper.Status.READING)
+            ),
+            mock.patch.object(pipeline, "read_questions") as reading,
+        ):
             pipeline.process_paper(paper)
         reading.assert_not_called()
         paper.refresh_from_db()
@@ -132,8 +150,9 @@ class ReimportingAnArchivedOriginalTests(NothingWasCutCase):
     def upload(self, data, **extra):
         handle = io.BytesIO(data)
         handle.name = "月考卷.pdf"
-        return self.client.post("/api/papers", {"file": [handle], "parse_mode": "auto",
-            "allow_cloud": "0", **extra}, HTTP_X_QB_REQUEST="1")
+        return self.client.post(
+            "/api/papers", {"file": [handle], "parse_mode": "auto", "allow_cloud": "0", **extra}, HTTP_X_QB_REQUEST="1"
+        )
 
     def archive(self, paper):
         paper.archived = True
@@ -161,8 +180,9 @@ class ReimportingAnArchivedOriginalTests(NothingWasCutCase):
         self.assertFalse(again.json().get("duplicate"))
         self.assertEqual(Paper.objects.count(), 2)
         names = {paper.display_name for paper in Paper.objects.all()}
-        self.assertEqual(names, {"月考卷.pdf", "月考卷 (2).pdf"},
-            "题库按来源分组显示，两份同名会让「撤回所选」分不清撤的是哪份")
+        self.assertEqual(
+            names, {"月考卷.pdf", "月考卷 (2).pdf"}, "题库按来源分组显示，两份同名会让「撤回所选」分不清撤的是哪份"
+        )
 
     def test_force_on_a_live_duplicate_does_not_multiply_the_task(self):
         # 未归档的重复本来就直接打开原卷，force 只对归档那份有意义。
@@ -178,8 +198,7 @@ class ReimportingAnArchivedOriginalTests(NothingWasCutCase):
         self.archive(Paper.objects.get())
         live = self.upload(same, force="1").json()["paper"]
         third = self.upload(same)
-        self.assertEqual(third.json()["paper"]["id"], live["id"],
-            "同时存在归档份和未归档份时，应回未归档的那份")
+        self.assertEqual(third.json()["paper"]["id"], live["id"], "同时存在归档份和未归档份时，应回未归档的那份")
         self.assertFalse(third.json().get("archived"))
         self.assertEqual(Paper.objects.count(), 2)
         self.assertIsNotNone(first)

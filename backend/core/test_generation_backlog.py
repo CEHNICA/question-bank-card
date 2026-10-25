@@ -22,15 +22,30 @@ class GenerationBacklogTests(TempDataMixin, TestCase):
         self.use_temp_data()
 
     def publication(self, number, *, tags=(), answer="", ai_answer=None, status="published"):
-        content = {"question_type": "free_response", "stem": f"第 {number} 题", "options": {},
-                   "figures": [], "sources": [], "answer": answer, "analysis": "", "source_filename": "卷.pdf"}
+        content = {
+            "question_type": "free_response",
+            "stem": f"第 {number} 题",
+            "options": {},
+            "figures": [],
+            "sources": [],
+            "answer": answer,
+            "analysis": "",
+            "source_filename": "卷.pdf",
+        }
         extras = {"tags": list(tags)}
         if ai_answer is not None:
             extras["ai_answer"] = {"answer": ai_answer, "fingerprint": "f"}
         return PublishedQuestion.objects.create(
-            source_filename="卷.pdf", number=number, question_type="free_response", version=1,
-            content=content, content_hash=library.content_hash(content), extras=extras,
-            tags_text=library.tags_text(tags), status=status)
+            source_filename="卷.pdf",
+            number=number,
+            question_type="free_response",
+            version=1,
+            content=content,
+            content_hash=library.content_hash(content),
+            extras=extras,
+            tags_text=library.tags_text(tags),
+            status=status,
+        )
 
     def test_counts_only_what_is_still_missing(self):
         self.publication(1, tags=["集合的概念"], answer="原卷有")
@@ -55,11 +70,12 @@ class GenerationBacklogTests(TempDataMixin, TestCase):
         self.assertEqual((backlog["tags"], backlog["answer"]), (1, 2))
 
         status = {"mode": "assistant", "on_intake": {"tags": True, "answer": True}}
-        with mock.patch.object(library_jobs.library_ai_settings, "public_status", return_value=status), \
-             mock.patch.object(library_jobs.features, "enabled", return_value=True), \
-             mock.patch.object(library_jobs, "enqueue") as enqueue:
-            enqueue.side_effect = lambda publication, kind: library_jobs.LibraryJob(
-                publication=publication, kind=kind)
+        with (
+            mock.patch.object(library_jobs.library_ai_settings, "public_status", return_value=status),
+            mock.patch.object(library_jobs.features, "enabled", return_value=True),
+            mock.patch.object(library_jobs, "enqueue") as enqueue,
+        ):
+            enqueue.side_effect = lambda publication, kind: library_jobs.LibraryJob(publication=publication, kind=kind)
             for publication in (ready, half, bare):
                 library_jobs.queue_on_intake(publication)
             queued_tags = sum(1 for call in enqueue.call_args_list if call.args[1] == "tags")

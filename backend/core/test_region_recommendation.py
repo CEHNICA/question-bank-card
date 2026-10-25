@@ -13,27 +13,36 @@ from .test_v110_types_origin import TempDataMixin
 
 class RegionRecommendationTests(SimpleTestCase):
     def base(self, stem="已知 $x+1=3$，求 $x$ 的值。", **options):
-        return {"fields": {"stem": stem, **{key: options.get(key, "") for key in "ABCDE"}},
-                "question_type": "single_choice", "figures": [], "regions": []}
+        return {
+            "fields": {"stem": stem, **{key: options.get(key, "") for key in "ABCDE"}},
+            "question_type": "single_choice",
+            "figures": [],
+            "regions": [],
+        }
 
     def locate(self, base=None, text="$x-1=3$", before="$x+1=3$", target="stem", **changes):
-        return region_reads.recommendation_for(base or self.base(), text, {
-            "target": target, "before": before, "confidence": "high", "why": "完整公式唯一对应", **changes})
+        return region_reads.recommendation_for(
+            base or self.base(),
+            text,
+            {"target": target, "before": before, "confidence": "high", "why": "完整公式唯一对应", **changes},
+        )
 
     def test_complete_formula_is_located_without_changing_the_original_context(self):
         base = self.base()
         original = deepcopy(base)
         result = self.locate(base)
-        self.assertEqual((result["status"], result["field"], result["before"], result["after"]),
-                         ("recommended", "stem", "$x+1=3$", "$x-1=3$"))
-        self.assertEqual(result["field_text"][result["start"]:result["end"]], result["before"])
+        self.assertEqual(
+            (result["status"], result["field"], result["before"], result["after"]),
+            ("recommended", "stem", "$x+1=3$", "$x-1=3$"),
+        )
+        self.assertEqual(result["field_text"][result["start"] : result["end"]], result["before"])
         self.assertEqual(result["mode"], "replace_fragment")
         self.assertEqual(base, original)
 
     def test_js_offsets_count_utf16_for_text_before_the_fragment(self):
         result = self.locate(self.base("😀已知 $x+1=3$。"))
         original = result["field_text"].encode("utf-16-le")
-        self.assertEqual(original[result["start"] * 2:result["end"] * 2].decode("utf-16-le"), "$x+1=3$")
+        self.assertEqual(original[result["start"] * 2 : result["end"] * 2].decode("utf-16-le"), "$x+1=3$")
         self.assertEqual(result["offset_unit"], "utf16")
 
     def test_repeated_missing_wrong_field_and_uncertain_proposals_need_manual_location(self):
@@ -60,13 +69,16 @@ class RegionRecommendationTests(SimpleTestCase):
         ):
             result = self.locate(self.base(stem), before=before, text=replacement)
             self.assertEqual(result["status"], "manual", (stem, before))
-        self.assertEqual(self.locate(self.base(r"求 \frac{1}{2}。"), before=r"\frac{1}{2}",
-                                     text=r"$\frac{2}{3}$")["status"], "recommended")
+        self.assertEqual(
+            self.locate(self.base(r"求 \frac{1}{2}。"), before=r"\frac{1}{2}", text=r"$\frac{2}{3}$")["status"],
+            "recommended",
+        )
 
     def test_empty_choice_option_can_receive_whole_text_but_existing_or_picture_option_cannot(self):
         result = self.locate(target="A", before="", text="$1$")
-        self.assertEqual((result["status"], result["mode"], result["start"], result["end"]),
-                         ("recommended", "whole_field", 0, 0))
+        self.assertEqual(
+            (result["status"], result["mode"], result["start"], result["end"]), ("recommended", "whole_field", 0, 0)
+        )
         self.assertEqual(self.locate(self.base(A="$2$"), target="A", before="")["status"], "manual")
         picture = self.base()
         picture["figures"] = [{"slot": "A"}]
@@ -85,8 +97,12 @@ class RegionRecommendationTests(SimpleTestCase):
             ("参见 [原文](https://example.test/(old)", "原文", "新文字"),
         ):
             self.assertEqual(self.locate(self.base(stem), before=before, text=text)["status"], "manual")
-        self.assertEqual(self.locate(self.base("集合 $A=\\{x|x>0\\}$。"),
-                                     before="$A=\\{x|x>0\\}$", text="$A=\\{x|x>1\\}$")["status"], "recommended")
+        self.assertEqual(
+            self.locate(self.base("集合 $A=\\{x|x>0\\}$。"), before="$A=\\{x|x>0\\}$", text="$A=\\{x|x>1\\}$")[
+                "status"
+            ],
+            "recommended",
+        )
 
     def test_long_inputs_do_not_gain_a_location_or_lose_transcribed_text(self):
         text = "长" * (region_reads.MAX_FRAGMENT_CHARS + 1)
@@ -119,9 +135,15 @@ class RegionRecommendationWorkerTests(TempDataMixin, TransactionTestCase):
     def setUp(self):
         self.use_temp_data()
         self.paper = self.make_paper()
-        self.question = self.card(self.paper, question_type="single_choice", stem="已知 $x+1=3$，求值。",
-                                  options={"A": "$1$", "B": "$2$"}, approved=True,
-                                  approved_content_hash="keep-the-human-review", approval_source="human")
+        self.question = self.card(
+            self.paper,
+            question_type="single_choice",
+            stem="已知 $x+1=3$，求值。",
+            options={"A": "$1$", "B": "$2$"},
+            approved=True,
+            approved_content_hash="keep-the-human-review",
+            approval_source="human",
+        )
         self.url = f"/api/questions/{self.question.id}/region-read"
         patch = mock.patch.object(readers, "primary_engine", return_value=readers.Engine("minimax", "fake-model"))
         patch.start()
@@ -132,8 +154,17 @@ class RegionRecommendationWorkerTests(TempDataMixin, TransactionTestCase):
         return Client().post(self.url, data=json.dumps(data), content_type="application/json", HTTP_X_QB_REQUEST="1")
 
     def reply(self, **change):
-        return json.dumps({"text": "$x-1=3$", "kind": "text", "target": "stem", "before": "$x+1=3$",
-                           "confidence": "high", "why": "完整公式对应", **change})
+        return json.dumps(
+            {
+                "text": "$x-1=3$",
+                "kind": "text",
+                "target": "stem",
+                "before": "$x+1=3$",
+                "confidence": "high",
+                "why": "完整公式对应",
+                **change,
+            }
+        )
 
     def test_auto_queue_captures_base_and_worker_only_adds_a_recommendation(self):
         before = self.question.__class__.objects.filter(pk=self.question.pk).values().get()
@@ -164,8 +195,9 @@ class RegionRecommendationWorkerTests(TempDataMixin, TransactionTestCase):
             region_reads.process_pending()
         self.question.refresh_from_db()
         shown = region_reads.latest_json(self.question)
-        self.assertEqual((shown["status"], shown["text"], shown["recommendation"]["status"]),
-                         ("done", "$x-1=3$", "stale"))
+        self.assertEqual(
+            (shown["status"], shown["text"], shown["recommendation"]["status"]), ("done", "$x-1=3$", "stale")
+        )
         self.assertIn("已经变化", shown["recommendation"]["why"])
         self.assertEqual(self.question.stem, "后来改过的题干")
         self.assertTrue(self.question.approved)

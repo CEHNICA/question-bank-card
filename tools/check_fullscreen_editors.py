@@ -34,14 +34,29 @@ def main():
             failures.append(name)
 
     with sync_playwright() as pw:
-        executable = next((str(p) for p in (Path(pw.chromium.executable_path),
-            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if p.is_file()), None)
+        executable = next(
+            (
+                str(p)
+                for p in (
+                    Path(pw.chromium.executable_path),
+                    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                )
+                if p.is_file()
+            ),
+            None,
+        )
         browser = pw.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
         context = browser.new_context(viewport={"width": 1600, "height": 1000})
         context.add_init_script("localStorage.setItem('qb-welcome-seen','1'); localStorage.setItem('qb-lens','0')")
-        context.route("**/*", lambda route: route.continue_() if urlparse(route.request.url).hostname in
-                      ("127.0.0.1", "localhost") else route.abort())
+        context.route(
+            "**/*",
+            lambda route: (
+                route.continue_()
+                if urlparse(route.request.url).hostname in ("127.0.0.1", "localhost")
+                else route.abort()
+            ),
+        )
         page = context.new_page()
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
@@ -62,7 +77,10 @@ def main():
         stem = page.locator(".card.editing .stem-input")
         stem.fill(f"{original_stem}{MARK}")
         page.wait_for_timeout(250)
-        ok("改字：保存条在顶栏", page.locator(".card.editing .editor-bar").get_by_role("button", name="保存", exact=True).count() == 1)
+        ok(
+            "改字：保存条在顶栏",
+            page.locator(".card.editing .editor-bar").get_by_role("button", name="保存", exact=True).count() == 1,
+        )
         ok("改字：左栏试卷列表已隐藏", page.locator(".sidebar").is_hidden())
         page.locator(".card.editing .editor-bar").get_by_role("button", name="保存", exact=True).click()
         page.wait_for_timeout(1500)
@@ -81,8 +99,10 @@ def main():
         page.locator(".card.editing .editor-bar").get_by_role("button", name="保存", exact=True).click()
         page.wait_for_timeout(1500)
         restored = page.request.get(f"{url}/api/papers/{args.paper}").json()
-        ok("改字：原文改回去了",
-           next(q["stem"] for q in restored["questions"] if str(q["id"]) == str(question_id)) == original_stem)
+        ok(
+            "改字：原文改回去了",
+            next(q["stem"] for q in restored["questions"] if str(q["id"]) == str(question_id)) == original_stem,
+        )
 
         # ---------------------------------------------------------- 答案解析
         # 挑一道已经有答案解析的题：往返之后能原样存回去，不会给这份库留验证垃圾
@@ -95,8 +115,7 @@ def main():
         if not pick:
             # 测不了就说测不了。退出码 3 = SKIP（见 run_acceptance）：
             # 跟「跑挂了」不是一回事，混在一起会让整张表看不出哪些是真问题。
-            print("SKIP 题库里没有已保存答案解析的题，答案解析这一段测不了；"
-                  "换一份带答案解析的库再跑。", flush=True)
+            print("SKIP 题库里没有已保存答案解析的题，答案解析这一段测不了；换一份带答案解析的库再跑。", flush=True)
             raise SystemExit(3)
         pick.check(force=True)
         page.wait_for_timeout(120)
@@ -112,13 +131,17 @@ def main():
             const row = document.querySelector('.answer-list-row.active');
             return row ? (row.querySelector('input') || {}).getAttribute('aria-label') : null; }""")
         original_answer = page.input_value("#answerEditorResult")
-        ok("答案解析：保存条在顶栏",
-           page.evaluate("""() => { const bar = document.querySelector('.answer-editor-bar');
-             return Boolean(bar.querySelector('#answerEditorSave') && bar.querySelector('#answerEditorSync')); }"""))
+        ok(
+            "答案解析：保存条在顶栏",
+            page.evaluate("""() => { const bar = document.querySelector('.answer-editor-bar');
+             return Boolean(bar.querySelector('#answerEditorSave') && bar.querySelector('#answerEditorSync')); }"""),
+        )
         ok("答案解析：底部没有悬浮保存条", page.locator(".answer-editor-footer").count() == 0)
-        ok("答案解析：题号在顶栏的横排带里",
-           page.evaluate("""() => { const strip = document.querySelector('.answer-editor-strip');
-             return Boolean(strip && strip.querySelector('.answer-editor-list')); }"""))
+        ok(
+            "答案解析：题号在顶栏的横排带里",
+            page.evaluate("""() => { const strip = document.querySelector('.answer-editor-strip');
+             return Boolean(strip && strip.querySelector('.answer-editor-list')); }"""),
+        )
 
         page.fill("#answerEditorResult", f"{original_answer}{MARK}" if original_answer else MARK)
         page.wait_for_timeout(300)

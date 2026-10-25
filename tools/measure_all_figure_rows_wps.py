@@ -7,14 +7,15 @@ WPS one. Every "it is centred" claim has to be checked in WPS as well.
 
 Usage: python tools/measure_all_figure_rows_wps.py [path-to-docx]
 """
+
 import os
 import sys
 
 import win32com.client as win32
 
 MM = 25.4 / 72.0
-COLUMN = 5          # wdHorizontalPositionRelativeToPage
-IN_TABLE = 12       # wdWithInTable
+COLUMN = 5  # wdHorizontalPositionRelativeToPage
+IN_TABLE = 12  # wdWithInTable
 
 
 def cell_left_from_wps(cell, cell_mm, picture_mm):
@@ -51,33 +52,32 @@ def measure(path):
                 continue
             number += 1
             first_row = table.Rows.Item(1)
-            widths = [first_row.Cells.Item(index).Width * MM
-                      for index in range(1, first_row.Cells.Count + 1)]
+            widths = [first_row.Cells.Item(index).Width * MM for index in range(1, first_row.Cells.Count + 1)]
             picture_mm = [shape.Width * MM for shape in pictures]
             alignment = table.Rows.Alignment
             # Table edges come from the first and last cell, each measured the
             # way WPS reports it and then unwound to the cell's own edge.
-            table_left = cell_left_from_wps(first_row.Cells.Item(1),
-                                            widths[0], picture_mm[0])
-            table_right = (cell_left_from_wps(first_row.Cells.Item(len(widths)),
-                                             widths[-1], picture_mm[-1]) + widths[-1])
+            table_left = cell_left_from_wps(first_row.Cells.Item(1), widths[0], picture_mm[0])
+            table_right = cell_left_from_wps(first_row.Cells.Item(len(widths)), widths[-1], picture_mm[-1]) + widths[-1]
             spans = []
             before = 0.0
             for index, width in enumerate(widths):
                 slack = (width - picture_mm[index]) / 2
-                spans.append((table_left + before + slack,
-                              table_left + before + slack + picture_mm[index]))
+                spans.append((table_left + before + slack, table_left + before + slack + picture_mm[index]))
                 before += width
-            rows.append({
-                "label": f"table row {number} ({len(pictures)} picture"
-                         f"{'s' if len(pictures) > 1 else ''})",
-                "left": min(item[0] for item in spans),
-                "right": max(item[1] for item in spans),
-                "align": alignment,
-            })
-            print(f"  table: edges {table_left:.2f} .. {table_right:.2f} mm "
-                  f"({table_right - table_left:.2f}mm wide), {len(widths)} columns, "
-                  f"rowsAlign={alignment}")
+            rows.append(
+                {
+                    "label": f"table row {number} ({len(pictures)} picture{'s' if len(pictures) > 1 else ''})",
+                    "left": min(item[0] for item in spans),
+                    "right": max(item[1] for item in spans),
+                    "align": alignment,
+                }
+            )
+            print(
+                f"  table: edges {table_left:.2f} .. {table_right:.2f} mm "
+                f"({table_right - table_left:.2f}mm wide), {len(widths)} columns, "
+                f"rowsAlign={alignment}"
+            )
 
         loose = 0
         for shape in doc.InlineShapes:
@@ -86,10 +86,15 @@ def measure(path):
             loose += 1
             width = shape.Width * MM
             alignment = int(shape.Range.Paragraphs.Item(1).Alignment)
-            left = {1: col_left + (col_width - width) / 2,
-                    2: col_right - width}.get(alignment, col_left)
-            rows.append({"label": f"paragraph {loose} (alignment {alignment})",
-                         "left": left, "right": left + width, "align": alignment})
+            left = {1: col_left + (col_width - width) / 2, 2: col_right - width}.get(alignment, col_left)
+            rows.append(
+                {
+                    "label": f"paragraph {loose} (alignment {alignment})",
+                    "left": left,
+                    "right": left + width,
+                    "align": alignment,
+                }
+            )
 
         print()
         print("per line (WPS):")
@@ -101,8 +106,10 @@ def measure(path):
             if abs(skew) > 0.5:
                 off += 1
             verdict = "CENTRED" if abs(skew) <= 0.5 else "OFF CENTRE"
-            print(f"  {row['label']:<30} left {row['left']:7.2f}  right {row['right']:7.2f}  "
-                  f"content {row['right'] - row['left']:6.2f}mm  skew {skew:6.2f}  {verdict}")
+            print(
+                f"  {row['label']:<30} left {row['left']:7.2f}  right {row['right']:7.2f}  "
+                f"content {row['right'] - row['left']:6.2f}mm  skew {skew:6.2f}  {verdict}"
+            )
         print()
         print(f"lines measured {len(rows)}, off centre {off}, worst skew {worst:.2f} mm")
         doc.Close(False)
@@ -114,5 +121,4 @@ def measure(path):
 
 
 if __name__ == "__main__":
-    measure(sys.argv[1] if len(sys.argv) > 1
-            else os.path.join(os.environ["TEMP"], "qb-all-figure-rows.docx"))
+    measure(sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.environ["TEMP"], "qb-all-figure-rows.docx"))

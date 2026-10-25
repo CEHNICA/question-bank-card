@@ -29,12 +29,14 @@ def seed_and_migrate_tags(apps, schema_editor):
                 break
     if has_legacy_tags:
         from core.tag_catalogue_seed import seed_catalogue
+
         seed_catalogue(apps=apps)
     LibraryTagCatalogue.objects.get_or_create(pk=1, defaults={"revision": 1})
 
     catalogue = LibraryTagCatalogue.objects.get(pk=1)
     tag_by_name = {}
     tag_by_alias = {}
+
     def old_key(value):
         value = unicodedata.normalize("NFKC", str(value or "")).casefold()
         return re.sub(r"[\s（）()·，,。:：\-—_]", "", value)
@@ -57,7 +59,8 @@ def seed_and_migrate_tags(apps, schema_editor):
             return tag
         kind = "legacy"
         tag, _ = LibraryTag.objects.get_or_create(
-            kind=kind, name=name[:100],
+            kind=kind,
+            name=name[:100],
             defaults={"description": "从旧版题库迁入；没有对应的细分目录项，等待人工整理。", "active": False},
         )
         nonlocal_legacy_group = None
@@ -65,7 +68,8 @@ def seed_and_migrate_tags(apps, schema_editor):
         nonlocal_legacy_group = LibraryTagGroup.objects.filter(system_key="system:legacy-tags").first()
         if nonlocal_legacy_group is None:
             nonlocal_legacy_group = LibraryTagGroup.objects.create(
-                system_key="system:legacy-tags", name="历史标签", color="#7d8188", position=99)
+                system_key="system:legacy-tags", name="历史标签", color="#7d8188", position=99
+            )
         tag.groups.add(nonlocal_legacy_group)
         tag_by_name[key] = tag
         return tag
@@ -85,37 +89,62 @@ def seed_and_migrate_tags(apps, schema_editor):
         else:
             disposition = "unknown"
 
-        raw_snapshot = {"names": names, "source": source, "executor": executor,
-                        "checked": extras.get("tags_checked"), "at": extras.get("tags_at")}
+        raw_snapshot = {
+            "names": names,
+            "source": source,
+            "executor": executor,
+            "checked": extras.get("tags_checked"),
+            "at": extras.get("tags_at"),
+        }
         if disposition == "ai":
             suggestions = []
             for name in names:
                 tag = old_tag(name, formal=False)
                 if tag.kind == "legacy":
-                    suggestions.append({"new_name": name[:100], "name": name[:100], "legacy_name": name[:100], "kind": "knowledge",
-                                        "levels": ["初中", "高中"], "description": "旧版 AI 标签，待人工核对。",
-                                        "rationale": "旧版 AI 标签没有逐条理由，需回到题面核对。",
-                                        "evidence": "请依据原题题干、选项和配图重新核对。",
-                                        "scope": {"whole": True}, "legacy": True})
+                    suggestions.append(
+                        {
+                            "new_name": name[:100],
+                            "name": name[:100],
+                            "legacy_name": name[:100],
+                            "kind": "knowledge",
+                            "levels": ["初中", "高中"],
+                            "description": "旧版 AI 标签，待人工核对。",
+                            "rationale": "旧版 AI 标签没有逐条理由，需回到题面核对。",
+                            "evidence": "请依据原题题干、选项和配图重新核对。",
+                            "scope": {"whole": True},
+                            "legacy": True,
+                        }
+                    )
                 else:
-                    suggestions.append({"tag_id": str(tag.pk), "kind": tag.kind, "name": tag.name, "legacy_name": name[:100],
-                                        "description": tag.description,
-                                        "rationale": "旧版 AI 标签，待人工核对。",
-                                        "evidence": "请依据原题题干、选项和配图重新核对。",
-                                        "scope": {"whole": True}, "legacy": True})
+                    suggestions.append(
+                        {
+                            "tag_id": str(tag.pk),
+                            "kind": tag.kind,
+                            "name": tag.name,
+                            "legacy_name": name[:100],
+                            "description": tag.description,
+                            "rationale": "旧版 AI 标签，待人工核对。",
+                            "evidence": "请依据原题题干、选项和配图重新核对。",
+                            "scope": {"whole": True},
+                            "legacy": True,
+                        }
+                    )
             job = LibraryJob.objects.filter(publication_id=publication.pk, kind="tags").order_by("-created_at").first()
             candidate_status = "pending" if publication.status == "published" else "stale"
             suggestion, _ = LibraryTagSuggestion.objects.get_or_create(
                 publication_id=publication.pk,
                 status=candidate_status,
-                defaults={"job_id": job.pk if job else None,
-                          "question_fingerprint": str(extras.get("tags_fingerprint") or ""),
-                          "taxonomy_revision": catalogue.revision,
-                          "suggestions": suggestions,
-                          "status": candidate_status,
-                          "message": "从旧版迁入，原有建议没有逐条依据，请重新核对。" if candidate_status == "pending"
-                                     else "旧版 AI 结果已保留为历史候选；该入库版本已撤回，不能直接采纳。",
-                          "generation_source": str(extras.get("tags_source") or "旧版 AI")},
+                defaults={
+                    "job_id": job.pk if job else None,
+                    "question_fingerprint": str(extras.get("tags_fingerprint") or ""),
+                    "taxonomy_revision": catalogue.revision,
+                    "suggestions": suggestions,
+                    "status": candidate_status,
+                    "message": "从旧版迁入，原有建议没有逐条依据，请重新核对。"
+                    if candidate_status == "pending"
+                    else "旧版 AI 结果已保留为历史候选；该入库版本已撤回，不能直接采纳。",
+                    "generation_source": str(extras.get("tags_source") or "旧版 AI"),
+                },
             )
             if job is not None:
                 result = dict(job.result or {})
@@ -135,11 +164,14 @@ def seed_and_migrate_tags(apps, schema_editor):
             tag = old_tag(name, formal=disposition != "ai")
             needs_review = disposition == "unknown"
             assignment, _ = LibraryTagAssignment.objects.get_or_create(
-                publication_id=publication.pk, tag_id=tag.pk,
-                defaults={"source": "legacy_human" if disposition == "human" else "legacy_unknown",
-                          "needs_review": needs_review,
-                          "source_snapshot": {**raw_snapshot, "legacy_name": name},
-                          "rationale": "旧版标签保留；未记录逐标签核对状态。"},
+                publication_id=publication.pk,
+                tag_id=tag.pk,
+                defaults={
+                    "source": "legacy_human" if disposition == "human" else "legacy_unknown",
+                    "needs_review": needs_review,
+                    "source_snapshot": {**raw_snapshot, "legacy_name": name},
+                    "rationale": "旧版标签保留；未记录逐标签核对状态。",
+                },
             )
             if not assignment.needs_review:
                 assignments.append(tag.name)
@@ -155,136 +187,190 @@ def seed_and_migrate_tags(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
-    dependencies = [
-        ('core', '0021_question_layout'),
-    ]
+    dependencies = [("core", "0021_question_layout")]
 
     operations = [
         migrations.CreateModel(
-            name='LibraryTagCatalogue',
+            name="LibraryTagCatalogue",
             fields=[
-                ('id', models.PositiveSmallIntegerField(default=1, editable=False, primary_key=True, serialize=False)),
-                ('revision', models.PositiveIntegerField(default=1)),
+                ("id", models.PositiveSmallIntegerField(default=1, editable=False, primary_key=True, serialize=False)),
+                ("revision", models.PositiveIntegerField(default=1)),
             ],
         ),
         migrations.CreateModel(
-            name='LibraryTagGroup',
+            name="LibraryTagGroup",
             fields=[
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ('name', models.CharField(max_length=100, unique=True)),
-                ('color', models.CharField(blank=True, default='', max_length=16)),
-                ('position', models.PositiveIntegerField(default=0)),
-                ('system_key', models.CharField(blank=True, default=None, max_length=64, null=True, unique=True)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
+                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ("name", models.CharField(max_length=100, unique=True)),
+                ("color", models.CharField(blank=True, default="", max_length=16)),
+                ("position", models.PositiveIntegerField(default=0)),
+                ("system_key", models.CharField(blank=True, default=None, max_length=64, null=True, unique=True)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
             ],
-            options={
-                'ordering': ['position', 'name', 'id'],
-            },
+            options={"ordering": ["position", "name", "id"]},
         ),
         migrations.CreateModel(
-            name='LibraryTagOperation',
+            name="LibraryTagOperation",
             fields=[
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ('client_request_id', models.UUIDField(unique=True)),
-                ('request_hash', models.CharField(max_length=64)),
-                ('action', models.CharField(max_length=24)),
-                ('publication_ids', models.JSONField(blank=True, default=list)),
-                ('before_snapshot', models.JSONField(blank=True, default=dict)),
-                ('after_snapshot', models.JSONField(blank=True, default=dict)),
-                ('catalogue_revision', models.PositiveIntegerField(default=1)),
-                ('undone_at', models.DateTimeField(blank=True, null=True)),
-                ('blocked_reason', models.CharField(blank=True, default='', max_length=300)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ("client_request_id", models.UUIDField(unique=True)),
+                ("request_hash", models.CharField(max_length=64)),
+                ("action", models.CharField(max_length=24)),
+                ("publication_ids", models.JSONField(blank=True, default=list)),
+                ("before_snapshot", models.JSONField(blank=True, default=dict)),
+                ("after_snapshot", models.JSONField(blank=True, default=dict)),
+                ("catalogue_revision", models.PositiveIntegerField(default=1)),
+                ("undone_at", models.DateTimeField(blank=True, null=True)),
+                ("blocked_reason", models.CharField(blank=True, default="", max_length=300)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
             ],
-            options={
-                'ordering': ['-created_at', '-id'],
-            },
+            options={"ordering": ["-created_at", "-id"]},
         ),
-        migrations.AddField(
-            model_name='libraryjob',
-            name='tag_scope',
-            field=models.BooleanField(default=False),
+        migrations.AddField(model_name="libraryjob", name="tag_scope", field=models.BooleanField(default=False)),
+        migrations.CreateModel(
+            name="LibraryTag",
+            fields=[
+                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ("name", models.CharField(max_length=100)),
+                (
+                    "kind",
+                    models.CharField(
+                        choices=[
+                            ("knowledge", "知识点"),
+                            ("method", "解题方法"),
+                            ("custom", "自定义"),
+                            ("legacy", "历史标签"),
+                        ],
+                        default="knowledge",
+                        max_length=16,
+                    ),
+                ),
+                ("description", models.CharField(blank=True, default="", max_length=300)),
+                ("color", models.CharField(blank=True, default="", max_length=16)),
+                ("aliases", models.JSONField(blank=True, default=list)),
+                ("levels", models.JSONField(blank=True, default=list)),
+                ("conditions", models.TextField(blank=True, default="")),
+                ("active", models.BooleanField(db_index=True, default=True)),
+                ("favorite", models.BooleanField(default=False)),
+                ("system_key", models.CharField(blank=True, default=None, max_length=100, null=True, unique=True)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                ("groups", models.ManyToManyField(blank=True, related_name="tags", to="core.librarytaggroup")),
+            ],
+            options={"ordering": ["name", "id"]},
         ),
         migrations.CreateModel(
-            name='LibraryTag',
+            name="LibraryTagSuggestion",
             fields=[
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ('name', models.CharField(max_length=100)),
-                ('kind', models.CharField(choices=[('knowledge', '知识点'), ('method', '解题方法'), ('custom', '自定义'), ('legacy', '历史标签')], default='knowledge', max_length=16)),
-                ('description', models.CharField(blank=True, default='', max_length=300)),
-                ('color', models.CharField(blank=True, default='', max_length=16)),
-                ('aliases', models.JSONField(blank=True, default=list)),
-                ('levels', models.JSONField(blank=True, default=list)),
-                ('conditions', models.TextField(blank=True, default='')),
-                ('active', models.BooleanField(db_index=True, default=True)),
-                ('favorite', models.BooleanField(default=False)),
-                ('system_key', models.CharField(blank=True, default=None, max_length=100, null=True, unique=True)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
-                ('groups', models.ManyToManyField(blank=True, related_name='tags', to='core.librarytaggroup')),
+                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ("question_fingerprint", models.CharField(blank=True, default="", max_length=64)),
+                ("taxonomy_revision", models.PositiveIntegerField(default=1)),
+                ("assignment_revision", models.PositiveIntegerField(default=0)),
+                ("prompt_version", models.CharField(default="tags-v2", max_length=32)),
+                ("method_source", models.JSONField(blank=True, default=dict)),
+                ("suggestions", models.JSONField(blank=True, default=list)),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[
+                            ("pending", "待核对"),
+                            ("accepted", "已采纳"),
+                            ("rejected", "已拒绝"),
+                            ("no_match", "无合适标签"),
+                            ("review", "暂不能判断"),
+                            ("failed", "生成失败"),
+                            ("stale", "依据已变化"),
+                        ],
+                        db_index=True,
+                        default="pending",
+                        max_length=16,
+                    ),
+                ),
+                ("message", models.CharField(blank=True, default="", max_length=500)),
+                ("generation_source", models.CharField(blank=True, default="", max_length=80)),
+                ("resolved_at", models.DateTimeField(blank=True, null=True)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                (
+                    "job",
+                    models.OneToOneField(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.SET_NULL,
+                        related_name="tag_suggestion",
+                        to="core.libraryjob",
+                    ),
+                ),
+                (
+                    "publication",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="tag_suggestions",
+                        to="core.publishedquestion",
+                    ),
+                ),
             ],
-            options={
-                'ordering': ['name', 'id'],
-            },
+            options={"ordering": ["-created_at", "-id"]},
         ),
         migrations.CreateModel(
-            name='LibraryTagSuggestion',
+            name="LibraryTagAssignment",
             fields=[
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ('question_fingerprint', models.CharField(blank=True, default='', max_length=64)),
-                ('taxonomy_revision', models.PositiveIntegerField(default=1)),
-                ('assignment_revision', models.PositiveIntegerField(default=0)),
-                ('prompt_version', models.CharField(default='tags-v2', max_length=32)),
-                ('method_source', models.JSONField(blank=True, default=dict)),
-                ('suggestions', models.JSONField(blank=True, default=list)),
-                ('status', models.CharField(choices=[('pending', '待核对'), ('accepted', '已采纳'), ('rejected', '已拒绝'), ('no_match', '无合适标签'), ('review', '暂不能判断'), ('failed', '生成失败'), ('stale', '依据已变化')], db_index=True, default='pending', max_length=16)),
-                ('message', models.CharField(blank=True, default='', max_length=500)),
-                ('generation_source', models.CharField(blank=True, default='', max_length=80)),
-                ('resolved_at', models.DateTimeField(blank=True, null=True)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
-                ('job', models.OneToOneField(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='tag_suggestion', to='core.libraryjob')),
-                ('publication', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='tag_suggestions', to='core.publishedquestion')),
+                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                ("scope", models.JSONField(blank=True, default=dict)),
+                (
+                    "source",
+                    models.CharField(
+                        choices=[
+                            ("human", "人工添加"),
+                            ("ai_accepted", "人工采纳 AI 建议"),
+                            ("legacy_human", "旧版人工编辑"),
+                            ("legacy_unknown", "旧标签待核对"),
+                        ],
+                        default="human",
+                        max_length=24,
+                    ),
+                ),
+                ("generation_source", models.CharField(blank=True, default="", max_length=80)),
+                ("rationale", models.CharField(blank=True, default="", max_length=500)),
+                ("evidence", models.CharField(blank=True, default="", max_length=500)),
+                ("needs_review", models.BooleanField(db_index=True, default=False)),
+                ("source_snapshot", models.JSONField(blank=True, default=dict)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                (
+                    "publication",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="tag_assignments",
+                        to="core.publishedquestion",
+                    ),
+                ),
+                (
+                    "tag",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT, related_name="assignments", to="core.librarytag"
+                    ),
+                ),
             ],
             options={
-                'ordering': ['-created_at', '-id'],
-            },
-        ),
-        migrations.CreateModel(
-            name='LibraryTagAssignment',
-            fields=[
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ('scope', models.JSONField(blank=True, default=dict)),
-                ('source', models.CharField(choices=[('human', '人工添加'), ('ai_accepted', '人工采纳 AI 建议'), ('legacy_human', '旧版人工编辑'), ('legacy_unknown', '旧标签待核对')], default='human', max_length=24)),
-                ('generation_source', models.CharField(blank=True, default='', max_length=80)),
-                ('rationale', models.CharField(blank=True, default='', max_length=500)),
-                ('evidence', models.CharField(blank=True, default='', max_length=500)),
-                ('needs_review', models.BooleanField(db_index=True, default=False)),
-                ('source_snapshot', models.JSONField(blank=True, default=dict)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
-                ('publication', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='tag_assignments', to='core.publishedquestion')),
-                ('tag', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='assignments', to='core.librarytag')),
-            ],
-            options={
-                'ordering': ['created_at', 'id'],
-                'indexes': [models.Index(fields=['publication', 'needs_review'], name='tag_assignment_review')],
-                'constraints': [models.UniqueConstraint(fields=('publication', 'tag'), name='unique_publication_tag_assignment')],
+                "ordering": ["created_at", "id"],
+                "indexes": [models.Index(fields=["publication", "needs_review"], name="tag_assignment_review")],
+                "constraints": [
+                    models.UniqueConstraint(fields=("publication", "tag"), name="unique_publication_tag_assignment")
+                ],
             },
         ),
         migrations.AddIndex(
-            model_name='librarytag',
-            index=models.Index(fields=['kind', 'active', 'name'], name='library_tag_kind_name'),
+            model_name="librarytag", index=models.Index(fields=["kind", "active", "name"], name="library_tag_kind_name")
         ),
         migrations.AddConstraint(
-            model_name='librarytag',
-            constraint=models.UniqueConstraint(fields=('kind', 'name'), name='unique_library_tag_name_kind'),
+            model_name="librarytag",
+            constraint=models.UniqueConstraint(fields=("kind", "name"), name="unique_library_tag_name_kind"),
         ),
         migrations.AddIndex(
-            model_name='librarytagsuggestion',
-            index=models.Index(fields=['publication', 'status', 'created_at'], name='tag_suggest_pub_state'),
+            model_name="librarytagsuggestion",
+            index=models.Index(fields=["publication", "status", "created_at"], name="tag_suggest_pub_state"),
         ),
         migrations.RunPython(seed_and_migrate_tags, migrations.RunPython.noop),
     ]

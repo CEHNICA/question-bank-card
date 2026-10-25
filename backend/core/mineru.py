@@ -99,6 +99,8 @@ def read_state(path: Path, *, raw: bool = False) -> dict | None:
     if isinstance(note.get("pages"), int) and isinstance(note.get("total_pages"), int) and note["total_pages"] > 0:
         shown.update(pages=max(0, min(note["pages"], note["total_pages"])), total_pages=note["total_pages"])
     return shown
+
+
 ERROR_HINTS = {
     "A0202": "Token 不正确，请在 MinerU API 管理页核对或更换 Token",
     "A0211": "Token 已过期：请到 mineru.net 的 API 管理页生成新 Token，在“设置 → 服务与密钥”里换上；有效期以管理页为准",
@@ -150,17 +152,31 @@ REMOTE_ERROR_PHRASES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("-60009", ("task submission queue is full", "任务提交队列已满")),
     ("-60008", ("file read timeout", "文件读取超时")),
     ("-60007", ("model service temporarily unavailable", "模型服务暂时不可用")),
-    ("-60006", (
-        "page count exceeds", "page count exceeded", "too many pages",
-        "文件页数超过限制", "页数超过限制", "页数超出限制",
-    )),
+    (
+        "-60006",
+        (
+            "page count exceeds",
+            "page count exceeded",
+            "too many pages",
+            "文件页数超过限制",
+            "页数超过限制",
+            "页数超出限制",
+        ),
+    ),
     ("-60005", ("file size exceeds limit", "file size exceeded", "file is too large", "文件大小超出限制")),
     ("-60004", ("empty file", "空文件")),
     ("-60003", ("file read failure", "failed to read file", "文件读取失败")),
-    ("-60002", (
-        "failed to match file format", "file format not supported", "unsupported file format",
-        "unsupported file type", "获取匹配的文件格式失败", "文件格式不支持",
-    )),
+    (
+        "-60002",
+        (
+            "failed to match file format",
+            "file format not supported",
+            "unsupported file format",
+            "unsupported file type",
+            "获取匹配的文件格式失败",
+            "文件格式不支持",
+        ),
+    ),
     ("-60001", ("failed to generate upload url", "生成上传 url 失败", "生成上传地址失败")),
     ("-10002", ("request parameter error", "请求参数错误")),
     ("-10001", ("service error", "服务异常")),
@@ -256,9 +272,7 @@ class MineruError(RuntimeError):
     def account_unusable(self) -> bool:
         """Whether only this account should be removed from the current run."""
 
-        return self.http_status in {401, 403} or self.effective_code in {
-            "A0202", "A0211", "-60013", "-60018", "-60019",
-        }
+        return self.http_status in {401, 403} or self.effective_code in {"A0202", "A0211", "-60013", "-60018", "-60019"}
 
     @property
     def rate_limited(self) -> bool:
@@ -297,13 +311,7 @@ def _error_details(stage: str, result: dict | None, status: int | None = None) -
     if trace_id:
         details.append(f"追踪号 {trace_id}")
     message = f"MinerU {stage}失败（{'，'.join(details)}）：{hint}"
-    metadata = {
-        "stage": stage,
-        "code": code,
-        "category": category,
-        "trace_id": trace_id,
-        "http_status": safe_status,
-    }
+    metadata = {"stage": stage, "code": code, "category": category, "trace_id": trace_id, "http_status": safe_status}
     return message, metadata
 
 
@@ -362,20 +370,19 @@ def _with_network_retries(action: Callable[[], requests.Response], *, cancel=Non
 
 
 def _api_json(
-    session: requests.Session,
-    token: str,
-    endpoint: str,
-    payload: dict | None = None,
-    *, cancel=None,
+    session: requests.Session, token: str, endpoint: str, payload: dict | None = None, *, cancel=None
 ) -> tuple[dict, str]:
     try:
-        response = _with_network_retries(lambda: session.request(
-            "POST" if payload is not None else "GET",
-            f"{API_ROOT}/{endpoint.lstrip('/')}",
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-            json=payload,
-            timeout=(10, 45),
-        ), cancel=cancel)
+        response = _with_network_retries(
+            lambda: session.request(
+                "POST" if payload is not None else "GET",
+                f"{API_ROOT}/{endpoint.lstrip('/')}",
+                headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                json=payload,
+                timeout=(10, 45),
+            ),
+            cancel=cancel,
+        )
     except requests.RequestException:
         raise MineruError("MinerU 接口连接失败，请检查网络后重试") from None
     try:
@@ -391,26 +398,34 @@ def _api_json(
         raise _mineru_error(stage, result)
     data = result.get("data")
     if not isinstance(data, dict):
-        raise MineruError(f"MinerU {stage}没有返回预期数据", stage=stage,
-                          trace_id=_safe_trace_id(result.get("trace_id")))
+        raise MineruError(
+            f"MinerU {stage}没有返回预期数据", stage=stage, trace_id=_safe_trace_id(result.get("trace_id"))
+        )
     return data, _safe_trace_id(result.get("trace_id"))
 
 
 def _https_url(value: object, stage: str, *, trace_id: str = "") -> str:
     """Validate returned storage URLs without exposing signed URLs in errors."""
-    valid = (isinstance(value, str) and bool(value)
-             and not any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value))
+    valid = (
+        isinstance(value, str)
+        and bool(value)
+        and not any(character.isspace() or ord(character) < 32 or ord(character) == 127 for character in value)
+    )
     if valid:
         try:
             parsed = urlsplit(value)
-            valid = (parsed.scheme == "https" and bool(parsed.hostname)
-                     and parsed.username is None and parsed.password is None and not parsed.fragment
-                     and (parsed.port is None or 0 < parsed.port <= 65535))
+            valid = (
+                parsed.scheme == "https"
+                and bool(parsed.hostname)
+                and parsed.username is None
+                and parsed.password is None
+                and not parsed.fragment
+                and (parsed.port is None or 0 < parsed.port <= 65535)
+            )
         except ValueError:
             valid = False
     if not valid:
-        raise MineruError(f"MinerU {stage}返回的地址格式不正确，需要有效的 HTTPS 地址", stage=stage,
-                          trace_id=trace_id)
+        raise MineruError(f"MinerU {stage}返回的地址格式不正确，需要有效的 HTTPS 地址", stage=stage, trace_id=trace_id)
     return value
 
 
@@ -498,20 +513,34 @@ def request_extract_file(
 
     with requests.Session() as session:
         report("uploading")
-        batch, submit_trace_id = _api_json(session, token, "file-urls/batch",
-                                            {"files": [{"name": source.name}], "model_version": "vlm"},
-                                            **({"cancel": cancel} if cancel is not None else {}))
+        batch, submit_trace_id = _api_json(
+            session,
+            token,
+            "file-urls/batch",
+            {"files": [{"name": source.name}], "model_version": "vlm"},
+            **({"cancel": cancel} if cancel is not None else {}),
+        )
         _check_cancel(cancel)
         batch_id = batch.get("batch_id")
-        if (not isinstance(batch_id, str) or not batch_id.strip()
-                or any(character.isspace() or ord(character) < 32 for character in batch_id)):
-            raise MineruError("MinerU 申请上传地址返回的批次编号格式不正确，未上传文件",
-                              stage="申请上传地址", trace_id=submit_trace_id)
+        if (
+            not isinstance(batch_id, str)
+            or not batch_id.strip()
+            or any(character.isspace() or ord(character) < 32 for character in batch_id)
+        ):
+            raise MineruError(
+                "MinerU 申请上传地址返回的批次编号格式不正确，未上传文件",
+                stage="申请上传地址",
+                trace_id=submit_trace_id,
+            )
         upload_urls = batch.get("file_urls")
         if not isinstance(upload_urls, list) or len(upload_urls) != 1:
-            raise MineruError("MinerU 申请上传地址没有返回单个文件所需的上传地址列表，未上传文件",
-                              stage="申请上传地址", trace_id=submit_trace_id)
+            raise MineruError(
+                "MinerU 申请上传地址没有返回单个文件所需的上传地址列表，未上传文件",
+                stage="申请上传地址",
+                trace_id=submit_trace_id,
+            )
         upload_url = _https_url(upload_urls[0], "申请上传地址", trace_id=submit_trace_id)
+
         def upload() -> requests.Response:
             # Reopen the file for every attempt: a retried PUT must send the
             # whole body again, not the remainder of a half-read stream.
@@ -531,20 +560,24 @@ def request_extract_file(
         # read: giving up then and sending again would only start the queue over (1.10.8).
         while time.monotonic() - started < (WAIT_ALIVE if state in ALIVE_STATES else WAIT_SILENT):
             _check_cancel(cancel)
-            data, trace_id = _api_json(session, token, f"extract-results/batch/{quote(batch_id, safe='')}",
-                                       **({"cancel": cancel} if cancel is not None else {}))
+            data, trace_id = _api_json(
+                session,
+                token,
+                f"extract-results/batch/{quote(batch_id, safe='')}",
+                **({"cancel": cancel} if cancel is not None else {}),
+            )
             _check_cancel(cancel)
             if heartbeat is not None:
                 heartbeat()
             rows = data.get("extract_result")
             if not isinstance(rows, list) or len(rows) > 1 or (rows and not isinstance(rows[0], dict)):
-                raise MineruError("MinerU 查询解析结果返回的单文件任务列表格式不正确",
-                                  stage="查询解析结果", trace_id=trace_id)
+                raise MineruError(
+                    "MinerU 查询解析结果返回的单文件任务列表格式不正确", stage="查询解析结果", trace_id=trace_id
+                )
             task = rows[0] if rows else None
             state = task.get("state") if isinstance(task, dict) else None
             if task is not None and (not isinstance(state, str) or not state.strip()):
-                raise MineruError("MinerU 查询解析结果没有返回有效的任务状态",
-                                  stage="查询解析结果", trace_id=trace_id)
+                raise MineruError("MinerU 查询解析结果没有返回有效的任务状态", stage="查询解析结果", trace_id=trace_id)
             if state == "done":
                 url = task.get("full_zip_url")
                 url = _https_url(url, "解析包下载", trace_id=trace_id)
@@ -556,14 +589,18 @@ def request_extract_file(
                 # “running” comes with {extracted_pages, total_pages}.
                 pages = task.get("extract_progress") if isinstance(task.get("extract_progress"), dict) else {}
                 done, total = pages.get("extracted_pages"), pages.get("total_pages")
-                report(state, **({"pages": done, "total_pages": total}
-                                 if isinstance(done, int) and isinstance(total, int) and total > 0 else {}))
+                report(
+                    state,
+                    **(
+                        {"pages": done, "total_pages": total}
+                        if isinstance(done, int) and isinstance(total, int) and total > 0
+                        else {}
+                    ),
+                )
             if state == "failed":
-                raise _mineru_error("解析", {
-                    "code": task.get("err_code"),
-                    "err_msg": task.get("err_msg"),
-                    "trace_id": trace_id,
-                })
+                raise _mineru_error(
+                    "解析", {"code": task.get("err_code"), "err_msg": task.get("err_msg"), "trace_id": trace_id}
+                )
             if cancel is not None and cancel():
                 raise MineruCancelled
             if restart is not None and restart():
@@ -612,7 +649,11 @@ def request_extract_file_from_pool(
             with pool.lease(exclude=attempted, **({"cancel": cancel} if cancel is not None else {})) as lease:
                 try:
                     return request_extract_file(
-                        lease.secret, source, target, page_count, heartbeat=heartbeat,
+                        lease.secret,
+                        source,
+                        target,
+                        page_count,
+                        heartbeat=heartbeat,
                         **({"on_state": on_state} if on_state is not None else {}),
                         **({"restart": restart} if restart is not None else {}),
                         **({"cancel": cancel} if cancel is not None else {}),
@@ -672,8 +713,11 @@ def load_blocks(archive_path: Path, page_count: int) -> list[dict]:
     """从解析包读出内容块（坐标 0–1000）。"""
     try:
         with zipfile.ZipFile(archive_path) as archive:
-            names = [n for n in archive.namelist()
-                     if n.endswith("_content_list.json") and not n.endswith("_content_list_v2.json")]
+            names = [
+                n
+                for n in archive.namelist()
+                if n.endswith("_content_list.json") and not n.endswith("_content_list_v2.json")
+            ]
             if len(names) != 1:
                 raise MineruError("MinerU 解析包缺少唯一的 content_list.json")
             info = archive.getinfo(names[0])
@@ -694,14 +738,24 @@ def load_blocks(archive_path: Path, page_count: int) -> list[dict]:
         if isinstance(page, bool) or not isinstance(page, int) or not 0 <= page < page_count:
             continue
         bbox = raw.get("bbox")
-        if not (isinstance(bbox, list) and len(bbox) == 4 and all(isinstance(v, (int, float)) for v in bbox)
-                and 0 <= bbox[0] < bbox[2] <= 1000 and 0 <= bbox[1] < bbox[3] <= 1000):
+        if not (
+            isinstance(bbox, list)
+            and len(bbox) == 4
+            and all(isinstance(v, (int, float)) for v in bbox)
+            and 0 <= bbox[0] < bbox[2] <= 1000
+            and 0 <= bbox[1] < bbox[3] <= 1000
+        ):
             bbox = None
         text = raw.get("text") or raw.get("content") or ""
         if not isinstance(text, str):
             text = ""
-        block = {"seq": seq, "type": str(raw.get("type") or "unknown")[:40], "page_idx": page,
-                 "bbox": [float(v) for v in bbox] if bbox else None, "text": text[:4000]}
+        block = {
+            "seq": seq,
+            "type": str(raw.get("type") or "unknown")[:40],
+            "page_idx": page,
+            "bbox": [float(v) for v in bbox] if bbox else None,
+            "text": text[:4000],
+        }
         # A recognised table keeps its cells: it can become a text table.
         body = raw.get("table_body")
         if block["type"] == "table" and isinstance(body, str) and body.strip():

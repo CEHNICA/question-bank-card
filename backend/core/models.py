@@ -32,13 +32,11 @@ class Paper(models.Model):
     filename = models.CharField(max_length=255)
     # 人可修改的任务显示名；filename 始终保留最初上传的文件名，方便追溯原卷。
     task_name = models.CharField(max_length=255, blank=True, default="")
-    kind = models.CharField(max_length=8)                   # pdf | image | docx
+    kind = models.CharField(max_length=8)  # pdf | image | docx
     # 资料结构与文件格式分开记录：同样是 PDF，既可能是一份试卷，也可能是一本书。
-    material_type = models.CharField(
-        max_length=8, choices=MaterialType.choices, default=MaterialType.EXAM,
-    )
+    material_type = models.CharField(max_length=8, choices=MaterialType.choices, default=MaterialType.EXAM)
     sha256 = models.CharField(max_length=64, db_index=True)
-    source_path = models.CharField(max_length=500)           # 上传的原文件
+    source_path = models.CharField(max_length=500)  # 上传的原文件
     render_path = models.CharField(max_length=500, blank=True)  # 用于渲染页面的 PDF/图片（docx 转成的 PDF）
     zip_path = models.CharField(max_length=500, blank=True)
     pages = models.JSONField(default=list)
@@ -46,7 +44,7 @@ class Paper(models.Model):
     progress = models.PositiveIntegerField(default=0)
     total = models.PositiveIntegerField(default=0)
     error = models.TextField(blank=True)
-    notes = models.JSONField(default=list)                   # 切题过程中的说明（如"第 5 题由 AI 定位"）
+    notes = models.JSONField(default=list)  # 切题过程中的说明（如"第 5 题由 AI 定位"）
     # 跨文件格式的资料结构判断：suggested_groups、signals 以及人工 confirmed 结果。
     # 不放进 photos，因为 PDF 和书籍同样需要这份可追溯记录。
     structure = models.JSONField(default=dict, blank=True)
@@ -72,8 +70,11 @@ class Paper(models.Model):
         # saves. A full save must never overwrite the shared CAS counters with
         # that object's stale values. Counter changes use explicit updates.
         if not self._state.adding and kwargs.get("update_fields") is None:
-            kwargs["update_fields"] = [field.name for field in self._meta.concrete_fields
-                if not field.primary_key and field.name not in {"layout_revision", "layout_page_epoch"}]
+            kwargs["update_fields"] = [
+                field.name
+                for field in self._meta.concrete_fields
+                if not field.primary_key and field.name not in {"layout_revision", "layout_page_epoch"}
+            ]
         return super().save(*args, **kwargs)
 
     class Meta:
@@ -151,10 +152,7 @@ class ImportChunk(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["paper", "sequence"], name="unique_import_chunk_sequence"),
             models.CheckConstraint(
-                condition=models.Q(
-                    source_page_start__gte=1,
-                    source_page_end__gte=models.F("source_page_start"),
-                ),
+                condition=models.Q(source_page_start__gte=1, source_page_end__gte=models.F("source_page_start")),
                 name="valid_import_chunk_range",
             ),
             models.CheckConstraint(condition=models.Q(sequence__gte=1), name="valid_import_chunk_sequence"),
@@ -196,16 +194,14 @@ class Question(models.Model):
 
     paper = models.ForeignKey(Paper, on_delete=models.CASCADE, related_name="questions")
     # 题号只在题组中用于展示；真正稳定的题源身份与题号、排序和任务改名无关。
-    group = models.ForeignKey(
-        QuestionGroup, on_delete=models.SET_NULL, null=True, blank=True, related_name="questions",
-    )
+    group = models.ForeignKey(QuestionGroup, on_delete=models.SET_NULL, null=True, blank=True, related_name="questions")
     source_key = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     # Presentation only: never part of OCR, approval or publication identity.
     color_index = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
     number = models.PositiveIntegerField()
     section = models.CharField(max_length=120, blank=True)
     question_type = models.CharField(max_length=24, default="unknown")
-    regions = models.JSONField(default=list)             # [{page_idx, bbox}]，按阅读顺序
+    regions = models.JSONField(default=list)  # [{page_idx, bbox}]，按阅读顺序
     regions_auto = models.JSONField(default=list)
     body_mode = models.CharField(max_length=16, default="text")
     processing_mode = models.CharField(max_length=16, default="auto")
@@ -217,12 +213,10 @@ class Question(models.Model):
     start_source = models.CharField(max_length=16, default="mineru")
     # 题号会在书籍中反复从 1 开始，不能单独充当身份。来源类型与 MinerU
     # 起始块序号共同提供一次解析内稳定、无需模型的匹配锚点。
-    source_kind = models.CharField(
-        max_length=16, choices=SourceKind.choices, default=SourceKind.UNKNOWN,
-    )
+    source_kind = models.CharField(max_length=16, choices=SourceKind.choices, default=SourceKind.UNKNOWN)
     source_anchor_seq = models.PositiveIntegerField(null=True, blank=True, db_index=True)
-    figure_candidates = models.JSONField(default=list)   # [{label, page_idx, bbox, seq}]
-    figures = models.JSONField(default=list)             # [{slot, page_idx, bbox, source}]
+    figure_candidates = models.JSONField(default=list)  # [{label, page_idx, bbox, seq}]
+    figures = models.JSONField(default=list)  # [{slot, page_idx, bbox, source}]
     # 零额外识别调用的配图核查结果。自动判断和人工“确认无图”都保留理由，便于撤销与追溯。
     figure_review = models.JSONField(default=dict)
     # 识读记录：甲（MiniMax）、乙（第二位读者）、丙（仅分歧时的裁决）。
@@ -231,9 +225,9 @@ class Question(models.Model):
     read_c = models.JSONField(default=dict)
     stem = models.TextField(blank=True)
     options = models.JSONField(default=dict)
-    text_source = models.CharField(max_length=16, blank=True)   # agree | witness | majority | arbiter | single | human
+    text_source = models.CharField(max_length=16, blank=True)  # agree | witness | majority | arbiter | single | human
     state = models.CharField(max_length=10, choices=State.choices, default=State.WAITING)
-    flags = models.JSONField(default=list)               # 请看一眼的具体原因
+    flags = models.JSONField(default=list)  # 请看一眼的具体原因
     error = models.CharField(max_length=300, blank=True)
     edited = models.BooleanField(default=False)
     approved = models.BooleanField(default=False)
@@ -258,8 +252,7 @@ class Question(models.Model):
     # deletion and undo byte-for-byte.
     deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
     deletion_batch = models.ForeignKey(
-        "QuestionDeletionBatch", on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="questions",
+        "QuestionDeletionBatch", on_delete=models.SET_NULL, null=True, blank=True, related_name="questions"
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -275,12 +268,14 @@ class Question(models.Model):
             old = type(self).all_objects.filter(pk=self.pk).values(*topology).first()
         if self._state.adding and self.color_index is None:
             from .question_layout import choose_color
+
             self.color_index = choose_color(self.paper_id, self.regions)
         super().save(*args, **kwargs)
         written = kwargs.get("update_fields")
         changed = old is None or any(
             (written is None or name in written or name.removesuffix("_id") in written)
-            and old[name] != getattr(self, name) for name in topology
+            and old[name] != getattr(self, name)
+            for name in topology
         )
         if changed:
             Paper.objects.filter(pk=self.paper_id).update(layout_revision=models.F("layout_revision") + 1)
@@ -291,10 +286,7 @@ class Question(models.Model):
         base_manager_name = "all_objects"
         indexes = [
             models.Index(fields=["paper", "group", "number"], name="question_source_lookup"),
-            models.Index(
-                fields=["paper", "group", "source_kind", "source_anchor_seq"],
-                name="question_source_anchor",
-            ),
+            models.Index(fields=["paper", "group", "source_kind", "source_anchor_seq"], name="question_source_anchor"),
         ]
 
 
@@ -354,7 +346,9 @@ class PublishedQuestion(models.Model):
         WITHDRAWN = "withdrawn", "Withdrawn"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    question = models.ForeignKey(Question, on_delete=models.SET_NULL, null=True, blank=True, related_name="publications")
+    question = models.ForeignKey(
+        Question, on_delete=models.SET_NULL, null=True, blank=True, related_name="publications"
+    )
     paper = models.ForeignKey(Paper, on_delete=models.SET_NULL, null=True, blank=True, related_name="publications")
     source_filename = models.CharField(max_length=255)
     number = models.PositiveIntegerField()
@@ -464,9 +458,7 @@ class LibraryTag(models.Model):
 
     class Meta:
         ordering = ["name", "id"]
-        constraints = [
-            models.UniqueConstraint(fields=["kind", "name"], name="unique_library_tag_name_kind"),
-        ]
+        constraints = [models.UniqueConstraint(fields=["kind", "name"], name="unique_library_tag_name_kind")]
         indexes = [models.Index(fields=["kind", "active", "name"], name="library_tag_kind_name")]
 
 
@@ -523,9 +515,7 @@ class LibraryTagAssignment(models.Model):
 
     class Meta:
         ordering = ["created_at", "id"]
-        constraints = [
-            models.UniqueConstraint(fields=["publication", "tag"], name="unique_publication_tag_assignment"),
-        ]
+        constraints = [models.UniqueConstraint(fields=["publication", "tag"], name="unique_publication_tag_assignment")]
         indexes = [models.Index(fields=["publication", "needs_review"], name="tag_assignment_review")]
 
 
@@ -544,7 +534,9 @@ class LibraryTagSuggestion(models.Model):
         STALE = "stale", "依据已变化"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    job = models.OneToOneField(LibraryJob, null=True, blank=True, on_delete=models.SET_NULL, related_name="tag_suggestion")
+    job = models.OneToOneField(
+        LibraryJob, null=True, blank=True, on_delete=models.SET_NULL, related_name="tag_suggestion"
+    )
     publication = models.ForeignKey(PublishedQuestion, on_delete=models.CASCADE, related_name="tag_suggestions")
     question_fingerprint = models.CharField(max_length=64, blank=True, default="")
     taxonomy_revision = models.PositiveIntegerField(default=1)

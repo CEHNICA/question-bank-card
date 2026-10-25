@@ -38,12 +38,10 @@ FOREIGN_QUESTION_ROLE = re.compile(r"^q\d+$")
 FLAG_NO_FIGURE = "题干说有图，但还没有配图，请点“配图”框出"
 FLAG_UNFOUND_FIGURE = "原卷可能有图没有被找到，请点“配图”框出"
 FLAG_UNCUED_FIGURE = "题目文字没有发现图像提示词，但识读判断有印刷配图，请确认配图或确认本题确实无图"
-FLAG_FIGURE_OUTSIDE_RANGE = (
-    "这张配图落在本题范围外面，可能是范围没圈住它、也可能挂错了题；"
-    "请对照原书确认范围和这张图")
+FLAG_FIGURE_OUTSIDE_RANGE = "这张配图落在本题范围外面，可能是范围没圈住它、也可能挂错了题；请对照原书确认范围和这张图"
 FLAG_FIGURE_CUT_BY_RANGE = (
-    "这道题的配图有一大半落在题目范围外面，成品卷上这张图会被切掉；"
-    "请点“调整范围”把整张图框进来，或在“配图”里手动框出来")
+    "这道题的配图有一大半落在题目范围外面，成品卷上这张图会被切掉；请点“调整范围”把整张图框进来，或在“配图”里手动框出来"
+)
 LEGACY_FLAG_NO_FIGURE = "题干说“如图”，但还没有配图，请点“配图”框出"
 
 # 教材在图的正下方另起一行印「图 4-1」这样的编号，题干照着这个编号指路。
@@ -77,8 +75,10 @@ def _box_inside_regions(regions: list[dict], page_idx: int, bbox) -> bool:
             lo, top, hi, bot = (float(value) for value in region["bbox"])
         except (KeyError, TypeError, ValueError):
             continue
-        if (lo - _RANGE_TOLERANCE <= cx <= hi + _RANGE_TOLERANCE
-                and top - _RANGE_TOLERANCE <= cy <= bot + _RANGE_TOLERANCE):
+        if (
+            lo - _RANGE_TOLERANCE <= cx <= hi + _RANGE_TOLERANCE
+            and top - _RANGE_TOLERANCE <= cy <= bot + _RANGE_TOLERANCE
+        ):
             return True
     return False
 
@@ -96,10 +96,11 @@ def figures_outside_own_range(regions: list[dict], figures: list[dict]) -> list[
     因为同行排图时它通常是对的；可一旦范围没罩住，重新识读时这个指认未必还在。
     """
     return [
-        figure for figure in (figures or [])
-        if isinstance(figure, dict) and figure.get("bbox")
-        and not _box_inside_regions(regions, int(figure.get("page_idx") or 0),
-                                    figure["bbox"])
+        figure
+        for figure in (figures or [])
+        if isinstance(figure, dict)
+        and figure.get("bbox")
+        and not _box_inside_regions(regions, int(figure.get("page_idx") or 0), figure["bbox"])
     ]
 
 
@@ -111,8 +112,7 @@ def _box_area(bbox) -> float:
     return max(0.0, x1 - x0) * max(0.0, y1 - y0)
 
 
-def candidates_cut_by_own_range(regions: list[dict], candidates: list[dict],
-                                 named, attached=()) -> list[dict]:
+def candidates_cut_by_own_range(regions: list[dict], candidates: list[dict], named, attached=()) -> list[dict]:
     """识读点名要、候选池里也有，可题目范围只罩住一小半的候选图。
 
     这和 ``figures_outside_own_range`` 是两件事：那边是「图已经挂到卡上、却落在
@@ -136,7 +136,7 @@ def candidates_cut_by_own_range(regions: list[dict], candidates: list[dict],
             by_label.setdefault(str(candidate["label"]), candidate)
 
     cut = []
-    for label in (named or []):
+    for label in named or []:
         key = str(label)
         if key in attached_labels:
             continue
@@ -290,10 +290,7 @@ REQUIRED_OPTION_SLOTS = frozenset({"A", "B", "C", "D"})
 
 
 # Backwards-compatible public matcher used by older tests and callers.
-MENTIONS_FIGURE = re.compile(
-    rf"(?:{_CHINESE_CUE.pattern}|{_ENGLISH_CUE.pattern})",
-    re.IGNORECASE,
-)
+MENTIONS_FIGURE = re.compile(rf"(?:{_CHINESE_CUE.pattern}|{_ENGLISH_CUE.pattern})", re.IGNORECASE)
 
 
 def _question_text(stem: str, options: dict | None = None) -> str:
@@ -320,8 +317,7 @@ def cue_matches(stem: str, options: dict | None = None) -> list[str]:
     # plainly does not refer to a printed figure.  A real supplied cue outside
     # the drawing command is retained: ``根据下图画出……`` becomes ``根据下图``.
     text = _STUDENT_DRAWING_REQUEST.sub("", text)
-    matches = [match.group(0).strip() for pattern in (_CHINESE_CUE, _ENGLISH_CUE)
-               for match in pattern.finditer(text)]
+    matches = [match.group(0).strip() for pattern in (_CHINESE_CUE, _ENGLISH_CUE) for match in pattern.finditer(text)]
     # “如表”“填写下表”: once the table is written into the text, the text
     # itself supplies it and no crop is missing.
     if has_table(text):
@@ -350,10 +346,7 @@ def contest_winner(claimants: list[dict]) -> int | None:
     returned and the conflict stays for a person, because moving a correct figure onto
     the wrong question is worse than asking.
     """
-    cued = [
-        card for card in claimants
-        if has_figure_cue(str(card.get("stem") or ""), card.get("options") or {})
-    ]
+    cued = [card for card in claimants if has_figure_cue(str(card.get("stem") or ""), card.get("options") or {})]
     return cued[0]["id"] if len(cued) == 1 else None
 
 
@@ -373,18 +366,17 @@ def _has_textbook_section_badge_geometry(item: dict) -> bool:
     if not isinstance(item, dict):
         return False
     bbox = item.get("bbox")
-    if (not isinstance(bbox, list) or len(bbox) != 4
-            or any(isinstance(value, bool) or not isinstance(value, (int, float))
-                   or not math.isfinite(value) for value in bbox)):
+    if (
+        not isinstance(bbox, list)
+        or len(bbox) != 4
+        or any(
+            isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) for value in bbox
+        )
+    ):
         return False
     x0, _y0, x1, _y1 = map(float, bbox)
     width, height = x1 - x0, float(bbox[3]) - float(bbox[1])
-    return (
-        88 <= x0 <= 115
-        and 124 <= x1 <= 151
-        and 30 <= width <= 42
-        and 20 <= height <= 32
-    )
+    return 88 <= x0 <= 115 and 124 <= x1 <= 151 and 30 <= width <= 42 and 20 <= height <= 32
 
 
 def is_likely_textbook_section_badge(candidate: dict) -> bool:
@@ -412,7 +404,8 @@ def without_automatic_textbook_badges(figures: list[dict]) -> list[dict]:
     """
 
     return [
-        figure for figure in (figures or [])
+        figure
+        for figure in (figures or [])
         if not (
             isinstance(figure, dict)
             and figure.get("source") in {"auto", "other", "row"}
@@ -423,7 +416,7 @@ def without_automatic_textbook_badges(figures: list[dict]) -> list[dict]:
 
 
 def _automatic_decoration_labels(
-    *, candidates: list[dict], assignments: dict[str, str], kind: str, options: dict | None,
+    *, candidates: list[dict], assignments: dict[str, str], kind: str, options: dict | None
 ) -> set[str]:
     """Return only unassigned badges that are safe to auto-exclude.
 
@@ -457,17 +450,13 @@ def _automatic_decoration_labels(
 
 
 def resolve_automatic_figure_assignments(
-    *, stem: str, options: dict | None, kind: str,
-    candidates: list[dict], assignments: dict | None,
+    *, stem: str, options: dict | None, kind: str, candidates: list[dict], assignments: dict | None
 ) -> dict[str, str]:
     """Combine saved reader labels with stronger local layout evidence."""
 
     resolved = {str(label): str(role) for label, role in (assignments or {}).items()}
     decorations = _automatic_decoration_labels(
-        candidates=candidates,
-        assignments=resolved,
-        kind=str(kind or "unknown"),
-        options=options or {},
+        candidates=candidates, assignments=resolved, kind=str(kind or "unknown"), options=options or {}
     )
     resolved.update(dict.fromkeys(decorations, "decoration"))
 
@@ -479,14 +468,16 @@ def resolve_automatic_figure_assignments(
             if label is not None and str(label) not in decorations:
                 resolved[str(label)] = "stem"
         bound_roles = {"stem", *OPTION_SLOTS}
-        if str(kind or "unknown") not in {"single_choice", "multiple_choice"} \
-                and not any(role in bound_roles for role in resolved.values()):
+        if str(kind or "unknown") not in {"single_choice", "multiple_choice"} and not any(
+            role in bound_roles for role in resolved.values()
+        ):
             # If a free-response stem explicitly says a supplied figure exists
             # and exactly one ordinary candidate remains unclassified, that
             # crop is stronger evidence than the reader's omission.  Explicit
             # ``none``/foreign labels and textbook badges are not reconsidered.
             plausible = [
-                candidate for candidate in candidates
+                candidate
+                for candidate in candidates
                 if isinstance(candidate, dict)
                 and candidate.get("label") is not None
                 and str(candidate.get("label")) not in resolved
@@ -498,15 +489,12 @@ def resolve_automatic_figure_assignments(
 
 
 def repaired_automatic_figures(
-    *, figures: list[dict], candidates: list[dict], assignments: dict[str, str],
+    *, figures: list[dict], candidates: list[dict], assignments: dict[str, str]
 ) -> list[dict]:
     """Remove badges and restore locally resolved automatic candidate crops."""
 
     repaired = without_automatic_textbook_badges(figures)
-    existing = {
-        (item.get("slot"), candidate_key(item))
-        for item in repaired if isinstance(item, dict)
-    }
+    existing = {(item.get("slot"), candidate_key(item)) for item in repaired if isinstance(item, dict)}
     for candidate in candidates:
         if not isinstance(candidate, dict):
             continue
@@ -517,12 +505,7 @@ def repaired_automatic_figures(
         key = candidate_key(candidate)
         if key is None or (role, key) in existing:
             continue
-        repaired.append({
-            "slot": role,
-            "page_idx": candidate["page_idx"],
-            "bbox": candidate["bbox"],
-            "source": "auto",
-        })
+        repaired.append({"slot": role, "page_idx": candidate["page_idx"], "bbox": candidate["bbox"], "source": "auto"})
         existing.add((role, key))
     return repaired
 
@@ -531,9 +514,13 @@ def _normalised_box(item: dict) -> tuple[int, tuple[float, float, float, float]]
     if not isinstance(item, dict) or not isinstance(item.get("page_idx"), int):
         return None
     bbox = item.get("bbox")
-    if (not isinstance(bbox, list) or len(bbox) != 4
-            or any(isinstance(value, bool) or not isinstance(value, (int, float))
-                   or not math.isfinite(value) for value in bbox)):
+    if (
+        not isinstance(bbox, list)
+        or len(bbox) != 4
+        or any(
+            isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) for value in bbox
+        )
+    ):
         return None
     x0, y0, x1, y1 = (max(0, min(1000, float(value))) for value in bbox)
     if x1 - x0 < 3 or y1 - y0 < 3:
@@ -650,32 +637,35 @@ def _validated_layout(primary: dict, candidates: list[dict]) -> tuple[dict, dict
         current.pop(label, None)
     current_keys = {label: candidate_key(candidate) for label, candidate in current.items()}
     saved_keys = layout.get("candidate_keys")
-    scope_matches = bool(current_keys) and not duplicate_labels \
-        and isinstance(saved_keys, dict) and saved_keys == current_keys
+    scope_matches = (
+        bool(current_keys) and not duplicate_labels and isinstance(saved_keys, dict) and saved_keys == current_keys
+    )
     raw = layout.get("evidence")
     evidence = {}
     if isinstance(raw, dict):
         for raw_label, item in raw.items():
             label = str(raw_label)
             candidate = current.get(label)
-            if (not isinstance(item, dict) or candidate is None
-                    or candidate.get("source") in {"manual", "human"}
-                    or candidate.get("manual") is True
-                    or item.get("source") != "printed_option_marker"
-                    or not isinstance(item.get("slot"), str) or item["slot"] not in OPTION_SLOTS
-                    or type(item.get("applied")) is not bool
-                    or not isinstance(item.get("candidate_key"), str)
-                    or current_keys[label] != item["candidate_key"]
-                    or type(item.get("page_idx")) is not int
-                    or item["page_idx"] != candidate["page_idx"]):
+            if (
+                not isinstance(item, dict)
+                or candidate is None
+                or candidate.get("source") in {"manual", "human"}
+                or candidate.get("manual") is True
+                or item.get("source") != "printed_option_marker"
+                or not isinstance(item.get("slot"), str)
+                or item["slot"] not in OPTION_SLOTS
+                or type(item.get("applied")) is not bool
+                or not isinstance(item.get("candidate_key"), str)
+                or current_keys[label] != item["candidate_key"]
+                or type(item.get("page_idx")) is not int
+                or item["page_idx"] != candidate["page_idx"]
+            ):
                 continue
             evidence[label] = deepcopy(item)
     return layout, evidence, scope_matches
 
 
-def validated_layout_assignments(
-    primary: dict, candidates: list[dict], assignments: dict,
-) -> dict[str, str]:
+def validated_layout_assignments(primary: dict, candidates: list[dict], assignments: dict) -> dict[str, str]:
     """Restore validated local roles without rewriting the raw reader evidence.
 
     Old exclusions, foreign roles, and explicit competing option roles remain
@@ -686,8 +676,7 @@ def validated_layout_assignments(
     _layout, evidence, _scope_matches = _validated_layout(primary, candidates)
     for label, item in evidence.items():
         current = resolved.get(label)
-        if item["applied"] and (current is None or current == "" or current == "stem"
-                                or current == item["slot"]):
+        if item["applied"] and (current is None or current == "" or current == "stem" or current == item["slot"]):
             resolved[label] = item["slot"]
     return resolved
 
@@ -714,7 +703,7 @@ def _validated_layout_diagnostics(primary: dict, candidates: list[dict], stored:
 
 
 def missing_choice_figure_slots(
-    *, kind: str, options: dict | None, figures: list[dict], readings: list[dict] | None = None,
+    *, kind: str, options: dict | None, figures: list[dict], readings: list[dict] | None = None
 ) -> set[str]:
     """Return image-option slots that still need a bound crop.
 
@@ -729,16 +718,10 @@ def missing_choice_figure_slots(
     if kind not in {"single_choice", "multiple_choice"} or options:
         return set()
     bound = {
-        figure.get("slot") for figure in figures
-        if isinstance(figure, dict) and figure.get("slot") in option_slots
+        figure.get("slot") for figure in figures if isinstance(figure, dict) and figure.get("slot") in option_slots
     }
-    has_stem_figure = any(
-        isinstance(figure, dict) and figure.get("slot") == "stem" for figure in figures
-    )
-    declared = {
-        str(reading.get("type") or "unknown")
-        for reading in (readings or []) if isinstance(reading, dict)
-    }
+    has_stem_figure = any(isinstance(figure, dict) and figure.get("slot") == "stem" for figure in figures)
+    declared = {str(reading.get("type") or "unknown") for reading in (readings or []) if isinstance(reading, dict)}
     choice_types = {"single_choice", "multiple_choice"}
     non_choice_types = {"fill_blank", "true_false", "free_response"}
     if has_stem_figure and not bound and declared & choice_types and declared & non_choice_types:
@@ -770,19 +753,14 @@ def _automatic_input_hash(
         "reader_missing": bool(reader_missing),
         "described_slots": sorted(str(value) for value in (described_slots or set())),
     }
-    encoded = json.dumps(
-        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str,
-    ).encode("utf-8")
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode(
+        "utf-8"
+    )
     return hashlib.sha256(encoded).hexdigest()
 
 
 def _versioned_automatic_review(review: dict, *, input_hash: str) -> dict:
-    return {
-        **review,
-        "source": "automatic",
-        "policy_version": FIGURE_REVIEW_POLICY_VERSION,
-        "input_hash": input_hash,
-    }
+    return {**review, "source": "automatic", "policy_version": FIGURE_REVIEW_POLICY_VERSION, "input_hash": input_hash}
 
 
 def automatic_review(
@@ -815,15 +793,12 @@ def automatic_review(
                 cues.append(value)
         # Two or more printed option crops whose option text is empty *are* the
         # options: the paper itself supplies them, whatever the stem says.
-        option_crops = {
-            figure.get("slot") for figure in figures if figure.get("slot") in OPTION_SLOTS
-        }
+        option_crops = {figure.get("slot") for figure in figures if figure.get("slot") in OPTION_SLOTS}
         texts = options or {}
         if len(option_crops) >= 2 and not any(str(texts.get(slot, "")).strip() for slot in option_crops):
             cues.append("选项为印刷图")
     bound_slots = {
-        figure.get("slot") for figure in figures
-        if figure.get("slot") == "stem" or figure.get("slot") in OPTION_SLOTS
+        figure.get("slot") for figure in figures if figure.get("slot") == "stem" or figure.get("slot") in OPTION_SLOTS
     }
     missing_descriptions = sorted((described_slots or set()) - bound_slots)
     # assignments 里出现过的候选图都视为「已决定归属」——这是「同一件事两处各算
@@ -834,12 +809,12 @@ def automatic_review(
     # ——row 共享、other 跨页异物、page_border 页边装饰，含义都是一样的。
     own_q_role = f"q{own_number}" if own_number is not None else None
     bound_labels = {
-        label for label, role in assignments.items()
+        label
+        for label, role in assignments.items()
         if role == "stem" or role in OPTION_SLOTS or (own_q_role is not None and role == own_q_role)
     }
     foreign_labels = {
-        label for label, role in assignments.items()
-        if FOREIGN_QUESTION_ROLE.fullmatch(role) and role != own_q_role
+        label for label, role in assignments.items() if FOREIGN_QUESTION_ROLE.fullmatch(role) and role != own_q_role
     }
     decoration_labels = {label for label, role in assignments.items() if role == "decoration"}
     # A table written into the stem as text is resolved, not a missing picture.
@@ -856,8 +831,7 @@ def automatic_review(
     # absent.  Likewise, a pure instruction to draw does not mean the paper
     # omitted an input image.
     unresolved_reader_missing = bool(reader_missing) and not figures
-    drawing_only_missing = unresolved_reader_missing and drawing_request and not cues \
-        and not missing_descriptions
+    drawing_only_missing = unresolved_reader_missing and drawing_request and not cues and not missing_descriptions
     if drawing_only_missing:
         unresolved_reader_missing = False
 
@@ -884,51 +858,64 @@ def automatic_review(
         signals.append("candidate_unclassified")
 
     if unresolved_reader_missing or missing_descriptions or (cues and not figures):
-        return _versioned_automatic_review({
-            "status": BLOCKED_MISSING,
-            "reason": "题目文字或现有识读表明应有图，但还没有找到完整配图",
-            "signals": signals,
-            "cue_matches": cues,
-            "missing_slots": missing_descriptions,
-            "excluded_count": excluded_count,
-        }, input_hash=input_hash)
+        return _versioned_automatic_review(
+            {
+                "status": BLOCKED_MISSING,
+                "reason": "题目文字或现有识读表明应有图，但还没有找到完整配图",
+                "signals": signals,
+                "cue_matches": cues,
+                "missing_slots": missing_descriptions,
+                "excluded_count": excluded_count,
+            },
+            input_hash=input_hash,
+        )
     if unclassified:
-        return _versioned_automatic_review({
-            "status": CONFLICT,
-            "reason": "有候选图尚未被现有识读明确分类，请确认是否属于本题",
-            "signals": signals,
-            "cue_matches": cues,
-            "excluded_count": excluded_count,
-            "unclassified_count": len(unclassified),
-        }, input_hash=input_hash)
+        return _versioned_automatic_review(
+            {
+                "status": CONFLICT,
+                "reason": "有候选图尚未被现有识读明确分类，请确认是否属于本题",
+                "signals": signals,
+                "cue_matches": cues,
+                "excluded_count": excluded_count,
+                "unclassified_count": len(unclassified),
+            },
+            input_hash=input_hash,
+        )
     if figures and not cues:
-        return _versioned_automatic_review({
-            "status": CONFLICT,
-            "reason": "题目文字没有发现图像提示词，但现有识读绑定了印刷配图",
-            "signals": [*signals, "bound_figure_without_text_cue"],
-            "cue_matches": [],
-            "excluded_count": excluded_count,
-        }, input_hash=input_hash)
+        return _versioned_automatic_review(
+            {
+                "status": CONFLICT,
+                "reason": "题目文字没有发现图像提示词，但现有识读绑定了印刷配图",
+                "signals": [*signals, "bound_figure_without_text_cue"],
+                "cue_matches": [],
+                "excluded_count": excluded_count,
+            },
+            input_hash=input_hash,
+        )
     if not figures and excluded_count:
-        return _versioned_automatic_review({
-            "status": AUTO_EXCLUDED,
-            "reason": "没有发现图像提示词；未绑定的候选图已作为无关内容排除",
+        return _versioned_automatic_review(
+            {
+                "status": AUTO_EXCLUDED,
+                "reason": "没有发现图像提示词；未绑定的候选图已作为无关内容排除",
+                "signals": signals,
+                "cue_matches": cues,
+                "excluded_count": excluded_count,
+            },
+            input_hash=input_hash,
+        )
+    return _versioned_automatic_review(
+        {
+            "status": OK,
+            "reason": "配图检查未发现矛盾",
             "signals": signals,
             "cue_matches": cues,
             "excluded_count": excluded_count,
-        }, input_hash=input_hash)
-    return _versioned_automatic_review({
-        "status": OK,
-        "reason": "配图检查未发现矛盾",
-        "signals": signals,
-        "cue_matches": cues,
-        "excluded_count": excluded_count,
-    }, input_hash=input_hash)
+        },
+        input_hash=input_hash,
+    )
 
 
-def recheck_automatic_review(
-    *, stem: str, options: dict | None, figures: list[dict], previous: dict | None,
-) -> dict:
+def recheck_automatic_review(*, stem: str, options: dict | None, figures: list[dict], previous: dict | None) -> dict:
     """Re-run local safeguards after a figure is borrowed or restored.
 
     The earlier read may contain evidence that is not reconstructible from the
@@ -983,12 +970,14 @@ def _apply_automatic_upgrade_in_memory(question, review: dict) -> dict:
     if hasattr(question, "flags"):
         flags = [str(value) for value in (getattr(question, "flags", None) or []) if not figure_flag(str(value))]
         if review.get("status") == BLOCKED_MISSING:
-            flags.append(FLAG_NO_FIGURE if review.get("cue_matches") and not getattr(question, "figures", None)
-                         else FLAG_UNFOUND_FIGURE)
+            flags.append(
+                FLAG_NO_FIGURE
+                if review.get("cue_matches") and not getattr(question, "figures", None)
+                else FLAG_UNFOUND_FIGURE
+            )
         elif review.get("status") == CONFLICT:
             flags.append(
-                FLAG_UNFOUND_FIGURE if "candidate_unclassified" in (review.get("signals") or [])
-                else FLAG_UNCUED_FIGURE
+                FLAG_UNFOUND_FIGURE if "candidate_unclassified" in (review.get("signals") or []) else FLAG_UNCUED_FIGURE
             )
         question.flags = flags
         if getattr(question, "state", None) in {"green", "yellow"}:
@@ -1045,30 +1034,37 @@ def _stored_or_derived_review(question, *, ignored_candidates: list[str] | None 
     manual = any(figure.get("source") == "manual" for figure in current_figures)
     if manual:
         return {
-            "status": OK, "source": "human", "reason": "配图已经由人工设置",
-            "signals": ["manual_figure"], "cue_matches": [], "excluded_count": 0,
+            "status": OK,
+            "source": "human",
+            "reason": "配图已经由人工设置",
+            "signals": ["manual_figure"],
+            "cue_matches": [],
+            "excluded_count": 0,
         }
 
     # Existing databases already contain everything the new rule needs.  Derive
     # the same decision from those saved reads so old cards gain the safeguard
     # without a reread, page render, MinerU request, or model call.
     readings = [
-        value for value in (
+        value
+        for value in (
             getattr(question, "read_a", None),
             getattr(question, "read_b", None),
             getattr(question, "read_c", None),
-        ) if isinstance(value, dict)
+        )
+        if isinstance(value, dict)
     ]
     primary = next((value for value in readings if "stem" in value or "figures" in value), {})
     candidates = list(getattr(question, "figure_candidates", None) or [])
     raw_ignored = ignored_candidates if ignored_candidates is not None else stored.get("ignored_candidates", [])
-    ignored_keys = {
-        value for value in raw_ignored
-        if isinstance(value, str)
-    } if isinstance(raw_ignored, list) else set()
+    ignored_keys = (
+        {value for value in raw_ignored if isinstance(value, str)} if isinstance(raw_ignored, list) else set()
+    )
     ignored_labels = {
-        str(candidate.get("label")) for candidate in candidates
-        if isinstance(candidate, dict) and candidate.get("label") is not None
+        str(candidate.get("label"))
+        for candidate in candidates
+        if isinstance(candidate, dict)
+        and candidate.get("label") is not None
         and candidate_key(candidate) in ignored_keys
     }
     state = str(getattr(question, "state", "") or "")
@@ -1083,45 +1079,40 @@ def _stored_or_derived_review(question, *, ignored_candidates: list[str] | None 
         # free response.  Honour that saved decision during later policy
         # upgrades without rewriting either raw reading.
         base_figures = without_automatic_textbook_badges(current_figures)
-        if (kind in {"single_choice", "multiple_choice"}
-                and str(getattr(question, "question_type", "unknown")) == "free_response"
-                and any(str(value.get("type") or "unknown") == "free_response"
-                        for value in readings)
-                and not options and not candidates and not base_figures):
+        if (
+            kind in {"single_choice", "multiple_choice"}
+            and str(getattr(question, "question_type", "unknown")) == "free_response"
+            and any(str(value.get("type") or "unknown") == "free_response" for value in readings)
+            and not options
+            and not candidates
+            and not base_figures
+        ):
             kind = "free_response"
         # Boxes the first reading skipped were judged by a follow-up question;
         # without them an edited card fell back to “unjudged box” warnings.
-        judged = {**(primary.get("figures_followup") or {}), **(primary.get("figures") or {})} \
-            if isinstance(primary.get("figures_followup"), dict) else (primary.get("figures") or {})
+        judged = (
+            {**(primary.get("figures_followup") or {}), **(primary.get("figures") or {})}
+            if isinstance(primary.get("figures_followup"), dict)
+            else (primary.get("figures") or {})
+        )
         assignments = resolve_automatic_figure_assignments(
-            stem=question.stem,
-            options=options,
-            kind=kind,
-            candidates=candidates,
-            assignments=judged,
+            stem=question.stem, options=options, kind=kind, candidates=candidates, assignments=judged
         )
         assignments = validated_layout_assignments(primary, candidates, assignments)
         assignments.update(dict.fromkeys(ignored_labels, "none"))
         review_figures = repaired_automatic_figures(
-            figures=base_figures,
-            candidates=candidates,
-            assignments=assignments,
+            figures=base_figures, candidates=candidates, assignments=assignments
         )
         missing_option_slots = missing_choice_figure_slots(
-            kind=kind,
-            options=options,
-            figures=review_figures,
-            readings=readings,
+            kind=kind, options=options, figures=review_figures, readings=readings
         )
-        described_slots = {
-            slot for reading in readings
-            for slot in (reading.get("figure_descriptions") or [])
-        }
+        described_slots = {slot for reading in readings for slot in (reading.get("figure_descriptions") or [])}
         derived = automatic_review(
             stem=question.stem,
             options=options,
             candidate_labels={
-                str(candidate.get("label")) for candidate in candidates
+                str(candidate.get("label"))
+                for candidate in candidates
                 if isinstance(candidate, dict) and candidate.get("label") is not None
             },
             assignments=assignments,
@@ -1143,12 +1134,13 @@ def _stored_or_derived_review(question, *, ignored_candidates: list[str] | None 
         )
 
     derived.update(_validated_layout_diagnostics(primary, candidates, stored))
-    if (stored.get("source") == "automatic"
-            and stored.get("status") in VALID_STATUSES
-            and stored.get("policy_version") == FIGURE_REVIEW_POLICY_VERSION
-            and stored.get("input_hash") == derived.get("input_hash")
-            and all(stored.get(key) == derived.get(key)
-                    for key in ("assignment_evidence", "assignment_conflicts"))):
+    if (
+        stored.get("source") == "automatic"
+        and stored.get("status") in VALID_STATUSES
+        and stored.get("policy_version") == FIGURE_REVIEW_POLICY_VERSION
+        and stored.get("input_hash") == derived.get("input_hash")
+        and all(stored.get(key) == derived.get(key) for key in ("assignment_evidence", "assignment_conflicts"))
+    ):
         return stored
 
     # Very old data and a few defensive call sites can contain a blocking
@@ -1157,18 +1149,21 @@ def _stored_or_derived_review(question, *, ignored_candidates: list[str] | None 
     # nothing left from which it can be disproved.  Real cue-rule upgrades have
     # text and/or figure evidence, so they take the freshly derived path above.
     has_reconstructible_evidence = bool(
-        any(readings) or candidates or current_figures
+        any(readings)
+        or candidates
+        or current_figures
         or cue_matches(getattr(question, "stem", ""), getattr(question, "options", None))
     )
-    if (not has_reconstructible_evidence
-            and stored.get("status") in BLOCKING_STATUSES
-            and stored.get("source") in {None, "automatic"}):
+    if (
+        not has_reconstructible_evidence
+        and stored.get("status") in BLOCKING_STATUSES
+        and stored.get("source") in {None, "automatic"}
+    ):
         preserved = {**stored}
         preserved.pop("confirmed_at", None)
         preserved.pop("previous_figures", None)
         return _apply_automatic_upgrade_in_memory(
-            question,
-            _versioned_automatic_review(preserved, input_hash=derived["input_hash"]),
+            question, _versioned_automatic_review(preserved, input_hash=derived["input_hash"])
         )
 
     return _apply_automatic_upgrade_in_memory(question, derived)
@@ -1185,16 +1180,16 @@ def persist_automatic_review_upgrades(questions) -> dict[str, int]:
     flags owned by this module before deriving green/yellow state.
     """
 
-    stats = {"seen": 0, "updated": 0, "unchanged": 0, "human_skipped": 0,
-             "state_skipped": 0}
+    stats = {"seen": 0, "updated": 0, "unchanged": 0, "human_skipped": 0, "state_skipped": 0}
     iterator = questions.iterator() if hasattr(questions, "iterator") else iter(questions)
     for question in iterator:
         stats["seen"] += 1
         stored = getattr(question, "figure_review", None)
         stored = stored if isinstance(stored, dict) else {}
         if stored.get("source") == "human" or any(
-                isinstance(item, dict) and item.get("source") == "manual"
-                for item in (getattr(question, "figures", None) or [])):
+            isinstance(item, dict) and item.get("source") == "manual"
+            for item in (getattr(question, "figures", None) or [])
+        ):
             stats["human_skipped"] += 1
             continue
         if str(getattr(question, "state", "") or "") not in {"green", "yellow"}:
@@ -1207,11 +1202,13 @@ def persist_automatic_review_upgrades(questions) -> dict[str, int]:
         before_figures = deepcopy(getattr(question, "figures", None) or [])
         candidates = list(getattr(question, "figure_candidates", None) or [])
         readings = [
-            value for value in (
+            value
+            for value in (
                 getattr(question, "read_a", None),
                 getattr(question, "read_b", None),
                 getattr(question, "read_c", None),
-            ) if isinstance(value, dict)
+            )
+            if isinstance(value, dict)
         ]
         primary = next((value for value in readings if "stem" in value or "figures" in value), {})
         kind = str(primary.get("type") or getattr(question, "question_type", "unknown") or "unknown")
@@ -1221,21 +1218,23 @@ def persist_automatic_review_upgrades(questions) -> dict[str, int]:
             kind=kind,
             candidates=candidates,
             assignments={**(primary.get("figures_followup") or {}), **(primary.get("figures") or {})}
-                if isinstance(primary.get("figures_followup"), dict) else (primary.get("figures") or {}),
+            if isinstance(primary.get("figures_followup"), dict)
+            else (primary.get("figures") or {}),
         )
         assignments = validated_layout_assignments(primary, candidates, assignments)
         raw_ignored = stored.get("ignored_candidates", [])
         ignored_keys = set(raw_ignored) if isinstance(raw_ignored, list) else set()
-        assignments.update({
-            str(candidate.get("label")): "none"
-            for candidate in candidates
-            if isinstance(candidate, dict) and candidate.get("label") is not None
-            and candidate_key(candidate) in ignored_keys
-        })
+        assignments.update(
+            {
+                str(candidate.get("label")): "none"
+                for candidate in candidates
+                if isinstance(candidate, dict)
+                and candidate.get("label") is not None
+                and candidate_key(candidate) in ignored_keys
+            }
+        )
         repaired_figures = repaired_automatic_figures(
-            figures=before_figures,
-            candidates=candidates,
-            assignments=assignments,
+            figures=before_figures, candidates=candidates, assignments=assignments
         )
         if repaired_figures != before_figures:
             question.figures = repaired_figures
@@ -1283,10 +1282,19 @@ FLAG_WITHDRAWN_FIGURE = "自动撤下了疑似手写的配图（整幅没有一�
 FLAG_DOUBTFUL_FIGURE = "这张配图整幅没有一笔印刷内容，像是学生写上去的；请确认要不要删掉"
 FLAG_SLOTTED_NON_CHOICE = (
     "这不是选择题，但有配图被分到 A/B/C/D 选项里，成品卷上会凭空印出这些字母；"
-    "请把这些图改挂到题干下，或把本题改成选择题")
-DECISION_FLAGS = frozenset({FLAG_ROW_FIGURE, FLAG_FOREIGN_FIGURE, FLAG_FIGURE_CLAIM_CONFLICT,
-                            FLAG_SHARED_FIGURE, FLAG_OPTION_ASSIGNMENT_CONFLICT,
-                            FLAG_WITHDRAWN_FIGURE, FLAG_DOUBTFUL_FIGURE})
+    "请把这些图改挂到题干下，或把本题改成选择题"
+)
+DECISION_FLAGS = frozenset(
+    {
+        FLAG_ROW_FIGURE,
+        FLAG_FOREIGN_FIGURE,
+        FLAG_FIGURE_CLAIM_CONFLICT,
+        FLAG_SHARED_FIGURE,
+        FLAG_OPTION_ASSIGNMENT_CONFLICT,
+        FLAG_WITHDRAWN_FIGURE,
+        FLAG_DOUBTFUL_FIGURE,
+    }
+)
 
 
 def figure_flag(flag: str) -> bool:
@@ -1295,5 +1303,6 @@ def figure_flag(flag: str) -> bool:
     # row stopped the card instead of just its flag.
     if not isinstance(flag, str):
         return False
-    return flag in {FLAG_NO_FIGURE, LEGACY_FLAG_NO_FIGURE, FLAG_UNFOUND_FIGURE, FLAG_UNCUED_FIGURE} \
-        or "选项是图" in flag
+    return (
+        flag in {FLAG_NO_FIGURE, LEGACY_FLAG_NO_FIGURE, FLAG_UNFOUND_FIGURE, FLAG_UNCUED_FIGURE} or "选项是图" in flag
+    )

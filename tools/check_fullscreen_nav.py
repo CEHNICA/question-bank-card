@@ -23,14 +23,29 @@ def main():
     from playwright.sync_api import expect, sync_playwright
 
     with sync_playwright() as pw:
-        executable = next((str(p) for p in (Path(pw.chromium.executable_path),
-            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if p.is_file()), None)
+        executable = next(
+            (
+                str(p)
+                for p in (
+                    Path(pw.chromium.executable_path),
+                    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                )
+                if p.is_file()
+            ),
+            None,
+        )
         browser = pw.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
         context = browser.new_context(viewport={"width": 1600, "height": 1000})
         context.add_init_script("localStorage.setItem('qb-welcome-seen','1'); localStorage.setItem('qb-lens','0')")
-        context.route("**/*", lambda route: route.continue_() if urlparse(route.request.url).hostname in
-                      ("127.0.0.1", "localhost") else route.abort())
+        context.route(
+            "**/*",
+            lambda route: (
+                route.continue_()
+                if urlparse(route.request.url).hostname in ("127.0.0.1", "localhost")
+                else route.abort()
+            ),
+        )
         page = context.new_page()
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
@@ -99,9 +114,17 @@ def main():
             ("切题后仍然是全屏", still_fullscreen, ""),
             ("切到第二题后「上一题」可点了", prev_now_enabled, ""),
             ("走到最后一题时「下一题」变灰", next_at_end_disabled, f"{last} reached={reached_end}"),
-            ("走回第一题时「上一题」变灰", prev_at_start_disabled, f"{first} -> {back_at_start} reached={reached_start}"),
+            (
+                "走回第一题时「上一题」变灰",
+                prev_at_start_disabled,
+                f"{first} -> {back_at_start} reached={reached_start}",
+            ),
             ("有未保存改动时切题会先问", asked, ""),
-            ("答「继续编辑」就留在原来这题", stayed, f"{before_edit} -> {page.text_content('.editor-bar-count') if page.locator('.card.editing').count() else '已退出全屏'}"),
+            (
+                "答「继续编辑」就留在原来这题",
+                stayed,
+                f"{before_edit} -> {page.text_content('.editor-bar-count') if page.locator('.card.editing').count() else '已退出全屏'}",
+            ),
             ("改的字一个字没丢", kept_text, ""),
             ("Esc 退回审核页，左栏回来了", back, ""),
         ]:

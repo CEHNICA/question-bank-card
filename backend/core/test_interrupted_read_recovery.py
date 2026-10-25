@@ -24,11 +24,7 @@ class InterruptedReadRecoveryTests(TestCase):
 
     def question(self, state: str, number: int, **fields) -> Question:
         return Question.objects.create(
-            paper=self.paper,
-            number=number,
-            state=state,
-            stem=fields.pop("stem", f"question {number}"),
-            **fields,
+            paper=self.paper, number=number, state=state, stem=fields.pop("stem", f"question {number}"), **fields
         )
 
     def read_snapshot(self) -> dict:
@@ -52,23 +48,22 @@ class InterruptedReadRecoveryTests(TestCase):
         primary = pipeline.readers.Engine("minimax", "MiniMax-M3")
         checker = pipeline.readers.Engine("siliconflow", "Qwen/Test")
         successful = pipeline.readers.parse_reading(
-            "【内容类型】练习题\n【题号】1\n【题型】解答题\n【题干】计算 $1+1$。",
-            1,
+            "【内容类型】练习题\n【题号】1\n【题型】解答题\n【题干】计算 $1+1$。", 1
         )
 
         def read(engine, _url, _number, with_figures):
             if engine.provider == "minimax":
-                raise pipeline.readers.ReaderQuotaExhausted(
-                    "MiniMax Token Plan 额度已用尽；补充额度后点“重试”即可续跑"
-                )
+                raise pipeline.readers.ReaderQuotaExhausted("MiniMax Token Plan 额度已用尽；补充额度后点“重试”即可续跑")
             return successful
 
-        with mock.patch.object(pipeline.readers, "primary_engine", return_value=primary), \
-                mock.patch.object(pipeline.readers, "checker_engine", return_value=checker) as checker_mock, \
-                mock.patch.object(pipeline.readers, "read_question", side_effect=read), \
-                mock.patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])), \
-                mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:image/jpeg;base64,test"), \
-                self.assertRaises(pipeline.readers.ReaderQuotaExhausted):
+        with (
+            mock.patch.object(pipeline.readers, "primary_engine", return_value=primary),
+            mock.patch.object(pipeline.readers, "checker_engine", return_value=checker) as checker_mock,
+            mock.patch.object(pipeline.readers, "read_question", side_effect=read),
+            mock.patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])),
+            mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:image/jpeg;base64,test"),
+            self.assertRaises(pipeline.readers.ReaderQuotaExhausted),
+        ):
             pipeline.read_card(self.read_snapshot(), mock.Mock())
         checker_mock.assert_not_called()
 
@@ -78,32 +73,25 @@ class InterruptedReadRecoveryTests(TestCase):
 
         def read(engine, _url, _number, with_figures):
             if engine.provider == "minimax":
-                raise pipeline.readers.ReaderQuotaExhausted(
-                    "MiniMax Token Plan 额度已用尽；补充额度后点“重试”即可续跑"
-                )
+                raise pipeline.readers.ReaderQuotaExhausted("MiniMax Token Plan 额度已用尽；补充额度后点“重试”即可续跑")
             raise pipeline.readers.ReaderError("复核服务暂时不可用")
 
-        with mock.patch.object(pipeline.readers, "primary_engine", return_value=primary), \
-                mock.patch.object(pipeline.readers, "checker_engine", return_value=checker) as checker_mock, \
-                mock.patch.object(pipeline.readers, "read_question", side_effect=read), \
-                mock.patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])), \
-                mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:image/jpeg;base64,test"), \
-                self.assertRaises(pipeline.readers.ReaderQuotaExhausted):
+        with (
+            mock.patch.object(pipeline.readers, "primary_engine", return_value=primary),
+            mock.patch.object(pipeline.readers, "checker_engine", return_value=checker) as checker_mock,
+            mock.patch.object(pipeline.readers, "read_question", side_effect=read),
+            mock.patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])),
+            mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:image/jpeg;base64,test"),
+            self.assertRaises(pipeline.readers.ReaderQuotaExhausted),
+        ):
             pipeline.read_card(self.read_snapshot(), mock.Mock())
         checker_mock.assert_not_called()
 
     def test_restart_only_resumes_waiting_and_reading_cards(self):
         approved = self.question(
-            Question.State.GREEN,
-            1,
-            approved=True,
-            approved_content_hash="approved-before-restart",
+            Question.State.GREEN, 1, approved=True, approved_content_hash="approved-before-restart"
         )
-        protected = self.question(
-            Question.State.YELLOW,
-            2,
-            flags=[pipeline.FLAG_RESEGMENT_RANGE_PROTECTED],
-        )
+        protected = self.question(Question.State.YELLOW, 2, flags=[pipeline.FLAG_RESEGMENT_RANGE_PROTECTED])
         rate_limited = self.question(
             Question.State.RED,
             3,
@@ -143,45 +131,32 @@ class InterruptedReadRecoveryTests(TestCase):
             called.append(snapshot["id"])
             barrier.wait(timeout=1)
             if snapshot["id"] == questions[0].pk:
-                raise pipeline.readers.ReaderQuotaExhausted(
-                    "MiniMax Token Plan 额度已用尽；补充额度后点“重试”即可续跑"
-                )
+                raise pipeline.readers.ReaderQuotaExhausted("MiniMax Token Plan 额度已用尽；补充额度后点“重试”即可续跑")
             # Keep the other already-running job alive until the quota future
             # has been observed; its result must not be persisted after pause.
             time.sleep(0.05)
             return {"state": Question.State.GREEN, "error": "", "flags": []}
 
         # An explicit two-card limit must not be raised by live account capacity.
-        with mock.patch.dict("os.environ", {"QB_PARALLEL_EXPLICIT": "1"}), \
-                mock.patch.object(pipeline, "PARALLEL", 2), \
-                mock.patch.object(pipeline, "read_card", side_effect=read):
+        with (
+            mock.patch.dict("os.environ", {"QB_PARALLEL_EXPLICIT": "1"}),
+            mock.patch.object(pipeline, "PARALLEL", 2),
+            mock.patch.object(pipeline, "read_card", side_effect=read),
+        ):
             pipeline.process_paper(self.paper)
 
         self.paper.refresh_from_db()
         self.assertEqual(self.paper.status, Paper.Status.FAILED)
-        self.assertEqual(
-            self.paper.error,
-            "MiniMax Token Plan 额度已用尽；补充额度后点“重试”即可续跑",
-        )
+        self.assertEqual(self.paper.error, "MiniMax Token Plan 额度已用尽；补充额度后点“重试”即可续跑")
         self.assertEqual(len(called), 2)
         self.assertEqual(
-            set(Question.objects.filter(paper=self.paper).values_list("state", flat=True)),
-            {Question.State.READING},
+            set(Question.objects.filter(paper=self.paper).values_list("state", flat=True)), {Question.State.READING}
         )
 
     def test_failed_paper_retry_resumes_reading_cards_and_requeues_red_cards(self):
-        red = self.question(
-            Question.State.RED,
-            1,
-            error="MiniMax 接口返回 HTTP 429",
-        )
+        red = self.question(Question.State.RED, 1, error="MiniMax 接口返回 HTTP 429")
         interrupted = self.question(Question.State.READING, 2)
-        approved = self.question(
-            Question.State.GREEN,
-            3,
-            approved=True,
-            approved_content_hash="approved-before-retry",
-        )
+        approved = self.question(Question.State.GREEN, 3, approved=True, approved_content_hash="approved-before-retry")
         self.paper.status = Paper.Status.FAILED
         self.paper.error = "MiniMax Token Plan 额度已用尽；补充额度后点“重试”即可续跑"
         self.paper.save(update_fields=["status", "error", "updated_at"])

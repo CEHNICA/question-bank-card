@@ -28,8 +28,13 @@ MISSING = "minimax_m3"
 MISSING_PROVIDER = readers.ENGINE_CHOICES[MISSING]
 MISSING_LABEL = provider_catalog.VISION[MISSING_PROVIDER]["label"]
 NOT_CONFIGURED = {
-    "ready": False, "reason": "none_configured", "selected": MISSING,
-    "label": MISSING_LABEL, "engine": None, "used": "", "fallback_available": False,
+    "ready": False,
+    "reason": "none_configured",
+    "selected": MISSING,
+    "label": MISSING_LABEL,
+    "engine": None,
+    "used": "",
+    "fallback_available": False,
 }
 
 
@@ -42,18 +47,24 @@ class IsolatedData:
         setting.enable()
         self.addCleanup(setting.disable)
         system_environment = {
-            key: value for key, value in os.environ.items()
+            key: value
+            for key, value in os.environ.items()
             if key.casefold() in {"path", "systemroot", "windir", "temp", "tmp", "tmpdir"}
         }
-        environment = mock.patch.dict(os.environ, {
-            **system_environment,
-            "QB_FEATURES_FILE": str(self.root / "features.json"),
-            "QB_MODEL_PREFERENCES_FILE": str(self.root / "models.json"),
-        }, clear=True)
+        environment = mock.patch.dict(
+            os.environ,
+            {
+                **system_environment,
+                "QB_FEATURES_FILE": str(self.root / "features.json"),
+                "QB_MODEL_PREFERENCES_FILE": str(self.root / "models.json"),
+            },
+            clear=True,
+        )
         environment.start()
         self.addCleanup(environment.stop)
-        network = mock.patch("requests.sessions.Session.request",
-            side_effect=AssertionError("unexpected real cloud request"))
+        network = mock.patch(
+            "requests.sessions.Session.request", side_effect=AssertionError("unexpected real cloud request")
+        )
         network.start()
         self.addCleanup(network.stop)
 
@@ -62,8 +73,10 @@ class PrimaryReadinessTests(IsolatedData, SimpleTestCase):
     """``primary_engine`` and the page now ask the same question."""
 
     def test_selected_service_with_a_key_is_ready_and_is_the_one_reported(self):
-        with mock.patch.object(readers, "_primary_selection", return_value=MISSING), \
-                mock.patch.object(readers, "engine_by_key", return_value=CONFIGURED):
+        with (
+            mock.patch.object(readers, "_primary_selection", return_value=MISSING),
+            mock.patch.object(readers, "engine_by_key", return_value=CONFIGURED),
+        ):
             readiness = readers.primary_readiness()
             engine = readers.primary_engine()
         self.assertTrue(readiness["ready"])
@@ -72,9 +85,11 @@ class PrimaryReadinessTests(IsolatedData, SimpleTestCase):
         self.assertIs(engine, CONFIGURED)
 
     def test_missing_key_falls_back_when_the_round_allows_it_and_says_so(self):
-        with mock.patch.object(readers, "_primary_selection", return_value=MISSING), \
-                mock.patch.object(readers, "engine_by_key", return_value=None), \
-                mock.patch.object(readers, "_first_configured", return_value=CONFIGURED) as fallback:
+        with (
+            mock.patch.object(readers, "_primary_selection", return_value=MISSING),
+            mock.patch.object(readers, "engine_by_key", return_value=None),
+            mock.patch.object(readers, "_first_configured", return_value=CONFIGURED) as fallback,
+        ):
             readiness = readers.primary_readiness()
         self.assertTrue(readiness["ready"])
         self.assertTrue(readiness["fallback_available"])
@@ -87,10 +102,12 @@ class PrimaryReadinessTests(IsolatedData, SimpleTestCase):
         # A service that never had a key is not a failing request, so a
         # selected-only round still reads — and the answer names the service
         # that will read, so the switch is never the silent kind.
-        with readers.selected_services_only(), \
-                mock.patch.object(readers, "_primary_selection", return_value=MISSING), \
-                mock.patch.object(readers, "engine_by_key", return_value=None), \
-                mock.patch.object(readers, "_first_configured", return_value=CONFIGURED) as fallback:
+        with (
+            readers.selected_services_only(),
+            mock.patch.object(readers, "_primary_selection", return_value=MISSING),
+            mock.patch.object(readers, "engine_by_key", return_value=None),
+            mock.patch.object(readers, "_first_configured", return_value=CONFIGURED) as fallback,
+        ):
             readiness = readers.primary_readiness()
             engine = readers.primary_engine()
         self.assertTrue(readiness["ready"])
@@ -101,10 +118,12 @@ class PrimaryReadinessTests(IsolatedData, SimpleTestCase):
         fallback.assert_called()
 
     def test_selected_only_round_with_nothing_configured_still_refuses(self):
-        with readers.selected_services_only(), \
-                mock.patch.object(readers, "_primary_selection", return_value=MISSING), \
-                mock.patch.object(readers, "engine_by_key", return_value=None), \
-                mock.patch.object(readers, "_first_configured", return_value=None):
+        with (
+            readers.selected_services_only(),
+            mock.patch.object(readers, "_primary_selection", return_value=MISSING),
+            mock.patch.object(readers, "engine_by_key", return_value=None),
+            mock.patch.object(readers, "_first_configured", return_value=None),
+        ):
             readiness = readers.primary_readiness()
         self.assertEqual((readiness["ready"], readiness["reason"]), (False, "none_configured"))
         self.assertEqual(readiness["label"], MISSING_LABEL)
@@ -115,8 +134,7 @@ class PrimaryReadinessTests(IsolatedData, SimpleTestCase):
         # The other half of the rule, so narrowing the credential case did not
         # also allow swapping a running reader: _fallback_enabled() is what the
         # request path consults, and the scope still turns it off.
-        with mock.patch.dict("os.environ", {"QB_PROVIDER_FALLBACK": "1"}), \
-                readers.selected_services_only():
+        with mock.patch.dict("os.environ", {"QB_PROVIDER_FALLBACK": "1"}), readers.selected_services_only():
             self.assertFalse(readers._fallback_enabled())
 
     def test_the_service_the_teacher_chose_is_not_reported_as_a_fallback(self):
@@ -124,9 +142,11 @@ class PrimaryReadinessTests(IsolatedData, SimpleTestCase):
         # only way to be ready without a fallback is: the chosen service is the
         # one that reads.  Saying otherwise would tell the teacher their
         # reading changed hands when it did not.
-        with mock.patch.object(readers, "_primary_selection", return_value=MISSING), \
-                mock.patch.object(readers, "engine_by_key", return_value=CONFIGURED), \
-                mock.patch.object(readers, "_first_configured") as alternative:
+        with (
+            mock.patch.object(readers, "_primary_selection", return_value=MISSING),
+            mock.patch.object(readers, "engine_by_key", return_value=CONFIGURED),
+            mock.patch.object(readers, "_first_configured") as alternative,
+        ):
             readiness = readers.primary_readiness()
         self.assertTrue(readiness["ready"])
         self.assertEqual(readiness["used"], CONFIGURED.provider)
@@ -134,9 +154,11 @@ class PrimaryReadinessTests(IsolatedData, SimpleTestCase):
         alternative.assert_not_called()
 
     def test_nothing_configured_and_assistant_mode_are_told_apart(self):
-        with mock.patch.object(readers, "_primary_selection", return_value=MISSING), \
-                mock.patch.object(readers, "engine_by_key", return_value=None), \
-                mock.patch.object(readers, "_first_configured", return_value=None):
+        with (
+            mock.patch.object(readers, "_primary_selection", return_value=MISSING),
+            mock.patch.object(readers, "engine_by_key", return_value=None),
+            mock.patch.object(readers, "_first_configured", return_value=None),
+        ):
             nothing = readers.primary_readiness()
         self.assertEqual((nothing["ready"], nothing["reason"]), (False, "none_configured"))
         with mock.patch.object(readers, "_primary_selection", return_value=readers.ASSISTANT):
@@ -148,15 +170,22 @@ class PrimaryReadinessTests(IsolatedData, SimpleTestCase):
 class ReadCardConfigurationTests(IsolatedData, SimpleTestCase):
     def setUp(self):
         self.isolate()
-        self.snapshot = {"id": 1, "number": 1, "question_type": "free_response",
-            "regions": [{"page_idx": 0, "bbox": [20, 30, 800, 400]}], "candidates": []}
+        self.snapshot = {
+            "id": 1,
+            "number": 1,
+            "question_type": "free_response",
+            "regions": [{"page_idx": 0, "bbox": [20, 30, 800, 400]}],
+            "candidates": [],
+        }
 
     def run_card(self):
         primary = mock.patch.object(readers, "primary_engine", return_value=None)
         readiness = mock.patch.object(readers, "primary_readiness", return_value=dict(NOT_CONFIGURED))
         checker = mock.patch.object(readers, "checker_engine", return_value=None)
         chat = mock.patch.object(readers, "chat")
-        stack = mock.patch.object(pipeline.imaging, "stack_regions", return_value=(Image.new("RGB", (120, 100), "white"), []))
+        stack = mock.patch.object(
+            pipeline.imaging, "stack_regions", return_value=(Image.new("RGB", (120, 100), "white"), [])
+        )
         with primary, readiness, checker, chat as model, stack:
             return pipeline.read_card(self.snapshot, mock.Mock()), model
 
@@ -175,11 +204,14 @@ class ReadCardConfigurationTests(IsolatedData, SimpleTestCase):
         model.assert_not_called()
 
     def test_a_real_service_failure_is_not_disguised_as_a_missing_key(self):
-        with mock.patch.object(readers, "primary_engine", return_value=CONFIGURED), \
-                mock.patch.object(readers, "checker_engine", return_value=None), \
-                mock.patch.object(readers, "chat", side_effect=readers.ReaderError("mock outage")), \
-                mock.patch.object(pipeline.imaging, "stack_regions",
-                    return_value=(Image.new("RGB", (120, 100), "white"), [])):
+        with (
+            mock.patch.object(readers, "primary_engine", return_value=CONFIGURED),
+            mock.patch.object(readers, "checker_engine", return_value=None),
+            mock.patch.object(readers, "chat", side_effect=readers.ReaderError("mock outage")),
+            mock.patch.object(
+                pipeline.imaging, "stack_regions", return_value=(Image.new("RGB", (120, 100), "white"), [])
+            ),
+        ):
             result = pipeline.read_card(self.snapshot, mock.Mock())
         self.assertNotIn("error_kind", result)
         self.assertEqual(result["error"], "mock outage")
@@ -190,8 +222,7 @@ class StatusReportsReadinessTests(IsolatedData, TestCase):
         self.isolate()
 
     def test_status_exposes_the_reason_without_any_secret(self):
-        with mock.patch.object(views.readers, "primary_readiness",
-            return_value=dict(NOT_CONFIGURED)) as readiness:
+        with mock.patch.object(views.readers, "primary_readiness", return_value=dict(NOT_CONFIGURED)) as readiness:
             body = self.client.get("/api/status").json()
         readiness.assert_called()
         reported = body["reader_readiness"]
@@ -206,9 +237,19 @@ class StatusReportsReadinessTests(IsolatedData, TestCase):
         self.assertNotIn("engine", json.dumps(reported, ensure_ascii=False))
 
     def test_status_names_the_service_that_will_read_when_it_is_not_the_one_chosen(self):
-        with mock.patch.object(views.readers, "primary_readiness", return_value={
-            "ready": True, "reason": "", "selected": MISSING, "label": MISSING_LABEL,
-            "engine": None, "used": "modelscope", "fallback_available": True}):
+        with mock.patch.object(
+            views.readers,
+            "primary_readiness",
+            return_value={
+                "ready": True,
+                "reason": "",
+                "selected": MISSING,
+                "label": MISSING_LABEL,
+                "engine": None,
+                "used": "modelscope",
+                "fallback_available": True,
+            },
+        ):
             reported = self.client.get("/api/status").json()["reader_readiness"]
         self.assertTrue(reported["ready"])
         self.assertEqual(reported["used"], "modelscope")
@@ -223,13 +264,23 @@ class RereadEntryAsksTheSameQuestionTests(IsolatedData, TestCase):
         self.original = self.paper()
         self.original.processing_plan = {**self.original.processing_plan, "auto_fallback": True}
         self.original.save()
-        self.question = Question.objects.create(paper=self.original, number=1, body_mode="source_image",
-            processing_mode="manual", question_type="free_response", state="yellow",
-            regions=[{"page_idx": 0, "bbox": [50, 50, 900, 420]}])
+        self.question = Question.objects.create(
+            paper=self.original,
+            number=1,
+            body_mode="source_image",
+            processing_mode="manual",
+            question_type="free_response",
+            state="yellow",
+            regions=[{"page_idx": 0, "bbox": [50, 50, 900, 420]}],
+        )
 
     def post(self):
-        return self.client.post(f"/api/questions/{self.question.pk}/reread", json.dumps({"revision": self.question.content_revision}),
-            content_type="application/json", HTTP_X_QB_REQUEST="1")
+        return self.client.post(
+            f"/api/questions/{self.question.pk}/reread",
+            json.dumps({"revision": self.question.content_revision}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
 
     def test_auto_fallback_paper_reads_with_the_configured_service_instead_of_refusing(self):
         # The teacher asked for this paper to be read and another service does
@@ -237,10 +288,12 @@ class RereadEntryAsksTheSameQuestionTests(IsolatedData, TestCase):
         # “没有配置所选主读模型的 API Key” on the next; the read is queued and the
         # entry point says which service will really do it.
         before = deepcopy(Question.objects.values().get(pk=self.question.pk))
-        with mock.patch.object(readers, "_primary_selection", return_value=MISSING), \
-                mock.patch.object(readers, "engine_by_key", return_value=None), \
-                mock.patch.object(readers, "configured", return_value=False), \
-                mock.patch.object(readers, "_first_configured", return_value=CONFIGURED) as fallback:
+        with (
+            mock.patch.object(readers, "_primary_selection", return_value=MISSING),
+            mock.patch.object(readers, "engine_by_key", return_value=None),
+            mock.patch.object(readers, "configured", return_value=False),
+            mock.patch.object(readers, "_first_configured", return_value=CONFIGURED) as fallback,
+        ):
             result = self.post()
         self.assertEqual(result.status_code, 200, result.content)
         self.assertNotIn("API 配置", result.json().get("error", ""))
@@ -251,10 +304,12 @@ class RereadEntryAsksTheSameQuestionTests(IsolatedData, TestCase):
 
     def test_auto_fallback_paper_with_no_service_at_all_refuses_and_names_what_is_missing(self):
         before = deepcopy(Question.objects.values().get(pk=self.question.pk))
-        with mock.patch.object(readers, "_primary_selection", return_value=MISSING), \
-                mock.patch.object(readers, "engine_by_key", return_value=None), \
-                mock.patch.object(readers, "configured", return_value=False), \
-                mock.patch.object(readers, "_first_configured", return_value=None):
+        with (
+            mock.patch.object(readers, "_primary_selection", return_value=MISSING),
+            mock.patch.object(readers, "engine_by_key", return_value=None),
+            mock.patch.object(readers, "configured", return_value=False),
+            mock.patch.object(readers, "_first_configured", return_value=None),
+        ):
             result = self.post()
         self.assertEqual(result.status_code, 409, result.content)
         error = result.json()["error"]
@@ -268,10 +323,12 @@ class RereadEntryAsksTheSameQuestionTests(IsolatedData, TestCase):
         self.original.processing_plan = {**self.original.processing_plan, "auto_fallback": False}
         self.original.save(update_fields=["processing_plan"])
         self.question.refresh_from_db()
-        with mock.patch.object(readers, "_primary_selection", return_value=MISSING), \
-                mock.patch.object(readers, "engine_by_key", return_value=None), \
-                mock.patch.object(readers, "configured", return_value=False), \
-                mock.patch.object(readers, "_first_configured", return_value=CONFIGURED):
+        with (
+            mock.patch.object(readers, "_primary_selection", return_value=MISSING),
+            mock.patch.object(readers, "engine_by_key", return_value=None),
+            mock.patch.object(readers, "configured", return_value=False),
+            mock.patch.object(readers, "_first_configured", return_value=CONFIGURED),
+        ):
             result = self.post()
         self.assertEqual(result.status_code, 200, result.content)
         self.question.refresh_from_db()
@@ -286,17 +343,35 @@ class ManualSwitchClearsTheStaleSentenceTests(IsolatedData, TestCase):
         self.original = self.paper()
 
     def test_a_card_no_longer_waiting_for_a_read_does_not_keep_saying_it_could_not_read(self):
-        queued = Question.objects.create(paper=self.original, number=1, body_mode="source_image",
-            processing_mode="manual", question_type="free_response", state="reading", ocr_pending=True,
+        queued = Question.objects.create(
+            paper=self.original,
+            number=1,
+            body_mode="source_image",
+            processing_mode="manual",
+            question_type="free_response",
+            state="reading",
+            ocr_pending=True,
             regions=[{"page_idx": 0, "bbox": [50, 50, 900, 420]}],
             error="所选主读模型“MiniMax”还没有 API Key，无法读题。",
-            ocr_suggestion={"revision": 0, "error": "所选主读模型“MiniMax”还没有 API Key，无法读题。",
-                "error_kind": "reader_not_configured", "error_service": MISSING,
-                "error_service_label": MISSING_LABEL, "state": Question.State.RED})
-        finished = Question.objects.create(paper=self.original, number=2, body_mode="source_image",
-            processing_mode="manual", question_type="free_response", state="yellow",
+            ocr_suggestion={
+                "revision": 0,
+                "error": "所选主读模型“MiniMax”还没有 API Key，无法读题。",
+                "error_kind": "reader_not_configured",
+                "error_service": MISSING,
+                "error_service_label": MISSING_LABEL,
+                "state": Question.State.RED,
+            },
+        )
+        finished = Question.objects.create(
+            paper=self.original,
+            number=2,
+            body_mode="source_image",
+            processing_mode="manual",
+            question_type="free_response",
+            state="yellow",
             regions=[{"page_idx": 0, "bbox": [50, 50, 900, 420]}],
-            error="原卷文件或裁片已变化，本轮识读未写入，请重新确认原卷范围。")
+            error="原卷文件或裁片已变化，本轮识读未写入，请重新确认原卷范围。",
+        )
         intake.select_manual(self.original, [0])
         queued.refresh_from_db()
         finished.refresh_from_db()

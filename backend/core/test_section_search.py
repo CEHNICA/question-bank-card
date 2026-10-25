@@ -11,6 +11,7 @@
 卡面那边（frontend/library.js 的 cardLocator）认的是同一条规则，两边的测试
 都读 frontend/testdata/section_labels.json 这一份取值，改一边就会红。
 """
+
 import json
 import pathlib
 import tempfile
@@ -20,8 +21,7 @@ from django.test import TestCase, override_settings
 from core import library, library_browse
 from core.models import Paper, PublishedQuestion, Question
 
-FIXTURE = (pathlib.Path(__file__).resolve().parents[2]
-           / "frontend" / "testdata" / "section_labels.json")
+FIXTURE = pathlib.Path(__file__).resolve().parents[2] / "frontend" / "testdata" / "section_labels.json"
 
 
 class SectionLabelFixtureTests(TestCase):
@@ -46,19 +46,37 @@ class SectionIsSearchableTests(TestCase):
     def publication(self, *, section, stem=None):
         self.serial += 1
         stem = stem or f"虚构题干 {self.serial}：求 $\\sqrt{{9}}$ 的值。"
-        content = {"stem": stem, "options": {}, "answer": "", "analysis": "", "figures": [],
-                   "origin": "", "source_filename": "九年级上册.pdf",
-                   "document_id": str(self.paper.id), "question_type": "fill_blank",
-                   "sources": [], "section": section}
-        question = Question.objects.create(paper=self.paper, number=self.serial,
-                                           question_type="fill_blank", stem=stem,
-                                           section=section, state="green")
+        content = {
+            "stem": stem,
+            "options": {},
+            "answer": "",
+            "analysis": "",
+            "figures": [],
+            "origin": "",
+            "source_filename": "九年级上册.pdf",
+            "document_id": str(self.paper.id),
+            "question_type": "fill_blank",
+            "sources": [],
+            "section": section,
+        }
+        question = Question.objects.create(
+            paper=self.paper, number=self.serial, question_type="fill_blank", stem=stem, section=section, state="green"
+        )
         return PublishedQuestion.objects.create(
-            paper=self.paper, question=question, number=self.serial,
-            source_filename="九年级上册.pdf", question_type="fill_blank", version=1,
-            status="published", review_source="human", content=content,
+            paper=self.paper,
+            question=question,
+            number=self.serial,
+            source_filename="九年级上册.pdf",
+            question_type="fill_blank",
+            version=1,
+            status="published",
+            review_source="human",
+            content=content,
             content_hash=library.content_hash(content),
-            search_text=library._search_text(content, None), extras={}, tags_text="")
+            search_text=library._search_text(content, None),
+            extras={},
+            tags_text="",
+        )
 
     def found(self, query):
         return set(library_browse.library_rows({"q": query}).values_list("id", flat=True))
@@ -101,8 +119,7 @@ class SectionIsSearchableTests(TestCase):
         section = self.publication(section="第二章")
         bystander = self.publication(section="第三章", stem="这一段正文里正好提到「第二章」这个词。")
         self.assertIn(section.id, self.found("第二章"))
-        self.assertIn(bystander.id, self.found("第二章"),
-                      "正文本来就提到第二章时也该命中，这不是这次改动造成的")
+        self.assertIn(bystander.id, self.found("第二章"), "正文本来就提到第二章时也该命中，这不是这次改动造成的")
 
     def test_editing_tags_refreshes_the_search_index_of_an_existing_card(self):
         # 章节名是入库时算进 search_text 的。老卡片要等下一次写回才会补上，

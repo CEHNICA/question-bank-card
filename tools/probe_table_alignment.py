@@ -6,6 +6,7 @@ lands off centre for a teacher who opens the file in WPS. This builds the same
 picture row several different ways in one document, using the real sizes of
 初三第 23 题, so each way can be measured in both programs.
 """
+
 import io
 import os
 import sys
@@ -53,15 +54,14 @@ def zero_cell_margins(props):
     props.insert_element_before(margins, *FOLLOW)
 
 
-def add_row(document, images, *, centred, width_mm, indent_mm=None, pad_mm=None,
-            fixed_layout=False):
+def add_row(document, images, *, centred, width_mm, indent_mm=None, pad_mm=None, fixed_layout=False):
     sizes = [_figure_paper_size(image["size"], TEXT_WIDTH_MM) for image in images]
     widths = [item[0] for item in sizes]
     heights = [item[1] for item in sizes]
     columns = [value + GAP_MM for value in widths]
     table = document.add_table(rows=1, cols=len(images))
     table.autofit = False
-    table.alignment = (WD_TABLE_ALIGNMENT.CENTER if centred else WD_TABLE_ALIGNMENT.LEFT)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER if centred else WD_TABLE_ALIGNMENT.LEFT
     for column, value in zip(table.columns, columns):
         column.width = Mm(value)
     props = table._tbl.tblPr
@@ -70,8 +70,16 @@ def add_row(document, images, *, centred, width_mm, indent_mm=None, pad_mm=None,
     if declared is None:
         declared = OxmlElement("w:tblW")
         props.insert_element_before(
-            declared, "w:jc", "w:tblCellSpacing", "w:tblInd", "w:tblBorders", "w:shd",
-            "w:tblLayout", "w:tblCellMar", *FOLLOW)
+            declared,
+            "w:jc",
+            "w:tblCellSpacing",
+            "w:tblInd",
+            "w:tblBorders",
+            "w:shd",
+            "w:tblLayout",
+            "w:tblCellMar",
+            *FOLLOW,
+        )
     declared.set(qn("w:w"), str(int(round(width_mm * 1440 / 25.4))))
     declared.set(qn("w:type"), "dxa")
 
@@ -80,8 +88,7 @@ def add_row(document, images, *, centred, width_mm, indent_mm=None, pad_mm=None,
         border = OxmlElement("w:" + side)
         border.set(qn("w:val"), "nil")
         borders.append(border)
-    props.insert_element_before(
-        borders, "w:shd", "w:tblLayout", "w:tblCellMar", *FOLLOW)
+    props.insert_element_before(borders, "w:shd", "w:tblLayout", "w:tblCellMar", *FOLLOW)
 
     if fixed_layout:
         layout = OxmlElement("w:tblLayout")
@@ -91,8 +98,7 @@ def add_row(document, images, *, centred, width_mm, indent_mm=None, pad_mm=None,
         indent = OxmlElement("w:tblInd")
         indent.set(qn("w:w"), str(int(round(indent_mm * 1440 / 25.4))))
         indent.set(qn("w:type"), "dxa")
-        props.insert_element_before(indent, "w:tblBorders", "w:shd", "w:tblLayout",
-                                    "w:tblCellMar", *FOLLOW)
+        props.insert_element_before(indent, "w:tblBorders", "w:shd", "w:tblLayout", "w:tblCellMar", *FOLLOW)
     if pad_mm is None:
         zero_cell_margins(props)
     else:
@@ -109,8 +115,7 @@ def add_row(document, images, *, centred, width_mm, indent_mm=None, pad_mm=None,
         cell.width = Mm(columns[index])
         paragraph = cell.paragraphs[0]
         paragraph.alignment = 1
-        paragraph.add_run().add_picture(io.BytesIO(image["bytes"]),
-                                        width=Mm(widths[index]), height=Mm(heights[index]))
+        paragraph.add_run().add_picture(io.BytesIO(image["bytes"]), width=Mm(widths[index]), height=Mm(heights[index]))
         paragraph.paragraph_format.keep_together = True
     for row in table.rows:
         row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
@@ -123,8 +128,7 @@ def build(path):
         section.page_width, section.page_height = Mm(210), Mm(297)
         section.left_margin = section.right_margin = Mm(16)
     images = pictures()
-    content = sum(_figure_paper_size(image["size"], TEXT_WIDTH_MM)[0] for image in images) \
-        + GAP_MM * (len(images) - 1)
+    content = sum(_figure_paper_size(image["size"], TEXT_WIDTH_MM)[0] for image in images) + GAP_MM * (len(images) - 1)
     table_width = content + GAP_MM
     slack = TEXT_WIDTH_MM - table_width
 

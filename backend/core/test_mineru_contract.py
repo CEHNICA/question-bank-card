@@ -29,9 +29,14 @@ class MineruContractTests(SimpleTestCase):
 
     @staticmethod
     def done():
-        return {"code": 0, "data": {"extract_result": [{
-            "state": "done", "full_zip_url": "https://download.invalid/result.zip?signature=PRIVATE_URL",
-        }]}}
+        return {
+            "code": 0,
+            "data": {
+                "extract_result": [
+                    {"state": "done", "full_zip_url": "https://download.invalid/result.zip?signature=PRIVATE_URL"}
+                ]
+            },
+        }
 
     def session(self, answers):
         session = _ApiSession(answers)
@@ -40,8 +45,10 @@ class MineruContractTests(SimpleTestCase):
         return session
 
     def extract(self, session, pages=1):
-        with mock.patch.object(mineru.requests, "Session", return_value=session), \
-                mock.patch.object(mineru, "_download_zip") as download:
+        with (
+            mock.patch.object(mineru.requests, "Session", return_value=session),
+            mock.patch.object(mineru, "_download_zip") as download,
+        ):
             result = mineru.request_extract_file("PRIVATE_TOKEN", self.source, self.target, pages)
         return result, download
 
@@ -74,13 +81,18 @@ class MineruContractTests(SimpleTestCase):
 
     def test_empty_or_oversized_files_are_rejected_before_submission(self):
         self.source.write_bytes(b"")
-        with mock.patch.object(mineru.requests, "Session") as session, self.assertRaisesRegex(mineru.MineruError, "为空"):
+        with (
+            mock.patch.object(mineru.requests, "Session") as session,
+            self.assertRaisesRegex(mineru.MineruError, "为空"),
+        ):
             mineru.request_extract_file("PRIVATE_TOKEN", self.source, self.target, 1)
         session.assert_not_called()
         self.source.write_bytes(b"four")
-        with mock.patch.object(mineru, "MAX_SOURCE_BYTES", 3), \
-                mock.patch.object(mineru.requests, "Session") as session, \
-                self.assertRaisesRegex(mineru.MineruError, "200 MB"):
+        with (
+            mock.patch.object(mineru, "MAX_SOURCE_BYTES", 3),
+            mock.patch.object(mineru.requests, "Session") as session,
+            self.assertRaisesRegex(mineru.MineruError, "200 MB"),
+        ):
             mineru.request_extract_file("PRIVATE_TOKEN", self.source, self.target, 1)
         session.assert_not_called()
 
@@ -107,9 +119,17 @@ class MineruContractTests(SimpleTestCase):
                 session.put.assert_not_called()
 
     def test_upload_url_requires_https_and_a_host_without_echoing_signed_values(self):
-        for url in (None, 12, {}, "http://upload.invalid/PRIVATE_URL", "https://", "https:///PRIVATE_URL",
-                    "https://user:PRIVATE_TOKEN@upload.invalid/file", "https://upload.invalid:bad/PRIVATE_URL",
-                    "https://upload.invalid/file\nPRIVATE_URL"):
+        for url in (
+            None,
+            12,
+            {},
+            "http://upload.invalid/PRIVATE_URL",
+            "https://",
+            "https:///PRIVATE_URL",
+            "https://user:PRIVATE_TOKEN@upload.invalid/file",
+            "https://upload.invalid:bad/PRIVATE_URL",
+            "https://upload.invalid/file\nPRIVATE_URL",
+        ):
             with self.subTest(url=url):
                 session = self.session([self.submission(file_urls=[url])])
                 with self.assertRaisesRegex(mineru.MineruError, "HTTPS 地址") as caught:
@@ -121,8 +141,9 @@ class MineruContractTests(SimpleTestCase):
     def test_malformed_result_list_has_a_safe_actionable_error_without_new_submission(self):
         for rows in (None, {}, "PRIVATE_URL", [None], [[]], [{"state": "pending"}, {"state": "done"}]):
             with self.subTest(rows=rows):
-                session = self.session([self.submission(), {"code": 0, "trace_id": "b" * 32,
-                                                          "data": {"extract_result": rows}}])
+                session = self.session(
+                    [self.submission(), {"code": 0, "trace_id": "b" * 32, "data": {"extract_result": rows}}]
+                )
                 with self.assertRaisesRegex(mineru.MineruError, "任务列表格式不正确") as caught:
                     self.extract(session)
                 self.assert_safe(caught.exception)
@@ -133,9 +154,7 @@ class MineruContractTests(SimpleTestCase):
     def test_missing_or_non_string_state_is_not_treated_as_a_long_running_task(self):
         for state in (None, "", "  ", {}, 1, False):
             with self.subTest(state=state):
-                session = self.session([self.submission(), {"code": 0, "data": {
-                    "extract_result": [{"state": state}],
-                }}])
+                session = self.session([self.submission(), {"code": 0, "data": {"extract_result": [{"state": state}]}}])
                 with self.assertRaisesRegex(mineru.MineruError, "有效的任务状态"):
                     self.extract(session)
                 self.assertEqual(session.request.call_count, 2)
@@ -155,8 +174,10 @@ class MineruContractTests(SimpleTestCase):
                 response = self.done()
                 response["data"]["extract_result"][0]["full_zip_url"] = url
                 session = self.session([self.submission(), response])
-                with mock.patch.object(mineru, "_download_zip") as download, \
-                        self.assertRaisesRegex(mineru.MineruError, "HTTPS 地址") as caught:
+                with (
+                    mock.patch.object(mineru, "_download_zip") as download,
+                    self.assertRaisesRegex(mineru.MineruError, "HTTPS 地址") as caught,
+                ):
                     self.extract(session)
                 self.assert_safe(caught.exception)
                 self.assertEqual(caught.exception.stage, "解析包下载")

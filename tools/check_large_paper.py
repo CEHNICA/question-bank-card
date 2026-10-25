@@ -94,8 +94,11 @@ def main() -> int:
 
         for size in SIZES:
             take = ids[:size]
-            page.evaluate("""(list) => { localStorage.setItem('qb-basket', JSON.stringify(list));
-                localStorage.setItem('qb-basket-seen', '1'); }""", take)
+            page.evaluate(
+                """(list) => { localStorage.setItem('qb-basket', JSON.stringify(list));
+                localStorage.setItem('qb-basket-seen', '1'); }""",
+                take,
+            )
             started = time.time()
             page.reload(wait_until="domcontentloaded")
             page.wait_for_selector("#typeFilters button")
@@ -107,7 +110,10 @@ def main() -> int:
                     "n => { const b = document.querySelectorAll('#printPaper .print-question');"
                     " const ids = new Set([...b].map(x => x.dataset.questionId).filter(Boolean));"
                     " const miss = document.querySelector('#printMissing');"
-                    " return ids.size === n || (miss && !miss.hidden); }", arg=len(take), timeout=60000)
+                    " return ids.size === n || (miss && !miss.hidden); }",
+                    arg=len(take),
+                    timeout=60000,
+                )
             except Exception:
                 pass
             elapsed = round(time.time() - started, 1)
@@ -118,12 +124,16 @@ def main() -> int:
                 page.wait_for_function(
                     "() => { const n = document.querySelector('#printPageStatus');"
                     " const t = n ? n.textContent : '';"
-                    " return t && !t.includes('正在排版'); }", timeout=120000)
+                    " return t && !t.includes('正在排版'); }",
+                    timeout=120000,
+                )
             except Exception:
                 print("  ⚠ 排版 120 秒还没结束")
             settle = round(time.time() - started, 1)
             state = page.evaluate(STATE)
-            print(f"\n篮里 {size} 题：铺开用了 {elapsed}s，排版落定到 {settle}s，纸上 {state['unique']} 道（{state['blocks']} 块，小问会拆块）")
+            print(
+                f"\n篮里 {size} 题：铺开用了 {elapsed}s，排版落定到 {settle}s，纸上 {state['unique']} 道（{state['blocks']} 块，小问会拆块）"
+            )
             print(f"  状态栏：{state['status'][:130]}")
             print(f"  页码状态：{state['pageStatus'][:120]}")
             print(f"  篮摘要：{state['basketCount'][:110]}")
@@ -136,12 +146,19 @@ def main() -> int:
             if state["buttons"]["exportPdf"]:
                 # PDF 灰了就得让老师知道为什么，以及还能走哪条路。
                 # 注意 buttons 里存的是 n.disabled：true 才是「灰了」。
-                explained = (state["layoutNoticeShown"] and state["layoutNotice"]) or \
-                            (state["layoutWarningsShown"] and state["layoutWarnings"]) or \
-                            state["status"] or state["pageStatus"]
+                explained = (
+                    (state["layoutNoticeShown"] and state["layoutNotice"])
+                    or (state["layoutWarningsShown"] and state["layoutWarnings"])
+                    or state["status"]
+                    or state["pageStatus"]
+                )
                 check(bool(explained), f"{size} 题：导出 PDF 灰了，界面上找得到原因")
-                print(f"  版式提示块：{'显示' if state['layoutNoticeShown'] else '不显示'} | {state['layoutNotice'][:120]}")
-                print(f"  版式警告块：{'显示' if state['layoutWarningsShown'] else '不显示'} | {state['layoutWarnings'][:160]}")
+                print(
+                    f"  版式提示块：{'显示' if state['layoutNoticeShown'] else '不显示'} | {state['layoutNotice'][:120]}"
+                )
+                print(
+                    f"  版式警告块：{'显示' if state['layoutWarningsShown'] else '不显示'} | {state['layoutWarnings'][:160]}"
+                )
                 print(f"  状态栏：{state['status'][:120]}")
                 check(state["buttons"]["exportWord"] is False, f"{size} 题：灰掉 PDF 之后 Word 还能走")
             check(state["paperChars"] > size * 20, f"{size} 题：纸上确实有内容（{state['paperChars']} 字）")
@@ -150,8 +167,12 @@ def main() -> int:
                 # 导出」—— 大卷子到底导不导得出来、扛不扛得到，这是「组一份大卷子」
                 # 这个问题里唯一还没量过的一环。
                 posts: list[dict] = []
-                page.on("request", lambda r, _posts=posts: _posts.append({"route": r.url, "body": r.post_data})
-                        if "/export-docx" in r.url else None)
+                page.on(
+                    "request",
+                    lambda r, _posts=posts: (
+                        _posts.append({"route": r.url, "body": r.post_data}) if "/export-docx" in r.url else None
+                    ),
+                )
                 before = len(posts)
                 page.locator("#exportWord").click()
                 try:
@@ -159,19 +180,23 @@ def main() -> int:
                         "() => { const n = document.querySelector('#printExportStatus');"
                         " const t = n ? n.textContent : '';"
                         " return t && (t.includes('已导出') || t.includes('失败') || t.includes('未能')"
-                        " || t.includes('超过') || t.includes('请')); }", timeout=180000)
+                        " || t.includes('超过') || t.includes('请')); }",
+                        timeout=180000,
+                    )
                 except Exception:
                     print("  ⚠ 导出 180 秒没有给出结果")
                 got = posts[before:]
-                print(f"  导出请求：{len(got)} 次，载荷 {len(got[0]['body'] or '') if got else 0} 字符"
-                      f"（上限 2097152）" if got else "  导出请求：0 次")
+                print(
+                    f"  导出请求：{len(got)} 次，载荷 {len(got[0]['body'] or '') if got else 0} 字符（上限 2097152）"
+                    if got
+                    else "  导出请求：0 次"
+                )
                 line = (page.locator("#printExportStatus").inner_text() or "").strip()
                 print(f"  导出结果：{line[:150]}")
                 check(bool(got), f"{size} 题：点「导出 Word」真的发出了请求")
                 if got:
                     body = got[0]["body"] or ""
-                    check(len(body) <= 2 * 1024 * 1024,
-                          f"{size} 题：请求体 {len(body)} 字符，没撞上 2 MiB 上限")
+                    check(len(body) <= 2 * 1024 * 1024, f"{size} 题：请求体 {len(body)} 字符，没撞上 2 MiB 上限")
                 # 报错里那个「第 N 题」是**篮子里第 N 个**，卷面是按题型重排过的。
                 # 这两个不是同一道题的话，老师按 N 去卷子上找会找错 —— 那是唯一一条
                 # 告诉他哪道题坏了的信息。
@@ -181,7 +206,8 @@ def main() -> int:
                     # 报错说的 N，卷面上第 N 道题印的号就该是 N。
                     # 之前先按篮子顺序去取第 N 个再找它在哪 —— 那是另一个顺序，
                     # 量出来「对不上」其实一半是自己量错的。
-                    truth = page.evaluate("""(n) => {
+                    truth = page.evaluate(
+                        """(n) => {
                       const seen = new Set(); const order = [];
                       for (const b of document.querySelectorAll('#printPaper .print-question')) {
                         const id = b.dataset.questionId;
@@ -189,10 +215,11 @@ def main() -> int:
                       }
                       const block = order[n - 1];
                       return {total: order.length, shown: block ? (block.querySelector('.qb-number')?.textContent || '').trim() : null};
-                    }""", number)
+                    }""",
+                        number,
+                    )
                     print(f"  报错说的「第 {number} 题」，卷面上第 {number} 道印的是：{truth}")
-                    check(truth["shown"] == f"{number}.",
-                          f"报错说的题号 = 卷面上那道题印的号（{truth['shown']!r}）")
+                    check(truth["shown"] == f"{number}.", f"报错说的题号 = 卷面上那道题印的号（{truth['shown']!r}）")
                 else:
                     print("  （这次没报出题号，这条量不到）")
                 # 契约不是「一定导得出来」，而是「没有悄悄给一份坏卷子」。
@@ -203,16 +230,18 @@ def main() -> int:
                 # 拒绝导出有好几种说法：公式连图片都排不出来是一种，
                 # 配图文件在库里却已经不在是另一种。两种都算数 ——
                 # 只要说清了是哪道题、为什么，就不是「点了没反应」。
-                refused = bool(named) and any(word in line for word in
-                                              ("未能导出", "暂不能准确转换", "文件缺失", "配图"))
-                check(done or refused,
-                      f"{size} 题：要么导出来、要么失败时说清是哪道题（{line[:60]}）")
+                refused = bool(named) and any(
+                    word in line for word in ("未能导出", "暂不能准确转换", "文件缺失", "配图")
+                )
+                check(done or refused, f"{size} 题：要么导出来、要么失败时说清是哪道题（{line[:60]}）")
                 if refused:
                     # 「还能走哪条路」不等于一定要提打印：公式转不动时可以改用打印或
                     # PDF，配图文件不在时唯一能走的是把图补上/重切。
                     # 只要说得出下一步该做什么，就算数。
-                    check(any(word in line for word in ("打印", "PDF", "请检查", "重新")),
-                          f"{size} 题：失败时说了下一步怎么办（{line[-40:]}）")
+                    check(
+                        any(word in line for word in ("打印", "PDF", "请检查", "重新")),
+                        f"{size} 题：失败时说了下一步怎么办（{line[-40:]}）",
+                    )
             page.keyboard.press("Escape")
             page.wait_for_timeout(600)
             page.evaluate("() => localStorage.removeItem('qb-basket')")

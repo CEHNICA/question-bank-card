@@ -11,6 +11,7 @@
 
     .\\backend\\.venv\\Scripts\\python.exe backend\\manage.py test core.test_solution_trim
 """
+
 from types import SimpleNamespace
 from unittest import mock
 
@@ -20,8 +21,10 @@ from core import figure_policy, pipeline, readers
 from core.models import Question
 
 # 第 18 题的真实范围与解析标记（page_idx 9 那段从第 4 个单位起就是【答案】）。
-REAL_REGIONS = [{"page_idx": 8, "bbox": [62.0, 480.0, 937.0, 583.0]},
-               {"page_idx": 9, "bbox": [60.0, 45.0, 937.0, 474.0]}]
+REAL_REGIONS = [
+    {"page_idx": 8, "bbox": [62.0, 480.0, 937.0, 583.0]},
+    {"page_idx": 9, "bbox": [60.0, 45.0, 937.0, 474.0]},
+]
 REAL_BLOCKS = [
     {"page_idx": 8, "bbox": [87.0, 500.0, 800.0, 520.0], "text": "18.已知二次函数 $y=-x^2+bx+c$"},
     {"page_idx": 9, "bbox": [87.0, 49.0, 578.0, 63.0], "text": "【答案】（1) $y=-x^2+2x+3$"},
@@ -39,10 +42,8 @@ class SolutionTrimTests(SimpleTestCase):
 
     def test_a_segment_keeps_the_text_printed_above_the_marker(self):
         regions = [{"page_idx": 1, "bbox": [60.0, 40.0, 930.0, 900.0]}]
-        blocks = [{"page_idx": 1, "bbox": [87.0, 344.0, 912.0, 899.0],
-                   "text": "【答案】C\n【分析】本题考查..."}]
-        self.assertEqual(self.trim(regions, blocks),
-                         [{"page_idx": 1, "bbox": [60.0, 40.0, 930.0, 342.0]}])
+        blocks = [{"page_idx": 1, "bbox": [87.0, 344.0, 912.0, 899.0], "text": "【答案】C\n【分析】本题考查..."}]
+        self.assertEqual(self.trim(regions, blocks), [{"page_idx": 1, "bbox": [60.0, 40.0, 930.0, 342.0]}])
 
     def test_a_normal_paper_is_returned_untouched(self):
         regions = [{"page_idx": 0, "bbox": [52.0, 580.0, 512.0, 789.0]}]
@@ -70,9 +71,14 @@ class SolutionTrimTests(SimpleTestCase):
         # Cutting at that block's top deleted sub-question (3) from the reading,
         # and the card stayed green.  A marker in the middle is not a section start.
         regions = [{"page_idx": 14, "bbox": [60.0, 658.0, 932.0, 920.0]}]
-        blocks = [{"page_idx": 14, "bbox": [80.0, 898.0, 700.0, 916.0],
-                   "text": "(3)将 $\\Delta ABD$ 顺时针旋转 $90^\\circ$，判断点 $E_i$ 是否在该双曲线上"
-                           "【答案】(1)直线l的函数解析式为 $y=x+1$;"}]
+        blocks = [
+            {
+                "page_idx": 14,
+                "bbox": [80.0, 898.0, 700.0, 916.0],
+                "text": "(3)将 $\\Delta ABD$ 顺时针旋转 $90^\\circ$，判断点 $E_i$ 是否在该双曲线上"
+                "【答案】(1)直线l的函数解析式为 $y=x+1$;",
+            }
+        ]
         self.assertEqual(self.trim(regions, blocks), regions)
 
     def test_every_segment_dropped_falls_back_to_the_stored_range(self):
@@ -85,19 +91,29 @@ class SolutionTrimTests(SimpleTestCase):
         self.assertEqual(self.trim(regions, []), regions)
 
     def test_mixed_segments_keep_the_ones_without_a_marker(self):
-        regions = [{"page_idx": 0, "bbox": [60.0, 40.0, 500.0, 200.0]},
-                   {"page_idx": 1, "bbox": [60.0, 40.0, 930.0, 900.0]}]
+        regions = [
+            {"page_idx": 0, "bbox": [60.0, 40.0, 500.0, 200.0]},
+            {"page_idx": 1, "bbox": [60.0, 40.0, 930.0, 900.0]},
+        ]
         blocks = [{"page_idx": 1, "bbox": [87.0, 300.0, 912.0, 340.0], "text": "【详解】解："}]
         self.assertEqual(
             self.trim(regions, blocks),
-            [{"page_idx": 0, "bbox": [60.0, 40.0, 500.0, 200.0]},
-             {"page_idx": 1, "bbox": [60.0, 40.0, 930.0, 298.0]}])
+            [{"page_idx": 0, "bbox": [60.0, 40.0, 500.0, 200.0]}, {"page_idx": 1, "bbox": [60.0, 40.0, 930.0, 298.0]}],
+        )
 
 
-READING = {"stem": "如图，在 $\\triangle ABC$ 中，$\\angle B=30°$，$AC=10$。", "options": {},
-           "type": "free_response", "content_kind": "exercise", "figures": {},
-           "missing_figure": False, "number_seen": 17, "figure_descriptions": [],
-           "unclear": False, "unreadable": False}
+READING = {
+    "stem": "如图，在 $\\triangle ABC$ 中，$\\angle B=30°$，$AC=10$。",
+    "options": {},
+    "type": "free_response",
+    "content_kind": "exercise",
+    "figures": {},
+    "missing_figure": False,
+    "number_seen": 17,
+    "figure_descriptions": [],
+    "unclear": False,
+    "unreadable": False,
+}
 
 
 class SolutionFigureFlagTests(SimpleTestCase):
@@ -109,8 +125,10 @@ class SolutionFigureFlagTests(SimpleTestCase):
 
     # 【答案】在 y556，候选 1 在它上面、候选 2 在它下面。
     BLOCKS = [{"page_idx": 1, "bbox": [90.0, 556.0, 144.0, 568.0], "text": "【答案】C"}]
-    CANDIDATES = [{"label": "1", "page_idx": 1, "bbox": [85.0, 375.0, 226.0, 489.0]},
-                  {"label": "2", "page_idx": 1, "bbox": [132.0, 639.0, 233.0, 719.0]}]
+    CANDIDATES = [
+        {"label": "1", "page_idx": 1, "bbox": [85.0, 375.0, 226.0, 489.0]},
+        {"label": "2", "page_idx": 1, "bbox": [132.0, 639.0, 233.0, 719.0]},
+    ]
 
     def count(self, blocks, assignments):
         return pipeline._unclassified_below_solution(blocks, self.CANDIDATES, assignments)
@@ -119,10 +137,11 @@ class SolutionFigureFlagTests(SimpleTestCase):
         self.assertEqual(self.count(self.BLOCKS, {"1": "stem"}), (1, 1))
 
     def test_one_pending_box_sits_above_the_solution(self):
-        candidates = [{"label": "1", "page_idx": 1, "bbox": [132.0, 639.0, 233.0, 719.0]},
-                      {"label": "2", "page_idx": 1, "bbox": [85.0, 375.0, 226.0, 489.0]}]
-        self.assertEqual(
-            pipeline._unclassified_below_solution(self.BLOCKS, candidates, {}), (1, 2))
+        candidates = [
+            {"label": "1", "page_idx": 1, "bbox": [132.0, 639.0, 233.0, 719.0]},
+            {"label": "2", "page_idx": 1, "bbox": [85.0, 375.0, 226.0, 489.0]},
+        ]
+        self.assertEqual(pipeline._unclassified_below_solution(self.BLOCKS, candidates, {}), (1, 2))
 
     def test_a_paper_without_the_marker_reports_nothing_below(self):
         self.assertEqual(self.count([], {"1": "stem"}), (0, 1))
@@ -132,30 +151,49 @@ class SolutionFigureFlagTests(SimpleTestCase):
 
     def snapshot(self):
         return {
-            "id": 1, "number": 5, "group_id": None,
+            "id": 1,
+            "number": 5,
+            "group_id": None,
             "regions": [{"page_idx": 1, "bbox": [60.0, 344.0, 912.0, 899.0]}],
             "candidates": [dict(c) for c in self.CANDIDATES],
-            "question_type": "single_choice", "section": "一、单选题",
-            "stem": "", "options": {}, "edited": False,
-            "source_kind": Question.SourceKind.UNKNOWN, "source_anchor_seq": 5,
-            "segmentation_flags": [], "body_mode": "text", "start_source": "mineru",
-            "witness_blocks": [{"page_idx": 1, "bbox": [80.0, 360.0, 700.0, 380.0],
-                                "text": "5. 如图所示，$\\triangle ABC$的顶点在正方形网格的格点上"}] + self.BLOCKS,
+            "question_type": "single_choice",
+            "section": "一、单选题",
+            "stem": "",
+            "options": {},
+            "edited": False,
+            "source_kind": Question.SourceKind.UNKNOWN,
+            "source_anchor_seq": 5,
+            "segmentation_flags": [],
+            "body_mode": "text",
+            "start_source": "mineru",
+            "witness_blocks": [
+                {
+                    "page_idx": 1,
+                    "bbox": [80.0, 360.0, 700.0, 380.0],
+                    "text": "5. 如图所示，$\\triangle ABC$的顶点在正方形网格的格点上",
+                }
+            ]
+            + self.BLOCKS,
         }
 
     def read(self):
-        reading = {**READING, "type": "single_choice", "number_seen": 5,
-                   "stem": "如图所示，$\\triangle ABC$的顶点在正方形网格的格点上，则 $\\tan C$ 的值为（  ）",
-                   "options": {"A": "$\\frac{\\sqrt{2}}{2}$", "B": "$\\frac{1}{2}$",
-                               "C": "$\\frac{1}{3}$", "D": "$3$"},
-                   "figures": {"1": "stem"}}
-        with mock.patch.object(readers, "primary_engine", return_value=object()), \
-                mock.patch.object(readers, "read_question", return_value=reading), \
-                mock.patch.object(pipeline.imaging, "stack_regions",
-                                  return_value=(SimpleNamespace(height=900, width=1400), [])), \
-                mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:url"):
-            return pipeline.read_card(self.snapshot(),
-                                      SimpleNamespace(load=lambda page: object()))
+        reading = {
+            **READING,
+            "type": "single_choice",
+            "number_seen": 5,
+            "stem": "如图所示，$\\triangle ABC$的顶点在正方形网格的格点上，则 $\\tan C$ 的值为（  ）",
+            "options": {"A": "$\\frac{\\sqrt{2}}{2}$", "B": "$\\frac{1}{2}$", "C": "$\\frac{1}{3}$", "D": "$3$"},
+            "figures": {"1": "stem"},
+        }
+        with (
+            mock.patch.object(readers, "primary_engine", return_value=object()),
+            mock.patch.object(readers, "read_question", return_value=reading),
+            mock.patch.object(
+                pipeline.imaging, "stack_regions", return_value=(SimpleNamespace(height=900, width=1400), [])
+            ),
+            mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:url"),
+        ):
+            return pipeline.read_card(self.snapshot(), SimpleNamespace(load=lambda page: object()))
 
     def test_the_card_says_it_came_from_the_solution(self):
         result = self.read()
@@ -174,11 +212,21 @@ class SolutionTrimWiringTests(SimpleTestCase):
 
     def snapshot(self):
         return {
-            "id": 1, "number": 18, "group_id": None, "regions": REAL_REGIONS,
-            "candidates": [], "question_type": "free_response", "section": "三、解答题",
-            "stem": "", "options": {}, "edited": False,
-            "source_kind": Question.SourceKind.UNKNOWN, "source_anchor_seq": 18,
-            "segmentation_flags": [], "body_mode": "text", "start_source": "mineru",
+            "id": 1,
+            "number": 18,
+            "group_id": None,
+            "regions": REAL_REGIONS,
+            "candidates": [],
+            "question_type": "free_response",
+            "section": "三、解答题",
+            "stem": "",
+            "options": {},
+            "edited": False,
+            "source_kind": Question.SourceKind.UNKNOWN,
+            "source_anchor_seq": 18,
+            "segmentation_flags": [],
+            "body_mode": "text",
+            "start_source": "mineru",
             "witness_blocks": REAL_BLOCKS,
         }
 
@@ -189,10 +237,12 @@ class SolutionTrimWiringTests(SimpleTestCase):
             seen.append([dict(r) for r in regions])
             return SimpleNamespace(height=900, width=1400), []
 
-        with mock.patch.object(readers, "primary_engine", return_value=object()), \
-                mock.patch.object(readers, "read_question", return_value=READING), \
-                mock.patch.object(pipeline.imaging, "stack_regions", side_effect=stack), \
-                mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:url"):
+        with (
+            mock.patch.object(readers, "primary_engine", return_value=object()),
+            mock.patch.object(readers, "read_question", return_value=READING),
+            mock.patch.object(pipeline.imaging, "stack_regions", side_effect=stack),
+            mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:url"),
+        ):
             pipeline.read_card(self.snapshot(), SimpleNamespace(load=lambda page: object()))
         self.assertTrue(seen)
         for regions in seen:
@@ -200,10 +250,13 @@ class SolutionTrimWiringTests(SimpleTestCase):
 
     def test_the_card_keeps_its_stored_range(self):
         snapshot = self.snapshot()
-        with mock.patch.object(readers, "primary_engine", return_value=object()), \
-                mock.patch.object(readers, "read_question", return_value=READING), \
-                mock.patch.object(pipeline.imaging, "stack_regions",
-                                  return_value=(SimpleNamespace(height=900, width=1400), [])), \
-                mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:url"):
+        with (
+            mock.patch.object(readers, "primary_engine", return_value=object()),
+            mock.patch.object(readers, "read_question", return_value=READING),
+            mock.patch.object(
+                pipeline.imaging, "stack_regions", return_value=(SimpleNamespace(height=900, width=1400), [])
+            ),
+            mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:url"),
+        ):
             pipeline.read_card(snapshot, SimpleNamespace(load=lambda page: object()))
         self.assertEqual(snapshot["regions"], REAL_REGIONS)

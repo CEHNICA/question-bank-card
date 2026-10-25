@@ -24,10 +24,7 @@ from . import photos, pipeline, segment, views as core_views
 from .apps import discard_interrupted_deletes
 from .models import Block, Paper, PublishedQuestion, Question, QuestionGroup
 
-PAGES = [
-    {"page_idx": index, "width": 1000, "height": 1400}
-    for index in range(4)
-]
+PAGES = [{"page_idx": index, "width": 1000, "height": 1400} for index in range(4)]
 
 
 def _question_item(page_idx: int, bottom: int) -> dict:
@@ -69,17 +66,8 @@ class ImportStructureMigrationTests(TransactionTestCase):
             source_path="data/legacy/source.pdf",
         )
         approved_at = timezone.now().replace(microsecond=123456)
-        figures = [{
-            "slot": "stem",
-            "page_idx": 3,
-            "bbox": [120, 240, 680, 720],
-            "source": "manual",
-        }]
-        figure_review = {
-            "status": "manual_confirmed",
-            "reason": "teacher_crop",
-            "reviewed": True,
-        }
+        figures = [{"slot": "stem", "page_idx": 3, "bbox": [120, 240, 680, 720], "source": "manual"}]
+        figure_review = {"status": "manual_confirmed", "reason": "teacher_crop", "reviewed": True}
         question = OldQuestion.objects.create(
             paper=paper,
             number=12,
@@ -237,12 +225,10 @@ class GroupedQuestionTests(TestCase):
         self.assertNotEqual(first_card.source_key, second_card.source_key)
 
         Question.objects.filter(pk=first_card.pk).update(
-            stem="第一章第 1 题", state=Question.State.GREEN, approved=False,
-            approved_content_hash="",
+            stem="第一章第 1 题", state=Question.State.GREEN, approved=False, approved_content_hash=""
         )
         Question.objects.filter(pk=second_card.pk).update(
-            stem="第二章第 1 题", state=Question.State.GREEN, approved=True,
-            approved_content_hash="2" * 64,
+            stem="第二章第 1 题", state=Question.State.GREEN, approved=True, approved_content_hash="2" * 64
         )
         first_key, second_key = first_card.source_key, second_card.source_key
 
@@ -266,20 +252,15 @@ class GroupedQuestionTests(TestCase):
 
     def test_foreign_figure_is_assigned_only_within_the_same_group(self):
         first_card = Question.objects.create(
-            paper=self.paper, group=self.first, number=1, stem="如图，第一章",
-            state=Question.State.GREEN,
+            paper=self.paper, group=self.first, number=1, stem="如图，第一章", state=Question.State.GREEN
         )
         second_card = Question.objects.create(
-            paper=self.paper, group=self.second, number=1, stem="如图，第二章",
-            state=Question.State.GREEN,
+            paper=self.paper, group=self.second, number=1, stem="如图，第二章", state=Question.State.GREEN
         )
 
-        pipeline.assign_foreign_figures(self.paper, [{
-            "group_id": self.second.pk,
-            "number": 1,
-            "page_idx": 2,
-            "bbox": [200, 300, 500, 600],
-        }])
+        pipeline.assign_foreign_figures(
+            self.paper, [{"group_id": self.second.pk, "number": 1, "page_idx": 2, "bbox": [200, 300, 500, 600]}]
+        )
 
         first_card.refresh_from_db()
         second_card.refresh_from_db()
@@ -290,19 +271,13 @@ class GroupedQuestionTests(TestCase):
 
     def test_foreign_figure_without_a_group_is_not_guessed_when_number_is_ambiguous(self):
         first_card = Question.objects.create(
-            paper=self.paper, group=self.first, number=1, stem="如图，第一章",
-            state=Question.State.GREEN,
+            paper=self.paper, group=self.first, number=1, stem="如图，第一章", state=Question.State.GREEN
         )
         second_card = Question.objects.create(
-            paper=self.paper, group=self.second, number=1, stem="如图，第二章",
-            state=Question.State.GREEN,
+            paper=self.paper, group=self.second, number=1, stem="如图，第二章", state=Question.State.GREEN
         )
 
-        pipeline.assign_foreign_figures(self.paper, [{
-            "number": 1,
-            "page_idx": 1,
-            "bbox": [200, 300, 500, 600],
-        }])
+        pipeline.assign_foreign_figures(self.paper, [{"number": 1, "page_idx": 1, "bbox": [200, 300, 500, 600]}])
 
         first_card.refresh_from_db()
         second_card.refresh_from_db()
@@ -310,18 +285,12 @@ class GroupedQuestionTests(TestCase):
         self.assertEqual(second_card.figures, [])
 
     def test_group_page_range_is_either_complete_or_entirely_unknown(self):
-        for sequence, fields in enumerate((
-            {"page_start": 1, "page_end": None},
-            {"page_start": None, "page_end": 3},
-        ), start=10):
+        for sequence, fields in enumerate(
+            ({"page_start": 1, "page_end": None}, {"page_start": None, "page_end": 3}), start=10
+        ):
             with self.subTest(fields=fields), self.assertRaises(IntegrityError):
                 with transaction.atomic():
-                    QuestionGroup.objects.create(
-                        paper=self.paper,
-                        title="不完整页码范围",
-                        sequence=sequence,
-                        **fields,
-                    )
+                    QuestionGroup.objects.create(paper=self.paper, title="不完整页码范围", sequence=sequence, **fields)
 
 
 class BookScopeDetectionTests(TestCase):
@@ -337,8 +306,11 @@ class BookScopeDetectionTests(TestCase):
         blocks = []
         for seq, (number, top) in enumerate(((1, 80), (2, 300), (1, 600), (2, 900))):
             item = {
-                "seq": seq, "type": "text", "page_idx": 0,
-                "bbox": [40, top, 960, top + 100], "text": f"{number}. 已知条件，求结果",
+                "seq": seq,
+                "type": "text",
+                "page_idx": 0,
+                "bbox": [40, top, 960, top + 100],
+                "text": f"{number}. 已知条件，求结果",
             }
             blocks.append(item)
             Block.objects.create(paper=paper, **item)
@@ -351,8 +323,10 @@ class BookScopeDetectionTests(TestCase):
         paper.structure = structure
         paper.save(update_fields=["structure"])
 
-        with mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda regions, _load: regions), \
-                mock.patch.object(pipeline, "locate_missing", return_value=[]):
+        with (
+            mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda regions, _load: regions),
+            mock.patch.object(pipeline, "locate_missing", return_value=[]),
+        ):
             pipeline.segment_paper(paper)
 
         groups = list(paper.question_groups.order_by("sequence"))
@@ -360,9 +334,7 @@ class BookScopeDetectionTests(TestCase):
         self.assertEqual(Question.objects.filter(paper=paper).count(), 4)
         self.assertEqual(Question.objects.filter(paper=paper, number=1).count(), 2)
         self.assertEqual(Question.objects.filter(paper=paper, number=2).count(), 2)
-        self.assertEqual(
-            [Question.objects.filter(group=group).count() for group in groups], [2, 2],
-        )
+        self.assertEqual([Question.objects.filter(group=group).count() for group in groups], [2, 2])
 
         # Both scopes share page 0, so page membership alone must not guess where
         # a manually recovered question belongs. The API requires and records an
@@ -370,13 +342,12 @@ class BookScopeDetectionTests(TestCase):
         paper.status = Paper.Status.READY
         paper.save(update_fields=["status"])
         client = Client()
-        payload = {
-            "number": 3,
-            "regions": [{"page_idx": 0, "bbox": [40, 820, 960, 960]}],
-        }
+        payload = {"number": 3, "regions": [{"page_idx": 0, "bbox": [40, 820, 960, 960]}]}
         ambiguous = client.post(
             f"/api/papers/{paper.pk}/questions",
-            data=json.dumps(payload), content_type="application/json", HTTP_X_QB_REQUEST="1",
+            data=json.dumps(payload),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
         )
         self.assertEqual(ambiguous.status_code, 400, ambiguous.content)
         self.assertIn("明确选择题组", ambiguous.json()["error"])
@@ -384,7 +355,8 @@ class BookScopeDetectionTests(TestCase):
         chosen = client.post(
             f"/api/papers/{paper.pk}/questions",
             data=json.dumps({**payload, "group_id": groups[1].pk}),
-            content_type="application/json", HTTP_X_QB_REQUEST="1",
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
         )
         self.assertEqual(chosen.status_code, 201, chosen.content)
         recovered = Question.objects.get(pk=chosen.json()["question"]["id"])
@@ -401,9 +373,7 @@ class TaskLifecycleTests(TestCase):
         self.client = Client()
 
     def _paper(self, status: str) -> tuple[Paper, Path]:
-        paper = Paper.objects.create(
-            filename=f"{status}.pdf", kind="pdf", sha256=(status[0] * 64), status=status,
-        )
+        paper = Paper.objects.create(filename=f"{status}.pdf", kind="pdf", sha256=(status[0] * 64), status=status)
         folder = self.temp / str(paper.pk)
         folder.mkdir()
         source = folder / "source.pdf"
@@ -414,10 +384,7 @@ class TaskLifecycleTests(TestCase):
 
     def _post(self, path: str, body=None):
         return self.client.post(
-            path,
-            data=json.dumps(body or {}),
-            content_type="application/json",
-            HTTP_X_QB_REQUEST="1",
+            path, data=json.dumps(body or {}), content_type="application/json", HTTP_X_QB_REQUEST="1"
         )
 
     def _delete(self, paper: Paper):
@@ -534,6 +501,7 @@ class TaskLifecycleTests(TestCase):
         self.assertEqual(paper.structure["confirmed_groups"], [[0], [1]])
         self.assertEqual(len(paper.structure["confirmed_scopes"]), 2)
 
+
 class PhotoSplitTests(TestCase):
     def setUp(self):
         self.temp = Path(tempfile.mkdtemp())
@@ -592,19 +560,11 @@ class PhotoSplitTests(TestCase):
         )
 
     def _source_snapshot(self):
-        return {
-            path.name: path.read_bytes()
-            for path in self.folder.iterdir()
-            if path.is_file()
-        }
+        return {path.name: path.read_bytes() for path in self.folder.iterdir() if path.is_file()}
 
     def test_split_rejects_missing_duplicate_or_non_integer_pages_without_mutation(self):
         snapshot = self._source_snapshot()
-        for groups in (
-            [[0, 1], [2]],
-            [[0, 1], [1, 2, 3]],
-            [[0, 1], [2, True, 3]],
-        ):
+        for groups in ([[0, 1], [2]], [[0, 1], [1, 2, 3]], [[0, 1], [2, True, 3]]):
             with self.subTest(groups=groups):
                 response = self._split(groups)
                 self.assertEqual(response.status_code, 400, response.content)
@@ -628,33 +588,31 @@ class PhotoSplitTests(TestCase):
         child_ids = {str(child.pk) for child in children}
         self.assertEqual(set(self.paper.structure["split_children"]), child_ids)
         self.assertEqual(self.paper.structure["split_groups"], [[0, 1], [2, 3]])
-        self.assertEqual(
-            sorted(page for child in children for page in child.structure["source_pages"]),
-            [1, 2, 3, 4],
-        )
+        self.assertEqual(sorted(page for child in children for page in child.structure["source_pages"]), [1, 2, 3, 4])
         for child in children:
             self.assertEqual(child.structure["split_from"], str(self.paper.pk))
             self.assertFalse(child.archived)
             self.assertTrue((self.temp / str(child.pk)).is_dir())
 
-        blocked_delete = self.client.delete(
-            f"/api/papers/{self.paper.pk}", HTTP_X_QB_REQUEST="1",
-        )
+        blocked_delete = self.client.delete(f"/api/papers/{self.paper.pk}", HTTP_X_QB_REQUEST="1")
         self.assertEqual(blocked_delete.status_code, 400, blocked_delete.content)
         self.assertIn("追溯", blocked_delete.json()["error"])
         self.assertTrue(self.folder.is_dir())
 
     def test_split_does_not_copy_a_card_when_any_figure_stays_in_another_child(self):
         group = QuestionGroup.objects.create(
-            paper=self.paper, title="原卷", sequence=0, page_start=1, page_end=4,
-            metadata={"pages": [0, 1, 2, 3]},
+            paper=self.paper, title="原卷", sequence=0, page_start=1, page_end=4, metadata={"pages": [0, 1, 2, 3]}
         )
         Question.objects.create(
-            paper=self.paper, group=group, number=1,
+            paper=self.paper,
+            group=group,
+            number=1,
             regions=[{"page_idx": 0, "bbox": [20, 20, 900, 300]}],
             regions_auto=[{"page_idx": 0, "bbox": [20, 20, 900, 300]}],
             figures=[{"page_idx": 2, "bbox": [100, 100, 500, 500], "slot": "stem", "source": "auto"}],
-            figure_review={"status": "ok"}, stem="如图，求解", state=Question.State.GREEN,
+            figure_review={"status": "ok"},
+            stem="如图，求解",
+            state=Question.State.GREEN,
         )
         response = self._split([[0, 1], [2, 3]])
         self.assertEqual(response.status_code, 201, response.content)
@@ -670,10 +628,7 @@ class PhotoSplitTests(TestCase):
             page_end=4,
             metadata={"pages": [0, 1, 2, 3], "source_pages": [11, 12, 21, 22]},
         )
-        self.paper.structure = {
-            "source_pages": [11, 12, 21, 22],
-            "suggested_groups": [[0, 1], [2, 3]],
-        }
+        self.paper.structure = {"source_pages": [11, 12, 21, 22], "suggested_groups": [[0, 1], [2, 3]]}
         self.paper.save(update_fields=["structure"])
 
         reordered = self.client.post(
@@ -697,14 +652,18 @@ class PhotoSplitTests(TestCase):
 
         confirmed = self.client.post(
             f"/api/papers/{self.paper.pk}/confirm-structure",
-            data=json.dumps({}), content_type="application/json", HTTP_X_QB_REQUEST="1",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
         )
         self.assertEqual(confirmed.status_code, 200, confirmed.content)
         self.paper.refresh_from_db()
         self.assertTrue(self.paper.structure["groups_need_rebuild"])
 
-        with mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda regions, _load: regions), \
-                mock.patch.object(pipeline, "locate_missing", return_value=[]):
+        with (
+            mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda regions, _load: regions),
+            mock.patch.object(pipeline, "locate_missing", return_value=[]),
+        ):
             pipeline.segment_paper(self.paper)
 
         self.paper.refresh_from_db()
@@ -713,9 +672,7 @@ class PhotoSplitTests(TestCase):
         self.assertEqual([group.metadata["pages"] for group in groups], [[0, 1], [2, 3]])
         self.assertFalse(self.paper.structure["groups_need_rebuild"])
         self.assertEqual(Question.objects.filter(paper=self.paper).count(), 4)
-        self.assertEqual(
-            [Question.objects.filter(group=group).count() for group in groups], [2, 2],
-        )
+        self.assertEqual([Question.objects.filter(group=group).count() for group in groups], [2, 2])
 
 
 class PdfSplitTests(TestCase):

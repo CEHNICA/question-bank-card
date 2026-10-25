@@ -3,6 +3,7 @@
 This module uses only the Python standard library. It never invokes readers,
 loads credentials, or changes the application database.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -143,8 +144,12 @@ def _intersection_area(left: Geometry, right: Geometry) -> float:
     for page in left.keys() & right.keys():
         for first in left[page]:
             for second in right[page]:
-                box = (max(first[0], second[0]), max(first[1], second[1]),
-                       min(first[2], second[2]), min(first[3], second[3]))
+                box = (
+                    max(first[0], second[0]),
+                    max(first[1], second[1]),
+                    min(first[2], second[2]),
+                    min(first[3], second[3]),
+                )
                 if box[0] < box[2] and box[1] < box[3]:
                     intersections.setdefault(page, []).append(box)
     return _area(intersections)
@@ -182,9 +187,14 @@ def _figure_matches(truth: list[Figure], result: list[Figure]) -> list[dict]:
 
     for result_index in range(len(result)):
         assign(result_index, set())
-    return [{"truth_index": truth_index, "result_index": result_index,
-             "iou": next(iou for index, iou in edges[result_index] if index == truth_index)}
-            for truth_index, result_index in sorted(owners.items())]
+    return [
+        {
+            "truth_index": truth_index,
+            "result_index": result_index,
+            "iou": next(iou for index, iou in edges[result_index] if index == truth_index),
+        }
+        for truth_index, result_index in sorted(owners.items())
+    ]
 
 
 def _key_dict(key: Key) -> dict:
@@ -202,8 +212,11 @@ def score(truth_document: dict, result_document: dict) -> dict:
         first_result.setdefault(card.key, index)
     truth_keys = set(truth_counts)
     selected = {key: index for key, index in first_result.items() if key in truth_keys}
-    extra = [{"result_index": index, **_key_dict(card.key)} for index, card in enumerate(result)
-             if selected.get(card.key) != index]
+    extra = [
+        {"result_index": index, **_key_dict(card.key)}
+        for index, card in enumerate(result)
+        if selected.get(card.key) != index
+    ]
     body_truth = math.fsum(_area(card.regions) for card in truth)
     body_result = math.fsum(_area(card.regions) for card in result)
     body_intersections, figure_matched, per_card = [], 0, []
@@ -217,34 +230,63 @@ def score(truth_document: dict, result_document: dict) -> dict:
         figure_matched += len(matches)
         matched_truth = {match["truth_index"] for match in matches}
         matched_result = {match["result_index"] for match in matches}
-        per_card.append({
-            **_key_dict(expected.key), "result_index": result_index,
-            "body": {"truth_area": truth_area, "result_area": result_area, "intersection_area": intersection,
-                     "coverage": _ratio(intersection, truth_area), "precision": _ratio(intersection, result_area)},
-            "figures": {"truth_count": len(expected.figures), "result_count": len(predicted.figures),
-                        "matched_count": len(matches), "matches": matches,
-                        "missing_indices": [index for index in range(len(expected.figures)) if index not in matched_truth],
-                        "extra_indices": [index for index in range(len(predicted.figures)) if index not in matched_result]},
-        })
+        per_card.append(
+            {
+                **_key_dict(expected.key),
+                "result_index": result_index,
+                "body": {
+                    "truth_area": truth_area,
+                    "result_area": result_area,
+                    "intersection_area": intersection,
+                    "coverage": _ratio(intersection, truth_area),
+                    "precision": _ratio(intersection, result_area),
+                },
+                "figures": {
+                    "truth_count": len(expected.figures),
+                    "result_count": len(predicted.figures),
+                    "matched_count": len(matches),
+                    "matches": matches,
+                    "missing_indices": [index for index in range(len(expected.figures)) if index not in matched_truth],
+                    "extra_indices": [index for index in range(len(predicted.figures)) if index not in matched_result],
+                },
+            }
+        )
     body_intersection = math.fsum(body_intersections)
     figure_truth, figure_result = sum(len(card.figures) for card in truth), sum(len(card.figures) for card in result)
     matched = len(selected)
     return {
-        "schema_version": 1, "metric_scope": "question_identity_and_geometry_only",
+        "schema_version": 1,
+        "metric_scope": "question_identity_and_geometry_only",
         "figure_iou_threshold": FIGURE_IOU_THRESHOLD,
         "question_numbers": {
-            "truth_count": len(truth), "result_count": len(result), "matched_count": matched,
-            "precision": _ratio(matched, len(result)), "recall": _ratio(matched, len(truth)),
-            "missing_count": len(truth) - matched, "extra_count": len(extra),
+            "truth_count": len(truth),
+            "result_count": len(result),
+            "matched_count": matched,
+            "precision": _ratio(matched, len(result)),
+            "recall": _ratio(matched, len(truth)),
+            "missing_count": len(truth) - matched,
+            "extra_count": len(extra),
             "duplicate_question_count": sum(count - 1 for count in result_counts.values()),
-            "missing": [_key_dict(card.key) for card in truth if card.key not in selected], "extra": extra,
-            "duplicate_question_keys": [{**_key_dict(key), "count": count}
-                                        for key, count in result_counts.items() if count > 1],
+            "missing": [_key_dict(card.key) for card in truth if card.key not in selected],
+            "extra": extra,
+            "duplicate_question_keys": [
+                {**_key_dict(key), "count": count} for key, count in result_counts.items() if count > 1
+            ],
         },
-        "body_regions": {"truth_area": body_truth, "result_area": body_result, "intersection_area": body_intersection,
-                         "coverage": _ratio(body_intersection, body_truth), "precision": _ratio(body_intersection, body_result)},
-        "figure_relations": {"truth_count": figure_truth, "result_count": figure_result, "matched_count": figure_matched,
-                             "precision": _ratio(figure_matched, figure_result), "recall": _ratio(figure_matched, figure_truth)},
+        "body_regions": {
+            "truth_area": body_truth,
+            "result_area": body_result,
+            "intersection_area": body_intersection,
+            "coverage": _ratio(body_intersection, body_truth),
+            "precision": _ratio(body_intersection, body_result),
+        },
+        "figure_relations": {
+            "truth_count": figure_truth,
+            "result_count": figure_result,
+            "matched_count": figure_matched,
+            "precision": _ratio(figure_matched, figure_result),
+            "recall": _ratio(figure_matched, figure_truth),
+        },
         "cards": per_card,
     }
 

@@ -20,12 +20,15 @@ from django.test import SimpleTestCase
 from . import library_pdf as pdf
 
 
-@skipUnless(os.name == "nt" and os.environ.get("QB_EXPORT_BROWSER_TEST") == "1",
-            "Windows: set QB_EXPORT_BROWSER_TEST=1 for real browser ownership checks")
+@skipUnless(
+    os.name == "nt" and os.environ.get("QB_EXPORT_BROWSER_TEST") == "1",
+    "Windows: set QB_EXPORT_BROWSER_TEST=1 for real browser ownership checks",
+)
 class PdfBrowserLaunchIntegrationTests(SimpleTestCase):
     def browser(self, name, *, required):
-        relative = {"edge": "Microsoft/Edge/Application/msedge.exe",
-                    "chrome": "Google/Chrome/Application/chrome.exe"}[name]
+        relative = {"edge": "Microsoft/Edge/Application/msedge.exe", "chrome": "Google/Chrome/Application/chrome.exe"}[
+            name
+        ]
         for key in ("PROGRAMFILES(X86)", "PROGRAMFILES", "LOCALAPPDATA"):
             root = os.environ.get(key)
             if root:
@@ -46,13 +49,19 @@ class PdfBrowserLaunchIntegrationTests(SimpleTestCase):
         self.assertEqual(root.parent, Path(tempfile.gettempdir()).resolve())
         self.assertTrue(root.name.startswith("tiyouju-pdf-"))
         marker = str(profile).replace("'", "''")
-        script = ("$marker='" + marker + "'; "
-                  "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | "
-                  "Where-Object { $_.CommandLine -and $_.CommandLine.Contains($marker) } | "
-                  "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }")
-        result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                                creationflags=subprocess.CREATE_NO_WINDOW, timeout=10)
+        script = (
+            "$marker='" + marker + "'; "
+            "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | "
+            "Where-Object { $_.CommandLine -and $_.CommandLine.Contains($marker) } | "
+            "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=10,
+        )
         self.assertEqual(result.returncode, 0, "Cannot clean this test's independent browser profile")
 
     def check_lifecycle(self, executable):
@@ -69,8 +78,10 @@ class PdfBrowserLaunchIntegrationTests(SimpleTestCase):
                 port = pdf._wait_debug_port(profile, process, deadline)
                 target = pdf._wait_page_target(pdf.build_opener(pdf.ProxyHandler({})), port, process, deadline)
                 self.assertIsNone(process.poll(), "The owned browser exited while its child kept running")
-                match = re.fullmatch(rf"ws://(?:127\.0\.0\.1|localhost):{port}(/devtools/page/[A-Za-z0-9_-]+)",
-                                     target["webSocketDebuggerUrl"])
+                match = re.fullmatch(
+                    rf"ws://(?:127\.0\.0\.1|localhost):{port}(/devtools/page/[A-Za-z0-9_-]+)",
+                    target["webSocketDebuggerUrl"],
+                )
                 self.assertIsNotNone(match)
                 client = pdf._CDP(port, match[1], deadline)
                 value = client.call("Runtime.evaluate", {"expression": "6 * 7", "returnByValue": True})
@@ -97,10 +108,17 @@ class PdfBrowserLaunchIntegrationTests(SimpleTestCase):
         drawing.line((15, 105, 15, 15, 180, 105, 15, 105), fill=(0, 90, 180), width=4)
         stream = io.BytesIO()
         image.save(stream, format="PNG")
-        captured = [{"id": "00000000-0000-0000-0000-000000000001", "type": "free_response",
-                     "content": {"stem": r"合成测试：求 $x^2+\frac{1}{3}$ 的值，并观察三角形配图。", "options": {}},
-                     "selected": {}, "ai": False, "solution_images": [],
-                     "images": [{"slot": "stem", "bytes": stream.getvalue(), "size": image.size}]}]
+        captured = [
+            {
+                "id": "00000000-0000-0000-0000-000000000001",
+                "type": "free_response",
+                "content": {"stem": r"合成测试：求 $x^2+\frac{1}{3}$ 的值，并观察三角形配图。", "options": {}},
+                "selected": {},
+                "ai": False,
+                "solution_images": [],
+                "images": [{"slot": "stem", "bytes": stream.getvalue(), "size": image.size}],
+            }
+        ]
         document = pdf._html_document(captured, "浏览器导出回归", pdf._print_options({"student_info": False}))
         profiles, processes = [], []
         original_launch = pdf._launch_browser
@@ -112,10 +130,12 @@ class PdfBrowserLaunchIntegrationTests(SimpleTestCase):
             return process
 
         try:
-            with mock.patch.dict(os.environ, {"__COMPAT_LAYER": "DetectorsAppHealth"}), \
-                    mock.patch.object(pdf, "_browser_path", return_value=executable), \
-                    mock.patch.object(pdf, "_launch_browser", side_effect=launch), \
-                    mock.patch.object(pdf._logger, "warning", wraps=pdf._logger.warning) as warnings:
+            with (
+                mock.patch.dict(os.environ, {"__COMPAT_LAYER": "DetectorsAppHealth"}),
+                mock.patch.object(pdf, "_browser_path", return_value=executable),
+                mock.patch.object(pdf, "_launch_browser", side_effect=launch),
+                mock.patch.object(pdf._logger, "warning", wraps=pdf._logger.warning) as warnings,
+            ):
                 data, page_count = pdf._render(document)
             self.assertEqual(page_count, 1)
             self.assertEqual(len(profiles), 1, "One export must render exactly once")
@@ -129,25 +149,33 @@ class PdfBrowserLaunchIntegrationTests(SimpleTestCase):
                 self.assertNotIn(r"\frac", text)
                 self.assertIn("x", text)
                 self.assertIn("3", text)
-                self.assertTrue(any("katex" in font[3].lower() for font in page.get_fonts()),
-                                "The formula must use real embedded KaTeX glyphs")
+                self.assertTrue(
+                    any("katex" in font[3].lower() for font in page.get_fonts()),
+                    "The formula must use real embedded KaTeX glyphs",
+                )
                 images = page.get_images(full=True)
                 self.assertEqual(len(images), 1)
                 bitmap = pymupdf.Pixmap(result, images[0][0])
                 self.assertEqual((bitmap.width, bitmap.height), image.size)
                 rgb = pymupdf.Pixmap(pymupdf.csRGB, bitmap)
-                coloured = sum(1 for red, green, blue in zip(rgb.samples[0::3], rgb.samples[1::3], rgb.samples[2::3])
-                               if blue > red + 40)
+                coloured = sum(
+                    1
+                    for red, green, blue in zip(rgb.samples[0::3], rgb.samples[1::3], rgb.samples[2::3])
+                    if blue > red + 40
+                )
                 self.assertGreater(coloured, 100, "The exported image must retain its coloured triangle")
-            self.assertTrue(all(process.poll() is not None for process in processes),
-                            "Production cleanup must stop the owned browser before returning PDF bytes")
+            self.assertTrue(
+                all(process.poll() is not None for process in processes),
+                "Production cleanup must stop the owned browser before returning PDF bytes",
+            )
             if any(profile.parent.exists() for profile in profiles):
                 # Windows may still hold a file after process exit. The existing
                 # cleanup contract logs this and preserves the validated PDF;
                 # PdfCleanupTests separately covers persistent deletion failures.
-                self.assertTrue(any(call.args[1:2] == ("temporary_directory",)
-                                    for call in warnings.call_args_list),
-                                "An unremoved temporary directory must have a cleanup warning")
+                self.assertTrue(
+                    any(call.args[1:2] == ("temporary_directory",) for call in warnings.call_args_list),
+                    "An unremoved temporary directory must have a cleanup warning",
+                )
         finally:
             for profile in profiles:
                 self.cleanup_profile(profile)

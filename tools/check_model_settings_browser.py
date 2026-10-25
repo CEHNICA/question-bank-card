@@ -28,27 +28,53 @@ class FrontendHandler(SimpleHTTPRequestHandler):
 
 
 async def check():
-    saved = {"primary": "minimax_test", "checker": "auto", "arbiter": "primary",
-             "models": {"minimax": "Offline-MiniMax", "modelscope": "Offline-Qwen", "siliconflow": "Offline-Silicon"},
-             "plans": {"minimax": "auto"}}
+    saved = {
+        "primary": "minimax_test",
+        "checker": "auto",
+        "arbiter": "primary",
+        "models": {"minimax": "Offline-MiniMax", "modelscope": "Offline-Qwen", "siliconflow": "Offline-Silicon"},
+        "plans": {"minimax": "auto"},
+    }
     posts, forbidden, errors, checks = [], [], [], []
-    control = {"hold_save": False, "fail_save": False, "hold_status": False,
-               "save_started": asyncio.Event(), "save_release": asyncio.Event(),
-               "status_started": asyncio.Event(), "status_release": asyncio.Event(), "configured": False}
+    control = {
+        "hold_save": False,
+        "fail_save": False,
+        "hold_status": False,
+        "save_started": asyncio.Event(),
+        "save_release": asyncio.Event(),
+        "status_started": asyncio.Event(),
+        "status_release": asyncio.Event(),
+        "configured": False,
+    }
     url = f"http://127.0.0.1:{PORT}"
 
     def status():
-        return {"app_version": "isolated-browser-test", "mineru": control["configured"],
-            "upload_enabled": control["configured"], "assistant_mode": saved["primary"] == "assistant",
-            "configured": {"mineru": control["configured"], "minimax": control["configured"]}, "m3_available": False,
-            "engines": {"saved": deepcopy(saved), "selected": {k: saved[k] for k in ("primary", "checker", "arbiter")},
-                "primary": saved["primary"], "checker": saved["checker"], "arbiter": saved["arbiter"],
-                "models": deepcopy(saved["models"]), "plans": deepcopy(saved["plans"]),
+        return {
+            "app_version": "isolated-browser-test",
+            "mineru": control["configured"],
+            "upload_enabled": control["configured"],
+            "assistant_mode": saved["primary"] == "assistant",
+            "configured": {"mineru": control["configured"], "minimax": control["configured"]},
+            "m3_available": False,
+            "engines": {
+                "saved": deepcopy(saved),
+                "selected": {k: saved[k] for k in ("primary", "checker", "arbiter")},
+                "primary": saved["primary"],
+                "checker": saved["checker"],
+                "arbiter": saved["arbiter"],
+                "models": deepcopy(saved["models"]),
+                "plans": deepcopy(saved["plans"]),
                 "configured": {"minimax": control["configured"]},
-                "choices": [{"key": key, "provider_key": provider, "provider": label, "model": model, "available": True}
-                    for key, provider, label, model in (("minimax_test", "minimax", "MiniMax", "Offline-MiniMax"),
-                    ("modelscope_test", "modelscope", "魔搭", "Offline-Qwen"),
-                    ("siliconflow_test", "siliconflow", "硅基流动", "Offline-Silicon"))]}}
+                "choices": [
+                    {"key": key, "provider_key": provider, "provider": label, "model": model, "available": True}
+                    for key, provider, label, model in (
+                        ("minimax_test", "minimax", "MiniMax", "Offline-MiniMax"),
+                        ("modelscope_test", "modelscope", "魔搭", "Offline-Qwen"),
+                        ("siliconflow_test", "siliconflow", "硅基流动", "Offline-Silicon"),
+                    )
+                ],
+            },
+        }
 
     async def route_all(route):
         request = route.request
@@ -91,9 +117,18 @@ async def check():
             await route.continue_()
 
     async with async_playwright() as pw:
-        executable = next((str(p) for p in (Path(pw.chromium.executable_path),
-            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if p.is_file()), None)
+        executable = next(
+            (
+                str(p)
+                for p in (
+                    Path(pw.chromium.executable_path),
+                    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                )
+                if p.is_file()
+            ),
+            None,
+        )
         browser = await pw.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
         context = await browser.new_context(viewport={"width": 1440, "height": 1000})
         await context.add_init_script("localStorage.setItem('qb-welcome-seen','1')")
@@ -108,8 +143,11 @@ async def check():
         # #settingsModelRetry、#settingsReady 都不在了。
         # 硬跑下去只会每轮卡 33 秒报「找不到按钮」，看不出是界面改版还是代码坏了
         # —— 先说清楚，要按现在的窗口重写。退出码 3 = SKIP（见 run_acceptance）。
-        print("SKIP 这份脚本还在量 1.13 以前的模型配置界面；模型选择已并入密钥窗口"
-              "（#credentialDialog → 读题与切题），需要按新界面重写后才能继续跑。", flush=True)
+        print(
+            "SKIP 这份脚本还在量 1.13 以前的模型配置界面；模型选择已并入密钥窗口"
+            "（#credentialDialog → 读题与切题），需要按新界面重写后才能继续跑。",
+            flush=True,
+        )
         raise SystemExit(3)
 
         async def open_drawer():
@@ -155,8 +193,14 @@ async def check():
         assert posts[offset + 1]["checker"] == "siliconflow_test" and posts[offset + 1]["arbiter"] == "primary"
         assert posts[offset + 2]["arbiter"] == "checker"
         await screenshot("02-latest-model-intent-saved.jpg")
-        checks.append({"case": "Delayed first save; three fast changes keep exact snapshots and final intent", "outcome": "PASS",
-                       "requests": posts[offset:], "evidence": "02-latest-model-intent-saved.jpg"})
+        checks.append(
+            {
+                "case": "Delayed first save; three fast changes keep exact snapshots and final intent",
+                "outcome": "PASS",
+                "requests": posts[offset:],
+                "evidence": "02-latest-model-intent-saved.jpg",
+            }
+        )
 
         # A currently typed model ID must also survive an unrelated save/status
         # response, before native change/blur submits the new text.
@@ -195,8 +239,13 @@ async def check():
         await expect(page.locator("#settingsModelRetry")).not_to_be_visible()
         assert saved["arbiter"] == "siliconflow_test"
         await screenshot("05-retry-saves-retained-choice.jpg")
-        checks.append({"case": "Failed latest save preserves form through close/reopen and explicit retry succeeds", "outcome": "PASS",
-                       "evidence": ["04-failed-save-preserves-choice-and-retry.jpg", "05-retry-saves-retained-choice.jpg"]})
+        checks.append(
+            {
+                "case": "Failed latest save preserves form through close/reopen and explicit retry succeeds",
+                "outcome": "PASS",
+                "evidence": ["04-failed-save-preserves-choice-and-retry.jpg", "05-retry-saves-retained-choice.jpg"],
+            }
+        )
 
         hold_next_save(fail=True)
         await page.locator('[data-settings-tab="settingsGeneral"]').click()
@@ -228,7 +277,9 @@ async def check():
             await open_settings()
             await advanced()
             await expect(page.locator("#settingsModelscopeModel")).to_have_value(value)
-            checks.append({"case": f"Typed model ID saves exactly once on {mode} and persists after reopen", "outcome": "PASS"})
+            checks.append(
+                {"case": f"Typed model ID saves exactly once on {mode} and persists after reopen", "outcome": "PASS"}
+            )
         await screenshot("06-model-id-escape-and-close-saved.jpg")
 
         # Hold an older status response from opening settings, finish a newer
@@ -247,7 +298,9 @@ async def check():
         await expect(page.locator("#settingsCheckerModel")).to_have_value("modelscope_test")
         assert saved["checker"] == "modelscope_test"
         await screenshot("07-stale-status-cannot-replace-latest-model.jpg")
-        checks.append({"case": "Late status from opening settings cannot replace latest saved choice", "outcome": "PASS"})
+        checks.append(
+            {"case": "Late status from opening settings cannot replace latest saved choice", "outcome": "PASS"}
+        )
 
         await page.locator("#settingsClose").click()
         control["configured"] = True
@@ -257,16 +310,33 @@ async def check():
         await expect(page.locator("#settingsReady")).to_contain_text("所需密钥已配置")
         await expect(page.locator("#settingsReady")).to_contain_text("服务当前是否可用，以任务返回为准")
         await screenshot("08-configured-is-not-a-service-availability-promise.jpg")
-        checks.append({"case": "Configured credentials wording explicitly distinguishes actual service availability", "outcome": "PASS"})
+        checks.append(
+            {
+                "case": "Configured credentials wording explicitly distinguishes actual service availability",
+                "outcome": "PASS",
+            }
+        )
         await browser.close()
 
     assert not errors, errors
     assert not forbidden, forbidden
-    report = {"result": "PASS", "checks": checks, "mocked_settings_posts": posts,
-        "final_mock_settings": saved, "page_errors": errors, "external_or_unplanned_requests": forbidden,
-        "real_user_data_accessed": False, "worker_started": False, "server_stopped": False}
+    report = {
+        "result": "PASS",
+        "checks": checks,
+        "mocked_settings_posts": posts,
+        "final_mock_settings": saved,
+        "page_errors": errors,
+        "external_or_unplanned_requests": forbidden,
+        "real_user_data_accessed": False,
+        "worker_started": False,
+        "server_stopped": False,
+    }
     (OUTPUT / "results.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({"result": "PASS", "checks": len(checks), "report": str(OUTPUT / "results.json")}, ensure_ascii=False))
+    print(
+        json.dumps(
+            {"result": "PASS", "checks": len(checks), "report": str(OUTPUT / "results.json")}, ensure_ascii=False
+        )
+    )
 
 
 def run():

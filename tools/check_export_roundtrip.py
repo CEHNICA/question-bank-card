@@ -38,8 +38,12 @@ SHOTS = "tmp/export"
 DB = r"tmp\accept-1133\db.sqlite3"
 MARK = "验收标记"
 
-TYPES = [("single_choice", "单选题"), ("multiple_choice", "多选题"),
-         ("fill_blank", "填空题"), ("free_response", "解答题")]
+TYPES = [
+    ("single_choice", "单选题"),
+    ("multiple_choice", "多选题"),
+    ("fill_blank", "填空题"),
+    ("free_response", "解答题"),
+]
 
 # <w:t> 的正则不能写成 <w:t[^>]*>：<w:tblPr>、<w:tc> 也会被它当开口，
 # 结果整张表格的属性全被当成正文混进文本里，比对时看着像「少了一题」。
@@ -151,7 +155,7 @@ def db_key(publication_id: str) -> str:
 
 class Loans:
     def __init__(self) -> None:
-        self.rows: list[tuple[str, str, str]] = []   # (publication_id, 原 extras, 新建 solution id)
+        self.rows: list[tuple[str, str, str]] = []  # (publication_id, 原 extras, 新建 solution id)
         self.broken: list[str] = []
 
     def borrow(self, page, publications: dict[str, str]) -> bool:
@@ -163,10 +167,17 @@ class Loans:
                 continue
             response = page.request.post(
                 f"{BASE}/api/library/{pub_id}/solution",
-                data=json.dumps({"answer": f"{MARK}答案{index}-{key}",
-                                 "analysis": f"{MARK}解析{index}-{key}：这一步是从题面推到结论的关键。",
-                                 "figures": [], "base_revision": existing, "sync_library": True}),
-                headers={"Content-Type": "application/json", "X-QB-Request": "1"})
+                data=json.dumps(
+                    {
+                        "answer": f"{MARK}答案{index}-{key}",
+                        "analysis": f"{MARK}解析{index}-{key}：这一步是从题面推到结论的关键。",
+                        "figures": [],
+                        "base_revision": existing,
+                        "sync_library": True,
+                    }
+                ),
+                headers={"Content-Type": "application/json", "X-QB-Request": "1"},
+            )
             if response.status != 201:
                 self.broken.append(pub_id)
                 skip(f"借答案失败（HTTP {response.status} {response.text()[:120]}），「分别导出」这条路这轮量不到")
@@ -188,8 +199,9 @@ class Loans:
                 if cursor.rowcount != 1:
                     missed += 1
                     print(f"  !! 没删掉解析行 {plain}（匹配 {cursor.rowcount} 行），库现在是脏的")
-                write = connection.execute("UPDATE core_publishedquestion SET extras = ? WHERE id = ?",
-                                           (original, db_key(pub_id)))
+                write = connection.execute(
+                    "UPDATE core_publishedquestion SET extras = ? WHERE id = ?", (original, db_key(pub_id))
+                )
                 if write.rowcount != 1:
                     missed += 1
                     print(f"  !! 没还原 {pub_id} 的 extras（匹配 {write.rowcount} 行）")
@@ -203,8 +215,9 @@ class Loans:
         """(原 extras 原文, 已挂着的 solution_id)。读不到就返回 (None, None)。"""
         connection = sqlite3.connect(DB)
         try:
-            row = connection.execute("SELECT extras FROM core_publishedquestion WHERE id = ?",
-                                     (db_key(pub_id),)).fetchone()
+            row = connection.execute(
+                "SELECT extras FROM core_publishedquestion WHERE id = ?", (db_key(pub_id),)
+            ).fetchone()
         finally:
             connection.close()
         if row is None:
@@ -236,8 +249,9 @@ def settle(page, label: str, timeout: int = 90000) -> str:
 
 
 def replay(page, post: dict) -> tuple[int, bytes, str, dict]:
-    response = page.request.post(post["url"], data=post["body"],
-                                 headers={"Content-Type": "application/json", "X-QB-Request": "1"})
+    response = page.request.post(
+        post["url"], data=post["body"], headers={"Content-Type": "application/json", "X-QB-Request": "1"}
+    )
     return response.status, response.body(), response.headers.get("content-type", ""), response.headers
 
 
@@ -254,8 +268,14 @@ def main() -> int:
         page = context.new_page()
 
         posts: list[dict] = []
-        page.on("request", lambda r: posts.append({"url": r.url, "body": r.post_data or ""})
-                if "/api/library/export-" in r.url and r.method == "POST" else None)
+        page.on(
+            "request",
+            lambda r: (
+                posts.append({"url": r.url, "body": r.post_data or ""})
+                if "/api/library/export-" in r.url and r.method == "POST"
+                else None
+            ),
+        )
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
 
@@ -276,7 +296,9 @@ def main() -> int:
                     page.wait_for_function(
                         "label => { const c = document.querySelector('.library-card .library-type');"
                         " return c && c.textContent.trim() === label; }",
-                        arg=label, timeout=15000)
+                        arg=label,
+                        timeout=15000,
+                    )
                 except Exception:
                     skip(f"{label}：筛完列表没换过来")
                     continue
@@ -292,8 +314,9 @@ def main() -> int:
             got = "、".join(label for key, label in TYPES if key in picked)
             failures += fail_count(check(len(picked) >= 3, f"至少挑进三种题型（实到 {len(picked)} 种：{got}）"))
             count_text = page.locator("#basketCount").inner_text().strip()
-            failures += fail_count(check(count_text == str(len(picked)),
-                                           f"篮里显示 {count_text} 题，和挑进去的 {len(picked)} 道对得上"))
+            failures += fail_count(
+                check(count_text == str(len(picked)), f"篮里显示 {count_text} 题，和挑进去的 {len(picked)} 道对得上")
+            )
             summary = page.locator("#basketSummary").inner_text()
             missing = [label for key, label in TYPES if key in picked and label not in summary]
             failures += fail_count(check(not missing, f"篮里写清了各题型（{summary}）"))
@@ -304,19 +327,27 @@ def main() -> int:
             handle = page.locator("#basketHandle")
             failures += fail_count(check(handle.is_visible(), "右边缘有一条常驻的篮子把手"))
             box = handle.bounding_box() or {}
-            failures += fail_count(check(box.get("width", 0) >= 24 and box.get("height", 0) >= 40,
-                                           f"把手够大点得中（{round(box.get('width', 0))}×{round(box.get('height', 0))}px）"))
-            failures += fail_count(check(not page.locator("#basketButton").is_visible(),
-                                           "加完题不自动弹抽屉，「组卷预览」此刻不在屏幕上（得先点把手）"))
+            failures += fail_count(
+                check(
+                    box.get("width", 0) >= 24 and box.get("height", 0) >= 40,
+                    f"把手够大点得中（{round(box.get('width', 0))}×{round(box.get('height', 0))}px）",
+                )
+            )
+            failures += fail_count(
+                check(
+                    not page.locator("#basketButton").is_visible(),
+                    "加完题不自动弹抽屉，「组卷预览」此刻不在屏幕上（得先点把手）",
+                )
+            )
             glow = handle.evaluate("n => getComputedStyle(n, '::after').animationName")
-            failures += fail_count(check("fluoresce" in (glow or ""),
-                                           f"篮里有题、还没展开过时，把手在闪（::{'{'}after{'}'} 动画 {glow}）"))
+            failures += fail_count(
+                check("fluoresce" in (glow or ""), f"篮里有题、还没展开过时，把手在闪（::{'{'}after{'}'} 动画 {glow}）")
+            )
             page.screenshot(path=f"{SHOTS}/after-add.png")
             handle.click()
             page.wait_for_selector("#basketPanel", state="visible")
             glow2 = handle.evaluate("n => getComputedStyle(n, '::after').animationName")
-            failures += fail_count(check("fluoresce" not in (glow2 or ""),
-                                           f"展开过一次之后就不再闪了（动画 {glow2}）"))
+            failures += fail_count(check("fluoresce" not in (glow2 or ""), f"展开过一次之后就不再闪了（动画 {glow2}）"))
             page.locator("#basketButton").click()
 
             # ── 三、组卷预览 ──────────────────────────────────────
@@ -346,10 +377,15 @@ def main() -> int:
             wait_preview(page, len(picked))
 
             buttons = page.evaluate(BUTTON_STATE)
-            failures += fail_count(check(not buttons["exportWord"]["disabled"], f"「导出 Word」可点（{buttons['exportWord']}）"))
-            failures += fail_count(check(bool(borrowed) is not buttons["exportSplit"]["disabled"],
-                                         f"借到答案之后「分别导出」的状态跟着变（借到 {len(loans.rows)} 段，"
-                                         f"按钮 {buttons['exportSplit']}）"))
+            failures += fail_count(
+                check(not buttons["exportWord"]["disabled"], f"「导出 Word」可点（{buttons['exportWord']}）")
+            )
+            failures += fail_count(
+                check(
+                    bool(borrowed) is not buttons["exportSplit"]["disabled"],
+                    f"借到答案之后「分别导出」的状态跟着变（借到 {len(loans.rows)} 段，按钮 {buttons['exportSplit']}）",
+                )
+            )
             print(f"  （答案状态：{page.locator('#printAnswerStatus').inner_text().strip() or '没写'}）")
 
             # ── 五、导出 Word ─────────────────────────────────────
@@ -366,7 +402,8 @@ def main() -> int:
             page.select_option("#printDocument", "combined")
             page.wait_for_function(
                 "() => { const s = document.getElementById('printPageStatus'); return s && !s.textContent.includes('正在排版'); }",
-                timeout=90000)
+                timeout=90000,
+            )
             posts.clear()
             page.locator("#exportWord").click()
             status = settle(page, "Word 题目＋答案")
@@ -398,8 +435,12 @@ def main() -> int:
 
             # ── 八、导完之后按钮回得来吗 ────────────────────────────
             after = page.evaluate(BUTTON_STATE)
-            failures += fail_count(check(not [k for k, v in after.items() if v["disabled"]],
-                                         f"导完一轮，按钮都回来了（{json.dumps(after, ensure_ascii=False)}）"))
+            failures += fail_count(
+                check(
+                    not [k for k, v in after.items() if v["disabled"]],
+                    f"导完一轮，按钮都回来了（{json.dumps(after, ensure_ascii=False)}）",
+                )
+            )
             stuck = page.locator("#printExportStatus").inner_text()
             failures += fail_count(check("正在" not in stuck, f"状态栏没卡在「正在…」：{stuck.strip()[:60]}"))
             page.screenshot(path=f"{SHOTS}/after-export.png")
@@ -421,12 +462,14 @@ def main() -> int:
 
 def wait_preview(page, count: int) -> None:
     page.wait_for_selector("#printSheet[open]")
-    page.wait_for_function("n => document.querySelectorAll('#printPaper .print-question').length === n",
-                           arg=count, timeout=40000)
+    page.wait_for_function(
+        "n => document.querySelectorAll('#printPaper .print-question').length === n", arg=count, timeout=40000
+    )
     try:
         page.wait_for_function(
             "() => { const s = document.getElementById('printPageStatus'); return s && !s.textContent.includes('正在排版'); }",
-            timeout=90000)
+            timeout=90000,
+        )
     except Exception:
         skip("排版一直没报完成（分页卡住）")
 
@@ -434,12 +477,14 @@ def wait_preview(page, count: int) -> None:
 def preview_checks(page, picked: dict) -> int:
     failures = 0
     shown = page.eval_on_selector_all("#printPaper .print-question", "nodes => nodes.map(n => n.dataset.questionType)")
-    failures += fail_count(check(sorted(shown) == sorted(picked),
-                                 f"预览里 {len(shown)} 道题的题型和挑的一样：{'、'.join(shown)}"))
+    failures += fail_count(
+        check(sorted(shown) == sorted(picked), f"预览里 {len(shown)} 道题的题型和挑的一样：{'、'.join(shown)}")
+    )
     sections = page.eval_on_selector_all("#printPaper .print-section", "nodes => nodes.map(n => n.textContent.trim())")
     failures += fail_count(check(len(sections) >= 2, f"预览按题型分了 {len(sections)} 组：{' / '.join(sections)}"))
-    failures += fail_count(check(not page.locator("#printMissing").is_visible(),
-                                 "没有「尚未载入」的提示（否则导出会自己拦下来）"))
+    failures += fail_count(
+        check(not page.locator("#printMissing").is_visible(), "没有「尚未载入」的提示（否则导出会自己拦下来）")
+    )
     page.screenshot(path=f"{SHOTS}/preview.png")
     return failures
 
@@ -452,8 +497,12 @@ def export_checks(page, label: str, post: dict, stems, status: str, expect_answe
         return failures + 1
     count = re.search(r"(?:已导出|已下载)\s*(\d+)\s*道题", status)
     if count:
-        failures += fail_count(check(int(count.group(1)) == len(stems),
-                                     f"{label}：状态栏说导出了 {count.group(1)} 道题（篮里 {len(stems)} 道）"))
+        failures += fail_count(
+            check(
+                int(count.group(1)) == len(stems),
+                f"{label}：状态栏说导出了 {count.group(1)} 道题（篮里 {len(stems)} 道）",
+            )
+        )
     parts = docx_parts(blob)
     lost = [qid for qid, snippet in stems if snippet not in parts["text"]]
     if not check(not lost, f"{label}：{len(stems)} 道题的题干都在（{len(stems) - len(lost)}/{len(stems)}，缺 {lost}）"):
@@ -461,15 +510,16 @@ def export_checks(page, label: str, post: dict, stems, status: str, expect_answe
             if qid in lost:
                 print(f"    少了这道，界面上的片段是：{snippet!r}")
         print(f"    文件里的纯文字是：{parts['raw_text'][:600]!r}")
-    failures += fail_count(check(parts["math"] > 0,
-                                 f"{label}：公式是 Word 公式（OMML {parts['math']} 处）而不是图片"))
+    failures += fail_count(check(parts["math"] > 0, f"{label}：公式是 Word 公式（OMML {parts['math']} 处）而不是图片"))
     found = parts["text"].count(MARK)
     if expect_answers:
-        failures += fail_count(check(found >= len(stems),
-                                     f"{label}：带上了借进去的 {len(stems)} 段答案（文件里 {found} 处「{MARK}」）"))
+        failures += fail_count(
+            check(found >= len(stems), f"{label}：带上了借进去的 {len(stems)} 段答案（文件里 {found} 处「{MARK}」）")
+        )
     else:
-        failures += fail_count(check(found == 0,
-                                     f"{label}：没混进答案（「输出内容」选的是题目，文件里 {found} 处「{MARK}」）"))
+        failures += fail_count(
+            check(found == 0, f"{label}：没混进答案（「输出内容」选的是题目，文件里 {found} 处「{MARK}」）")
+        )
     print(f"  （{label}：图片 {parts['drawings']} 处、内嵌文件 {parts['media']} 个）")
     open(f"{SHOTS}/{label}.docx", "wb").write(blob)
     return failures
@@ -512,12 +562,11 @@ def split_checks(page, post: dict, stems, status: str, count: int) -> int:
         qnums = question_numbers(question) if question else []
         anums = question_numbers(answer)
         print(f"  题目卷题号 {qnums} / 答案卷题号 {anums}")
-        failures += fail_count(check(anums == qnums,
-                                     f"两卷题号完全一致（题目卷 {qnums}，答案卷 {anums}）"))
-        failures += fail_count(check(anums == list(range(1, len(anums) + 1)),
-                                     f"答案卷题号是 1..{count} 不跳号不重号（{anums}）"))
-        failures += fail_count(check(len(anums) == count,
-                                     f"答案卷题数 {len(anums)} = 篮里 {count} 道"))
+        failures += fail_count(check(anums == qnums, f"两卷题号完全一致（题目卷 {qnums}，答案卷 {anums}）"))
+        failures += fail_count(
+            check(anums == list(range(1, len(anums) + 1)), f"答案卷题号是 1..{count} 不跳号不重号（{anums}）")
+        )
+        failures += fail_count(check(len(anums) == count, f"答案卷题数 {len(anums)} = 篮里 {count} 道"))
     open(f"{SHOTS}/split.zip", "wb").write(blob)
     return failures
 
@@ -530,7 +579,7 @@ def pdf_text(blob: bytes) -> str:
     """
     try:
         import pymupdf as pdf
-    except ImportError:                      # 老版本只有 fitz 这个名字
+    except ImportError:  # 老版本只有 fitz 这个名字
         import fitz as pdf
     with pdf.open(stream=blob, filetype="pdf") as document:
         return unicodedata.normalize("NFKC", "".join(page.get_text() for page in document))
@@ -553,18 +602,18 @@ def pdf_checks(page, post: dict, status: str, stems=None, expect_answers: bool =
         sent = None
     on_screen = page.evaluate("() => Number(document.getElementById('printPaper')?.dataset.pageCount) || 0")
     reported = int(headers.get("x-page-count") or 0)
-    failures += fail_count(check(isinstance(sent, int) and sent > 0,
-                                 f"导 PDF 时带上了屏幕上的页数（发了 {sent}）"))
-    failures += fail_count(check(sent == on_screen,
-                                 f"请求里的页数 {sent} = 屏幕上的 {on_screen}"))
-    failures += fail_count(check(reported == on_screen,
-                                 f"导回来的 PDF 是 {reported} 页 = 屏幕上的 {on_screen} 页"))
+    failures += fail_count(check(isinstance(sent, int) and sent > 0, f"导 PDF 时带上了屏幕上的页数（发了 {sent}）"))
+    failures += fail_count(check(sent == on_screen, f"请求里的页数 {sent} = 屏幕上的 {on_screen}"))
+    failures += fail_count(check(reported == on_screen, f"导回来的 PDF 是 {reported} 页 = 屏幕上的 {on_screen} 页"))
     # 页数对不上时必须拒发。把请求里的页数改掉再发一次，看它到底给不给。
-    tampered = dict(post, body=json.dumps({**json.loads(post["body"]),
-                                           "preview_page_count": (on_screen or 1) + 1}))
+    tampered = dict(post, body=json.dumps({**json.loads(post["body"]), "preview_page_count": (on_screen or 1) + 1}))
     bad_code, bad_blob, bad_mime, _ = replay(page, tampered)
-    failures += fail_count(check(bad_code == 409 and not bad_blob.startswith(b"%PDF-"),
-                                 f"页数对不上时不发卷（HTTP {bad_code}，{bad_mime}，{len(bad_blob)} 字节）"))
+    failures += fail_count(
+        check(
+            bad_code == 409 and not bad_blob.startswith(b"%PDF-"),
+            f"页数对不上时不发卷（HTTP {bad_code}，{bad_mime}，{len(bad_blob)} 字节）",
+        )
+    )
     if not stems:
         return failures
     # 以前这里只到「是个 PDF、有页」就收工。一份空白页或整页缺题的 PDF 一样能过 ——
@@ -578,14 +627,14 @@ def pdf_checks(page, post: dict, status: str, stems=None, expect_answers: bool =
         print(f"    PDF 里的纯文字有 {len(text)} 字：{text[:300]!r}")
     found = text.count(MARK)
     if expect_answers:
-        failures += fail_count(check(found >= len(stems),
-                                     f"PDF 里带上了借进去的 {len(stems)} 段答案（{found} 处「{MARK}」）"))
+        failures += fail_count(
+            check(found >= len(stems), f"PDF 里带上了借进去的 {len(stems)} 段答案（{found} 处「{MARK}」）")
+        )
     else:
         failures += fail_count(check(found == 0, f"PDF 里没混进答案（{found} 处「{MARK}」）"))
     numbers = [int(m) for m in re.findall(r"(?m)^\s*(\d+)\s*[.．、]", pdf_text(blob))]
     print(f"  PDF 里看到的题号：{numbers[:12]}")
-    failures += fail_count(check(len(numbers) == len(stems),
-                                 f"PDF 里题号个数 {len(numbers)} = 篮里 {len(stems)} 道"))
+    failures += fail_count(check(len(numbers) == len(stems), f"PDF 里题号个数 {len(numbers)} = 篮里 {len(stems)} 道"))
     return failures
 
 

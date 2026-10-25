@@ -1,4 +1,5 @@
 """Versioned solution overlays and private local assets, never OCR replacements."""
+
 from __future__ import annotations
 
 import hashlib
@@ -45,7 +46,9 @@ def identity(value, label="解析版本"):
 def _folder(publication_id):
     root = Path(settings.DATA_ROOT)
     folder = root / "library-solutions" / str(publication_id)
-    if any(part.is_symlink() for part in (folder.parent, folder)) or not folder.resolve().is_relative_to(root.resolve()):
+    if any(part.is_symlink() for part in (folder.parent, folder)) or not folder.resolve().is_relative_to(
+        root.resolve()
+    ):
         raise SolutionError("解析图片目录异常，未访问原文件", 409)
     return folder
 
@@ -55,13 +58,26 @@ def _asset_spec(publication_id, asset_id):
     folder = _folder(publication_id)
     target, metadata = folder / (key + ".png"), folder / (key + ".json")
     try:
-        if target.is_symlink() or metadata.is_symlink() or target.stat().st_size > MAX_UPLOAD_BYTES or metadata.stat().st_size > 2000:
+        if (
+            target.is_symlink()
+            or metadata.is_symlink()
+            or target.stat().st_size > MAX_UPLOAD_BYTES
+            or metadata.stat().st_size > 2000
+        ):
             raise ValueError
         spec = json.loads(metadata.read_text(encoding="utf-8"))
-        if not isinstance(spec, dict) or spec.get("id") != key or spec.get("publication_id") != str(publication_id) \
-                or not isinstance(spec.get("sha256"), str) or not re.fullmatch(r"[a-f0-9]{64}", spec["sha256"]) \
-                or type(spec.get("width")) is not int or type(spec.get("height")) is not int \
-                or not spec["width"] >= 1 or not spec["height"] >= 1 or spec["width"] * spec["height"] > MAX_PIXELS:
+        if (
+            not isinstance(spec, dict)
+            or spec.get("id") != key
+            or spec.get("publication_id") != str(publication_id)
+            or not isinstance(spec.get("sha256"), str)
+            or not re.fullmatch(r"[a-f0-9]{64}", spec["sha256"])
+            or type(spec.get("width")) is not int
+            or type(spec.get("height")) is not int
+            or not spec["width"] >= 1
+            or not spec["height"] >= 1
+            or spec["width"] * spec["height"] > MAX_PIXELS
+        ):
             raise ValueError
         return spec, target
     except (OSError, ValueError, KeyError, TypeError):
@@ -77,8 +93,11 @@ def _asset(publication_id, asset_id):
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(io.BytesIO(data)) as image:
-                if image.format != "PNG" or image.width * image.height > MAX_PIXELS \
-                        or [image.width, image.height] != [spec.get("width"), spec.get("height")]:
+                if (
+                    image.format != "PNG"
+                    or image.width * image.height > MAX_PIXELS
+                    or [image.width, image.height] != [spec.get("width"), spec.get("height")]
+                ):
                     raise ValueError
                 image.load()
         return spec, data
@@ -117,17 +136,26 @@ def _figure_json(publication_id, value):
     # Listing hundreds of library entries or historical versions must not
     # decode every full image. Retrieval, save and export verify actual bytes.
     spec, _target = _asset_spec(publication_id, value["id"])
-    return {**deepcopy(spec), **deepcopy(value),
-            "url": f"/api/library/{publication_id}/solution-images/{spec['id']}?v={spec['sha256'][:16]}"}
+    return {
+        **deepcopy(spec),
+        **deepcopy(value),
+        "url": f"/api/library/{publication_id}/solution-images/{spec['id']}?v={spec['sha256'][:16]}",
+    }
 
 
 def solution_json(solution, *, fingerprint=None):
-    return {"id": str(solution.pk), "publication_id": str(solution.publication_id),
-            "parent_id": str(solution.parent_id) if solution.parent_id else None,
-            "fingerprint": solution.fingerprint, "answer": solution.answer, "analysis": solution.analysis,
-            "figures": [_figure_json(solution.publication_id, item) for item in solution.figures],
-            "created_at": solution.created_at.isoformat(),
-            "needs_check": solution.fingerprint != (fingerprint or library.generation_fingerprint(solution.publication.content, solution.publication_id))}
+    return {
+        "id": str(solution.pk),
+        "publication_id": str(solution.publication_id),
+        "parent_id": str(solution.parent_id) if solution.parent_id else None,
+        "fingerprint": solution.fingerprint,
+        "answer": solution.answer,
+        "analysis": solution.analysis,
+        "figures": [_figure_json(solution.publication_id, item) for item in solution.figures],
+        "created_at": solution.created_at.isoformat(),
+        "needs_check": solution.fingerprint
+        != (fingerprint or library.generation_fingerprint(solution.publication.content, solution.publication_id)),
+    }
 
 
 def selected(publication, revision=None):
@@ -161,21 +189,36 @@ def capture_images(solution):
     images = []
     for figure in solution.figures:
         spec, data = _asset(solution.publication_id, figure["id"])
-        images.append({**deepcopy(figure), "slot": "solution", "bytes": data,
-                       "size": (spec["width"], spec["height"]), "name": spec["id"], "sha256": spec["sha256"]})
+        images.append(
+            {
+                **deepcopy(figure),
+                "slot": "solution",
+                "bytes": data,
+                "size": (spec["width"], spec["height"]),
+                "name": spec["id"],
+                "sha256": spec["sha256"],
+            }
+        )
     return images
 
 
 def _text(value, name, maximum):
-    if not isinstance(value, str) or any((ord(c) < 32 and c not in "\n\r\t") or 0xD800 <= ord(c) <= 0xDFFF for c in value) \
-            or len(value.encode("utf-16-le")) // 2 > maximum:
+    if (
+        not isinstance(value, str)
+        or any((ord(c) < 32 and c not in "\n\r\t") or 0xD800 <= ord(c) <= 0xDFFF for c in value)
+        or len(value.encode("utf-16-le")) // 2 > maximum
+    ):
         raise SolutionError(f"{name}应为不超过 {maximum} 字的文字")
     return value.strip()
 
 
 def save(publication, payload):
     allowed = {"answer", "analysis", "figures", "base_revision", "sync_library"}
-    if not isinstance(payload, dict) or set(payload) - allowed or not {"answer", "analysis", "base_revision", "sync_library"} <= set(payload):
+    if (
+        not isinstance(payload, dict)
+        or set(payload) - allowed
+        or not {"answer", "analysis", "base_revision", "sync_library"} <= set(payload)
+    ):
         raise SolutionError("请提供答案、解析、原解析版本和是否同步题库")
     if type(payload["sync_library"]) is not bool:
         raise SolutionError("是否同步题库只能是 true 或 false")
@@ -186,7 +229,11 @@ def save(publication, payload):
     normalized, seen = [], set()
     for value in figures:
         value = {"id": value} if isinstance(value, str) else value
-        if not isinstance(value, dict) or set(value) - {"id", "display_width", "position", "paragraph"} or "id" not in value:
+        if (
+            not isinstance(value, dict)
+            or set(value) - {"id", "display_width", "position", "paragraph"}
+            or "id" not in value
+        ):
             raise SolutionError("解析图片位置格式不正确")
         key = identity(value["id"], "解析图片")
         if key in seen:
@@ -203,8 +250,14 @@ def save(publication, payload):
             spec, _data = adopted
         width = value.get("display_width", min(178, max(20, spec["width"] * 25.4 / 150)))
         position, paragraph = value.get("position", "after"), value.get("paragraph", 0)
-        if type(width) not in {float, int} or not math.isfinite(width) or not 5 <= width <= 178 \
-                or position not in {"before", "after", "paragraph"} or type(paragraph) is not int or not 0 <= paragraph <= 1000:
+        if (
+            type(width) not in {float, int}
+            or not math.isfinite(width)
+            or not 5 <= width <= 178
+            or position not in {"before", "after", "paragraph"}
+            or type(paragraph) is not int
+            or not 0 <= paragraph <= 1000
+        ):
             raise SolutionError("解析图宽度应为 5–178 mm，位置应为解析前、解析后或段落")
         normalized.append({"id": key, "display_width": width, "position": position, "paragraph": paragraph})
     if not answer and not analysis and not normalized:
@@ -222,9 +275,14 @@ def save(publication, payload):
         # own parent; parallel edits still need the exact current head.
         if payload["sync_library"] and current != base:
             raise SolutionError("题库解析已在其他窗口修改，请重新载入；本次文字和原解析均保留", 409)
-        row = LibrarySolution.objects.create(publication=publication, parent=parent,
+        row = LibrarySolution.objects.create(
+            publication=publication,
+            parent=parent,
             fingerprint=library.generation_fingerprint(publication.content, publication.pk),
-            answer=answer, analysis=analysis, figures=normalized)
+            answer=answer,
+            analysis=analysis,
+            figures=normalized,
+        )
         if payload["sync_library"]:
             extras = {**deepcopy(publication.extras or {}), "solution_id": str(row.pk)}
             extras.pop("solution_needs_review_id", None)
@@ -237,6 +295,7 @@ def solution_view(request, publication_id):
     if request.method not in {"GET", "POST"}:
         return HttpResponseNotAllowed(["GET", "POST"])
     from .views import _body, _guard
+
     if request.method == "POST":
         rejected = _guard(request)
         if rejected is not None:
@@ -246,7 +305,10 @@ def solution_view(request, publication_id):
         if request.method == "POST":
             row = save(publication, _body(request, limit=500_000))
             publication.refresh_from_db()
-            return JsonResponse({"solution": solution_json(row), "base_revision": (publication.extras or {}).get("solution_id")}, status=201)
+            return JsonResponse(
+                {"solution": solution_json(row), "base_revision": (publication.extras or {}).get("solution_id")},
+                status=201,
+            )
         row = selected(publication, request.GET.get("revision"))
         fingerprint = library.generation_fingerprint(publication.content, publication.pk)
         # 1.13.5：题面一改，题目就换成新一版，原来那份解析留在**旧版**上 ——
@@ -263,13 +325,22 @@ def solution_view(request, publication_id):
                 older = None
             if older is not None:
                 try:
-                    previous = {**solution_json(older, fingerprint=older.fingerprint), "needs_check": True,
-                                "from_version": older.publication.version}
+                    previous = {
+                        **solution_json(older, fingerprint=older.fingerprint),
+                        "needs_check": True,
+                        "from_version": older.publication.version,
+                    }
                 except SolutionError as error:
-                    previous = {"id": str(older.pk), "answer": older.answer, "analysis": older.analysis,
-                                "figures": [], "created_at": older.created_at.isoformat(),
-                                "needs_check": True, "from_version": older.publication.version,
-                                "asset_error": str(error)}
+                    previous = {
+                        "id": str(older.pk),
+                        "answer": older.answer,
+                        "analysis": older.analysis,
+                        "figures": [],
+                        "created_at": older.created_at.isoformat(),
+                        "needs_check": True,
+                        "from_version": older.publication.version,
+                        "asset_error": str(error),
+                    }
         raw_ai = (publication.extras or {}).get("ai_answer")
         ai_answer = None
         ai_stale = False
@@ -284,15 +355,32 @@ def solution_view(request, publication_id):
             except SolutionError as error:
                 # A broken old image must not prevent editing a healthy current
                 # solution. Preserve the revision and prose for manual repair.
-                history.append({"id": str(item.pk), "publication_id": str(item.publication_id),
-                    "answer": item.answer, "analysis": item.analysis, "figures": [], "asset_error": str(error),
-                    "created_at": item.created_at.isoformat(), "needs_check": True})
-        return JsonResponse({"solution": solution_json(row) if row else None,
-            "base_revision": (publication.extras or {}).get("solution_id"),
-            "previous": previous,
-            "origin": {"answer": str((publication.content or {}).get("answer") or ""), "analysis": str((publication.content or {}).get("analysis") or "")},
-            "ai_answer": ai_answer, "ai_answer_stale": ai_stale,
-            "history": history})
+                history.append(
+                    {
+                        "id": str(item.pk),
+                        "publication_id": str(item.publication_id),
+                        "answer": item.answer,
+                        "analysis": item.analysis,
+                        "figures": [],
+                        "asset_error": str(error),
+                        "created_at": item.created_at.isoformat(),
+                        "needs_check": True,
+                    }
+                )
+        return JsonResponse(
+            {
+                "solution": solution_json(row) if row else None,
+                "base_revision": (publication.extras or {}).get("solution_id"),
+                "previous": previous,
+                "origin": {
+                    "answer": str((publication.content or {}).get("answer") or ""),
+                    "analysis": str((publication.content or {}).get("analysis") or ""),
+                },
+                "ai_answer": ai_answer,
+                "ai_answer_stale": ai_stale,
+                "history": history,
+            }
+        )
     except SolutionError as error:
         return JsonResponse({"error": str(error)}, status=error.status)
     except OSError:
@@ -305,15 +393,22 @@ def _store_image(publication, image):
     image.load()
     if image.width < 1 or image.height < 1 or image.width * image.height > MAX_PIXELS:
         raise SolutionError("图片尺寸过大或为空")
-    image = ImageOps.exif_transpose(image).convert("RGBA" if "A" in image.getbands() or "transparency" in image.info else "RGB")
+    image = ImageOps.exif_transpose(image).convert(
+        "RGBA" if "A" in image.getbands() or "transparency" in image.info else "RGB"
+    )
     output = io.BytesIO()
     image.save(output, format="PNG", optimize=True)
     data = output.getvalue()
     if len(data) > MAX_UPLOAD_BYTES:
         raise SolutionError("解析图片超过 16 MiB，请压缩后重试", 413)
     key = str(uuid.uuid4())
-    spec = {"id": key, "publication_id": str(publication.pk), "width": image.width, "height": image.height,
-            "sha256": hashlib.sha256(data).hexdigest()}
+    spec = {
+        "id": key,
+        "publication_id": str(publication.pk),
+        "width": image.width,
+        "height": image.height,
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
     folder = _folder(publication.pk)
     folder.mkdir(parents=True, exist_ok=True)
     # IDs are fresh for each addition; no saved immutable asset is overwritten.
@@ -328,7 +423,10 @@ def _store_image(publication, image):
             os.replace(temporary, target)
         finally:
             temporary.unlink(missing_ok=True)
-    return _figure_json(publication.pk, {"id": key, "display_width": min(178, max(20, image.width * 25.4 / 150)), "position": "after", "paragraph": 0})
+    return _figure_json(
+        publication.pk,
+        {"id": key, "display_width": min(178, max(20, image.width * 25.4 / 150)), "position": "after", "paragraph": 0},
+    )
 
 
 @csrf_exempt
@@ -336,6 +434,7 @@ def image_upload(request, publication_id):
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
     from .views import _body, _guard
+
     rejected = _guard(request, json_body=False)
     if rejected is not None:
         return rejected
@@ -346,9 +445,11 @@ def image_upload(request, publication_id):
             if set(payload) != {"page_idx", "bbox"} or publication.paper is None:
                 raise SolutionError("请提供原卷页码和矩形范围")
             from .source_images import valid_regions
+
             if not valid_regions(publication.paper, [payload]):
                 raise SolutionError("范围必须位于这道题所属原卷的真实页面内")
             from .pipeline import PageStore
+
             page = PageStore(publication.paper).load(payload["page_idx"])
             image = page.crop(imaging.to_pixels(payload["bbox"], page.size))
             figure = _store_image(publication, image)

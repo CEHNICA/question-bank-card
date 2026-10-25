@@ -36,14 +36,29 @@ def main():
             failures.append(f"{label} {detail}")
 
     with sync_playwright() as pw:
-        executable = next((str(p) for p in (Path(pw.chromium.executable_path),
-            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if p.is_file()), None)
+        executable = next(
+            (
+                str(p)
+                for p in (
+                    Path(pw.chromium.executable_path),
+                    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                )
+                if p.is_file()
+            ),
+            None,
+        )
         browser = pw.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
         context = browser.new_context(viewport={"width": args.width, "height": args.height})
         context.add_init_script("localStorage.setItem('qb-welcome-seen','1'); localStorage.setItem('qb-lens','0')")
-        context.route("**/*", lambda route: route.continue_() if urlparse(route.request.url).hostname in
-                      ("127.0.0.1", "localhost") else route.abort())
+        context.route(
+            "**/*",
+            lambda route: (
+                route.continue_()
+                if urlparse(route.request.url).hostname in ("127.0.0.1", "localhost")
+                else route.abort()
+            ),
+        )
         page = context.new_page()
         page.on("pageerror", lambda error: errors.append(str(error)))
 
@@ -54,17 +69,26 @@ def main():
         print("== 题库页 ==")
         # 侧栏：搜索、来源、题型、排序、更多筛选都得能用（查找条搬进侧栏之后）
         rail = page.locator("#libraryRail")
-        check("查找和筛选在左侧栏", rail.is_visible() and rail.bounding_box()["width"] < 320,
-              f"侧栏宽 {rail.bounding_box()['width']}")
-        check("搜索框和下拉同高", page.evaluate("""() => {
+        check(
+            "查找和筛选在左侧栏",
+            rail.is_visible() and rail.bounding_box()["width"] < 320,
+            f"侧栏宽 {rail.bounding_box()['width']}",
+        )
+        check(
+            "搜索框和下拉同高",
+            page.evaluate("""() => {
             const s = document.querySelector('.library-search input').getBoundingClientRect();
             const d = document.querySelector('.library-rail .library-select select').getBoundingClientRect();
-            return Math.abs(s.height - d.height) < 1; }"""))
+            return Math.abs(s.height - d.height) < 1; }"""),
+        )
         page.locator("#searchInput").fill("抛物线")
         page.wait_for_timeout(700)
         check("侧栏里搜索能用", page.locator(".library-card").count() >= 1, page.locator(".library-card").count())
-        check("搜索后出现「当前筛选」行（在侧栏里）", page.locator("#activeFilters").is_visible()
-              and page.locator("#activeFilters").evaluate("n => n.closest('.library-rail') !== null"))
+        check(
+            "搜索后出现「当前筛选」行（在侧栏里）",
+            page.locator("#activeFilters").is_visible()
+            and page.locator("#activeFilters").evaluate("n => n.closest('.library-rail') !== null"),
+        )
         page.locator("#searchInput").fill("")
         page.wait_for_timeout(700)
         page.locator("#sourceSelect").select_option(index=1)
@@ -82,7 +106,10 @@ def main():
         check("侧栏里排序能用", page.evaluate("new URL(location.href).searchParams.get('sort')") == "source")
         page.locator("#sortSelect").select_option("recent")
         page.wait_for_timeout(700)
-        check("清掉排序后 URL 也跟着清", page.evaluate("new URL(location.href).searchParams.get('sort')") in (None, "recent"))
+        check(
+            "清掉排序后 URL 也跟着清",
+            page.evaluate("new URL(location.href).searchParams.get('sort')") in (None, "recent"),
+        )
 
         # 加一题进篮，验的是 localStorage 里的篮，不���顶栏按钮。
         page.locator(".library-card").first.get_by_role("button", name="加入试题篮").click()
@@ -95,8 +122,7 @@ def main():
         # 这个改版。脚本原来还在等 .topbar-basket，那个元素早没了，一等就是 30 秒超时。
         handle = page.locator("#basketHandle")
         check("右边缘有一条常驻的篮把手", handle.is_visible(), handle.get_attribute("aria-label") or "")
-        check("把手上的计数跟着篮里的题走",
-              (handle.locator("#basketHandleCount").inner_text() or "").strip() == "1")
+        check("把手上的计数跟着篮里的题走", (handle.locator("#basketHandleCount").inner_text() or "").strip() == "1")
         check("顶栏不再有篮的按钮", page.locator(".topbar-basket").count() == 0)
 
         handle.click()
@@ -167,8 +193,11 @@ def main():
         page.locator("#selectVisible").check()
         page.wait_for_timeout(400)
         check("勾上后批量按钮出现", page.locator("#addSelected").is_visible())
-        check("勾选数写对了", page.locator("#selectionCount").inner_text().strip() != "已勾选 0 题",
-              page.locator("#selectionCount").inner_text())
+        check(
+            "勾选数写对了",
+            page.locator("#selectionCount").inner_text().strip() != "已勾选 0 题",
+            page.locator("#selectionCount").inner_text(),
+        )
         page.locator("#clearSelection").click()
         page.wait_for_timeout(400)
         check("取消勾选后按钮又收起来", not page.locator("#addSelected").is_visible())
@@ -219,8 +248,11 @@ def main():
             page.screenshot(path=str(OUTPUT / "tour-drawer.png"))
             page.locator("#tourNext").click()
             page.wait_for_timeout(500)
-            check("下一步到设置那一步，抽屉仍开着", page.evaluate("window.QBSiteDrawer.isOpen()"),
-                  page.locator("#tourTitle").inner_text())
+            check(
+                "下一步到设置那一步，抽屉仍开着",
+                page.evaluate("window.QBSiteDrawer.isOpen()"),
+                page.locator("#tourTitle").inner_text(),
+            )
             page.locator("#tourNext").click()
             page.wait_for_timeout(500)
             check("巡演走完抽屉合上", not page.evaluate("window.QBSiteDrawer.isOpen()"))

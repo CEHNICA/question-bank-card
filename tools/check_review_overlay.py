@@ -67,8 +67,9 @@ PROBE = """(menu) => {
 def dismiss_modals(page) -> None:
     for selector in ("#welcomeDialog[open]", "#automaticGuideDialog[open]"):
         while page.locator(selector).count():
-            page.locator(f"{selector} [data-close]").first.click() if page.locator(f"{selector} [data-close]").count() \
-                else page.locator("#welcomeSkip").first.click()
+            page.locator(f"{selector} [data-close]").first.click() if page.locator(
+                f"{selector} [data-close]"
+            ).count() else page.locator("#welcomeSkip").first.click()
             page.wait_for_timeout(400)
 
 
@@ -94,7 +95,9 @@ def open_and_probe(page, summary_locator, label: str) -> tuple[int, int]:
     data = page.evaluate(PROBE, panel.element_handle())
     if data["items"]:
         for item in data["items"]:
-            blocked.append(f"{label} · 「{item['label']}」被 {item['coveredBy']} 压住（元素在 {item['itemTop']}–{item['itemBottom']}）")
+            blocked.append(
+                f"{label} · 「{item['label']}」被 {item['coveredBy']} 压住（元素在 {item['itemTop']}–{item['itemBottom']}）"
+            )
     close_everything(page)
     return len(data["items"]), data["count"]
 
@@ -140,7 +143,10 @@ def check_corner(page, tag: str) -> None:
     before = f"{SHOTS}/_corner_open.png"
     after = f"{SHOTS}/_corner_clip.png"
     page.screenshot(path=before, clip=clip)
-    page.evaluate("(css) => { const s = document.createElement('style'); s.id = 'corner-probe'; s.textContent = css; document.head.appendChild(s); }", CORNER_CLIP_IT)
+    page.evaluate(
+        "(css) => { const s = document.createElement('style'); s.id = 'corner-probe'; s.textContent = css; document.head.appendChild(s); }",
+        CORNER_CLIP_IT,
+    )
     page.wait_for_timeout(200)
     page.screenshot(path=after, clip=corner_clip(page) or clip)
     page.evaluate("document.getElementById('corner-probe')?.remove()")
@@ -157,10 +163,12 @@ def check_corner(page, tag: str) -> None:
         if d:
             changed += 1
             worst = max(worst, d)
-    check(worst <= CORNER_MAX_DELTA,
-          f"{tag}：菜单开着时卡片左上角和裁剪时几乎一样（{changed} 个像素有差，最大通道差 {worst}）"
-          if worst <= CORNER_MAX_DELTA else
-          f"{tag}：菜单开着时卡片左上角顶出方角了（{changed} 个像素，最大通道差 {worst}）")
+    check(
+        worst <= CORNER_MAX_DELTA,
+        f"{tag}：菜单开着时卡片左上角和裁剪时几乎一样（{changed} 个像素有差，最大通道差 {worst}）"
+        if worst <= CORNER_MAX_DELTA
+        else f"{tag}：菜单开着时卡片左上角顶出方角了（{changed} 个像素，最大通道差 {worst}）",
+    )
 
 
 def run(page) -> None:
@@ -189,13 +197,16 @@ def run(page) -> None:
 
             bad_total = 0
             for index in range(cards):
-                bad, _ = open_and_probe(page, page.locator("details.more > summary").nth(index),
-                                       f"第 {index + 1} 张卡的「更多」 @ {where}")
+                bad, _ = open_and_probe(
+                    page, page.locator("details.more > summary").nth(index), f"第 {index + 1} 张卡的「更多」 @ {where}"
+                )
                 bad_total += bad
-            check(bad_total == 0,
-                  f"{width}×{height} @ {where}：{cards} 张卡的「更多」菜单（{cards * 4} 项）全都点得到"
-                  if bad_total == 0 else
-                  f"{width}×{height} @ {where}：{cards} 张卡里有 {bad_total} 项被压住")
+            check(
+                bad_total == 0,
+                f"{width}×{height} @ {where}：{cards} 张卡的「更多」菜单（{cards * 4} 项）全都点得到"
+                if bad_total == 0
+                else f"{width}×{height} @ {where}：{cards} 张卡里有 {bad_total} 项被压住",
+            )
 
         # 圆角特写：菜单开着的时候量这张正在屏幕里的卡
         page.evaluate("window.scrollTo(0, 0)")

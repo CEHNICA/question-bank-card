@@ -4,15 +4,22 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
-    dependencies = [
-        ('core', '0019_library_solutions'),
-    ]
+    dependencies = [("core", "0019_library_solutions")]
 
     operations = [
         migrations.AlterField(
-            model_name='question',
-            name='state',
-            field=models.CharField(choices=[('waiting', '等待识读'), ('reading', '识读中'), ('green', '自动检查无明显异常'), ('yellow', '请看一眼'), ('red', '识读失败')], default='waiting', max_length=10),
-        ),
+            model_name="question",
+            name="state",
+            field=models.CharField(
+                choices=[
+                    ("waiting", "等待识读"),
+                    ("reading", "识读中"),
+                    ("green", "自动检查无明显异常"),
+                    ("yellow", "请看一眼"),
+                    ("red", "识读失败"),
+                ],
+                default="waiting",
+                max_length=10,
+            ),
+        )
     ]

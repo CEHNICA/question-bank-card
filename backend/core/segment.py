@@ -20,7 +20,9 @@ from dataclasses import dataclass, field
 from . import qtypes
 
 NUMBER_RE = re.compile(r"(?<![\d.．A-Za-z\\^_{])(\d{1,2})\s*[.．、]{1,2}(?!\d)")
-HEADING_RE = re.compile(r"^\s*(?:[一二三四五六七八九十]{1,3}\s*[、.．]|第[一二三四五六七八九十]+部分|[ⅠⅡⅢⅣ]+\s*[、.．])")
+HEADING_RE = re.compile(
+    r"^\s*(?:[一二三四五六七八九十]{1,3}\s*[、.．]|第[一二三四五六七八九十]+部分|[ⅠⅡⅢⅣ]+\s*[、.．])"
+)
 # 全国卷大题内部的“（二）选考题：……”“[选修 4-4：坐标系与参数方程]”：
 # 它们结束上一题的范围（否则会被誊录进第 21、22 题题面），但不替换
 # “三、解答题”作为题卡的大题名称。
@@ -32,7 +34,7 @@ FIGURE_TYPES = {"image", "table", "chart"}
 # 大题标题（“三、解答题”）的题型，和读题共用一份词表。
 SECTION_TYPES = qtypes.TYPE_WORDS
 CJK = re.compile(r"[一-鿿（(【]")
-START_PAD = 9      # 题号上方留白
+START_PAD = 9  # 题号上方留白
 # AI 定位的题号只精确到一条横带，常常落在题号行下面一行：多往上留一行。
 # 截图因此会带上上一题的最后一行，读题时由 clean_stem 去掉题号行之前的内容；
 # 上一题的范围不变。
@@ -43,8 +45,8 @@ LOCATED_EXTRA_PAD = 20
 # cut off “且 AE=4，BD=6，分别连” at its top right and both readers agreed on
 # the shortened question.  Leave a little more above such an estimate.
 MID_BLOCK_EXTRA_PAD = 12
-END_GAP = 2        # 下一题起点上方留白
-COLUMN_GAP = 120   # 两栏左边距至少相差多少才算不同栏
+END_GAP = 2  # 下一题起点上方留白
+COLUMN_GAP = 120  # 两栏左边距至少相差多少才算不同栏
 BOOK_MAX_CARD_PAGES = 4
 
 # Textbooks use a different visual grammar from exam papers.  In particular,
@@ -56,9 +58,7 @@ BOOK_EXAMPLE_RE = re.compile(
     r"([0-9]{1,3}|[一二三四五六七八九十]{1,3})\s*(?:[.．、:：])?\s*(.*)$",
     re.I | re.S,
 )
-BOOK_EXAMPLE_REFERENCE_RE = re.compile(
-    r"^(?:中(?:的|命题)?|的(?:结果|证明|解法|结论)|参见|见上?例)"
-)
+BOOK_EXAMPLE_REFERENCE_RE = re.compile(r"^(?:中(?:的|命题)?|的(?:结果|证明|解法|结论)|参见|见上?例)")
 # 行首的印刷题号。教材把难题、拓展题印成 `※3.` `*5.`，那个 N 就是这道习题里
 # 真正的序号 —— 两本教材 27 个带标记的题号，逐个回看前一个印刷题号，27/27 都刚好
 # 是 N-1，没有一个重新编号。不认这些标记，这些题就永远不会被切成卡：既没有卡，
@@ -78,9 +78,7 @@ BOOK_EMBEDDED_NUMBERED_RE = re.compile(
     r"(?<=[？?。．.!！；;])(?<!\d\.)\s*(\d{1,3})\s*[.．、]\s*(.+)$",
     re.S,
 )
-BOOK_CHOICE_BUNDLE_RE = re.compile(
-    r"^\s*\d{1,3}\s*[.．、]\s*(?:单项?选择题|多项选择题|选择题)\s*$"
-)
+BOOK_CHOICE_BUNDLE_RE = re.compile(r"^\s*\d{1,3}\s*[.．、]\s*(?:单项?选择题|多项选择题|选择题)\s*$")
 BOOK_PRACTICE_RE = re.compile(
     r"^\s*(?:课后)?(?:练习|习题|巩固练习|综合练习|复习题|复习参考题)"
     r"(?:\s*\d+(?:\.\d+)*)?\s*[：:]?\s*$"
@@ -121,7 +119,7 @@ BOOK_EMBEDDED_ANALYSIS_RE = re.compile(
 BOOK_EMBEDDED_ANALYSIS_LATEX_RE = re.compile(
     r"\\(?:text|textbf|mbox|textrm)\s*\{\s*"
     r"(?:分析|解析|解答?|证明|答|(?:解法|证法)(?:\s*[一二三四五六七八九十0-9]+)?)"
-    r"\s*[：:]",
+    r"\s*[：:]"
 )
 BOOK_DECIMAL_HEADING_RE = re.compile(r"^\s*\d+(?:\.\d+){1,3}\s+\S")
 BOOK_NAMED_BOUNDARY_RE = re.compile(
@@ -131,9 +129,7 @@ BOOK_NAMED_BOUNDARY_RE = re.compile(
     r"阅读与思考|信息技术应用|本章小结|小结|补集|"
     r"部分中英文词汇索引|中英文词汇索引|索引|后记|附录)\s*[：:]?\s*$"
 )
-BOOK_PROCEDURE_INTRO_RE = re.compile(
-    r"(?:一般)?步骤如下\s*[：:]?\s*$|过程可以概括为\s*[：:]?\s*$"
-)
+BOOK_PROCEDURE_INTRO_RE = re.compile(r"(?:一般)?步骤如下\s*[：:]?\s*$|过程可以概括为\s*[：:]?\s*$")
 BOOK_PROCEDURE_TRANSITION_RE = re.compile(
     r"^\s*下面在探究\s*[一二三四五六七八九十0-9]+\s*的基础上继续探究\s*[。．.]?\s*$"
 )
@@ -162,12 +158,8 @@ BOOK_QUESTION_CUE_RE = re.compile(
     r"下列|如图|观察|说明|比较|解答|研究|借助|利用|回答|表示|举出|列出|"
     r"指出|估计|设计|构建|完成|讨论|化简|解方程|为什么|为何)"
 )
-BOOK_CONTEXT_PROBLEM_HEADING_RE = re.compile(
-    r"^\s*观察实际情景\s*[，,]?\s*发现和提出问题\s*$"
-)
-BOOK_REFERENCED_CONTEXT_QUESTION_RE = re.compile(
-    r"问题\s*([0-9]{1,3}|[一二三四五六七八九十]{1,3})\s*中"
-)
+BOOK_CONTEXT_PROBLEM_HEADING_RE = re.compile(r"^\s*观察实际情景\s*[，,]?\s*发现和提出问题\s*$")
+BOOK_REFERENCED_CONTEXT_QUESTION_RE = re.compile(r"问题\s*([0-9]{1,3}|[一二三四五六七八九十]{1,3})\s*中")
 BOOK_NUMBERED_VISUAL_RE = re.compile(
     r"(?:如|见|观察|根据|依据|结合|参照|参考)?\s*"
     r"(?:图|表)\s*[0-9一二三四五六七八九十]+(?:\.[0-9]+)*(?:\s*[-－—]\s*[0-9]+)?",
@@ -185,8 +177,7 @@ _LEADING_STEM_RE = re.compile(
     r"^(?:已知|若|设|下列|如图|根据|阅读|观察|判断|计算|证明|求|关于|对于|在\S{0,24}(?:中|上))"
 )
 _LEADING_SOURCE_RE = re.compile(
-    r"^\s*[\[【（(]\s*(?:20\d{2}|\d{2,4}\s*年|[^\]】）)]{0,32}(?:高考|中考|联考|期中|期末|月考|模拟))",
-    re.I,
+    r"^\s*[\[【（(]\s*(?:20\d{2}|\d{2,4}\s*年|[^\]】）)]{0,32}(?:高考|中考|联考|期中|期末|月考|模拟))", re.I
 )
 _LEADING_SUBQUESTION_RE = re.compile(r"^\s*[（(]\s*([12])\s*[)）]", re.M)
 _LEADING_OPTION_RE = re.compile(r"(?:^|\s)[A-EＡ-Ｅ]\s*[.．、:]", re.I)
@@ -214,10 +205,10 @@ class Start:
     page: int
     x: float
     y: float
-    seq: int | None = None        # 来源文字框；None 表示由视觉模型定位
+    seq: int | None = None  # 来源文字框；None 表示由视觉模型定位
     at_start: bool = True
     score: float = 1.0
-    source: str = "mineru"        # mineru | repaired | inferred | located | manual
+    source: str = "mineru"  # mineru | repaired | inferred | located | manual
     col: int = 0
     source_kind: str = "question"  # question | example | exercise
     anchor_seq: int | None = None
@@ -230,8 +221,8 @@ class Start:
 @dataclass
 class Layout:
     page_count: int
-    splits: dict[int, list[float]]                 # 每页的分栏线 x
-    slots: list[dict]                              # 阅读顺序的 (页, 栏) 版面及其内容上下沿
+    splits: dict[int, list[float]]  # 每页的分栏线 x
+    slots: list[dict]  # 阅读顺序的 (页, 栏) 版面及其内容上下沿
     headings: list[dict] = field(default_factory=list)
     candidates: list[Start] = field(default_factory=list)
     # Extra non-card stops used by textbook segmentation. Structural dividers
@@ -241,7 +232,7 @@ class Layout:
 
 @dataclass
 class BookMarker:
-    kind: str                       # example_start | exercise_start | section_heading | ...
+    kind: str  # example_start | exercise_start | section_heading | ...
     page: int
     x: float
     y: float
@@ -307,12 +298,19 @@ def _candidates(blocks: list[dict]) -> list[Start]:
                 # A scan that clipped the binding edge turns “20.” into “0.”.
                 # Keep it only as evidence for gap repair; it never joins a chain.
                 if at_start:
-                    found.append(Start(
-                        number=0, page=int(block["page_idx"]), x=float(bbox[0]), y=float(bbox[1]),
-                        seq=block.get("seq"), at_start=True, score=0.2,
-                    ))
+                    found.append(
+                        Start(
+                            number=0,
+                            page=int(block["page_idx"]),
+                            x=float(bbox[0]),
+                            y=float(bbox[1]),
+                            seq=block.get("seq"),
+                            at_start=True,
+                            score=0.2,
+                        )
+                    )
                 continue
-            after = text[match.end():match.end() + 6].lstrip(" $")
+            after = text[match.end() : match.end() + 6].lstrip(" $")
             looks_like_question = bool(after) and (CJK.match(after) is not None or after[:1] in "如已设若在下对")
             if not at_start and not looks_like_question:
                 continue
@@ -321,14 +319,14 @@ def _candidates(blocks: list[dict]) -> list[Start]:
                 score += 2.0
             if looks_like_question:
                 score += 1.0
-            if re.match(r"\s*[（(]\s*\d+\s*分", text[match.end():match.end() + 10]):
+            if re.match(r"\s*[（(]\s*\d+\s*分", text[match.end() : match.end() + 10]):
                 score += 1.5
             if block.get("type") == "equation":
                 score -= 1.5
             height = bbox[3] - bbox[1]
             y = bbox[1]
-            before = text[:match.start()]
-            if not at_start and "\n" in before and not before[before.rfind("\n") + 1:].strip(" $　"):
+            before = text[: match.start()]
+            if not at_start and "\n" in before and not before[before.rfind("\n") + 1 :].strip(" $　"):
                 # 题号在框内某一行的行首（“D. 3\n10. 如图…”：上一题的选项和本题挤在
                 # 一个框里）：按行估算。短行也占一整行，按字符比例会把本题起点估得太高，
                 # 切掉上一题的最后一个选项。
@@ -339,10 +337,17 @@ def _candidates(blocks: list[dict]) -> list[Start]:
                 # 题号在框中间（常见于手写与题号挤在同一框）：按字符位置估算所在行。
                 y = bbox[1] + height * match.start() / max(1, len(text))
                 y = max(bbox[1], y - 6)
-            found.append(Start(
-                number=number, page=int(block["page_idx"]), x=float(bbox[0]), y=float(y),
-                seq=block.get("seq"), at_start=at_start, score=score,
-            ))
+            found.append(
+                Start(
+                    number=number,
+                    page=int(block["page_idx"]),
+                    x=float(bbox[0]),
+                    y=float(y),
+                    seq=block.get("seq"),
+                    at_start=at_start,
+                    score=score,
+                )
+            )
     return found
 
 
@@ -357,10 +362,18 @@ def _unnumbered_starts(blocks: list[dict]) -> list[Start]:
         if not bbox or block.get("type") in NON_CONTENT | FIGURE_TYPES:
             continue
         if _UNNUMBERED_START_RE.match(_plain_block_text(block.get("text"))):
-            found.append(Start(
-                number=0, page=int(block["page_idx"]), x=float(bbox[0]), y=float(bbox[1]),
-                seq=block.get("seq"), at_start=True, score=0.5, source="unnumbered",
-            ))
+            found.append(
+                Start(
+                    number=0,
+                    page=int(block["page_idx"]),
+                    x=float(bbox[0]),
+                    y=float(bbox[1]),
+                    seq=block.get("seq"),
+                    at_start=True,
+                    score=0.5,
+                    source="unnumbered",
+                )
+            )
     return found
 
 
@@ -386,10 +399,18 @@ def _bare_number_starts(blocks: list[dict]) -> list[Start]:
             continue
         match = _BARE_NUMBER_START_RE.match(_plain_block_text(block.get("text")).lstrip(" $　"))
         if match and int(match.group(1)) > 0:
-            found.append(Start(
-                number=int(match.group(1)), page=int(block["page_idx"]), x=float(bbox[0]), y=float(bbox[1]),
-                seq=block.get("seq"), at_start=True, score=0.5, source="bare",
-            ))
+            found.append(
+                Start(
+                    number=int(match.group(1)),
+                    page=int(block["page_idx"]),
+                    x=float(bbox[0]),
+                    y=float(bbox[1]),
+                    seq=block.get("seq"),
+                    at_start=True,
+                    score=0.5,
+                    source="bare",
+                )
+            )
     return found
 
 
@@ -431,8 +452,16 @@ def _headings(blocks: list[dict]) -> list[dict]:
     for block in blocks:
         text = str(block.get("text") or "")
         if block.get("bbox") and HEADING_RE.match(text) and block.get("type") not in NON_CONTENT | FIGURE_TYPES:
-            result.append({"page": int(block["page_idx"]), "x": block["bbox"][0], "y": block["bbox"][1],
-                           "bottom": block["bbox"][3], "text": text.strip()[:80], "seq": block.get("seq")})
+            result.append(
+                {
+                    "page": int(block["page_idx"]),
+                    "x": block["bbox"][0],
+                    "y": block["bbox"][1],
+                    "bottom": block["bbox"][3],
+                    "text": text.strip()[:80],
+                    "seq": block.get("seq"),
+                }
+            )
     return result
 
 
@@ -455,8 +484,11 @@ def _valid_split(page_idx: int, split: float, blocks: list[dict]) -> bool:
     """
     if not 250 <= split <= 750:
         return False
-    content = [b["bbox"] for b in blocks
-               if b.get("bbox") and int(b["page_idx"]) == page_idx and b.get("type") not in NON_CONTENT]
+    content = [
+        b["bbox"]
+        for b in blocks
+        if b.get("bbox") and int(b["page_idx"]) == page_idx and b.get("type") not in NON_CONTENT
+    ]
     if len(content) < 3:
         return False
     left = sum(1 for bbox in content if _center(bbox)[0] < split)
@@ -473,8 +505,9 @@ def _splits_from(starts: list[Start], pages: list[dict], blocks: list[dict]) -> 
         page_idx = page["page_idx"]
         own = _cluster_margins([start.x for start in starts if start.page == page_idx])
         margins = own if len(own) > 1 else global_margins
-        result[page_idx] = [split for split in (max(0.0, m - 15) for m in margins[1:])
-                            if _valid_split(page_idx, split, blocks)]
+        result[page_idx] = [
+            split for split in (max(0.0, m - 15) for m in margins[1:]) if _valid_split(page_idx, split, blocks)
+        ]
     return result
 
 
@@ -487,20 +520,26 @@ def _slots(pages: list[dict], blocks: list[dict], splits: dict[int, list[float]]
         for col in range(last + 1):
             x0, x1 = _column_bounds(page_splits, col)
             inside = [
-                block["bbox"] for block in blocks
-                if block.get("bbox") and int(block["page_idx"]) == page_idx
+                block["bbox"]
+                for block in blocks
+                if block.get("bbox")
+                and int(block["page_idx"]) == page_idx
                 and block.get("type") not in NON_CONTENT
                 and column_of(page_splits, _center(block["bbox"])[0]) == col
             ]
             if not inside:
                 continue
             # 栏与栏之间按分栏线切，不按文字框收窄：框外漏读的字（如被扫描压淡的题号"2"）也要留在图里。
-            slots.append({
-                "page": page_idx, "col": col,
-                "x0": x0 if col > 0 else max(0.0, min(b[0] for b in inside) - 20),
-                "x1": x1 if col < last else min(1000.0, max(b[2] for b in inside) + 20),
-                "top": max(0.0, min(b[1] for b in inside) - 4), "bottom": min(1000.0, max(b[3] for b in inside) + 4),
-            })
+            slots.append(
+                {
+                    "page": page_idx,
+                    "col": col,
+                    "x0": x0 if col > 0 else max(0.0, min(b[0] for b in inside) - 20),
+                    "x1": x1 if col < last else min(1000.0, max(b[2] for b in inside) + 20),
+                    "top": max(0.0, min(b[1] for b in inside) - 4),
+                    "bottom": min(1000.0, max(b[3] for b in inside) + 4),
+                }
+            )
     return slots
 
 
@@ -529,9 +568,7 @@ def _chain(candidates: list[Start]) -> list[Start]:
     return list(reversed(chain))
 
 
-def _repair_gaps(
-    chain: list[Start], candidates: list[Start], unnumbered: list[Start] | None = None,
-) -> list[Start]:
+def _repair_gaps(chain: list[Start], candidates: list[Start], unnumbered: list[Start] | None = None) -> list[Start]:
     """补缺号。
 
     1. 两题之间恰有一个候选、其数字是缺号的末位（把“23.”读成“3.”，或扫描裁掉
@@ -554,34 +591,69 @@ def _repair_gaps(
             fits = [c for c in between if str(number).endswith(str(c.number)) and c.number != number]
             if len(fits) == 1:
                 fixed = fits[0]
-                repaired.append(Start(number=number, page=fixed.page, x=fixed.x, y=fixed.y, seq=fixed.seq,
-                                      at_start=True, score=fixed.score, source="repaired", col=fixed.col))
+                repaired.append(
+                    Start(
+                        number=number,
+                        page=fixed.page,
+                        x=fixed.x,
+                        y=fixed.y,
+                        seq=fixed.seq,
+                        at_start=True,
+                        score=fixed.score,
+                        source="repaired",
+                        col=fixed.col,
+                    )
+                )
                 between = [c for c in between if c is not fixed and c.key() > fixed.key()]
         remaining = [number for number in missing if number not in {item.number for item in repaired}]
         used = {item.seq for item in repaired}
         for number in list(remaining):
             exact = [
-                item for item in (unnumbered or [])
-                if item.source == "bare" and item.number == number and item.seq not in used
+                item
+                for item in (unnumbered or [])
+                if item.source == "bare"
+                and item.number == number
+                and item.seq not in used
                 and start.key() < item.key() < following.key()
             ]
             if len(exact) == 1:
                 item = exact[0]
-                repaired.append(Start(number=number, page=item.page, x=item.x, y=item.y, seq=item.seq,
-                                      at_start=True, score=item.score, source="repaired", col=item.col))
+                repaired.append(
+                    Start(
+                        number=number,
+                        page=item.page,
+                        x=item.x,
+                        y=item.y,
+                        seq=item.seq,
+                        at_start=True,
+                        score=item.score,
+                        source="repaired",
+                        col=item.col,
+                    )
+                )
                 used.add(item.seq)
                 remaining.remove(number)
         repaired.sort(key=Start.key)
         loose = [
-            item for item in (unnumbered or [])
-            if item.source == "unnumbered" and start.key() < item.key() < following.key()
-            and item.seq not in used
+            item
+            for item in (unnumbered or [])
+            if item.source == "unnumbered" and start.key() < item.key() < following.key() and item.seq not in used
         ]
         if remaining and len(loose) == len(remaining):
             trial = sorted(
-                repaired + [
-                    Start(number=number, page=item.page, x=item.x, y=item.y, seq=item.seq, at_start=True,
-                          score=item.score, source="repaired", col=item.col)
+                repaired
+                + [
+                    Start(
+                        number=number,
+                        page=item.page,
+                        x=item.x,
+                        y=item.y,
+                        seq=item.seq,
+                        at_start=True,
+                        score=item.score,
+                        source="repaired",
+                        col=item.col,
+                    )
                     for number, item in zip(remaining, sorted(loose, key=Start.key))
                 ],
                 key=Start.key,
@@ -608,8 +680,9 @@ def analyse(pages: list[dict], blocks: list[dict]) -> tuple[Layout, list[Start]]
     for heading in headings:
         heading["col"] = column_of(splits.get(heading["page"], []), heading["x"] + 1)
     # 说明文字里的"1. 答卷前……"：第一个"一、"大题标题之前的候选不算题目，只要标题之后另有第 1 题。
-    first_section = next((h for h in sorted(headings, key=lambda h: (h["page"], h["col"], h["y"]))
-                          if h["text"].startswith("一")), None)
+    first_section = next(
+        (h for h in sorted(headings, key=lambda h: (h["page"], h["col"], h["y"])) if h["text"].startswith("一")), None
+    )
     if first_section is not None:
         section_key = (first_section["page"], first_section["col"], first_section["y"])
         if any(c.number == 1 and c.key() > section_key for c in candidates):
@@ -625,14 +698,27 @@ def analyse(pages: list[dict], blocks: list[dict]) -> tuple[Layout, list[Start]]
     assign(unnumbered)
     chain = _repair_gaps(chain, candidates, unnumbered)
     boundaries = [
-        {"page": int(block["page_idx"]), "col": column_of(splits.get(int(block["page_idx"]), []), block["bbox"][0] + 1),
-         "y": block["bbox"][1], "bottom": block["bbox"][3], "kind": "exam_subheading", "seq": block.get("seq")}
+        {
+            "page": int(block["page_idx"]),
+            "col": column_of(splits.get(int(block["page_idx"]), []), block["bbox"][0] + 1),
+            "y": block["bbox"][1],
+            "bottom": block["bbox"][3],
+            "kind": "exam_subheading",
+            "seq": block.get("seq"),
+        }
         for block in blocks
-        if block.get("bbox") and block.get("type") not in NON_CONTENT | FIGURE_TYPES
+        if block.get("bbox")
+        and block.get("type") not in NON_CONTENT | FIGURE_TYPES
         and EXAM_SUBHEADING_RE.match(str(block.get("text") or ""))
     ]
-    layout = Layout(page_count=len(pages), splits=splits, slots=_slots(pages, blocks, splits),
-                    headings=headings, candidates=candidates, boundaries=boundaries)
+    layout = Layout(
+        page_count=len(pages),
+        splits=splits,
+        slots=_slots(pages, blocks, splits),
+        headings=headings,
+        candidates=candidates,
+        boundaries=boundaries,
+    )
     return layout, chain
 
 
@@ -642,8 +728,7 @@ def _book_number(value: str) -> int | None:
     if value.isdigit():
         number = int(value)
         return number if number > 0 else None
-    digits = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
-              "六": 6, "七": 7, "八": 8, "九": 9}
+    digits = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
     if value == "十":
         return 10
     if "十" in value:
@@ -666,7 +751,8 @@ def _raw_book_markers(blocks: list[dict]) -> list[BookMarker]:
     """Extract typed textbook markers without deciding numbered-line context yet."""
     markers: list[BookMarker] = []
     textual = [
-        block for block in blocks
+        block
+        for block in blocks
         if block.get("type") not in NON_CONTENT | FIGURE_TYPES | {"equation"}
         and _book_block_position(block) is not None
         and str(block.get("text") or "").strip()
@@ -696,13 +782,17 @@ def _raw_book_markers(blocks: list[dict]) -> list[BookMarker]:
             embedded_solution = BOOK_EMBEDDED_ANALYSIS_LATEX_RE.search(plain)
             if embedded_solution is not None:
                 bbox = block["bbox"]
-                solution_y = y + (float(bbox[3]) - float(bbox[1])) * (
-                    embedded_solution.start() / max(1, len(plain))
+                solution_y = y + (float(bbox[3]) - float(bbox[1])) * (embedded_solution.start() / max(1, len(plain)))
+                markers.append(
+                    BookMarker(
+                        kind="analysis_solution",
+                        page=page,
+                        x=x,
+                        y=solution_y,
+                        seq=seq,
+                        text=plain[embedded_solution.start() :][:160],
+                    )
                 )
-                markers.append(BookMarker(
-                    kind="analysis_solution", page=page, x=x, y=solution_y,
-                    seq=seq, text=plain[embedded_solution.start():][:160],
-                ))
             continue
 
         if block.get("type") in NON_CONTENT | FIGURE_TYPES:
@@ -721,20 +811,32 @@ def _raw_book_markers(blocks: list[dict]) -> list[BookMarker]:
             re.match(r"^\s*思考(?:\s*[一二三四五六七八九十0-9]+)?\s*[：:]?\s*$", previous_text)
             or BOOK_DECIMAL_HEADING_RE.match(next_text)
         )
-        if context_panel and not BOOK_NUMBERED_RE.match(plain) \
-                and ("?" in plain or "？" in plain):
+        if context_panel and not BOOK_NUMBERED_RE.match(plain) and ("?" in plain or "？" in plain):
             referenced = BOOK_REFERENCED_CONTEXT_QUESTION_RE.search(plain)
             referenced_number = _book_number(referenced.group(1)) if referenced else None
             if referenced_number is not None and BOOK_QUESTION_CUE_RE.search(plain):
-                markers.append(BookMarker(
-                    kind="context_question", page=page, x=x, y=y, seq=seq,
-                    text=text, number=referenced_number, question_shaped=True,
-                ))
-                markers.append(BookMarker(
-                    kind="embedded_question_end", page=page, x=x,
-                    y=float(block["bbox"][3]) + END_GAP, seq=seq,
-                    text="引用情境问题文字块结束",
-                ))
+                markers.append(
+                    BookMarker(
+                        kind="context_question",
+                        page=page,
+                        x=x,
+                        y=y,
+                        seq=seq,
+                        text=text,
+                        number=referenced_number,
+                        question_shaped=True,
+                    )
+                )
+                markers.append(
+                    BookMarker(
+                        kind="embedded_question_end",
+                        page=page,
+                        x=x,
+                        y=float(block["bbox"][3]) + END_GAP,
+                        seq=seq,
+                        text="引用情境问题文字块结束",
+                    )
+                )
 
         # MinerU can join the final line of one exercise and the next printed
         # top-level number into one text block.  Recover one embedded anchor
@@ -751,17 +853,29 @@ def _raw_book_markers(blocks: list[dict]) -> list[BookMarker]:
                     embedded_y = y + (float(bbox[3]) - float(bbox[1])) * (
                         embedded_numbered.start(1) / max(1, len(plain))
                     )
-                    markers.append(BookMarker(
-                        kind="numbered", page=page, x=x, y=embedded_y,
-                        seq=seq, text=plain[embedded_numbered.start(1):],
-                        number=number, question_shaped=True,
-                    ))
-                    if body.endswith(("。", "．", ".", "？", "?")) \
-                            and not re.search(r"[（(]\s*[）)]", body):
-                        markers.append(BookMarker(
-                            kind="embedded_question_end", page=page, x=x,
-                            y=float(bbox[3]), seq=seq, text="合并文字块内题目结束",
-                        ))
+                    markers.append(
+                        BookMarker(
+                            kind="numbered",
+                            page=page,
+                            x=x,
+                            y=embedded_y,
+                            seq=seq,
+                            text=plain[embedded_numbered.start(1) :],
+                            number=number,
+                            question_shaped=True,
+                        )
+                    )
+                    if body.endswith(("。", "．", ".", "？", "?")) and not re.search(r"[（(]\s*[）)]", body):
+                        markers.append(
+                            BookMarker(
+                                kind="embedded_question_end",
+                                page=page,
+                                x=x,
+                                y=float(bbox[3]),
+                                seq=seq,
+                                text="合并文字块内题目结束",
+                            )
+                        )
 
         # MinerU normally emits the coloured “分析/解” label as its own block,
         # but it can merge several printed lines. Preserve the same boundary in
@@ -769,57 +883,70 @@ def _raw_book_markers(blocks: list[dict]) -> list[BookMarker]:
         embedded_solution = BOOK_EMBEDDED_ANALYSIS_RE.search(plain)
         if embedded_solution is not None and embedded_solution.start() > 0:
             bbox = block["bbox"]
-            solution_y = y + (float(bbox[3]) - float(bbox[1])) * (
-                embedded_solution.start() / max(1, len(plain))
+            solution_y = y + (float(bbox[3]) - float(bbox[1])) * (embedded_solution.start() / max(1, len(plain)))
+            markers.append(
+                BookMarker(
+                    kind="analysis_solution",
+                    page=page,
+                    x=x,
+                    y=solution_y,
+                    seq=seq,
+                    text=plain[embedded_solution.start() :][:160],
+                )
             )
-            markers.append(BookMarker(
-                kind="analysis_solution", page=page, x=x, y=solution_y,
-                seq=seq, text=plain[embedded_solution.start():][:160],
-            ))
 
         example = BOOK_EXAMPLE_RE.match(plain)
         if example:
             number = _book_number(example.group(1))
             remainder = example.group(2).lstrip()
             if number is not None and not BOOK_EXAMPLE_REFERENCE_RE.match(remainder):
-                markers.append(BookMarker(
-                    kind="example_start", page=page, x=x, y=y, seq=seq,
-                    text=text, number=number, question_shaped=True,
-                ))
+                markers.append(
+                    BookMarker(
+                        kind="example_start",
+                        page=page,
+                        x=x,
+                        y=y,
+                        seq=seq,
+                        text=text,
+                        number=number,
+                        question_shaped=True,
+                    )
+                )
             else:
-                markers.append(BookMarker(
-                    kind="example_reference", page=page, x=x, y=y, seq=seq,
-                    text=text, number=number,
-                ))
+                markers.append(
+                    BookMarker(kind="example_reference", page=page, x=x, y=y, seq=seq, text=text, number=number)
+                )
             continue
 
         if BOOK_PRACTICE_RE.match(plain):
-            markers.append(BookMarker(
-                kind="practice_header", page=page, x=x, y=y, seq=seq, text=text,
-            ))
+            markers.append(BookMarker(kind="practice_header", page=page, x=x, y=y, seq=seq, text=text))
             continue
 
         if BOOK_CHOICE_BUNDLE_RE.match(plain):
-            markers.append(BookMarker(
-                kind="choice_bundle_header", page=page, x=x, y=y, seq=seq, text=text,
-            ))
+            markers.append(BookMarker(kind="choice_bundle_header", page=page, x=x, y=y, seq=seq, text=text))
             continue
 
         if BOOK_ANALYSIS_RE.match(plain):
-            markers.append(BookMarker(
-                kind="analysis_solution", page=page, x=x, y=y, seq=seq, text=text,
-            ))
+            markers.append(BookMarker(kind="analysis_solution", page=page, x=x, y=y, seq=seq, text=text))
             continue
 
-        if HEADING_RE.match(plain) or BOOK_DECIMAL_HEADING_RE.match(plain) or \
-                BOOK_NAMED_BOUNDARY_RE.match(plain) or \
-                BOOK_PROCEDURE_INTRO_RE.search(plain) or \
-                BOOK_PROCEDURE_TRANSITION_RE.match(plain):
-            markers.append(BookMarker(
-                kind=("procedure_intro" if BOOK_PROCEDURE_INTRO_RE.search(plain)
-                      else "section_heading"),
-                page=page, x=x, y=y, seq=seq, text=text,
-            ))
+        if (
+            HEADING_RE.match(plain)
+            or BOOK_DECIMAL_HEADING_RE.match(plain)
+            or BOOK_NAMED_BOUNDARY_RE.match(plain)
+            or BOOK_PROCEDURE_INTRO_RE.search(plain)
+            or BOOK_PROCEDURE_TRANSITION_RE.match(plain)
+        ):
+            markers.append(
+                BookMarker(
+                    kind=("procedure_intro" if BOOK_PROCEDURE_INTRO_RE.search(plain) else "section_heading"),
+                    page=page,
+                    x=x,
+                    y=y,
+                    seq=seq,
+                    text=text,
+                )
+            )
             continue
 
         parenthesized = BOOK_PARENTHESIZED_RE.match(plain)
@@ -829,11 +956,18 @@ def _raw_book_markers(blocks: list[dict]) -> list[BookMarker]:
             # Bare ``(1)`` labels below a printed figure are captions, not
             # card anchors.  A choice-bundle subquestion always has a stem.
             if body:
-                markers.append(BookMarker(
-                    kind="parenthesized", page=page, x=x, y=y, seq=seq,
-                    text=text, number=number,
-                    question_shaped=bool(BOOK_QUESTION_CUE_RE.search(body)),
-                ))
+                markers.append(
+                    BookMarker(
+                        kind="parenthesized",
+                        page=page,
+                        x=x,
+                        y=y,
+                        seq=seq,
+                        text=text,
+                        number=number,
+                        question_shaped=bool(BOOK_QUESTION_CUE_RE.search(body)),
+                    )
+                )
             continue
 
         numbered = BOOK_NUMBERED_RE.match(plain)
@@ -842,32 +976,36 @@ def _raw_book_markers(blocks: list[dict]) -> list[BookMarker]:
             if number <= 0:
                 continue
             body = numbered.group(2).strip()
-            markers.append(BookMarker(
-                kind=("non_card_numbered" if BOOK_NON_CARD_NUMBERED_RE.match(body)
-                      else "numbered"),
-                page=page, x=x, y=y, seq=seq, text=text,
-                number=number, question_shaped=bool(BOOK_QUESTION_CUE_RE.search(body)),
-            ))
+            markers.append(
+                BookMarker(
+                    kind=("non_card_numbered" if BOOK_NON_CARD_NUMBERED_RE.match(body) else "numbered"),
+                    page=page,
+                    x=x,
+                    y=y,
+                    seq=seq,
+                    text=text,
+                    number=number,
+                    question_shaped=bool(BOOK_QUESTION_CUE_RE.search(body)),
+                )
+            )
 
     # In modelling examples a numbered workflow label such as
     # ``1. 观察实际情景，发现和提出问题`` is not itself a card, but the immediately
     # following paragraph can contain the real problem statement.  Recover
     # only this named workflow shape and require an actual question mark; broad
     # promotion of arbitrary unnumbered prose would create many false cards.
-    marker_seqs = sorted(
-        marker.seq for marker in markers if isinstance(marker.seq, int)
-    )
-    block_by_seq = {
-        block.get("seq"): block for block in blocks
-        if isinstance(block.get("seq"), int)
-    }
+    marker_seqs = sorted(marker.seq for marker in markers if isinstance(marker.seq, int))
+    block_by_seq = {block.get("seq"): block for block in blocks if isinstance(block.get("seq"), int)}
     recovered_context: list[BookMarker] = []
     for marker in markers:
         numbered = BOOK_NUMBERED_RE.match(marker.text.replace("**", "").strip())
         body = numbered.group(2).strip() if numbered else ""
-        if marker.kind != "non_card_numbered" or marker.number is None \
-                or not BOOK_CONTEXT_PROBLEM_HEADING_RE.match(body) \
-                or not isinstance(marker.seq, int):
+        if (
+            marker.kind != "non_card_numbered"
+            or marker.number is None
+            or not BOOK_CONTEXT_PROBLEM_HEADING_RE.match(body)
+            or not isinstance(marker.seq, int)
+        ):
             continue
         next_marker_seq = next((seq for seq in marker_seqs if seq > marker.seq), None)
         for seq in sorted(value for value in block_by_seq if value > marker.seq):
@@ -883,19 +1021,32 @@ def _raw_book_markers(blocks: list[dict]) -> list[BookMarker]:
             if ("?" not in text and "？" not in text) or not BOOK_QUESTION_CUE_RE.search(text):
                 continue
             page, x, y = position
-            recovered_context.append(BookMarker(
-                kind="context_question", page=page, x=x, y=y, seq=seq,
-                text=text, number=marker.number, question_shaped=True,
-            ))
+            recovered_context.append(
+                BookMarker(
+                    kind="context_question",
+                    page=page,
+                    x=x,
+                    y=y,
+                    seq=seq,
+                    text=text,
+                    number=marker.number,
+                    question_shaped=True,
+                )
+            )
             # The following paragraph is the textbook author's modelling
             # guidance, not part of the question.  Stop exactly at the bottom
             # of the recovered question block; adding END_GAP compensates for
             # ``question_regions`` subtracting the same padding.
-            recovered_context.append(BookMarker(
-                kind="embedded_question_end", page=page, x=x,
-                y=float(block["bbox"][3]) + END_GAP, seq=seq,
-                text="情境问题文字块结束",
-            ))
+            recovered_context.append(
+                BookMarker(
+                    kind="embedded_question_end",
+                    page=page,
+                    x=x,
+                    y=float(block["bbox"][3]) + END_GAP,
+                    seq=seq,
+                    text="情境问题文字块结束",
+                )
+            )
             break
     markers.extend(recovered_context)
     return markers + _column_markers(blocks)
@@ -924,9 +1075,7 @@ def _column_markers(blocks: list[dict]) -> list[BookMarker]:
         if not text or not BOOK_COLUMN_BOUNDARY_RE.match(text.replace("**", "").strip()):
             continue
         page, x, y = _book_block_position(block)
-        markers.append(BookMarker(
-            kind="column_header", page=page, x=x, y=y, seq=block["seq"], text=text,
-        ))
+        markers.append(BookMarker(kind="column_header", page=page, x=x, y=y, seq=block["seq"], text=text))
     return markers
 
 
@@ -935,10 +1084,7 @@ def _assign_book_columns(markers: list[BookMarker], splits: dict[int, list[float
         marker.col = column_of(splits.get(marker.page, []), marker.x + 1)
 
 
-def _recover_book_gap_questions(
-    markers: list[BookMarker],
-    blocks: list[dict],
-) -> list[BookMarker]:
+def _recover_book_gap_questions(markers: list[BookMarker], blocks: list[dict]) -> list[BookMarker]:
     """Recover a missing printed number between two consecutive exercises.
 
     MinerU can omit a faint ``2.`` printed beside a table.  Recovery requires
@@ -948,13 +1094,9 @@ def _recover_book_gap_questions(
     to the recovered card instead of the preceding one.
     """
 
-    exercises = sorted(
-        (marker for marker in markers if marker.kind == "exercise_start"),
-        key=BookMarker.key,
-    )
+    exercises = sorted((marker for marker in markers if marker.kind == "exercise_start"), key=BookMarker.key)
     ordered_blocks = sorted(
-        (block for block in blocks if isinstance(block.get("seq"), int)),
-        key=lambda block: int(block["seq"]),
+        (block for block in blocks if isinstance(block.get("seq"), int)), key=lambda block: int(block["seq"])
     )
     recovered: list[BookMarker] = []
     for previous, following in zip(exercises, exercises[1:]):
@@ -968,12 +1110,13 @@ def _recover_book_gap_questions(
         ):
             continue
         between = [
-            block for block in ordered_blocks
-            if previous.seq < int(block["seq"]) < following.seq
-            and int(block.get("page_idx", -1)) == previous.page
+            block
+            for block in ordered_blocks
+            if previous.seq < int(block["seq"]) < following.seq and int(block.get("page_idx", -1)) == previous.page
         ]
         question_blocks = [
-            block for block in between
+            block
+            for block in between
             if block.get("type") not in NON_CONTENT | FIGURE_TYPES | {"equation"}
             and ("?" in str(block.get("text") or "") or "？" in str(block.get("text") or ""))
             and BOOK_QUESTION_CUE_RE.search(str(block.get("text") or ""))
@@ -983,8 +1126,7 @@ def _recover_book_gap_questions(
             continue
         question = question_blocks[0]
         tables = [
-            block for block in between
-            if block.get("type") == "table" and int(block["seq"]) < int(question["seq"])
+            block for block in between if block.get("type") == "table" and int(block["seq"]) < int(question["seq"])
         ]
         if not tables:
             continue
@@ -993,18 +1135,23 @@ def _recover_book_gap_questions(
         if position is None:
             continue
         page, x, y = position
-        recovered.append(BookMarker(
-            kind="exercise_start", page=page, x=x, y=y,
-            seq=int(anchor["seq"]), text=str(question.get("text") or "").strip(),
-            number=previous.number + 1, col=previous.col, question_shaped=True,
-        ))
+        recovered.append(
+            BookMarker(
+                kind="exercise_start",
+                page=page,
+                x=x,
+                y=y,
+                seq=int(anchor["seq"]),
+                text=str(question.get("text") or "").strip(),
+                number=previous.number + 1,
+                col=previous.col,
+                question_shaped=True,
+            )
+        )
     return recovered
 
 
-def _book_marker_stream(
-    pages: list[dict],
-    blocks: list[dict],
-) -> tuple[Layout, list[BookMarker]]:
+def _book_marker_stream(pages: list[dict], blocks: list[dict]) -> tuple[Layout, list[BookMarker]]:
     """Return a context-aware marker stream for a textbook.
 
     A numbered line is a card inside an explicit practice area.  Outside that
@@ -1014,8 +1161,12 @@ def _book_marker_stream(
     raw = _raw_book_markers(blocks)
     provisional = [
         Start(
-            number=marker.number or 1, page=marker.page, x=marker.x, y=marker.y,
-            seq=marker.seq, source_kind=("example" if marker.kind == "example_start" else "exercise"),
+            number=marker.number or 1,
+            page=marker.page,
+            x=marker.x,
+            y=marker.y,
+            seq=marker.seq,
+            source_kind=("example" if marker.kind == "example_start" else "exercise"),
         )
         for marker in raw
         if marker.kind == "example_start" or marker.kind == "numbered"
@@ -1089,10 +1240,7 @@ def _book_marker_stream(
             # own stable, source-anchored cards.
             choice_bundle = False
             short_title = bool(
-                body
-                and len(body) <= 24
-                and not marker.question_shaped
-                and not body.endswith(("：", ":", "？", "?"))
+                body and len(body) <= 24 and not marker.question_shaped and not body.endswith(("：", ":", "？", "?"))
             )
             if procedure:
                 marker.kind = "section_heading"
@@ -1138,26 +1286,36 @@ def _book_marker_stream(
     headings = _headings(blocks)
     for marker in resolved:
         if marker.kind in {"example_start", "exercise_start"} and marker.number is not None:
-            starts.append(Start(
-                number=marker.number,
-                page=marker.page,
-                x=marker.x,
-                y=marker.y,
-                seq=marker.seq,
-                at_start=True,
-                score=5.0 if marker.kind == "example_start" else 4.0,
-                source="mineru",
-                col=marker.col,
-                source_kind="example" if marker.kind == "example_start" else "exercise",
-                anchor_seq=marker.seq,
-                marker_text=marker.text[:160],
-            ))
+            starts.append(
+                Start(
+                    number=marker.number,
+                    page=marker.page,
+                    x=marker.x,
+                    y=marker.y,
+                    seq=marker.seq,
+                    at_start=True,
+                    score=5.0 if marker.kind == "example_start" else 4.0,
+                    source="mineru",
+                    col=marker.col,
+                    source_kind="example" if marker.kind == "example_start" else "exercise",
+                    anchor_seq=marker.seq,
+                    marker_text=marker.text[:160],
+                )
+            )
         elif marker.kind in {
-                "practice_header", "section_heading", "analysis_solution",
-                "embedded_question_end", "column_header"}:
+            "practice_header",
+            "section_heading",
+            "analysis_solution",
+            "embedded_question_end",
+            "column_header",
+        }:
             boundary = {
-                "page": marker.page, "col": marker.col, "y": marker.y,
-                "text": marker.text[:160], "seq": marker.seq, "kind": marker.kind,
+                "page": marker.page,
+                "col": marker.col,
+                "y": marker.y,
+                "text": marker.text[:160],
+                "seq": marker.seq,
+                "kind": marker.kind,
             }
             boundaries.append(boundary)
             # Treat textbook structural markers as headings for both stopping
@@ -1183,7 +1341,8 @@ def _book_marker_stream(
     for heading in headings:
         heading["col"] = (
             column_of(splits.get(heading["page"], []), heading["x"] + 1)
-            if "x" in heading else int(heading.get("col", 0))
+            if "x" in heading
+            else int(heading.get("col", 0))
         )
 
     layout = Layout(
@@ -1203,8 +1362,20 @@ def analyse_book(pages: list[dict], blocks: list[dict]) -> tuple[Layout, list[St
     return layout, sorted(layout.candidates, key=Start.key)
 
 
-_CHAPTER_DIGITS = {"〇": 0, "零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
-                   "六": 6, "七": 7, "八": 8, "九": 9}
+_CHAPTER_DIGITS = {
+    "〇": 0,
+    "零": 0,
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+}
 
 
 def _chapter_number(text: str) -> int | None:
@@ -1237,8 +1408,7 @@ def chapter_index(blocks: list[dict]) -> dict:
     """
     headers: list[dict] = []
     fullest: dict[str, str] = {}
-    for block in sorted(blocks, key=lambda item: (int(item.get("page_idx", 0) or 0),
-                                                  _block_order(item.get("seq")))):
+    for block in sorted(blocks, key=lambda item: (int(item.get("page_idx", 0) or 0), _block_order(item.get("seq")))):
         seq = block.get("seq")
         if type(seq) is not int:
             continue
@@ -1250,8 +1420,9 @@ def chapter_index(blocks: list[dict]) -> dict:
             continue
         unit = matched.group(2)
         name = re.sub(r"\s+", " ", matched.group(3)).strip(" 　·-—:：、")
-        headers.append({"seq": seq, "page_idx": int(block.get("page_idx", 0)),
-                        "number": number, "unit": unit, "name": name})
+        headers.append(
+            {"seq": seq, "page_idx": int(block.get("page_idx", 0)), "number": number, "unit": unit, "name": name}
+        )
         key = f"{number}{unit}"
         if len(name) > len(fullest.get(key, "")):
             fullest[key] = name
@@ -1318,8 +1489,14 @@ def _leading_candidate_score(block: dict, following_text: str) -> tuple[int, boo
     question_mark = bool(_LEADING_QUESTION_MARK_RE.search(body))
     options = bool(_LEADING_OPTION_RE.search(text))
     subquestions = set(_LEADING_SUBQUESTION_RE.findall(following_text))
-    score = (5 if source else 0) + (2 if stem else 0) + (2 if question_mark else 0) + \
-        (2 if options else 0) + (1 if len(body) >= 18 else 0) + (2 if bare_one else 0)
+    score = (
+        (5 if source else 0)
+        + (2 if stem else 0)
+        + (2 if question_mark else 0)
+        + (2 if options else 0)
+        + (1 if len(body) >= 18 else 0)
+        + (2 if bare_one else 0)
+    )
     if "1" in subquestions:
         score += 1
     if {"1", "2"}.issubset(subquestions):
@@ -1334,9 +1511,7 @@ def _leading_candidate_score(block: dict, following_text: str) -> tuple[int, boo
 
 
 def repair_leading_question(
-    layout: Layout,
-    starts: list[Start],
-    blocks: list[dict],
+    layout: Layout, starts: list[Start], blocks: list[dict]
 ) -> tuple[list[Start], LeadingQuestionCheck]:
     """Locally recover a missing printed ``1.`` before the first detected card.
 
@@ -1356,16 +1531,11 @@ def repair_leading_question(
         if (int(item["page"]), int(item.get("col", 0)), float(item["y"])) < first.key()
     ]
     preceding_headings.sort(key=lambda item: item[0])
-    first_section = next(
-        (item for item in preceding_headings if re.match(r"^\s*一\s*[、.．]", item[1])),
-        None,
-    )
+    first_section = next((item for item in preceding_headings if re.match(r"^\s*一\s*[、.．]", item[1])), None)
     # A first-section heading is a stable front-matter boundary.  Without one,
     # do not pull evidence from before the nearest later section heading: that
     # text may belong to a previous chapter/exercise.
-    heading_cutoff = first_section[0] if first_section else (
-        preceding_headings[-1][0] if preceding_headings else None
-    )
+    heading_cutoff = first_section[0] if first_section else (preceding_headings[-1][0] if preceding_headings else None)
     prefix: list[tuple[tuple[int, int, float], dict]] = []
     for block in blocks:
         key = _block_key(layout, block)
@@ -1389,22 +1559,18 @@ def repair_leading_question(
         # heading also stops this supporting window, so evidence cannot be
         # assembled from two different sections.
         next_heading = next((item[0] for item in preceding_headings if item[0] > key), first.key())
-        support = [item for item in prefix[index:index + 10] if item[0] < next_heading]
-        following_text = "\n".join(
-            str(item.get("text") or "") for _, item in support
-        )
+        support = [item for item in prefix[index : index + 10] if item[0] < next_heading]
+        following_text = "\n".join(str(item.get("text") or "") for _, item in support)
         score, shaped, source = _leading_candidate_score(block, following_text)
         scored.append((score, shaped, source, key, block))
     score, shaped, source, key, candidate = max(
-        scored,
-        key=lambda item: (item[0], -item[3][0], -item[3][1], -item[3][2]),
+        scored, key=lambda item: (item[0], -item[3][0], -item[3][1], -item[3][2])
     )
 
     candidate_seq = candidate.get("seq") if type(candidate.get("seq")) is int else None
-    first_question_after_section = next(
-        (item[3] for item in scored if item[1] and item[0] >= 0),
-        None,
-    ) if first_section else None
+    first_question_after_section = (
+        next((item[3] for item in scored if item[1] and item[0] >= 0), None) if first_section else None
+    )
     has_boundary_evidence = source or (first_section is not None and key == first_question_after_section)
     if first.number == 2 and shaped and has_boundary_evidence and score >= 7:
         bbox = candidate["bbox"]
@@ -1432,9 +1598,11 @@ def repair_leading_question(
 
     # Only warn when there is actual question-like evidence.  A clean excerpt
     # that simply begins with “2.” has no prefix candidate and remains untouched.
-    if shaped or score >= 4 or _LEADING_SUBQUESTION_RE.search("\n".join(
-        str(item.get("text") or "") for _, item in prefix
-    )):
+    if (
+        shaped
+        or score >= 4
+        or _LEADING_SUBQUESTION_RE.search("\n".join(str(item.get("text") or "") for _, item in prefix))
+    ):
         return ordered, LeadingQuestionCheck(
             status="suspected",
             first_detected=first.number,
@@ -1464,8 +1632,11 @@ def numbering_scopes(pages: list[dict], blocks: list[dict]) -> list[dict]:
     # as 19) is part of the main run, not the start of a new numbering scope.
     repaired_seqs = {item.seq for item in selected if item.source == "repaired" and item.seq is not None}
     reliable = sorted(
-        (item for item in layout.candidates
-         if item.at_start and item.score >= 3.0 and item.number > 0 and item.seq not in repaired_seqs),
+        (
+            item
+            for item in layout.candidates
+            if item.at_start and item.score >= 3.0 and item.number > 0 and item.seq not in repaired_seqs
+        ),
         key=Start.key,
     )
     if not reliable:
@@ -1478,8 +1649,13 @@ def numbering_scopes(pages: list[dict], blocks: list[dict]) -> list[dict]:
     deduped: list[Start] = []
     for item in reliable:
         previous = deduped[-1] if deduped else None
-        if (previous is not None and previous.number == item.number and previous.page == item.page
-                and previous.col == item.col and abs(item.y - previous.y) < 60):
+        if (
+            previous is not None
+            and previous.number == item.number
+            and previous.page == item.page
+            and previous.col == item.col
+            and abs(item.y - previous.y) < 60
+        ):
             continue
         deduped.append(item)
     reliable = deduped
@@ -1527,21 +1703,24 @@ def numbering_scopes(pages: list[dict], blocks: list[dict]) -> list[dict]:
         # A restart on a later page is a clean page boundary. Only a restart on
         # the same physical page needs that page to belong to both source scopes.
         page_end = (
-            following.page if following is not None and following.page == run[-1].page
-            else following.page - 1 if following is not None
+            following.page
+            if following is not None and following.page == run[-1].page
+            else following.page - 1
+            if following is not None
             else last_page
         )
-        scopes.append({
-            "sequence": index,
-            "pages": list(range(page_start, page_end + 1)),
-            # Keep headings/front matter in the first scope. Later scopes begin
-            # exactly at the restart block, so two runs on one page stay apart.
-            "seq_start": None if index == 0 else first.seq,
-            "seq_end": (following.seq - 1) if following is not None
-            and isinstance(following.seq, int) else None,
-            "first_number": first.number,
-            "start_page": first.page,
-        })
+        scopes.append(
+            {
+                "sequence": index,
+                "pages": list(range(page_start, page_end + 1)),
+                # Keep headings/front matter in the first scope. Later scopes begin
+                # exactly at the restart block, so two runs on one page stay apart.
+                "seq_start": None if index == 0 else first.seq,
+                "seq_end": (following.seq - 1) if following is not None and isinstance(following.seq, int) else None,
+                "first_number": first.number,
+                "start_page": first.page,
+            }
+        )
     return scopes
 
 
@@ -1590,8 +1769,7 @@ def book_numbering_scopes(pages: list[dict], blocks: list[dict]) -> list[dict]:
     # later per-scope pass would lose the state that makes long, declarative
     # textbook exercises (for example a table followed by its question) valid.
     structural = [
-        marker for marker in markers
-        if marker.kind in {"practice_header", "section_heading", "example_start"}
+        marker for marker in markers if marker.kind in {"practice_header", "section_heading", "example_start"}
     ]
     effective_starts: list[int | None] = []
     for index, run in enumerate(runs):
@@ -1600,10 +1778,14 @@ def book_numbering_scopes(pages: list[dict], blocks: list[dict]) -> list[dict]:
         if index > 0 and first.source_kind == "exercise":
             preceding = [marker for marker in structural if marker.key() < first.key()]
             previous_anchor = runs[index - 1][-1].anchor_seq
-            if preceding and preceding[-1].kind == "practice_header" and (
-                not isinstance(previous_anchor, int)
-                or not isinstance(preceding[-1].seq, int)
-                or preceding[-1].seq > previous_anchor
+            if (
+                preceding
+                and preceding[-1].kind == "practice_header"
+                and (
+                    not isinstance(previous_anchor, int)
+                    or not isinstance(preceding[-1].seq, int)
+                    or preceding[-1].seq > previous_anchor
+                )
             ):
                 effective = preceding[-1].seq
         effective_starts.append(effective)
@@ -1614,21 +1796,26 @@ def book_numbering_scopes(pages: list[dict], blocks: list[dict]) -> list[dict]:
         following = runs[index + 1][0] if index + 1 < len(runs) else None
         page_start = first_page if index == 0 else first.page
         page_end = (
-            following.page if following is not None and following.page == run[-1].page
-            else following.page - 1 if following is not None
+            following.page
+            if following is not None and following.page == run[-1].page
+            else following.page - 1
+            if following is not None
             else last_page
         )
-        scopes.append({
-            "sequence": index,
-            "pages": list(range(page_start, page_end + 1)),
-            "seq_start": None if index == 0 else effective_starts[index],
-            "seq_end": (effective_starts[index + 1] - 1) if following is not None
-            and isinstance(effective_starts[index + 1], int) else None,
-            "scope_anchor_seq": first.anchor_seq,
-            "first_number": first.number,
-            "start_page": first.page,
-            "source_kind": first.source_kind,
-        })
+        scopes.append(
+            {
+                "sequence": index,
+                "pages": list(range(page_start, page_end + 1)),
+                "seq_start": None if index == 0 else effective_starts[index],
+                "seq_end": (effective_starts[index + 1] - 1)
+                if following is not None and isinstance(effective_starts[index + 1], int)
+                else None,
+                "scope_anchor_seq": first.anchor_seq,
+                "first_number": first.number,
+                "start_page": first.page,
+                "source_kind": first.source_kind,
+            }
+        )
     return scopes
 
 
@@ -1673,16 +1860,16 @@ _TOPIC_TITLE_RE = re.compile(
     r"复习|讲解|方法总结|概念|定理|公理|推导|知识点|面积计算|体积计算|"
     r"表面积|其他性质|存在意义|常用结论|易错点|分类讨论)"
 )
-MIN_TOPIC_NUMBERED_LINES = 3   # 少于三个编号谈不上“整份都是小节”
-TOPIC_TITLE_SHARE = 0.30       # 像小节标题的编号占比达到这个数才动手
-QUESTION_STEM_SHARE = 0.40     # 像题的编号占比高于这个数就一律不动
+MIN_TOPIC_NUMBERED_LINES = 3  # 少于三个编号谈不上“整份都是小节”
+TOPIC_TITLE_SHARE = 0.30  # 像小节标题的编号占比达到这个数才动手
+QUESTION_STEM_SHARE = 0.40  # 像题的编号占比高于这个数就一律不动
 
 
 @dataclass(frozen=True)
 class NumberingVerdict:
     """这些印刷编号开的是题目，还是只是小节标题。"""
 
-    verdict: str = "exam"        # exam | topics
+    verdict: str = "exam"  # exam | topics
     numbered: int = 0
     topic_like: int = 0
     stem_like: int = 0
@@ -1714,25 +1901,24 @@ def _looks_like_sentence(stem: str) -> bool:
 
 def classify_numbering(blocks: list[dict], starts: list[Start]) -> NumberingVerdict:
     """判断一串印刷编号开的是题目还是小节标题。"""
-    by_seq = {block.get("seq"): block for block in blocks
-              if isinstance(block.get("seq"), int)}
+    by_seq = {block.get("seq"): block for block in blocks if isinstance(block.get("seq"), int)}
     stems: list[str] = []
     for start in starts:
         block = by_seq.get(start.seq)
         stems.append(_stem_after_number(str((block or {}).get("text") or "")))
     if len(stems) < MIN_TOPIC_NUMBERED_LINES:
         return NumberingVerdict(numbered=len(stems))
-    topic_like = [stem for stem in stems
-                  if _TOPIC_TITLE_RE.search(stem) and not _looks_like_sentence(stem)]
+    topic_like = [stem for stem in stems if _TOPIC_TITLE_RE.search(stem) and not _looks_like_sentence(stem)]
     stem_like = [stem for stem in stems if _looks_like_sentence(stem)]
-    if (len(topic_like) / len(stems) >= TOPIC_TITLE_SHARE
-            and len(stem_like) / len(stems) <= QUESTION_STEM_SHARE):
+    if len(topic_like) / len(stems) >= TOPIC_TITLE_SHARE and len(stem_like) / len(stems) <= QUESTION_STEM_SHARE:
         return NumberingVerdict(
-            verdict="topics", numbered=len(stems), topic_like=len(topic_like),
-            stem_like=len(stem_like), samples=tuple(topic_like[:4]),
+            verdict="topics",
+            numbered=len(stems),
+            topic_like=len(topic_like),
+            stem_like=len(stem_like),
+            samples=tuple(topic_like[:4]),
         )
-    return NumberingVerdict(numbered=len(stems), topic_like=len(topic_like),
-                            stem_like=len(stem_like))
+    return NumberingVerdict(numbered=len(stems), topic_like=len(topic_like), stem_like=len(stem_like))
 
 
 def _slot_index(layout: Layout, page: int, col: int) -> int | None:
@@ -1793,18 +1979,22 @@ def _ambiguous_continuations(regions: list[dict], blocks: list[dict]) -> list[di
     diagnostics = []
     for region in regions[1:]:
         inside = [
-            block for block in blocks
-            if block.get("bbox") and block.get("type") not in NON_CONTENT
+            block
+            for block in blocks
+            if block.get("bbox")
+            and block.get("type") not in NON_CONTENT
             and center_in_regions(int(block.get("page_idx", -1)), block["bbox"], [region])
         ]
         if inside and not any(_has_continuation_support(block) for block in inside):
-            diagnostics.append({
-                "code": "ambiguous_formula_continuation",
-                "page_idx": int(region["page_idx"]),
-                "bbox": list(region["bbox"]),
-                "reason": "续栏或续页只有算式或零散符号，没有正文文字、选项标记或配图支持；无法确认是题目正文还是草稿。",
-                "action": "pending_review",
-            })
+            diagnostics.append(
+                {
+                    "code": "ambiguous_formula_continuation",
+                    "page_idx": int(region["page_idx"]),
+                    "bbox": list(region["bbox"]),
+                    "reason": "续栏或续页只有算式或零散符号，没有正文文字、选项标记或配图支持；无法确认是题目正文还是草稿。",
+                    "action": "pending_review",
+                }
+            )
     return diagnostics
 
 
@@ -1835,15 +2025,20 @@ def question_regions(layout: Layout, start: Start, stop: tuple | None) -> list[d
         slot_key = (slot["page"], slot["col"])
         if stop is not None and slot_key > (stop[0], stop[1]):
             break
-        pad = START_PAD + (LOCATED_EXTRA_PAD if start.source == "located" else
-                           MID_BLOCK_EXTRA_PAD if not start.at_start else 0)
+        pad = START_PAD + (
+            LOCATED_EXTRA_PAD if start.source == "located" else MID_BLOCK_EXTRA_PAD if not start.at_start else 0
+        )
         top = max(slot["top"], start.y - pad, _heading_floor(layout, start)) if index == begin else slot["top"]
         bottom = slot["bottom"]
         if stop is not None and slot_key == (stop[0], stop[1]):
             bottom = min(bottom, stop[2] - END_GAP)
         if bottom - top >= 8:
-            regions.append({"page_idx": slot["page"], "bbox": [round(slot["x0"], 1), round(top, 1),
-                                                               round(slot["x1"], 1), round(bottom, 1)]})
+            regions.append(
+                {
+                    "page_idx": slot["page"],
+                    "bbox": [round(slot["x0"], 1), round(top, 1), round(slot["x1"], 1), round(bottom, 1)],
+                }
+            )
         if stop is not None and slot_key == (stop[0], stop[1]):
             break
     return regions
@@ -1892,9 +2087,9 @@ def figure_in_regions(page_idx: int, bbox: list[float], regions: list[dict]) -> 
     if not overlaps_regions(page_idx, bbox, regions):
         return False
     cy = _center(bbox)[1]
-    touching = [region for region in regions
-                if region["page_idx"] == page_idx
-                and overlaps_regions(page_idx, bbox, [region])]
+    touching = [
+        region for region in regions if region["page_idx"] == page_idx and overlaps_regions(page_idx, bbox, [region])
+    ]
     return not touching or not all(cy < float(region["bbox"][1]) for region in touching)
 
 
@@ -1918,8 +2113,12 @@ def text_blocks_in(blocks: list[dict], regions: list[dict]) -> frozenset:
         if not bbox or block.get("type") in NON_CONTENT | FIGURE_TYPES:
             continue
         cx, cy = _center(bbox)
-        if any(r["page_idx"] == int(block["page_idx"]) and r["bbox"][0] <= cx <= r["bbox"][2]
-               and r["bbox"][1] <= cy <= r["bbox"][3] for r in regions):
+        if any(
+            r["page_idx"] == int(block["page_idx"])
+            and r["bbox"][0] <= cx <= r["bbox"][2]
+            and r["bbox"][1] <= cy <= r["bbox"][3]
+            for r in regions
+        ):
             found.add(block.get("seq"))
     return frozenset(found)
 
@@ -1964,15 +2163,12 @@ def _limit_book_regions(regions: list[dict]) -> tuple[list[dict], list[str]]:
         return regions, []
     allowed = set(page_order[:BOOK_MAX_CARD_PAGES])
     return [region for region in regions if int(region["page_idx"]) in allowed], [
-        f"书本切题范围超过 {BOOK_MAX_CARD_PAGES} 页，已在安全上限停止；请对照原书调整范围",
+        f"书本切题范围超过 {BOOK_MAX_CARD_PAGES} 页，已在安全上限停止；请对照原书调整范围"
     ]
 
 
 def _tighten_book_local_left_column(
-    layout: Layout,
-    start: Start,
-    regions: list[dict],
-    blocks: list[dict],
+    layout: Layout, start: Start, regions: list[dict], blocks: list[dict]
 ) -> list[dict]:
     """Trim one unambiguous mixed-layout left-column exercise.
 
@@ -1994,24 +2190,23 @@ def _tighten_book_local_left_column(
     if not regions or layout.splits.get(start.page):
         return regions
     first = next((item for item in regions if item.get("page_idx") == start.page), None)
-    anchor = next(
-        (block for block in blocks if start.seq is not None and block.get("seq") == start.seq),
-        None,
-    )
+    anchor = next((block for block in blocks if start.seq is not None and block.get("seq") == start.seq), None)
     if first is None or anchor is None or not isinstance(anchor.get("bbox"), list):
         return regions
     anchor_box = anchor["bbox"]
     if float(anchor_box[0]) >= 350 or float(anchor_box[2]) > 600:
         return regions
     page_blocks = [
-        block for block in blocks
+        block
+        for block in blocks
         if int(block.get("page_idx", -1)) == start.page
         and isinstance(block.get("bbox"), list)
         and block.get("type") not in NON_CONTENT | FIGURE_TYPES
         and str(block.get("text") or "").strip()
     ]
     right = [
-        block for block in page_blocks
+        block
+        for block in page_blocks
         if float(block["bbox"][0]) >= float(anchor_box[2]) + 120
         and float(block["bbox"][1]) <= float(anchor_box[3]) + 80
         and float(block["bbox"][3]) >= float(anchor_box[1]) - 80
@@ -2021,26 +2216,32 @@ def _tighten_book_local_left_column(
         return regions
     right_x = min(float(block["bbox"][0]) for block in right)
     left = [
-        block for block in page_blocks
+        block
+        for block in page_blocks
         if float(block["bbox"][1]) >= start.y - START_PAD
         and float(block["bbox"][0]) < float(anchor_box[0]) + 90
         and float(block["bbox"][2]) <= right_x - 20
         and float(block["bbox"][1]) < float(first["bbox"][3])
     ]
     if len(left) < 2 or not any(
-            float(candidate["bbox"][1]) < float(item["bbox"][3])
-            and float(candidate["bbox"][3]) > float(item["bbox"][1])
-            for candidate in right for item in left):
+        float(candidate["bbox"][1]) < float(item["bbox"][3]) and float(candidate["bbox"][3]) > float(item["bbox"][1])
+        for candidate in right
+        for item in left
+    ):
         return regions
     left_right = max(float(block["bbox"][2]) for block in left)
     divider = (left_right + right_x) / 2
     last_left_bottom = max(float(block["bbox"][3]) for block in left)
-    crossing = sorted([
-        block for block in page_blocks
-        if float(block["bbox"][1]) >= last_left_bottom
-        and float(block["bbox"][0]) < divider - 20
-        and float(block["bbox"][2]) > divider + 20
-    ], key=lambda block: float(block["bbox"][1]))
+    crossing = sorted(
+        [
+            block
+            for block in page_blocks
+            if float(block["bbox"][1]) >= last_left_bottom
+            and float(block["bbox"][0]) < divider - 20
+            and float(block["bbox"][2]) > divider + 20
+        ],
+        key=lambda block: float(block["bbox"][1]),
+    )
     if not crossing:
         return regions
     bottom = min(float(first["bbox"][3]), float(crossing[0]["bbox"][1]) - END_GAP)
@@ -2067,8 +2268,7 @@ def _drop_spill_candidates(questions: list[dict]) -> None:
     """
     for index, question in enumerate(questions):
         regions = question.get("regions") or []
-        strips = [region for region in regions[1:]
-                  if region["bbox"][3] - region["bbox"][1] < SPILL_REGION_HEIGHT]
+        strips = [region for region in regions[1:] if region["bbox"][3] - region["bbox"][1] < SPILL_REGION_HEIGHT]
         if not strips:
             continue
         others = [other.get("regions") or [] for position, other in enumerate(questions) if position != index]
@@ -2100,8 +2300,11 @@ def _cover_own_lines(regions: list[dict], blocks: list[dict]) -> list[dict]:
         x0, y0, x1, y1 = region["bbox"]
         for block in blocks:
             bbox = block.get("bbox")
-            if not bbox or int(block["page_idx"]) != region["page_idx"] \
-                    or block.get("type") in NON_CONTENT | FIGURE_TYPES:
+            if (
+                not bbox
+                or int(block["page_idx"]) != region["page_idx"]
+                or block.get("type") in NON_CONTENT | FIGURE_TYPES
+            ):
                 continue
             cx, cy = _center(bbox)
             if not (region["bbox"][0] <= cx <= region["bbox"][2] and y0 <= cy <= y1):
@@ -2114,30 +2317,17 @@ def _cover_own_lines(regions: list[dict], blocks: list[dict]) -> list[dict]:
     return widened
 
 
-def build_questions(
-    layout: Layout,
-    starts: list[Start],
-    blocks: list[dict],
-    *,
-    textbook: bool = False,
-) -> list[dict]:
+def build_questions(layout: Layout, starts: list[Start], blocks: list[dict], *, textbook: bool = False) -> list[dict]:
     ordered = sorted(starts, key=Start.key)
     headings = sorted(layout.headings, key=lambda h: (h["page"], h["col"], h["y"]))
     universal_stops = sorted(
         [(s.page, s.col, s.y) for s in ordered]
         + [(h["page"], h["col"], h["y"]) for h in headings]
-        + [
-            (b["page"], b.get("col", 0), b["y"])
-            for b in layout.boundaries
-            if b.get("kind") != "analysis_solution"
-        ]
+        + [(b["page"], b.get("col", 0), b["y"]) for b in layout.boundaries if b.get("kind") != "analysis_solution"]
     )
     example_solution_boundaries = sorted(
         (
-            (
-                (b["page"], b.get("col", 0), b["y"]),
-                b.get("seq"),
-            )
+            ((b["page"], b.get("col", 0), b["y"]), b.get("seq"))
             for b in layout.boundaries
             if b.get("kind") == "analysis_solution"
         ),
@@ -2152,13 +2342,8 @@ def build_questions(
         solution_trimmed = False
         solution_boundary_seq = None
         if start.source_kind == "example":
-            solution_boundary = next(
-                (item for item in example_solution_boundaries if item[0] > here),
-                None,
-            )
-            if solution_boundary is not None and (
-                stop is None or solution_boundary[0] < stop
-            ):
+            solution_boundary = next((item for item in example_solution_boundaries if item[0] > here), None)
+            if solution_boundary is not None and (stop is None or solution_boundary[0] < stop):
                 stop = solution_boundary[0]
                 solution_trimmed = True
                 solution_boundary_seq = solution_boundary[1]
@@ -2175,12 +2360,8 @@ def build_questions(
                 )
                 segmentation_notes.append(note)
                 segmentation_flags.append(note)
-                deferred = {
-                    (item["page_idx"], tuple(item["bbox"]))
-                    for item in segmentation_diagnostics
-                }
-                regions = [region for region in regions
-                           if (region["page_idx"], tuple(region["bbox"])) not in deferred]
+                deferred = {(item["page_idx"], tuple(item["bbox"])) for item in segmentation_diagnostics}
+                regions = [region for region in regions if (region["page_idx"], tuple(region["bbox"])) not in deferred]
             regions = _cover_own_lines(regions, blocks)
         if start.source_kind in {"example", "exercise"}:
             regions = _tighten_book_local_left_column(layout, start, regions, blocks)
@@ -2192,9 +2373,11 @@ def build_questions(
         for heading in headings:
             if (heading["page"], heading["col"], heading["y"]) < here:
                 section = heading["text"]
-        figure_blocks = [{"seq": block.get("seq"), "page_idx": int(block["page_idx"]), "bbox": list(block["bbox"])}
-                         for block in figures
-                         if figure_in_regions(int(block["page_idx"]), block["bbox"], regions)]
+        figure_blocks = [
+            {"seq": block.get("seq"), "page_idx": int(block["page_idx"]), "bbox": list(block["bbox"])}
+            for block in figures
+            if figure_in_regions(int(block["page_idx"]), block["bbox"], regions)
+        ]
         if solution_trimmed:
             # The general 20%-overlap rule is intentionally generous around a
             # next-question boundary.  At an explicit ``分析/解`` boundary it
@@ -2203,16 +2386,13 @@ def build_questions(
             # genuine side-by-side input figure (whose centre is in the stem)
             # while excluding answer-only diagrams below the label.
             figure_blocks = [
-                block for block in figure_blocks
+                block
+                for block in figure_blocks
                 if center_in_regions(block["page_idx"], block["bbox"], regions)
-                and not (
-                    block["bbox"][1] >= 945
-                    and block["bbox"][3] - block["bbox"][1] <= 60
-                )
+                and not (block["bbox"][1] >= 945 and block["bbox"][3] - block["bbox"][1] <= 60)
             ]
         recovered_input_figures: list[dict] = []
-        if solution_trimmed and not figure_blocks \
-                and BOOK_NUMBERED_VISUAL_RE.search(_text_in_regions(blocks, regions)):
+        if solution_trimmed and not figure_blocks and BOOK_NUMBERED_VISUAL_RE.search(_text_in_regions(blocks, regions)):
             # Some textbooks print the input chart beside the worked solution
             # even though the question refers to it explicitly (for example
             # “如图 4.2-7”).  Keep only the first substantive visual before the
@@ -2220,18 +2400,17 @@ def build_questions(
             # several visuals compete, do not guess: leave the existing yellow
             # warning for a person to resolve.  This preserves the unambiguous
             # input without bringing answer text back into view.
-            full_regions = question_regions(layout, start, structural_stop) \
-                or _fallback_regions(layout, start, structural_stop)
+            full_regions = question_regions(layout, start, structural_stop) or _fallback_regions(
+                layout, start, structural_stop
+            )
             tail = sorted(
                 (
-                    block for block in figures
+                    block
+                    for block in figures
                     if overlaps_regions(int(block["page_idx"]), block["bbox"], full_regions)
                     and int(block["page_idx"]) <= stop[0] + 1
                     and not center_in_regions(int(block["page_idx"]), block["bbox"], regions)
-                    and not (
-                        block["bbox"][1] >= 945
-                        and block["bbox"][3] - block["bbox"][1] <= 60
-                    )
+                    and not (block["bbox"][1] >= 945 and block["bbox"][3] - block["bbox"][1] <= 60)
                     and (block["bbox"][2] - block["bbox"][0]) >= 80
                     and (block["bbox"][3] - block["bbox"][1]) >= 60
                 ),
@@ -2239,63 +2418,63 @@ def build_questions(
             )
             if len(tail) == 1:
                 recovered = tail[0]
-                recovered_region = {
-                    "page_idx": int(recovered["page_idx"]),
-                    "bbox": list(recovered["bbox"]),
-                }
+                recovered_region = {"page_idx": int(recovered["page_idx"]), "bbox": list(recovered["bbox"])}
                 regions.append(recovered_region)
-                recovered_input_figures.append({
-                    "seq": recovered.get("seq"),
-                    **recovered_region,
-                    "recovered_input": True,
-                })
+                recovered_input_figures.append(
+                    {"seq": recovered.get("seq"), **recovered_region, "recovered_input": True}
+                )
                 figure_blocks.extend(recovered_input_figures)
-        questions.append({
-            "number": start.number,
-            "start": {
-                "page": start.page,
-                "col": start.col,
-                "y": round(start.y, 1),
-                "x": round(start.x, 1),
-                "source": start.source,
-                "at_start": start.at_start,
+        questions.append(
+            {
+                "number": start.number,
+                "start": {
+                    "page": start.page,
+                    "col": start.col,
+                    "y": round(start.y, 1),
+                    "x": round(start.x, 1),
+                    "source": start.source,
+                    "at_start": start.at_start,
+                    "source_kind": start.source_kind,
+                    "source_anchor_seq": start.anchor_seq if start.anchor_seq is not None else start.seq,
+                },
                 "source_kind": start.source_kind,
                 "source_anchor_seq": start.anchor_seq if start.anchor_seq is not None else start.seq,
-            },
-            "source_kind": start.source_kind,
-            "source_anchor_seq": start.anchor_seq if start.anchor_seq is not None else start.seq,
-            "source_marker": start.marker_text,
-            "segmentation_flags": segmentation_flags,
-            "segmentation_notes": segmentation_notes,
-            "segmentation_diagnostics": segmentation_diagnostics,
-            "segmentation": {
-                "source_kind": start.source_kind,
-                "source_anchor_seq": start.anchor_seq if start.anchor_seq is not None else start.seq,
-                "range_limited": range_limited,
-                "solution_trimmed": solution_trimmed,
-                **({"solution_boundary_seq": solution_boundary_seq}
-                   if solution_trimmed and solution_boundary_seq is not None else {}),
-                **({"recovered_input_figure_seqs": [
-                    figure.get("seq") for figure in recovered_input_figures
-                ]} if recovered_input_figures else {}),
-            },
-            "regions": regions,
-            "figure_candidates": figure_blocks,
-            "section": section,
-            "question_type": _section_type(section),
-        })
+                "source_marker": start.marker_text,
+                "segmentation_flags": segmentation_flags,
+                "segmentation_notes": segmentation_notes,
+                "segmentation_diagnostics": segmentation_diagnostics,
+                "segmentation": {
+                    "source_kind": start.source_kind,
+                    "source_anchor_seq": start.anchor_seq if start.anchor_seq is not None else start.seq,
+                    "range_limited": range_limited,
+                    "solution_trimmed": solution_trimmed,
+                    **(
+                        {"solution_boundary_seq": solution_boundary_seq}
+                        if solution_trimmed and solution_boundary_seq is not None
+                        else {}
+                    ),
+                    **(
+                        {"recovered_input_figure_seqs": [figure.get("seq") for figure in recovered_input_figures]}
+                        if recovered_input_figures
+                        else {}
+                    ),
+                },
+                "regions": regions,
+                "figure_candidates": figure_blocks,
+                "section": section,
+                "question_type": _section_type(section),
+            }
+        )
     _drop_spill_candidates(questions)
     return questions
 
 
-def _captioned_book_visual_owners(
-    questions: list[dict],
-    blocks: list[dict],
-) -> dict[int, dict]:
+def _captioned_book_visual_owners(questions: list[dict], blocks: list[dict]) -> dict[int, dict]:
     """Map an unambiguous captioned visual to the question that names it."""
 
     visuals = [
-        block for block in blocks
+        block
+        for block in blocks
         if isinstance(block.get("seq"), int)
         and isinstance(block.get("bbox"), list)
         and block.get("type") in FIGURE_TYPES
@@ -2313,7 +2492,8 @@ def _captioned_book_visual_owners(
         box = caption["bbox"]
         caption_x = (float(box[0]) + float(box[2])) / 2
         eligible = [
-            visual for visual in visuals
+            visual
+            for visual in visuals
             if int(visual.get("page_idx", -2)) == page
             and 0 <= float(box[1]) - float(visual["bbox"][3]) <= 90
             and float(visual["bbox"][0]) - 30 <= caption_x <= float(visual["bbox"][2]) + 30
@@ -2331,10 +2511,10 @@ def _captioned_book_visual_owners(
         if local_match is not None:
             number = local_match.group(1)
             targets = [
-                question for question in questions
+                question
+                for question in questions
                 if re.search(
-                    rf"(?:如|见)?\s*图\s*[（(]\s*{re.escape(number)}\s*[)）]",
-                    str(question.get("source_marker") or ""),
+                    rf"(?:如|见)?\s*图\s*[（(]\s*{re.escape(number)}\s*[)）]", str(question.get("source_marker") or "")
                 )
             ]
         else:
@@ -2375,9 +2555,9 @@ def _exclude_foreign_visual_from_regions(regions: list[dict], visual: dict) -> l
             region_box[3] = min(float(region_box[3]), float(box[1]) - END_GAP)
         adjusted.append(current)
     return [
-        region for region in adjusted
-        if region["bbox"][2] - region["bbox"][0] >= 20
-        and region["bbox"][3] - region["bbox"][1] >= 10
+        region
+        for region in adjusted
+        if region["bbox"][2] - region["bbox"][0] >= 20 and region["bbox"][3] - region["bbox"][1] >= 10
     ]
 
 
@@ -2386,20 +2566,17 @@ def _book_marker_mentions_supplied_visual(question: dict, visual_type: str) -> b
 
     text = str(question.get("source_marker") or "")
     if visual_type == "table":
-        return bool(re.search(
-            r"(?:如|见|根据|观察)?\s*(?:下|上)?\s*表(?:\s*所示|中|如下)?|表\s*中",
+        return bool(re.search(r"(?:如|见|根据|观察)?\s*(?:下|上)?\s*表(?:\s*所示|中|如下)?|表\s*中", text))
+    return bool(
+        re.search(
+            r"(?:如|见|根据|观察)\s*(?:下|上|左|右)?\s*图|"
+            r"(?:图像|图象|图形|示意图|简图)\s*(?:如图|所示)",
             text,
-        ))
-    return bool(re.search(
-        r"(?:如|见|根据|观察)\s*(?:下|上|左|右)?\s*图|"
-        r"(?:图像|图象|图形|示意图|简图)\s*(?:如图|所示)",
-        text,
-    ))
+        )
+    )
 
 
-def _uncaptioned_book_visual_owners(
-    questions: list[dict], figures: list[dict], claimed: set[int],
-) -> dict[int, dict]:
+def _uncaptioned_book_visual_owners(questions: list[dict], figures: list[dict], claimed: set[int]) -> dict[int, dict]:
     """Recover a right-side visual whose centre fell into the next card.
 
     The rule is intentionally narrow: the current centre-owner must not refer
@@ -2412,19 +2589,16 @@ def _uncaptioned_book_visual_owners(
     owners: dict[int, dict] = {}
     ordered = sorted(
         questions,
-        key=lambda item: (
-            int((item.get("start") or {}).get("page", 0)),
-            float((item.get("start") or {}).get("y", 0)),
-        ),
+        key=lambda item: (int((item.get("start") or {}).get("page", 0)), float((item.get("start") or {}).get("y", 0))),
     )
     for visual in figures:
         sequence = visual.get("seq")
         if not isinstance(sequence, int) or sequence in claimed:
             continue
         current = [
-            question for question in ordered
-            if any(candidate.get("seq") == sequence
-                   for candidate in (question.get("figure_candidates") or []))
+            question
+            for question in ordered
+            if any(candidate.get("seq") == sequence for candidate in (question.get("figure_candidates") or []))
         ]
         if len(current) != 1:
             continue
@@ -2435,10 +2609,10 @@ def _uncaptioned_book_visual_owners(
         current_start = current_owner.get("start") or {}
         page = int(visual.get("page_idx", -1))
         eligible = [
-            question for question in ordered
+            question
+            for question in ordered
             if int((question.get("start") or {}).get("page", -2)) == page
-            and float((question.get("start") or {}).get("y", 0))
-            < float(current_start.get("y", 0))
+            and float((question.get("start") or {}).get("y", 0)) < float(current_start.get("y", 0))
             and _book_marker_mentions_supplied_visual(question, visual_type)
             and overlaps_regions(page, visual["bbox"], question.get("regions") or [])
         ]
@@ -2471,7 +2645,8 @@ def build_book_questions(layout: Layout, starts: list[Start], blocks: list[dict]
         # crop.  Explicit recovered-input crops remain valid because their own
         # image-only region contains that centre.
         question["figure_candidates"] = [
-            candidate for candidate in (question.get("figure_candidates") or [])
+            candidate
+            for candidate in (question.get("figure_candidates") or [])
             if center_in_regions(candidate["page_idx"], candidate["bbox"], regions)
         ]
         if flags:
@@ -2486,23 +2661,14 @@ def build_book_questions(layout: Layout, starts: list[Start], blocks: list[dict]
                     # can still stop a runaway range. Do not claim a formula
                     # beyond that limit survived in the rendered question.
                     diagnostic["action"] = "range_limited"
-        question["segmentation_flags"] = list(dict.fromkeys([
-            *(question.get("segmentation_flags") or []), *flags,
-        ]))
+        question["segmentation_flags"] = list(dict.fromkeys([*(question.get("segmentation_flags") or []), *flags]))
         metadata = dict(question.get("segmentation") or {})
         metadata["range_limited"] = bool(flags)
         question["segmentation"] = metadata
     owners = _captioned_book_visual_owners(questions, blocks)
-    owners.update(_uncaptioned_book_visual_owners(
-        questions,
-        figures,
-        set(owners),
-    ))
+    owners.update(_uncaptioned_book_visual_owners(questions, figures, set(owners)))
     if owners:
-        figures_by_seq = {
-            int(block["seq"]): block for block in figures
-            if isinstance(block.get("seq"), int)
-        }
+        figures_by_seq = {int(block["seq"]): block for block in figures if isinstance(block.get("seq"), int)}
         for sequence, owner in owners.items():
             visual = figures_by_seq.get(sequence)
             if visual is None:
@@ -2511,12 +2677,12 @@ def build_book_questions(layout: Layout, starts: list[Start], blocks: list[dict]
                 if question is owner:
                     continue
                 question["figure_candidates"] = [
-                    candidate for candidate in (question.get("figure_candidates") or [])
+                    candidate
+                    for candidate in (question.get("figure_candidates") or [])
                     if candidate.get("seq") != sequence
                 ]
                 question["regions"] = _exclude_foreign_visual_from_regions(
-                    question.get("regions") or [],
-                    {"page_idx": int(visual["page_idx"]), "bbox": list(visual["bbox"])},
+                    question.get("regions") or [], {"page_idx": int(visual["page_idx"]), "bbox": list(visual["bbox"])}
                 )
             candidate = {
                 "seq": sequence,
@@ -2540,9 +2706,9 @@ def build_book_questions(layout: Layout, starts: list[Start], blocks: list[dict]
                 for region in (owner.get("regions") or [])
             )
             if not fully_visible:
-                owner.setdefault("regions", []).append({
-                    "page_idx": candidate["page_idx"], "bbox": list(candidate["bbox"]),
-                })
+                owner.setdefault("regions", []).append(
+                    {"page_idx": candidate["page_idx"], "bbox": list(candidate["bbox"])}
+                )
                 owner["regions"].sort(key=lambda item: (item["page_idx"], item["bbox"][1], item["bbox"][0]))
             metadata = dict(owner.get("segmentation") or {})
             recovered = list(metadata.get("recovered_input_figure_seqs") or [])

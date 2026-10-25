@@ -26,36 +26,45 @@ ORIGINAL = MIGRATION.read_text(encoding="utf-8")
 def run_tests() -> tuple[int, str]:
     finished = subprocess.run(
         [str(VENV_PY), "manage.py", "test", TESTS],
-        cwd=str(BACKEND), capture_output=True, text=True, encoding="utf-8", errors="replace")
+        cwd=str(BACKEND),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     return finished.returncode, (finished.stdout or "") + (finished.stderr or "")
 
 
 def ignores_retirement(text: str) -> str:
     """只查标签「在不在」，不查「还在不在用」—— 停用的标签会被救回来。"""
     return text.replace(
-        'alive = {str(tag.pk) for tag in LibraryTag.objects.all() if tag.active}',
-        'alive = {str(tag.pk) for tag in LibraryTag.objects.all()}', 1)
+        "alive = {str(tag.pk) for tag in LibraryTag.objects.all() if tag.active}",
+        "alive = {str(tag.pk) for tag in LibraryTag.objects.all()}",
+        1,
+    )
 
 
 def skips_the_intact_broken_split(text: str) -> str:
     """干脆不判断好坏了，把所有落后的待核对建议都抬上去。"""
     return text.replace(
-        "        (broken if _split(apps, entries, alive) else intact).append(pk)",
-        "        intact.append(pk)", 1)
+        "        (broken if _split(apps, entries, alive) else intact).append(pk)", "        intact.append(pk)", 1
+    )
 
 
 def aligns_nothing(text: str) -> str:
     """什么都不做 —— 就是迁移没跑过的样子。"""
     return text.replace(
         "    if intact:\n        LibraryTagSuggestion.objects.filter(pk__in=intact).update(taxonomy_revision=revision)",
-        "    return", 1)
+        "    return",
+        1,
+    )
 
 
 def silently_advances_status(text: str) -> str:
     """对齐时顺手把状态改成已采纳 —— 用户会发现建议凭空消失了。"""
     return text.replace(
-        ".update(taxonomy_revision=revision)",
-        '.update(taxonomy_revision=revision, status="accepted")', 1)
+        ".update(taxonomy_revision=revision)", '.update(taxonomy_revision=revision, status="accepted")', 1
+    )
 
 
 MUTATIONS = [
@@ -92,8 +101,9 @@ def main() -> int:
                 failures.append(label)
                 print(f"[{label}] 坏实现竟然通过了测试 —— 这个测试没守住")
             else:
-                hit = next((line.strip() for line in output.splitlines()
-                            if "FAIL:" in line or "AssertionError" in line), "")
+                hit = next(
+                    (line.strip() for line in output.splitlines() if "FAIL:" in line or "AssertionError" in line), ""
+                )
                 print(f"[{label}] 测试如期失败 ✓ {hit[:110]}")
     finally:
         MIGRATION.write_text(ORIGINAL, encoding="utf-8")

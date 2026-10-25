@@ -6,6 +6,7 @@ Python one, so a rule that only one side implements shows up as a paper that
 disagrees with the screen. Each entry below reverts one rule and requires the
 named tests to go red; a mutation that stays green proves no test looks at it.
 """
+
 import shutil
 import subprocess
 import sys
@@ -15,16 +16,15 @@ from pathlib import Path
 ROOT = Path(r"C:\Users\17321\.minimax\sessions\mvs_fc946281665f4565a3d0ce7af01bd838\workspace\qbj-src")
 LAYOUT = ROOT / "frontend" / "exam-layout.js"
 LIBRARY = ROOT / "frontend" / "library.js"
-TESTS = ["frontend/test_exam_layout.js", "frontend/test_figure_layout_parity.js",
-         "frontend/test_library_export_ui.js"]
+TESTS = ["frontend/test_exam_layout.js", "frontend/test_figure_layout_parity.js", "frontend/test_library_export_ui.js"]
 
 # (file, label, old, new, tests-that-must-go-red)
 MUTATIONS = [
     (
         LAYOUT,
         "the row stops following the position the teacher chose",
-        '      if (setting.align) row.style.justifyContent = setting.align;',
-        '      if (false) row.style.justifyContent = setting.align;',
+        "      if (setting.align) row.style.justifyContent = setting.align;",
+        "      if (false) row.style.justifyContent = setting.align;",
         ["frontend/test_exam_layout.js"],
     ),
     (
@@ -121,8 +121,8 @@ MUTATIONS = [
     (
         LIBRARY,
         "the figure controls never appear for a question that has figures",
-        '    box.hidden = !figures.length;',
-        '    box.hidden = true;',
+        "    box.hidden = !figures.length;",
+        "    box.hidden = true;",
         ["frontend/test_library_export_ui.js"],
     ),
     (
@@ -149,10 +149,10 @@ MUTATIONS = [
     (
         LIBRARY,
         "the slider only measures the half of a split question that has no figures",
-        "    const images = Array.from(ui.paper.querySelectorAll(`.print-question[data-question-id=\"${CSS.escape(id)}\"]`))\n"
-        "      .flatMap(block => Array.from(block.querySelectorAll(\".qb-figures .qb-figure img\")));",
-        "    const images = Array.from((ui.paper.querySelector(`.print-question[data-question-id=\"${CSS.escape(id)}\"]`) || { querySelectorAll: () => [] })\n"
-        "      .querySelectorAll(\".qb-figures .qb-figure img\"));",
+        '    const images = Array.from(ui.paper.querySelectorAll(`.print-question[data-question-id="${CSS.escape(id)}"]`))\n'
+        '      .flatMap(block => Array.from(block.querySelectorAll(".qb-figures .qb-figure img")));',
+        '    const images = Array.from((ui.paper.querySelector(`.print-question[data-question-id="${CSS.escape(id)}"]`) || { querySelectorAll: () => [] })\n'
+        '      .querySelectorAll(".qb-figures .qb-figure img"));',
         ["frontend/test_library_export_ui.js"],
     ),
     (
@@ -174,8 +174,9 @@ MUTATIONS = [
 
 def run(tests):
     for name in tests:
-        result = subprocess.run(["node", name], cwd=ROOT, capture_output=True, text=True,
-                                encoding="utf-8", errors="replace")
+        result = subprocess.run(
+            ["node", name], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
         if result.returncode != 0:
             return False, name
     return True, ""

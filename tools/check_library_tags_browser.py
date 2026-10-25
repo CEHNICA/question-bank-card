@@ -28,8 +28,14 @@ EDITED_ALIASES = ["课堂综合456", "综合复习789"]
 
 
 def _assert_isolated():
-    for name in ("QB_DATABASE", "QB_DATA_ROOT", "QB_FEATURES_FILE", "QB_LIBRARY_AI_SETTINGS_FILE",
-                 "QB_LIBRARY_AI_CREDENTIAL_FILE", "QB_CREDENTIAL_FILE"):
+    for name in (
+        "QB_DATABASE",
+        "QB_DATA_ROOT",
+        "QB_FEATURES_FILE",
+        "QB_LIBRARY_AI_SETTINGS_FILE",
+        "QB_LIBRARY_AI_CREDENTIAL_FILE",
+        "QB_CREDENTIAL_FILE",
+    ):
         value = os.environ.get(name)
         if not value or not Path(value).resolve().is_relative_to(ROOT / "tmp"):
             raise SystemExit(f"{name} must point inside this checkout's tmp directory")
@@ -42,6 +48,7 @@ def seed():
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "qb_server.settings")
     sys.path.insert(0, str(ROOT / "backend"))
     import django
+
     django.setup()
     from django.core.management import call_command
 
@@ -54,28 +61,45 @@ def seed():
     # The fixture explicitly starts with the reviewed template directory;
     # production catalogue reads remain side-effect free.
     seed_catalogue()
-    paper = Paper.objects.create(filename="仅用于标签界面验收.pdf", kind="pdf", sha256="tag-browser-synthetic",
-                                 pages=1, status="ready")
+    paper = Paper.objects.create(
+        filename="仅用于标签界面验收.pdf", kind="pdf", sha256="tag-browser-synthetic", pages=1, status="ready"
+    )
     ids = []
-    for number, stem in enumerate((
-        "虚构题一：已知二次函数 y=x²−4x+3，求最小值。",
-        "虚构题二：三角形两边中点连线，说明它与第三边的关系。",
-    ), 1):
+    for number, stem in enumerate(
+        ("虚构题一：已知二次函数 y=x²−4x+3，求最小值。", "虚构题二：三角形两边中点连线，说明它与第三边的关系。"), 1
+    ):
         question = Question.objects.create(paper=paper, number=number, question_type="free_response", stem=stem)
-        content = {"stem": stem, "options": {}, "answer": "", "analysis": "", "figures": [],
-                   "sources": [], "origin": "合成浏览器验收数据", "source_filename": paper.filename,
-                   "document_id": str(paper.pk), "question_type": "free_response"}
+        content = {
+            "stem": stem,
+            "options": {},
+            "answer": "",
+            "analysis": "",
+            "figures": [],
+            "sources": [],
+            "origin": "合成浏览器验收数据",
+            "source_filename": paper.filename,
+            "document_id": str(paper.pk),
+            "question_type": "free_response",
+        }
         publication = PublishedQuestion.objects.create(
-            question=question, paper=paper, source_filename=paper.filename, number=number,
-            question_type="free_response", version=1, status=PublishedQuestion.Status.PUBLISHED,
-            review_source="human", content=content, content_hash=library.content_hash(content),
-            search_text=library.search_key(stem), extras={})
+            question=question,
+            paper=paper,
+            source_filename=paper.filename,
+            number=number,
+            question_type="free_response",
+            version=1,
+            status=PublishedQuestion.Status.PUBLISHED,
+            review_source="human",
+            content=content,
+            content_hash=library.content_hash(content),
+            search_text=library.search_key(stem),
+            extras={},
+        )
         ids.append(str(publication.pk))
 
     knowledge_tag = LibraryTag.objects.get(kind=LibraryTag.Kind.KNOWLEDGE, name=TAG_NAME)
     first = PublishedQuestion.objects.get(pk=ids[0])
-    LibraryTagAssignment.objects.create(publication=first, tag=knowledge_tag,
-        source=LibraryTagAssignment.Source.HUMAN)
+    LibraryTagAssignment.objects.create(publication=first, tag=knowledge_tag, source=LibraryTagAssignment.Source.HUMAN)
     first.tag_revision = 1
     first.extras = {"tags": [TAG_NAME], "tags_source": "human"}
     first.tags_text = library.tags_text([TAG_NAME])
@@ -85,18 +109,35 @@ def seed():
     method = LibraryTag.objects.get(kind=LibraryTag.Kind.METHOD, name="构造中位线")
     catalogue = library_tagging.catalogue_state()
     LibraryTagSuggestion.objects.create(
-        publication=second, question_fingerprint=library.generation_fingerprint(second.content, second.pk),
-        taxonomy_revision=catalogue.revision, assignment_revision=second.tag_revision, method_source={},
-        suggestions=[{"kind": "method", "tag_id": str(method.pk), "name": method.name,
-                      "description": method.description, "rationale": "连接两边中点后得到平行关系。",
-                      "evidence": "题干明确给出两个中点。", "scope": {"subquestions": ["1"]}},
-                     {"kind": "knowledge", "new_name": NEW_TAG_NAME,
-                      "levels": ["初中"],
-                      "description": "仅用于验证新标签编辑栏，不是正式目录内容。",
-                      "rationale": "合成题面给出了三角形两边中点。",
-                      "evidence": "仅用于浏览器交互验收。", "scope": {"whole": True}}],
-        status=LibraryTagSuggestion.Status.PENDING, message="来自合成测试的候选，须人工逐条核对。",
-        generation_source="隔离测试模型")
+        publication=second,
+        question_fingerprint=library.generation_fingerprint(second.content, second.pk),
+        taxonomy_revision=catalogue.revision,
+        assignment_revision=second.tag_revision,
+        method_source={},
+        suggestions=[
+            {
+                "kind": "method",
+                "tag_id": str(method.pk),
+                "name": method.name,
+                "description": method.description,
+                "rationale": "连接两边中点后得到平行关系。",
+                "evidence": "题干明确给出两个中点。",
+                "scope": {"subquestions": ["1"]},
+            },
+            {
+                "kind": "knowledge",
+                "new_name": NEW_TAG_NAME,
+                "levels": ["初中"],
+                "description": "仅用于验证新标签编辑栏，不是正式目录内容。",
+                "rationale": "合成题面给出了三角形两边中点。",
+                "evidence": "仅用于浏览器交互验收。",
+                "scope": {"whole": True},
+            },
+        ],
+        status=LibraryTagSuggestion.Status.PENDING,
+        message="来自合成测试的候选，须人工逐条核对。",
+        generation_source="隔离测试模型",
+    )
     OUTPUT.mkdir(parents=True, exist_ok=True)
     (OUTPUT / "fixture.json").write_text(json.dumps({"ids": ids}, ensure_ascii=False), encoding="utf-8")
     print("Synthetic tag browser fixture ready")
@@ -111,12 +152,19 @@ def check(base: str):
     fixture = json.loads((OUTPUT / "fixture.json").read_text(encoding="utf-8"))
     errors, external = [], []
     with sync_playwright() as playwright:
-        executable = next((str(path) for path in (
-            Path(playwright.chromium.executable_path),
-            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if path.is_file()), None)
-        browser = playwright.chromium.launch(headless=True,
-            **({"executable_path": executable} if executable else {}))
+        executable = next(
+            (
+                str(path)
+                for path in (
+                    Path(playwright.chromium.executable_path),
+                    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                )
+                if path.is_file()
+            ),
+            None,
+        )
+        browser = playwright.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
         context = browser.new_context(viewport={"width": 1440, "height": 960}, device_scale_factor=1)
 
         def local_only(route):
@@ -169,14 +217,20 @@ def check(base: str):
         def check_picker_layout():
             """Check the painted scroll panes and footer, including short screens."""
             picker = page.locator("#tagPickerDialog")
-            panes = (picker.locator(".tag-picker-body"),
-                     picker.locator("#tagPickerGroups"), picker.locator("#tagPickerList"))
+            panes = (
+                picker.locator(".tag-picker-body"),
+                picker.locator("#tagPickerGroups"),
+                picker.locator("#tagPickerList"),
+            )
             assert panes[1].evaluate("element => element.parentElement.classList.contains('tag-picker-body')"), (
-                "Chapter navigation must remain inside the picker body")
+                "Chapter navigation must remain inside the picker body"
+            )
             for width, height in ((1440, 960), (1440, 680), (390, 844)):
                 page.set_viewport_size({"width": width, "height": height})
                 for pane in panes[1:]:
-                    pane.evaluate("element => { element.scrollTop = element.scrollHeight; element.scrollLeft = element.scrollWidth; }")
+                    pane.evaluate(
+                        "element => { element.scrollTop = element.scrollHeight; element.scrollLeft = element.scrollWidth; }"
+                    )
                 page.wait_for_function("""() => {
                     const dialog = document.querySelector('#tagPickerDialog');
                     return dialog && dialog.open && dialog.getBoundingClientRect().height > 0;
@@ -186,16 +240,30 @@ def check(base: str):
                 body_bounds, chapter_bounds, list_bounds = [pane.bounding_box() for pane in panes]
                 assert all((dialog_bounds, footer_bounds, body_bounds, chapter_bounds, list_bounds))
                 assert dialog_bounds["y"] >= -1 and dialog_bounds["y"] + dialog_bounds["height"] <= height + 1, (
-                    "The tag window must fit within the visible screen", width, height, dialog_bounds)
+                    "The tag window must fit within the visible screen",
+                    width,
+                    height,
+                    dialog_bounds,
+                )
                 for pane_bounds in (body_bounds, chapter_bounds, list_bounds):
                     assert pane_bounds["y"] + pane_bounds["height"] <= footer_bounds["y"] + 1, (
-                        "Scrolled tag content must not paint over the footer", width, height,
-                        pane_bounds, footer_bounds)
+                        "Scrolled tag content must not paint over the footer",
+                        width,
+                        height,
+                        pane_bounds,
+                        footer_bounds,
+                    )
                 assert chapter_bounds["y"] >= body_bounds["y"] - 1, (body_bounds, chapter_bounds)
                 assert chapter_bounds["y"] + chapter_bounds["height"] <= body_bounds["y"] + body_bounds["height"] + 1, (
-                    "The chapter pane must be constrained by the picker body", body_bounds, chapter_bounds)
+                    "The chapter pane must be constrained by the picker body",
+                    body_bounds,
+                    chapter_bounds,
+                )
                 assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1"), (
-                    "The tag picker must not add horizontal page overflow", width, height)
+                    "The tag picker must not add horizontal page overflow",
+                    width,
+                    height,
+                )
                 # Layout boxes alone cannot detect text drawn outside a scroll
                 # pane. Hit-testing the actual footer catches a pane overlay.
                 assert picker.locator("#tagPickerStatus").evaluate("""element => {
@@ -254,8 +322,10 @@ def check(base: str):
         expect(parent_select).to_have_count(1)
         window_bounds, card_bounds = tag_window.bounding_box(), proposal.bounding_box()
         assert window_bounds and card_bounds
-        assert card_bounds["x"] >= window_bounds["x"] - 1 and card_bounds["x"] + card_bounds["width"] <= window_bounds["x"] + window_bounds["width"] + 1, (
-            "The suggestion must stay inside the tag window it belongs to", window_bounds, card_bounds)
+        assert (
+            card_bounds["x"] >= window_bounds["x"] - 1
+            and card_bounds["x"] + card_bounds["width"] <= window_bounds["x"] + window_bounds["width"] + 1
+        ), ("The suggestion must stay inside the tag window it belongs to", window_bounds, card_bounds)
         page.screenshot(path=str(OUTPUT / "tag-suggestion-pending.png"), full_page=False)
         edit.get_by_text("修改名称或上级", exact=True).click()
         expect(name).to_be_visible()
@@ -285,12 +355,17 @@ def check(base: str):
         card_bounds, window_bounds = proposal.bounding_box(), tag_window.bounding_box()
         assert card_bounds and window_bounds
         assert window_bounds["y"] >= -1 and window_bounds["y"] + window_bounds["height"] <= 845, (
-            "The tag window must fit a phone screen", window_bounds)
-        assert card_bounds["x"] >= window_bounds["x"] - 1 and card_bounds["x"] + card_bounds["width"] <= window_bounds["x"] + window_bounds["width"] + 1, (
-            "The suggestion must stay inside the tag window on a phone", window_bounds, card_bounds)
+            "The tag window must fit a phone screen",
+            window_bounds,
+        )
+        assert (
+            card_bounds["x"] >= window_bounds["x"] - 1
+            and card_bounds["x"] + card_bounds["width"] <= window_bounds["x"] + window_bounds["width"] + 1
+        ), ("The suggestion must stay inside the tag window on a phone", window_bounds, card_bounds)
         assert card_bounds["width"] >= 280, ("The suggestion must stay readable on a phone", card_bounds)
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1"), (
-            "Narrow tag review must not introduce horizontal page overflow")
+            "Narrow tag review must not introduce horizontal page overflow"
+        )
         page.screenshot(path=str(OUTPUT / "tag-suggestion-mobile.png"), full_page=False)
         page.set_viewport_size({"width": 1440, "height": 960})
 
@@ -298,16 +373,20 @@ def check(base: str):
         # chosen parent must reach the backend and the formal tag row.
         parent_select.select_option([selected_parent_id])
         candidates.nth(1).check()
-        with page.expect_response(lambda response: response.url.endswith("/resolve")
-                                  and response.request.method == "POST") as acceptance:
+        with page.expect_response(
+            lambda response: response.url.endswith("/resolve") and response.request.method == "POST"
+        ) as acceptance:
             accept.click()
         response = acceptance.value
         assert response.ok, response.text()
         submitted = response.request.post_data_json
         assert submitted["action"] == "accept" and submitted["indices"] == [1], submitted
         assert submitted["new_tags"]["1"] == {
-            "name": NEW_TAG_NAME + "已编辑", "kind": "knowledge",
-            "parent_ids": [selected_parent_id], "top_level": False}, submitted
+            "name": NEW_TAG_NAME + "已编辑",
+            "kind": "knowledge",
+            "parent_ids": [selected_parent_id],
+            "top_level": False,
+        }, submitted
         saved_tag_name = unicodedata.normalize("NFKC", NEW_TAG_NAME + "已编辑")
         # A decided candidate exits the review panel immediately; the other
         # candidate keeps its original index and remains independently reviewable.
@@ -329,8 +408,9 @@ def check(base: str):
         # than accepting fake method evidence; the accepted knowledge stays.
         open_suggestions()
         candidates.nth(0).check()
-        with page.expect_response(lambda response: response.url.endswith("/resolve")
-                                  and response.request.method == "POST") as rejection:
+        with page.expect_response(
+            lambda response: response.url.endswith("/resolve") and response.request.method == "POST"
+        ) as rejection:
             reject.click()
         response = rejection.value
         assert response.ok, response.text()
@@ -362,7 +442,11 @@ def check(base: str):
         expect(picker.locator("#tagPickerStatus")).to_have_text("单题")
         check_picker_layout()
         page.locator("#tagPickerSearch").fill(TAG_NAME)
-        row = page.locator(".tag-picker-row").filter(has=page.locator(".tag-picker-row-title strong", has_text=TAG_NAME)).first
+        row = (
+            page.locator(".tag-picker-row")
+            .filter(has=page.locator(".tag-picker-row-title strong", has_text=TAG_NAME))
+            .first
+        )
         expect(row.locator(".tag-picker-row-state")).to_have_text("✓ 已添加")
         row.click()
         expect(row.locator(".tag-picker-row-state")).to_have_text("添加")
@@ -384,8 +468,9 @@ def check(base: str):
         name_field = editor.locator("#tagCatalogueName")
         name_field.press_sequentially(CUSTOM_PARENT_NAME, delay=3)
         expect(name_field).to_have_value(CUSTOM_PARENT_NAME)
-        with page.expect_response(lambda response: urlparse(response.url).path == "/api/library/tags"
-                                  and response.request.method == "POST") as parent_creation:
+        with page.expect_response(
+            lambda response: urlparse(response.url).path == "/api/library/tags" and response.request.method == "POST"
+        ) as parent_creation:
             editor.locator("#tagCatalogueSave").click()
         response = parent_creation.value
         assert response.ok, response.text()
@@ -393,8 +478,7 @@ def check(base: str):
         assert submitted["action"] == "create_tag" and submitted["name"] == CUSTOM_PARENT_NAME, submitted
         assert submitted["kind"] == "custom" and submitted["parent_ids"] == [], submitted
         saved_parent_name = unicodedata.normalize("NFKC", CUSTOM_PARENT_NAME)
-        parent_tag = next(tag for tag in response.json()["catalogue"]["tags"]
-                          if tag["name"] == saved_parent_name)
+        parent_tag = next(tag for tag in response.json()["catalogue"]["tags"] if tag["name"] == saved_parent_name)
         expect(editor).not_to_be_visible()
         expect(manager).to_be_visible()
         # A tag of your own can sit at the top of a level, exactly like a chapter.
@@ -432,14 +516,18 @@ def check(base: str):
             request = route.request
             if request.method == "POST" and request.post_data_json.get("action") == "create_tag" and not failures:
                 failures.append(request.post_data_json)
-                route.fulfill(status=503, content_type="application/json",
-                              body=json.dumps({"error": injected_error}, ensure_ascii=False))
+                route.fulfill(
+                    status=503,
+                    content_type="application/json",
+                    body=json.dumps({"error": injected_error}, ensure_ascii=False),
+                )
             else:
                 route.continue_()
 
         page.route(catalogue_url, fail_first_tag_creation)
-        with page.expect_response(lambda response: response.url == catalogue_url
-                                  and response.request.method == "POST") as failed_creation:
+        with page.expect_response(
+            lambda response: response.url == catalogue_url and response.request.method == "POST"
+        ) as failed_creation:
             editor.locator("#tagCatalogueCreateOnly").click()
         assert failed_creation.value.status == 503 and len(failures) == 1
         expect(editor.locator("#tagCatalogueStatus")).to_contain_text(injected_error)
@@ -453,10 +541,17 @@ def check(base: str):
         page.screenshot(path=str(OUTPUT / "tag-create-draft-retained.png"), full_page=False)
         page.unroute(catalogue_url, fail_first_tag_creation)
 
-        with page.expect_response(lambda response: response.url == catalogue_url
-                                  and response.request.method == "POST") as tag_creation, \
-             page.expect_response(lambda response: urlparse(response.url).path == "/api/library/tags/assignments/batch"
-                                  and response.request.method == "POST") as assignment_creation:
+        with (
+            page.expect_response(
+                lambda response: response.url == catalogue_url and response.request.method == "POST"
+            ) as tag_creation,
+            page.expect_response(
+                lambda response: (
+                    urlparse(response.url).path == "/api/library/tags/assignments/batch"
+                    and response.request.method == "POST"
+                )
+            ) as assignment_creation,
+        ):
             editor.locator("#tagCatalogueSave").click()
         response = tag_creation.value
         assert response.ok, response.text()
@@ -465,8 +560,7 @@ def check(base: str):
         assert submitted["kind"] == "custom" and submitted["parent_ids"] == [parent_tag["id"]], submitted
         assert submitted["description"] == CUSTOM_TAG_DESCRIPTION and submitted["color"] == selected_color, submitted
         saved_custom_name = unicodedata.normalize("NFKC", CUSTOM_TAG_NAME)
-        saved_tag = next(tag for tag in response.json()["catalogue"]["tags"]
-                         if tag["name"] == saved_custom_name)
+        saved_tag = next(tag for tag in response.json()["catalogue"]["tags"] if tag["name"] == saved_custom_name)
         assignment = assignment_creation.value
         assert assignment.ok, assignment.text()
         submitted = assignment.request.post_data_json
@@ -474,14 +568,19 @@ def check(base: str):
         assert submitted["add"] == [saved_tag["id"]] and submitted["remove"] == [], submitted
         expect(editor).not_to_be_visible()
         expect(picker).to_be_visible()
-        new_row = picker.locator(".tag-picker-row").filter(has=page.locator(".tag-picker-row-title strong", has_text=saved_custom_name))
+        new_row = picker.locator(".tag-picker-row").filter(
+            has=page.locator(".tag-picker-row-title strong", has_text=saved_custom_name)
+        )
         expect(new_row).to_have_count(1)
         expect(new_row.locator(".tag-picker-row-state")).to_have_text("✓ 已添加")
         expect(inspector.locator(".library-tags")).to_contain_text(saved_custom_name)
         page.screenshot(path=str(OUTPUT / "tag-create-and-add.png"), full_page=False)
 
-        with page.expect_response(lambda response: urlparse(response.url).path == "/api/library/tags/undo"
-                                  and response.request.method == "POST") as creation_undo:
+        with page.expect_response(
+            lambda response: (
+                urlparse(response.url).path == "/api/library/tags/undo" and response.request.method == "POST"
+            )
+        ) as creation_undo:
             picker.locator("#tagPickerUndo").click()
         assert creation_undo.value.ok, creation_undo.value.text()
         expect(new_row.locator(".tag-picker-row-state")).to_have_text("添加")
@@ -521,35 +620,46 @@ def check(base: str):
                 committed = route.fetch()
                 assert committed.ok, committed.text()
                 committed_assignments.append(committed.json())
-                route.fulfill(status=503, content_type="application/json",
-                              body=json.dumps({"error": lost_reply_error}, ensure_ascii=False))
+                route.fulfill(
+                    status=503,
+                    content_type="application/json",
+                    body=json.dumps({"error": lost_reply_error}, ensure_ascii=False),
+                )
             else:
                 route.continue_()
 
         page.route(assignment_url, commit_then_lose_reply)
-        with page.expect_response(lambda response: response.url == catalogue_url
-                                  and response.request.method == "POST") as retry_tag_creation, \
-             page.expect_response(lambda response: response.url == assignment_url
-                                  and response.request.method == "POST") as lost_assignment:
+        with (
+            page.expect_response(
+                lambda response: response.url == catalogue_url and response.request.method == "POST"
+            ) as retry_tag_creation,
+            page.expect_response(
+                lambda response: response.url == assignment_url and response.request.method == "POST"
+            ) as lost_assignment,
+        ):
             editor.locator("#tagCatalogueSave").click()
         assert retry_tag_creation.value.ok, retry_tag_creation.value.text()
         assert lost_assignment.value.status == 503
         saved_retry_name = unicodedata.normalize("NFKC", RETRY_TAG_NAME)
-        retry_tag = next(tag for tag in retry_tag_creation.value.json()["catalogue"]["tags"]
-                         if tag["name"] == saved_retry_name)
+        retry_tag = next(
+            tag for tag in retry_tag_creation.value.json()["catalogue"]["tags"] if tag["name"] == saved_retry_name
+        )
         assert len(assignment_requests) == 1 and len(committed_assignments) == 1
         committed_assignment = committed_assignments[0]
         persisted = read_api("/api/library/tags/assignments/batch?ids=" + fixture["ids"][0])["items"][fixture["ids"][0]]
         assert persisted["revision"] == committed_assignment["revisions"][fixture["ids"][0]], persisted
-        assert sum(assignment["tag"]["id"] == retry_tag["id"] for assignment in persisted["assignments"]) == 1, persisted
+        assert sum(assignment["tag"]["id"] == retry_tag["id"] for assignment in persisted["assignments"]) == 1, (
+            persisted
+        )
         expect(editor).to_be_visible()
         expect(editor.locator("#tagCatalogueStatus")).to_contain_text(lost_reply_error)
         expect(name_field).to_have_value(RETRY_TAG_NAME)
         expect(editor.locator("#tagCatalogueSave")).to_have_text("重试添加")
         expect(editor.locator("#tagCatalogueSave")).to_be_enabled()
         page.screenshot(path=str(OUTPUT / "tag-created-reply-lost.png"), full_page=False)
-        with page.expect_response(lambda response: response.url == assignment_url
-                                  and response.request.method == "POST") as assignment_retry:
+        with page.expect_response(
+            lambda response: response.url == assignment_url and response.request.method == "POST"
+        ) as assignment_retry:
             editor.locator("#tagCatalogueSave").click()
         response = assignment_retry.value
         assert response.ok, response.text()
@@ -560,13 +670,20 @@ def check(base: str):
         assert replay["revisions"] == committed_assignment["revisions"], (replay, committed_assignment)
         page.unroute(assignment_url, commit_then_lose_reply)
         expect(editor).not_to_be_visible()
-        expect(picker.locator(".tag-picker-row").filter(has=page.locator(".tag-picker-row-title strong", has_text=saved_retry_name))
-               .locator(".tag-picker-row-state")).to_have_text("✓ 已添加")
+        expect(
+            picker.locator(".tag-picker-row")
+            .filter(has=page.locator(".tag-picker-row-title strong", has_text=saved_retry_name))
+            .locator(".tag-picker-row-state")
+        ).to_have_text("✓ 已添加")
         expect(inspector.locator(".library-tags")).to_contain_text(saved_retry_name)
         after_operations = read_api("/api/library/tags/operations")["operations"]
         added_operations = [operation for operation in after_operations if operation["id"] not in before_operations]
-        assert sorted(operation["action"] for operation in added_operations) == ["assign", "catalogue:create_tag"], added_operations
-        assert [operation["id"] for operation in added_operations if operation["action"] == "assign"] == [committed_assignment["operation_id"]], added_operations
+        assert sorted(operation["action"] for operation in added_operations) == ["assign", "catalogue:create_tag"], (
+            added_operations
+        )
+        assert [operation["id"] for operation in added_operations if operation["action"] == "assign"] == [
+            committed_assignment["operation_id"]
+        ], added_operations
         assert sum(tag["name"] == saved_retry_name for tag in read_api("/api/library/tags")["tags"]) == 1
         page.screenshot(path=str(OUTPUT / "tag-created-reply-retried.png"), full_page=False)
 
@@ -577,8 +694,7 @@ def check(base: str):
         page.locator("#libraryTagManager").click()
         expect(manager).to_be_visible()
         manager.locator('#tagManagerScopes [data-nav-id="all"]').click()
-        managed_tag = manager.locator(".tag-directory-row").filter(
-            has=page.get_by_text(saved_retry_name, exact=True))
+        managed_tag = manager.locator(".tag-directory-row").filter(has=page.get_by_text(saved_retry_name, exact=True))
         managed_tag.get_by_role("button", name=saved_retry_name, exact=True).click()
         manager.locator("#tagManagerEditTag").click()
         expect(editor).to_be_visible()
@@ -590,8 +706,9 @@ def check(base: str):
         editor.get_by_text("别名、学段与适用条件", exact=True).click()
         aliases_field = editor.get_by_label("别名（用逗号分隔）", exact=True)
         aliases_field.fill("，".join(EDITED_ALIASES))
-        with page.expect_response(lambda response: response.url == catalogue_url
-                                  and response.request.method == "POST") as tag_edit:
+        with page.expect_response(
+            lambda response: response.url == catalogue_url and response.request.method == "POST"
+        ) as tag_edit:
             editor.locator("#tagCatalogueSave").click()
         response = tag_edit.value
         assert response.ok, response.text()
@@ -601,19 +718,22 @@ def check(base: str):
         assert submitted["aliases"] == [*EDITED_ALIASES, saved_retry_name], submitted
         expect(editor).not_to_be_visible()
         edited_tag_name = unicodedata.normalize("NFKC", EDITED_TAG_NAME)
-        expect(manager.locator(".tag-directory-row").filter(
-            has=page.get_by_text(edited_tag_name, exact=True))).to_have_count(1)
+        expect(
+            manager.locator(".tag-directory-row").filter(has=page.get_by_text(edited_tag_name, exact=True))
+        ).to_have_count(1)
 
         manager.locator('#tagManagerHierarchyNav [data-nav-id="custom"]').click()
         managed_parent = manager.locator(".tag-directory-row").filter(
-            has=page.get_by_text(saved_parent_name, exact=True))
+            has=page.get_by_text(saved_parent_name, exact=True)
+        )
         managed_parent.get_by_role("button", name=saved_parent_name, exact=True).click()
         manager.locator("#tagManagerEditTag").click()
         expect(editor).to_be_visible()
         expect(name_field).to_have_value(saved_parent_name)
         name_field.fill(EDITED_PARENT_NAME)
-        with page.expect_response(lambda response: response.url == catalogue_url
-                                  and response.request.method == "POST") as parent_edit:
+        with page.expect_response(
+            lambda response: response.url == catalogue_url and response.request.method == "POST"
+        ) as parent_edit:
             editor.locator("#tagCatalogueSave").click()
         response = parent_edit.value
         assert response.ok, response.text()
@@ -622,30 +742,43 @@ def check(base: str):
         assert submitted["name"] == EDITED_PARENT_NAME, submitted
         expect(editor).not_to_be_visible()
         edited_parent_name = unicodedata.normalize("NFKC", EDITED_PARENT_NAME)
-        expect(manager.locator(".tag-directory-row").filter(
-            has=page.get_by_text(edited_parent_name, exact=True))).to_have_count(1)
+        expect(
+            manager.locator(".tag-directory-row").filter(has=page.get_by_text(edited_parent_name, exact=True))
+        ).to_have_count(1)
         page.screenshot(path=str(OUTPUT / "tag-manager-edited-directory.png"), full_page=False)
         manager.locator("#tagManagerBack").click()
         first.locator(".paper").click()
         if not inspector.is_visible():
             first.locator(".library-card-details").click()
-        with page.expect_response(lambda response: urlparse(response.url).path == "/api/library/tags/assignments/batch"
-                                  and response.request.method == "GET") as picker_refresh:
+        with page.expect_response(
+            lambda response: (
+                urlparse(response.url).path == "/api/library/tags/assignments/batch"
+                and response.request.method == "GET"
+            )
+        ) as picker_refresh:
             inspector.locator(".library-tags-edit").click()
         response = picker_refresh.value
         assert response.ok, response.text()
         refreshed_revision = response.json()["items"][fixture["ids"][0]]["revision"]
         assert refreshed_revision == committed_assignment["revisions"][fixture["ids"][0]] + 1
         expect(picker).to_be_visible()
-        expect(picker.locator("#tagPickerGroups").get_by_role("button", name=edited_parent_name, exact=True)).to_be_visible()
+        expect(
+            picker.locator("#tagPickerGroups").get_by_role("button", name=edited_parent_name, exact=True)
+        ).to_be_visible()
         picker.locator("#tagPickerSearch").fill("")
         picker.locator("#tagPickerGroups").get_by_role("button", name=edited_parent_name, exact=True).click()
-        expect(picker.locator(".tag-picker-row").filter(has=page.locator(".tag-picker-row-title strong", has_text=edited_tag_name))
-               .locator(".tag-picker-row-state")).to_have_text("✓ 已添加")
-        new_row = picker.locator(".tag-picker-row").filter(has=page.locator(".tag-picker-row-title strong", has_text=saved_custom_name))
+        expect(
+            picker.locator(".tag-picker-row")
+            .filter(has=page.locator(".tag-picker-row-title strong", has_text=edited_tag_name))
+            .locator(".tag-picker-row-state")
+        ).to_have_text("✓ 已添加")
+        new_row = picker.locator(".tag-picker-row").filter(
+            has=page.locator(".tag-picker-row-title strong", has_text=saved_custom_name)
+        )
         expect(new_row.locator(".tag-picker-row-state")).to_have_text("添加")
-        with page.expect_response(lambda response: response.url == assignment_url
-                                  and response.request.method == "POST") as refreshed_save:
+        with page.expect_response(
+            lambda response: response.url == assignment_url and response.request.method == "POST"
+        ) as refreshed_save:
             new_row.click()
         response = refreshed_save.value
         assert response.ok, response.text()
@@ -655,9 +788,12 @@ def check(base: str):
         expect(new_row.locator(".tag-picker-row-state")).to_have_text("✓ 已添加")
         picker.locator("#tagPickerUndo").click()
         expect(new_row.locator(".tag-picker-row-state")).to_have_text("添加")
-        renamed_row = picker.locator(".tag-picker-row").filter(has=page.locator(".tag-picker-row-title strong", has_text=edited_tag_name))
-        with page.expect_response(lambda response: response.url == assignment_url
-                                  and response.request.method == "POST") as retry_cleanup:
+        renamed_row = picker.locator(".tag-picker-row").filter(
+            has=page.locator(".tag-picker-row-title strong", has_text=edited_tag_name)
+        )
+        with page.expect_response(
+            lambda response: response.url == assignment_url and response.request.method == "POST"
+        ) as retry_cleanup:
             renamed_row.click()
         assert retry_cleanup.value.ok, retry_cleanup.value.text()
         expect(renamed_row.locator(".tag-picker-row-state")).to_have_text("添加")
@@ -673,7 +809,11 @@ def check(base: str):
         picker = page.locator("#tagPickerDialog")
         expect(picker).to_be_visible()
         page.locator("#tagPickerSearch").fill(TAG_NAME)
-        row = page.locator(".tag-picker-row").filter(has=page.locator(".tag-picker-row-title strong", has_text=TAG_NAME)).first
+        row = (
+            page.locator(".tag-picker-row")
+            .filter(has=page.locator(".tag-picker-row-title strong", has_text=TAG_NAME))
+            .first
+        )
         expect(row.locator(".tag-picker-row-state")).to_contain_text("部分有 1/2")
         row.click()
         expect(row.locator(".tag-picker-row-state")).to_have_text("全部都有")
@@ -703,8 +843,9 @@ def check(base: str):
         expect(template_dialog.locator("input[type=checkbox]:checked")).to_have_count(0)
         page.screenshot(path=str(OUTPUT / "tag-system-template-preview.png"), full_page=False)
         template_checks.first.check()
-        with page.expect_response(lambda response: urlparse(response.url).path == "/api/library/tags"
-                                  and response.request.method == "POST") as template_import:
+        with page.expect_response(
+            lambda response: urlparse(response.url).path == "/api/library/tags" and response.request.method == "POST"
+        ) as template_import:
             template_dialog.get_by_role("button", name="导入所选章节", exact=True).click()
         response = template_import.value
         assert response.ok, response.text()
@@ -716,8 +857,9 @@ def check(base: str):
         # assignments and tags, then the operation log restores the snapshot.
         page.once("dialog", lambda dialog: dialog.accept())
         manager.locator("details.tag-directory-advanced > summary").click()
-        with page.expect_response(lambda response: urlparse(response.url).path == "/api/library/tags"
-                                  and response.request.method == "POST") as reset:
+        with page.expect_response(
+            lambda response: urlparse(response.url).path == "/api/library/tags" and response.request.method == "POST"
+        ) as reset:
             manager.locator("#tagManagerReset").click()
         response = reset.value
         assert response.ok, response.text()
@@ -728,8 +870,11 @@ def check(base: str):
             history_section.locator("summary").click()
         reset_row = manager.locator(".tag-directory-history-row").filter(has_text="清空标签目录")
         expect(reset_row).to_have_count(1)
-        with page.expect_response(lambda response: urlparse(response.url).path == "/api/library/tags/undo"
-                                  and response.request.method == "POST") as reset_undo:
+        with page.expect_response(
+            lambda response: (
+                urlparse(response.url).path == "/api/library/tags/undo" and response.request.method == "POST"
+            )
+        ) as reset_undo:
             reset_row.get_by_role("button", name="撤销", exact=True).click()
         assert reset_undo.value.ok, reset_undo.value.text()
         expect(manager.locator(".tag-directory-row")).not_to_have_count(0)
@@ -739,19 +884,25 @@ def check(base: str):
         assert not external, external
         assert not errors, errors
         browser.close()
-    print("Formal tag browser checks passed: directory, responsive pending-only AI review, "
-          "new-tag parent acceptance, partial review and rejection, scroll/footer containment, "
-          "picker directory creation, Chinese draft retention after failed save, "
-          "create-and-add undo, committed assignment reply-loss replay, "
-          "shared-form directory edits and refreshed picker revisions, single/bulk save and undo")
+    print(
+        "Formal tag browser checks passed: directory, responsive pending-only AI review, "
+        "new-tag parent acceptance, partial review and rejection, scroll/footer containment, "
+        "picker directory creation, Chinese draft retention after failed save, "
+        "create-and-add undo, committed assignment reply-loss replay, "
+        "shared-form directory edits and refreshed picker revisions, single/bulk save and undo"
+    )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", action="store_true")
     parser.add_argument("--url", default="http://127.0.0.1:8891")
-    parser.add_argument("--output", type=Path, default=OUTPUT,
-                        help="Fixture and screenshot directory, restricted to this checkout's tmp folder")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=OUTPUT,
+        help="Fixture and screenshot directory, restricted to this checkout's tmp folder",
+    )
     options = parser.parse_args()
     OUTPUT = options.output.resolve()
     if not OUTPUT.is_relative_to(ROOT / "tmp"):

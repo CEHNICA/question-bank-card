@@ -100,10 +100,14 @@ def main() -> int:
         check("第" in title, f"标题写清了是哪份资料的第几题：{title}")
         page.wait_for_function(
             "() => { const i = document.querySelector('#sourcePages .source-surface img');"
-            " return i ? (i.complete || i.dataset.ready === 'x') : false; }", timeout=30000)
+            " return i ? (i.complete || i.dataset.ready === 'x') : false; }",
+            timeout=30000,
+        )
         page.wait_for_timeout(700)
         first = page.evaluate(GEOMETRY)
-        if not check(first["imageLoaded"], f"原卷那一页真的画出来了（{first['imageWidth']}×{first['imageWidth']} 宽的图）"):
+        if not check(
+            first["imageLoaded"], f"原卷那一页真的画出来了（{first['imageWidth']}×{first['imageWidth']} 宽的图）"
+        ):
             print(f"    占位上写着：{first['placeholder'] or first['noCoords']}")
             if not (first["placeholder"] or first["noCoords"]):
                 skip("原卷没加载出来、界面上也什么都没说 —— 后面几项没量到")
@@ -121,8 +125,10 @@ def main() -> int:
         page.wait_for_timeout(250)
         zoomed = page.evaluate(GEOMETRY)
         check(zoomed["zoom"] != before["zoom"], f"点放大读数变了：{before['zoom']} → {zoomed['zoom']}")
-        check(zoomed["contentWidth"] > before["contentWidth"],
-              f"画面真的变大了（{before['contentWidth']} → {zoomed['contentWidth']}px）")
+        check(
+            zoomed["contentWidth"] > before["contentWidth"],
+            f"画面真的变大了（{before['contentWidth']} → {zoomed['contentWidth']}px）",
+        )
         for _ in range(10):
             if page.locator("#sourceZoomIn").is_disabled():
                 break
@@ -146,17 +152,25 @@ def main() -> int:
         page.locator("#sourceZoomIn").click()
         page.wait_for_timeout(300)
         wide_state = page.evaluate(GEOMETRY)
-        check(wide_state["surfaceWidth"] > wide_state["viewportWidth"],
-              f"先放大到撑出窗口（页宽 {wide_state['surfaceWidth']} > 窗口 {wide_state['viewportWidth']}）")
+        check(
+            wide_state["surfaceWidth"] > wide_state["viewportWidth"],
+            f"先放大到撑出窗口（页宽 {wide_state['surfaceWidth']} > 窗口 {wide_state['viewportWidth']}）",
+        )
         page.locator("#sourceFit").click()
         page.wait_for_timeout(400)
         fitted = page.evaluate(GEOMETRY)
-        check(fitted["surfaceWidth"] < wide_state["surfaceWidth"],
-              f"「适应窗口」确实把画面收窄了（{wide_state['surfaceWidth']} → {fitted['surfaceWidth']}px）")
-        check(fitted["surfaceWidth"] <= fitted["viewportWidth"] + 2,
-              f"整页宽度收得进窗口（{fitted['surfaceWidth']} / {fitted['viewportWidth']}）")
-        check(fitted["surfaceHeight"] <= fitted["viewportHeight"] + 2,
-              f"整页高度也收得进（{fitted['surfaceHeight']} / {fitted['viewportHeight']}）")
+        check(
+            fitted["surfaceWidth"] < wide_state["surfaceWidth"],
+            f"「适应窗口」确实把画面收窄了（{wide_state['surfaceWidth']} → {fitted['surfaceWidth']}px）",
+        )
+        check(
+            fitted["surfaceWidth"] <= fitted["viewportWidth"] + 2,
+            f"整页宽度收得进窗口（{fitted['surfaceWidth']} / {fitted['viewportWidth']}）",
+        )
+        check(
+            fitted["surfaceHeight"] <= fitted["viewportHeight"] + 2,
+            f"整页高度也收得进（{fitted['surfaceHeight']} / {fitted['viewportHeight']}）",
+        )
         page.screenshot(path=f"{SHOTS}/source-fit.png")
 
         # ── 四、Ctrl+滚轮也能缩放 ────────────────────────────────
@@ -168,8 +182,10 @@ def main() -> int:
         page.keyboard.up("Control")
         page.wait_for_timeout(300)
         wheel_after = page.evaluate(GEOMETRY)
-        check(wheel_after["contentWidth"] != wheel_before["contentWidth"],
-              f"Ctrl+滚轮也缩放（{wheel_before['contentWidth']} → {wheel_after['contentWidth']}px）")
+        check(
+            wheel_after["contentWidth"] != wheel_before["contentWidth"],
+            f"Ctrl+滚轮也缩放（{wheel_before['contentWidth']} → {wheel_after['contentWidth']}px）",
+        )
 
         # ── 五、本题范围 / 整页 ─────────────────────────────────
         page.locator("#sourceQuestion").click()
@@ -194,8 +210,7 @@ def main() -> int:
         page.wait_for_timeout(1200)
         second_title = page.locator("#sourceTitle").inner_text().strip()
         other = page.locator("article.library-card").nth(1).get_attribute("id")
-        check(other not in second_title or first_id != other,
-              f"换了一道题看，标题跟着换了：{second_title}")
+        check(other not in second_title or first_id != other, f"换了一道题看，标题跟着换了：{second_title}")
         second = page.evaluate(GEOMETRY)
         check(second["imageLoaded"], f"换题之后那一页也加载出来了（{second['imageWidth']}px 宽）")
         check(second["boxCount"] > 0, f"换题之后位置框也重画了（{second['boxCount']} 个）")
@@ -209,7 +224,8 @@ def main() -> int:
             page.wait_for_timeout(400)
             open_source(page, 0)
             page.wait_for_timeout(1200)
-            blocked = page.evaluate("""(root) => {
+            blocked = page.evaluate(
+                """(root) => {
               const bad = [];
               for (const item of root.querySelectorAll('button, a[href], summary, [role=menuitem]')) {
                 if (!item.checkVisibility({checkVisibilityCSS: true, contentVisibilityAuto: true})) continue;
@@ -223,7 +239,9 @@ def main() -> int:
                 }
               }
               return bad;
-            }""", page.locator("#sourceDialog").element_handle())
+            }""",
+                page.locator("#sourceDialog").element_handle(),
+            )
             check(not blocked, f"{width}×{height} 下原卷窗里的控件都点得到（被挡的：{blocked}）")
             page.screenshot(path=f"{SHOTS}/source-{width}.png")
             page.keyboard.press("Escape")

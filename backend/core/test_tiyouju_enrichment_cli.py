@@ -28,11 +28,21 @@ PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4
 def prepared():
     return {
         "publication": {"id": PUBLICATION, "version": 2, "content": {"stem": "如图，求 $x$。"}},
-        "jobs": [{"id": JOB, "kind": "answer", "fingerprint": FINGERPRINT,
-                  "executor": "assistant", "status": "queued", "prompt": "看图并自己解题"}],
-        "images": {"crop": f"/api/library/{PUBLICATION}/crop",
-                   "figures": [{"index": 0, "slot": "stem", "url": f"/api/library/{PUBLICATION}/figures/figure-1.png"}],
-                   "originals": [{"page_idx": 0, "url": f"/api/library/{PUBLICATION}/pages/0"}]},
+        "jobs": [
+            {
+                "id": JOB,
+                "kind": "answer",
+                "fingerprint": FINGERPRINT,
+                "executor": "assistant",
+                "status": "queued",
+                "prompt": "看图并自己解题",
+            }
+        ],
+        "images": {
+            "crop": f"/api/library/{PUBLICATION}/crop",
+            "figures": [{"index": 0, "slot": "stem", "url": f"/api/library/{PUBLICATION}/figures/figure-1.png"}],
+            "originals": [{"page_idx": 0, "url": f"/api/library/{PUBLICATION}/pages/0"}],
+        },
         "knowledge": {"points": [{"point": "一元一次方程", "chapter": "方程"}]},
     }
 
@@ -56,13 +66,13 @@ class EnrichmentCliProtocolTests(SimpleTestCase):
         self.local.get.assert_called_once_with("/api/settings/features")
         self.local.post.assert_not_called()
 
-
     def test_only_explicit_feature_choices_are_sent(self):
         self.local.post.return_value = {"features": []}
         code, _ = self.command("features", "--enable", "knowledge_tags", "--disable", "ai_answer")
         self.assertEqual(code, 0)
-        self.local.post.assert_called_once_with("/api/settings/features", {
-            "features": {"knowledge_tags": True, "ai_answer": False}})
+        self.local.post.assert_called_once_with(
+            "/api/settings/features", {"features": {"knowledge_tags": True, "ai_answer": False}}
+        )
         self.local.post.reset_mock()
         code, result = self.command("features", "--enable", "ai_answer", "--disable", "ai_answer")
         self.assertEqual(code, 1)
@@ -84,11 +94,17 @@ class EnrichmentCliProtocolTests(SimpleTestCase):
     def test_mcp_auto_preserves_false_and_does_not_enable_features(self):
         self.local.post.return_value = {"on_intake": {"tags": False, "answer": True}}
         cli.mcp_call(self.local, "configure_enrichment_auto", {"tags": False, "answer": True})
-        self.local.post.assert_called_once_with("/api/settings/library-ai", {"on_intake": {"tags": False, "answer": True}})
+        self.local.post.assert_called_once_with(
+            "/api/settings/library-ai", {"on_intake": {"tags": False, "answer": True}}
+        )
 
     def test_listing_preserves_paused_tasks_and_filters_without_preparing(self):
-        self.local.get.return_value = {"tasks": [{"id": JOB, "enabled": False, "stale": True}],
-                                       "total": 1, "mode": "assistant", "message": "功能已关闭"}
+        self.local.get.return_value = {
+            "tasks": [{"id": JOB, "enabled": False, "stale": True}],
+            "total": 1,
+            "mode": "assistant",
+            "message": "功能已关闭",
+        }
         code, result = self.command("enrich", "tasks", "--ids", PUBLICATION, OTHER, PUBLICATION, "--limit", "7")
         self.assertEqual(code, 0)
         self.assertFalse(result["tasks"][0]["enabled"])
@@ -106,15 +122,23 @@ class EnrichmentCliProtocolTests(SimpleTestCase):
     def test_prepare_downloads_only_question_images_and_keeps_original_urls(self):
         self.local.post.return_value = prepared()
         with tempfile.TemporaryDirectory() as folder:
-            code, result = self.command("enrich", "prepare", PUBLICATION, "--kinds", "answer",
-                                        "--agent", "豆包工作版", "--out", folder)
+            code, result = self.command(
+                "enrich", "prepare", PUBLICATION, "--kinds", "answer", "--agent", "豆包工作版", "--out", folder
+            )
             self.assertEqual(code, 0, result)
             self.assertEqual(Path(result["local_images"]["crop"]).read_bytes(), PNG)
             self.assertEqual(Path(result["local_images"]["figures"][0]).read_bytes(), PNG)
-        self.local.post.assert_called_once_with("/api/library/assistant/prepare", {
-            "publication_id": PUBLICATION, "kinds": ["answer"], "agent": "豆包工作版"})
-        self.assertEqual(self.local.get_bytes.call_args_list, [mock.call(f"/api/library/{PUBLICATION}/crop"),
-                                                              mock.call(f"/api/library/{PUBLICATION}/figures/figure-1.png")])
+        self.local.post.assert_called_once_with(
+            "/api/library/assistant/prepare",
+            {"publication_id": PUBLICATION, "kinds": ["answer"], "agent": "豆包工作版"},
+        )
+        self.assertEqual(
+            self.local.get_bytes.call_args_list,
+            [
+                mock.call(f"/api/library/{PUBLICATION}/crop"),
+                mock.call(f"/api/library/{PUBLICATION}/figures/figure-1.png"),
+            ],
+        )
         self.assertEqual(result["images"]["originals"][0]["url"], f"{self.local.url}/api/library/{PUBLICATION}/pages/0")
         self.assertEqual(result["jobs"][0]["fingerprint"], FINGERPRINT)
 
@@ -141,21 +165,41 @@ class EnrichmentCliProtocolTests(SimpleTestCase):
         with tempfile.TemporaryDirectory() as folder:
             file = Path(folder) / "结果.json"
             file.write_text(json.dumps(content, ensure_ascii=False), encoding="utf-8-sig")
-            code, result = self.command("enrich", "submit", JOB, "--fingerprint", FINGERPRINT,
-                                        "--result-file", str(file), "--agent", "豆包工作版")
+            code, result = self.command(
+                "enrich",
+                "submit",
+                JOB,
+                "--fingerprint",
+                FINGERPRINT,
+                "--result-file",
+                str(file),
+                "--agent",
+                "豆包工作版",
+            )
         self.assertEqual(code, 0, result)
-        self.local.post.assert_called_once_with("/api/library/assistant/complete", {
-            **content, "job_id": JOB, "fingerprint": FINGERPRINT, "agent": "豆包工作版"})
+        self.local.post.assert_called_once_with(
+            "/api/library/assistant/complete",
+            {**content, "job_id": JOB, "fingerprint": FINGERPRINT, "agent": "豆包工作版"},
+        )
 
     def test_submit_rejects_mixed_results_and_attempts_to_override_task_or_source(self):
-        invalid = [{"tags": ["一元一次方程"], "answer": "2"}, {"tags": []}, {"tags": [1]},
-                   {"answer": "2", "agent": "伪造来源"}, {"answer": "2", "stem": "改原题"},
-                   {"answer": "2", "job_id": OTHER}, {"analysis": "只有解析"}, []]
+        invalid = [
+            {"tags": ["一元一次方程"], "answer": "2"},
+            {"tags": []},
+            {"tags": [1]},
+            {"answer": "2", "agent": "伪造来源"},
+            {"answer": "2", "stem": "改原题"},
+            {"answer": "2", "job_id": OTHER},
+            {"analysis": "只有解析"},
+            [],
+        ]
         with tempfile.TemporaryDirectory() as folder:
             file = Path(folder) / "结果.json"
             for value in invalid:
                 file.write_text(json.dumps(value), encoding="utf-8")
-                code, result = self.command("enrich", "submit", JOB, "--fingerprint", FINGERPRINT, "--result-file", str(file))
+                code, result = self.command(
+                    "enrich", "submit", JOB, "--fingerprint", FINGERPRINT, "--result-file", str(file)
+                )
                 self.assertEqual(code, 1, result)
         self.local.post.assert_not_called()
 
@@ -169,10 +213,19 @@ class EnrichmentCliProtocolTests(SimpleTestCase):
 
     def test_mcp_preparation_attaches_local_images_and_uses_client_identity(self):
         self.local.post.return_value = prepared()
-        with tempfile.TemporaryDirectory() as folder, \
-                mock.patch.object(cli.tempfile, "mkdtemp", return_value=folder):
-            reply = cli.mcp_handle(self.local, {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                                               "params": {"name": "prepare_enrichment", "arguments": {"publication_id": PUBLICATION, "kinds": ["answer"]}}})
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(cli.tempfile, "mkdtemp", return_value=folder):
+            reply = cli.mcp_handle(
+                self.local,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "prepare_enrichment",
+                        "arguments": {"publication_id": PUBLICATION, "kinds": ["answer"]},
+                    },
+                },
+            )
         result = reply["result"]
         self.assertFalse(result["isError"])
         self.assertEqual([block["type"] for block in result["content"]], ["text", "image", "image"])
@@ -181,15 +234,24 @@ class EnrichmentCliProtocolTests(SimpleTestCase):
 
     def test_mcp_submit_does_not_mix_kinds_or_call_a_cloud_api(self):
         self.local.post.return_value = {"job": {"status": "done"}}
-        result, images = cli.mcp_call(self.local, "submit_enrichment", {
-            "job_id": JOB, "fingerprint": FINGERPRINT, "tags": ["一元一次方程"]})
+        result, images = cli.mcp_call(
+            self.local, "submit_enrichment", {"job_id": JOB, "fingerprint": FINGERPRINT, "tags": ["一元一次方程"]}
+        )
         self.assertEqual(result["job"]["status"], "done")
         self.assertEqual(images, [])
         self.assertEqual(self.local.post.call_args.args[0], "/api/library/assistant/complete")
         self.local.post.reset_mock()
-        result = cli.mcp_handle(self.local, {"id": 2, "method": "tools/call", "params": {
-            "name": "submit_enrichment", "arguments": {"job_id": JOB, "fingerprint": FINGERPRINT,
-                                                        "tags": ["一元一次方程"], "answer": "2"}}})
+        result = cli.mcp_handle(
+            self.local,
+            {
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "submit_enrichment",
+                    "arguments": {"job_id": JOB, "fingerprint": FINGERPRINT, "tags": ["一元一次方程"], "answer": "2"},
+                },
+            },
+        )
         self.assertTrue(result["result"]["isError"])
         self.local.post.assert_not_called()
 
@@ -202,15 +264,21 @@ class EnrichmentCliLiveTests(TempDataMixin, LiveServerTestCase):
 
     def setUp(self):
         self.use_temp_data()
-        environment = mock.patch.dict(os.environ, {
-            "TIYOUJU_URL": self.live_server_url, "TIYOUJU_AGENT": "",
-            "QB_LIBRARY_AI_SETTINGS_FILE": str(self.temp / "library-ai-settings.json"),
-            "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.temp / "synthetic-key.dat"),
-            "QB_FEATURES_FILE": str(self.temp / "features.json"),
-        })
+        environment = mock.patch.dict(
+            os.environ,
+            {
+                "TIYOUJU_URL": self.live_server_url,
+                "TIYOUJU_AGENT": "",
+                "QB_LIBRARY_AI_SETTINGS_FILE": str(self.temp / "library-ai-settings.json"),
+                "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.temp / "synthetic-key.dat"),
+                "QB_FEATURES_FILE": str(self.temp / "features.json"),
+            },
+        )
         environment.start()
         self.addCleanup(environment.stop)
-        transport = mock.patch.object(library_ai_settings.requests, "post", side_effect=AssertionError("no cloud request allowed"))
+        transport = mock.patch.object(
+            library_ai_settings.requests, "post", side_effect=AssertionError("no cloud request allowed")
+        )
         self.network = transport.start()
         self.addCleanup(transport.stop)
         self.paper = self.make_paper()
@@ -226,16 +294,25 @@ class EnrichmentCliLiveTests(TempDataMixin, LiveServerTestCase):
         code, switches = run_json("features", "--enable", "knowledge_tags", "ai_answer")
         self.assertEqual(code, 0, switches)
         with tempfile.TemporaryDirectory() as folder:
-            code, task = run_json("enrich", "prepare", str(self.publication.pk), "--kinds", "answer",
-                                  "--out", folder, "--agent", "豆包工作版")
+            code, task = run_json(
+                "enrich",
+                "prepare",
+                str(self.publication.pk),
+                "--kinds",
+                "answer",
+                "--out",
+                folder,
+                "--agent",
+                "豆包工作版",
+            )
             self.assertEqual(code, 0, task)
             self.assertTrue(Path(task["local_images"]["crop"]).is_file())
-            self.assertEqual([job["kind"] for job in task["jobs"]], ["answer"],
-                             "新建资料不再自动排队 AI 标签任务")
+            self.assertEqual([job["kind"] for job in task["jobs"]], ["answer"], "新建资料不再自动排队 AI 标签任务")
             for job in task["jobs"]:
                 args = ["--answer", "$2$", "--analysis", "$1+1=2$，代回检查。"]
-                code, result = run_json("enrich", "submit", job["id"], "--fingerprint", job["fingerprint"],
-                                        "--agent", "豆包工作版", *args)
+                code, result = run_json(
+                    "enrich", "submit", job["id"], "--fingerprint", job["fingerprint"], "--agent", "豆包工作版", *args
+                )
                 self.assertEqual(code, 0, result)
                 self.assertEqual(result["job"]["status"], "done")
         self.publication.refresh_from_db()
@@ -245,8 +322,7 @@ class EnrichmentCliLiveTests(TempDataMixin, LiveServerTestCase):
         self.assertTrue(self.question.approved)
         self.assertEqual(self.publication.extras["ai_answer"]["agent"], "豆包工作版")
         self.assertFalse(self.publication.extras["ai_answer"]["checked"])
-        self.assertNotIn("tags", self.publication.extras,
-                         "AI 标签只进入待核对建议，不写成正式标签")
+        self.assertNotIn("tags", self.publication.extras, "AI 标签只进入待核对建议，不写成正式标签")
         self.network.assert_not_called()
 
     def test_auto_changes_only_timing_and_disabled_task_cannot_write_back(self):
@@ -258,11 +334,15 @@ class EnrichmentCliLiveTests(TempDataMixin, LiveServerTestCase):
         self.assertEqual(current["on_intake"], {"tags": False, "answer": False})
         self.assertFalse(current["features"]["knowledge_tags"])
         run_json("features", "--enable", "ai_answer")
-        code, task = run_json("enrich", "prepare", str(self.publication.pk), "--kinds", "answer", "--no-images", "--agent", "豆包工作版")
+        code, task = run_json(
+            "enrich", "prepare", str(self.publication.pk), "--kinds", "answer", "--no-images", "--agent", "豆包工作版"
+        )
         self.assertEqual(code, 0, task)
         run_json("features", "--disable", "ai_answer")
         job = task["jobs"][0]
-        code, result = run_json("enrich", "submit", job["id"], "--fingerprint", job["fingerprint"], "--answer", "2", "--agent", "豆包工作版")
+        code, result = run_json(
+            "enrich", "submit", job["id"], "--fingerprint", job["fingerprint"], "--answer", "2", "--agent", "豆包工作版"
+        )
         self.assertEqual(code, 1)
         self.assertIn("关闭", result["error"])
         self.publication.refresh_from_db()

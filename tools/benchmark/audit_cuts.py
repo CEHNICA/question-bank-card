@@ -24,6 +24,7 @@ The input directory is the one ``qb_bench.py`` writes per paper:
 ``meta.json``, ``blocks.json`` and ``pages/p001.png`` …  Exit code 1 when a cut
 loses printed text or a crop swallows another question, so it can gate a build.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,14 +44,14 @@ from core.figure_policy import has_figure_cue  # noqa: E402
 
 NUMBER_LINE = re.compile(r"^\s*(\d{1,2})\s*[.．、]")
 TEXT_TYPES = {"text", "equation", "table"}
-LINE_GAP = 2.0        # page units of blank that separate two printed lines
-LINE_DENSE = 0.05     # rows this black belong to a line of print; the cutter
-                      # uses the same figure to tell a line from a hairline
-SLICE_SHARE = 0.45   # share of the line that must fall outside the crop
-SLICE_UNITS = 4.0    # ...and that share must be this many page units, or the
-                      # clipped sliver is under a pixel and not worth reporting
-PRINT_PEAK = 0.20    # what a line of print reaches; pencil and rules do not
-PAD = 30             # page units of context read around every cut
+LINE_GAP = 2.0  # page units of blank that separate two printed lines
+LINE_DENSE = 0.05  # rows this black belong to a line of print; the cutter
+# uses the same figure to tell a line from a hairline
+SLICE_SHARE = 0.45  # share of the line that must fall outside the crop
+SLICE_UNITS = 4.0  # ...and that share must be this many page units, or the
+# clipped sliver is under a pixel and not worth reporting
+PRINT_PEAK = 0.20  # what a line of print reaches; pencil and rules do not
+PAD = 30  # page units of context read around every cut
 BOOK_PAPERS = {"jiaocai7a"}
 
 
@@ -78,8 +79,7 @@ def crossing_run(rows: list[tuple[float, float]], edge: float) -> tuple[float, f
             start = None
     if start is not None:
         top, bottom = window[start][0], window[-1][0]
-        if (top - LINE_GAP <= edge <= bottom + LINE_GAP
-                and window[-1][0] < high - 1 and bottom - top <= PAD):
+        if top - LINE_GAP <= edge <= bottom + LINE_GAP and window[-1][0] < high - 1 and bottom - top <= PAD:
             return top, bottom, max(v for _, v in window[start:])
     return None
 
@@ -97,9 +97,14 @@ def slices_print(rows: list[tuple[float, float]], edge: float, inward: int) -> d
     lost_units = beyond if inward > 0 else inside
     if lost < SLICE_SHARE or lost_units < SLICE_UNITS:
         return None
-    return {"side": "head" if inward > 0 else "tail", "inside": round(inside, 1),
-            "beyond": round(beyond, 1), "lost": round(lost, 2),
-            "lost_units": round(lost_units, 1), "peak": round(peak, 3)}
+    return {
+        "side": "head" if inward > 0 else "tail",
+        "inside": round(inside, 1),
+        "beyond": round(beyond, 1),
+        "lost": round(lost, 2),
+        "lost_units": round(lost_units, 1),
+        "peak": round(peak, 3),
+    }
 
 
 def blocks_in(regions: list[dict], by_page: dict[int, list[dict]]) -> list[dict]:
@@ -155,21 +160,33 @@ def audit_paper(slug: str, work: Path, pred: dict) -> dict:
                 break
             if any(f.get("page_idx") == page for f in card.get("figures") or []):
                 break
-            no_figure.append({"card": card["group_sequence"], "number": card["number"],
-                              "page": page + 1, "text": stem[:60]})
+            no_figure.append(
+                {"card": card["group_sequence"], "number": card["number"], "page": page + 1, "text": stem[:60]}
+            )
             break
         for region in card["regions"]:
             try:
-                rows = cuts.row_ink(page_image(region["page_idx"]), region["bbox"][0],
-                                    region["bbox"][2], max(0.0, region["bbox"][1] - PAD),
-                                    min(1000.0, region["bbox"][3] + PAD))
+                rows = cuts.row_ink(
+                    page_image(region["page_idx"]),
+                    region["bbox"][0],
+                    region["bbox"][2],
+                    max(0.0, region["bbox"][1] - PAD),
+                    min(1000.0, region["bbox"][3] + PAD),
+                )
             except (OSError, ValueError):
                 continue
             for edge, inward in ((region["bbox"][1], +1), (region["bbox"][3], -1)):
                 hit = slices_print(rows, edge, inward)
                 if hit:
-                    sliced.append({"card": card["group_sequence"], "number": card["number"],
-                                   "page": region["page_idx"] + 1, "edge": round(edge), **hit})
+                    sliced.append(
+                        {
+                            "card": card["group_sequence"],
+                            "number": card["number"],
+                            "page": region["page_idx"] + 1,
+                            "edge": round(edge),
+                            **hit,
+                        }
+                    )
         for block in blocks_in(card["regions"], by_page):
             for raw in (block.get("text") or "").split("\n"):
                 match = NUMBER_LINE.match(raw)
@@ -182,9 +199,15 @@ def audit_paper(slug: str, work: Path, pred: dict) -> dict:
                 # The one shape that is a real cut bug is this card's successor
                 # landing inside it: card N holding “N+1.”.
                 if int(match.group(1)) == int(card["number"]) + 1:
-                    foreign.append({"card": card["group_sequence"], "number": card["number"],
-                                    "foreign": match.group(1), "page": block["page_idx"] + 1,
-                                    "text": raw.strip()[:40]})
+                    foreign.append(
+                        {
+                            "card": card["group_sequence"],
+                            "number": card["number"],
+                            "foreign": match.group(1),
+                            "page": block["page_idx"] + 1,
+                            "text": raw.strip()[:40],
+                        }
+                    )
                 break
 
     coverage = []
@@ -192,8 +215,7 @@ def audit_paper(slug: str, work: Path, pred: dict) -> dict:
         page_text = text_by_page.get(page, [])
         if not page_text:
             continue
-        page_regions = [region for card in pred["cards"] for region in card["regions"]
-                        if region["page_idx"] == page]
+        page_regions = [region for card in pred["cards"] for region in card["regions"] if region["page_idx"] == page]
         spans = []
         for region in sorted(page_regions, key=lambda r: r["bbox"][1]):
             low, high = region["bbox"][1], region["bbox"][3]
@@ -201,37 +223,45 @@ def audit_paper(slug: str, work: Path, pred: dict) -> dict:
                 spans[-1] = (spans[-1][0], max(spans[-1][1], high))
             else:
                 spans.append((low, high))
-        covered = sum(1 for block in page_text
-                      if any(low - 2 <= (block["bbox"][1] + block["bbox"][3]) / 2 <= high + 2
-                             for low, high in spans))
-        coverage.append({"page": page, "covered": covered, "total": len(page_text),
-                         "ratio": round(covered / len(page_text), 3)})
+        covered = sum(
+            1
+            for block in page_text
+            if any(low - 2 <= (block["bbox"][1] + block["bbox"][3]) / 2 <= high + 2 for low, high in spans)
+        )
+        coverage.append(
+            {"page": page, "covered": covered, "total": len(page_text), "ratio": round(covered / len(page_text), 3)}
+        )
 
     numbers = [card["number"] for card in pred["cards"]]
     expected = list(range(1, len(numbers) + 1)) if numbers else []
     gaps = [n for n in expected if n not in numbers] if numbers else []
-    return {"cards": len(pred["cards"]), "numbers": numbers, "gaps": gaps,
-            "sliced": sliced, "foreign": foreign, "coverage": coverage,
-            "no_figure": no_figure,
-            "notes": pred.get("notes") or []}
+    return {
+        "cards": len(pred["cards"]),
+        "numbers": numbers,
+        "gaps": gaps,
+        "sliced": sliced,
+        "foreign": foreign,
+        "coverage": coverage,
+        "no_figure": no_figure,
+        "notes": pred.get("notes") or [],
+    }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--papers", required=True, help="directory of per-paper folders")
-    parser.add_argument("--pred", help="directory of <slug>.json predictions; "
-                                        "defaults to <papers>")
+    parser.add_argument("--pred", help="directory of <slug>.json predictions; defaults to <papers>")
     parser.add_argument("--only", nargs="*", default=None)
-    parser.add_argument("--expected-only", action="store_true",
-                        help="print the per-paper summary without the detail lists")
+    parser.add_argument(
+        "--expected-only", action="store_true", help="print the per-paper summary without the detail lists"
+    )
     args = parser.parse_args()
 
     papers = Path(args.papers)
     pred_root = Path(args.pred) if args.pred else papers
     failures = 0
     warned = 0
-    print(f"{'paper':18} {'cards':>5} {'gaps':>5} {'sliced':>7} {'foreign':>8} "
-          f"{'nofig':>6} {'cover':>7}")
+    print(f"{'paper':18} {'cards':>5} {'gaps':>5} {'sliced':>7} {'foreign':>8} {'nofig':>6} {'cover':>7}")
     for work in sorted(p for p in papers.iterdir() if p.is_dir()):
         if args.only and work.name not in set(args.only):
             continue
@@ -242,22 +272,30 @@ def main() -> int:
         total = sum(row["total"] for row in result["coverage"])
         covered = sum(row["covered"] for row in result["coverage"])
         ratio = covered / total if total else 0.0
-        print(f"{work.name:18} {result['cards']:5} {len(result['gaps']):5} "
-              f"{len(result['sliced']):7} {len(result['foreign']):8} "
-              f"{len(result['no_figure']):6} {ratio:6.1%}")
+        print(
+            f"{work.name:18} {result['cards']:5} {len(result['gaps']):5} "
+            f"{len(result['sliced']):7} {len(result['foreign']):8} "
+            f"{len(result['no_figure']):6} {ratio:6.1%}"
+        )
         for note in result["notes"]:
             print(f"    note: {note}")
         if not args.expected_only:
             for item in result["sliced"]:
-                print(f"    sliced  card#{item['card']} Q{item['number']} p{item['page']} "
-                      f"{item['side']:4} edge={item['edge']} lost={item['lost']} "
-                      f"({item['lost_units']} units)")
+                print(
+                    f"    sliced  card#{item['card']} Q{item['number']} p{item['page']} "
+                    f"{item['side']:4} edge={item['edge']} lost={item['lost']} "
+                    f"({item['lost_units']} units)"
+                )
             for item in result["foreign"]:
-                print(f"    foreign card#{item['card']} Q{item['number']} holds "
-                      f"{item['foreign']}. at p{item['page']}: {item['text']!r}")
+                print(
+                    f"    foreign card#{item['card']} Q{item['number']} holds "
+                    f"{item['foreign']}. at p{item['page']}: {item['text']!r}"
+                )
             for item in result["no_figure"]:
-                print(f"    no-figure card#{item['card']} Q{item['number']} p{item['page']} "
-                      f"says 如图 but carries none: {item['text']!r}")
+                print(
+                    f"    no-figure card#{item['card']} Q{item['number']} p{item['page']} "
+                    f"says 如图 but carries none: {item['text']!r}"
+                )
         failures += len(result["sliced"]) + len(result["foreign"])
         warned += len(result["no_figure"])
 

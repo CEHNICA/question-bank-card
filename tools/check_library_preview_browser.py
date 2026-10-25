@@ -30,15 +30,29 @@ class FrontendHandler(SimpleHTTPRequestHandler):
 
 def fixture_item(key, number, answer="", analysis="", ai=None, stem=None):
     return {
-        "id": key, "document_id": "offline-preview", "draft_id": key,
-        "source_filename": "组卷离线测试.pdf", "number": number,
-        "question_type": "single_choice", "version": 1, "status": "published",
-        "published_at": "2026-10-02T01:00:00Z", "has_answer": bool(answer or analysis),
-        "review": {"source": "human"}, "ai_answer": ai, "jobs": [],
-        "content": {"number": number, "question_type": "single_choice",
+        "id": key,
+        "document_id": "offline-preview",
+        "draft_id": key,
+        "source_filename": "组卷离线测试.pdf",
+        "number": number,
+        "question_type": "single_choice",
+        "version": 1,
+        "status": "published",
+        "published_at": "2026-10-02T01:00:00Z",
+        "has_answer": bool(answer or analysis),
+        "review": {"source": "human"},
+        "ai_answer": ai,
+        "jobs": [],
+        "content": {
+            "number": number,
+            "question_type": "single_choice",
             "stem": stem or f"离线题 {number}：求 $1+1$。",
             "options": {"A": "1", "B": "2", "C": "3", "D": "4"},
-            "answer": answer, "analysis": analysis, "figures": [], "sources": []},
+            "answer": answer,
+            "analysis": analysis,
+            "figures": [],
+            "sources": [],
+        },
     }
 
 
@@ -51,20 +65,36 @@ def check():
         fixture_item("analysis-only", 4, analysis="只有解析的原卷内容也应保留。"),
         fixture_item("ai-only", 5, ai={"answer": "B", "analysis": "测试用 AI 参考解析。"}),
     ]
-    payload = {"items": fixtures, "total": len(fixtures), "features": {"ai_answer": True},
-        "facets": {"sources": [], "types": {"single_choice": len(fixtures)},
-                   "answers": {"yes": 2, "no": 3}, "reviews": {"human": len(fixtures)}, "tags": []}}
+    payload = {
+        "items": fixtures,
+        "total": len(fixtures),
+        "features": {"ai_answer": True},
+        "facets": {
+            "sources": [],
+            "types": {"single_choice": len(fixtures)},
+            "answers": {"yes": 2, "no": 3},
+            "reviews": {"human": len(fixtures)},
+            "tags": [],
+        },
+    }
     server = ThreadingHTTPServer(("127.0.0.1", 0), partial(FrontendHandler, directory=str(ROOT / "frontend")))
     worker = Thread(target=server.serve_forever, daemon=True)
     worker.start()
     errors = []
     try:
         with sync_playwright() as pw:
-            executable = next((str(path) for path in (
-                Path(pw.chromium.executable_path),
-                Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-                Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
-            ) if path.is_file()), None)
+            executable = next(
+                (
+                    str(path)
+                    for path in (
+                        Path(pw.chromium.executable_path),
+                        Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                        Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                    )
+                    if path.is_file()
+                ),
+                None,
+            )
             browser = pw.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
             context = browser.new_context(viewport={"width": 650, "height": 950})
             page = context.new_page()
@@ -79,8 +109,12 @@ def check():
                 # 否则「非 GET 一律拒绝」会把这条正常的读请求当成越界。
                 if parsed.path == "/api/library/batch" and request.method == "POST":
                     ids = (request.post_data_json or {}).get("ids", [])
-                    route.fulfill(json={"items": [by_id[i] for i in ids if i in by_id],
-                                        "missing": [{"id": i, "reason": "not_found"} for i in ids if i not in by_id]})
+                    route.fulfill(
+                        json={
+                            "items": [by_id[i] for i in ids if i in by_id],
+                            "missing": [{"id": i, "reason": "not_found"} for i in ids if i not in by_id],
+                        }
+                    )
                     return
                 if parsed.hostname != "127.0.0.1" or request.method != "GET":
                     raise AssertionError(f"Unexpected request: {request.method} {request.url}")
@@ -96,7 +130,9 @@ def check():
             expect(page.locator(".library-card")).to_have_count(len(fixtures))
 
             def toggle(key, selected=False):
-                page.locator(f"#q-{key}").get_by_role("button", name="已在试题篮" if selected else "加入试题篮", exact=True).click()
+                page.locator(f"#q-{key}").get_by_role(
+                    "button", name="已在试题篮" if selected else "加入试题篮", exact=True
+                ).click()
 
             # 「组卷预览」在试题篮抽屉里，篮不是打开的就点不到它。
             def open_basket():
@@ -153,10 +189,13 @@ def check():
             for width in (1440, 650, 390, 320):
                 page.set_viewport_size({"width": width, "height": 950})
                 try:
-                    page.wait_for_function("""() => {
+                    page.wait_for_function(
+                        """() => {
                         const sheet = document.querySelector('#printSheet');
                         return sheet.scrollWidth <= sheet.clientWidth + 1;
-                    }""", timeout=6000)
+                    }""",
+                        timeout=6000,
+                    )
                 except Exception:
                     pass
                 layout = page.locator("#printSheet").evaluate("""sheet => ({
@@ -167,20 +206,29 @@ def check():
                     })
                 })""")
                 assert layout["scrollWidth"] <= layout["width"] + 1, layout
-                assert all(button["left"] >= 0 and button["right"] <= width + 1 and button["opacity"] == "1"
-                           for button in layout["buttons"]), layout
+                assert all(
+                    button["left"] >= 0 and button["right"] <= width + 1 and button["opacity"] == "1"
+                    for button in layout["buttons"]
+                ), layout
             page.set_viewport_size({"width": 650, "height": 950})
             page.screenshot(path=str(OUTPUT / "preview-no-answers-650.png"))
             down = page.get_by_role("button", name="第 1 题下移", exact=True)
             down.focus()
             down.press("Enter")
-            assert page.locator(".print-question").evaluate_all("nodes => nodes.map(node => node.dataset.questionId)") == ["no-answer-2", "no-answer-1"]
+            assert page.locator(".print-question").evaluate_all(
+                "nodes => nodes.map(node => node.dataset.questionId)"
+            ) == ["no-answer-2", "no-answer-1"]
             # 按完回车焦点要跟着这道题走（分页会把整卷重排，焦点得等排完再给）。
             # 只有两道题，移到末位后「下移」本来就禁用，焦点退到这道题的「调整」。
-            assert page.evaluate("document.activeElement.getAttribute('aria-label')") == "第 2 题排版操作", \
-                page.evaluate("() => ({label: document.activeElement.getAttribute('aria-label'), tag: document.activeElement.tagName})")
+            assert page.evaluate("document.activeElement.getAttribute('aria-label')") == "第 2 题排版操作", (
+                page.evaluate(
+                    "() => ({label: document.activeElement.getAttribute('aria-label'), tag: document.activeElement.tagName})"
+                )
+            )
             page.get_by_role("button", name="第 2 题上移", exact=True).press("Space")
-            assert page.locator(".print-question").evaluate_all("nodes => nodes.map(node => node.dataset.questionId)") == ["no-answer-1", "no-answer-2"]
+            assert page.locator(".print-question").evaluate_all(
+                "nodes => nodes.map(node => node.dataset.questionId)"
+            ) == ["no-answer-1", "no-answer-2"]
             # 回到第一位，「上移」禁用，焦点同样退到「调整」。
             assert page.evaluate("document.activeElement.getAttribute('aria-label')") == "第 1 题排版操作"
             page.get_by_role("button", name="第 1 题移出试题篮", exact=True).press("Enter")
@@ -272,11 +320,27 @@ def check():
         server.shutdown()
         server.server_close()
         worker.join(timeout=5)
-    print(json.dumps({"result": "PASS", "viewports": [1440, 650, 390, 320],
-        "checks": ["no empty answer section", "answers follow the output selector", "analysis-only content",
-                   "AI-only hint and opt-in", "original/AI mixed answers", "no horizontal page overflow", "visible controls",
-                   "keyboard move/remove and focus", "print controls hidden"],
-        "screenshots": str(OUTPUT)}, ensure_ascii=False))
+    print(
+        json.dumps(
+            {
+                "result": "PASS",
+                "viewports": [1440, 650, 390, 320],
+                "checks": [
+                    "no empty answer section",
+                    "answers follow the output selector",
+                    "analysis-only content",
+                    "AI-only hint and opt-in",
+                    "original/AI mixed answers",
+                    "no horizontal page overflow",
+                    "visible controls",
+                    "keyboard move/remove and focus",
+                    "print controls hidden",
+                ],
+                "screenshots": str(OUTPUT),
+            },
+            ensure_ascii=False,
+        )
+    )
 
 
 if __name__ == "__main__":

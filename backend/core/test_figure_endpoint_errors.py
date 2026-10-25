@@ -8,6 +8,7 @@
 坐标为什么真的会坏：模型给的框可能小于一个像素，页面换过序之后旧坐标可能指向
 不存在的页，缓存也可能被清掉。这三样都不是假设。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -24,7 +25,7 @@ def original_pdf(pages=2):
     document = fitz.open()
     for index in range(pages):
         page = document.new_page(width=595, height=842)
-        page.draw_rect(fitz.Rect(50, 90, 470, 330), color=(1, 0, 0), fill=(index / 3, .3, .7))
+        page.draw_rect(fitz.Rect(50, 90, 470, 330), color=(1, 0, 0), fill=(index / 3, 0.3, 0.7))
     data = document.tobytes()
     document.close()
     return data
@@ -41,8 +42,12 @@ class FigureEndpointTests(TestCase):
         self.addCleanup(setting.disable)
         data = original_pdf()
         self.paper = Paper.objects.create(
-            filename="crops.pdf", kind="pdf", sha256=hashlib.sha256(data).hexdigest(),
-            status=Paper.Status.READY, processing_plan={"schema": 1, "revision": 0})
+            filename="crops.pdf",
+            kind="pdf",
+            sha256=hashlib.sha256(data).hexdigest(),
+            status=Paper.Status.READY,
+            processing_plan={"schema": 1, "revision": 0},
+        )
         folder = Path(self.tmp.name) / str(self.paper.pk)
         folder.mkdir(parents=True)
         source = folder / "source.pdf"
@@ -52,18 +57,23 @@ class FigureEndpointTests(TestCase):
         self.paper.save(update_fields=["source_path", "pages"])
 
     def card(self, **extra):
-        values = {"paper": self.paper, "number": 1, "body_mode": "text", "processing_mode": "auto",
-                      "question_type": "single_choice", "state": "yellow",
-                      "regions": [{"page_idx": 0, "bbox": [50, 50, 900, 420]}],
-                      "figures": [{"page_idx": 0, "bbox": [100, 200, 450, 500],
-                                "slot": "stem", "source": "auto"}], "flags": []}
+        values = {
+            "paper": self.paper,
+            "number": 1,
+            "body_mode": "text",
+            "processing_mode": "auto",
+            "question_type": "single_choice",
+            "state": "yellow",
+            "regions": [{"page_idx": 0, "bbox": [50, 50, 900, 420]}],
+            "figures": [{"page_idx": 0, "bbox": [100, 200, 450, 500], "slot": "stem", "source": "auto"}],
+            "flags": [],
+        }
         values.update(extra)
         return Question.objects.create(**values)
 
     def test_a_box_that_collapses_to_nothing_answers_409(self):
         # 宽和高都不足一个像素：裁图函数抛 ValueError。
-        question = self.card(figures=[{"page_idx": 0, "bbox": [100, 200, 100, 200],
-                                       "slot": "stem", "source": "auto"}])
+        question = self.card(figures=[{"page_idx": 0, "bbox": [100, 200, 100, 200], "slot": "stem", "source": "auto"}])
         response = self.client.get(f"/api/questions/{question.pk}/figures/0")
         self.assertEqual(response.status_code, 409, response.content)
         self.assertIn("原卷裁片无法生成", response.json()["error"])
@@ -72,15 +82,13 @@ class FigureEndpointTests(TestCase):
         # 模型给的坐标没过 _valid_bbox：坐标是 null、维度不够、坐标是字符串。
         for bbox in (None, [0, 0, 100], "0,0,100,100", [0, 0, 100, None]):
             with self.subTest(bbox=bbox):
-                question = self.card(figures=[{"page_idx": 0, "bbox": bbox,
-                                               "slot": "stem", "source": "auto"}])
+                question = self.card(figures=[{"page_idx": 0, "bbox": bbox, "slot": "stem", "source": "auto"}])
                 response = self.client.get(f"/api/questions/{question.pk}/figures/0")
                 self.assertEqual(response.status_code, 409, response.content)
 
     def test_a_page_that_no_longer_exists_answers_409(self):
         # 页面换过序之后，旧坐标指向的页可能已经不存在了。
-        question = self.card(figures=[{"page_idx": 99, "bbox": [100, 200, 450, 500],
-                                       "slot": "stem", "source": "auto"}])
+        question = self.card(figures=[{"page_idx": 99, "bbox": [100, 200, 450, 500], "slot": "stem", "source": "auto"}])
         response = self.client.get(f"/api/questions/{question.pk}/figures/0")
         self.assertEqual(response.status_code, 409, response.content)
 
@@ -88,8 +96,11 @@ class FigureEndpointTests(TestCase):
         # ocr-figures 用的是模型给的坐标，从来没有校验过，所以这条更要兜住。
         question = self.card(
             ocr_pending=True,
-            ocr_suggestion={"revision": 0, "figures": [
-                {"page_idx": 0, "bbox": [100, 200, 100, 200], "slot": "stem", "source": "auto"}]})
+            ocr_suggestion={
+                "revision": 0,
+                "figures": [{"page_idx": 0, "bbox": [100, 200, 100, 200], "slot": "stem", "source": "auto"}],
+            },
+        )
         response = self.client.get(f"/api/questions/{question.pk}/ocr-figures/0")
         self.assertEqual(response.status_code, 409, response.content)
         self.assertIn("原卷裁片无法生成", response.json()["error"])
@@ -104,8 +115,11 @@ class FigureEndpointTests(TestCase):
     def test_a_good_ocr_suggestion_still_serves_the_picture(self):
         question = self.card(
             ocr_pending=True,
-            ocr_suggestion={"revision": 0, "figures": [
-                {"page_idx": 0, "bbox": [100, 200, 450, 500], "slot": "stem", "source": "auto"}]})
+            ocr_suggestion={
+                "revision": 0,
+                "figures": [{"page_idx": 0, "bbox": [100, 200, 450, 500], "slot": "stem", "source": "auto"}],
+            },
+        )
         response = self.client.get(f"/api/questions/{question.pk}/ocr-figures/0")
         self.assertEqual(response.status_code, 200)
         self.assertTrue(b"".join(response.streaming_content).startswith(b"\x89PNG"))

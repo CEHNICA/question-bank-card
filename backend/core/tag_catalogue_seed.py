@@ -400,23 +400,26 @@ def seed_catalogue(*, apps=None):
 
 def _seed_chapter_groups(apps):
     """The pre-1.25 shape: chapters as LibraryTagGroup rows.  Migration 0022 only."""
-    GroupModel, TagModel, CatalogueModel = (apps.get_model("core", name) for name in
-                                            ("LibraryTagGroup", "LibraryTag", "LibraryTagCatalogue"))
+    GroupModel, TagModel, CatalogueModel = (
+        apps.get_model("core", name) for name in ("LibraryTagGroup", "LibraryTag", "LibraryTagCatalogue")
+    )
     groups = {}
     for position, (name, color) in enumerate(SECTIONS):
         groups[name], _ = GroupModel.objects.get_or_create(
-            system_key=f"seed-group:{position + 1}",
-            defaults={"name": name, "color": color, "position": position},
+            system_key=f"seed-group:{position + 1}", defaults={"name": name, "color": color, "position": position}
         )
     for group_name, rows in KNOWLEDGE.items():
         for name, _related_terms, description in rows:
             key = _key(name)
             tag, _ = TagModel.objects.get_or_create(
                 system_key=f"knowledge:{key}",
-                defaults={"name": name, "kind": "knowledge",
-                          "aliases": ALIASES.get(name, []),
-                          "description": description,
-                          "levels": ["初中"] if group_name.startswith("初中") else ["高中"]},
+                defaults={
+                    "name": name,
+                    "kind": "knowledge",
+                    "aliases": ALIASES.get(name, []),
+                    "description": description,
+                    "levels": ["初中"] if group_name.startswith("初中") else ["高中"],
+                },
             )
             tag.groups.add(groups[group_name])
     for name, extra_groups in SHARED_KNOWLEDGE.items():
@@ -428,9 +431,13 @@ def _seed_chapter_groups(apps):
         for name, conditions in rows:
             tag, _ = TagModel.objects.get_or_create(
                 system_key=f"method:{_key(name)}",
-                defaults={"name": name, "kind": "method",
-                          "description": conditions, "conditions": conditions,
-                          "levels": ["初中", "高中"]},
+                defaults={
+                    "name": name,
+                    "kind": "method",
+                    "description": conditions,
+                    "conditions": conditions,
+                    "levels": ["初中", "高中"],
+                },
             )
             tag.groups.add(groups[group_name])
     state, _ = CatalogueModel.objects.get_or_create(pk=1, defaults={"revision": 1})
@@ -451,11 +458,15 @@ def _seed_hierarchy():
         if tag is None:
             tag = LibraryTag.objects.filter(kind=spec["kind"], name__iexact=spec["name"]).first()
         if tag is None:
-            defaults = {"name": spec["name"], "kind": spec["kind"],
-                        "description": description or spec.get("description", ""),
-                        "color": spec.get("color", ""), "aliases": spec.get("aliases", []),
-                        "levels": spec.get("levels", []) if levels is None else levels,
-                        "system_key": spec["key"]}
+            defaults = {
+                "name": spec["name"],
+                "kind": spec["kind"],
+                "description": description or spec.get("description", ""),
+                "color": spec.get("color", ""),
+                "aliases": spec.get("aliases", []),
+                "levels": spec.get("levels", []) if levels is None else levels,
+                "system_key": spec["key"],
+            }
             if "conditions" in spec:
                 defaults["conditions"] = spec["conditions"]
             tag = LibraryTag.objects.create(**defaults)
@@ -463,20 +474,31 @@ def _seed_hierarchy():
 
     for spec in blueprint["sections"]:
         name = spec["name"]
-        levels = ["初中", "高中"] if name.startswith("方法 · ") else (
-            ["初中"] if name.startswith("初中") else ["高中"])
+        levels = ["初中", "高中"] if name.startswith("方法 · ") else (["初中"] if name.startswith("初中") else ["高中"])
         live[spec["key"]] = bind(spec, levels=levels, description="教材章节，用来给标签目录分层。")
     for spec in blueprint["tags"]:
         live[spec["key"]] = bind(spec)
     rows = []
     wanted = blueprint_parents()
     for spec in blueprint["tags"]:
-        rows.extend(LibraryTagRelation(parent_id=live[parent].pk, child_id=live[spec["key"]].pk,
-                                      relation_type=LibraryTagRelation.Type.HIERARCHY)
-                    for parent in wanted[spec["key"]] if parent in live)
-        rows.extend(LibraryTagRelation(parent_id=live[spec["key"]].pk, child_id=live[method].pk,
-                                      relation_type=LibraryTagRelation.Type.RELATED_METHOD)
-                    for method in spec.get("related_method_keys", []) if method in live)
+        rows.extend(
+            LibraryTagRelation(
+                parent_id=live[parent].pk,
+                child_id=live[spec["key"]].pk,
+                relation_type=LibraryTagRelation.Type.HIERARCHY,
+            )
+            for parent in wanted[spec["key"]]
+            if parent in live
+        )
+        rows.extend(
+            LibraryTagRelation(
+                parent_id=live[spec["key"]].pk,
+                child_id=live[method].pk,
+                relation_type=LibraryTagRelation.Type.RELATED_METHOD,
+            )
+            for method in spec.get("related_method_keys", [])
+            if method in live
+        )
     LibraryTagRelation.objects.bulk_create(rows, ignore_conflicts=True)
     state, _ = LibraryTagCatalogue.objects.get_or_create(pk=1, defaults={"revision": 1})
     if hasattr(state, "initialized") and not state.initialized:
@@ -490,19 +512,33 @@ def template_blueprint():
     A section is a textbook chapter.  It is imported as a top-level tag so the
     catalogue has one organising idea: parent tag and child tag.
     """
-    sections = [{"key": f"section:seed-group:{position + 1}", "name": name,
-                 "kind": "method" if name.startswith("方法 · ") else "knowledge",
-                 "color": color, "position": position}
-                for position, (name, color) in enumerate(SECTIONS)]
+    sections = [
+        {
+            "key": f"section:seed-group:{position + 1}",
+            "name": name,
+            "kind": "method" if name.startswith("方法 · ") else "knowledge",
+            "color": color,
+            "position": position,
+        }
+        for position, (name, color) in enumerate(SECTIONS)
+    ]
     section_keys = {section["name"]: section["key"] for section in sections}
     tags = {}
     for section_name, rows in KNOWLEDGE.items():
         for name, _related_terms, description in rows:
             key = f"knowledge:{_key(name)}"
-            row = tags.setdefault(key, {"key": key, "name": name, "kind": "knowledge",
-                "aliases": ALIASES.get(name, []), "description": description,
-                "levels": ["初中"] if section_name.startswith("初中") else ["高中"],
-                "section_keys": []})
+            row = tags.setdefault(
+                key,
+                {
+                    "key": key,
+                    "name": name,
+                    "kind": "knowledge",
+                    "aliases": ALIASES.get(name, []),
+                    "description": description,
+                    "levels": ["初中"] if section_name.startswith("初中") else ["高中"],
+                    "section_keys": [],
+                },
+            )
             if section_keys[section_name] not in row["section_keys"]:
                 row["section_keys"].append(section_keys[section_name])
     for name, extra_sections in SHARED_KNOWLEDGE.items():
@@ -514,9 +550,19 @@ def template_blueprint():
     for section_name, rows in METHODS.items():
         for name, conditions in rows:
             key = f"method:{_key(name)}"
-            row = tags.setdefault(key, {"key": key, "name": name, "kind": "method",
-                "aliases": ALIASES.get(name, []), "description": conditions,
-                "conditions": conditions, "levels": ["初中", "高中"], "section_keys": []})
+            row = tags.setdefault(
+                key,
+                {
+                    "key": key,
+                    "name": name,
+                    "kind": "method",
+                    "aliases": ALIASES.get(name, []),
+                    "description": conditions,
+                    "conditions": conditions,
+                    "levels": ["初中", "高中"],
+                    "section_keys": [],
+                },
+            )
             if section_keys[section_name] not in row["section_keys"]:
                 row["section_keys"].append(section_keys[section_name])
     _hierarchical_template(tags, section_keys)
@@ -529,15 +575,25 @@ def _hierarchical_template(tags, section_keys):
     A chapter and a mathematical containment are both parent-child links now.
     Keys reuse earlier concept identities, including concepts shared by stages.
     """
+
     def key(name, kind="knowledge"):
         return f"{kind}:{_key(name)}"
 
     def add(name, description, sections, parents=(), kind="knowledge", levels=None):
         identity = key(name, kind)
-        row = tags.setdefault(identity, {"key": identity, "name": name, "kind": kind,
-            "aliases": ALIASES.get(name, []), "description": description,
-            "conditions": description if kind == "method" else "",
-            "levels": levels or ["初中", "高中"], "section_keys": []})
+        row = tags.setdefault(
+            identity,
+            {
+                "key": identity,
+                "name": name,
+                "kind": kind,
+                "aliases": ALIASES.get(name, []),
+                "description": description,
+                "conditions": description if kind == "method" else "",
+                "levels": levels or ["初中", "高中"],
+                "section_keys": [],
+            },
+        )
         for section in sections:
             if section_keys[section] not in row["section_keys"]:
                 row["section_keys"].append(section_keys[section])
@@ -565,17 +621,28 @@ def _hierarchical_template(tags, section_keys):
     ]
     existing = list(tags.values())
     for name, description, memberships in roots:
-        add(name, description, memberships,
-            levels=["高中"] if name in {"向量", "立体几何", "解析几何", "数列", "导数", "集合与逻辑", "复数"} else None)
+        add(
+            name,
+            description,
+            memberships,
+            levels=["高中"] if name in {"向量", "立体几何", "解析几何", "数列", "导数", "集合与逻辑", "复数"} else None,
+        )
 
     section_default = {
-        "初中 · 数与式": "数与式", "初中 · 方程与不等式": "方程",
-        "初中 · 函数": "函数", "初中 · 图形与几何": "平面几何",
-        "初中 · 坐标与变化": "坐标与变换", "初中 · 统计与概率": "统计",
-        "高中 · 集合、逻辑与数系": "集合与逻辑", "高中 · 函数与方程": "函数",
-        "高中 · 三角函数与向量": "向量", "高中 · 立体几何": "立体几何",
-        "高中 · 解析几何": "解析几何", "高中 · 数列与导数": "数列",
-        "高中 · 计数、概率与统计": "概率"}
+        "初中 · 数与式": "数与式",
+        "初中 · 方程与不等式": "方程",
+        "初中 · 函数": "函数",
+        "初中 · 图形与几何": "平面几何",
+        "初中 · 坐标与变化": "坐标与变换",
+        "初中 · 统计与概率": "统计",
+        "高中 · 集合、逻辑与数系": "集合与逻辑",
+        "高中 · 函数与方程": "函数",
+        "高中 · 三角函数与向量": "向量",
+        "高中 · 立体几何": "立体几何",
+        "高中 · 解析几何": "解析几何",
+        "高中 · 数列与导数": "数列",
+        "高中 · 计数、概率与统计": "概率",
+    }
     section_by_key = {value: name for name, value in section_keys.items()}
     for row in existing:
         if row["kind"] != "knowledge":
@@ -583,11 +650,18 @@ def _hierarchical_template(tags, section_keys):
         name = row["name"]
         section = section_by_key[row["section_keys"][0]]
         parent = section_default[section]
-        if "不等式" in name: parent = "不等式"
-        elif "复数" in name: parent = "复数"
-        elif "导数" in name or "导函数" in name: parent = "导数"
-        elif "概率" in name or "事件" in name or name == "列举法求概率": parent = "概率"
-        elif section == "高中 · 计数、概率与统计" and any(word in name for word in ("统计", "抽样", "数据", "回归", "列联表")): parent = "统计"
+        if "不等式" in name:
+            parent = "不等式"
+        elif "复数" in name:
+            parent = "复数"
+        elif "导数" in name or "导函数" in name:
+            parent = "导数"
+        elif "概率" in name or "事件" in name or name == "列举法求概率":
+            parent = "概率"
+        elif section == "高中 · 计数、概率与统计" and any(
+            word in name for word in ("统计", "抽样", "数据", "回归", "列联表")
+        ):
+            parent = "统计"
         row["parent_keys"] = [key(parent)]
         row["related_method_keys"] = []
 
@@ -607,27 +681,37 @@ def _hierarchical_template(tags, section_keys):
     ]
     for name, description, parent, section in branches:
         add(name, description, [section], [parent], levels=["高中"] if section.startswith("高中") else None)
-    add("三角函数", "三角函数的定义、关系、图象与性质。",
-        ["初中 · 坐标与变化", "高中 · 函数与方程"], ["函数"])
+    add("三角函数", "三角函数的定义、关系、图象与性质。", ["初中 · 坐标与变化", "高中 · 函数与方程"], ["函数"])
 
     explicit = {
-        "有理数": ["数与式"], "有理数的加减": ["有理数"], "有理数的乘除": ["有理数"],
+        "有理数": ["数与式"],
+        "有理数的加减": ["有理数"],
+        "有理数的乘除": ["有理数"],
         "方程根的判别式": ["一元二次方程"],
         "二次函数的最值": ["二次函数", "函数的最值"],
         "二次函数与一元二次方程": ["二次函数", "函数与方程"],
-        "三角形的边与角": ["三角形"], "全等三角形": ["三角形"],
-        "等腰三角形": ["三角形"], "直角三角形": ["三角形"],
-        "勾股定理": ["直角三角形"], "勾股定理的逆定理": ["直角三角形"],
-        "三角形中位线": ["三角形"], "相似三角形": ["三角形"],
-        "平行四边形": ["四边形"], "矩形": ["平行四边形"],
-        "菱形": ["平行四边形"], "正方形": ["矩形", "菱形"], "梯形": ["四边形"],
+        "三角形的边与角": ["三角形"],
+        "全等三角形": ["三角形"],
+        "等腰三角形": ["三角形"],
+        "直角三角形": ["三角形"],
+        "勾股定理": ["直角三角形"],
+        "勾股定理的逆定理": ["直角三角形"],
+        "三角形中位线": ["三角形"],
+        "相似三角形": ["三角形"],
+        "平行四边形": ["四边形"],
+        "矩形": ["平行四边形"],
+        "菱形": ["平行四边形"],
+        "正方形": ["矩形", "菱形"],
+        "梯形": ["四边形"],
         "图形的平移与坐标": ["平移", "坐标与变换"],
         "图形的旋转与坐标": ["旋转", "坐标与变换"],
         "图形的对称与坐标": ["轴对称与轴对称图形", "坐标与变换"],
         "空间点线面位置关系": ["立体几何"],
         "空间直线与直线的位置关系": ["空间点线面位置关系"],
-        "直线与平面平行": ["空间点线面位置关系"], "直线与平面垂直": ["空间点线面位置关系"],
-        "平面与平面平行": ["空间点线面位置关系"], "平面与平面垂直": ["空间点线面位置关系"],
+        "直线与平面平行": ["空间点线面位置关系"],
+        "直线与平面垂直": ["空间点线面位置关系"],
+        "平面与平面平行": ["空间点线面位置关系"],
+        "平面与平面垂直": ["空间点线面位置关系"],
         "空间向量求角": ["空间向量", "空间角"],
         "空间向量求距离": ["空间向量", "空间距离"],
         "对数运算性质": ["对数与对数函数"],
@@ -636,68 +720,121 @@ def _hierarchical_template(tags, section_keys):
         explicit[name] = ["圆"]
     for name in ("平移", "旋转", "轴对称与轴对称图形", "位似图形"):
         explicit[name] = ["几何变换"]
-    for name in ("三角函数的概念", "同角三角函数关系", "诱导公式", "三角函数图象与性质", "正弦型函数", "三角恒等变换", "三角函数的应用", "锐角三角函数"):
+    for name in (
+        "三角函数的概念",
+        "同角三角函数关系",
+        "诱导公式",
+        "三角函数图象与性质",
+        "正弦型函数",
+        "三角恒等变换",
+        "三角函数的应用",
+        "锐角三角函数",
+    ):
         explicit[name] = ["三角函数"]
     for row in list(tags.values()):
         name = row["name"]
-        if name.startswith("平面向量") and name != "平面向量": explicit[name] = ["平面向量"]
-        elif name.startswith("空间向量") and name != "空间向量" and name not in explicit: explicit[name] = ["空间向量"]
-        elif name.startswith(("椭圆的", "双曲线的", "抛物线的")): explicit[name] = [name.split("的")[0]]
-        elif name.startswith("圆锥曲线的"): explicit[name] = ["圆锥曲线"]
+        if name.startswith("平面向量") and name != "平面向量":
+            explicit[name] = ["平面向量"]
+        elif name.startswith("空间向量") and name != "空间向量" and name not in explicit:
+            explicit[name] = ["空间向量"]
+        elif name.startswith(("椭圆的", "双曲线的", "抛物线的")):
+            explicit[name] = [name.split("的")[0]]
+        elif name.startswith("圆锥曲线的"):
+            explicit[name] = ["圆锥曲线"]
     for name, parents in explicit.items():
         if key(name) in tags:
             tags[key(name)]["parent_keys"] = [key(parent) for parent in parents if parent != name]
 
     details = {
-        "一元二次方程": [("一元二次方程根与系数的关系", "利用两根之和、两根之积建立系数关系。"),
-            ("一元二次方程的求根公式", "在实根条件下用求根公式计算根。")],
-        "二次函数": [("二次函数的顶点与对称轴", "由顶点式或一般式确定顶点和对称轴。"),
+        "一元二次方程": [
+            ("一元二次方程根与系数的关系", "利用两根之和、两根之积建立系数关系。"),
+            ("一元二次方程的求根公式", "在实根条件下用求根公式计算根。"),
+        ],
+        "二次函数": [
+            ("二次函数的顶点与对称轴", "由顶点式或一般式确定顶点和对称轴。"),
             ("二次函数的单调区间", "根据开口方向及对称轴判断增减区间。"),
-            ("二次函数的三种表达式", "在一般式、顶点式与交点式间转换。")],
-        "二次函数的最值": [("二次函数在闭区间上的最值", "同时比较顶点位置与区间端点的函数值。"),
-            ("二次函数含参数最值", "按顶点与区间的相对位置讨论参数。")],
-        "全等三角形": [("边边边全等判定", "三组对应边分别相等时判定全等。"),
+            ("二次函数的三种表达式", "在一般式、顶点式与交点式间转换。"),
+        ],
+        "二次函数的最值": [
+            ("二次函数在闭区间上的最值", "同时比较顶点位置与区间端点的函数值。"),
+            ("二次函数含参数最值", "按顶点与区间的相对位置讨论参数。"),
+        ],
+        "全等三角形": [
+            ("边边边全等判定", "三组对应边分别相等时判定全等。"),
             ("边角边全等判定", "两边及其夹角对应相等时判定全等。"),
             ("角边角全等判定", "两角及其夹边对应相等时判定全等。"),
-            ("角角边全等判定", "两角与其中一角的对边对应相等时判定全等。")],
+            ("角角边全等判定", "两角与其中一角的对边对应相等时判定全等。"),
+        ],
         "直角三角形": [("斜边直角边全等判定", "直角三角形斜边和一条直角边对应相等。")],
-        "三角形中位线": [("三角形中位线的性质", "中位线平行于第三边且长度为其一半。"),
-            ("三角形中位线的判定", "核验线段两端分别为三角形两边中点。")],
-        "平行四边形": [("平行四边形的性质", "对边、对角及对角线之间的性质。"),
-            ("平行四边形的判定", "运用对边或对角线的条件判定平行四边形。")],
-        "矩形": [("矩形的性质", "矩形四角为直角且对角线相等。"), ("矩形的判定", "由平行四边形和直角或对角线条件判定矩形。")],
+        "三角形中位线": [
+            ("三角形中位线的性质", "中位线平行于第三边且长度为其一半。"),
+            ("三角形中位线的判定", "核验线段两端分别为三角形两边中点。"),
+        ],
+        "平行四边形": [
+            ("平行四边形的性质", "对边、对角及对角线之间的性质。"),
+            ("平行四边形的判定", "运用对边或对角线的条件判定平行四边形。"),
+        ],
+        "矩形": [
+            ("矩形的性质", "矩形四角为直角且对角线相等。"),
+            ("矩形的判定", "由平行四边形和直角或对角线条件判定矩形。"),
+        ],
         "菱形": [("菱形的性质", "菱形四边相等且对角线垂直平分。"), ("菱形的判定", "由边或对角线条件判定菱形。")],
-        "圆周角定理": [("同弧圆周角相等", "同弧或等弧所对的圆周角相等。"),
-            ("直径所对圆周角", "直径所对的圆周角为直角。")],
-        "锐角三角函数": [("锐角正弦", "直角三角形中锐角对边与斜边的比。"),
+        "圆周角定理": [
+            ("同弧圆周角相等", "同弧或等弧所对的圆周角相等。"),
+            ("直径所对圆周角", "直径所对的圆周角为直角。"),
+        ],
+        "锐角三角函数": [
+            ("锐角正弦", "直角三角形中锐角对边与斜边的比。"),
             ("锐角余弦", "直角三角形中锐角邻边与斜边的比。"),
-            ("锐角正切", "直角三角形中锐角对边与邻边的比。")],
-        "正弦型函数": [("正弦型函数的周期", "由角频率确定最小正周期。"),
+            ("锐角正切", "直角三角形中锐角对边与邻边的比。"),
+        ],
+        "正弦型函数": [
+            ("正弦型函数的周期", "由角频率确定最小正周期。"),
             ("正弦型函数的相位与平移", "根据初相与角频率确定水平平移。"),
-            ("正弦型函数的单调区间", "将相位区间条件转化为自变量区间。")],
-        "三角恒等变换": [("两角和与差公式", "使用正弦、余弦或正切的两角和差公式。"),
+            ("正弦型函数的单调区间", "将相位区间条件转化为自变量区间。"),
+        ],
+        "三角恒等变换": [
+            ("两角和与差公式", "使用正弦、余弦或正切的两角和差公式。"),
             ("二倍角公式", "使用正弦、余弦或正切的二倍角公式。"),
-            ("辅助角公式", "将同频正弦余弦线性组合化为单一三角函数。")],
-        "平面向量的数量积": [("平面向量的夹角", "用数量积与模长求两非零向量的夹角。"),
-            ("向量垂直的数量积条件", "用非零向量数量积为零判定垂直。")],
-        "直线与平面平行": [("线面平行的判定", "利用平面外直线与平面内直线平行判定。"),
-            ("线面平行的性质", "用交线和已有线面平行关系推出线线平行。")],
-        "直线与平面垂直": [("线面垂直的判定", "利用与平面内两条相交直线垂直判定。"),
-            ("线面垂直的性质", "利用垂直直线与平面内直线的关系。")],
-        "空间角": [("异面直线所成角", "通过平移构造相交直线计算异面直线角。"),
+            ("辅助角公式", "将同频正弦余弦线性组合化为单一三角函数。"),
+        ],
+        "平面向量的数量积": [
+            ("平面向量的夹角", "用数量积与模长求两非零向量的夹角。"),
+            ("向量垂直的数量积条件", "用非零向量数量积为零判定垂直。"),
+        ],
+        "直线与平面平行": [
+            ("线面平行的判定", "利用平面外直线与平面内直线平行判定。"),
+            ("线面平行的性质", "用交线和已有线面平行关系推出线线平行。"),
+        ],
+        "直线与平面垂直": [
+            ("线面垂直的判定", "利用与平面内两条相交直线垂直判定。"),
+            ("线面垂直的性质", "利用垂直直线与平面内直线的关系。"),
+        ],
+        "空间角": [
+            ("异面直线所成角", "通过平移构造相交直线计算异面直线角。"),
             ("直线与平面所成角", "计算斜线与其在平面内正射影所成角。"),
-            ("二面角的平面角", "通过垂直棱的两条射线表示二面角。")],
+            ("二面角的平面角", "通过垂直棱的两条射线表示二面角。"),
+        ],
         "椭圆的几何性质": [("椭圆离心率", "用焦距与长轴半长关系计算离心率。")],
         "双曲线的几何性质": [("双曲线渐近线", "根据标准方程求渐近线及相关参数。")],
         "抛物线的几何性质": [("抛物线焦点弦", "利用过焦点弦的关系求长度或参数。")],
-        "等差数列": [("等差数列的通项公式", "以首项与公差表示第 n 项。"),
-            ("等差数列的前n项和", "利用首末项或首项公差求前 n 项和。")],
-        "等比数列": [("等比数列的通项公式", "以首项与公比表示第 n 项。"),
-            ("等比数列的前n项和", "区分公比等于一的情况使用求和公式。")],
-        "统计图表": [("条形统计图", "根据条形长度比较数量。"), ("折线统计图", "根据折线趋势分析数据变化。"),
-            ("扇形统计图", "由扇形占比计算数量或百分比。")],
-        "平均数与加权平均数": [("算术平均数", "以总和除以项数描述数据中心。"),
-            ("加权平均数", "按照各项权重计算平均水平。")],
+        "等差数列": [
+            ("等差数列的通项公式", "以首项与公差表示第 n 项。"),
+            ("等差数列的前n项和", "利用首末项或首项公差求前 n 项和。"),
+        ],
+        "等比数列": [
+            ("等比数列的通项公式", "以首项与公比表示第 n 项。"),
+            ("等比数列的前n项和", "区分公比等于一的情况使用求和公式。"),
+        ],
+        "统计图表": [
+            ("条形统计图", "根据条形长度比较数量。"),
+            ("折线统计图", "根据折线趋势分析数据变化。"),
+            ("扇形统计图", "由扇形占比计算数量或百分比。"),
+        ],
+        "平均数与加权平均数": [
+            ("算术平均数", "以总和除以项数描述数据中心。"),
+            ("加权平均数", "按照各项权重计算平均水平。"),
+        ],
     }
     for parent, children in details.items():
         parent_row = tags[key(parent)]
@@ -706,25 +843,52 @@ def _hierarchical_template(tags, section_keys):
             add(name, description, memberships, [parent], levels=parent_row["levels"])
 
     method_roots = {
-        "代数变形": "方法 · 代数与函数", "推理与证明": "方法 · 代数与函数",
-        "函数分析": "方法 · 代数与函数", "几何构造": "方法 · 几何与构造",
-        "坐标化": "方法 · 坐标与向量", "向量计算": "方法 · 坐标与向量",
-        "概率计算": "方法 · 统计与概率", "统计分析": "方法 · 统计与概率"}
+        "代数变形": "方法 · 代数与函数",
+        "推理与证明": "方法 · 代数与函数",
+        "函数分析": "方法 · 代数与函数",
+        "几何构造": "方法 · 几何与构造",
+        "坐标化": "方法 · 坐标与向量",
+        "向量计算": "方法 · 坐标与向量",
+        "概率计算": "方法 · 统计与概率",
+        "统计分析": "方法 · 统计与概率",
+    }
     for name, section in method_roots.items():
         add(name, "仅在当前采用的解析实际使用该类方法时贴标；注明整题或适用小问。", [section], kind="method")
-    defaults = {"方法 · 代数与函数": "代数变形", "方法 · 几何与构造": "几何构造",
-        "方法 · 坐标与向量": "坐标化", "方法 · 统计与概率": "概率计算"}
+    defaults = {
+        "方法 · 代数与函数": "代数变形",
+        "方法 · 几何与构造": "几何构造",
+        "方法 · 坐标与向量": "坐标化",
+        "方法 · 统计与概率": "概率计算",
+    }
     for row in existing:
-        if row["kind"] != "method": continue
+        if row["kind"] != "method":
+            continue
         name = row["name"]
         parent = defaults[section_by_key[row["section_keys"][0]]]
-        if name in {"分类讨论", "反证法", "数学归纳证明", "放缩法"}: parent = "推理与证明"
-        elif name in {"构造函数", "数形结合", "参数分离", "图象平移与变换", "同构变换", "定义域优先"}: parent = "函数分析"
-        elif name in {"向量法", "投影法"}: parent = "向量计算"
-        elif name == "空间向量法": parent = "向量法"
-        elif name == "法向量法": parent = "空间向量法"
-        elif name in {"频率估计", "回归分析"}: parent = "统计分析"
-        elif name in {"构造中位线", "延长边构造全等", "截长补短", "构造平行四边形", "构造等腰三角形", "构造直角三角形", "构造相似三角形", "倍长中线", "角平分线构造"}: parent = "添加辅助线"
+        if name in {"分类讨论", "反证法", "数学归纳证明", "放缩法"}:
+            parent = "推理与证明"
+        elif name in {"构造函数", "数形结合", "参数分离", "图象平移与变换", "同构变换", "定义域优先"}:
+            parent = "函数分析"
+        elif name in {"向量法", "投影法"}:
+            parent = "向量计算"
+        elif name == "空间向量法":
+            parent = "向量法"
+        elif name == "法向量法":
+            parent = "空间向量法"
+        elif name in {"频率估计", "回归分析"}:
+            parent = "统计分析"
+        elif name in {
+            "构造中位线",
+            "延长边构造全等",
+            "截长补短",
+            "构造平行四边形",
+            "构造等腰三角形",
+            "构造直角三角形",
+            "构造相似三角形",
+            "倍长中线",
+            "角平分线构造",
+        }:
+            parent = "添加辅助线"
         row["parent_keys"] = [key(parent, "method")]
         row["related_method_keys"] = []
     for name, description, parent in [
@@ -737,11 +901,21 @@ def _hierarchical_template(tags, section_keys):
         ("裂项相消求和", "解析把通项拆为相邻两项之差后相消。", "代数变形"),
         ("错位相减求和", "解析以适当倍数错位相减，处理等差等比乘积型数列。", "代数变形"),
     ]:
-        add(name, description, [method_roots.get(parent, "方法 · 代数与函数")
-            if parent not in {"法向量法"} else "方法 · 坐标与向量"], [parent], kind="method")
-    related = {"二次函数": ["配方法", "待定系数法"], "一元二次方程": ["配方法", "因式分解法"],
+        add(
+            name,
+            description,
+            [method_roots.get(parent, "方法 · 代数与函数") if parent not in {"法向量法"} else "方法 · 坐标与向量"],
+            [parent],
+            kind="method",
+        )
+    related = {
+        "二次函数": ["配方法", "待定系数法"],
+        "一元二次方程": ["配方法", "因式分解法"],
         "三角形中位线": ["构造中位线", "反向使用中位线"],
-        "空间角": ["空间向量法", "法向量法"], "空间距离": ["空间向量法", "法向量法"],
-        "数列求和": ["裂项相消求和", "错位相减求和"], "平行四边形": ["构造平行四边形", "向量法"]}
+        "空间角": ["空间向量法", "法向量法"],
+        "空间距离": ["空间向量法", "法向量法"],
+        "数列求和": ["裂项相消求和", "错位相减求和"],
+        "平行四边形": ["构造平行四边形", "向量法"],
+    }
     for name, methods in related.items():
         tags[key(name)]["related_method_keys"] = [key(method, "method") for method in methods]

@@ -32,8 +32,7 @@ def _box(item: dict) -> tuple[float, float, float, float] | None:
     box = item.get("bbox")
     if not isinstance(box, (list, tuple)) or len(box) != 4:
         return None
-    if any(isinstance(value, bool) or not isinstance(value, (int, float))
-           or not math.isfinite(value) for value in box):
+    if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) for value in box):
         return None
     x0, y0, x1, y1 = map(float, box)
     if not (0 <= x0 < x1 <= 1000 and 0 <= y0 < y1 <= 1000):
@@ -46,13 +45,16 @@ def _manual(item: dict) -> bool:
 
 
 def _intersection(a: tuple, b: tuple) -> float:
-    return max(0.0, min(a[2], b[2]) - max(a[0], b[0])) \
-        * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    return max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
 
 
 def _marker(block: dict) -> dict | None:
-    if (block.get("type", "") not in TEXT_TYPES or _manual(block)
-            or block.get("handwritten") is True or block.get("is_handwritten") is True):
+    if (
+        block.get("type", "") not in TEXT_TYPES
+        or _manual(block)
+        or block.get("handwritten") is True
+        or block.get("is_handwritten") is True
+    ):
         return None
     page, box = _page(block), _box(block)
     if page is None or box is None or box[3] - box[1] > 65:
@@ -64,14 +66,13 @@ def _marker(block: dict) -> dict | None:
     if explicit:
         slot = explicit.group(1) or explicit.group(2)
         # A box containing several option labels has no exact per-label bbox.
-        if _EMBEDDED_MARKER.search(text[explicit.end():]):
+        if _EMBEDDED_MARKER.search(text[explicit.end() :]):
             return None
     elif text in OPTION_SLOTS:
         slot = text
     else:
         return None
-    return {"slot": slot, "page_idx": page, "bbox": box,
-            "seq": block.get("seq"), "explicit": explicit is not None}
+    return {"slot": slot, "page_idx": page, "bbox": box, "seq": block.get("seq"), "explicit": explicit is not None}
 
 
 def _distance(marker: dict, candidate: dict) -> float | None:
@@ -89,8 +90,7 @@ def _distance(marker: dict, candidate: dict) -> float | None:
     center_aligned = abs(mcy - center_y) <= vertical_tolerance
     if -2 <= left_gap <= 50 and (top_aligned or center_aligned):
         vertical_offset = min(
-            abs(mcy - y0) if top_aligned else float("inf"),
-            abs(mcy - center_y) if center_aligned else float("inf"),
+            abs(mcy - y0) if top_aligned else float("inf"), abs(mcy - center_y) if center_aligned else float("inf")
         )
         costs.append(max(0.0, left_gap) + 0.5 * vertical_offset)
     horizontal_overlap = max(0.0, min(mx1, x1) - max(mx0, x0))
@@ -105,8 +105,7 @@ def _distance(marker: dict, candidate: dict) -> float | None:
 
 
 def option_evidence(
-    *, stem: str, options: dict, kind: str, candidates: list[dict],
-    assignments: dict, blocks: list[dict] | None = None,
+    *, stem: str, options: dict, kind: str, candidates: list[dict], assignments: dict, blocks: list[dict] | None = None
 ) -> dict:
     """Return assignments, marker evidence, and unresolved diagnostic conflicts.
 
@@ -118,9 +117,14 @@ def option_evidence(
     """
     updated = dict(assignments or {})
     result = {"assignments": updated, "evidence": {}, "conflicts": []}
-    if (kind not in CHOICE_KINDS or not isinstance(candidates, list)
-            or not isinstance(blocks, list) or not blocks
-            or len(candidates) > MAX_CANDIDATES or len(blocks) > MAX_BLOCKS):
+    if (
+        kind not in CHOICE_KINDS
+        or not isinstance(candidates, list)
+        or not isinstance(blocks, list)
+        or not blocks
+        or len(candidates) > MAX_CANDIDATES
+        or len(blocks) > MAX_BLOCKS
+    ):
         return result
 
     valid = []
@@ -152,9 +156,10 @@ def option_evidence(
     for block in blocks:
         if not isinstance(block, dict) or (marker := _marker(block)) is None:
             continue
-        if any(page == marker["page_idx"] and box is not None
-               and _intersection(marker["bbox"], box) > 0
-               for page, box in image_boxes):
+        if any(
+            page == marker["page_idx"] and box is not None and _intersection(marker["bbox"], box) > 0
+            for page, box in image_boxes
+        ):
             continue
         key = (marker["slot"], marker["page_idx"], marker["bbox"])
         if key not in seen_markers:
@@ -176,8 +181,7 @@ def option_evidence(
     # real papers the pure-picture cards (options dict left empty by the reader)
     # were untouched by this.
     if has_figure_cue(stem, options):
-        written = {str(slot) for slot, value in (options or {}).items()
-                   if str(value or "").strip()}
+        written = {str(slot) for slot, value in (options or {}).items() if str(value or "").strip()}
         if written:
             markers = [marker for marker in markers if marker["slot"] not in written]
 
@@ -196,7 +200,8 @@ def option_evidence(
             continue
         ranked = sorted(
             (distance, candidate["label"])
-            for candidate in valid if (distance := _distance(marker, candidate)) is not None
+            for candidate in valid
+            if (distance := _distance(marker, candidate)) is not None
         )
         if not ranked:
             continue
@@ -213,25 +218,31 @@ def option_evidence(
         marker, distance = proposed[0]
         slot, current = marker["slot"], updated.get(label)
         applied = current in {None, "", "stem", slot}
-        reason = "printed_option_marker_disagrees" if current in OPTION_SLOTS and current != slot \
-            else "protected_assignment"
+        reason = (
+            "printed_option_marker_disagrees" if current in OPTION_SLOTS and current != slot else "protected_assignment"
+        )
         result["evidence"][label] = {
-            "slot": slot, "page_idx": marker["page_idx"], "marker_bbox": list(marker["bbox"]),
-            "marker_seq": marker["seq"], "source": "printed_option_marker",
-            "distance": round(distance, 2), "applied": applied,
+            "slot": slot,
+            "page_idx": marker["page_idx"],
+            "marker_bbox": list(marker["bbox"]),
+            "marker_seq": marker["seq"],
+            "source": "printed_option_marker",
+            "distance": round(distance, 2),
+            "applied": applied,
         }
         if applied:
             updated[label] = slot
         else:
-            result["conflicts"].append({"candidate_label": label, "current_role": current,
-                                        "proposed_role": slot, "reason": reason})
+            result["conflicts"].append(
+                {"candidate_label": label, "current_role": current, "proposed_role": slot, "reason": reason}
+            )
     return result
 
 
 def option_assignments(
-    *, stem: str, options: dict, kind: str, candidates: list[dict],
-    assignments: dict, blocks: list[dict] | None = None,
+    *, stem: str, options: dict, kind: str, candidates: list[dict], assignments: dict, blocks: list[dict] | None = None
 ) -> dict[str, str]:
     """Return a fresh role map, applying only unambiguous external option labels."""
-    return option_evidence(stem=stem, options=options, kind=kind, candidates=candidates,
-                           assignments=assignments, blocks=blocks)["assignments"]
+    return option_evidence(
+        stem=stem, options=options, kind=kind, candidates=candidates, assignments=assignments, blocks=blocks
+    )["assignments"]

@@ -27,10 +27,7 @@ READING_CSS = FRONTEND / "library-reading.css"
 
 ORIGINALS = {path: path.read_text(encoding="utf-8") for path in (HTML, JS, CSS, READING_CSS)}
 
-QUICK_MARKER = (
-    '<div id="tagQuickTools" class="library-extra-tools" role="group" '
-    'aria-label="标签待办" hidden></div>'
-)
+QUICK_MARKER = '<div id="tagQuickTools" class="library-extra-tools" role="group" aria-label="标签待办" hidden></div>'
 
 
 def run_node() -> tuple[int, str]:
@@ -40,8 +37,8 @@ def run_node() -> tuple[int, str]:
     if not tests:
         return 1, "找不到任何前端用例"
     finished = subprocess.run(
-        ["node", "--test", *tests],
-        cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace")
+        ["node", "--test", *tests], cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
     return finished.returncode, (finished.stdout or "") + (finished.stderr or "")
 
 
@@ -52,8 +49,7 @@ def parked_in_the_disclosure(text: str) -> str:
     anchor = '<div class="library-filters">'
     if anchor not in text:
         return text
-    return text.replace(QUICK_MARKER, "", 1).replace(
-        anchor, anchor + "\n                " + QUICK_MARKER, 1)
+    return text.replace(QUICK_MARKER, "", 1).replace(anchor, anchor + "\n                " + QUICK_MARKER, 1)
 
 
 def hide_counts_the_pending_entry(text: str) -> str:
@@ -61,7 +57,8 @@ def hide_counts_the_pending_entry(text: str) -> str:
     return text.replace(
         '$("advancedFilters").hidden = [ui.answerFilters, $("reviewFilters"), ui.tagBox]',
         '$("advancedFilters").hidden = [ui.answerFilters, $("reviewFilters"), ui.tagBox, ui.extraTools]',
-        1)
+        1,
+    )
 
 
 def loses_its_grid_slot(text: str) -> str:
@@ -71,16 +68,12 @@ def loses_its_grid_slot(text: str) -> str:
 
 def hidden_still_takes_room(text: str) -> str:
     """没活的时候也不消失 —— 筛选栏白白多出一个空格子。"""
-    return text.replace(
-        "  .library-page .library-filterbar > .library-extra-tools[hidden] { display: none; }\n",
-        "", 1)
+    return text.replace("  .library-page .library-filterbar > .library-extra-tools[hidden] { display: none; }\n", "", 1)
 
 
 def buttons_never_rendered(text: str) -> str:
     """按钮压根没被塞进常驻容器 —— 页面上什么都没有。"""
-    return text.replace(
-        "box.append(...quickActions);",
-        "box.dataset.ignored = String(quickActions.length);", 1)
+    return text.replace("box.append(...quickActions);", "box.dataset.ignored = String(quickActions.length);", 1)
 
 
 MUTATIONS = [
@@ -124,9 +117,7 @@ def main() -> int:
                 failures.append(label)
                 print(f"[{label}] 坏实现竟然通过了测试 —— 这个测试没守住")
             else:
-                hit = next(
-                    (line.strip() for line in output.splitlines() if "AssertionError" in line),
-                    "")
+                hit = next((line.strip() for line in output.splitlines() if "AssertionError" in line), "")
                 print(f"[{label}] 测试如期失败 ✓ {hit[:110]}")
     finally:
         restore()

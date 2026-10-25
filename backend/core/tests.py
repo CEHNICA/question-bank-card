@@ -96,7 +96,7 @@ class SegmentTests(TestCase):
         ]
         result = segment.segment(PAGES[:1], blocks)
         questions = {q["number"]: q for q in result["questions"]}
-        self.assertGreaterEqual(questions[9]["regions"][-1]["bbox"][3], 696)   # D. 3 is inside
+        self.assertGreaterEqual(questions[9]["regions"][-1]["bbox"][3], 696)  # D. 3 is inside
         self.assertLessEqual(questions[10]["regions"][0]["bbox"][1], 704)
         # The photo's first line of question 10 rises to about 682 at its right
         # end (“且 AE=4，BD=6，分别连”); the estimated start leaves room for it.
@@ -143,8 +143,9 @@ class SegmentTests(TestCase):
         self.assertEqual([(s.number, s.y) for s in starts], [(7, 100), (8, 373), (9, 579), (10, 779)])
 
     def test_suffix_repair(self):
-        blocks = [block(i, 0, [60, 50 + 60 * i, 470, 80 + 60 * i], f"{n}. 题目{n}")
-                  for i, n in enumerate([21, 22, 3, 24])]
+        blocks = [
+            block(i, 0, [60, 50 + 60 * i, 470, 80 + 60 * i], f"{n}. 题目{n}") for i, n in enumerate([21, 22, 3, 24])
+        ]
         layout, starts = segment.analyse(PAGES[:1], blocks)
         self.assertEqual([s.number for s in starts], [21, 22, 23, 24])
         self.assertEqual(starts[2].source, "repaired")
@@ -153,8 +154,7 @@ class SegmentTests(TestCase):
         blocks = [
             block(6, 0, [250, 261, 597, 290], "每周两练.数学不难"),
             block(7, 0, [250, 291, 597, 315], "9. 1 8", "equation"),
-            block(8, 0, [190, 319, 608, 374],
-                  "[2026吉林、黑龙江两省十校期中联考]已知全集 U=R，集合 A={x|x>1}"),
+            block(8, 0, [190, 319, 608, 374], "[2026吉林、黑龙江两省十校期中联考]已知全集 U=R，集合 A={x|x>1}"),
             block(9, 0, [216, 374, 515, 392], "(1) 若 m=2，求 A∩B；"),
             block(10, 0, [216, 392, 507, 409], "(2) 若 A∪B=A，求 m 的取值范围；"),
             block(11, 0, [190, 430, 620, 500], "解(1) 当 m=2 时，计算可得。"),
@@ -299,15 +299,20 @@ class SegmentTests(TestCase):
         self.assertEqual([s.number for s in starts], [1, 2, 3])
         self.assertGreater(starts[1].y, 200)
 
-
     def test_single_column_pages_with_alternating_margins(self):
         """A3 对折扫描成单页：单页题号靠右（装订边），双页题号靠左——都是单栏，不能当成两栏。"""
         pages = [{"page_idx": 0, "width": 595, "height": 842}, {"page_idx": 1, "width": 595, "height": 842}]
         blocks, seq = [], 0
         for page, x0, numbers in ((0, 166, range(1, 6)), (1, 33, range(6, 11))):
             for i, n in enumerate(numbers):
-                blocks.append(block(seq, page, [x0, 100 + i * 150, 980 if page == 0 else 900, 140 + i * 150],
-                                    f"{n}. 下列说法正确的是（ ）A. 1 B. 2 C. 3 D. 4"))
+                blocks.append(
+                    block(
+                        seq,
+                        page,
+                        [x0, 100 + i * 150, 980 if page == 0 else 900, 140 + i * 150],
+                        f"{n}. 下列说法正确的是（ ）A. 1 B. 2 C. 3 D. 4",
+                    )
+                )
                 seq += 1
         result = segment.segment(pages, blocks)
         self.assertEqual(result["layout"].splits, {0: [], 1: []})
@@ -435,7 +440,9 @@ class ParallelogramSymbolTests(TestCase):
         from django.apps import apps
 
         paper = Paper.objects.create(filename="卷.pdf", kind="pdf", sha256="p" * 64)
-        question = Question.objects.create(paper=paper, number=23, stem="在 $\\square ABCD$ 中", options={"A": "□ABCD 是菱形"})
+        question = Question.objects.create(
+            paper=paper, number=23, stem="在 $\\square ABCD$ 中", options={"A": "□ABCD 是菱形"}
+        )
         import_module("core.migrations.0003_fix_parallelogram_symbol").forwards(apps, None)
         question.refresh_from_db()
         self.assertEqual((question.stem, question.options), ("在 ▱ABCD 中", {"A": "▱ABCD 是菱形"}))
@@ -455,11 +462,7 @@ class ParallelogramSymbolTests(TestCase):
             approved_content_hash="a" * 64,
         )
         bad_final = Question.objects.create(
-            paper=paper,
-            number=6,
-            stem=r"在 $\square WXYZ$ 中",
-            approved=True,
-            approved_content_hash="b" * 64,
+            paper=paper, number=6, stem=r"在 $\square WXYZ$ 中", approved=True, approved_content_hash="b" * 64
         )
         migrate = import_module("core.migrations.0005_normalize_parallelogram_readings").forwards
         migrate(apps, None)
@@ -532,15 +535,24 @@ class ParseTests(TestCase):
 
     def test_figure_description_filter_is_conservative(self):
         for value in (
-            "[图：数轴]", "【图片: 函数图象】", "（示意图：三角形）", "[表格：星期与产量]",
+            "[图：数轴]",
+            "【图片: 函数图象】",
+            "（示意图：三角形）",
+            "[表格：星期与产量]",
             "（图形：呈阶梯状排列的六个正方形）",
             "数轴上标有点，标号依次为 1, 2, 3, 4, 5",
             "数轴上标有点，标号依次为 $-2$、$-1$、$0$、$1$、$2$",
         ):
             self.assertTrue(readers.is_figure_description(value), value)
         for value in (
-            "如图，点 A 在数轴上", "图1中的阴影部分", "[图1]", "$[a,b]$", "图",
-            "数轴上点 A 表示 1", "向右", "甲",
+            "如图，点 A 在数轴上",
+            "图1中的阴影部分",
+            "[图1]",
+            "$[a,b]$",
+            "图",
+            "数轴上点 A 表示 1",
+            "向右",
+            "甲",
         ):
             self.assertFalse(readers.is_figure_description(value), value)
 
@@ -588,8 +600,11 @@ class ParseTests(TestCase):
                 {"slot": "B", "page_idx": 0, "bbox": [2, 3, 4, 5], "source": "auto"},
                 {"slot": "stem", "page_idx": 0, "bbox": [5, 6, 7, 8], "source": "auto"},
             ],
-            read_a={"options": {}, "figures": {"1": "A", "2": "B", "3": "stem"},
-                    "raw": "【A】\\n【B】\\n【配图】1=A,2=B,3=题干"},
+            read_a={
+                "options": {},
+                "figures": {"1": "A", "2": "B", "3": "stem"},
+                "raw": "【A】\\n【B】\\n【配图】1=A,2=B,3=题干",
+            },
             state="green",
             approved=True,
             approved_content_hash="a" * 64,
@@ -673,6 +688,7 @@ class ScriptedChat:
 
     def __call__(self, engine, prompt, images, max_tokens=3000):
         import re
+
         # Prefer the explicit candidate label.  The figure instructions also
         # contain examples such as “第14题图”, which are not this card's id.
         match = re.search(r"(?:候选显示编号为|显示编号)\s*(\d+)", prompt)
@@ -683,12 +699,23 @@ class ScriptedChat:
         # 手写闸门的两问必须排在兜底的 "b" 前面：它们不是第二读者，只是提示词里
         # 没有「蓝色框」，落到兜底会被记成一次复读，于是「没有用过 b」那条断言
         # 会被闸门自己的提问顶红。判定错了看起来像产品回归，其实是这个分类器老了。
-        kind = "locate" if "横带" in prompt else "arbiter" if "读法甲" in prompt else \
-            "spotcheck" if "每一处空位上印的是甲还是乙" in prompt else \
-            "classify" if "上次没有判断编号" in prompt else \
-            "handwritten" if "整幅从头到尾都是手写" in prompt else \
-            "ownership" if "是不是原卷正式印刷的插图" in prompt else \
-            "a" if "蓝色框" in prompt else "b"
+        kind = (
+            "locate"
+            if "横带" in prompt
+            else "arbiter"
+            if "读法甲" in prompt
+            else "spotcheck"
+            if "每一处空位上印的是甲还是乙" in prompt
+            else "classify"
+            if "上次没有判断编号" in prompt
+            else "handwritten"
+            if "整幅从头到尾都是手写" in prompt
+            else "ownership"
+            if "是不是原卷正式印刷的插图" in prompt
+            else "a"
+            if "蓝色框" in prompt
+            else "b"
+        )
         self.calls.append((kind, number, engine.provider))
         value = self.answers.get((kind, number), self.answers.get(("*", number), ""))
         if isinstance(value, Exception):
@@ -697,7 +724,11 @@ class ScriptedChat:
 
 
 def tagged(stem, options=None, figures="无", number=None):
-    lines = ([f"【题号】{number}"] if number else []) + ["【题型】单选题" if options else "【题型】解答题", "【题干】", stem]
+    lines = ([f"【题号】{number}"] if number else []) + [
+        "【题型】单选题" if options else "【题型】解答题",
+        "【题干】",
+        stem,
+    ]
     for key, value in (options or {}).items():
         lines.append(f"【{key}】{value}")
     lines += [f"【配图】{figures}"]
@@ -711,8 +742,9 @@ class PipelineTests(TestCase):
         self.settings_override = override_settings(DATA_ROOT=self.temp)
         self.settings_override.enable()
         self.addCleanup(self.settings_override.disable)
-        env = mock.patch.dict("os.environ", {"MINIMAX_API_KEY": "test", "SILICONFLOW_API_KEY": "test2",
-                                             "MINERU_TOKEN": "tok"})
+        env = mock.patch.dict(
+            "os.environ", {"MINIMAX_API_KEY": "test", "SILICONFLOW_API_KEY": "test2", "MINERU_TOKEN": "tok"}
+        )
         env.start()
         self.addCleanup(env.stop)
         self.paper = Paper.objects.create(filename="卷.pdf", kind="pdf", sha256="x" * 64)
@@ -739,17 +771,20 @@ class PipelineTests(TestCase):
             "id": 999,
             "number": 9,
             "regions": [{"page_idx": 0, "bbox": [50, 300, 480, 520]}],
-            "candidates": ([{
-                "label": "1", "seq": 5, "page_idx": 0, "bbox": [300, 410, 460, 500],
-            }] if candidates else []),
+            "candidates": (
+                [{"label": "1", "seq": 5, "page_idx": 0, "bbox": [300, 410, 460, 500]}] if candidates else []
+            ),
             "question_type": "free_response",
         }
         store = pipeline.PageStore(self.paper)
-        with mock.patch.object(
-                readers, "read_question",
+        with (
+            mock.patch.object(
+                readers,
+                "read_question",
                 side_effect=lambda _engine, _url, _number, with_figures: primary if with_figures else checker,
-        ) as read_mock, \
-                mock.patch.object(readers, "arbitrate") as arbitrate_mock:
+            ) as read_mock,
+            mock.patch.object(readers, "arbitrate") as arbitrate_mock,
+        ):
             result = pipeline.read_card(snapshot, store)
         return result, read_mock, arbitrate_mock
 
@@ -763,12 +798,17 @@ class PipelineTests(TestCase):
             return primary if with_figures else checker
 
         snapshot = {
-            "id": 999, "number": 9, "group_id": None,
+            "id": 999,
+            "number": 9,
+            "group_id": None,
             "regions": [{"page_idx": 0, "bbox": [50, 300, 480, 520]}],
-            "candidates": [], "question_type": "free_response",
+            "candidates": [],
+            "question_type": "free_response",
         }
-        with mock.patch.object(readers, "read_question", side_effect=read), \
-                mock.patch.object(readers, "arbitrate") as arbitrate_mock:
+        with (
+            mock.patch.object(readers, "read_question", side_effect=read),
+            mock.patch.object(readers, "arbitrate") as arbitrate_mock,
+        ):
             result = pipeline.read_card(snapshot, pipeline.PageStore(self.paper))
 
         self.assertEqual(result["state"], Question.State.GREEN)
@@ -778,9 +818,7 @@ class PipelineTests(TestCase):
         arbitrate_mock.assert_not_called()
 
     def test_figure_policy_uses_existing_reads_without_extra_api_call_and_excludes_irrelevant_candidate(self):
-        result, read_mock, arbitrate_mock = self.read_policy_card(
-            "计算 $1+1$ 的值。", figure_role="1=无关",
-        )
+        result, read_mock, arbitrate_mock = self.read_policy_card("计算 $1+1$ 的值。", figure_role="1=无关")
 
         # One selected vision read supplies the automatic figure review.
         self.assertEqual(read_mock.call_count, 1)
@@ -803,9 +841,7 @@ class PipelineTests(TestCase):
             options={},
             candidate_labels={"1", "2"},
             assignments={"1": "stem"},
-            figures=[{
-                "slot": "stem", "page_idx": 0, "bbox": [10, 20, 30, 40], "source": "auto",
-            }],
+            figures=[{"slot": "stem", "page_idx": 0, "bbox": [10, 20, 30, 40], "source": "auto"}],
         )
 
         self.assertEqual(review["status"], "conflict")
@@ -826,27 +862,23 @@ class PipelineTests(TestCase):
             "The graph below shows the temperature during a morning experiment.\n\n"
             "At what time did the temperature first reach 18℃?"
         )
-        primary = readers.parse_reading(
-            f"【题号】6\n【题型】单选题\n【题干】\n{stem}\n【配图】1=题干",
-            6,
-        )
-        checker = readers.parse_reading(
-            f"【题号】6\n【题型】解答题\n【题干】\n{stem}",
-            6,
-        )
+        primary = readers.parse_reading(f"【题号】6\n【题型】单选题\n【题干】\n{stem}\n【配图】1=题干", 6)
+        checker = readers.parse_reading(f"【题号】6\n【题型】解答题\n【题干】\n{stem}", 6)
         snapshot = {
             "id": 999,
             "number": 6,
             "regions": [{"page_idx": 0, "bbox": [50, 300, 480, 520]}],
-            "candidates": [{
-                "label": "1", "seq": 5, "page_idx": 0, "bbox": [300, 410, 460, 500],
-            }],
+            "candidates": [{"label": "1", "seq": 5, "page_idx": 0, "bbox": [300, 410, 460, 500]}],
             "question_type": "unknown",
         }
-        with mock.patch.object(
-                readers, "read_question",
+        with (
+            mock.patch.object(
+                readers,
+                "read_question",
                 side_effect=lambda _engine, _url, _number, with_figures: primary if with_figures else checker,
-        ) as read_mock, mock.patch.object(readers, "arbitrate") as arbitrate_mock:
+            ) as read_mock,
+            mock.patch.object(readers, "arbitrate") as arbitrate_mock,
+        ):
             result = pipeline.read_card(snapshot, pipeline.PageStore(self.paper))
 
         self.assertEqual(read_mock.call_count, 1)
@@ -859,7 +891,7 @@ class PipelineTests(TestCase):
 
         self.assertEqual(
             figure_policy.missing_choice_figure_slots(
-                kind="single_choice", options={}, figures=[], readings=[primary, checker],
+                kind="single_choice", options={}, figures=[], readings=[primary, checker]
             ),
             {"A", "B", "C", "D"},
         )
@@ -872,23 +904,36 @@ class PipelineTests(TestCase):
             "(3) $f(x)=x^2$，$g(x)=\\sqrt[3]{x^6}$。"
         )
         common = {
-            "stem": stem, "options": {}, "content_kind": "exercise",
-            "figures": {}, "missing_figure": False,
-            "number_seen": 2, "figure_descriptions": [], "unclear": False,
+            "stem": stem,
+            "options": {},
+            "content_kind": "exercise",
+            "figures": {},
+            "missing_figure": False,
+            "number_seen": 2,
+            "figure_descriptions": [],
+            "unclear": False,
         }
         primary = {**common, "type": "single_choice", "raw": "primary raw audit"}
         checker = {**common, "type": "free_response", "raw": "checker raw audit"}
         snapshot = {
-            "id": 998, "number": 2, "group_id": None,
+            "id": 998,
+            "number": 2,
+            "group_id": None,
             "regions": [{"page_idx": 0, "bbox": [50, 300, 480, 520]}],
-            "candidates": [], "question_type": "single_choice",
+            "candidates": [],
+            "question_type": "single_choice",
             "source_kind": Question.SourceKind.EXERCISE,
         }
-        with mock.patch.object(
-                readers, "read_question",
-                side_effect=lambda _engine, _url, _number, with_figures, **_kwargs:
-                primary if with_figures else checker,
-        ), mock.patch.object(readers, "arbitrate") as arbitrate_mock:
+        with (
+            mock.patch.object(
+                readers,
+                "read_question",
+                side_effect=lambda _engine, _url, _number, with_figures, **_kwargs: (
+                    primary if with_figures else checker
+                ),
+            ),
+            mock.patch.object(readers, "arbitrate") as arbitrate_mock,
+        ):
             result = pipeline.read_card(snapshot, pipeline.PageStore(self.paper))
 
         arbitrate_mock.assert_not_called()
@@ -906,8 +951,7 @@ class PipelineTests(TestCase):
 
         self.assertEqual(
             pipeline._normalise_unlabelled_numeric_choice_type(
-                "single_choice", final=final, readings=readings,
-                candidates=[{"label": "1"}], figures=[],
+                "single_choice", final=final, readings=readings, candidates=[{"label": "1"}], figures=[]
             ),
             "single_choice",
         )
@@ -931,10 +975,12 @@ class PipelineTests(TestCase):
         }
         store = pipeline.PageStore(self.paper)
 
-        with mock.patch.object(readers, "primary_engine", return_value=primary), \
-                mock.patch.object(readers, "checker_engine", return_value=None) as checker_mock, \
-                mock.patch.object(readers, "read_question", return_value=primary_reading) as read_mock, \
-                mock.patch.object(readers, "arbitrate") as arbitrate_mock:
+        with (
+            mock.patch.object(readers, "primary_engine", return_value=primary),
+            mock.patch.object(readers, "checker_engine", return_value=None) as checker_mock,
+            mock.patch.object(readers, "read_question", return_value=primary_reading) as read_mock,
+            mock.patch.object(readers, "arbitrate") as arbitrate_mock,
+        ):
             result = pipeline.read_card(snapshot, store)
 
         read_mock.assert_called_once_with(primary, mock.ANY, 9, with_figures=True)
@@ -950,8 +996,11 @@ class PipelineTests(TestCase):
         first_key = "0:300,410,460,500"
         ignored_key = "0:500,410,640,500"
         manual = {
-            "slot": "stem", "page_idx": 0, "bbox": [300, 410, 460, 500],
-            "source": "manual", "candidate_key": first_key,
+            "slot": "stem",
+            "page_idx": 0,
+            "bbox": [300, 410, 460, 500],
+            "source": "manual",
+            "candidate_key": first_key,
         }
         question = Question.objects.create(
             paper=self.paper,
@@ -966,16 +1015,20 @@ class PipelineTests(TestCase):
             ],
             figures=[manual],
             figure_review={
-                "status": "ok", "source": "human", "reason": "配图已经由人工设置",
-                "signals": ["manual_figure"], "cue_matches": [], "excluded_count": 1,
-                "ignored_candidates": [ignored_key], "confirmed_at": "2026-09-27T00:00:00+08:00",
+                "status": "ok",
+                "source": "human",
+                "reason": "配图已经由人工设置",
+                "signals": ["manual_figure"],
+                "cue_matches": [],
+                "excluded_count": 1,
+                "ignored_candidates": [ignored_key],
+                "confirmed_at": "2026-09-27T00:00:00+08:00",
             },
             state=Question.State.WAITING,
         )
-        chat = ScriptedChat({
-            ("a", 9): tagged("计算 $1+1$ 的值。", figures="1=无关"),
-            ("b", 9): tagged("计算 $1+1$ 的值。"),
-        })
+        chat = ScriptedChat(
+            {("a", 9): tagged("计算 $1+1$ 的值。", figures="1=无关"), ("b", 9): tagged("计算 $1+1$ 的值。")}
+        )
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
 
@@ -1006,18 +1059,13 @@ class PipelineTests(TestCase):
             stem="重读前的题干。",
             regions=[{"page_idx": 0, "bbox": [50, 300, 480, 520]}],
             regions_auto=[{"page_idx": 0, "bbox": [50, 300, 480, 520]}],
-            figure_candidates=[{
-                "label": "1", "seq": 5, "page_idx": 0, "bbox": [300, 410, 460, 500],
-            }],
+            figure_candidates=[{"label": "1", "seq": 5, "page_idx": 0, "bbox": [300, 410, 460, 500]}],
             figures=[],
             figure_review=confirmed,
             state=Question.State.WAITING,
             reread_requested=True,
         )
-        chat = ScriptedChat({
-            ("a", 9): tagged("重读后的题干。", figures="1=题干"),
-            ("b", 9): tagged("重读后的题干。"),
-        })
+        chat = ScriptedChat({("a", 9): tagged("重读后的题干。", figures="1=题干"), ("b", 9): tagged("重读后的题干。")})
         with mock.patch.object(readers, "chat", chat):
             pipeline.read_questions(self.paper, [question])
 
@@ -1081,8 +1129,10 @@ class PipelineTests(TestCase):
             ("a", 2): tagged("下列图形中是柱体的是（ ）", figures="1=第3题"),
             ("b", 2): tagged("下列图形中是柱体的是（ ）"),
             ("*", 3): tagged("如图，已知函数 $f(x)=x^2$"),
-            ("a", 5): tagged("已知数列"), ("b", 5): tagged("已知数列"),
-            ("a", 6): tagged("如图，四棱锥", figures="无"), ("b", 6): tagged("如图，四棱锥"),
+            ("a", 5): tagged("已知数列"),
+            ("b", 5): tagged("已知数列"),
+            ("a", 6): tagged("如图，四棱锥", figures="无"),
+            ("b", 6): tagged("如图，四棱锥"),
         }
         self.run_paper(answers)
         cards = {q.number: q for q in self.paper.questions.all()}
@@ -1092,10 +1142,7 @@ class PipelineTests(TestCase):
         # 第 3 题明确写有“如图”，且自己范围内恰好只有一张普通候选图：
         # 本地规则可确定性认领该图，随后再接收第 2 题交来的另一张图。
         # 多候选、无文字提示或图片选项题仍由其他测试保持人工审核。
-        self.assertEqual(
-            sorted(f["source"] for f in cards[3].figures), ["auto", "other"],
-            cards[3].figures,
-        )
+        self.assertEqual(sorted(f["source"] for f in cards[3].figures), ["auto", "other"], cards[3].figures)
         self.assertEqual(cards[3].figure_review["status"], "ok")
         self.assertNotIn(figure_policy.FLAG_UNFOUND_FIGURE, cards[3].flags)
         # 第 6 题说"如图"却没有图 → 提示
@@ -1103,10 +1150,15 @@ class PipelineTests(TestCase):
         self.assertEqual(cards[6].state, "yellow")
 
     def test_partial_option_figures_keep_the_question_blocked(self):
-        answers = {("locate", 4): "【刻度】无", ("*", 1): tagged("x"), ("*", 3): tagged("x"), ("*", 5): tagged("x"),
-                   ("*", 6): tagged("x"),
-                   ("a", 2): "【题型】单选题\n【题干】\n下列图形，不是柱体的是（ ）\n【A】\n【B】\n【配图】1=A",
-                   ("b", 2): "【题型】单选题\n【题干】\n下列图形，不是柱体的是（ ）"}
+        answers = {
+            ("locate", 4): "【刻度】无",
+            ("*", 1): tagged("x"),
+            ("*", 3): tagged("x"),
+            ("*", 5): tagged("x"),
+            ("*", 6): tagged("x"),
+            ("a", 2): "【题型】单选题\n【题干】\n下列图形，不是柱体的是（ ）\n【A】\n【B】\n【配图】1=A",
+            ("b", 2): "【题型】单选题\n【题干】\n下列图形，不是柱体的是（ ）",
+        }
         self.run_paper(answers)
         q2 = self.paper.questions.get(number=2)
         self.assertEqual([f["slot"] for f in q2.figures], ["A"])
@@ -1142,10 +1194,13 @@ class PipelineTests(TestCase):
             },
         )
 
-        pipeline.assign_foreign_figures(self.paper, [
-            {"number": 8, "page_idx": 0, "bbox": [300, 310, 440, 370]},
-            {"number": 9, "page_idx": 0, "bbox": [300, 390, 440, 450]},
-        ])
+        pipeline.assign_foreign_figures(
+            self.paper,
+            [
+                {"number": 8, "page_idx": 0, "bbox": [300, 310, 440, 370]},
+                {"number": 9, "page_idx": 0, "bbox": [300, 390, 440, 450]},
+            ],
+        )
 
         no_cue.refresh_from_db()
         missing_options.refresh_from_db()
@@ -1158,12 +1213,11 @@ class PipelineTests(TestCase):
     def test_plain_image_description_from_second_reader_is_not_saved(self):
         answers = {
             ("locate", 4): "【刻度】无",
-            ("*", 1): tagged("x"), ("*", 3): tagged("x"),
-            ("*", 5): tagged("x"), ("*", 6): tagged("x"),
-            ("a", 2): (
-                "【题型】单选题\n【题干】四位同学画数轴如图所示（ ）\n"
-                "【A】\n【B】\n【C】\n【D】\n【配图】1=A"
-            ),
+            ("*", 1): tagged("x"),
+            ("*", 3): tagged("x"),
+            ("*", 5): tagged("x"),
+            ("*", 6): tagged("x"),
+            ("a", 2): ("【题型】单选题\n【题干】四位同学画数轴如图所示（ ）\n【A】\n【B】\n【C】\n【D】\n【配图】1=A"),
             ("b", 2): tagged(
                 "四位同学画数轴如图所示（ ）",
                 {
@@ -1189,12 +1243,11 @@ class PipelineTests(TestCase):
     def test_missing_option_text_from_primary_read_stays_flagged_for_human_review(self):
         answers = {
             ("locate", 4): "【刻度】无",
-            ("*", 1): tagged("x"), ("*", 3): tagged("x"),
-            ("*", 5): tagged("x"), ("*", 6): tagged("x"),
-            ("a", 2): (
-                "【题型】单选题\n【题干】选择箭头方向（ ）\n"
-                "【A】\n【配图】1=A"
-            ),
+            ("*", 1): tagged("x"),
+            ("*", 3): tagged("x"),
+            ("*", 5): tagged("x"),
+            ("*", 6): tagged("x"),
+            ("a", 2): ("【题型】单选题\n【题干】选择箭头方向（ ）\n【A】\n【配图】1=A"),
             ("b", 2): tagged("选择箭头方向（ ）", {"A": "向右"}),
             ("arbiter", 2): tagged("选择箭头方向（ ）", {"A": "向右"}),
         }
@@ -1211,13 +1264,11 @@ class PipelineTests(TestCase):
     def test_plain_image_description_from_primary_reader_is_not_saved(self):
         answers = {
             ("locate", 4): "【刻度】无",
-            ("*", 1): tagged("x"), ("*", 3): tagged("x"),
-            ("*", 5): tagged("x"), ("*", 6): tagged("x"),
-            ("a", 2): tagged(
-                "选择正确的数轴（ ）",
-                {"A": "数轴上标有点，标号依次为 1, 2, 3, 4, 5"},
-                figures="1=A",
-            ),
+            ("*", 1): tagged("x"),
+            ("*", 3): tagged("x"),
+            ("*", 5): tagged("x"),
+            ("*", 6): tagged("x"),
+            ("a", 2): tagged("选择正确的数轴（ ）", {"A": "数轴上标有点，标号依次为 1, 2, 3, 4, 5"}, figures="1=A"),
             ("b", 2): tagged("选择正确的数轴（ ）"),
         }
         chat = self.run_paper(answers)
@@ -1233,8 +1284,10 @@ class PipelineTests(TestCase):
     def test_primary_text_is_kept_without_a_second_reader(self):
         answers = {
             ("locate", 4): "【刻度】无",
-            ("*", 1): tagged("x"), ("*", 3): tagged("x"),
-            ("*", 5): tagged("x"), ("*", 6): tagged("x"),
+            ("*", 1): tagged("x"),
+            ("*", 3): tagged("x"),
+            ("*", 5): tagged("x"),
+            ("*", 6): tagged("x"),
             ("a", 2): tagged("选择正确答案（ ）", {"A": "甲"}),
             ("b", 2): tagged("选择正确答案（ ）", {"A": "乙"}),
             ("arbiter", 2): tagged("选择正确答案（ ）", {"A": "[图：一条没有框出的数轴]"}),
@@ -1250,8 +1303,10 @@ class PipelineTests(TestCase):
         table_stem = "根据下表回答：\n\n| 星期 | 一 | 二 |\n|---|---|---|\n| 增减 | +5 | -2 |\n\n求总数。"
         answers = {
             ("locate", 4): "【刻度】无",
-            ("*", 1): tagged("x"), ("*", 3): tagged("x"),
-            ("*", 5): tagged("x"), ("*", 6): tagged("x"),
+            ("*", 1): tagged("x"),
+            ("*", 3): tagged("x"),
+            ("*", 5): tagged("x"),
+            ("*", 6): tagged("x"),
             ("a", 2): tagged(table_stem, {"A": "1", "B": "2"}, figures="1=题干"),
             ("b", 2): tagged(table_stem, {"A": "1", "B": "2"}),
         }
@@ -1264,8 +1319,11 @@ class PipelineTests(TestCase):
         self.assertFalse(any(kind == "arbiter" and number == 2 for kind, number, _ in chat.calls))
 
     def test_resegment_keeps_unchanged_cards_and_rereads_changed(self):
-        answers = {("locate", 4): "【刻度】无", **{("*", n): tagged(f"第{n}题", {"A": "1", "B": "2"}) for n in (1, 2, 3)},
-                   **{("*", n): tagged(f"第{n}题") for n in (5, 6)}}
+        answers = {
+            ("locate", 4): "【刻度】无",
+            **{("*", n): tagged(f"第{n}题", {"A": "1", "B": "2"}) for n in (1, 2, 3)},
+            **{("*", n): tagged(f"第{n}题") for n in (5, 6)},
+        }
         answers[("a", 2)] = tagged("第2题", {"A": "1", "B": "2"}, figures="1=无关")
         self.run_paper(answers)
         q1 = self.paper.questions.get(number=1)
@@ -1283,27 +1341,40 @@ class PipelineTests(TestCase):
         chat = self.run_paper(answers)
         cards = {q.number: q for q in self.paper.questions.all()}
         self.assertTrue(library.approval_is_current(cards[1]))  # 内容和来源没变：保留通过
-        self.assertTrue(cards[2].regions)                   # 重新切出范围
-        self.assertEqual(cards[2].state, "green")           # 并重新识读
-        self.assertEqual(cards[5].regions, manual)          # 人工范围不动
+        self.assertTrue(cards[2].regions)  # 重新切出范围
+        self.assertEqual(cards[2].state, "green")  # 并重新识读
+        self.assertEqual(cards[5].regions, manual)  # 人工范围不动
         read_numbers = {n for kind, n, _ in chat.calls if kind in ("a", "b")}
         self.assertEqual(read_numbers, {2})
         self.assertTrue(any("重新切题" in note for note in self.paper.notes))
 
     def test_resegment_preserves_missing_human_cards_and_only_deletes_unreviewed_auto_cards(self):
         edited = Question.objects.create(
-            paper=self.paper, number=90, stem="人工改过的题干", edited=True, text_source="human",
-            start_source="mineru", state=Question.State.GREEN,
+            paper=self.paper,
+            number=90,
+            stem="人工改过的题干",
+            edited=True,
+            text_source="human",
+            start_source="mineru",
+            state=Question.State.GREEN,
             regions=[{"page_idx": 0, "bbox": [10, 10, 100, 100]}],
         )
         approved = Question.objects.create(
-            paper=self.paper, number=91, stem="已人工通过的草稿", approved=True,
-            approved_at=timezone.now(), approved_content_hash="a" * 64,
-            start_source="mineru", state=Question.State.GREEN,
+            paper=self.paper,
+            number=91,
+            stem="已人工通过的草稿",
+            approved=True,
+            approved_at=timezone.now(),
+            approved_content_hash="a" * 64,
+            start_source="mineru",
+            state=Question.State.GREEN,
             regions=[{"page_idx": 0, "bbox": [10, 110, 100, 200]}],
         )
         disposable = Question.objects.create(
-            paper=self.paper, number=92, stem="纯自动未审核", start_source="mineru",
+            paper=self.paper,
+            number=92,
+            stem="纯自动未审核",
+            start_source="mineru",
             state=Question.State.WAITING,
             regions=[{"page_idx": 0, "bbox": [10, 210, 100, 300]}],
         )
@@ -1331,17 +1402,29 @@ class PipelineTests(TestCase):
 
         def items(section_a="第一处", section_b="第二处"):
             return [
-                {"number": 1, "section": section_a, "question_type": "free_response",
-                 "regions": first_regions, "figure_candidates": [],
-                 "start": {"source": "mineru"}},
-                {"number": 1, "section": section_b, "question_type": "free_response",
-                 "regions": second_regions, "figure_candidates": [],
-                 "start": {"source": "mineru"}},
+                {
+                    "number": 1,
+                    "section": section_a,
+                    "question_type": "free_response",
+                    "regions": first_regions,
+                    "figure_candidates": [],
+                    "start": {"source": "mineru"},
+                },
+                {
+                    "number": 1,
+                    "section": section_b,
+                    "question_type": "free_response",
+                    "regions": second_regions,
+                    "figure_candidates": [],
+                    "start": {"source": "mineru"},
+                },
             ]
 
-        with mock.patch.object(pipeline, "locate_missing", return_value=[]), \
-                mock.patch.object(segment, "build_questions", return_value=items()), \
-                mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda value, _load: value):
+        with (
+            mock.patch.object(pipeline, "locate_missing", return_value=[]),
+            mock.patch.object(segment, "build_questions", return_value=items()),
+            mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda value, _load: value),
+        ):
             pipeline.segment_paper(self.paper)
 
         cards = list(self.paper.questions.filter(number=1).order_by("id"))
@@ -1351,9 +1434,11 @@ class PipelineTests(TestCase):
 
         self.paper.status = Paper.Status.SEGMENTING
         self.paper.save(update_fields=["status"])
-        with mock.patch.object(pipeline, "locate_missing", return_value=[]), \
-                mock.patch.object(segment, "build_questions", return_value=items("第一处更新", "第二处更新")), \
-                mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda value, _load: value):
+        with (
+            mock.patch.object(pipeline, "locate_missing", return_value=[]),
+            mock.patch.object(segment, "build_questions", return_value=items("第一处更新", "第二处更新")),
+            mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda value, _load: value),
+        ):
             pipeline.segment_paper(self.paper)
 
         cards = list(self.paper.questions.filter(number=1).order_by("id"))
@@ -1362,8 +1447,15 @@ class PipelineTests(TestCase):
         self.assertEqual({card.section for card in cards}, {"第一处更新", "第二处更新"})
 
     def test_missing_number_is_located_and_split(self):
-        answers = {("locate", 4): "【刻度】05", ("*", 1): tagged("x"), ("*", 2): tagged("x"), ("*", 3): tagged("x"),
-                   ("*", 4): tagged("x"), ("*", 5): tagged("x"), ("*", 6): tagged("x")}
+        answers = {
+            ("locate", 4): "【刻度】05",
+            ("*", 1): tagged("x"),
+            ("*", 2): tagged("x"),
+            ("*", 3): tagged("x"),
+            ("*", 4): tagged("x"),
+            ("*", 5): tagged("x"),
+            ("*", 6): tagged("x"),
+        }
         self.run_paper(answers)
         numbers = list(self.paper.questions.values_list("number", flat=True))
         self.assertEqual(numbers, [1, 2, 3, 4, 5, 6])
@@ -1374,8 +1466,9 @@ class PipelineTests(TestCase):
         q3 = self.paper.questions.get(number=3)
         # A located start's crop reaches one line higher (the band is coarse);
         # the previous question's range still ends at the located number.
-        self.assertLessEqual(q3.regions[-1]["bbox"][3],
-                             q4.regions[0]["bbox"][1] + segment.START_PAD + segment.LOCATED_EXTRA_PAD + 1)
+        self.assertLessEqual(
+            q3.regions[-1]["bbox"][3], q4.regions[0]["bbox"][1] + segment.START_PAD + segment.LOCATED_EXTRA_PAD + 1
+        )
 
     def test_segment_pipeline_recovers_group_first_question_and_records_note(self):
         self.paper.blocks.all().delete()
@@ -1384,8 +1477,7 @@ class PipelineTests(TestCase):
         blocks = [
             block(6, 0, [250, 261, 597, 290], "每周两练.数学不难"),
             block(7, 0, [250, 291, 597, 315], "9. 1 8", "equation"),
-            block(8, 0, [190, 319, 608, 374],
-                  "[2026吉林、黑龙江两省十校期中联考]已知全集 U=R，集合 A={x|x>1}"),
+            block(8, 0, [190, 319, 608, 374], "[2026吉林、黑龙江两省十校期中联考]已知全集 U=R，集合 A={x|x>1}"),
             block(9, 0, [216, 374, 515, 392], "(1) 若 m=2，求 A∩B；"),
             block(10, 0, [216, 392, 507, 409], "(2) 若 A∪B=A，求 m 的取值范围；"),
             block(11, 0, [190, 430, 620, 500], "解(1) 当 m=2 时，计算可得。"),
@@ -1393,8 +1485,10 @@ class PipelineTests(TestCase):
             block(22, 1, [190, 100, 646, 160], "3. 已知函数 f(x)=x，求值。"),
         ]
         Block.objects.bulk_create([Block(paper=self.paper, **item) for item in blocks])
-        with mock.patch.object(pipeline.readers, "locate_band") as locate_band, \
-                mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda regions, _load: regions):
+        with (
+            mock.patch.object(pipeline.readers, "locate_band") as locate_band,
+            mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda regions, _load: regions),
+        ):
             pipeline.segment_paper(self.paper)
 
         self.paper.refresh_from_db()
@@ -1425,8 +1519,10 @@ class PipelineTests(TestCase):
         self.paper.status = Paper.Status.SEGMENTING
         self.paper.save(update_fields=["status"])
 
-        with mock.patch.object(pipeline.readers, "locate_band") as locate_band, \
-                mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda regions, _load: regions):
+        with (
+            mock.patch.object(pipeline.readers, "locate_band") as locate_band,
+            mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda regions, _load: regions),
+        ):
             pipeline.segment_paper(self.paper)
 
         locate_band.assert_not_called()
@@ -1448,20 +1544,33 @@ class ApiTests(TestCase):
         override.enable()
         self.addCleanup(override.disable)
         self.client = Client()
-        self.paper = Paper.objects.create(filename="卷.pdf", kind="pdf", sha256="y" * 64, status=Paper.Status.READY,
-                                          pages=PAGES[:1])
+        self.paper = Paper.objects.create(
+            filename="卷.pdf", kind="pdf", sha256="y" * 64, status=Paper.Status.READY, pages=PAGES[:1]
+        )
         folder = self.temp / str(self.paper.id)
         folder.mkdir(parents=True)
         fake_page_pdf(folder / "source.pdf")
         self.paper.source_path = str(folder / "source.pdf")
         self.paper.save()
         self.q = Question.objects.create(
-            paper=self.paper, number=1, question_type="single_choice", stem="如图，已知 $x=1$", options={"A": "1", "B": "2"},
-            regions=[{"page_idx": 0, "bbox": [50, 100, 480, 300]}], state=Question.State.GREEN,
+            paper=self.paper,
+            number=1,
+            question_type="single_choice",
+            stem="如图，已知 $x=1$",
+            options={"A": "1", "B": "2"},
+            regions=[{"page_idx": 0, "bbox": [50, 100, 480, 300]}],
+            state=Question.State.GREEN,
             figures=[{"slot": "stem", "page_idx": 0, "bbox": [300, 150, 450, 250], "source": "auto"}],
         )
-        self.q2 = Question.objects.create(paper=self.paper, number=2, stem="求证", regions=[{"page_idx": 0, "bbox": [50, 300, 480, 400]}],
-                                          question_type="free_response", state=Question.State.YELLOW, flags=["两次识读不一致，已由第三次识读裁决，请看标黄的地方"])
+        self.q2 = Question.objects.create(
+            paper=self.paper,
+            number=2,
+            stem="求证",
+            regions=[{"page_idx": 0, "bbox": [50, 300, 480, 400]}],
+            question_type="free_response",
+            state=Question.State.YELLOW,
+            flags=["两次识读不一致，已由第三次识读裁决，请看标黄的地方"],
+        )
 
     def post(self, path, body=None, header=True):
         headers = {"HTTP_X_QB_REQUEST": "1"} if header else {}
@@ -1474,12 +1583,21 @@ class ApiTests(TestCase):
     def test_empty_review_reuses_saved_reads_without_rereading_old_cards(self):
         candidate = {"label": "1", "seq": 1, "page_idx": 0, "bbox": [300, 310, 440, 370]}
         base_read = {
-            "stem": "求证", "options": {}, "type": "free_response", "figures": {"1": "none"},
-            "missing_figure": False, "figure_descriptions": [],
+            "stem": "求证",
+            "options": {},
+            "type": "free_response",
+            "figures": {"1": "none"},
+            "missing_figure": False,
+            "figure_descriptions": [],
         }
         Question.objects.filter(pk=self.q2.pk).update(
-            figure_review={}, figure_candidates=[candidate], read_a=base_read, read_b={}, read_c={},
-            figures=[], question_type="free_response",
+            figure_review={},
+            figure_candidates=[candidate],
+            read_a=base_read,
+            read_b={},
+            read_c={},
+            figures=[],
+            question_type="free_response",
         )
         self.q2.refresh_from_db()
         self.assertEqual(figure_policy.stored_or_derived_review(self.q2)["status"], "auto_excluded")
@@ -1490,9 +1608,7 @@ class ApiTests(TestCase):
 
         self.q2.question_type = "single_choice"
         self.q2.read_a = {**base_read, "type": "single_choice", "figures": {"1": "A"}}
-        self.q2.figures = [{
-            "slot": "A", "page_idx": 0, "bbox": [300, 310, 440, 370], "source": "auto",
-        }]
+        self.q2.figures = [{"slot": "A", "page_idx": 0, "bbox": [300, 310, 440, 370], "source": "auto"}]
         self.q2.save(update_fields=["question_type", "read_a", "figures"])
         review = figure_policy.stored_or_derived_review(self.q2)
         self.assertEqual(review["status"], "blocked_missing")
@@ -1517,7 +1633,9 @@ class ApiTests(TestCase):
         again = self.post(f"/api/papers/{self.paper.id}/publish").json()
         self.assertEqual((again["created"], again["unchanged"]), (0, 1))
         self.assertEqual(PublishedQuestion.objects.get().pk, publication.pk)
-        self.assertEqual(publication.content["figures"][0]["url"], f"/api/library/{publication.id}/figures/figure-1.png")
+        self.assertEqual(
+            publication.content["figures"][0]["url"], f"/api/library/{publication.id}/figures/figure-1.png"
+        )
         self.assertEqual(publication.content["figures"][0]["source"], "auto")
         # 测试题没有 regions_auto，对系统来说是人工框定的来源范围。
         self.assertEqual(publication.content["sources"][0]["source"], "manual")
@@ -1536,8 +1654,10 @@ class ApiTests(TestCase):
         self.assertEqual(second.content["stem"], "如图，已知 $x=2$")
         self.assertEqual(self.post(f"/api/papers/{self.paper.id}/publish").json()["created"], 0)
         self.assertEqual(PublishedQuestion.objects.count(), 2)
-        self.assertEqual(list(PublishedQuestion.objects.order_by("version").values_list("status", flat=True)),
-                         ["superseded", "published"])
+        self.assertEqual(
+            list(PublishedQuestion.objects.order_by("version").values_list("status", flat=True)),
+            ["superseded", "published"],
+        )
         library = self.client.get("/api/library").json()
         self.assertEqual(library["total"], 1)
         self.assertEqual(library["items"][0]["content"]["stem"], "如图，已知 $x=2$")
@@ -1552,13 +1672,11 @@ class ApiTests(TestCase):
 
         for stem in ("如图，已知 $x=2$", "如图，已知 $x=3$"):
             current = PublishedQuestion.objects.filter(
-                question=self.q, status=PublishedQuestion.Status.PUBLISHED,
+                question=self.q, status=PublishedQuestion.Status.PUBLISHED
             ).first()
             if stem.endswith("3$"):
                 library.withdraw(current)
-            self.post(f"/api/questions/{self.q.id}/text", {
-                "stem": stem, "options": {"A": "1", "B": "2"},
-            })
+            self.post(f"/api/questions/{self.q.id}/text", {"stem": stem, "options": {"A": "1", "B": "2"}})
             self.post(f"/api/questions/{self.q.id}/approve", {"approved": True})
             self.post(f"/api/papers/{self.paper.id}/publish")
 
@@ -1568,8 +1686,11 @@ class ApiTests(TestCase):
         }
         self.assertEqual(
             [item.status for item in PublishedQuestion.objects.filter(question=self.q).order_by("version")],
-            [PublishedQuestion.Status.SUPERSEDED, PublishedQuestion.Status.WITHDRAWN,
-             PublishedQuestion.Status.PUBLISHED],
+            [
+                PublishedQuestion.Status.SUPERSEDED,
+                PublishedQuestion.Status.WITHDRAWN,
+                PublishedQuestion.Status.PUBLISHED,
+            ],
         )
         self.q.refresh_from_db()
         self.assertTrue(library.approval_is_current(self.q))
@@ -1591,8 +1712,7 @@ class ApiTests(TestCase):
         for publication in publications:
             old = before[publication.pk]
             self.assertEqual(
-                (publication.version, publication.status, publication.published_at, publication.withdrawn_at),
-                old[:4],
+                (publication.version, publication.status, publication.published_at, publication.withdrawn_at), old[:4]
             )
             self.assertNotEqual(publication.content_hash, old[4])
             self.assertEqual(publication.source_filename, "秋季月考任务")
@@ -1607,8 +1727,9 @@ class ApiTests(TestCase):
         self.assertEqual(listing["items"][0]["source_filename"], "秋季月考任务")
         source = listing["facets"]["sources"][0]
         # 1.12.6：来源带上入库时间，题库里同名来源（同一份卷录过两次）才分得开。
-        self.assertEqual((source["document_id"], source["filename"], source["count"]),
-                         (str(self.paper.id), "秋季月考任务", 1))
+        self.assertEqual(
+            (source["document_id"], source["filename"], source["count"]), (str(self.paper.id), "秋季月考任务", 1)
+        )
         published = datetime.fromisoformat(listing["items"][0]["published_at"].replace("Z", "+00:00"))
         # JsonResponse 会把 UTC 写成 Z，publication_json 里是 +00:00；数据库只存到
         # 微秒而发布记录的序列化保留全精度，所以比到秒。
@@ -1649,9 +1770,7 @@ class ApiTests(TestCase):
         self.assertEqual(self.paper.filename, "卷.pdf")
 
     def test_paper_rename_and_delete_require_local_page_header(self):
-        failed = Paper.objects.create(
-            filename="失败.pdf", kind="pdf", sha256="h" * 64, status=Paper.Status.FAILED,
-        )
+        failed = Paper.objects.create(filename="失败.pdf", kind="pdf", sha256="h" * 64, status=Paper.Status.FAILED)
         rename = self.patch(f"/api/papers/{self.paper.id}", {"name": "不应生效"}, header=False)
         delete = self.delete(f"/api/papers/{failed.id}", header=False)
         self.assertEqual(rename.status_code, 403)
@@ -1661,9 +1780,7 @@ class ApiTests(TestCase):
         self.assertTrue(Paper.objects.filter(pk=failed.pk).exists())
 
     def test_delete_failed_task_removes_related_drafts_and_controlled_folder(self):
-        failed = Paper.objects.create(
-            filename="失败.pdf", kind="pdf", sha256="d" * 64, status=Paper.Status.FAILED,
-        )
+        failed = Paper.objects.create(filename="失败.pdf", kind="pdf", sha256="d" * 64, status=Paper.Status.FAILED)
         folder = self.temp / str(failed.id)
         folder.mkdir()
         source = folder / "source.pdf"
@@ -1671,9 +1788,7 @@ class ApiTests(TestCase):
         failed.source_path = str(source)
         failed.save(update_fields=["source_path"])
         draft = Question.objects.create(paper=failed, number=1, stem="未完成草稿")
-        block = Block.objects.create(
-            paper=failed, seq=0, type="text", page_idx=0, bbox=[0, 0, 10, 10], text="草稿",
-        )
+        block = Block.objects.create(paper=failed, seq=0, type="text", page_idx=0, bbox=[0, 0, 10, 10], text="草稿")
 
         response = self.delete(f"/api/papers/{failed.id}")
         self.assertEqual(response.status_code, 200, response.content)
@@ -1684,9 +1799,7 @@ class ApiTests(TestCase):
         self.assertFalse(folder.exists())
 
     def test_delete_keeps_task_when_its_files_cannot_be_staged(self):
-        failed = Paper.objects.create(
-            filename="占用中.pdf", kind="pdf", sha256="b" * 64, status=Paper.Status.FAILED,
-        )
+        failed = Paper.objects.create(filename="占用中.pdf", kind="pdf", sha256="b" * 64, status=Paper.Status.FAILED)
         folder = self.temp / str(failed.id)
         folder.mkdir()
         (folder / "source.pdf").write_bytes(b"busy")
@@ -1714,11 +1827,12 @@ class ApiTests(TestCase):
         self.assertTrue(PublishedQuestion.objects.filter(paper_id=self.paper.pk).exists())
 
     def test_delete_rejects_both_split_source_and_split_child(self):
-        source = Paper.objects.create(
-            filename="原书.pdf", kind="pdf", sha256="1" * 64, status=Paper.Status.FAILED,
-        )
+        source = Paper.objects.create(filename="原书.pdf", kind="pdf", sha256="1" * 64, status=Paper.Status.FAILED)
         child = Paper.objects.create(
-            filename="第一册.pdf", kind="pdf", sha256="2" * 64, status=Paper.Status.FAILED,
+            filename="第一册.pdf",
+            kind="pdf",
+            sha256="2" * 64,
+            status=Paper.Status.FAILED,
             structure={"split_from": str(source.id), "split_index": 1},
         )
         source.structure = {"split_children": [str(child.id)]}
@@ -1732,7 +1846,9 @@ class ApiTests(TestCase):
                 self.assertTrue(Paper.objects.filter(pk=paper.pk).exists())
 
     def test_text_edit_clears_text_flags_but_requires_separate_approval(self):
-        data = self.post(f"/api/questions/{self.q2.id}/text", {"stem": "求证：AB=CD", "question_type": "free_response"}).json()
+        data = self.post(
+            f"/api/questions/{self.q2.id}/text", {"stem": "求证：AB=CD", "question_type": "free_response"}
+        ).json()
         self.assertFalse(data["question"]["approved"])
         self.assertFalse(data["question"]["approval_valid"])
         self.assertEqual(data["question"]["state"], "green")
@@ -1742,13 +1858,16 @@ class ApiTests(TestCase):
         self.assertTrue(approved["approval_valid"])
 
     def test_manual_text_edit_normalizes_parallelogram_notation(self):
-        data = self.post(f"/api/questions/{self.q.id}/text", {
-            "stem": r"如图，在 $\square ABCD$ 中",
-            "options": {"A": "□EFGH", "B": r"$3\square 5=15$"},
-            "answer": r"\Box WXYZ",
-            "analysis": r"由 $\text{□}ABCD$ 可知",
-            "question_type": "single_choice",
-        }).json()["question"]
+        data = self.post(
+            f"/api/questions/{self.q.id}/text",
+            {
+                "stem": r"如图，在 $\square ABCD$ 中",
+                "options": {"A": "□EFGH", "B": r"$3\square 5=15$"},
+                "answer": r"\Box WXYZ",
+                "analysis": r"由 $\text{□}ABCD$ 可知",
+                "question_type": "single_choice",
+            },
+        ).json()["question"]
         self.assertEqual(data["stem"], "如图，在 ▱ABCD 中")
         self.assertEqual(data["options"], {"A": "▱EFGH", "B": r"$3\square 5=15$"})
         self.assertEqual(data["answer"], "▱WXYZ")
@@ -1757,8 +1876,9 @@ class ApiTests(TestCase):
 
     def test_regions_change_saves_only_and_preserves_figures(self):
         old_figures = deepcopy(self.q.figures)
-        data = self.post(f"/api/questions/{self.q.id}/regions",
-                         {"regions": [{"page_idx": 0, "bbox": [40, 90, 490, 320]}]}).json()
+        data = self.post(
+            f"/api/questions/{self.q.id}/regions", {"regions": [{"page_idx": 0, "bbox": [40, 90, 490, 320]}]}
+        ).json()
         q = data["question"]
         self.assertEqual(q["state"], "yellow")
         self.assertTrue(q["regions_changed"])
@@ -1770,8 +1890,10 @@ class ApiTests(TestCase):
 
     def test_figures_manual(self):
         self.post(f"/api/questions/{self.q.id}/approve", {"approved": True})
-        data = self.post(f"/api/questions/{self.q.id}/figures",
-                         {"figures": [{"slot": "A", "page_idx": 0, "bbox": [60, 200, 120, 260]}]}).json()
+        data = self.post(
+            f"/api/questions/{self.q.id}/figures",
+            {"figures": [{"slot": "A", "page_idx": 0, "bbox": [60, 200, 120, 260]}]},
+        ).json()
         self.assertEqual(data["question"]["figures"][0]["source"], "manual")
         self.assertEqual(data["question"]["figure_review"]["status"], "ok")
         self.assertEqual(data["question"]["figure_review"]["source"], "human")
@@ -1828,8 +1950,10 @@ class ApiTests(TestCase):
         Question.objects.filter(pk=self.q2.pk).update(
             state=Question.State.GREEN,
             figure_review={
-                "status": "blocked_missing", "reason": "题干提示有图但未绑定配图",
-                "signals": ["text_reference"], "source": "automatic",
+                "status": "blocked_missing",
+                "reason": "题干提示有图但未绑定配图",
+                "signals": ["text_reference"],
+                "source": "automatic",
             },
         )
         data = self.post(f"/api/papers/{self.paper.id}/approve-green").json()
@@ -1843,12 +1967,17 @@ class ApiTests(TestCase):
         """一键通过的结果面板要能说清每道过不去的题卡卡在哪一步。"""
         # 空题干：没读出文字
         Question.objects.filter(pk=self.q2.pk).update(
-            state=Question.State.GREEN, stem="   ", question_type="free_response",
+            state=Question.State.GREEN,
+            stem="   ",
+            question_type="free_response",
             figure_review={"status": figure_policy.CONFIRMED_NO_FIGURE, "source": "human"},
         )
         # 题型未定
         q3 = Question.objects.create(
-            paper=self.paper, number=3, state=Question.State.GREEN, stem="求证：如图。",
+            paper=self.paper,
+            number=3,
+            state=Question.State.GREEN,
+            stem="求证：如图。",
             question_type="",
             figure_review={"status": figure_policy.CONFIRMED_NO_FIGURE, "source": "human"},
         )
@@ -1877,10 +2006,7 @@ class ApiTests(TestCase):
         blocked = self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True})
         self.assertEqual(blocked.status_code, 400, blocked.content)
 
-        confirmed = self.post(
-            f"/api/questions/{self.q2.id}/figure-review",
-            {"decision": "confirm_no_figure"},
-        )
+        confirmed = self.post(f"/api/questions/{self.q2.id}/figure-review", {"decision": "confirm_no_figure"})
         self.assertEqual(confirmed.status_code, 200, confirmed.content)
         payload = confirmed.json()["question"]
         self.assertEqual(payload["figure_review"]["status"], "confirmed_no_figure")
@@ -1904,10 +2030,7 @@ class ApiTests(TestCase):
 
     def test_no_figure_confirmation_can_restore_previous_figures(self):
         original = json.loads(json.dumps(self.q.figures))
-        confirmed = self.post(
-            f"/api/questions/{self.q.id}/figure-review",
-            {"decision": "confirm_no_figure"},
-        )
+        confirmed = self.post(f"/api/questions/{self.q.id}/figure-review", {"decision": "confirm_no_figure"})
         self.assertEqual(confirmed.status_code, 200, confirmed.content)
         self.assertEqual(confirmed.json()["question"]["figures"], [])
 
@@ -1925,31 +2048,22 @@ class ApiTests(TestCase):
             "signals": ["human_confirmation"],
             "source": "human",
         }
-        Question.objects.filter(pk=self.q2.pk).update(
-            state=Question.State.GREEN, flags=[], figure_review=confirmed,
-        )
+        Question.objects.filter(pk=self.q2.pk).update(state=Question.State.GREEN, flags=[], figure_review=confirmed)
 
-        edited = self.post(f"/api/questions/{self.q2.id}/text", {
-            "stem": "如图所示，求证：AB=CD",
-            "question_type": "free_response",
-        })
+        edited = self.post(
+            f"/api/questions/{self.q2.id}/text", {"stem": "如图所示，求证：AB=CD", "question_type": "free_response"}
+        )
         self.assertEqual(edited.status_code, 200, edited.content)
         edited_question = edited.json()["question"]
         self.assertEqual(edited_question["figure_review"]["status"], "blocked_missing")
         self.assertEqual(edited_question["figure_review"]["source"], "automatic")
-        self.assertEqual(
-            self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code,
-            400,
-        )
+        self.assertEqual(self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code, 400)
 
-        confirmed_again = self.post(
-            f"/api/questions/{self.q2.id}/figure-review",
-            {"decision": "confirm_no_figure"},
-        )
+        confirmed_again = self.post(f"/api/questions/{self.q2.id}/figure-review", {"decision": "confirm_no_figure"})
         self.assertEqual(confirmed_again.status_code, 200, confirmed_again.content)
-        moved = self.post(f"/api/questions/{self.q2.id}/regions", {
-            "regions": [{"page_idx": 0, "bbox": [40, 280, 490, 430]}],
-        })
+        moved = self.post(
+            f"/api/questions/{self.q2.id}/regions", {"regions": [{"page_idx": 0, "bbox": [40, 280, 490, 430]}]}
+        )
         self.assertEqual(moved.status_code, 200, moved.content)
         self.q2.refresh_from_db()
         self.assertEqual(self.q2.figure_review.get("status"), "confirmed_no_figure")
@@ -1966,25 +2080,18 @@ class ApiTests(TestCase):
                 "source": "human",
             },
         )
-        self.assertEqual(
-            self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code,
-            200,
-        )
+        self.assertEqual(self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code, 200)
         first = PublishedQuestion.objects.get(question=self.q2, version=1)
         original_snapshot = json.loads(json.dumps(first.content))
         self.assertEqual(self.post(f"/api/papers/{self.paper.id}/publish").json()["created"], 0)
         self.assertEqual(self.q2.publications.count(), 1)
 
-        changed = self.post(f"/api/questions/{self.q2.id}/text", {
-            "stem": "如图所示，求证：AB=CD",
-            "question_type": "free_response",
-        }).json()["question"]
+        changed = self.post(
+            f"/api/questions/{self.q2.id}/text", {"stem": "如图所示，求证：AB=CD", "question_type": "free_response"}
+        ).json()["question"]
         self.assertEqual(changed["figure_review"]["status"], "blocked_missing")
         self.post(f"/api/questions/{self.q2.id}/figure-review", {"decision": "confirm_no_figure"})
-        self.assertEqual(
-            self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code,
-            200,
-        )
+        self.assertEqual(self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code, 200)
         second = PublishedQuestion.objects.get(question=self.q2, version=2)
         self.assertEqual(self.post(f"/api/papers/{self.paper.id}/publish").json()["created"], 0)
         self.assertEqual(self.q2.publications.count(), 2)
@@ -2009,26 +2116,17 @@ class ApiTests(TestCase):
                 "excluded_count": 0,
             },
         )
-        self.assertEqual(
-            self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code,
-            200,
-        )
+        self.assertEqual(self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code, 200)
         first = PublishedQuestion.objects.get(question=self.q2, version=1)
         self.assertEqual(first.content["review"]["figure_review"]["source"], "automatic")
         original_snapshot = json.loads(json.dumps(first.content))
         self.assertEqual(self.post(f"/api/papers/{self.paper.id}/publish").json()["created"], 0)
         self.assertEqual(self.q2.publications.count(), 1)
 
-        confirmed = self.post(
-            f"/api/questions/{self.q2.id}/figure-review",
-            {"decision": "confirm_no_figure"},
-        )
+        confirmed = self.post(f"/api/questions/{self.q2.id}/figure-review", {"decision": "confirm_no_figure"})
         self.assertEqual(confirmed.status_code, 200, confirmed.content)
         self.assertEqual(confirmed.json()["question"]["figure_review"]["source"], "human")
-        self.assertEqual(
-            self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code,
-            200,
-        )
+        self.assertEqual(self.post(f"/api/questions/{self.q2.id}/approve", {"approved": True}).status_code, 200)
         second = PublishedQuestion.objects.get(question=self.q2, version=2)
         published = self.post(f"/api/papers/{self.paper.id}/publish").json()
         self.assertEqual((published["created"], published["unchanged"]), (0, 1), published)
@@ -2081,14 +2179,16 @@ class ApiTests(TestCase):
         first = PublishedQuestion.objects.get(question=self.q, version=1)
         original_snapshot = json.loads(json.dumps(first.content))
         self.post(f"/api/papers/{self.paper.id}/publish")
-        self.post(f"/api/questions/{self.q.id}/regions",
-                  {"regions": [{"page_idx": 0, "bbox": [40, 90, 490, 320]}]})
+        self.post(f"/api/questions/{self.q.id}/regions", {"regions": [{"page_idx": 0, "bbox": [40, 90, 490, 320]}]})
         # 调整范围会清掉旧配图；重新人工配图并确认文字后，才能再通过。
-        self.post(f"/api/questions/{self.q.id}/figures", {
-            "figures": [{"slot": "stem", "page_idx": 0, "bbox": [300, 150, 450, 250]}],
-        })
-        self.post(f"/api/questions/{self.q.id}/text",
-                  {"stem": self.q.stem, "options": self.q.options, "question_type": self.q.question_type})
+        self.post(
+            f"/api/questions/{self.q.id}/figures",
+            {"figures": [{"slot": "stem", "page_idx": 0, "bbox": [300, 150, 450, 250]}]},
+        )
+        self.post(
+            f"/api/questions/{self.q.id}/text",
+            {"stem": self.q.stem, "options": self.q.options, "question_type": self.q.question_type},
+        )
         self.post(f"/api/questions/{self.q.id}/approve", {"approved": True})
         second = PublishedQuestion.objects.get(question=self.q, version=2)
         result = self.post(f"/api/papers/{self.paper.id}/publish").json()
@@ -2109,16 +2209,18 @@ class ApiTests(TestCase):
     def test_card_without_regions_turns_red_with_hint(self):
         store = pipeline.PageStore(self.paper)
         with mock.patch.dict("os.environ", {"MINIMAX_API_KEY": "k"}):
-            result = pipeline.read_card({"id": 1, "number": 9, "regions": [], "candidates": [],
-                                         "question_type": "single_choice"}, store)
+            result = pipeline.read_card(
+                {"id": 1, "number": 9, "regions": [], "candidates": [], "question_type": "single_choice"}, store
+            )
         self.assertEqual(result["state"], "red")
         self.assertIn("调整范围", result["error"])
 
     def test_page_store_bounds_decoded_page_memory(self):
         store = pipeline.PageStore(self.paper)
         store.MAX_MEMORY_PAGES = 2
-        with mock.patch("core.pipeline.imaging.render_source_page",
-                        side_effect=lambda *_args: Image.new("RGB", (12, 12), "white")):
+        with mock.patch(
+            "core.pipeline.imaging.render_source_page", side_effect=lambda *_args: Image.new("RGB", (12, 12), "white")
+        ):
             first = store.load(0)
             for page_idx in range(3):
                 store.load(page_idx)
@@ -2127,18 +2229,25 @@ class ApiTests(TestCase):
         self.assertEqual(first.crop((0, 0, 2, 2)).size, (2, 2))
 
     def test_add_and_delete_question(self):
-        data = self.post(f"/api/papers/{self.paper.id}/questions",
-                         {"number": 3, "regions": [{"page_idx": 0, "bbox": [520, 100, 950, 300]}]})
+        data = self.post(
+            f"/api/papers/{self.paper.id}/questions",
+            {"number": 3, "regions": [{"page_idx": 0, "bbox": [520, 100, 950, 300]}]},
+        )
         self.assertEqual(data.status_code, 201)
         new_id = data.json()["question"]["id"]
         self.assertFalse(Question.objects.get(pk=new_id).reread_requested)
-        self.assertEqual(self.post(f"/api/papers/{self.paper.id}/questions",
-                                   {"number": 3, "regions": [{"page_idx": 0, "bbox": [520, 100, 950, 300]}]}).status_code, 409)
+        self.assertEqual(
+            self.post(
+                f"/api/papers/{self.paper.id}/questions",
+                {"number": 3, "regions": [{"page_idx": 0, "bbox": [520, 100, 950, 300]}]},
+            ).status_code,
+            409,
+        )
         Question.objects.filter(pk=new_id).update(reread_requested=True, state=Question.State.WAITING)
         response = self.client.delete(f"/api/questions/{new_id}", HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 409)  # 尚在重读队列，不能和工作者竞态
         Question.objects.filter(pk=new_id).update(
-            reread_requested=False, state=Question.State.GREEN, stem="人工补录完成",
+            reread_requested=False, state=Question.State.GREEN, stem="人工补录完成"
         )
         response = self.client.delete(f"/api/questions/{new_id}", HTTP_X_QB_REQUEST="1")
         self.assertEqual(response.status_code, 200)
@@ -2154,8 +2263,9 @@ class ApiTests(TestCase):
 
     def test_explicit_cloud_upload_needs_credentials(self):
         with mock.patch.dict("os.environ", {"MINERU_TOKEN": "", "MINIMAX_API_KEY": ""}):
-            response = self.client.post("/api/papers", {"file": io.BytesIO(b"%PDF-1.4"),
-                "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1")
+            response = self.client.post(
+                "/api/papers", {"file": io.BytesIO(b"%PDF-1.4"), "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1"
+            )
         self.assertEqual(response.status_code, 400)
 
     def test_upload_creates_queued_paper(self):
@@ -2175,12 +2285,14 @@ class ApiTests(TestCase):
         pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(200)]
         upload = io.BytesIO(b"mock PDF at the supported page limit")
         upload.name = "200页.pdf"
-        with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
-                mock.patch("core.views.imaging.page_sizes", return_value=pages):
+        with (
+            mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}),
+            mock.patch("core.views.imaging.page_sizes", return_value=pages),
+        ):
             # 先选「试卷」：这条量的是试卷按 200 页上限一次交给云。
             response = self.client.post(
-                "/api/papers", {"file": upload, "material_type": "exam", "parse_mode": "mineru"},
-                HTTP_X_QB_REQUEST="1")
+                "/api/papers", {"file": upload, "material_type": "exam", "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1"
+            )
         self.assertEqual(response.status_code, 201, response.content)
         paper = Paper.objects.get(filename="200页.pdf")
         self.assertEqual(len(paper.pages), 200)
@@ -2191,34 +2303,34 @@ class ApiTests(TestCase):
         pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(100)]
         upload = io.BytesIO(b"mock 100 page book")
         upload.name = "100页教材.pdf"
-        with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
-                mock.patch("core.views.imaging.page_sizes", return_value=pages):
+        with (
+            mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}),
+            mock.patch("core.views.imaging.page_sizes", return_value=pages),
+        ):
             response = self.client.post(
-                "/api/papers", {"file": upload, "material_type": "book", "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1",
+                "/api/papers", {"file": upload, "material_type": "book", "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1"
             )
         self.assertEqual(response.status_code, 201, response.content)
         paper = Paper.objects.get(filename="100页教材.pdf")
         self.assertEqual(paper.material_type, Paper.MaterialType.BOOK)
-        self.assertEqual(
-            list(paper.import_chunks.values_list("source_page_start", "source_page_end")),
-            [(1, 100)],
-        )
+        self.assertEqual(list(paper.import_chunks.values_list("source_page_start", "source_page_end")), [(1, 100)])
 
     def test_upload_book_over_100_pages_creates_stable_chunks(self):
         pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(270)]
         upload = io.BytesIO(b"mock 270 page book")
         upload.name = "270页教材.pdf"
-        with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
-                mock.patch("core.views.imaging.page_sizes", return_value=pages):
+        with (
+            mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}),
+            mock.patch("core.views.imaging.page_sizes", return_value=pages),
+        ):
             response = self.client.post(
-                "/api/papers", {"file": upload, "material_type": "book", "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1",
+                "/api/papers", {"file": upload, "material_type": "book", "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1"
             )
         self.assertEqual(response.status_code, 201, response.content)
         paper = Paper.objects.get(filename="270页教材.pdf")
         chunks = list(paper.import_chunks.order_by("sequence"))
         self.assertEqual(
-            [(chunk.source_page_start, chunk.source_page_end) for chunk in chunks],
-            [(1, 100), (101, 200), (201, 270)],
+            [(chunk.source_page_start, chunk.source_page_end) for chunk in chunks], [(1, 100), (101, 200), (201, 270)]
         )
         self.assertEqual([page for chunk in chunks for page in chunk.page_map], list(range(1, 271)))
 
@@ -2235,9 +2347,7 @@ class ApiTests(TestCase):
         )
         self.assertEqual(failed.material_type, Paper.MaterialType.EXAM)
 
-        response = self.post(
-            f"/api/papers/{failed.id}/retry", {"material_type": Paper.MaterialType.BOOK},
-        )
+        response = self.post(f"/api/papers/{failed.id}/retry", {"material_type": Paper.MaterialType.BOOK})
 
         self.assertEqual(response.status_code, 200, response.content)
         failed.refresh_from_db()
@@ -2251,15 +2361,15 @@ class ApiTests(TestCase):
 
     def test_failed_task_with_results_cannot_change_material_type(self):
         failed = Paper.objects.create(
-            filename="已有解析结果.pdf", kind="pdf", sha256="r" * 64,
-            source_path=str(self.temp / "parsed.pdf"), pages=PAGES[:1], status=Paper.Status.FAILED,
+            filename="已有解析结果.pdf",
+            kind="pdf",
+            sha256="r" * 64,
+            source_path=str(self.temp / "parsed.pdf"),
+            pages=PAGES[:1],
+            status=Paper.Status.FAILED,
         )
-        Block.objects.create(
-            paper=failed, seq=0, type="text", page_idx=0, bbox=[10, 10, 20, 20], text="1. 已知",
-        )
-        response = self.post(
-            f"/api/papers/{failed.id}/retry", {"material_type": Paper.MaterialType.BOOK},
-        )
+        Block.objects.create(paper=failed, seq=0, type="text", page_idx=0, bbox=[10, 10, 20, 20], text="1. 已知")
+        response = self.post(f"/api/papers/{failed.id}/retry", {"material_type": Paper.MaterialType.BOOK})
         self.assertEqual(response.status_code, 400, response.content)
         failed.refresh_from_db()
         self.assertEqual(failed.material_type, Paper.MaterialType.EXAM)
@@ -2269,17 +2379,18 @@ class ApiTests(TestCase):
         pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(201)]
         upload = io.BytesIO(b"mock PDF over the supported page limit")
         upload.name = "201页.pdf"
-        with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
-                mock.patch("core.views.imaging.page_sizes", return_value=pages):
+        with (
+            mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}),
+            mock.patch("core.views.imaging.page_sizes", return_value=pages),
+        ):
             # 先选「试卷」：200 页上限的分片规则属于试卷。
             response = self.client.post(
-                "/api/papers", {"file": upload, "material_type": "exam", "parse_mode": "mineru"},
-                HTTP_X_QB_REQUEST="1")
+                "/api/papers", {"file": upload, "material_type": "exam", "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1"
+            )
         self.assertEqual(response.status_code, 201, response.content)
         paper = Paper.objects.get(filename="201页.pdf")
         chunks = list(ImportChunk.objects.filter(paper=paper).order_by("sequence"))
-        self.assertEqual([(chunk.source_page_start, chunk.source_page_end) for chunk in chunks],
-                         [(1, 200), (201, 201)])
+        self.assertEqual([(chunk.source_page_start, chunk.source_page_end) for chunk in chunks], [(1, 200), (201, 201)])
         self.assertEqual(chunks[0].page_map, list(range(1, 201)))
         self.assertEqual(chunks[1].page_map, [201])
         self.assertTrue((self.temp / str(paper.id) / "source.pdf").is_file())
@@ -2288,18 +2399,23 @@ class ApiTests(TestCase):
         pages = [{"page_idx": index, "width": 842, "height": 595} for index in range(1200)]
         upload = io.BytesIO(b"mock long PDF")
         upload.name = "1200页.pdf"
-        with mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}), \
-                mock.patch("core.views.imaging.page_sizes", return_value=pages):
+        with (
+            mock.patch.dict("os.environ", {"MINERU_TOKEN": "t", "MINIMAX_API_KEY": "k"}),
+            mock.patch("core.views.imaging.page_sizes", return_value=pages),
+        ):
             # 先选「试卷」：这条量的是试卷按 200 页一片、完整覆盖 1200 页。
             response = self.client.post(
-                "/api/papers", {"file": upload, "material_type": "exam", "parse_mode": "mineru"},
-                HTTP_X_QB_REQUEST="1")
+                "/api/papers", {"file": upload, "material_type": "exam", "parse_mode": "mineru"}, HTTP_X_QB_REQUEST="1"
+            )
         self.assertEqual(response.status_code, 201, response.content)
         paper = Paper.objects.get(filename="1200页.pdf")
         chunks = list(paper.import_chunks.order_by("sequence"))
-        self.assertEqual([(chunk.source_page_start, chunk.source_page_end) for chunk in chunks],
-                         [(1, 200), (201, 400), (401, 600), (601, 800), (801, 1000), (1001, 1200)])
+        self.assertEqual(
+            [(chunk.source_page_start, chunk.source_page_end) for chunk in chunks],
+            [(1, 200), (201, 400), (401, 600), (601, 800), (801, 1000), (1001, 1200)],
+        )
         self.assertEqual([page for chunk in chunks for page in chunk.page_map], list(range(1, 1201)))
+
 
 class FrontendCacheTests(TestCase):
     """1.25.40：升级后浏览器可能还拿着旧脚本，本地页面必须每次核对。"""

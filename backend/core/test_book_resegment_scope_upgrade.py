@@ -14,13 +14,7 @@ PAGES = [{"page_idx": 0, "width": 1000, "height": 1400}]
 
 
 def block(seq, y, text):
-    return {
-        "seq": seq,
-        "type": "text",
-        "page_idx": 0,
-        "bbox": [80, y, 920, y + 45],
-        "text": text,
-    }
+    return {"seq": seq, "type": "text", "page_idx": 0, "bbox": [80, y, 920, y + 45], "text": text}
 
 
 class BookResegmentScopeUpgradeTests(TestCase):
@@ -54,10 +48,7 @@ class BookResegmentScopeUpgradeTests(TestCase):
             # only the middle numbered exercise was made visible to segmentation.
             structure={
                 "suggested_groups": [[0]],
-                "suggested_scopes": [{
-                    "pages": [0], "seq_start": 3, "seq_end": 4,
-                    "first_number": 1, "start_page": 0,
-                }],
+                "suggested_scopes": [{"pages": [0], "seq_start": 3, "seq_end": 4, "first_number": 1, "start_page": 0}],
             },
         )
         Block.objects.bulk_create([Block(paper=self.paper, **row) for row in self.rows])
@@ -74,11 +65,7 @@ class BookResegmentScopeUpgradeTests(TestCase):
         global_items = segment.segment_book(PAGES, self.rows)["questions"]
         self.assertEqual(
             [(item["source_kind"], item["source_anchor_seq"]) for item in global_items],
-            [
-                (Question.SourceKind.EXAMPLE, 0),
-                (Question.SourceKind.EXERCISE, 4),
-                (Question.SourceKind.EXAMPLE, 5),
-            ],
+            [(Question.SourceKind.EXAMPLE, 0), (Question.SourceKind.EXERCISE, 4), (Question.SourceKind.EXAMPLE, 5)],
         )
         exercise = next(item for item in global_items if item["source_anchor_seq"] == 4)
         approved_at = timezone.now()
@@ -106,12 +93,7 @@ class BookResegmentScopeUpgradeTests(TestCase):
         )
 
     def post(self, path):
-        return self.client.post(
-            path,
-            data=json.dumps({}),
-            content_type="application/json",
-            HTTP_X_QB_REQUEST="1",
-        )
+        return self.client.post(path, data=json.dumps({}), content_type="application/json", HTTP_X_QB_REQUEST="1")
 
     @staticmethod
     def desired_rows(report):
@@ -123,15 +105,13 @@ class BookResegmentScopeUpgradeTests(TestCase):
     def test_preview_uses_all_book_blocks_instead_of_legacy_group_seq_bounds(self):
         groups_before = list(
             self.paper.question_groups.order_by("id").values(
-                "id", "title", "kind", "sequence", "page_start", "page_end", "metadata",
+                "id", "title", "kind", "sequence", "page_start", "page_end", "metadata"
             )
         )
         structure_before = deepcopy(self.paper.structure)
         question_before = Question.objects.values().get(pk=self.legacy_question.pk)
 
-        with mock.patch.object(
-            pipeline.imaging, "trim_regions", side_effect=lambda value, _load: value,
-        ):
+        with mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda value, _load: value):
             response = self.post(f"/api/papers/{self.paper.pk}/resegment/preview")
 
         self.assertEqual(response.status_code, 200, response.content)
@@ -141,11 +121,7 @@ class BookResegmentScopeUpgradeTests(TestCase):
         desired = self.desired_rows(report)
         self.assertEqual(
             {(row["source_kind"], row["source_anchor_seq"]) for row in desired},
-            {
-                (Question.SourceKind.EXAMPLE, 0),
-                (Question.SourceKind.EXERCISE, 4),
-                (Question.SourceKind.EXAMPLE, 5),
-            },
+            {(Question.SourceKind.EXAMPLE, 0), (Question.SourceKind.EXERCISE, 4), (Question.SourceKind.EXAMPLE, 5)},
         )
         matched = [row for row in desired if row["source_anchor_seq"] == 4]
         self.assertEqual(len(matched), 1)
@@ -154,15 +130,14 @@ class BookResegmentScopeUpgradeTests(TestCase):
         self.paper.refresh_from_db()
         self.assertEqual(self.paper.structure, structure_before)
         self.assertEqual(
-            list(self.paper.question_groups.order_by("id").values(
-                "id", "title", "kind", "sequence", "page_start", "page_end", "metadata",
-            )),
+            list(
+                self.paper.question_groups.order_by("id").values(
+                    "id", "title", "kind", "sequence", "page_start", "page_end", "metadata"
+                )
+            ),
             groups_before,
         )
-        self.assertEqual(
-            Question.objects.values().get(pk=self.legacy_question.pk),
-            question_before,
-        )
+        self.assertEqual(Question.objects.values().get(pk=self.legacy_question.pk), question_before)
 
     def test_source_anchor_matching_is_global_across_a_group_rebuild(self):
         replacement_group = QuestionGroup.objects.create(
@@ -174,17 +149,17 @@ class BookResegmentScopeUpgradeTests(TestCase):
             page_end=1,
             metadata={"pages": [0], "seq_start": 3, "seq_end": 4},
         )
-        desired = [{
-            "number": 1,
-            "group": replacement_group,
-            "regions": self.legacy_question.regions,
-            "source_kind": Question.SourceKind.EXERCISE,
-            "source_anchor_seq": 4,
-        }]
+        desired = [
+            {
+                "number": 1,
+                "group": replacement_group,
+                "regions": self.legacy_question.regions,
+                "source_kind": Question.SourceKind.EXERCISE,
+                "source_anchor_seq": 4,
+            }
+        ]
 
-        pairs, unmatched = pipeline._match_segmentation_items(
-            [self.legacy_question], desired, [replacement_group],
-        )
+        pairs, unmatched = pipeline._match_segmentation_items([self.legacy_question], desired, [replacement_group])
 
         self.assertEqual(pairs[0][1], self.legacy_question)
         self.assertEqual(unmatched, [])
@@ -197,33 +172,21 @@ class BookResegmentScopeUpgradeTests(TestCase):
         self.paper.refresh_from_db()
         self.assertEqual(self.paper.status, Paper.Status.SEGMENTING)
 
-        with mock.patch.object(
-            pipeline.imaging, "trim_regions", side_effect=lambda value, _load: value,
-        ):
+        with mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda value, _load: value):
             pipeline.segment_paper(self.paper)
 
         groups = list(self.paper.question_groups.order_by("sequence", "id"))
         self.assertEqual(len(groups), 3)
         self.assertEqual([group.kind for group in groups], [QuestionGroup.Kind.CHAPTER] * 3)
         self.assertEqual(
-            [
-                (
-                    group.metadata.get("seq_start"),
-                    group.metadata.get("seq_end"),
-                )
-                for group in groups
-            ],
+            [(group.metadata.get("seq_start"), group.metadata.get("seq_end")) for group in groups],
             [(None, 2), (3, 4), (5, None)],
         )
 
         questions = list(Question.objects.filter(paper=self.paper).order_by("source_anchor_seq"))
         self.assertEqual(
             [(question.source_kind, question.source_anchor_seq) for question in questions],
-            [
-                (Question.SourceKind.EXAMPLE, 0),
-                (Question.SourceKind.EXERCISE, 4),
-                (Question.SourceKind.EXAMPLE, 5),
-            ],
+            [(Question.SourceKind.EXAMPLE, 0), (Question.SourceKind.EXERCISE, 4), (Question.SourceKind.EXAMPLE, 5)],
         )
         preserved = Question.objects.get(pk=self.legacy_question.pk)
         self.assertEqual(preserved.source_key, source_key)
@@ -247,9 +210,7 @@ class BookResegmentScopeUpgradeTests(TestCase):
         self.legacy_question.regions_auto = protected_range
         self.legacy_question.save(update_fields=["regions", "regions_auto", "updated_at"])
 
-        with mock.patch.object(
-            pipeline.imaging, "trim_regions", side_effect=lambda value, _load: value,
-        ):
+        with mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda value, _load: value):
             preview = self.post(f"/api/papers/{self.paper.pk}/resegment/preview")
         self.assertEqual(preview.status_code, 200, preview.content)
         protected = preview.json()["report"]["items"]["protected_unmatched"]
@@ -258,9 +219,7 @@ class BookResegmentScopeUpgradeTests(TestCase):
         applied = self.post(f"/api/papers/{self.paper.pk}/resegment")
         self.assertEqual(applied.status_code, 200, applied.content)
         self.paper.refresh_from_db()
-        with mock.patch.object(
-            pipeline.imaging, "trim_regions", side_effect=lambda value, _load: value,
-        ):
+        with mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda value, _load: value):
             pipeline.segment_paper(self.paper)
 
         self.legacy_question.refresh_from_db()

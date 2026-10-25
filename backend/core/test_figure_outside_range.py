@@ -16,6 +16,7 @@ r"""卡上挂着一张落在本题范围外面的图，而这张卡看上去很�
 全库 959 张卡里 50 张挂图的卡有越界图，其中 **19 张是绿卡、零图旗标**，
 它们的图全部来自 ``other`` 这条通道。
 """
+
 from unittest import mock
 
 from django.test import SimpleTestCase, TestCase
@@ -25,38 +26,37 @@ from .models import Block, Paper, Question, QuestionGroup
 
 # 纸上这一行的形状就是「如图」，图提示词必须认得出。
 REGIONS = [{"page_idx": 0, "bbox": [83, 505, 899, 535]}]
-FIGURE = {"slot": "stem", "page_idx": 0, "bbox": [543, 368, 727, 474],
-          "source": "other"}
+FIGURE = {"slot": "stem", "page_idx": 0, "bbox": [543, 368, 727, 474], "source": "other"}
 
 
 class FiguresOutsideOwnRangeTests(SimpleTestCase):
     def test_a_figure_printed_outside_the_range_is_reported(self):
-        self.assertEqual(len(figure_policy.figures_outside_own_range(
-            REGIONS, [FIGURE])), 1)
+        self.assertEqual(len(figure_policy.figures_outside_own_range(REGIONS, [FIGURE])), 1)
 
     def test_a_figure_inside_the_range_is_not_reported(self):
-        inside = {"slot": "stem", "page_idx": 0, "bbox": [500, 506, 700, 534],
-                  "source": "auto"}
+        inside = {"slot": "stem", "page_idx": 0, "bbox": [500, 506, 700, 534], "source": "auto"}
         self.assertEqual(figure_policy.figures_outside_own_range(REGIONS, [inside]), [])
 
     def test_the_same_box_on_another_page_is_outside(self):
         # 范围只罩住第 0 页。同一坐标印在第 1 页上的图不属于本题。
-        self.assertEqual(len(figure_policy.figures_outside_own_range(
-            REGIONS, [{**FIGURE, "page_idx": 1}])), 1)
+        self.assertEqual(len(figure_policy.figures_outside_own_range(REGIONS, [{**FIGURE, "page_idx": 1}])), 1)
 
     def test_a_page_that_is_not_covered_at_all_counts_as_outside(self):
         # 这张图的坐标正好落在范围的框里，只有页码不同。不看页码的话它会被
         # 判成「在范围内」放过去 —— 这条专门盯住页码这一项。
-        self.assertEqual(len(figure_policy.figures_outside_own_range(
-            REGIONS, [{"slot": "stem", "page_idx": 3, "bbox": [500, 506, 700, 534],
-                       "source": "auto"}])), 1)
+        self.assertEqual(
+            len(
+                figure_policy.figures_outside_own_range(
+                    REGIONS, [{"slot": "stem", "page_idx": 3, "bbox": [500, 506, 700, 534], "source": "auto"}]
+                )
+            ),
+            1,
+        )
 
     def test_a_malformed_figure_is_left_to_the_other_guards(self):
         # 没有 bbox、或 bbox 不成形，不是「越界」，别在这里下结论。
-        for figure in ({"slot": "stem"}, {"slot": "stem", "bbox": [1, 2]},
-                       {"slot": "stem", "bbox": None}, "不是字典"):
-            self.assertEqual(figure_policy.figures_outside_own_range(
-                REGIONS, [figure]), [], figure)
+        for figure in ({"slot": "stem"}, {"slot": "stem", "bbox": [1, 2]}, {"slot": "stem", "bbox": None}, "不是字典"):
+            self.assertEqual(figure_policy.figures_outside_own_range(REGIONS, [figure]), [], figure)
 
     def test_no_regions_means_every_figure_is_outside(self):
         # 范围缺失时无法判断归属，仍然报出来让人看，而不是静默放过。
@@ -68,34 +68,41 @@ class ForeignFigureOutsideRangeTests(TestCase):
 
     def setUp(self):
         self.paper = Paper.objects.create(
-            filename="教材.pdf", kind="pdf", material_type=Paper.MaterialType.BOOK,
-            sha256="c" * 64, source_path="missing-source.pdf",
+            filename="教材.pdf",
+            kind="pdf",
+            material_type=Paper.MaterialType.BOOK,
+            sha256="c" * 64,
+            source_path="missing-source.pdf",
             pages=[{"page_idx": 0, "width": 1000, "height": 1400}],
             status=Paper.Status.READY,
         )
         self.group = QuestionGroup.objects.create(
-            paper=self.paper, title="第一章", sequence=1,
-            page_start=1, page_end=1, metadata={"pages": [0]},
+            paper=self.paper, title="第一章", sequence=1, page_start=1, page_end=1, metadata={"pages": [0]}
         )
 
     def make_card(self, *, stem, regions):
         return Question.objects.create(
-            paper=self.paper, group=self.group, number=4, stem=stem,
-            regions=regions, regions_auto=regions,
-            source_kind=Question.SourceKind.EXERCISE, source_anchor_seq=128,
-            processing_mode="auto", body_mode="text",
-            state=Question.State.GREEN, flags=[],
+            paper=self.paper,
+            group=self.group,
+            number=4,
+            stem=stem,
+            regions=regions,
+            regions_auto=regions,
+            source_kind=Question.SourceKind.EXERCISE,
+            source_anchor_seq=128,
+            processing_mode="auto",
+            body_mode="text",
+            state=Question.State.GREEN,
+            flags=[],
         )
 
     def hand_over(self, figure_bbox):
-        pipeline.assign_foreign_figures(self.paper, [
-            {"number": 4, "page_idx": 0, "bbox": list(figure_bbox)},
-        ])
+        pipeline.assign_foreign_figures(self.paper, [{"number": 4, "page_idx": 0, "bbox": list(figure_bbox)}])
 
     def test_a_handed_over_figure_outside_the_range_is_not_green(self):
         card = self.make_card(
-            stem="如图，△ABC 的高 BD，CE 相交于点 G，找出其中的三对相似三角形。",
-            regions=list(REGIONS))
+            stem="如图，△ABC 的高 BD，CE 相交于点 G，找出其中的三对相似三角形。", regions=list(REGIONS)
+        )
 
         self.hand_over([543, 368, 727, 474])
         card.refresh_from_db()
@@ -106,7 +113,8 @@ class ForeignFigureOutsideRangeTests(TestCase):
     def test_a_handed_over_figure_inside_the_range_stays_green(self):
         card = self.make_card(
             stem="如图，△ABC 的高 BD，CE 相交于点 G，找出其中的三对相似三角形。",
-            regions=[{"page_idx": 0, "bbox": [83, 340, 899, 500]}])
+            regions=[{"page_idx": 0, "bbox": [83, 340, 899, 500]}],
+        )
 
         self.hand_over([543, 368, 727, 474])
         card.refresh_from_db()
@@ -140,26 +148,33 @@ class GeometricFigureFlagReconcileTests(TestCase):
 
     def setUp(self):
         self.paper = Paper.objects.create(
-            filename="月考.pdf", kind="pdf", material_type=Paper.MaterialType.EXAM,
-            sha256="d" * 64, source_path="missing-source.pdf",
-            pages=[{"page_idx": 0, "width": 1000, "height": 1400},
-                   {"page_idx": 1, "width": 1000, "height": 1400}],
+            filename="月考.pdf",
+            kind="pdf",
+            material_type=Paper.MaterialType.EXAM,
+            sha256="d" * 64,
+            source_path="missing-source.pdf",
+            pages=[{"page_idx": 0, "width": 1000, "height": 1400}, {"page_idx": 1, "width": 1000, "height": 1400}],
             status=Paper.Status.READY,
         )
         self.group = QuestionGroup.objects.create(
-            paper=self.paper, title="第一章", sequence=1,
-            page_start=1, page_end=2, metadata={"pages": [0, 1]},
+            paper=self.paper, title="第一章", sequence=1, page_start=1, page_end=2, metadata={"pages": [0, 1]}
         )
         self.counter = 0
 
     def card(self, **values):
         self.counter += 1
         base = {
-            "paper": self.paper, "group": self.group, "number": self.counter,
+            "paper": self.paper,
+            "group": self.group,
+            "number": self.counter,
             "stem": "如图，△ABC 的三个顶点分别为 A（1，2），求函数 $y=\\dfrac{k}{x}$ 的图象。",
             "regions": [{"page_idx": 1, "bbox": [83, 505, 899, 535]}],
-            "processing_mode": "auto", "body_mode": "text",
-            "state": Question.State.GREEN, "flags": [], "figures": [], "figure_review": {},
+            "processing_mode": "auto",
+            "body_mode": "text",
+            "state": Question.State.GREEN,
+            "flags": [],
+            "figures": [],
+            "figure_review": {},
         }
         base.update(values)
         return Question.objects.create(**base)
@@ -196,8 +211,7 @@ class GeometricFigureFlagReconcileTests(TestCase):
         self.assertEqual(card.flags, [])
 
     def test_a_card_already_asked_about_its_figures_is_not_asked_twice(self):
-        card = self.card(figures=[self.OUTSIDE],
-                         flags=[figure_policy.FLAG_FOREIGN_FIGURE])
+        card = self.card(figures=[self.OUTSIDE], flags=[figure_policy.FLAG_FOREIGN_FIGURE])
 
         self.assertEqual(pipeline.reconcile_geometric_figure_flags(self.paper), 0)
 
@@ -241,48 +255,67 @@ class ResegmentAlsoAsksAboutGeometricFiguresTests(TestCase):
 
     def setUp(self):
         self.paper = Paper.objects.create(
-            filename="教材.pdf", kind="pdf", material_type=Paper.MaterialType.BOOK,
-            sha256="e" * 64, source_path="missing-source.pdf",
+            filename="教材.pdf",
+            kind="pdf",
+            material_type=Paper.MaterialType.BOOK,
+            sha256="e" * 64,
+            source_path="missing-source.pdf",
             pages=[{"page_idx": 0, "width": 1000, "height": 1400}],
             status=Paper.Status.SEGMENTING,
         )
         self.group = QuestionGroup.objects.create(
-            paper=self.paper, title="第一章", kind=QuestionGroup.Kind.CHAPTER,
-            sequence=0, page_start=1, page_end=1, metadata={"pages": [0]},
+            paper=self.paper,
+            title="第一章",
+            kind=QuestionGroup.Kind.CHAPTER,
+            sequence=0,
+            page_start=1,
+            page_end=1,
+            metadata={"pages": [0]},
         )
         self.rows = [
-            {"seq": 10, "type": "text", "page_idx": 0, "bbox": [80, 500, 920, 545],
-             "text": "例1 如图，求函数的最大值。"},
-            {"seq": 20, "type": "text", "page_idx": 0, "bbox": [80, 800, 920, 845],
-             "text": "例2 求函数的最小值。"},
+            {
+                "seq": 10,
+                "type": "text",
+                "page_idx": 0,
+                "bbox": [80, 500, 920, 545],
+                "text": "例1 如图，求函数的最大值。",
+            },
+            {"seq": 20, "type": "text", "page_idx": 0, "bbox": [80, 800, 920, 845], "text": "例2 求函数的最小值。"},
         ]
         Block.objects.bulk_create([Block(paper=self.paper, **row) for row in self.rows])
-        self.items = [{**item, "group": self.group}
-                      for item in segment.segment_book(self.paper.pages, self.rows)["questions"]]
+        self.items = [
+            {**item, "group": self.group} for item in segment.segment_book(self.paper.pages, self.rows)["questions"]
+        ]
         # 版式照真实教材：图印在题目文字的**上方**（y 380–470），范围只罩住
         # y 496 往下那一行。八下第 4 题 id=1083、汶源初四第 9 题 id=664 都是这样。
-        self.foreign = {"slot": "stem", "page_idx": 0, "bbox": [500, 380, 700, 470],
-                        "source": "other"}
+        self.foreign = {"slot": "stem", "page_idx": 0, "bbox": [500, 380, 700, 470], "source": "other"}
 
     def make_card(self, regions):
         return Question.objects.create(
-            paper=self.paper, group=self.group, number=1,
+            paper=self.paper,
+            group=self.group,
+            number=1,
             stem="例1 如图，求函数的最大值。",
-            regions=regions, regions_auto=regions,
-            source_kind=Question.SourceKind.EXAMPLE, source_anchor_seq=10,
-            processing_mode="auto", body_mode="text", state=Question.State.GREEN,
-            flags=[], figures=[dict(self.foreign)], figure_review={},
+            regions=regions,
+            regions_auto=regions,
+            source_kind=Question.SourceKind.EXAMPLE,
+            source_anchor_seq=10,
+            processing_mode="auto",
+            body_mode="text",
+            state=Question.State.GREEN,
+            flags=[],
+            figures=[dict(self.foreign)],
+            figure_review={},
         )
 
     def resegment(self):
-        with mock.patch.object(
-                pipeline, "_prospective_book_groups",
-                return_value=([self.group], dict(self.paper.structure or {}))), \
-                mock.patch.object(pipeline, "_ensure_question_groups",
-                                  return_value=[self.group]), \
-                mock.patch.object(
-                    pipeline, "_collect_segmentation_items",
-                    return_value=(self.rows, self.items, [], [])):
+        with (
+            mock.patch.object(
+                pipeline, "_prospective_book_groups", return_value=([self.group], dict(self.paper.structure or {}))
+            ),
+            mock.patch.object(pipeline, "_ensure_question_groups", return_value=[self.group]),
+            mock.patch.object(pipeline, "_collect_segmentation_items", return_value=(self.rows, self.items, [], [])),
+        ):
             pipeline.segment_paper(self.paper)
 
     def test_an_unchanged_card_keeps_its_picture_and_gains_the_warning(self):

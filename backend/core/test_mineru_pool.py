@@ -24,15 +24,12 @@ class MineruPoolTests(SimpleTestCase):
                 raise mineru.MineruError("safe", category="A0202")
             return target
 
-        environment = {
-            "MINERU_TOKENS_JSON": json.dumps(["bad-token", "good-token"]),
-            "MINERU_TOKEN": "bad-token",
-        }
-        with mock.patch.dict("os.environ", environment, clear=False), \
-                mock.patch.object(mineru, "request_extract_file", side_effect=extract):
-            result = mineru.request_extract_file_from_pool(
-                Path("source.pdf"), Path("result.zip"), 1,
-            )
+        environment = {"MINERU_TOKENS_JSON": json.dumps(["bad-token", "good-token"]), "MINERU_TOKEN": "bad-token"}
+        with (
+            mock.patch.dict("os.environ", environment, clear=False),
+            mock.patch.object(mineru, "request_extract_file", side_effect=extract),
+        ):
+            result = mineru.request_extract_file_from_pool(Path("source.pdf"), Path("result.zip"), 1)
         self.assertEqual(result, Path("result.zip"))
         self.assertEqual(seen, ["bad-token", "good-token"])
 
@@ -45,12 +42,13 @@ class MineruPoolTests(SimpleTestCase):
                 raise mineru.MineruError("safe", http_status=429)
             return target
 
-        with mock.patch.dict("os.environ", {
-            "MINERU_TOKENS_JSON": json.dumps(["busy-token", "good-token"]),
-        }, clear=False), mock.patch.object(mineru, "request_extract_file", side_effect=extract):
-            result = mineru.request_extract_file_from_pool(
-                Path("source.pdf"), Path("result.zip"), 1,
-            )
+        with (
+            mock.patch.dict(
+                "os.environ", {"MINERU_TOKENS_JSON": json.dumps(["busy-token", "good-token"])}, clear=False
+            ),
+            mock.patch.object(mineru, "request_extract_file", side_effect=extract),
+        ):
+            result = mineru.request_extract_file_from_pool(Path("source.pdf"), Path("result.zip"), 1)
         self.assertEqual(result, Path("result.zip"))
         self.assertEqual(seen, ["busy-token", "good-token"])
 
@@ -60,24 +58,19 @@ class MineruPoolTests(SimpleTestCase):
         def extract(_token, _source, _target, _page_count, *, heartbeat=None):
             raise mineru.MineruError("Token 无效", http_status=401, category="A0202")
 
-        with mock.patch.dict("os.environ", {
-            "MINERU_TOKENS_JSON": json.dumps(private_tokens),
-        }, clear=False), mock.patch.object(mineru, "request_extract_file", side_effect=extract):
+        with (
+            mock.patch.dict("os.environ", {"MINERU_TOKENS_JSON": json.dumps(private_tokens)}, clear=False),
+            mock.patch.object(mineru, "request_extract_file", side_effect=extract),
+        ):
             with self.assertRaises(mineru.MineruError) as raised:
-                mineru.request_extract_file_from_pool(
-                    Path("source.pdf"), Path("result.zip"), 1,
-                )
+                mineru.request_extract_file_from_pool(Path("source.pdf"), Path("result.zip"), 1)
         self.assertTrue(raised.exception.account_unusable)
         self.assertEqual(raised.exception.category, "A0202")
         for token in private_tokens:
             self.assertNotIn(token, str(raised.exception))
 
     def test_unknown_code_cannot_hide_recognised_invalid_token_category(self):
-        error = mineru._mineru_error("解析", {
-            "code": "A9999",
-            "err_msg": "Invalid token",
-            "trace_id": "a" * 32,
-        })
+        error = mineru._mineru_error("解析", {"code": "A9999", "err_msg": "Invalid token", "trace_id": "a" * 32})
         self.assertEqual(error.code, "A9999")
         self.assertEqual(error.category, "A0202")
         self.assertTrue(error.account_unusable)
@@ -88,8 +81,6 @@ class MineruPoolTests(SimpleTestCase):
         raw = "not-json-with-private-value"
         with mock.patch.dict("os.environ", {"MINERU_TOKENS_JSON": raw}, clear=False):
             with self.assertRaises(mineru.MineruError) as raised:
-                mineru.request_extract_file_from_pool(
-                    Path("source.pdf"), Path("result.zip"), 1,
-                )
+                mineru.request_extract_file_from_pool(Path("source.pdf"), Path("result.zip"), 1)
         self.assertIn("配置", str(raised.exception))
         self.assertNotIn(raw, str(raised.exception))

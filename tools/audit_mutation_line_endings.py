@@ -24,7 +24,9 @@ for _stream in (sys.stdout, sys.stderr):
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
 
-PATH_RE = re.compile(r'"((?:frontend|backend|packaging|docs|tools)/[A-Za-z0-9_./-]+|[A-Za-z0-9_./-]+\.(?:py|js|css|html|md))"')
+PATH_RE = re.compile(
+    r'"((?:frontend|backend|packaging|docs|tools)/[A-Za-z0-9_./-]+|[A-Za-z0-9_./-]+\.(?:py|js|css|html|md))"'
+)
 
 
 def eol(path: Path) -> str:

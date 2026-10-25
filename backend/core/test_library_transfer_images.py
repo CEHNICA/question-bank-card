@@ -11,6 +11,7 @@
 
 这里用真数据把这两条堵住：文件真的回到硬盘上、路径真的指得到。
 """
+
 from __future__ import annotations
 
 import json
@@ -40,9 +41,13 @@ class ImageRestoreFixture(TestCase):
         override.enable()
         self.addCleanup(override.disable)
 
-        self.paper = Paper.objects.create(filename="卷一.pdf", kind="pdf", sha256="a" * 64,
-                                          status=Paper.Status.READY,
-                                          pages=[{"page_idx": 0, "width": 1684, "height": 1190}])
+        self.paper = Paper.objects.create(
+            filename="卷一.pdf",
+            kind="pdf",
+            sha256="a" * 64,
+            status=Paper.Status.READY,
+            pages=[{"page_idx": 0, "width": 1684, "height": 1190}],
+        )
         self.folder = self.data / str(self.paper.pk)
         self.folder.mkdir(parents=True, exist_ok=True)
         (self.folder / "source.pdf").write_bytes(b"%PDF-1.4 fake")
@@ -53,16 +58,29 @@ class ImageRestoreFixture(TestCase):
         self.paper.save()
 
         self.question = Question.objects.create(
-            paper=self.paper, number=1, question_type="single_choice",
-            stem="（虚构）第一题", options={"A": "甲"}, answer="甲", analysis="",
-            state=Question.State.YELLOW, text_source="agree",
-            regions=[{"page_idx": 0, "bbox": [10, 10, 200, 200]}])
+            paper=self.paper,
+            number=1,
+            question_type="single_choice",
+            stem="（虚构）第一题",
+            options={"A": "甲"},
+            answer="甲",
+            analysis="",
+            state=Question.State.YELLOW,
+            text_source="agree",
+            regions=[{"page_idx": 0, "bbox": [10, 10, 200, 200]}],
+        )
         self.publication = PublishedQuestion.objects.create(
-            question=self.question, paper=self.paper, number=1, version=1,
-            content={"stem": "（虚构）第一题", "answer": "甲",
-                     "figures": [{"file": "figure-1.png"}]},
-            content_hash="c" * 64, search_text="第一题", source_filename="卷一.pdf",
-            question_type="single_choice", status=PublishedQuestion.Status.PUBLISHED)
+            question=self.question,
+            paper=self.paper,
+            number=1,
+            version=1,
+            content={"stem": "（虚构）第一题", "answer": "甲", "figures": [{"file": "figure-1.png"}]},
+            content_hash="c" * 64,
+            search_text="第一题",
+            source_filename="卷一.pdf",
+            question_type="single_choice",
+            status=PublishedQuestion.Status.PUBLISHED,
+        )
         self.library_folder = self.data / "library" / str(self.publication.pk)
         self.library_folder.mkdir(parents=True, exist_ok=True)
         (self.library_folder / "figure-1.png").write_bytes(b"\x89PNG library crop")
@@ -74,18 +92,30 @@ class ImageRestoreFixture(TestCase):
         return Path(result["file"])
 
     def make_other_paper(self) -> Paper:
-        other = Paper.objects.create(filename="卷二.pdf", kind="pdf", sha256="b" * 64,
-                                     status=Paper.Status.READY,
-                                     pages=[{"page_idx": 0, "width": 1684, "height": 1190}])
+        other = Paper.objects.create(
+            filename="卷二.pdf",
+            kind="pdf",
+            sha256="b" * 64,
+            status=Paper.Status.READY,
+            pages=[{"page_idx": 0, "width": 1684, "height": 1190}],
+        )
         folder = self.data / str(other.pk)
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "source.pdf").write_bytes(b"%PDF-1.4 other fake")
         other.source_path = str(folder / "source.pdf")
         other.render_path = other.source_path
         other.save()
-        Question.objects.create(paper=other, number=1, question_type="single_choice",
-                                stem="（虚构）新卷的题", options={"A": "甲"}, answer="戊",
-                                analysis="", state=Question.State.YELLOW, text_source="agree")
+        Question.objects.create(
+            paper=other,
+            number=1,
+            question_type="single_choice",
+            stem="（虚构）新卷的题",
+            options={"A": "甲"},
+            answer="戊",
+            analysis="",
+            state=Question.State.YELLOW,
+            text_source="agree",
+        )
         return other
 
     def forget_other_paper(self) -> None:
@@ -102,17 +132,16 @@ class BundleContentTests(ImageRestoreFixture):
         bundle = self.export()
         with zipfile.ZipFile(bundle) as archive:
             names = archive.namelist()
-        self.assertIn(f"{library_transfer.ORIGINALS}/library/{self.publication.pk}/figure-1.png", names,
-                      "题库里的小图必须进包")
-        self.assertIn(f"{library_transfer.ORIGINALS}/{self.paper.pk}/source.pdf", names,
-                      "原卷文件必须进包")
+        self.assertIn(
+            f"{library_transfer.ORIGINALS}/library/{self.publication.pk}/figure-1.png", names, "题库里的小图必须进包"
+        )
+        self.assertIn(f"{library_transfer.ORIGINALS}/{self.paper.pk}/source.pdf", names, "原卷文件必须进包")
 
     def test_the_bundle_carries_the_question_figures(self):
         bundle = self.export()
         with zipfile.ZipFile(bundle) as archive:
             names = archive.namelist()
-        self.assertIn(f"{library_transfer.ORIGINALS}/{self.paper.pk}/figures/q1_abc.png", names,
-                      "题目插图必须进包")
+        self.assertIn(f"{library_transfer.ORIGINALS}/{self.paper.pk}/figures/q1_abc.png", names, "题目插图必须进包")
 
     def test_the_manifest_records_the_path_the_folder_actually_has(self):
         """清单里的编号是带横杠的（硬盘上文件夹的名字），文件路径也得对得上。"""
@@ -138,13 +167,15 @@ class ManifestTests(ImageRestoreFixture):
         """库里的绝对路径指到别处（数据文件夹挪过家、或者这份库是从另一台电脑
         恢复来的，里面存着人家的路径）—— 清单里也得记着这个文件，
         不然恢复时就对不上号，那套卷的原卷路径就再也指不回去了。"""
-        Paper.objects.filter(pk=self.paper.pk).update(
-            source_path=r"D:\另一台电脑\data\某个卷\source.pdf")
+        Paper.objects.filter(pk=self.paper.pk).update(source_path=r"D:\另一台电脑\data\某个卷\source.pdf")
         bundle = self.export()
         with zipfile.ZipFile(bundle) as archive:
             manifest = json.loads(archive.read(library_transfer.MANIFEST_NAME).decode("utf-8"))
-        self.assertEqual(manifest["papers"][0]["files"]["source"], f"{self.paper.pk}/source.pdf",
-                         "文件名取自库里、位置按本机卷子文件夹去找")
+        self.assertEqual(
+            manifest["papers"][0]["files"]["source"],
+            f"{self.paper.pk}/source.pdf",
+            "文件名取自库里、位置按本机卷子文件夹去找",
+        )
 
 
 class RestoreOriginalsTests(ImageRestoreFixture):
@@ -161,8 +192,7 @@ class RestoreOriginalsTests(ImageRestoreFixture):
         paper = Paper.objects.get(sha256="a" * 64)
         self.assertTrue(paper.source_path, "原卷路径不能是空的")
         self.assertTrue(Path(paper.source_path).is_file(), "原卷文件得真的回到硬盘上")
-        self.assertEqual(Path(paper.source_path).parent.name, str(paper.pk),
-                         "文件要放回这套卷自己的文件夹")
+        self.assertEqual(Path(paper.source_path).parent.name, str(paper.pk), "文件要放回这套卷自己的文件夹")
 
     def test_the_question_figures_come_back_too(self):
         bundle = self.export()
@@ -209,9 +239,14 @@ class RestoreOriginalsTests(ImageRestoreFixture):
         Paper.objects.filter(pk=self.paper.pk).delete()
         Question.objects.filter(paper_id=self.paper.pk).delete()
         shutil.rmtree(self.folder, ignore_errors=True)
-        clash = Paper.objects.create(id=self.paper.pk, filename="另一份.pdf", kind="pdf",
-                                     sha256="d" * 64, status=Paper.Status.READY,
-                                     pages=[{"page_idx": 0, "width": 1684, "height": 1190}])
+        clash = Paper.objects.create(
+            id=self.paper.pk,
+            filename="另一份.pdf",
+            kind="pdf",
+            sha256="d" * 64,
+            status=Paper.Status.READY,
+            pages=[{"page_idx": 0, "width": 1684, "height": 1190}],
+        )
         self.assertEqual(clash.pk, self.paper.pk, "本机确实占着这个编号")
 
         library_transfer.merge_bundle(bundle)
@@ -220,8 +255,7 @@ class RestoreOriginalsTests(ImageRestoreFixture):
         self.assertNotEqual(incoming.pk, self.paper.pk, "本机该给它另编一个号")
         self.assertTrue(incoming.source_path, "新来的卷子得有原卷路径")
         self.assertTrue(Path(incoming.source_path).is_file(), "原卷文件要跟着新编号走")
-        self.assertEqual(Path(incoming.source_path).parent.name, str(incoming.pk),
-                         "文件要落在新编号那个文件夹里")
+        self.assertEqual(Path(incoming.source_path).parent.name, str(incoming.pk), "文件要落在新编号那个文件夹里")
 
     def test_the_preview_counts_the_files_the_merge_would_restore(self):
         """预览说的和真合做的一样 —— 老师先看的那张卡不能骗人。"""
@@ -247,10 +281,12 @@ class RestoreLibraryCropsTests(ImageRestoreFixture):
         library_transfer.merge_bundle(bundle)
 
         restored = PublishedQuestion.objects.get(question=self.question)
-        self.assertTrue((self.data / "library" / str(restored.pk) / "figure-1.png").is_file(),
-                        "题库的小图得跟着入库快照回来")
-        self.assertTrue((self.data / "library" / str(restored.pk) / "question-1.png").is_file(),
-                        "题库里的整题截图也得回来")
+        self.assertTrue(
+            (self.data / "library" / str(restored.pk) / "figure-1.png").is_file(), "题库的小图得跟着入库快照回来"
+        )
+        self.assertTrue(
+            (self.data / "library" / str(restored.pk) / "question-1.png").is_file(), "题库里的整题截图也得回来"
+        )
 
     def test_the_crops_land_under_the_number_this_machine_uses(self):
         """两台电脑各编各的号：备份里的入库快照到了本机是另一个编号，
@@ -258,18 +294,19 @@ class RestoreLibraryCropsTests(ImageRestoreFixture):
         bundle = self.export()
         local_id = uuid.uuid4()
         with connection.cursor() as cursor:
-            cursor.execute('UPDATE "core_publishedquestion" SET id=? WHERE id=?',
-                           (local_id.hex, self.publication.pk.hex))
+            cursor.execute(
+                'UPDATE "core_publishedquestion" SET id=? WHERE id=?', (local_id.hex, self.publication.pk.hex)
+            )
         local_folder = self.data / "library" / str(local_id)
         local_folder.mkdir(parents=True, exist_ok=True)
         shutil.rmtree(self.library_folder, ignore_errors=True)
 
         library_transfer.merge_bundle(bundle)
 
-        self.assertTrue((local_folder / "figure-1.png").is_file(),
-                        "小图要落到本机那个入库快照的编号下面")
-        self.assertFalse((self.data / "library" / str(self.publication.pk)).exists(),
-                         "备份里的编号那个文件夹不该留在本机")
+        self.assertTrue((local_folder / "figure-1.png").is_file(), "小图要落到本机那个入库快照的编号下面")
+        self.assertFalse(
+            (self.data / "library" / str(self.publication.pk)).exists(), "备份里的编号那个文件夹不该留在本机"
+        )
 
     def test_undo_takes_the_restored_files_away(self):
         """撤销要把这次放回硬盘上的原卷文件带走 —— 原来用的编号写法不对，
@@ -285,5 +322,4 @@ class RestoreLibraryCropsTests(ImageRestoreFixture):
 
         library_transfer.undo_last_merge()
 
-        self.assertFalse((self.data / str(incoming.pk)).exists(),
-                         "撤销要把这套卷的文件夹整个删掉，不能留在盘上")
+        self.assertFalse((self.data / str(incoming.pk)).exists(), "撤销要把这套卷的文件夹整个删掉，不能留在盘上")

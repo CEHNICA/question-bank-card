@@ -6,6 +6,7 @@ Three questions wrap 2+1 and one wraps 2+2; those are the ones a single Word
 grid used to get wrong, so the report lists the line width every line is
 supposed to have next to the one Word reports.
 """
+
 import io
 import json
 import os
@@ -40,8 +41,7 @@ GAP = PREVIEW_FIGURE_GAP_PX * 25.4 / PREVIEW_PX_PER_INCH
 
 def dashed(value):
     text = str(value)
-    return (f"{text[:8]}-{text[8:12]}-{text[12:16]}-{text[16:20]}-{text[20:32]}"
-            if len(text) == 32 else text)
+    return f"{text[:8]}-{text[8:12]}-{text[12:16]}-{text[16:20]}-{text[20:32]}" if len(text) == 32 else text
 
 
 def load_items():
@@ -49,14 +49,14 @@ def load_items():
     connection.row_factory = sqlite3.Row
     items = []
     for row in connection.execute(
-            "SELECT id, number, source_filename, content FROM core_publishedquestion"
-            " WHERE status = 'published' ORDER BY number"):
+        "SELECT id, number, source_filename, content FROM core_publishedquestion"
+        " WHERE status = 'published' ORDER BY number"
+    ):
         try:
             content = json.loads(row["content"] or "{}")
         except Exception:
             continue
-        figures = [f for f in (content.get("figures") or []) if isinstance(f, dict)
-                   and f.get("slot") == "stem"]
+        figures = [f for f in (content.get("figures") or []) if isinstance(f, dict) and f.get("slot") == "stem"]
         if len(figures) < 2:
             continue
         folder = os.path.join(DATA, dashed(row["id"]))
@@ -75,12 +75,13 @@ def load_items():
 def build(path):
     document = Document()
     for section in document.sections:
-        section.page_width = Mm(210)          # A4, the paper the app prints on
+        section.page_width = Mm(210)  # A4, the paper the app prints on
         section.page_height = Mm(297)
         section.left_margin = section.right_margin = Mm(16)
     report = []
     for item in load_items():
         from PIL import Image
+
         sized = []
         for image in item["images"]:
             with Image.open(io.BytesIO(image["bytes"])) as picture:
@@ -93,7 +94,7 @@ def build(path):
         widths = [_figure_paper_size(picture["size"])[0] for picture in sized]
         expected, cursor = [], 0
         for count in lines:
-            chunk = widths[cursor:cursor + count]
+            chunk = widths[cursor : cursor + count]
             expected.append(round(sum(chunk) + GAP * (len(chunk) - 1), 1))
             cursor += count
         report.append({"label": item["label"], "lines": lines, "expectedMm": expected})
@@ -106,11 +107,21 @@ if __name__ == "__main__":
     entries = build(str(target))
     print(f"built {target} with {len(entries)} questions")
     for entry in entries:
-        print(f"  {entry['label']}: lines {entry['lines']} "
-              f"expected {entry['expectedMm']} mm")
+        print(f"  {entry['label']}: lines {entry['lines']} expected {entry['expectedMm']} mm")
     result = subprocess.run(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-         "-File", str(ROOT / "tools" / "measure_word_pictures.ps1"), str(target)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace")
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(ROOT / "tools" / "measure_word_pictures.ps1"),
+            str(target),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     print()
     print(result.stdout or result.stderr)

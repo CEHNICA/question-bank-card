@@ -47,6 +47,7 @@ def seed():
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "qb_server.settings")
     sys.path.insert(0, str(ROOT / "backend"))
     import django
+
     django.setup()
     from django.conf import settings
     from django.core.management import call_command
@@ -65,8 +66,9 @@ def seed():
     fixture = json.loads((ROOT / "backend/core/demo_data/demo-paper.json").read_text(encoding="utf-8"))
 
     def make(filename, withdraw_all):
-        paper = Paper.objects.create(filename=filename, kind="pdf", sha256=f"seed-{filename}",
-                                     pages=fixture["pages"], status=Paper.Status.READY)
+        paper = Paper.objects.create(
+            filename=filename, kind="pdf", sha256=f"seed-{filename}", pages=fixture["pages"], status=Paper.Status.READY
+        )
         folder = settings.DATA_ROOT / str(paper.id)
         folder.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / "backend/core/demo_data/demo-paper.pdf", folder / "source.pdf")
@@ -74,14 +76,24 @@ def seed():
         paper.save()
         for number in (1, 2):
             question = Question.objects.create(
-                paper=paper, number=number, question_type="free_response",
-                stem=f"第 {number} 题：求 ${number}+{number}$。", state=Question.State.GREEN, approved=True,
+                paper=paper,
+                number=number,
+                question_type="free_response",
+                stem=f"第 {number} 题：求 ${number}+{number}$。",
+                state=Question.State.GREEN,
+                approved=True,
             )
             content = library.final_content(question)
             PublishedQuestion.objects.create(
-                question=question, paper=paper, source_filename=filename, number=number,
-                question_type="free_response", version=1, content=content,
-                content_hash=library.content_hash(content), search_text=library._search_text(content),
+                question=question,
+                paper=paper,
+                source_filename=filename,
+                number=number,
+                question_type="free_response",
+                version=1,
+                content=content,
+                content_hash=library.content_hash(content),
+                search_text=library._search_text(content),
                 status=PublishedQuestion.Status.WITHDRAWN if withdraw_all else PublishedQuestion.Status.PUBLISHED,
                 published_at=timezone.now(),
                 withdrawn_at=timezone.now() if withdraw_all else None,
@@ -90,8 +102,9 @@ def seed():
 
     live = make(LIVE_NAME, False)
     done = make(DONE_NAME, True)
-    (OUT / "seed.json").write_text(json.dumps({"live": str(live.id), "done": str(done.id)}, ensure_ascii=False),
-                                   encoding="utf-8")
+    (OUT / "seed.json").write_text(
+        json.dumps({"live": str(live.id), "done": str(done.id)}, ensure_ascii=False), encoding="utf-8"
+    )
     print(f"seeded live={live.id} done={done.id}")
 
 
@@ -107,9 +120,14 @@ def run_isolated():
     seed()
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     with (OUT / "server.log").open("w", encoding="utf-8") as log:
-        server = subprocess.Popen([sys.executable, str(ROOT / "backend/manage.py"), "runserver",
-            f"127.0.0.1:{PORT}", "--noreload"], cwd=ROOT, env=os.environ.copy(),
-            stdout=log, stderr=subprocess.STDOUT, creationflags=flags)
+        server = subprocess.Popen(
+            [sys.executable, str(ROOT / "backend/manage.py"), "runserver", f"127.0.0.1:{PORT}", "--noreload"],
+            cwd=ROOT,
+            env=os.environ.copy(),
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            creationflags=flags,
+        )
         try:
             deadline = time.monotonic() + 40
             while time.monotonic() < deadline:
@@ -126,8 +144,13 @@ def run_isolated():
             # The Windows venv launcher creates a child Python process, so
             # terminate this exact process tree rather than the launcher only.
             if os.name == "nt":
-                subprocess.run(["taskkill", "/PID", str(server.pid), "/T", "/F"],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags, check=False)
+                subprocess.run(
+                    ["taskkill", "/PID", str(server.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=flags,
+                    check=False,
+                )
             else:
                 server.terminate()
             server.wait(timeout=10)
@@ -149,8 +172,9 @@ def main(url=None, width=1600, height=1000):
             failures += 1
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True,
-                                    executable_path=r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+        browser = p.chromium.launch(
+            headless=True, executable_path=r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+        )
         page = browser.new_page(viewport={"width": width, "height": height})
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
@@ -177,8 +201,11 @@ def main(url=None, width=1600, height=1000):
         open_paper(ids["live"])
         open_menu()
         delete = page.query_selector("#settingsDelete")
-        check("有活题时「永久删除…」不出现", delete is None or delete.is_hidden(),
-              f"hidden={delete.is_hidden() if delete else 'n/a'}")
+        check(
+            "有活题时「永久删除…」不出现",
+            delete is None or delete.is_hidden(),
+            f"hidden={delete.is_hidden() if delete else 'n/a'}",
+        )
         hint = page.inner_text("#settingsDangerHint")
         check("提示给出去路而不是一句不能删", "撤回" in hint and "正式题库" in hint, hint)
 
@@ -186,8 +213,9 @@ def main(url=None, width=1600, height=1000):
         open_paper(ids["done"])
         open_menu()
         delete = page.query_selector("#settingsDelete")
-        check("全部撤回后「永久删除…」出现且可点",
-              delete is not None and delete.is_visible() and not delete.is_disabled())
+        check(
+            "全部撤回后「永久删除…」出现且可点", delete is not None and delete.is_visible() and not delete.is_disabled()
+        )
         page.screenshot(path=str(OUT / "01-menu-before-delete.png"))
         if delete is not None and delete.is_visible():
             delete.click()
@@ -203,8 +231,11 @@ def main(url=None, width=1600, height=1000):
                 if candidate.is_visible() and "删除" in (candidate.inner_text() or ""):
                     ok = candidate
                     break
-            check("确认框里有可点的删除按钮", ok is not None,
-                  f"dialog 按钮: {[x.inner_text().strip() for x in page.query_selector_all('dialog[open] button')]}")
+            check(
+                "确认框里有可点的删除按钮",
+                ok is not None,
+                f"dialog 按钮: {[x.inner_text().strip() for x in page.query_selector_all('dialog[open] button')]}",
+            )
             if ok is None:
                 browser.close()
                 (OUT / "report.txt").write_text("\n".join(report), encoding="utf-8")
@@ -217,8 +248,11 @@ def main(url=None, width=1600, height=1000):
         names = [row["name"] for row in papers]
         check("被删的任务从试卷列表消失", DONE_NAME not in names, f"现在有 {len(names)} 份：{names}")
         check("有活题那份还在", LIVE_NAME in names)
-        check("题库条数没被动过（撤回记录不是活题，删任务不该动它）",
-              library_total() == before_total, f"{before_total} → {library_total()}")
+        check(
+            "题库条数没被动过（撤回记录不是活题，删任务不该动它）",
+            library_total() == before_total,
+            f"{before_total} → {library_total()}",
+        )
 
         # 撤回的那两道不该混在题库列表里；活着的两道应该在。
         # 这里按卡片数比对，不按题库 total：列表一页只放一部分，
@@ -226,8 +260,11 @@ def main(url=None, width=1600, height=1000):
         page.goto(f"{url}/library", wait_until="networkidle")
         page.wait_for_timeout(1200)
         shown = len(page.query_selector_all(".library-card"))
-        check("撤回记录不出现在题库列表里（本来就不该在）", shown == 2,
-              f"列表里有 {shown} 张卡，题库报 {library_total()} 条")
+        check(
+            "撤回记录不出现在题库列表里（本来就不该在）",
+            shown == 2,
+            f"列表里有 {shown} 张卡，题库报 {library_total()} 条",
+        )
         report.append(f"题库当前 {library_total()} 条（两份卷各 2 道：2 道活的 + 2 道撤回的）")
 
         check("没有 JS 报错", not errors, "; ".join(errors[:4]))

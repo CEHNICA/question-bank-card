@@ -14,6 +14,7 @@ library_export._capture，所以两边行为一致。
 印「点『查看出处』可以回到原卷核对」。那是给老师看的操作指引，**导出路径走不到**
 （_capture 先拦住了），所以不用改文案；真走到了才会把它印给学生对。
 """
+
 import re
 from pathlib import Path
 
@@ -23,21 +24,24 @@ from . import library_export, library_pdf
 
 
 class ExportRefusesMissingFiguresTests(SimpleTestCase):
-
     def test_a_deleted_figure_file_is_caught_as_oserror(self):
         source = Path(library_export.__file__).read_text(encoding="utf-8")
         block = re.search(r"def _images\(.*?\n    return images\n", source, re.S)
         self.assertIsNotNone(block, "library_export.py must keep _images()")
         self.assertRegex(
-            block.group(0), r"except \(OSError",
+            block.group(0),
+            r"except \(OSError",
             "A deleted figure raises FileNotFoundError, which is an OSError. Without it in "
-            "the except clause the whole export dies with a traceback instead of a message.")
+            "the except clause the whole export dies with a traceback instead of a message.",
+        )
 
     def test_the_refusal_names_the_question_and_the_source_paper(self):
         source = Path(library_export.__file__).read_text(encoding="utf-8")
         self.assertRegex(
-            source, r"where = f\"第 \{position\} 题（\{publication\.source_filename",
-            "「本卷第 N 题」不够用：老师要回原卷核对，得知道是哪份原卷的第几题")
+            source,
+            r"where = f\"第 \{position\} 题（\{publication\.source_filename",
+            "「本卷第 N 题」不够用：老师要回原卷核对，得知道是哪份原卷的第几题",
+        )
         self.assertIn("请检查这道题的入库配图", source)
 
     def test_both_routes_share_that_capture_instead_of_differing(self):
@@ -51,5 +55,8 @@ class ExportRefusesMissingFiguresTests(SimpleTestCase):
         self.assertIn("from . import library_export as word", source)
         self.assertIn("word._capture(", source, "The PDF route must go through the same capture")
         export_source = Path(library_export.__file__).read_text(encoding="utf-8")
-        self.assertIn("images = _images(publication, where) if question_fields else []", export_source,
-                      "Every question that prints figures has to go through _images")
+        self.assertIn(
+            "images = _images(publication, where) if question_fields else []",
+            export_source,
+            "Every question that prints figures has to go through _images",
+        )

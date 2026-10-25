@@ -1,8 +1,9 @@
-﻿"""教材题组的名字：以前一律叫「第 N 组」，现在用书上真实的章节名。
+"""教材题组的名字：以前一律叫「第 N 组」，现在用书上真实的章节名。
 
 每张教材卡的审核页都会显示题组名，所以这个名字是老师天天看的东西。
 这里钉住三件事：认得出章节名、重名会补序号、没有章节名就原样退回。
 """
+
 from django.test import TestCase
 
 from . import pipeline, segment
@@ -76,11 +77,7 @@ class FakePaper:
 
 class BookGroupNameTests(TestCase):
     def setUp(self):
-        self.blocks = [
-            header(0, 0, "第6章 特殊平行四边形"),
-            header(1, 1, "第六章"),
-            header(2, 1, "第六章"),
-        ]
+        self.blocks = [header(0, 0, "第6章 特殊平行四边形"), header(1, 1, "第六章"), header(2, 1, "第六章")]
         self.scopes = [
             {"pages": [0], "scope_anchor_seq": 0, "source_kind": "example"},
             {"pages": [0], "scope_anchor_seq": 1, "source_kind": "exercise"},
@@ -116,8 +113,11 @@ class BookGroupNameTests(TestCase):
         self.assertEqual(pipeline._book_group_names(self.scopes, self.paper, plain), {})
 
     def test_scope_without_anchor_keeps_the_old_name(self):
-        scopes = [{"pages": [0]}, {"pages": [0], "scope_anchor_seq": 0},
-                  {"pages": [0], "scope_anchor_seq": 0, "source_kind": "exercise"}]
+        scopes = [
+            {"pages": [0]},
+            {"pages": [0], "scope_anchor_seq": 0},
+            {"pages": [0], "scope_anchor_seq": 0, "source_kind": "exercise"},
+        ]
         names = pipeline._book_group_names(scopes, self.paper, self.blocks)
         # 0 没有任何锚点，没法知道它在第几章，只能留旧名
         self.assertNotIn(0, names)
@@ -132,31 +132,41 @@ class BookGroupTitleWiringTests(TestCase):
     def test_book_group_title_comes_from_the_chapter(self):
         from .models import Paper as RealPaper
 
-        paper = RealPaper(filename="九年级.pdf", kind="pdf",
-                          material_type=RealPaper.MaterialType.BOOK,
-                          sha256="d" * 64, source_path="/nowhere.pdf", pages=PAGES,
-                          status=RealPaper.Status.READY,
-                          structure={"suggested_scopes": [
-                              {"pages": [0], "scope_anchor_seq": 0, "source_kind": "example"},
-                              {"pages": [1], "scope_anchor_seq": 1, "source_kind": "exercise"},
-                          ]})
-        specs = pipeline._question_group_specs(paper, blocks=[
-            header(0, 0, "第6章 特殊平行四边形"),
-            header(1, 1, "第7章 二次根式"),
-        ])
-        self.assertEqual([s["title"] for s in specs],
-                         ["第6章 特殊平行四边形 · 例题", "第7章 二次根式 · 习题"])
+        paper = RealPaper(
+            filename="九年级.pdf",
+            kind="pdf",
+            material_type=RealPaper.MaterialType.BOOK,
+            sha256="d" * 64,
+            source_path="/nowhere.pdf",
+            pages=PAGES,
+            status=RealPaper.Status.READY,
+            structure={
+                "suggested_scopes": [
+                    {"pages": [0], "scope_anchor_seq": 0, "source_kind": "example"},
+                    {"pages": [1], "scope_anchor_seq": 1, "source_kind": "exercise"},
+                ]
+            },
+        )
+        specs = pipeline._question_group_specs(
+            paper, blocks=[header(0, 0, "第6章 特殊平行四边形"), header(1, 1, "第7章 二次根式")]
+        )
+        self.assertEqual([s["title"] for s in specs], ["第6章 特殊平行四边形 · 例题", "第7章 二次根式 · 习题"])
 
     def test_exam_paper_keeps_the_paper_name(self):
         from unittest import mock
 
         from .models import Paper as RealPaper
 
-        paper = RealPaper(filename="月考.pdf", kind="pdf",
-                          material_type=RealPaper.MaterialType.EXAM,
-                          sha256="e" * 64, source_path="/nowhere.pdf", pages=PAGES,
-                          status=RealPaper.Status.READY,
-                          structure={"suggested_groups": [[0], [1]]})
+        paper = RealPaper(
+            filename="月考.pdf",
+            kind="pdf",
+            material_type=RealPaper.MaterialType.EXAM,
+            sha256="e" * 64,
+            source_path="/nowhere.pdf",
+            pages=PAGES,
+            status=RealPaper.Status.READY,
+            structure={"suggested_groups": [[0], [1]]},
+        )
         # 试卷的组名是卷名。而且它不该为了改名去读一整份版面块 ——
         # 这一句是 is_book 那道闸门唯一能被测到的行为。
         with mock.patch.object(pipeline, "_block_dicts") as loader:

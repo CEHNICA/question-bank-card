@@ -91,8 +91,10 @@ def run(page) -> None:
         page.locator("#welcomeSkip").first.click()
         page.wait_for_timeout(400)
 
-    check(page.locator("#focusToggle").get_attribute("aria-pressed") == "true",
-          "专注模式默认开着（这是最坏情况，也是默认情况）")
+    check(
+        page.locator("#focusToggle").get_attribute("aria-pressed") == "true",
+        "专注模式默认开着（这是最坏情况，也是默认情况）",
+    )
 
     page.locator("body").click(position={"x": 5, "y": 5})
     page.keyboard.press("Escape")
@@ -110,27 +112,32 @@ def run(page) -> None:
     dim = [s for s in stops if 0 < s["op"] < 0.5]
     for s in dim:
         problems.append(f"焦点落在被压暗的地方（不透明度 {s['op']}）：{s['tag']}.{s['cls']}「{s['text']}」")
-    check(not dim,
-          f"Tab {STEPS} 次，没有一步落在被压暗的卡片上（之前有 {len(dim)} 步）"
-          if not dim else
-          f"Tab {STEPS} 次，有 {len(dim)} 步落在被压暗的卡片上（不透明度 0.34）")
+    check(
+        not dim,
+        f"Tab {STEPS} 次，没有一步落在被压暗的卡片上（之前有 {len(dim)} 步）"
+        if not dim
+        else f"Tab {STEPS} 次，有 {len(dim)} 步落在被压暗的卡片上（不透明度 0.34）",
+    )
 
     invisible = [s for s in stops if s["w"] < 2 or s["h"] < 2 or s["op"] == 0]
     bad_hidden = [s for s in invisible if not s["shown"]]
     for s in bad_hidden:
-        problems.append(f"焦点落在一个看不见的东西上：{s['tag']}.{s['cls']}「{s['text']}」"
-                        f" {s['w']}×{s['h']}")
-    check(not bad_hidden,
-          "看不见的落点都把焦点提示画在了看得见的 label 上" if not bad_hidden
-          else f"有 {len(bad_hidden)} 个落点既看不见、也没有任何可见的焦点提示")
+        problems.append(f"焦点落在一个看不见的东西上：{s['tag']}.{s['cls']}「{s['text']}」 {s['w']}×{s['h']}")
+    check(
+        not bad_hidden,
+        "看不见的落点都把焦点提示画在了看得见的 label 上"
+        if not bad_hidden
+        else f"有 {len(bad_hidden)} 个落点既看不见、也没有任何可见的焦点提示",
+    )
 
     # 焦点提示画在自己 label 上、或画在可见祖先上的，不算被浮层压住（见 DESCRIBE）。
     covered = [s for s in stops if s.get("covered")]
     for s in covered:
         problems.append(f"焦点被浮层压住：{s['tag']}.{s['cls']}「{s['text']}」被 {s['coveredBy']} 盖住")
-    check(not covered,
-          f"Tab {STEPS} 次，没有一步的焦点被浮层压住" if not covered
-          else f"有 {len(covered)} 步的焦点被浮层压住")
+    check(
+        not covered,
+        f"Tab {STEPS} 次，没有一步的焦点被浮层压住" if not covered else f"有 {len(covered)} 步的焦点被浮层压住",
+    )
 
     # 截一张：Tab 停在别的卡的「配图」上时，焦点圈必须看得见。
     for _ in range(STEPS):

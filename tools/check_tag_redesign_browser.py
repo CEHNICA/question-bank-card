@@ -69,39 +69,69 @@ def seed():
     fixture = json.loads((OUTPUT / "fixture.json").read_text(encoding="utf-8"))
     first = PublishedQuestion.objects.get(pk=fixture["ids"][0])
     stem = "虚构题三：仅用于验证失败标签建议的重试入口，不发送模型请求。"
-    question = Question.objects.create(paper=first.paper, number=3,
-        question_type="free_response", stem=stem)
+    question = Question.objects.create(paper=first.paper, number=3, question_type="free_response", stem=stem)
     content = {**first.content, "stem": stem}
-    third = PublishedQuestion.objects.create(question=question, paper=first.paper,
-        source_filename=first.source_filename, number=3, question_type="free_response",
-        version=1, status=PublishedQuestion.Status.PUBLISHED, review_source="human",
-        content=content, content_hash=library.content_hash(content),
-        search_text=library.search_key(stem), extras={})
-    LibraryTagSuggestion.objects.create(publication=third,
+    third = PublishedQuestion.objects.create(
+        question=question,
+        paper=first.paper,
+        source_filename=first.source_filename,
+        number=3,
+        question_type="free_response",
+        version=1,
+        status=PublishedQuestion.Status.PUBLISHED,
+        review_source="human",
+        content=content,
+        content_hash=library.content_hash(content),
+        search_text=library.search_key(stem),
+        extras={},
+    )
+    LibraryTagSuggestion.objects.create(
+        publication=third,
         question_fingerprint=library.generation_fingerprint(third.content, third.pk),
         taxonomy_revision=library_tagging.catalogue_state().revision,
-        assignment_revision=third.tag_revision, suggestions=[],
+        assignment_revision=third.tag_revision,
+        suggestions=[],
         status=LibraryTagSuggestion.Status.FAILED,
-        message="隔离合成失败：可重试，无真实服务请求。", generation_source="离线验收")
+        message="隔离合成失败：可重试，无真实服务请求。",
+        generation_source="离线验收",
+    )
     fixture["failure_id"] = str(third.pk)
     stem = "虚构题四：二次函数的最值，用于真实提交后返回丢失的验收。"
-    question = Question.objects.create(paper=first.paper, number=4,
-        question_type="free_response", stem=stem)
+    question = Question.objects.create(paper=first.paper, number=4, question_type="free_response", stem=stem)
     content = {**first.content, "stem": stem}
-    fourth = PublishedQuestion.objects.create(question=question, paper=first.paper,
-        source_filename=first.source_filename, number=4, question_type="free_response",
-        version=1, status=PublishedQuestion.Status.PUBLISHED, review_source="human",
-        content=content, content_hash=library.content_hash(content),
-        search_text=library.search_key(stem), extras={})
+    fourth = PublishedQuestion.objects.create(
+        question=question,
+        paper=first.paper,
+        source_filename=first.source_filename,
+        number=4,
+        question_type="free_response",
+        version=1,
+        status=PublishedQuestion.Status.PUBLISHED,
+        review_source="human",
+        content=content,
+        content_hash=library.content_hash(content),
+        search_text=library.search_key(stem),
+        extras={},
+    )
     knowledge = LibraryTag.objects.get(kind=LibraryTag.Kind.KNOWLEDGE, name=regression.TAG_NAME)
-    LibraryTagSuggestion.objects.create(publication=fourth,
+    LibraryTagSuggestion.objects.create(
+        publication=fourth,
         question_fingerprint=library.generation_fingerprint(fourth.content, fourth.pk),
         taxonomy_revision=library_tagging.catalogue_state().revision,
         assignment_revision=fourth.tag_revision,
-        suggestions=[{"kind": "knowledge", "tag_id": str(knowledge.pk), "name": knowledge.name,
-            "rationale": "合成题面直接要求求二次函数的最值。", "scope": {"whole": True}}],
+        suggestions=[
+            {
+                "kind": "knowledge",
+                "tag_id": str(knowledge.pk),
+                "name": knowledge.name,
+                "rationale": "合成题面直接要求求二次函数的最值。",
+                "scope": {"whole": True},
+            }
+        ],
         status=LibraryTagSuggestion.Status.PENDING,
-        message="仅用于提交丢响应及重试去重验收。", generation_source="离线验收")
+        message="仅用于提交丢响应及重试去重验收。",
+        generation_source="离线验收",
+    )
     fixture["lost_reply_id"] = str(fourth.pk)
     (OUTPUT / "fixture.json").write_text(json.dumps(fixture, ensure_ascii=False), encoding="utf-8")
 
@@ -114,17 +144,34 @@ def check(base):
     if urlparse(base).hostname not in {"127.0.0.1", "localhost"}:
         raise SystemExit("Only a local isolated server is accepted")
     fixture = json.loads((OUTPUT / "fixture.json").read_text(encoding="utf-8"))
-    version_node = next(node for node in ast.parse((ROOT / "backend/core/version.py").read_text(encoding="utf-8")).body
-        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "APP_VERSION" for target in node.targets))
-    report = {"checks": [], "errors": [], "external_requests": [], "screenshots": [],
-        "version": ast.literal_eval(version_node.value), "tested_artifact": "current source"}
+    version_node = next(
+        node
+        for node in ast.parse((ROOT / "backend/core/version.py").read_text(encoding="utf-8")).body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "APP_VERSION" for target in node.targets)
+    )
+    report = {
+        "checks": [],
+        "errors": [],
+        "external_requests": [],
+        "screenshots": [],
+        "version": ast.literal_eval(version_node.value),
+        "tested_artifact": "current source",
+    }
     with sync_playwright() as playwright:
-        executable = next((str(path) for path in (
-            Path(playwright.chromium.executable_path),
-            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if path.is_file()), None)
-        browser = playwright.chromium.launch(headless=True,
-            **({"executable_path": executable} if executable else {}))
+        executable = next(
+            (
+                str(path)
+                for path in (
+                    Path(playwright.chromium.executable_path),
+                    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                )
+                if path.is_file()
+            ),
+            None,
+        )
+        browser = playwright.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
         context = browser.new_context(viewport={"width": 1440, "height": 960}, device_scale_factor=1)
 
         def local_only(route):
@@ -149,8 +196,12 @@ def check(base):
             route.fulfill(response=response, json=body)
 
         page.route("**/api/library?*", fixture_ai_ready)
-        page.route("**/api/settings/library-ai", lambda route: route.fulfill(status=200,
-            content_type="application/json", body=json.dumps({"mode": "api", "api_ready": True})))
+        page.route(
+            "**/api/settings/library-ai",
+            lambda route: route.fulfill(
+                status=200, content_type="application/json", body=json.dumps({"mode": "api", "api_ready": True})
+            ),
+        )
         queued_requests = []
 
         def fixture_queue(route):
@@ -175,7 +226,9 @@ def check(base):
         page.locator("#advancedFilters > summary").click()
         expect(page.locator("#advancedFilters")).to_have_attribute("open", "")
         expect(page.locator("#advancedFilters > .library-filters")).to_be_visible()
-        assert page.locator(".library-bulk").evaluate("node => node.offsetHeight") == filter_height, "More Filters must float without pushing question cards down"
+        assert page.locator(".library-bulk").evaluate("node => node.offsetHeight") == filter_height, (
+            "More Filters must float without pushing question cards down"
+        )
         page.locator("#advancedFilters > summary").click()
         page.screenshot(path=str(OUTPUT / "question-filterbar-desktop.png"), full_page=False)
         mobile = context.new_page()
@@ -184,13 +237,23 @@ def check(base):
         mobile.wait_for_load_state("networkidle")
         mobile_filterbar = mobile.locator("#libraryFilterBar")
         expect(mobile_filterbar).to_be_visible()
-        assert mobile_filterbar.evaluate("node => node.scrollWidth <= node.clientWidth"), "mobile filter bar must not clip controls horizontally"
-        assert mobile.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "mobile page must not gain horizontal scrolling"
-        assert not mobile.locator("body").evaluate("node => node.classList.contains('rail-open')"), "mobile sidebar should remain closed while top filters are available"
+        assert mobile_filterbar.evaluate("node => node.scrollWidth <= node.clientWidth"), (
+            "mobile filter bar must not clip controls horizontally"
+        )
+        assert mobile.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), (
+            "mobile page must not gain horizontal scrolling"
+        )
+        assert not mobile.locator("body").evaluate("node => node.classList.contains('rail-open')"), (
+            "mobile sidebar should remain closed while top filters are available"
+        )
         mobile.screenshot(path=str(OUTPUT / "question-filterbar-mobile.png"), full_page=False)
         mobile.close()
-        report["screenshots"].extend([str(OUTPUT / "question-filterbar-desktop.png"), str(OUTPUT / "question-filterbar-mobile.png")])
-        report["checks"].append("Source, question type, sort, and advanced filters live above the list; mobile controls wrap without horizontal overflow and More Filters does not shift cards")
+        report["screenshots"].extend(
+            [str(OUTPUT / "question-filterbar-desktop.png"), str(OUTPUT / "question-filterbar-mobile.png")]
+        )
+        report["checks"].append(
+            "Source, question type, sort, and advanced filters live above the list; mobile controls wrap without horizontal overflow and More Filters does not shift cards"
+        )
         # 待办入口常驻在批量行上（1.25.20 从筛选行搬过来，和「让 AI 补标签和答案」
         # 合成一处）：不展开任何折叠板也要看得见。折叠板在三组筛选都为空时还会整个
         # 隐藏，待办跟着进去的话「有 87 题待核对」就会一起消失。
@@ -212,9 +275,9 @@ def check(base):
         bulk_height = page.locator(".library-bulk").evaluate("node => node.offsetHeight")
         page.evaluate("document.getElementById('libraryTodos').hidden = true")
         expect(page.locator("#libraryTodos")).to_be_hidden()
-        assert page.locator(".library-bulk").evaluate(
-            "node => node.offsetHeight") == bulk_height, \
+        assert page.locator(".library-bulk").evaluate("node => node.offsetHeight") == bulk_height, (
             "待办入口在没有任何待办时仍然占着批量行的位置"
+        )
         page.evaluate("document.getElementById('libraryTodos').hidden = false")
         expect(page.locator("#libraryTodos")).to_be_visible()
         # 折叠板仍然要展开成浮层、不推动题卡 —— 这条和待办入口无关，单独测。
@@ -222,7 +285,9 @@ def check(base):
         expect(page.locator("#advancedFilters")).to_have_attribute("open", "")
         expect(extra_tools).to_be_visible()
         page.locator("#advancedFilters > summary").click()
-        assert page.locator(".library-bulk").evaluate("node => node.offsetHeight") == filter_height, "Closing More Filters must not shift the question list"
+        assert page.locator(".library-bulk").evaluate("node => node.offsetHeight") == filter_height, (
+            "Closing More Filters must not shift the question list"
+        )
         batch_container = page.locator("#libraryTodos")
         expect(batch_container).to_be_visible()
         batch_tools = batch_container.locator("details.library-todo-menu")
@@ -231,8 +296,7 @@ def check(base):
         # 「AI 建议标签」改成常驻：什么都不勾的时候按钮要在，只是灰着（1.25.20）。
         expect(page.locator("#generateSelectedTags")).to_be_visible()
         expect(page.locator("#generateSelectedTags")).to_be_disabled()
-        assert page.locator("#generateSelectedTags").get_attribute("title"), \
-            "灰着的「AI 建议标签」必须说清要先勾题"
+        assert page.locator("#generateSelectedTags").get_attribute("title"), "灰着的「AI 建议标签」必须说清要先勾题"
         inspector = page.locator("#questionInspector")
         first = page.locator("#q-" + fixture["ids"][0])
         second = page.locator("#q-" + fixture["ids"][1])
@@ -250,9 +314,11 @@ def check(base):
             return response.json()
 
         def post_api(payload):
-            response = page.request.post(base.rstrip("/") + "/api/library/tags",
-                                         headers={"X-QB-Request": "1", "Content-Type": "application/json"},
-                                         data=json.dumps(payload))
+            response = page.request.post(
+                base.rstrip("/") + "/api/library/tags",
+                headers={"X-QB-Request": "1", "Content-Type": "application/json"},
+                data=json.dumps(payload),
+            )
             assert response.ok, response.text()
             return response.json()
 
@@ -271,8 +337,9 @@ def check(base):
         for name in ("补齐缺的知识点标签", "只处理当前这批"):
             title = batch_tools.get_by_role("button", name=re.compile(name)).get_attribute("title")
             assert "消耗额度" in (title or ""), f"{name} 的悬停说明没有提到会消耗额度：{title}"
-        assert "筛选" in (batch_tools.get_by_role(
-            "button", name=re.compile("补齐缺的知识点标签")).get_attribute("title") or "")
+        assert "筛选" in (
+            batch_tools.get_by_role("button", name=re.compile("补齐缺的知识点标签")).get_attribute("title") or ""
+        )
         assert queued_requests == [], queued_requests
         capture("tag-batch-tools.png")
         batch_tools.locator("summary").click()
@@ -304,8 +371,12 @@ def check(base):
         fixture_api_ready["value"] = True
         page.reload()
         page.wait_for_load_state("networkidle")
-        report["checks"].append("Pending-work filters stay visible without opening More Filters, and survive that disclosure being hidden; they need no request")
-        report["checks"].append("API batch actions stay disabled when local readiness is false, while quick filters remain available")
+        report["checks"].append(
+            "Pending-work filters stay visible without opening More Filters, and survive that disclosure being hidden; they need no request"
+        )
+        report["checks"].append(
+            "API batch actions stay disabled when local readiness is false, while quick filters remain available"
+        )
 
         # 题型筛选项必须永远在一行。以前它是会换行的一排：窗口稍窄一点，
         # 「解答题」就被挤到第二行，一眼看上去像两排选项。这条只量排版，
@@ -314,12 +385,15 @@ def check(base):
             page.set_viewport_size({"width": width, "height": 960})
             page.wait_for_timeout(120)
             tops = page.locator("#typeFilters .draft-filter").evaluate_all(
-                "nodes => nodes.map(node => Math.round(node.getBoundingClientRect().top))")
+                "nodes => nodes.map(node => Math.round(node.getBoundingClientRect().top))"
+            )
             assert tops, f"{width}px 下题型筛选一个按钮都没有"
             assert len(set(tops)) == 1, f"{width}px 下题型筛选折成了多行：{tops}"
         page.set_viewport_size({"width": 1440, "height": 960})
         page.wait_for_timeout(120)
-        report["checks"].append("Question type filters stay on one row from 768px to 1440px instead of wrapping the last type onto a second line")
+        report["checks"].append(
+            "Question type filters stay on one row from 768px to 1440px instead of wrapping the last type onto a second line"
+        )
 
         # 入口的名字必须自己说清「里面有什么、要不要花钱」（1.25.20 改成三样一起数出来）。
         # 它以前只写「批量补标签和答案 要花额度」——「要花额度」是警告不是动作，
@@ -329,20 +403,22 @@ def check(base):
         expect(summary_node).to_contain_text("还有活没干")
         expect(summary_node).to_contain_text(re.compile(r"题建议待采纳"))
         expect(summary_node).to_contain_text(re.compile(r"AI 能补 \d+ 项"))
-        assert "要花额度" not in (summary_node.inner_text() or ""), \
-            "「要花额度」是警告，不该占入口的名字"
+        assert "要花额度" not in (summary_node.inner_text() or ""), "「要花额度」是警告，不该占入口的名字"
         # 显不显眼走过一个来回：太低调没人点，改成实心主色又成了全场焦点 ——
         # 而它恰恰是一屏里最贵、最不该随手点的按钮。所以量的是「有没有活干」：
         # 没活干时必须和「更多筛选」一样是安静的白底描边。
         idle_bg = summary_node.evaluate("node => getComputedStyle(node).backgroundColor")
         more_filters_bg = page.locator("#advancedFilters > summary").evaluate(
-            "node => getComputedStyle(node).backgroundColor")
+            "node => getComputedStyle(node).backgroundColor"
+        )
         assert idle_bg == more_filters_bg, f"没有活干时待办入口不该抢眼：{idle_bg} vs {more_filters_bg}"
         # 待办入口和题型是同一种东西（点了就筛一遍），以前却挂着放大镜图标，
         # 一眼像「去搜索」，一屏里出现三种筛选长相。
         assert page.locator("#libraryTodos .library-todo-look svg.icon").count() == 0, "待办入口上的放大镜图标还没去掉"
         assert page.locator("#typeFilters svg.icon").count() == 0, "题型筛选上不该有图标"
-        report["checks"].append("The pending-work entry counts all three jobs in its name, keeps the cost warning out of the label, and stays quiet while nothing is running")
+        report["checks"].append(
+            "The pending-work entry counts all three jobs in its name, keeps the cost warning out of the label, and stays quiet while nothing is running"
+        )
 
         # These tests deliberately retain all four checked questions. The
         # inspector must still act on only the context question.
@@ -358,10 +434,18 @@ def check(base):
         expect(picker.locator("#tagPickerTemplates")).to_have_count(0)
         expect(picker.locator("#tagPickerStartEmpty")).to_have_count(0)
         picker.locator("#tagPickerSearch").fill(regression.TAG_NAME)
-        row = picker.locator(".tag-picker-row").filter(has=page.locator(".tag-picker-row-title strong", has_text=regression.TAG_NAME)).first
+        row = (
+            picker.locator(".tag-picker-row")
+            .filter(has=page.locator(".tag-picker-row-title strong", has_text=regression.TAG_NAME))
+            .first
+        )
         expect(row.locator(".tag-picker-row-state")).to_have_text("✓ 已添加")
-        with page.expect_response(lambda response: urlparse(response.url).path ==
-                "/api/library/tags/assignments/batch" and response.request.method == "POST") as single:
+        with page.expect_response(
+            lambda response: (
+                urlparse(response.url).path == "/api/library/tags/assignments/batch"
+                and response.request.method == "POST"
+            )
+        ) as single:
             row.click()
         assert single.value.ok, single.value.text()
         assert single.value.request.post_data_json["publication_ids"] == [fixture["ids"][0]]
@@ -375,8 +459,12 @@ def check(base):
         # and exposes the same persistent-operation undo as picker changes.
         remove = inspector.locator(".library-tags-remove").first
         expect(remove).to_be_visible()
-        with page.expect_response(lambda response: urlparse(response.url).path ==
-                "/api/library/tags/assignments/batch" and response.request.method == "POST") as removed:
+        with page.expect_response(
+            lambda response: (
+                urlparse(response.url).path == "/api/library/tags/assignments/batch"
+                and response.request.method == "POST"
+            )
+        ) as removed:
             remove.click()
         assert removed.value.ok, removed.value.text()
         assert removed.value.request.post_data_json["publication_ids"] == [fixture["ids"][0]]
@@ -402,11 +490,14 @@ def check(base):
         panel_suggestions = inspector.locator(".question-inspector-tags .tag-suggestion-card")
         expect(panel_suggestions).to_be_visible()
         assert panel_suggestions.locator(".tag-suggestion-name").count() >= 1, "面板上应当直接列出 AI 建议的标签"
-        assert inspector.locator(".question-inspector-tags .tag-suggestion-open").count() == 0, \
+        assert inspector.locator(".question-inspector-tags .tag-suggestion-open").count() == 0, (
             "有建议要核对时，不该再让人点一下才能看见"
+        )
         assert panel_suggestions.locator(".tag-suggestion-accept").count() >= 1, "面板上应当能就地采纳"
         assert panel_suggestions.locator(".tag-suggestion-reject").count() >= 1, "面板上应当能就地拒绝"
-        assert panel_suggestions.locator(".tag-suggestion-buttons button").count() == 2, "底部应当是采纳/拒绝两个批量按钮"
+        assert panel_suggestions.locator(".tag-suggestion-buttons button").count() == 2, (
+            "底部应当是采纳/拒绝两个批量按钮"
+        )
         # 改名、查依据是低频的精细活，留在标签窗口里；面板上不必摆折叠区把它挤满。
         assert panel_suggestions.locator(".tag-suggestion-edit").count() == 0, "改名入口不该挤在面板上"
         assert not inspector.evaluate("node => node.scrollHeight > node.clientHeight + 1"), "建议摊开后把面板撑破了"
@@ -418,8 +509,9 @@ def check(base):
         assert tag_window.locator(".tag-suggestion-accept").count() == 0, "标签窗口里不该再有第二套采纳按钮"
         assert tag_window.locator(".tag-suggestion-reject").count() == 0, "标签窗口里不该再有第二套拒绝按钮"
         assert tag_window.locator(".tag-suggestion-buttons button").count() == 0, "标签窗口里不该再有批量按钮"
-        assert tag_window.locator(".tag-suggestion-line input[type=checkbox]").count() == 0, \
+        assert tag_window.locator(".tag-suggestion-line input[type=checkbox]").count() == 0, (
             "窗口里没有能处理它们的按钮，就不该摆勾选框"
+        )
         # 同一份建议不在窗口里再画一遍：两处内容看两遍，还得对得上两份，改一处另一处就过期。
         assert tag_window.locator("aside.tag-suggestion-card").count() == 0, "标签窗口里不该再有第二份建议清单"
         assert tag_window.get_by_text("在右边详情面板上核对").count() == 1, "窗口应当把人指到面板上"
@@ -427,7 +519,8 @@ def check(base):
         tag_window.get_by_role("button", name="关闭", exact=True).click()
         report["checks"].append(
             "Pending tag suggestions are listed in place in the inspector with accept/reject there, "
-            "while the tag window draws no second copy and just points at the panel — one place per decision")
+            "while the tag window draws no second copy and just points at the panel — one place per decision"
+        )
 
         lost_panel = inspector.locator(".question-inspector-tags .tag-suggestion-card")
         prior_operations = {operation["id"] for operation in read_api("/api/library/tags/operations")["operations"]}
@@ -438,15 +531,20 @@ def check(base):
             result = route.fetch()
             assert result.ok, result.text()
             committed.append(result.json())
-            route.fulfill(status=503, content_type="application/json",
-                body=json.dumps({"error": "隔离验收：服务器已采纳，返回结果丢失。"}, ensure_ascii=False))
+            route.fulfill(
+                status=503,
+                content_type="application/json",
+                body=json.dumps({"error": "隔离验收：服务器已采纳，返回结果丢失。"}, ensure_ascii=False),
+            )
 
         resolve_pattern = "**/api/library/tag-suggestions/*/resolve"
         page.route(resolve_pattern, commit_then_lose_reply)
         lost_panel.locator(".tag-suggestion-accept").click()
         expect(inspector.locator(".tag-suggestion-retry")).to_be_visible()
         assert len(committed) == 1 and len(replay_requests) == 1
-        stored_revision = read_api("/api/library/tags/assignments/batch?ids=" + fixture["lost_reply_id"])["items"][fixture["lost_reply_id"]]["revision"]
+        stored_revision = read_api("/api/library/tags/assignments/batch?ids=" + fixture["lost_reply_id"])["items"][
+            fixture["lost_reply_id"]
+        ]["revision"]
         page.unroute(resolve_pattern, commit_then_lose_reply)
         page.reload()
         page.wait_for_load_state("networkidle")
@@ -454,8 +552,9 @@ def check(base):
         expect(inspector.locator("aside.tag-suggestion-card")).to_have_count(0)
         expect(inspector.locator(".library-tags")).to_contain_text(regression.TAG_NAME)
         expect(inspector.locator(".tag-suggestion-retry")).to_be_visible()
-        with page.expect_response(lambda response: urlparse(response.url).path.endswith("/resolve")
-                and response.request.method == "POST") as replayed:
+        with page.expect_response(
+            lambda response: urlparse(response.url).path.endswith("/resolve") and response.request.method == "POST"
+        ) as replayed:
             inspector.locator(".tag-suggestion-retry").click()
         assert replayed.value.ok, replayed.value.text()
         assert replayed.value.request.post_data_json == replay_requests[0]
@@ -463,13 +562,20 @@ def check(base):
         if replayed.value.json().get("operation_id"):
             assert replayed.value.json()["operation_id"] == committed[0]["operation_id"]
         expect(inspector.locator(".tag-suggestion-retry")).to_have_count(0)
-        current_revision = read_api("/api/library/tags/assignments/batch?ids=" + fixture["lost_reply_id"])["items"][fixture["lost_reply_id"]]["revision"]
+        current_revision = read_api("/api/library/tags/assignments/batch?ids=" + fixture["lost_reply_id"])["items"][
+            fixture["lost_reply_id"]
+        ]["revision"]
         assert current_revision == stored_revision
-        new_operations = [operation for operation in read_api("/api/library/tags/operations")["operations"]
-            if operation["id"] not in prior_operations]
+        new_operations = [
+            operation
+            for operation in read_api("/api/library/tags/operations")["operations"]
+            if operation["id"] not in prior_operations
+        ]
         assert len(new_operations) == 1 and new_operations[0]["action"] == "suggestion:accept"
         assert new_operations[0]["id"] == committed[0]["operation_id"]
-        report["checks"].append("Real committed AI acceptance with lost reply recovers after reload without duplicate operation or revision")
+        report["checks"].append(
+            "Real committed AI acceptance with lost reply recovers after reload without duplicate operation or revision"
+        )
 
         # Saved AI candidates remain drafts while users inspect other cards.
         # The same tab's reload must preserve names, the chosen parent and the
@@ -486,8 +592,10 @@ def check(base):
         name.fill(DRAFT_NAME)
         expect(editor.locator("input[data-new-tag-group]")).to_have_count(0)
         parents = editor.locator("select[data-new-tag-parent]")
-        page.wait_for_function("() => { const box = document.querySelector('[data-new-tag-parent]');"
-            " return !!box && box.options.length > 0; }")
+        page.wait_for_function(
+            "() => { const box = document.querySelector('[data-new-tag-parent]');"
+            " return !!box && box.options.length > 0; }"
+        )
         draft_parent_id = parents.locator("option").first.get_attribute("value")
         parents.select_option([draft_parent_id])
         entry.locator("input[data-tag-suggestion]").check()
@@ -503,7 +611,9 @@ def check(base):
         expect(name).to_have_value(DRAFT_NAME)
         expect(parents).to_have_values([draft_parent_id])
         expect(entry.locator("input[data-tag-suggestion]")).to_be_checked()
-        report["checks"].append("AI candidate draft name, chosen parent and checkboxes survive question switching and reload, all edited in place on the panel")
+        report["checks"].append(
+            "AI candidate draft name, chosen parent and checkboxes survive question switching and reload, all edited in place on the panel"
+        )
 
         # Hold a local request in-flight to check locking, then inject a failed
         # reply. Retrying must use the exact same request, not a second action.
@@ -521,8 +631,11 @@ def check(base):
         expect(entry.locator(".tag-suggestion-accept")).to_be_disabled()
         expect(entry.locator(".tag-suggestion-reject")).to_be_disabled()
         expect(name).to_be_disabled()
-        held[0].fulfill(status=503, content_type="application/json",
-            body=json.dumps({"error": "本机验收：采纳返回暂时失败，保留草稿。"}, ensure_ascii=False))
+        held[0].fulfill(
+            status=503,
+            content_type="application/json",
+            body=json.dumps({"error": "本机验收：采纳返回暂时失败，保留草稿。"}, ensure_ascii=False),
+        )
         expect(entry.locator(".tag-suggestion-accept")).to_be_enabled()
         expect(name).to_have_value(DRAFT_NAME)
         expect(parents).to_have_values([draft_parent_id])
@@ -530,14 +643,22 @@ def check(base):
         page.set_viewport_size({"width": 1440, "height": 640})
         page.evaluate("window.scrollTo(0, Math.max(1, document.documentElement.scrollHeight / 3))")
         second.scroll_into_view_if_needed()
-        before_accept_position = second.evaluate("element => ({top: element.getBoundingClientRect().top, scrollY: window.scrollY})")
+        before_accept_position = second.evaluate(
+            "element => ({top: element.getBoundingClientRect().top, scrollY: window.scrollY})"
+        )
         assert before_accept_position["scrollY"] > 0, before_accept_position
-        with page.expect_response(lambda response: urlparse(response.url).path.endswith("/resolve")
-                and response.request.method == "POST") as accepted:
+        with page.expect_response(
+            lambda response: urlparse(response.url).path.endswith("/resolve") and response.request.method == "POST"
+        ) as accepted:
             entry.locator(".tag-suggestion-accept").click()
         assert accepted.value.ok, accepted.value.text()
-        after_accept_position = second.evaluate("element => ({top: element.getBoundingClientRect().top, scrollY: window.scrollY})")
-        assert abs(after_accept_position["top"] - before_accept_position["top"]) < 12, (before_accept_position, after_accept_position)
+        after_accept_position = second.evaluate(
+            "element => ({top: element.getBoundingClientRect().top, scrollY: window.scrollY})"
+        )
+        assert abs(after_accept_position["top"] - before_accept_position["top"]) < 12, (
+            before_accept_position,
+            after_accept_position,
+        )
         assert after_accept_position["scrollY"] > 0, after_accept_position
         # 采纳之后题目列表原地不动，右侧定位也要能把题卡点亮。
         # 这里刻意没有窗口可关：整件事都在面板上做完，不再另开一层。
@@ -549,7 +670,9 @@ def check(base):
         expect(inspector.locator(".question-inspector-preview")).to_have_count(0)
         expect(inspector.locator(".library-tags-edit")).to_have_count(1)
         assert "inspector-active" in (second.get_attribute("class") or "")
-        report["checks"].append("AI tag acceptance keeps the target question in place and highlighted; the panel carries only the tag editor")
+        report["checks"].append(
+            "AI tag acceptance keeps the target question in place and highlighted; the panel carries only the tag editor"
+        )
         page.set_viewport_size({"width": 1440, "height": 960})
         accepted_payload = accepted.value.request.post_data_json
         assert accepted_payload == resolve_payloads[0], (accepted_payload, resolve_payloads)
@@ -561,8 +684,9 @@ def check(base):
         expect(proposal.locator('.tag-suggestion-entry[data-suggestion-index="1"]')).to_have_count(0)
         expect(inspector.locator(".library-tags")).to_contain_text("未提交的中点专项标签123")
         remaining = proposal.locator('.tag-suggestion-entry[data-suggestion-index="0"]')
-        with page.expect_response(lambda response: urlparse(response.url).path.endswith("/resolve")
-                and response.request.method == "POST") as rejected:
+        with page.expect_response(
+            lambda response: urlparse(response.url).path.endswith("/resolve") and response.request.method == "POST"
+        ) as rejected:
             remaining.locator(".tag-suggestion-reject").click()
         assert rejected.value.ok, rejected.value.text()
         assert rejected.value.request.post_data_json["indices"] == [0]
@@ -573,7 +697,9 @@ def check(base):
         expect(history).to_contain_text("已采纳")
         expect(history).to_contain_text("已拒绝")
         history.get_by_role("button", name="关闭", exact=True).click()
-        report["checks"].append("AI per-entry accept/reject locks in-flight edits, retries identically and removes decided entries")
+        report["checks"].append(
+            "AI per-entry accept/reject locks in-flight edits, retries identically and removes decided entries"
+        )
 
         # Batch scope belongs to the visible batch toolbar, not the inspector.
         page.locator("#selectVisible").check()
@@ -582,12 +708,19 @@ def check(base):
         expect(picker.locator("#tagPickerStatus")).to_have_text("已选 4 题")
         picker.locator("#tagPickerSearch").fill(regression.TAG_NAME)
         expect(row.locator(".tag-picker-row-state")).to_contain_text("部分有 2/4")
-        with page.expect_response(lambda response: urlparse(response.url).path ==
-                "/api/library/tags/assignments/batch" and response.request.method == "POST") as batch:
+        with page.expect_response(
+            lambda response: (
+                urlparse(response.url).path == "/api/library/tags/assignments/batch"
+                and response.request.method == "POST"
+            )
+        ) as batch:
             row.click()
         assert batch.value.ok, batch.value.text()
         assert set(batch.value.request.post_data_json["publication_ids"]) == {
-            *fixture["ids"], fixture["failure_id"], fixture["lost_reply_id"]}
+            *fixture["ids"],
+            fixture["failure_id"],
+            fixture["lost_reply_id"],
+        }
         picker.locator("#tagPickerUndo").click()
         expect(row.locator(".tag-picker-row-state")).to_contain_text("部分有 2/4")
         picker.get_by_role("button", name="关闭", exact=True).click()
@@ -600,9 +733,12 @@ def check(base):
         failed.locator(".library-card-more > summary").click()
         failed.get_by_role("button", name="重新建议", exact=True).click()
         page.wait_for_function("document.querySelector('#toast')?.textContent.includes('已排队')")
-        assert queued_requests == [{"kind": "tags", "ids": [fixture["failure_id"]],
-            "retry": True, "api_only": True}], queued_requests
-        report["checks"].append("Failure state exposes explicit retry with only the selected question; provider request is blocked")
+        assert queued_requests == [{"kind": "tags", "ids": [fixture["failure_id"]], "retry": True, "api_only": True}], (
+            queued_requests
+        )
+        report["checks"].append(
+            "Failure state exposes explicit retry with only the selected question; provider request is blocked"
+        )
 
         # 「点了以为卡死」是这一版要解决的事，所以这里量的是过程，不是静态文案：
         # 整库排队要逐题登记，请求会挂好几秒。必须先弹确认框（涉及额度和题数，
@@ -631,7 +767,9 @@ def check(base):
         expect(batch_panel.get_by_role("button", name=re.compile("正在排队"))).to_be_visible()
         expect(batch_panel.locator(".library-batch-state")).to_be_visible()
         expect(batch_panel.get_by_role("button", name=re.compile("只处理当前这批"))).to_be_disabled()
-        assert batch_panel.get_by_role("button", name=re.compile("正在排队")).count() == 1, "整个面板只应有一个按钮在排队"
+        assert batch_panel.get_by_role("button", name=re.compile("正在排队")).count() == 1, (
+            "整个面板只应有一个按钮在排队"
+        )
 
         # 登记的这几秒里界面会自己重画（题数回来、定时刷新），按钮节点会被换掉。
         # 以前「正在排队…」只写在点下去那一个节点上，于是重画之后按钮变回原名、
@@ -652,7 +790,9 @@ def check(base):
         assert len(queued_requests) == before + 1, "确认之后应当恰好排一次队"
         if batch_panel.evaluate("node => node.open"):
             batch_panel.locator("summary").click()
-        report["checks"].append("The batch entry names its cost on its face, asks before spending quota, and the pressed button keeps saying 正在排队 for the whole in-flight window — including across a re-render — then restores")
+        report["checks"].append(
+            "The batch entry names its cost on its face, asks before spending quota, and the pressed button keeps saying 正在排队 for the whole in-flight window — including across a re-render — then restores"
+        )
 
         first.locator(".paper").click()
         assert inspector.locator(".question-inspector-tags").evaluate("""element => {
@@ -705,15 +845,23 @@ def check(base):
         expect(first).to_be_visible()
         page.get_by_role("button", name="清除筛选", exact=True).click()
         expect(page.locator(".library-card")).to_have_count(4)
-        report["checks"].append("Tag manager is a standalone page; selected-tag details and usage counts open exact matching questions")
+        report["checks"].append(
+            "Tag manager is a standalone page; selected-tag details and usage counts open exact matching questions"
+        )
 
         # Grouping is gone for good: parents are the only hierarchy, so the
         # manager must expose no group bar, no group picker and no group
         # wording. Creating a tag still round-trips through the real server,
         # and neither the request nor the answer carries a group field.
         page.locator("#libraryTagManager").click()
-        for selector in ("#tagManagerGroups", "#tagManagerBulkGroup", "#tagManagerGroupActions",
-                         "#tagManagerCreateGroup", "#tagManagerBulkAdd", "#tagManagerBulkRemove"):
+        for selector in (
+            "#tagManagerGroups",
+            "#tagManagerBulkGroup",
+            "#tagManagerGroupActions",
+            "#tagManagerCreateGroup",
+            "#tagManagerBulkAdd",
+            "#tagManagerBulkRemove",
+        ):
             expect(page.locator(selector)).to_have_count(0)
         assert "分组" not in manager.inner_text()
         manager.locator("#tagManagerCreateTag").click()
@@ -724,21 +872,25 @@ def check(base):
         expect(catalogue_editor.locator("#tagCatalogueName")).to_have_value(new_tag_name)
         expect(catalogue_editor.locator("#tagCatalogueParents")).to_be_visible()
         publication_ids = [*fixture["ids"], fixture["lost_reply_id"]]
-        with page.expect_response(lambda response: urlparse(response.url).path == "/api/library/tags"
-                and response.request.method == "POST") as tag_created:
+        with page.expect_response(
+            lambda response: urlparse(response.url).path == "/api/library/tags" and response.request.method == "POST"
+        ) as tag_created:
             catalogue_editor.locator("#tagCatalogueSave").click()
         assert tag_created.value.ok, tag_created.value.text()
         tag_payload = tag_created.value.request.post_data_json
         assert tag_payload["action"] == "create_tag" and "group_ids" not in tag_payload, tag_payload
         assert "groups" not in tag_created.value.json()["catalogue"]
-        created_tag = next(tag for tag in tag_created.value.json()["catalogue"]["tags"]
-            if tag["name"] == new_tag_name)
+        created_tag = next(tag for tag in tag_created.value.json()["catalogue"]["tags"] if tag["name"] == new_tag_name)
         assert created_tag["parent_ids"] == [], created_tag
         expect(manager.locator(f'.tag-directory-row[data-tag-id="{created_tag["id"]}"]')).to_have_count(1)
         before_assignments = {publication_id: assignment_ids(publication_id) for publication_id in publication_ids}
         capture("tag-manager-bulk.png")
-        assert {publication_id: assignment_ids(publication_id) for publication_id in publication_ids} == before_assignments
-        report["checks"].append("Manager exposes no group controls and creates a tag through the real server without group fields")
+        assert {
+            publication_id: assignment_ids(publication_id) for publication_id in publication_ids
+        } == before_assignments
+        report["checks"].append(
+            "Manager exposes no group controls and creates a tag through the real server without group fields"
+        )
 
         history_section = manager.locator("details.tag-directory-history")
 
@@ -746,8 +898,11 @@ def check(base):
             if not history_section.evaluate("element => element.open"):
                 history_section.locator("summary").click()
             operation = manager.locator(".tag-directory-history-row").filter(has_text=label).first
-            with page.expect_response(lambda response: urlparse(response.url).path == "/api/library/tags/undo"
-                    and response.request.method == "POST") as undone:
+            with page.expect_response(
+                lambda response: (
+                    urlparse(response.url).path == "/api/library/tags/undo" and response.request.method == "POST"
+                )
+            ) as undone:
                 operation.get_by_role("button", name="撤销", exact=True).click()
             assert undone.value.ok, undone.value.text()
 
@@ -767,8 +922,9 @@ def check(base):
             dialog.accept()
 
         page.once("dialog", accept_confirm)
-        with page.expect_response(lambda response: urlparse(response.url).path == "/api/library/tags"
-                and response.request.method == "POST") as merged:
+        with page.expect_response(
+            lambda response: urlparse(response.url).path == "/api/library/tags" and response.request.method == "POST"
+        ) as merged:
             merge_dialog.locator("#tagManagerMergeSubmit").click()
         assert merged.value.ok, merged.value.text()
         assert len(confirms) == 1 and "影响" in confirms[0]
@@ -779,7 +935,9 @@ def check(base):
         assert assignment_ids(fixture["ids"][1]) == [target_id]
         undo_history("批量合并标签")
         expect(source_row).to_have_count(1)
-        assert {publication_id: assignment_ids(publication_id) for publication_id in publication_ids} == before_assignments
+        assert {
+            publication_id: assignment_ids(publication_id) for publication_id in publication_ids
+        } == before_assignments
         report["checks"].append("Merge has one impact confirmation and undo restores source identities and assignments")
 
         # Deleting used tags must cover the full library, then one persisted
@@ -787,8 +945,9 @@ def check(base):
         target_row.locator('input[type="checkbox"]').check()
         source_row.locator('input[type="checkbox"]').check()
         page.once("dialog", accept_confirm)
-        with page.expect_response(lambda response: urlparse(response.url).path == "/api/library/tags"
-                and response.request.method == "POST") as deleted:
+        with page.expect_response(
+            lambda response: urlparse(response.url).path == "/api/library/tags" and response.request.method == "POST"
+        ) as deleted:
             manager.locator("#tagManagerBulkDelete").click()
         assert deleted.value.ok, deleted.value.text()
         assert len(confirms) == 2 and "3 道当前题" in confirms[-1]
@@ -799,7 +958,9 @@ def check(base):
         undo_history("批量删除标签")
         expect(target_row).to_have_count(1)
         expect(source_row).to_have_count(1)
-        assert {publication_id: assignment_ids(publication_id) for publication_id in publication_ids} == before_assignments
+        assert {
+            publication_id: assignment_ids(publication_id) for publication_id in publication_ids
+        } == before_assignments
         report["checks"].append("Batch delete previews full-library impact; persistent undo restores every association")
 
         # After every merge/delete and its undo, the directory is intact: both
@@ -850,9 +1011,14 @@ def run(regression_only=False):
         port = probe.getsockname()[1]
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     with (OUTPUT / "server.log").open("w", encoding="utf-8") as log:
-        server = subprocess.Popen([sys.executable, str(ROOT / "backend/manage.py"), "runserver",
-            f"127.0.0.1:{port}", "--noreload"], cwd=ROOT, env=os.environ.copy(), stdout=log,
-            stderr=subprocess.STDOUT, creationflags=flags)
+        server = subprocess.Popen(
+            [sys.executable, str(ROOT / "backend/manage.py"), "runserver", f"127.0.0.1:{port}", "--noreload"],
+            cwd=ROOT,
+            env=os.environ.copy(),
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            creationflags=flags,
+        )
         try:
             deadline = time.monotonic() + 30
             while time.monotonic() < deadline:
@@ -867,8 +1033,13 @@ def run(regression_only=False):
             (regression.check if regression_only else check)(f"http://127.0.0.1:{port}")
         finally:
             if os.name == "nt":
-                subprocess.run(["taskkill", "/PID", str(server.pid), "/T", "/F"],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags, check=False)
+                subprocess.run(
+                    ["taskkill", "/PID", str(server.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=flags,
+                    check=False,
+                )
             else:
                 server.terminate()
             server.wait(timeout=10)
@@ -882,12 +1053,16 @@ def run(regression_only=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", action="store_true")
-    parser.add_argument("--full-regression", action="store_true",
-        help="With --run, execute the existing complete formal-tag browser regression on its own fresh fixture")
+    parser.add_argument(
+        "--full-regression",
+        action="store_true",
+        help="With --run, execute the existing complete formal-tag browser regression on its own fresh fixture",
+    )
     parser.add_argument("--seed", action="store_true")
     parser.add_argument("--url")
-    parser.add_argument("--output", type=Path,
-        default=OUTPUT / (time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]))
+    parser.add_argument(
+        "--output", type=Path, default=OUTPUT / (time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6])
+    )
     args = parser.parse_args()
     OUTPUT = args.output.resolve()
     if not OUTPUT.is_relative_to(ROOT / "tmp"):

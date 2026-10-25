@@ -13,8 +13,11 @@ REVIEWABLE_STATES = {"green", "yellow"}
 def _approval_hash(question) -> str:
     options = question.options or {}
     is_choice = question.question_type in CHOICE_TYPES or bool(options)
-    source_origin = "manual" if question.start_source == "manual" or question.regions != question.regions_auto \
+    source_origin = (
+        "manual"
+        if question.start_source == "manual" or question.regions != question.regions_auto
         else question.start_source
+    )
     material = {
         "number": question.number,
         "section": question.section,
@@ -52,10 +55,7 @@ def bind_existing_approvals(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
-    dependencies = [
-        ("core", "0003_fix_parallelogram_symbol"),
-    ]
+    dependencies = [("core", "0003_fix_parallelogram_symbol")]
 
     operations = [
         migrations.AddField(

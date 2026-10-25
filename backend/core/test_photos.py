@@ -111,9 +111,9 @@ class ImageTests(SimpleTestCase):
             self.assertLess(abs(x - fx), 60)
             self.assertLess(abs(y - fy), 60)
         flat = photos.straighten(photo, found)
-        self.assertAlmostEqual(flat.height / flat.width, 2 ** 0.5, places=2)   # 试卷纸按 √2 还原
+        self.assertAlmostEqual(flat.height / flat.width, 2**0.5, places=2)  # 试卷纸按 √2 还原
         corner = flat.convert("L").crop((0, 0, flat.width // 12, flat.height // 12))
-        self.assertGreater(ImageStat.Stat(corner).mean[0], 200)                # 角上是纸，不是桌面
+        self.assertGreater(ImageStat.Stat(corner).mean[0], 200)  # 角上是纸，不是桌面
 
     def test_not_straightened_when_sheet_fills_frame_or_is_cut_off(self):
         self.assertIsNone(photos.find_page_quad(text_page()))
@@ -122,11 +122,11 @@ class ImageTests(SimpleTestCase):
 
     def test_enhance_brightens_dark_uneven_paper_and_keeps_text(self):
         page = text_page().convert("L")
-        shade = Image.linear_gradient("L").resize(page.size).point(lambda v: 90 + v // 3)   # 发暗且一边更暗
+        shade = Image.linear_gradient("L").resize(page.size).point(lambda v: 90 + v // 3)  # 发暗且一边更暗
         dark = Image.composite(page, Image.new("L", page.size, 0), shade)
         clean = photos.enhance(dark)
-        paper = clean.crop((20, 20, 100, 1650))              # 左边空白处（原来很暗）
-        text = clean.crop((300, 125, 900, 135))              # 一行"字"
+        paper = clean.crop((20, 20, 100, 1650))  # 左边空白处（原来很暗）
+        text = clean.crop((300, 125, 900, 135))  # 一行"字"
         self.assertGreater(ImageStat.Stat(paper).mean[0], 240)
         self.assertLess(ImageStat.Stat(text).mean[0], 60)
 
@@ -163,14 +163,16 @@ class PhotoPaperTests(TestCase):
         self.assertEqual(paper.kind, "image")
         self.assertEqual(paper.filename, "IMG_2 等 2 张照片")
         self.assertEqual([f["name"] for f in paper.photos["files"]], ["IMG_2.jpg", "IMG_1.jpg"])
-        self.assertEqual(paper.photos["order"], [1, 0])          # 文件名粗排
+        self.assertEqual(paper.photos["order"], [1, 0])  # 文件名粗排
         self.assertTrue(paper.photos["enhance"])
         self.assertEqual(response.json()["paper"]["photos"]["names"], ["IMG_1.jpg", "IMG_2.jpg"])
         # 同一组照片换个顺序再传：认出是同一份卷
         again = self.upload({"IMG_1.jpg": jpeg_bytes(marked_page(1)), "IMG_2.jpg": jpeg_bytes(marked_page(2))})
         self.assertTrue(again.json().get("duplicate"))
         # 不做扫描件效果：算另一份卷
-        plain = self.upload({"IMG_1.jpg": jpeg_bytes(marked_page(1)), "IMG_2.jpg": jpeg_bytes(marked_page(2))}, enhance="0")
+        plain = self.upload(
+            {"IMG_1.jpg": jpeg_bytes(marked_page(1)), "IMG_2.jpg": jpeg_bytes(marked_page(2))}, enhance="0"
+        )
         self.assertEqual(plain.status_code, 201)
         self.assertFalse(Paper.objects.get(pk=plain.json()["paper"]["id"]).photos["enhance"])
 
@@ -189,8 +191,11 @@ class PhotoPaperTests(TestCase):
         forced = self.upload(batch, force="1")
         self.assertEqual(forced.status_code, 201, forced.content)
         self.assertEqual(Paper.objects.count(), 2)
-        self.assertNotEqual(Paper.objects.get(pk=forced.json()["paper"]["id"]).display_name,
-            archived.display_name, "两份来源必须能在题库里分开")
+        self.assertNotEqual(
+            Paper.objects.get(pk=forced.json()["paper"]["id"]).display_name,
+            archived.display_name,
+            "两份来源必须能在题库里分开",
+        )
 
     def test_mixing_pdf_and_photos_or_bad_image_is_rejected(self):
         response = self.upload({"a.jpg": jpeg_bytes(marked_page(1)), "b.pdf": b"%PDF-1.4"})
@@ -202,16 +207,23 @@ class PhotoPaperTests(TestCase):
     def test_parse_orders_pages_by_question_numbers_then_manual_reorder(self):
         # 三张照片按文件名粗排成 A、B、C，但卷面题号说明正确顺序是 B（1–5）、C（6–9）、A（10–12）。
         pictures = {"A.jpg": marked_page(1), "B.jpg": marked_page(2), "C.jpg": marked_page(3)}
-        response = self.upload({name: jpeg_bytes(image) for name, image in pictures.items()},
-            enhance="0", parse_mode="mineru")
+        response = self.upload(
+            {name: jpeg_bytes(image) for name, image in pictures.items()}, enhance="0", parse_mode="mineru"
+        )
         paper = Paper.objects.get(pk=response.json()["paper"]["id"])
         numbers = {"A.jpg": (10, 12), "B.jpg": (1, 5), "C.jpg": (6, 9)}
         blocks, seq = [], 0
-        for page, index in enumerate(paper.photos["order"]):          # MinerU 看到的页序 = 粗排顺序
+        for page, index in enumerate(paper.photos["order"]):  # MinerU 看到的页序 = 粗排顺序
             low, high = numbers[paper.photos["files"][index]["name"]]
             for offset, number in enumerate(range(low, high + 1)):
-                blocks.append({"type": "text", "page_idx": page, "bbox": [60, 80 + offset * 150, 900, 110 + offset * 150],
-                               "text": f"{number}. 已知函数 f(x) 的值"})
+                blocks.append(
+                    {
+                        "type": "text",
+                        "page_idx": page,
+                        "bbox": [60, 80 + offset * 150, 900, 110 + offset * 150],
+                        "text": f"{number}. 已知函数 f(x) 的值",
+                    }
+                )
                 seq += 1
         folder = self.temp / str(paper.id)
         mineru_zip(folder / "mineru_result.zip", blocks)
@@ -225,7 +237,7 @@ class PhotoPaperTests(TestCase):
         self.assertEqual(shown["names"], ["B.jpg", "C.jpg", "A.jpg"])
         self.assertEqual(shown["ranges"], [[1, 5], [6, 9], [10, 12]])
         store = pipeline.PageStore(paper)
-        self.assertEqual([dark_bars(store.load(p)) for p in range(3)], [2, 3, 1])     # PDF 也按新页序重拼
+        self.assertEqual([dark_bars(store.load(p)) for p in range(3)], [2, 3, 1])  # PDF 也按新页序重拼
         first_page = {b.text[:2] for b in paper.blocks.filter(page_idx=0)}
         self.assertEqual(first_page, {"1.", "2.", "3.", "4.", "5."})
 
@@ -233,17 +245,25 @@ class PhotoPaperTests(TestCase):
         paper.status = Paper.Status.READY
         paper.save()
         first_group = QuestionGroup.objects.create(
-            paper=paper, title="前两页", sequence=0, page_start=1, page_end=2,
-            metadata={"pages": [0, 1]},
+            paper=paper, title="前两页", sequence=0, page_start=1, page_end=2, metadata={"pages": [0, 1]}
         )
         second_group = QuestionGroup.objects.create(
-            paper=paper, title="最后一页", sequence=1, page_start=3, page_end=3,
-            metadata={"pages": [2]},
+            paper=paper, title="最后一页", sequence=1, page_start=3, page_end=3, metadata={"pages": [2]}
         )
-        question = Question.objects.create(paper=paper, group=second_group, number=10, regions=[{"page_idx": 2, "bbox": [50, 50, 950, 500]}],
-                                            regions_auto=[{"page_idx": 2, "bbox": [50, 50, 950, 500]}], state="green")
-        response = self.client.post(f"/api/papers/{paper.id}/page-order", data=json.dumps({"order": [2, 0, 1]}),
-                                    content_type="application/json", HTTP_X_QB_REQUEST="1")
+        question = Question.objects.create(
+            paper=paper,
+            group=second_group,
+            number=10,
+            regions=[{"page_idx": 2, "bbox": [50, 50, 950, 500]}],
+            regions_auto=[{"page_idx": 2, "bbox": [50, 50, 950, 500]}],
+            state="green",
+        )
+        response = self.client.post(
+            f"/api/papers/{paper.id}/page-order",
+            data=json.dumps({"order": [2, 0, 1]}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
         self.assertEqual(response.status_code, 200, response.content)
         paper.refresh_from_db()
         # This manual order restarts from 10–12 back to 1–5.  The new no-loss
@@ -263,8 +283,12 @@ class PhotoPaperTests(TestCase):
         self.assertEqual([dark_bars(pipeline.PageStore(paper).load(p)) for p in range(3)], [1, 2, 3])
         self.assertNotEqual(response.json()["paper"]["pages_version"], "")
         self.assertEqual(response.json()["paper"]["photos"]["ranges"], [[10, 12], [1, 5], [6, 9]])  # 范围跟着照片走
-        bad = self.client.post(f"/api/papers/{paper.id}/page-order", data=json.dumps({"order": [0, 0, 1]}),
-                               content_type="application/json", HTTP_X_QB_REQUEST="1")
+        bad = self.client.post(
+            f"/api/papers/{paper.id}/page-order",
+            data=json.dumps({"order": [0, 0, 1]}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
         self.assertEqual(bad.status_code, 400)
 
         # Confirming the new physical order must apply its new scopes, not keep
@@ -272,13 +296,17 @@ class PhotoPaperTests(TestCase):
         # and retains its stable source identity.
         source_key = question.source_key
         confirmed = self.client.post(
-            f"/api/papers/{paper.id}/confirm-structure", data=json.dumps({}),
-            content_type="application/json", HTTP_X_QB_REQUEST="1",
+            f"/api/papers/{paper.id}/confirm-structure",
+            data=json.dumps({}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
         )
         self.assertEqual(confirmed.status_code, 200, confirmed.content)
         paper.refresh_from_db()
-        with mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda regions, _load: regions), \
-                mock.patch.object(pipeline, "locate_missing", return_value=[]):
+        with (
+            mock.patch.object(pipeline.imaging, "trim_regions", side_effect=lambda regions, _load: regions),
+            mock.patch.object(pipeline, "locate_missing", return_value=[]),
+        ):
             pipeline.segment_paper(paper)
         question.refresh_from_db()
         self.assertEqual(question.source_key, source_key)

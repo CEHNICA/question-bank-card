@@ -85,9 +85,7 @@ async def fill_basket(page, base):
     await page.goto(f"{base}/library", wait_until="domcontentloaded")
     await page.wait_for_selector(".library-card", timeout=30000)
     await page.wait_for_timeout(2500)
-    for dialog in await page.evaluate(
-        "() => [...document.querySelectorAll('dialog[open]')].map((d) => d.id)"
-    ):
+    for dialog in await page.evaluate("() => [...document.querySelectorAll('dialog[open]')].map((d) => d.id)"):
         await page.evaluate("(id) => document.getElementById(id)?.close()", dialog)
     added = await page.evaluate(
         """(label) => {
@@ -188,8 +186,10 @@ async def main():
             if pushed.get("err"):
                 print(f"  SKIP 受控场景：{pushed['err']}")
             elif pushed["belowSheet"] <= 0:
-                print(f"  SKIP 受控场景：菜单没能伸出纸（belowSheet={pushed['belowSheet']}），"
-                      "这一轮没有真正复现要防的情形")
+                print(
+                    f"  SKIP 受控场景：菜单没能伸出纸（belowSheet={pushed['belowSheet']}），"
+                    "这一轮没有真正复现要防的情形"
+                )
             elif pushed["covered"]:
                 failures += 1
                 print(
@@ -198,9 +198,11 @@ async def main():
                     f"covered={json.dumps(pushed['covered'], ensure_ascii=False)}"
                 )
             else:
-                print(f"  OK 伸出纸 {pushed['belowSheet']}px 仍完全可点"
-                      f"（{pushed['inside']}/{pushed['total']} 个点，向上翻={pushed['flippedUp']}，"
-                      f"纸已抬起={pushed['sheetLifted']}）")
+                print(
+                    f"  OK 伸出纸 {pushed['belowSheet']}px 仍完全可点"
+                    f"（{pushed['inside']}/{pushed['total']} 个点，向上翻={pushed['flippedUp']}，"
+                    f"纸已抬起={pushed['sheetLifted']}）"
+                )
         finally:
             await browser.close()
 

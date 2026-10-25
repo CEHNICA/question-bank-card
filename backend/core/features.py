@@ -17,29 +17,34 @@ from django.conf import settings
 FEATURES = {
     # 默认开：只挪格式、不改字。
     "origin_split": {
-        "default": True, "label": "拆出题源",
+        "default": True,
+        "label": "拆出题源",
         "help": "题干开头的“[2026××中学月考]”“（2025·北京·期中）”放到“题源”里，组卷打印时不印。",
     },
     "chinese_quotes": {
-        "default": True, "label": "中文引号",
-        "help": "中文句子里的英文双引号 \"…\" 换成 “…”。公式里的不动。",
+        "default": True,
+        "label": "中文引号",
+        "help": '中文句子里的英文双引号 "…" 换成 “…”。公式里的不动。',
     },
     "full_width_punctuation": {
-        "default": True, "label": "中文标点",
-        "help": "中文句子里的半角 . , ; : ? ! 换成全角。，；：？！。"
-                "公式、坐标、比例、选项字母和数字里的半角标点不动。",
+        "default": True,
+        "label": "中文标点",
+        "help": "中文句子里的半角 . , ; : ? ! 换成全角。，；：？！。公式、坐标、比例、选项字母和数字里的半角标点不动。",
     },
     # 默认关：要用的时候再打开。
     "subquestions": {
-        "default": False, "label": "显示小问数",
+        "default": False,
+        "label": "显示小问数",
         "help": "题库里标出“含 2 小问”，以后按小问布置作业时用。",
     },
     "knowledge_tags": {
-        "default": False, "label": "知识点标签",
+        "default": False,
+        "label": "知识点标签",
         "help": "默认关闭。开启后由当前豆包或 AI 助手从固定目录选 1–3 个标签并写回；也可在独立设置中选择模型 API。AI 标签需核对。",
     },
     "ai_answer": {
-        "default": False, "label": "AI 参考答案",
+        "default": False,
+        "label": "AI 参考答案",
         "help": "默认关闭。开启后由当前豆包或 AI 助手为没有原卷答案的题生成参考并写回，无需额外豆包 API。可选独立模型；结果标着“AI 参考 · 未核对”，与原卷答案分开。",
     },
     # 1.26.22：每天自动打一份本机备份（1.26.23 起只留最近 2 份）。
@@ -49,10 +54,11 @@ FEATURES = {
     # 1.26.26：不说「（今天和昨天）」——手动打过一次备份，两份就都是今天的；
     # 隔几天没开软件，留着的两份比昨天还旧。写死那句话就是承诺兑现不了的事。
     "auto_backup": {
-        "default": True, "label": "每天自动备份",
+        "default": True,
+        "label": "每天自动备份",
         "help": "每天在本机打一份题库备份包，只留最近 2 份。"
-                "软件出毛病、迁移出错或磁盘写坏时，能把题库救回来。不联网、不上传。"
-                "关掉以后仍可以点“现在备份一次”手动打。",
+        "软件出毛病、迁移出错或磁盘写坏时，能把题库救回来。不联网、不上传。"
+        "关掉以后仍可以点“现在备份一次”手动打。",
     },
 }
 # Keep the removed switch readable as false so an old features.json cannot
@@ -94,8 +100,7 @@ def load() -> dict[str, bool]:
         if _cache["path"] == target and _cache["mtime"] == mtime and _cache["values"] is not None:
             return dict(_cache["values"])
     stored = _read(target) if mtime is not None else {}
-    values = {key: stored[key] if isinstance(stored.get(key), bool) else default
-              for key, default in DEFAULTS.items()}
+    values = {key: stored[key] if isinstance(stored.get(key), bool) else default for key, default in DEFAULTS.items()}
     values["double_read"] = False
     with _lock:
         _cache.update(path=target, mtime=mtime, values=dict(values))
@@ -137,5 +142,7 @@ def save(changes) -> dict[str, bool]:
 def describe() -> list[dict]:
     """The switches with their labels, for the settings page and tiyouju."""
     values = load()
-    return [{"key": key, "label": spec["label"], "help": spec["help"], "default": spec["default"],
-             "enabled": values[key]} for key, spec in FEATURES.items()]
+    return [
+        {"key": key, "label": spec["label"], "help": spec["help"], "default": spec["default"], "enabled": values[key]}
+        for key, spec in FEATURES.items()
+    ]

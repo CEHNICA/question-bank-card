@@ -123,8 +123,7 @@ class ReadingPipelineTests(TestCase):
         env = mock.patch.dict("os.environ", {"MINIMAX_API_KEY": "test", "SILICONFLOW_API_KEY": "test2"})
         env.start()
         self.addCleanup(env.stop)
-        self.paper = Paper.objects.create(filename="卷.pdf", kind="pdf", sha256="r" * 64,
-                                          status=Paper.Status.READING)
+        self.paper = Paper.objects.create(filename="卷.pdf", kind="pdf", sha256="r" * 64, status=Paper.Status.READING)
         folder = self.temp / str(self.paper.id)
         folder.mkdir(parents=True)
         fake_page_pdf(folder / "source.pdf")
@@ -134,7 +133,9 @@ class ReadingPipelineTests(TestCase):
 
     def card(self, candidates=()):
         return Question.objects.create(
-            paper=self.paper, number=1, question_type="free_response",
+            paper=self.paper,
+            number=1,
+            question_type="free_response",
             regions=[{"page_idx": 0, "bbox": [50, 100, 480, 200]}],
             regions_auto=[{"page_idx": 0, "bbox": [50, 100, 480, 200]}],
             figure_candidates=[
@@ -152,23 +153,27 @@ class ReadingPipelineTests(TestCase):
 
     def test_single_read_does_not_start_a_second_read_or_arbiter(self):
         question = self.card()
-        chat = self.run_card(question, {
-            ("a", 1): tagged("交x轴于点E，y≥0时，是否为定值？如果是，请求出"),
-            ("b", 1): tagged("交x轴于点E，当y≥0时，是否为定值？若是，请求出"),
-            ("arbiter", 1): tagged("交x轴于点E，当y≥0时，是否为定值？如果是，请求出"),
-        })
+        chat = self.run_card(
+            question,
+            {
+                ("a", 1): tagged("交x轴于点E，y≥0时，是否为定值？如果是，请求出"),
+                ("b", 1): tagged("交x轴于点E，当y≥0时，是否为定值？若是，请求出"),
+                ("arbiter", 1): tagged("交x轴于点E，当y≥0时，是否为定值？如果是，请求出"),
+            },
+        )
         self.assertEqual((question.state, question.text_source), (Question.State.GREEN, "single"), question.flags)
         self.assertEqual([call[0] for call in chat.calls], ["a"])
 
     def test_mineru_difference_is_visible_for_manual_review_without_an_ai_spot_check(self):
         # MinerU and the single vision reading differ at a clean one-character spot.
         question = self.card()
-        self.paper.blocks.create(seq=1, type="text", page_idx=0, bbox=[60, 110, 470, 170],
-                                 text="1. 小毅设计了包装盒，共有____种添补的方法")
-        chat = self.run_card(question, {
-            ("a", 1): tagged("小毅设计了包装盒，共有____种器补的方法"),
-            ("spotcheck", 1): lambda prompt: "1=不确定",
-        })
+        self.paper.blocks.create(
+            seq=1, type="text", page_idx=0, bbox=[60, 110, 470, 170], text="1. 小毅设计了包装盒，共有____种添补的方法"
+        )
+        chat = self.run_card(
+            question,
+            {("a", 1): tagged("小毅设计了包装盒，共有____种器补的方法"), ("spotcheck", 1): lambda prompt: "1=不确定"},
+        )
         self.assertEqual(question.state, Question.State.YELLOW)
         flag = next(f for f in question.flags if f.startswith(pipeline.WITNESS_FLAG_PREFIX))
         self.assertIn("【器】", flag)
@@ -178,16 +183,16 @@ class ReadingPipelineTests(TestCase):
     def test_a_choice_question_missing_a_letter_is_not_green(self):
         question = self.card()
         options = {"B": "甲命题成立", "C": "乙命题成立", "D": "丙命题成立"}
-        self.run_card(question, {("a", 1): tagged("已知二元函数，则", options),
-                                 ("b", 1): tagged("已知二元函数，则", options)})
+        self.run_card(
+            question, {("a", 1): tagged("已知二元函数，则", options), ("b", 1): tagged("已知二元函数，则", options)}
+        )
         self.assertEqual(question.state, Question.State.YELLOW)
         self.assertIn("选项 A 没有读出来，请对照原卷补上", question.flags)
 
     def test_unjudged_candidate_stays_flagged_after_a_later_edit(self):
         question = self.card(candidates=[1, 2])
         stem = "如图，在菱形 $ABCD$ 中，$AC=8$，求 $BD$ 的长。"
-        chat = self.run_card(question, {("a", 1): tagged(stem, figures="1=题干"),
-                                        ("classify", 1): "2=无关"})
+        chat = self.run_card(question, {("a", 1): tagged(stem, figures="1=题干"), ("classify", 1): "2=无关"})
         self.assertEqual(question.state, Question.State.YELLOW, question.flags)
         # 只钉住「没有为漏判的框单独再问一次」。手写闸门那两问是另一回事，它问的是
         # 图上有没有印刷内容，编号候选框，落在 calls 里是 ownership/handwritten。

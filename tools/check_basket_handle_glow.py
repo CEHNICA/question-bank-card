@@ -5,6 +5,7 @@
 但没真跑」骗过去，所以要跨一个周期采样；只看颜色又会漏掉「2/255 那种等于没有」，
 所以要拿波谷/波峰的底色和白比、和数字的对比度一起算。
 """
+
 import argparse
 import asyncio
 import pathlib
@@ -104,8 +105,7 @@ def spread_of(box_shadow):
     lengths, not the three the stylesheet is written with.
     """
     layers = []
-    for match in re.finditer(
-            r"(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px(?:\s+(-?[\d.]+)px)?", box_shadow):
+    for match in re.finditer(r"(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px(?:\s+(-?[\d.]+)px)?", box_shadow):
         offset, blur = float(match.group(1)), float(match.group(3))
         spread = float(match.group(4) or 0)
         if abs(offset) >= 1 or blur >= 1:
@@ -200,10 +200,8 @@ async def main():
 
         # 4) 可读性：越亮越清楚，两端都过 AA。底色要压在白底上算，透明才算白。
         text_rgb = parse_rgb(cycle[0]["color"])
-        trough_contrast = contrast(text_rgb, over_white(parse_rgba(
-            min(fills, key=lambda v: distance_from_white(v)))))
-        peak_contrast = contrast(text_rgb, over_white(parse_rgba(
-            max(fills, key=lambda v: distance_from_white(v)))))
+        trough_contrast = contrast(text_rgb, over_white(parse_rgba(min(fills, key=lambda v: distance_from_white(v)))))
+        peak_contrast = contrast(text_rgb, over_white(parse_rgba(max(fills, key=lambda v: distance_from_white(v)))))
         notes.append(f"数字 {cycle[0]['text']} 颜色 {cycle[0]['color']}")
         notes.append(f"数字对比度：波谷 {trough_contrast:.2f}:1，波峰 {peak_contrast:.2f}:1")
         check(trough_contrast >= 4.5, f"波谷数字仍可读（{trough_contrast:.2f} ≥ 4.5）")
@@ -220,30 +218,35 @@ async def main():
         twenty = await sample_cycle(page, steps=5)
         one_fills = {read["backgroundColor"] for read in one}
         twenty_fills = {read["backgroundColor"] for read in twenty}
-        check(len(one_fills) > 1 and len(twenty_fills) > 1,
-              f"1 题和 20 题都真的在呼吸（{len(one_fills)} / {len(twenty_fills)} 组取值）")
+        check(
+            len(one_fills) > 1 and len(twenty_fills) > 1,
+            f"1 题和 20 题都真的在呼吸（{len(one_fills)} / {len(twenty_fills)} 组取值）",
+        )
         one_bounds = extremes(one_fills, distance_from_white)
         twenty_bounds = extremes(twenty_fills, distance_from_white)
         notes.append(f"底色距白 1 题 {one_bounds} / 20 题 {twenty_bounds}")
         # 和下面那行溢光一个道理，这里也要容差：波谷是**连续动画的采样最小值**，5 个
         # 采样点落在周期的哪一段是随机的，波谷因此会差 1/255。真的「强度跟题数走」
         # 会差几十 —— 动画本身就跨 41→96，差 2 远在噪声里。
-        check(all(abs(a - b) <= 2 for a, b in zip(one_bounds, twenty_bounds)),
-              f"1 题和 20 题的荧光强弱一样（{one_bounds} vs {twenty_bounds}，容差 2/255）")
+        check(
+            all(abs(a - b) <= 2 for a, b in zip(one_bounds, twenty_bounds)),
+            f"1 题和 20 题的荧光强弱一样（{one_bounds} vs {twenty_bounds}，容差 2/255）",
+        )
         one_shadows = {read["boxShadow"] for read in one}
         twenty_shadows = {read["boxShadow"] for read in twenty}
         one_shadow_bound = extremes(one_shadows, widest)
         twenty_shadow_bound = extremes(twenty_shadows, widest)
         notes.append(f"溢光最宽 1 题 {one_shadow_bound} / 20 题 {twenty_shadow_bound}")
         # 模糊半径是连续变化的，采样很难正好落在极值上，所以留一点容差。
-        check(all(abs(a - b) <= 2 for a, b in zip(one_shadow_bound, twenty_shadow_bound)),
-              "1 题和 20 题的溢光强弱一样")
+        check(all(abs(a - b) <= 2 for a, b in zip(one_shadow_bound, twenty_shadow_bound)), "1 题和 20 题的溢光强弱一样")
 
         # 9) 几何：贴边 + 溢光不被视口切。取溢光最宽的那一帧（波峰）来量。
         peak_shadow = max((read["boxShadow"] for read in twenty), key=widest)
         rect = await page.locator("#basketHandle").bounding_box()
-        check(WIDTH - (rect["x"] + rect["width"]) < 1,
-              f"把手贴在视口右缘（间距 {WIDTH - (rect['x'] + rect['width']):.2f}px）")
+        check(
+            WIDTH - (rect["x"] + rect["width"]) < 1,
+            f"把手贴在视口右缘（间距 {WIDTH - (rect['x'] + rect['width']):.2f}px）",
+        )
         layers = spread_of(peak_shadow)
         notes.append(f"波峰溢光层：{layers}")
         check(bool(layers), f"解析出 {len(layers)} 层溢光")
@@ -251,13 +254,11 @@ async def main():
             # 设计点上这两个数**正好相等**（溢光往里收 blur/2，才不会顶出视口硬边）。
             # 两个值都是从 box-shadow 字符串里解析出来的，带小数末位；拿 13.9987 去比
             # 13.99875 会因为 5e-5 的差判成失败。留 0.1px，真露边是差好几像素的事。
-            check(abs(offset) >= blur / 2 - 0.1,
-                  f"溢光层 {offset:g}px/{blur:g}px 的右边界落在视口内，不露硬边")
+            check(abs(offset) >= blur / 2 - 0.1, f"溢光层 {offset:g}px/{blur:g}px 的右边界落在视口内，不露硬边")
 
         # 10) 截图：波谷和波峰，带把手周围的留白
         box = await page.locator("#basketHandle").bounding_box()
-        clip = {"x": box["x"] - 58, "y": box["y"] - 16,
-                "width": 58 + box["width"] + 10, "height": box["height"] + 32}
+        clip = {"x": box["x"] - 58, "y": box["y"] - 16, "width": 58 + box["width"] + 10, "height": box["height"] + 32}
         await page.screenshot(path=str(shots / "01-trough.png"), clip=clip)
         for _ in range(int(PERIOD_MS / 2 / 100)):
             await page.wait_for_timeout(100)

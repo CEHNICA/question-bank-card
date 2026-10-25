@@ -5,6 +5,7 @@
 不到那一步，目录就留下了。上传视图里那句「下次启动会按 .uploading-* 规则继续
 清理」说的就是 :func:`core.apps.discard_interrupted_uploads`——它以前并不存在。
 """
+
 import os
 import tempfile
 import time
@@ -32,6 +33,7 @@ class _StagingRootMixin:
 
     def _remove(self):
         import shutil
+
         shutil.rmtree(self.root, ignore_errors=True)
 
     def staging(self, name: str, payload: bytes = b"%PDF-1.4 x") -> Path:
@@ -51,6 +53,7 @@ class _StagingRootMixin:
     def _deny_removal(entry: Path):
         import shutil as real_shutil
         from unittest import mock
+
         original = real_shutil.rmtree
 
         def guarded(path, *args, **kwargs):
@@ -79,8 +82,8 @@ class DiscardInterruptedUploadsTests(_StagingRootMixin, SimpleTestCase):
     def test_a_still_being_written_dir_is_never_removed(self):
         # 200MB 的卷在慢盘上能写十几分钟，而目录是上传开始时建的。
         # 只看目录自己的时间会把它当成陈旧目录，连正在写的文件一起删掉。
-        entry = self.age(self.staging(".uploading-writing-now"), 3600)   # 目录看起来很旧
-        self.age(entry / "source.pdf", 2)                                # 可文件刚刚还在写
+        entry = self.age(self.staging(".uploading-writing-now"), 3600)  # 目录看起来很旧
+        self.age(entry / "source.pdf", 2)  # 可文件刚刚还在写
         self.assertEqual(discard_interrupted_uploads(), [])
         self.assertTrue((entry / "source.pdf").exists())
 
@@ -102,7 +105,7 @@ class DiscardInterruptedUploadsTests(_StagingRootMixin, SimpleTestCase):
     def test_a_locked_dir_does_not_stop_startup(self):
         entry = self.age(self.staging(".uploading-locked"), 3600)
         self._deny_removal(entry)
-        self.assertEqual(discard_interrupted_uploads(), [])   # 不抛异常
+        self.assertEqual(discard_interrupted_uploads(), [])  # 不抛异常
         self.assertTrue(entry.exists())
 
     def test_a_missing_data_root_is_not_an_error(self):
@@ -142,7 +145,7 @@ class DiscardInterruptedDeletesTests(_StagingRootMixin, SimpleTestCase):
         self.age(source, 86400)
         staged = self.root / (".deleting-3f9c1d2e-4a5b-4b61-aa11-000000000001-" + "d" * 32)
         source.replace(staged)
-        self.assertLess(staged.stat().st_mtime, time.time() - 3600)   # 看起来很旧
+        self.assertLess(staged.stat().st_mtime, time.time() - 3600)  # 看起来很旧
 
         # views.paper 改完名立刻 os.utime 一下，扫描才分得出新旧。
         os.utime(staged, None)
@@ -163,7 +166,7 @@ class DiscardInterruptedDeletesTests(_StagingRootMixin, SimpleTestCase):
     def test_a_locked_delete_dir_does_not_stop_startup(self):
         entry = self.age(self.staging(".deleting-locked-" + "e" * 32), 3600)
         self._deny_removal(entry)
-        self.assertEqual(discard_interrupted_deletes(), [])   # 不抛异常
+        self.assertEqual(discard_interrupted_deletes(), [])  # 不抛异常
         self.assertTrue(entry.exists())
 
     def test_the_age_guard_is_long_enough_to_cover_an_in_flight_delete(self):

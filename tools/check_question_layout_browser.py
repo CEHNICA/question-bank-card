@@ -6,6 +6,7 @@ the real loopback UI. No worker, installed service, credentials or cloud API
 is used. Writes are allowed only to this fixture's layout, undo, question
 deletion and recycle-bin restore endpoints.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,8 +41,10 @@ def database_rows():
     assert db.is_relative_to((ROOT / "tmp").resolve())
     with sqlite3.connect(db.as_uri() + "?mode=ro", uri=True) as connection:
         connection.row_factory = sqlite3.Row
-        return {table: [dict(row) for row in connection.execute(f"SELECT * FROM {table} ORDER BY id")]
-                for table in ("core_paper", "core_question", "core_publishedquestion", "core_regionread", "core_libraryjob")}
+        return {
+            table: [dict(row) for row in connection.execute(f"SELECT * FROM {table} ORDER BY id")]
+            for table in ("core_paper", "core_question", "core_publishedquestion", "core_regionread", "core_libraryjob")
+        }
 
 
 def bootstrap():
@@ -51,6 +54,7 @@ def bootstrap():
     assert Path(os.environ["QB_DATA_ROOT"]).resolve() == user / "data"
     sys.path.insert(0, str(ROOT / "backend"))
     import django
+
     django.setup()
 
 
@@ -68,12 +72,22 @@ def seed_old(output):
     Paper = apps.get_model("core", "Paper")
     Question = apps.get_model("core", "Question")
     Group = apps.get_model("core", "QuestionGroup")
-    paper = Paper.objects.create(filename="虚构题框校正验收.pdf", kind="pdf", sha256="layout-synthetic-main",
-        status="ready", pages=[{"page_idx": i, "width": 600, "height": 900} for i in range(2)],
-        processing_plan={"schema": 1, "mode": "manual", "revision": 0}, total=4, progress=4)
-    groups = [Group.objects.create(paper=paper, title=title, sequence=i, kind="exam",
-              page_start=1, page_end=2, metadata={"pages": [0, 1]})
-              for i, title in enumerate(("虚构试卷甲", "虚构试卷乙"))]
+    paper = Paper.objects.create(
+        filename="虚构题框校正验收.pdf",
+        kind="pdf",
+        sha256="layout-synthetic-main",
+        status="ready",
+        pages=[{"page_idx": i, "width": 600, "height": 900} for i in range(2)],
+        processing_plan={"schema": 1, "mode": "manual", "revision": 0},
+        total=4,
+        progress=4,
+    )
+    groups = [
+        Group.objects.create(
+            paper=paper, title=title, sequence=i, kind="exam", page_start=1, page_end=2, metadata={"pages": [0, 1]}
+        )
+        for i, title in enumerate(("虚构试卷甲", "虚构试卷乙"))
+    ]
     regions = [
         [{"page_idx": 0, "bbox": [70, 85, 930, 410]}],
         [{"page_idx": 0, "bbox": [70, 255, 930, 360]}],
@@ -82,37 +96,72 @@ def seed_old(output):
     ]
     rows = []
     for i, parts in enumerate(regions):
-        stem = ("人工保存的虚构第 1 题：求 sin x 的值。" if i == 0 else
-                "人工保存的虚构第 2 题：求 \\sin x 的值。" if i == 1 else
-                "人工保存的虚构第 3 题：求 SIN x 的值。" if i == 2 else "")
-        rows.append(Question.objects.create(paper=paper, group=groups[0 if i < 3 else 1],
-            number=i + 1 if i < 3 else 1, regions=parts, regions_auto=parts,
-            question_type="free_response", state="yellow", stem=stem,
-            processing_mode="auto" if i == 0 else "manual", body_mode="source_image" if i == 3 else "text", edited=i != 3,
-            type_locked=True, text_source="human", start_source="manual"))
+        stem = (
+            "人工保存的虚构第 1 题：求 sin x 的值。"
+            if i == 0
+            else "人工保存的虚构第 2 题：求 \\sin x 的值。"
+            if i == 1
+            else "人工保存的虚构第 3 题：求 SIN x 的值。"
+            if i == 2
+            else ""
+        )
+        rows.append(
+            Question.objects.create(
+                paper=paper,
+                group=groups[0 if i < 3 else 1],
+                number=i + 1 if i < 3 else 1,
+                regions=parts,
+                regions_auto=parts,
+                question_type="free_response",
+                state="yellow",
+                stem=stem,
+                processing_mode="auto" if i == 0 else "manual",
+                body_mode="source_image" if i == 3 else "text",
+                edited=i != 3,
+                type_locked=True,
+                text_source="human",
+                start_source="manual",
+            )
+        )
     folder = settings.DATA_ROOT / str(paper.pk)
     folder.mkdir(parents=True)
     source = folder / "source.pdf"
     document = fitz.open()
     for index in range(2):
         page = document.new_page(width=600, height=900)
-        lines = ((65, "虚构试卷甲：所有内容仅用于界面验收"), (120, "1. 已知函数 f(x)=x²+1，求 f(2)。"),
-                 (255, "2. 计算 2+3。此题在第一题的大框内部。"),
-                 (465, "3. 求图中三角形的面积，本题续在下一页。"),
-                 (690, "4. 这是一道尚未添加题框的漏题。")) if index == 0 else (
-                 (70, "3. 续题：三角形底为 4，高为 3。"),
-                 (290, "虚构试卷乙：题号再次从 1 开始"), (335, "1. 比较二分之一与三分之一。"))
+        lines = (
+            (
+                (65, "虚构试卷甲：所有内容仅用于界面验收"),
+                (120, "1. 已知函数 f(x)=x²+1，求 f(2)。"),
+                (255, "2. 计算 2+3。此题在第一题的大框内部。"),
+                (465, "3. 求图中三角形的面积，本题续在下一页。"),
+                (690, "4. 这是一道尚未添加题框的漏题。"),
+            )
+            if index == 0
+            else (
+                (70, "3. 续题：三角形底为 4，高为 3。"),
+                (290, "虚构试卷乙：题号再次从 1 开始"),
+                (335, "1. 比较二分之一与三分之一。"),
+            )
+        )
         for y, text in lines:
             page.insert_text((45, y), text, fontname="china-s", fontsize=15)
         if index == 0:
-            page.draw_polyline([(110, 580), (260, 580), (200, 500), (110, 580)], color=(0, 0, .8), width=2)
+            page.draw_polyline([(110, 580), (260, 580), (200, 500), (110, 580)], color=(0, 0, 0.8), width=2)
     document.save(source)
     document.close()
     paper.source_path = str(source)
     paper.save(update_fields=["source_path"])
-    stress = Paper.objects.create(filename="虚构一百题.pdf", kind="pdf", sha256="layout-synthetic-stress",
-        status="ready", pages=[{"page_idx": 0, "width": 1000, "height": 1000}], total=100, progress=100,
-        processing_plan={"schema": 1, "mode": "manual", "revision": 0})
+    stress = Paper.objects.create(
+        filename="虚构一百题.pdf",
+        kind="pdf",
+        sha256="layout-synthetic-stress",
+        status="ready",
+        pages=[{"page_idx": 0, "width": 1000, "height": 1000}],
+        total=100,
+        progress=100,
+        processing_plan={"schema": 1, "mode": "manual", "revision": 0},
+    )
     folder = settings.DATA_ROOT / str(stress.pk)
     folder.mkdir()
     document = fitz.open()
@@ -120,19 +169,37 @@ def seed_old(output):
     for i in range(100):
         x, y = 5 + (i % 10) * 98, 5 + (i // 10) * 98
         parts = [{"page_idx": 0, "bbox": [x, y, x + 90, y + 87]}]
-        page.insert_text((x + 5, y + 20), f"{i+1}. fixture", fontsize=9)
-        Question.objects.create(paper=stress, number=i + 1, regions=parts, regions_auto=parts,
-            question_type="free_response", state="yellow", stem=f"虚构第 {i+1} 题。",
-            processing_mode="manual", start_source="manual")
+        page.insert_text((x + 5, y + 20), f"{i + 1}. fixture", fontsize=9)
+        Question.objects.create(
+            paper=stress,
+            number=i + 1,
+            regions=parts,
+            regions_auto=parts,
+            question_type="free_response",
+            state="yellow",
+            stem=f"虚构第 {i + 1} 题。",
+            processing_mode="manual",
+            start_source="manual",
+        )
     source = folder / "source.pdf"
     document.save(source)
     document.close()
     stress.source_path = str(source)
     stress.save(update_fields=["source_path"])
     write_json(output / "old-schema-snapshot.json", database_rows())
-    write_json(output / "fixture.json", {"paper": str(paper.pk), "stress": str(stress.pk),
-        "first": rows[0].pk, "nested": rows[1].pk, "crosspage": rows[2].pk, "duplicate": rows[3].pk,
-        "group": groups[0].pk, "other_group": groups[1].pk})
+    write_json(
+        output / "fixture.json",
+        {
+            "paper": str(paper.pk),
+            "stress": str(stress.pk),
+            "first": rows[0].pk,
+            "nested": rows[1].pk,
+            "crosspage": rows[2].pk,
+            "duplicate": rows[3].pk,
+            "group": groups[0].pk,
+            "other_group": groups[1].pk,
+        },
+    )
     print("Fictional schema-0020 fixture created", flush=True)
 
 
@@ -142,12 +209,15 @@ def finish_seed(output):
 
     from core import library
     from core.models import Question
+
     before = json.loads((output / "old-schema-snapshot.json").read_text(encoding="utf-8"))
     after = database_rows()
     for table, rows in before.items():
         assert len(rows) == len(after[table]), f"Migration changed row count: {table}"
         for old, new in zip(rows, after[table]):
-            assert all(new[key] == value for key, value in old.items()), f"Migration changed original values: {table} id={old['id']}"
+            assert all(new[key] == value for key, value in old.items()), (
+                f"Migration changed original values: {table} id={old['id']}"
+            )
     assert all(0 <= q.color_index <= 5 for q in Question.objects.all())
     fixture = json.loads((output / "fixture.json").read_text(encoding="utf-8"))
     question = Question.objects.get(pk=fixture["nested"])
@@ -156,22 +226,48 @@ def finish_seed(output):
     publication, _created = library.publish(question, queue_enrichment=False)
     fixture["publication"] = str(publication.pk)
     write_json(output / "fixture.json", fixture)
-    write_json(output / "migration-verification.json", {"success": True, "old_schema": "0020",
-        "question_rows_preserved": len(before["core_question"]), "original_values_preserved": True,
-        "colour_backfill_passed": True, "fixture_publication_created_after_migration": True})
+    write_json(
+        output / "migration-verification.json",
+        {
+            "success": True,
+            "old_schema": "0020",
+            "question_rows_preserved": len(before["core_question"]),
+            "original_values_preserved": True,
+            "colour_backfill_passed": True,
+            "fixture_publication_created_after_migration": True,
+        },
+    )
     print("Old-schema upgrade preserves all original fields; colour backfill PASS", flush=True)
 
 
 def browser_check(output, port):
     from playwright.sync_api import expect, sync_playwright
+
     base = f"http://127.0.0.1:{port}"
     fixture = json.loads((output / "fixture.json").read_text(encoding="utf-8"))
-    report = {"success": False, "passed": [], "page_errors": [], "forbidden_requests": [], "writes": [],
-              "real_user_data_used": False, "worker_started": False, "cloud_called": False}
+    report = {
+        "success": False,
+        "passed": [],
+        "page_errors": [],
+        "forbidden_requests": [],
+        "writes": [],
+        "real_user_data_used": False,
+        "worker_started": False,
+        "cloud_called": False,
+    }
     with sync_playwright() as pw:
-        binary = next((p for p in (Path(pw.chromium.executable_path),
-            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if p.is_file()), None)
+        binary = next(
+            (
+                p
+                for p in (
+                    Path(pw.chromium.executable_path),
+                    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                )
+                if p.is_file()
+            ),
+            None,
+        )
         browser = pw.chromium.launch(headless=True, **({"executable_path": str(binary)} if binary else {}))
         context = browser.new_context(viewport={"width": 1440, "height": 1050})
         context.add_init_script("localStorage.setItem('qb-welcome-seen','1');localStorage.setItem('qb-lens','0')")
@@ -185,7 +281,8 @@ def browser_check(output, port):
                 allowed = request.method == "POST" and (
                     parsed.path.startswith(paper_path + "/question-layout")
                     or parsed.path == paper_path + "/questions/delete"
-                    or re.fullmatch(re.escape(paper_path) + r"/question-trash/[0-9a-fA-F-]{36}/restore", parsed.path) is not None
+                    or re.fullmatch(re.escape(paper_path) + r"/question-trash/[0-9a-fA-F-]{36}/restore", parsed.path)
+                    is not None
                 )
             if not allowed:
                 report["forbidden_requests"].append({"method": request.method, "path": parsed.path})
@@ -194,6 +291,7 @@ def browser_check(output, port):
                 if request.method == "POST":
                     report["writes"].append({"method": "POST", "path": parsed.path, "payload": request.post_data_json})
                 route.continue_()
+
         context.route("**/*", guard)
         page = context.new_page()
         page.on("pageerror", lambda error: report["page_errors"].append({"message": str(error), "stack": error.stack}))
@@ -210,7 +308,9 @@ def browser_check(output, port):
             page.locator("#paperMenu > summary").click()
             page.locator("#viewOriginalPaper").click()
             expect(page.locator("#pageDialog")).to_be_visible()
-            page.wait_for_function("document.querySelector('#pageStage img')?.complete && document.querySelector('#pageStage img')?.naturalWidth > 0")
+            page.wait_for_function(
+                "document.querySelector('#pageStage img')?.complete && document.querySelector('#pageStage img')?.naturalWidth > 0"
+            )
             expect(page.locator("#pageLayoutPanel")).to_be_visible()
             if page.locator("#pageNumberInput").input_value() != "1":
                 page.locator("#pageNumberInput").fill("1")
@@ -261,10 +361,12 @@ def browser_check(output, port):
             page.locator('#filters [data-filter="todo"]').click()
             finder.fill("2")
             expect(page.locator("#reviewFindResults [data-question-id]")).to_have_count(1)
-            page.locator('#reviewFindResults [data-question-id]').click()
+            page.locator("#reviewFindResults [data-question-id]").click()
             expect(page.locator('#filters [data-filter="all"]')).to_have_attribute("aria-selected", "true")
             expect(page.locator(f'.card[data-id="{fixture["nested"]}"]')).to_be_visible()
-            report["passed"].append("review finder handles sin/SIN/\\sin, repeated numbers, page and original-image lookup without reordering cards; hidden results open under All")
+            report["passed"].append(
+                "review finder handles sin/SIN/\\sin, repeated numbers, page and original-image lookup without reordering cards; hidden results open under All"
+            )
             # Reload restores this paper's finder query, filter and reading context.
             page.locator('#filters [data-filter="todo"]').click()
             finder = page.locator("#reviewFindInput")
@@ -289,7 +391,9 @@ def browser_check(output, port):
             assert original["paper"]["layout_revision"] == 0
             assert len({q["color_index"] for q in original["questions"]}) >= 3
             page.screenshot(path=str(output / "overview-desktop.png"))
-            report["passed"].append("old-schema upgrade, four distinct question identities, persistent palette and two question groups")
+            report["passed"].append(
+                "old-schema upgrade, four distinct question identities, persistent palette and two question groups"
+            )
             run_ui_cases(page, expect, output, fixture, report, paper_data)
             if page.locator("#pageDialog").is_visible():
                 page.locator("#pageDialogClose").click()
@@ -311,8 +415,13 @@ def browser_check(output, port):
             context.close()
             browser.close()
     write_json(output / "report.json", report)
-    print(json.dumps({"success": report["success"], "error": report.get("error"),
-                      "passed_groups": len(report["passed"])}, ensure_ascii=False), flush=True)
+    print(
+        json.dumps(
+            {"success": report["success"], "error": report.get("error"), "passed_groups": len(report["passed"])},
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
     return 0 if report["success"] else 1
 
 
@@ -340,7 +449,9 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
 
     def fit():
         page.locator("#pageZoomFit").click()
-        page.wait_for_function("document.querySelector('#pageStage img')?.complete && document.querySelector('#pageStage img')?.naturalWidth > 0")
+        page.wait_for_function(
+            "document.querySelector('#pageStage img')?.complete && document.querySelector('#pageStage img')?.naturalWidth > 0"
+        )
         page.locator("#pageStage .stage-surface").scroll_into_view_if_needed()
         page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
 
@@ -381,10 +492,14 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
             page.locator("#pageDialogSave").click()
             expect(page.locator("#pageLayoutConfirmSave")).to_be_visible()
             report["before_last_save"] = paper_data()
-            with page.expect_response(lambda response: response.request.method == "POST" and "/question-layout" in response.url) as waiting:
+            with page.expect_response(
+                lambda response: response.request.method == "POST" and "/question-layout" in response.url
+            ) as waiting:
                 page.locator("#pageLayoutConfirmSave").click()
         else:
-            with page.expect_response(lambda response: response.request.method == "POST" and "/question-layout" in response.url) as waiting:
+            with page.expect_response(
+                lambda response: response.request.method == "POST" and "/question-layout" in response.url
+            ) as waiting:
                 page.locator("#pageDialogSave").click()
         response = waiting.value
         report["last_save_response"] = {"status": response.status, "body": response.json()}
@@ -406,7 +521,9 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
         page.locator("#paperMenu > summary").click()
         page.locator("#viewOriginalPaper").click()
         expect(page.locator("#pageLayoutPanel")).to_be_visible()
-        page.wait_for_function("document.querySelector('#pageStage img')?.complete && document.querySelector('#pageStage img')?.naturalWidth > 0")
+        page.wait_for_function(
+            "document.querySelector('#pageStage img')?.complete && document.querySelector('#pageStage img')?.naturalWidth > 0"
+        )
 
     def undo(reopen=False):
         if reopen:
@@ -418,7 +535,9 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
         before = paper_data()["paper"]["layout_revision"]
         page.locator("#pageLayoutUndoSaved").click()
         expect(page.locator("#confirmDialog")).to_be_visible()
-        with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith("/undo")) as waiting:
+        with page.expect_response(
+            lambda response: response.request.method == "POST" and response.url.endswith("/undo")
+        ) as waiting:
             page.locator("#confirmOk").click()
         assert waiting.value.ok, waiting.value.text()
         expect(page.locator("#pageLayoutUndoSaved")).to_be_disabled()
@@ -453,7 +572,9 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     expect(page.locator("[data-layout-part-index]")).to_have_count(1)
     assert paper_data() == original and not report["writes"]
     assert database_rows()["core_publishedquestion"] == publication_before
-    report["passed"].append("removing the last frame offers a direct restore without saving or OCR; published-question delete protection remains intact")
+    report["passed"].append(
+        "removing the last frame offers a direct restore without saving or OCR; published-question delete protection remains intact"
+    )
 
     select("first")
     expect(page.locator('[data-layout-box-index="0"] [data-layout-handle="e"]')).to_be_visible()
@@ -502,12 +623,22 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     after = question("first")
     old = question("first", original)
     assert after["regions"] != old["regions"]
-    for key in ("stem", "edited_stem", "edited_options", "body_mode", "processing_mode", "question_type", "color_index"):
+    for key in (
+        "stem",
+        "edited_stem",
+        "edited_options",
+        "body_mode",
+        "processing_mode",
+        "question_type",
+        "color_index",
+    ):
         assert after.get(key) == old.get(key), key
     assert not after["approved"] and not after["ocr_pending"]
     assert page.locator("#pageZoomLevel").inner_text() == zoom
     page.screenshot(path=str(output / "range-saved.png"))
-    report["passed"].append("interior selection, 3-pixel jitter at two zooms, Escape rollback, right-pan, draft undo/redo and in-place save preserve manual content")
+    report["passed"].append(
+        "interior selection, 3-pixel jitter at two zooms, Escape rollback, right-pan, draft undo/redo and in-place save preserve manual content"
+    )
     undo(reopen=True)
     restored = question("first")
     assert restored["regions"] == old["regions"] and restored["content_revision"] > old["content_revision"]
@@ -515,13 +646,15 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
 
     select("crosspage")
     page.locator('[data-layout-part-index="1"] button').first.click()
-    page.wait_for_function("document.querySelector('#pageStage img')?.complete && document.querySelector('#pageStage img')?.naturalWidth > 0")
+    page.wait_for_function(
+        "document.querySelector('#pageStage img')?.complete && document.querySelector('#pageStage img')?.naturalWidth > 0"
+    )
     page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
     expect(page.locator('[data-layout-box-index="1"]')).to_be_visible()
     frame = page.locator('[data-layout-box-index="1"]').bounding_box()
     stage = page.locator("#pageStage").bounding_box()
-    assert abs(frame["x"] + frame["width"] / 2 - (stage["x"] + stage["width"] / 2)) < stage["width"] * .28
-    assert abs(frame["y"] + frame["height"] / 2 - (stage["y"] + stage["height"] / 2)) < stage["height"] * .28
+    assert abs(frame["x"] + frame["width"] / 2 - (stage["x"] + stage["width"] / 2)) < stage["width"] * 0.28
+    assert abs(frame["y"] + frame["height"] / 2 - (stage["y"] + stage["height"] / 2)) < stage["height"] * 0.28
     assert page.locator('[data-layout-box-index="0"] [data-layout-handle]').count() == 0
     page.locator('[data-layout-box-index="1"]').focus()
     page.keyboard.press("ArrowDown")
@@ -548,7 +681,9 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     page.locator("#pageLayoutNumber").fill("4")
     page.locator("#pageLayoutNumber").press("Tab")
     before_add = paper_data()["paper"]["layout_revision"]
-    with page.expect_response(lambda response: response.request.method == "POST" and "/question-layout" in response.url) as waiting:
+    with page.expect_response(
+        lambda response: response.request.method == "POST" and "/question-layout" in response.url
+    ) as waiting:
         page.locator("#pageDialogSave").click()
     response = waiting.value
     report["last_add_response"] = {"status": response.status, "body": response.json()}
@@ -563,14 +698,16 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     page.screenshot(path=str(output / "supplement-saved.png"))
     undo(reopen=True)
     assert len(paper_data()["questions"]) == 4
-    report["passed"].append("supplement an uncovered question as a manual original-image question, then persistent undo")
+    report["passed"].append(
+        "supplement an uncovered question as a manual original-image question, then persistent undo"
+    )
 
     select("nested")
     old_nested = question("nested")
     assert old_nested["approved"]
     page.locator("#pageLayoutPanel .layout-more-actions > summary").click()
     page.locator("#pageLayoutSplit").click()
-    expect(page.locator('[data-layout-target-index]')).to_have_count(2)
+    expect(page.locator("[data-layout-target-index]")).to_have_count(2)
     fit()
     rect = page.locator('[data-layout-box-index="0"]').bounding_box()
     page.mouse.click(rect["x"] + rect["width"] / 2, rect["y"] + rect["height"] / 2)
@@ -588,7 +725,9 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     page.locator("#pageDialogSave").click()
     expect(page.locator("#pageLayoutConfirmSave")).to_be_visible()
     page.screenshot(path=str(output / "split-confirmation.png"))
-    with page.expect_response(lambda response: response.request.method == "POST" and "/question-layout" in response.url) as split_waiting:
+    with page.expect_response(
+        lambda response: response.request.method == "POST" and "/question-layout" in response.url
+    ) as split_waiting:
         page.locator("#pageLayoutConfirmSave").click()
     split_response = split_waiting.value
     report["split_response"] = {"status": split_response.status, "body": split_response.json()}
@@ -603,24 +742,37 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     assert len(split_data["questions"]) == 5
     assert fixture["nested"] not in {q["id"] for q in split_data["questions"]}
     new = [q for q in split_data["questions"] if q["id"] not in {r["id"] for r in original["questions"]}]
-    assert len(new) == 2 and all(q["body_mode"] == "source_image" and not q["approved"] and not q["ocr_pending"] for q in new)
+    assert len(new) == 2 and all(
+        q["body_mode"] == "source_image" and not q["approved"] and not q["ocr_pending"] for q in new
+    )
     # Read the actual private DB to verify publication status and preserved content.
     database = database_rows()
-    publication = next(r for r in database["core_publishedquestion"] if uuid.UUID(str(r["id"])) == uuid.UUID(fixture["publication"]))
+    publication = next(
+        r for r in database["core_publishedquestion"] if uuid.UUID(str(r["id"])) == uuid.UUID(fixture["publication"])
+    )
     assert publication["status"] == "withdrawn"
     undo(reopen=True)
     restored = question("nested")
     assert restored["regions"] == old_nested["regions"] and restored["stem"] == old_nested["stem"]
     assert not restored["approved"]
-    assert next(r for r in database_rows()["core_publishedquestion"] if uuid.UUID(str(r["id"])) == uuid.UUID(fixture["publication"]))["status"] == "withdrawn"
-    report["passed"].append("true two-question split withdraws the current publication; undo restores content without approval or publication")
+    assert (
+        next(
+            r
+            for r in database_rows()["core_publishedquestion"]
+            if uuid.UUID(str(r["id"])) == uuid.UUID(fixture["publication"])
+        )["status"]
+        == "withdrawn"
+    )
+    report["passed"].append(
+        "true two-question split withdraws the current publication; undo restores content without approval or publication"
+    )
 
     select("first")
     page.locator("#pageLayoutPanel .layout-more-actions > summary").click()
     page.locator("#pageLayoutMerge").click()
     page.locator(f'[data-layout-merge-id="{fixture["crosspage"]}"]').check()
     page.locator("#pageLayoutMergeBegin").click()
-    expect(page.locator('[data-layout-part-index]')).to_have_count(3)
+    expect(page.locator("[data-layout-part-index]")).to_have_count(3)
     save()
     merged = paper_data()
     assert len(merged["questions"]) == 3
@@ -630,7 +782,9 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     assert len(new["regions"]) == 3 and new["body_mode"] == "source_image" and not new["ocr_pending"]
     undo(reopen=True)
     assert {q["id"] for q in paper_data()["questions"]} == {q["id"] for q in original["questions"]}
-    report["passed"].append("true same-group merge retains cross-page piece order; undo restores original visible identities")
+    report["passed"].append(
+        "true same-group merge retains cross-page piece order; undo restores original visible identities"
+    )
 
     # A second window changes the server state while this window holds its draft.
     select("first")
@@ -641,13 +795,26 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     changed_regions = json.loads(json.dumps(concurrent["regions"]))
     changed_regions[0]["bbox"][2] -= 5
     base = f"http://127.0.0.1:{urlparse(page.url).port}"
-    payload = {"kind": "regions", "layout_revision": current["paper"]["layout_revision"],
-        "client_request_id": str(uuid.uuid4()), "sources": [{"id": concurrent["id"], "revision": concurrent["content_revision"], "fingerprint": concurrent["layout_fingerprint"]}],
-        "targets": [{"regions": changed_regions}]}
-    result = page.request.post(f"{base}/api/papers/{fixture['paper']}/question-layout", data=payload,
-                               headers={"X-QB-Request": "1"})
+    payload = {
+        "kind": "regions",
+        "layout_revision": current["paper"]["layout_revision"],
+        "client_request_id": str(uuid.uuid4()),
+        "sources": [
+            {
+                "id": concurrent["id"],
+                "revision": concurrent["content_revision"],
+                "fingerprint": concurrent["layout_fingerprint"],
+            }
+        ],
+        "targets": [{"regions": changed_regions}],
+    }
+    result = page.request.post(
+        f"{base}/api/papers/{fixture['paper']}/question-layout", data=payload, headers={"X-QB-Request": "1"}
+    )
     assert result.ok, result.text()
-    with page.expect_response(lambda response: response.request.method == "POST" and "/question-layout" in response.url) as waiting:
+    with page.expect_response(
+        lambda response: response.request.method == "POST" and "/question-layout" in response.url
+    ) as waiting:
         page.locator("#pageDialogSave").click()
     assert waiting.value.status == 409
     expect(page.locator("#pageLayoutConflict")).to_be_visible()
@@ -668,7 +835,7 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     # begin() awaits source readiness before rendering the merge draft.
     # Wait for that async transition before pressing Save or installing the
     # lost-response interceptor, otherwise the click can hit the prior draft.
-    expect(page.locator('[data-layout-part-index]')).to_have_count(3)
+    expect(page.locator("[data-layout-part-index]")).to_have_count(3)
     expect(page.locator("#pageLayoutPanel")).to_contain_text("合题 · 未保存")
     endpoint = f"{base}/api/papers/{fixture['paper']}/question-layout"
     lost = []
@@ -682,15 +849,18 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
         response = route.fetch()
         assert response.ok, response.text()
         lost.append({"payload": body, "operation": response.json()["operation"]})
-        report["writes"].append({"method": "POST", "path": urlparse(endpoint).path,
-                                "response_intentionally_lost": True, "payload": body})
+        report["writes"].append(
+            {"method": "POST", "path": urlparse(endpoint).path, "response_intentionally_lost": True, "payload": body}
+        )
         route.abort("connectionreset")
 
     page.route(endpoint, drop_committed_response)
     try:
         page.locator("#pageDialogSave").click()
         expect(page.locator("#pageLayoutConfirmSave")).to_be_visible()
-        with page.expect_response(lambda response: response.request.method == "GET" and "client_request_id=" in response.url) as receipt_waiting:
+        with page.expect_response(
+            lambda response: response.request.method == "GET" and "client_request_id=" in response.url
+        ) as receipt_waiting:
             page.locator("#pageLayoutConfirmSave").click()
             # The panel stays visible during saves, so wait for the impact
             # confirmation to disappear after receipt recovery instead.
@@ -704,14 +874,18 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     assert result["operation"]["id"] == operation["id"] and len(operation["target_ids"]) == 1
     undo(reopen=True)
     assert len(paper_data()["questions"]) == 4
-    report["passed"].append("lost successful merge response recovers the same durable receipt without a duplicate write or duplicate question")
+    report["passed"].append(
+        "lost successful merge response recovers the same durable receipt without a duplicate write or duplicate question"
+    )
 
     # Correct the number of one existing question, preserving its identity and
     # source material. This is deliberately a distinct workflow from geometry.
     select("first")
     fit()
     page.mouse.click(*point(500, 140))
-    expect(page.locator(f'[data-layout-source-question-id="{fixture["first"]}"]').first).to_have_class(re.compile("selected"))
+    expect(page.locator(f'[data-layout-source-question-id="{fixture["first"]}"]').first).to_have_class(
+        re.compile("selected")
+    )
     before_renumber = question("first")
     before_data = paper_data()
     before_writes = len(report["writes"])
@@ -763,7 +937,9 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     expect(page.locator("#pageDialogSave")).to_be_enabled()
     expect(page.locator("#toast")).not_to_be_visible(timeout=8000)
     page.screenshot(path=str(output / "renumber-draft.png"))
-    with page.expect_response(lambda response: response.request.method == "POST" and "/question-layout" in response.url) as waiting:
+    with page.expect_response(
+        lambda response: response.request.method == "POST" and "/question-layout" in response.url
+    ) as waiting:
         page.locator("#pageDialogSave").click()
     response = waiting.value
     assert response.ok, response.text()
@@ -776,9 +952,27 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     assert after_renumber["number"] == 19
     assert after_renumber["content_revision"] > before_renumber["content_revision"]
     assert len(paper_data()["questions"]) == len(before_data["questions"])
-    for key in ("id", "regions", "regions_auto", "stem", "edited_stem", "ai_stem", "options", "edited_options",
-                "answer", "edited_answer", "analysis", "edited_analysis", "body_mode", "processing_mode", "question_type",
-                "color_index", "group", "figures", "manual_figures"):
+    for key in (
+        "id",
+        "regions",
+        "regions_auto",
+        "stem",
+        "edited_stem",
+        "ai_stem",
+        "options",
+        "edited_options",
+        "answer",
+        "edited_answer",
+        "analysis",
+        "edited_analysis",
+        "body_mode",
+        "processing_mode",
+        "question_type",
+        "color_index",
+        "group",
+        "figures",
+        "manual_figures",
+    ):
         assert after_renumber.get(key) == before_renumber.get(key), key
     box = page.locator(f'[data-layout-source-question-id="{fixture["first"]}"]').first
     expect(box).to_contain_text("19")
@@ -799,13 +993,25 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     assert restored["stem"] == before_renumber["stem"]
     assert restored["content_revision"] > after_renumber["content_revision"]
     expect(page.locator(f'[data-layout-source-question-id="{fixture["first"]}"]').first).to_contain_text("1")
-    report["renumber_verification"] = {"question_id": fixture["first"], "operation_id": saved["operation"]["id"],
-        "old_number": before_renumber["number"], "saved_number": after_renumber["number"], "undone_number": restored["number"],
-        "source_button": "pageDialogSave", "question_identity_preserved": True,
-        "regions_preserved": True, "manual_content_preserved": True, "colour_preserved": True,
-        "single_mutation": True, "reopened_before_undo": True, "multi_digit_typing_preserves_focus": True,
-        "late_history_response_preserves_input": True}
-    report["passed"].append("existing question renumber is one direct save, persists across reopen, preserves identity/content/ranges/colour, and supports saved undo")
+    report["renumber_verification"] = {
+        "question_id": fixture["first"],
+        "operation_id": saved["operation"]["id"],
+        "old_number": before_renumber["number"],
+        "saved_number": after_renumber["number"],
+        "undone_number": restored["number"],
+        "source_button": "pageDialogSave",
+        "question_identity_preserved": True,
+        "regions_preserved": True,
+        "manual_content_preserved": True,
+        "colour_preserved": True,
+        "single_mutation": True,
+        "reopened_before_undo": True,
+        "multi_digit_typing_preserves_focus": True,
+        "late_history_response_preserves_input": True,
+    }
+    report["passed"].append(
+        "existing question renumber is one direct save, persists across reopen, preserves identity/content/ranges/colour, and supports saved undo"
+    )
 
     # A duplicate in the same group and an invalid number are rejected while
     # preserving the user's draft. No mutation is sent for either case.
@@ -823,13 +1029,17 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
         assert paper_data() == rejection_data
     page.screenshot(path=str(output / "renumber-invalid-retains-draft.png"))
     cancel_draft()
-    report["passed"].append("renumber unchanged value, same-group duplicate and invalid number leave coordinates and versions unchanged; rejected drafts are retained")
+    report["passed"].append(
+        "renumber unchanged value, same-group duplicate and invalid number leave coordinates and versions unchanged; rejected drafts are retained"
+    )
 
     for value, shortcut in (("8", "Enter"), ("9", "Control+s")):
         select("first")
         page.locator("#pageLayoutRenumber").click()
         page.locator("#pageLayoutNumber").fill(value)
-        with page.expect_response(lambda response: response.request.method == "POST" and "/question-layout" in response.url) as waiting:
+        with page.expect_response(
+            lambda response: response.request.method == "POST" and "/question-layout" in response.url
+        ) as waiting:
             page.locator("#pageLayoutNumber").press(shortcut)
         assert waiting.value.ok, waiting.value.text()
         expect(page.locator("#pageLayoutPanel")).to_be_visible()
@@ -837,7 +1047,9 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
         assert question("first")["regions"] == before_renumber["regions"]
         undo()
         assert question("first")["number"] == before_renumber["number"]
-    report["passed"].append("renumber Enter and Ctrl+S each save exactly the selected question without a preview step and remain undoable")
+    report["passed"].append(
+        "renumber Enter and Ctrl+S each save exactly the selected question without a preview step and remain undoable"
+    )
 
     # Last-frame removal is an explicit, recoverable local state. It is not a
     # zero-range save, an implicit question deletion or a recognition request.
@@ -889,7 +1101,9 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     page.locator("#pageLayoutRestoreFrame").click()
     expect(page.locator("[data-layout-part-index]")).to_have_count(1)
     assert paper_data() == empty_before and len(report["writes"]) == empty_writes
-    report["passed"].append("last-frame empty state has clear restore/redraw/delete actions; cancelled redraw and draft undo/redo keep saved content and versions unchanged")
+    report["passed"].append(
+        "last-frame empty state has clear restore/redraw/delete actions; cancelled redraw and draft undo/redo keep saved content and versions unchanged"
+    )
 
     # A multi-frame question remains valid after one piece is removed. Its
     # sidebar must describe the draft's current range rather than stale data.
@@ -911,7 +1125,9 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     assert multi_saved["stem"] == multi_before["stem"] and not multi_saved["ocr_pending"]
     undo()
     assert question("crosspage")["regions"] == multi_before["regions"]
-    report["passed"].append("removing one of two pieces updates the draft frame count, remains directly saveable and supports draft plus persisted undo without OCR")
+    report["passed"].append(
+        "removing one of two pieces updates the draft frame count, remains directly saveable and supports draft plus persisted undo without OCR"
+    )
 
     select("first")
     fit()
@@ -938,13 +1154,17 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
         assert route.request.method == "POST"
         assert route.request.post_data_json == {"question_ids": [fixture["first"]]}
         injected_deletes.append("400")
-        route.fulfill(status=400, content_type="application/json", body=json.dumps({"error": "虚构删除失败：草稿应保留"}))
+        route.fulfill(
+            status=400, content_type="application/json", body=json.dumps({"error": "虚构删除失败：草稿应保留"})
+        )
 
     page.route(delete_endpoint, reject_delete)
     try:
         page.locator("#pageLayoutDeleteQuestion").click()
         expect(page.locator("#confirmDialog")).to_be_visible()
-        with page.expect_response(lambda response: response.request.method == "POST" and response.url == delete_endpoint) as failed_delete:
+        with page.expect_response(
+            lambda response: response.request.method == "POST" and response.url == delete_endpoint
+        ) as failed_delete:
             page.locator("#confirmOk").click()
         assert failed_delete.value.status == 400
         expect(page.locator("#toast")).to_contain_text("虚构删除失败")
@@ -965,7 +1185,9 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     try:
         page.locator("#pageLayoutDeleteQuestion").click()
         expect(page.locator("#confirmDialog")).to_be_visible()
-        with page.expect_event("requestfailed", predicate=lambda request: request.method == "POST" and request.url == delete_endpoint):
+        with page.expect_event(
+            "requestfailed", predicate=lambda request: request.method == "POST" and request.url == delete_endpoint
+        ):
             page.locator("#confirmOk").click()
         expect(page.locator("#pageLayoutEmptyRange")).to_be_visible()
         expect(page.locator("#pageLayoutDeleteQuestion")).to_be_enabled()
@@ -974,14 +1196,18 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
         page.unroute(delete_endpoint, disconnect_delete)
     assert injected_deletes == ["400", "network"]
     assert paper_data() == delete_before and len(report["writes"]) == delete_writes
-    report["passed"].append("whole-question delete cancellation, server rejection and network failure retain the local empty-frame draft and retry/restore choices")
+    report["passed"].append(
+        "whole-question delete cancellation, server rejection and network failure retain the local empty-frame draft and retry/restore choices"
+    )
 
     zoom_before_delete = page.locator("#pageZoomLevel").inner_text()
     page_before_delete = page.locator("#pageNumberInput").input_value()
     scroll_before_delete = page.locator("#pageStage").evaluate("node => [node.scrollLeft, node.scrollTop]")
     page.locator("#pageLayoutDeleteQuestion").click()
     expect(page.locator("#confirmDialog")).to_be_visible()
-    with page.expect_response(lambda response: response.request.method == "POST" and response.url == delete_endpoint) as successful_delete:
+    with page.expect_response(
+        lambda response: response.request.method == "POST" and response.url == delete_endpoint
+    ) as successful_delete:
         page.locator("#confirmOk").click()
     assert successful_delete.value.ok, successful_delete.value.text()
     deleted_receipt = successful_delete.value.json()
@@ -997,15 +1223,30 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     expect(page.locator("#pageLayoutRestoreDeleted")).to_be_enabled()
     expect(page.locator("#toast .toast-action")).to_have_count(0)
     page.screenshot(path=str(output / "question-deleted-overview.png"))
-    direct_restore_endpoint = f"{base}/api/papers/{fixture['paper']}/question-trash/{deleted_receipt['undo_batch']['id']}/restore"
-    with page.expect_response(lambda response: response.request.method == "POST" and response.url == direct_restore_endpoint) as direct_restore:
+    direct_restore_endpoint = (
+        f"{base}/api/papers/{fixture['paper']}/question-trash/{deleted_receipt['undo_batch']['id']}/restore"
+    )
+    with page.expect_response(
+        lambda response: response.request.method == "POST" and response.url == direct_restore_endpoint
+    ) as direct_restore:
         page.locator("#pageLayoutRestoreDeleted").click()
     assert direct_restore.value.ok, direct_restore.value.text()
     expect(page.locator("#pageLayoutRestoreDeleted")).to_have_count(0)
     expect(page.locator("[data-layout-part-index]")).to_have_count(1)
     expect(page.locator(f'[data-layout-source-question-id="{fixture["first"]}"]').first).to_be_visible()
     direct_restored_question = question("first")
-    for field in ("id", "number", "regions", "stem", "edited_stem", "edited_options", "body_mode", "color_index", "group", "manual_figures"):
+    for field in (
+        "id",
+        "number",
+        "regions",
+        "stem",
+        "edited_stem",
+        "edited_options",
+        "body_mode",
+        "color_index",
+        "group",
+        "manual_figures",
+    ):
         assert direct_restored_question.get(field) == delete_question_before.get(field), field
     assert not direct_restored_question["ocr_pending"]
     assert len(report["writes"]) == delete_writes + 2
@@ -1013,7 +1254,9 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     assert page.locator("#pageNumberInput").input_value() == page_before_delete
     assert page.locator("#pageStage").evaluate("node => [node.scrollLeft, node.scrollTop]") == scroll_before_delete
     page.screenshot(path=str(output / "question-restored-sidebar.png"))
-    report["passed"].append("deleting a question exposes an actionable in-workspace Restore this question button; one real restore returns its saved frame/content without moving the canvas")
+    report["passed"].append(
+        "deleting a question exposes an actionable in-workspace Restore this question button; one real restore returns its saved frame/content without moving the canvas"
+    )
 
     # Exercise the older recycle-bin route as well, using a second actual
     # delete batch rather than restoring an already-restored batch again.
@@ -1021,7 +1264,9 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     expect(page.locator("#pageLayoutEmptyRange")).to_be_visible()
     page.locator("#pageLayoutDeleteQuestion").click()
     expect(page.locator("#confirmDialog")).to_be_visible()
-    with page.expect_response(lambda response: response.request.method == "POST" and response.url == delete_endpoint) as second_delete:
+    with page.expect_response(
+        lambda response: response.request.method == "POST" and response.url == delete_endpoint
+    ) as second_delete:
         page.locator("#confirmOk").click()
     assert second_delete.value.ok, second_delete.value.text()
     deleted_receipt = second_delete.value.json()
@@ -1034,8 +1279,12 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     expect(page.locator("#trashDialog")).to_be_visible()
     batch = page.locator("#trashList .trash-batch:not(.restored)").filter(has_text=delete_question_before["stem"])
     expect(batch).to_have_count(1)
-    restore_endpoint = f"{base}/api/papers/{fixture['paper']}/question-trash/{deleted_receipt['undo_batch']['id']}/restore"
-    with page.expect_response(lambda response: response.request.method == "POST" and response.url == restore_endpoint) as restore_response:
+    restore_endpoint = (
+        f"{base}/api/papers/{fixture['paper']}/question-trash/{deleted_receipt['undo_batch']['id']}/restore"
+    )
+    with page.expect_response(
+        lambda response: response.request.method == "POST" and response.url == restore_endpoint
+    ) as restore_response:
         batch.get_by_role("button", name="恢复这一批", exact=True).click()
     assert restore_response.value.ok, restore_response.value.text()
     # The ordinary recycle-bin endpoint lists only un-restored batches.
@@ -1044,7 +1293,18 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     expect(page.locator("#trashList")).to_contain_text("回收站是空的")
     assert paper_data()["paper"]["trash_count"] == 0
     restored_question = question("first")
-    for field in ("id", "number", "regions", "stem", "edited_stem", "edited_options", "body_mode", "color_index", "group", "manual_figures"):
+    for field in (
+        "id",
+        "number",
+        "regions",
+        "stem",
+        "edited_stem",
+        "edited_options",
+        "body_mode",
+        "color_index",
+        "group",
+        "manual_figures",
+    ):
         assert restored_question.get(field) == delete_question_before.get(field), field
     assert not restored_question["ocr_pending"]
     assert len(report["writes"]) == delete_writes + 4
@@ -1053,18 +1313,24 @@ def run_ui_cases(page, expect, output, fixture, report, paper_data):
     page.locator("#paperMenu > summary").click()
     page.locator("#viewOriginalPaper").click()
     expect(page.locator("#pageDialog")).to_be_visible()
-    page.wait_for_function("document.querySelector('#pageStage img')?.complete && document.querySelector('#pageStage img')?.naturalWidth > 0")
+    page.wait_for_function(
+        "document.querySelector('#pageStage img')?.complete && document.querySelector('#pageStage img')?.naturalWidth > 0"
+    )
     if page.locator("#pageNumberInput").input_value() != "1":
         page.locator("#pageNumberInput").fill("1")
         page.locator("#pageNumberInput").press("Enter")
     fit()
-    report["passed"].append("explicit whole-question deletion makes one recoverable soft-delete, preserves canvas position and restores original identity/content/ranges through the real recycle-bin UI")
+    report["passed"].append(
+        "explicit whole-question deletion makes one recoverable soft-delete, preserves canvas position and restores original identity/content/ranges through the real recycle-bin UI"
+    )
 
     assert all(not q["ocr_pending"] for q in paper_data()["questions"])
     db = database_rows()
     assert not db["core_regionread"] and not db["core_libraryjob"]
     assert not report["forbidden_requests"], report["forbidden_requests"]
-    report["passed"].append("all saves, renumber, supplement, split, merge and undo run without an implicit AI request or background job")
+    report["passed"].append(
+        "all saves, renumber, supplement, split, merge and undo run without an implicit AI request or background job"
+    )
     # A saved box returns to its own review card; a normal return from the
     # workspace restores the opening context instead of guessing by number.
     select("first")
@@ -1098,8 +1364,13 @@ def run(args):
     assert backend_python.is_file()
     if application:
         assert application.is_file() and application.name.lower() == "questionbankcard.exe"
-    receipt = {"isolated_root": str(user), "port": args.port, "worker_started": False,
-        "real_credentials_available": False, "frozen_executable": str(application) if application else None}
+    receipt = {
+        "isolated_root": str(user),
+        "port": args.port,
+        "worker_started": False,
+        "real_credentials_available": False,
+        "frozen_executable": str(application) if application else None,
+    }
     if application:
         receipt["frozen_executable_sha256"] = hashlib.sha256(application.read_bytes()).hexdigest()
     owned = server = None
@@ -1107,10 +1378,13 @@ def run(args):
     def child(command, log_name, seconds=120):
         nonlocal owned
         with (output / log_name).open("wb") as log:
-            owned = subprocess.Popen(command, cwd=ROOT, env=environment, stdout=log, stderr=subprocess.STDOUT, creationflags=FLAGS)
+            owned = subprocess.Popen(
+                command, cwd=ROOT, env=environment, stdout=log, stderr=subprocess.STDOUT, creationflags=FLAGS
+            )
             result = wait_owned(owned, seconds)
         if result:
             raise RuntimeError(f"{log_name}: process exited {result}; inspect this private log")
+
     try:
         script = str(Path(__file__).resolve())
         child([str(backend_python), script, "--internal-mode", "seed-old", "--output", str(output)], "seed-old.log")
@@ -1120,14 +1394,24 @@ def run(args):
         else:
             command = [str(backend_python), str(ROOT / "backend/manage.py"), "migrate", "--noinput"]
         child(command, "migration.log")
-        child([str(backend_python), script, "--internal-mode", "finish-seed", "--output", str(output)], "finish-seed.log")
+        child(
+            [str(backend_python), script, "--internal-mode", "finish-seed", "--output", str(output)], "finish-seed.log"
+        )
         if application:
             environment["QB_INTERNAL_LOG"] = str(output / "server-internal.log")
             command = [str(application), "--internal-role", "runserver", f"127.0.0.1:{args.port}", "--noreload"]
         else:
-            command = [str(backend_python), str(ROOT / "backend/manage.py"), "runserver", f"127.0.0.1:{args.port}", "--noreload"]
+            command = [
+                str(backend_python),
+                str(ROOT / "backend/manage.py"),
+                "runserver",
+                f"127.0.0.1:{args.port}",
+                "--noreload",
+            ]
         with (output / "server.log").open("wb") as log:
-            server = subprocess.Popen(command, cwd=ROOT, env=environment, stdout=log, stderr=subprocess.STDOUT, creationflags=FLAGS)
+            server = subprocess.Popen(
+                command, cwd=ROOT, env=environment, stdout=log, stderr=subprocess.STDOUT, creationflags=FLAGS
+            )
             receipt["server_pid"] = server.pid
             opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
             deadline = time.monotonic() + 45
@@ -1139,11 +1423,23 @@ def run(args):
                         receipt["app_version"] = json.load(response).get("app_version")
                     break
                 except OSError:
-                    time.sleep(.1)
+                    time.sleep(0.1)
             else:
                 raise TimeoutError("Owned test server did not become ready")
-            child([sys.executable, script, "--internal-mode", "browser", "--output", str(output),
-                   "--port", str(args.port)], "browser.log", 240)
+            child(
+                [
+                    sys.executable,
+                    script,
+                    "--internal-mode",
+                    "browser",
+                    "--output",
+                    str(output),
+                    "--port",
+                    str(args.port),
+                ],
+                "browser.log",
+                240,
+            )
     finally:
         receipt["last_child_stopped"] = stop_owned(owned)
         receipt["server_stopped"] = stop_owned(server)

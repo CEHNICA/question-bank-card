@@ -32,8 +32,7 @@ def _rebase(apps, revision):
     LibraryTagSuggestion = apps.get_model("core", "LibraryTagSuggestion")
 
     alive = {str(tag.pk) for tag in LibraryTag.objects.all() if tag.active}
-    candidates = LibraryTagSuggestion.objects.filter(status="pending").exclude(
-        taxonomy_revision=revision)
+    candidates = LibraryTagSuggestion.objects.filter(status="pending").exclude(taxonomy_revision=revision)
     intact, broken = [], []
     for pk, entries in candidates.values_list("id", "suggestions"):
         (broken if _split(apps, entries, alive) else intact).append(pk)
@@ -58,7 +57,6 @@ def backwards(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [("core", "0028_tag_groups_to_hierarchy")]
 
     operations = [migrations.RunPython(forwards, backwards)]

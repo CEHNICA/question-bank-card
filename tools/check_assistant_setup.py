@@ -56,7 +56,10 @@ def main() -> None:
         def run(*arguments, expected=0):
             result = subprocess.run(
                 [str(cli), "assistant-setup", *arguments, "--json"],
-                env=env, capture_output=True, encoding="utf-8", timeout=40,
+                env=env,
+                capture_output=True,
+                encoding="utf-8",
+                timeout=40,
             )
             assert result.returncode == expected, result.stderr or result.stdout
             return json.loads(result.stdout)
@@ -117,8 +120,13 @@ def main() -> None:
         checks.append("same-name shortcut to another executable remains untouched")
 
     assert digest(actual_link) == before_link, "actual Desktop shortcut changed"
-    report = {"version": setup.executable_version(app), "passed": True,
-              "actual_desktop_unchanged": True, "paid_services_called": False, "checks": checks}
+    report = {
+        "version": setup.executable_version(app),
+        "passed": True,
+        "actual_desktop_unchanged": True,
+        "paid_services_called": False,
+        "checks": checks,
+    }
     if args.report:
         args.report.resolve().write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))

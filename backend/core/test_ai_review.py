@@ -30,9 +30,13 @@ class AiReviewTests(TestCase):
         override.enable()
         self.addCleanup(override.disable)
         self.paper = Paper.objects.create(
-            filename="ai.pdf", kind="pdf", sha256="a" * 64,
-            source_path=str(Path(temp.name) / "ai.pdf"), render_path=str(Path(temp.name) / "ai.pdf"),
-            pages=[{"page_idx": 0, "width": 1000, "height": 1000}], status=Paper.Status.READY,
+            filename="ai.pdf",
+            kind="pdf",
+            sha256="a" * 64,
+            source_path=str(Path(temp.name) / "ai.pdf"),
+            render_path=str(Path(temp.name) / "ai.pdf"),
+            pages=[{"page_idx": 0, "width": 1000, "height": 1000}],
+            status=Paper.Status.READY,
         )
         pages = paper_dir(self.paper) / "pages"
         pages.mkdir(parents=True)
@@ -42,8 +46,13 @@ class AiReviewTests(TestCase):
 
     def card(self, number, state, stem, flags=None):
         return Question.objects.create(
-            paper=self.paper, number=number, question_type="free_response", state=state, stem=stem,
-            flags=flags or [], regions=[{"page_idx": 0, "bbox": [50, 50 + number * 100, 950, 140 + number * 100]}],
+            paper=self.paper,
+            number=number,
+            question_type="free_response",
+            state=state,
+            stem=stem,
+            flags=flags or [],
+            regions=[{"page_idx": 0, "bbox": [50, 50 + number * 100, 950, 140 + number * 100]}],
             figure_candidates=[{"page_idx": 0, "bbox": [600, 300, 900, 600]}],
         )
 
@@ -79,9 +88,10 @@ class AiReviewTests(TestCase):
         card = self.approve(self.yellow, approved=True).json()["question"]
         self.assertEqual(card["approved_by"], "human")
         self.approve(self.green, approved=True, by="ai")
-        card = self.post(f"/api/questions/{self.green.pk}/text", {
-            "stem": "已知 $x+1=3$，求 $x$。", "options": {}, "question_type": "free_response",
-        }).json()["question"]
+        card = self.post(
+            f"/api/questions/{self.green.pk}/text",
+            {"stem": "已知 $x+1=3$，求 $x$。", "options": {}, "question_type": "free_response"},
+        ).json()["question"]
         self.assertFalse(card["approved"])
         self.assertEqual(card["approved_by"], "")
         self.green.refresh_from_db()

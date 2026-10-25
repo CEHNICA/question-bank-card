@@ -32,18 +32,24 @@ class IsolatedData:
         # SQLite needs TEMP/TMP to create transaction journal files when this
         # suite runs against a file-backed test database (as in local CI runs).
         system_environment = {
-            key: value for key, value in os.environ.items()
+            key: value
+            for key, value in os.environ.items()
             if key.casefold() in {"path", "systemroot", "windir", "temp", "tmp", "tmpdir"}
         }
-        environment = mock.patch.dict(os.environ, {
-            **system_environment,
-            "QB_FEATURES_FILE": str(self.root / "features.json"),
-            "QB_MODEL_PREFERENCES_FILE": str(self.root / "models.json"),
-        }, clear=True)
+        environment = mock.patch.dict(
+            os.environ,
+            {
+                **system_environment,
+                "QB_FEATURES_FILE": str(self.root / "features.json"),
+                "QB_MODEL_PREFERENCES_FILE": str(self.root / "models.json"),
+            },
+            clear=True,
+        )
         environment.start()
         self.addCleanup(environment.stop)
-        network = mock.patch("requests.sessions.Session.request",
-            side_effect=AssertionError("unexpected real cloud request"))
+        network = mock.patch(
+            "requests.sessions.Session.request", side_effect=AssertionError("unexpected real cloud request")
+        )
         network.start()
         self.addCleanup(network.stop)
 
@@ -60,9 +66,12 @@ class RemovedDoubleReadSettingsTests(IsolatedData, TestCase):
         self.assertNotIn("double_read", {item["key"] for item in response.json()["features"]})
 
     def test_api_no_longer_accepts_a_second_read_switch(self):
-        response = self.client.post("/api/settings/features",
+        response = self.client.post(
+            "/api/settings/features",
             json.dumps({"features": {"double_read": True}}),
-            content_type="application/json", HTTP_X_QB_REQUEST="1")
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
         self.assertEqual(response.status_code, 400, response.content)
         self.assertFalse(features.enabled("double_read"))
         self.assertTrue(features.enabled("origin_split"))
@@ -72,24 +81,32 @@ class RemovedDoubleReadSettingsTests(IsolatedData, TestCase):
 class SingleCardTests(IsolatedData, SimpleTestCase):
     def setUp(self):
         self.isolate()
-        self.snapshot = {"id": 1, "number": 1, "question_type": "free_response",
-            "regions": [{"page_idx": 0, "bbox": [20, 30, 800, 400]}], "candidates": []}
+        self.snapshot = {
+            "id": 1,
+            "number": 1,
+            "question_type": "free_response",
+            "regions": [{"page_idx": 0, "bbox": [20, 30, 800, 400]}],
+            "candidates": [],
+        }
         for name, result in (("primary_engine", PRIMARY), ("checker_engine", CHECKER)):
             patcher = mock.patch.object(readers, name, return_value=result)
             engine = patcher.start()
             setattr(self, name, engine)
             self.addCleanup(patcher.stop)
-        crop = mock.patch.object(pipeline.imaging, "stack_regions",
-            return_value=(Image.new("RGB", (120, 100), "white"), []))
+        crop = mock.patch.object(
+            pipeline.imaging, "stack_regions", return_value=(Image.new("RGB", (120, 100), "white"), [])
+        )
         crop.start()
         self.addCleanup(crop.stop)
 
     def run_card(self, *, raw=None, error=None):
-        with mock.patch.object(readers, "chat", return_value=raw or tagged(STEM), side_effect=error) as chat, \
-                mock.patch.object(readers, "answered_by", side_effect=lambda engine: engine), \
-                mock.patch.object(readers, "arbitrate") as arbiter, \
-                mock.patch.object(readers, "spot_check") as spot, \
-                mock.patch.object(readers, "classify_figures") as classify:
+        with (
+            mock.patch.object(readers, "chat", return_value=raw or tagged(STEM), side_effect=error) as chat,
+            mock.patch.object(readers, "answered_by", side_effect=lambda engine: engine),
+            mock.patch.object(readers, "arbitrate") as arbiter,
+            mock.patch.object(readers, "spot_check") as spot,
+            mock.patch.object(readers, "classify_figures") as classify,
+        ):
             result = pipeline.read_card(self.snapshot, store=mock.Mock())
         return result, chat, arbiter, spot, classify
 
@@ -185,20 +202,33 @@ class SingleReadingWorkflowTests(IsolatedData, TestCase):
     def setUp(self):
         self.isolate()
         self.original = self.paper()
-        for target, name, value in ((readers, "primary_engine", PRIMARY), (readers, "checker_engine", CHECKER),
-                (readers, "assistant_mode", False), (pipeline, "_reader_parallelism", 1),
-                (views, "_vision_ready", True), (views, "_reading_ready", True)):
+        for target, name, value in (
+            (readers, "primary_engine", PRIMARY),
+            (readers, "checker_engine", CHECKER),
+            (readers, "assistant_mode", False),
+            (pipeline, "_reader_parallelism", 1),
+            (views, "_vision_ready", True),
+            (views, "_reading_ready", True),
+        ):
             patcher = mock.patch.object(target, name, return_value=value)
             patcher.start()
             self.addCleanup(patcher.stop)
-        for name, value in (("ThreadPoolExecutor", manual_review.ImmediateExecutor), ("close_old_connections", mock.Mock())):
+        for name, value in (
+            ("ThreadPoolExecutor", manual_review.ImmediateExecutor),
+            ("close_old_connections", mock.Mock()),
+        ):
             patcher = mock.patch.object(pipeline, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
 
     def question(self, number=1, **fields):
-        return Question.objects.create(paper=self.original, number=number, question_type="free_response",
-            regions=[{"page_idx": 0, "bbox": [40, 40, 850, 450]}], **fields)
+        return Question.objects.create(
+            paper=self.original,
+            number=number,
+            question_type="free_response",
+            regions=[{"page_idx": 0, "bbox": [40, 40, 850, 450]}],
+            **fields,
+        )
 
     def post(self, path, payload=None):
         return self.client.post(path, json.dumps(payload or {}), content_type="application/json", HTTP_X_QB_REQUEST="1")
@@ -212,8 +242,9 @@ class SingleReadingWorkflowTests(IsolatedData, TestCase):
             self.assertEqual(pipeline.process_rereads(), 1)
         self.assertEqual(chat.call_count, 1)
         question.refresh_from_db()
-        self.assertEqual((question.body_mode, question.stem, question.regions, question.source_key),
-            ("text", STEM, regions, key))
+        self.assertEqual(
+            (question.body_mode, question.stem, question.regions, question.source_key), ("text", STEM, regions, key)
+        )
         self.assertEqual(question.text_source, "single")
         self.assertFalse(question.ocr_suggestion)
         self.assertFalse(question.approved or question.ocr_pending or question.reread_requested)
@@ -274,9 +305,11 @@ class SingleReadingWorkflowTests(IsolatedData, TestCase):
 
     def test_legacy_second_read_setting_during_batch_is_ignored(self):
         first, second = self.question(), self.question(2)
+
         def answer(*args, **kwargs):
             features.path().write_text('{"double_read": true}', encoding="utf-8")
             return tagged(STEM)
+
         with mock.patch.object(readers, "chat", side_effect=answer) as chat:
             pipeline.read_questions(self.original, [first, second])
         self.assertEqual(chat.call_count, 2)
@@ -291,11 +324,14 @@ class SingleReadingWorkflowTests(IsolatedData, TestCase):
 class SingleReadRequestPolicyTests(SimpleTestCase):
     def test_single_context_disables_hedge_but_preserves_original_timeout_and_cancel(self):
         response = mock.Mock(status_code=200)
-        with readers.cancellable_request(lambda: False), readers.selected_services_only(), \
-                readers.without_speculative_duplicates(), \
-                mock.patch.object(readers.requests, "post", return_value=response) as post, \
-                mock.patch.object(readers, "_chat_once", return_value="one answer") as once, \
-                mock.patch.object(readers._HEDGE_EXECUTOR, "submit") as duplicate:
+        with (
+            readers.cancellable_request(lambda: False),
+            readers.selected_services_only(),
+            readers.without_speculative_duplicates(),
+            mock.patch.object(readers.requests, "post", return_value=response) as post,
+            mock.patch.object(readers, "_chat_once", return_value="one answer") as once,
+            mock.patch.object(readers._HEDGE_EXECUTOR, "submit") as duplicate,
+        ):
             self.assertIs(readers._post("https://example.invalid", "isolated", {}), response)
             self.assertEqual(post.call_args.kwargs["timeout"], (10, 150))
             self.assertEqual(readers.chat(PRIMARY, "copy", ["image"]), "one answer")

@@ -37,6 +37,7 @@ def seed():
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "qb_server.settings")
     sys.path.insert(0, str(ROOT / "backend"))
     import django
+
     django.setup()
     from django.core.management import call_command
 
@@ -45,10 +46,15 @@ def seed():
     call_command("migrate", verbosity=0)
     fixtures = []
     for name, stem in (("未保存保护演示甲.pdf", "求 $1+1$。"), ("未保存保护演示乙.pdf", "求 $2+2$。")):
-        paper, _ = Paper.objects.get_or_create(sha256="unsaved-browser-" + name,
-            defaults={"filename": name, "kind": "pdf", "status": "ready", "pages": [], "total": 1})
-        question, _ = Question.objects.get_or_create(paper=paper, number=1,
-            defaults={"stem": stem, "question_type": "free_response", "state": "green", "approved": False})
+        paper, _ = Paper.objects.get_or_create(
+            sha256="unsaved-browser-" + name,
+            defaults={"filename": name, "kind": "pdf", "status": "ready", "pages": [], "total": 1},
+        )
+        question, _ = Question.objects.get_or_create(
+            paper=paper,
+            number=1,
+            defaults={"stem": stem, "question_type": "free_response", "state": "green", "approved": False},
+        )
         fixtures.append({"paper": str(paper.id), "question": question.id, "name": name, "stem": stem})
     (OUTPUT / "fixture.json").write_text(json.dumps(fixtures, ensure_ascii=False), encoding="utf-8")
     print("Isolated unsaved-edit fixtures ready", flush=True)
@@ -72,9 +78,18 @@ def check(url):
     errors, forbidden, dialogs = [], [], []
     native_action = "dismiss"
     with sync_playwright() as pw:
-        executable = next((str(path) for path in (Path(pw.chromium.executable_path),
-            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if path.is_file()), None)
+        executable = next(
+            (
+                str(path)
+                for path in (
+                    Path(pw.chromium.executable_path),
+                    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                )
+                if path.is_file()
+            ),
+            None,
+        )
         browser = pw.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
         context = browser.new_context(viewport={"width": 1440, "height": 1050})
         context.add_init_script("localStorage.setItem('qb-welcome-seen', '1')")
@@ -83,7 +98,10 @@ def check(url):
 
         def local_read_only(route):
             request = route.request
-            if urlparse(request.url).hostname not in ("127.0.0.1", "localhost") or request.method not in ("GET", "HEAD"):
+            if urlparse(request.url).hostname not in ("127.0.0.1", "localhost") or request.method not in (
+                "GET",
+                "HEAD",
+            ):
                 forbidden.append(f"{request.method} {request.url}")
                 route.abort()
             else:
@@ -294,7 +312,10 @@ def check(url):
         context.close()
         browser.close()
     assert question_snapshot() == before, "UI tests must not save or change any fixture questions"
-    print("Browser checks passed: unsaved edits are unreachable from outside the editor (chrome is folded away), Esc and 返回 ask before letting go, 继续编辑 keeps every character, discard then paper switch and navigation are clean, native refresh still warns; no mutating requests or question changes", flush=True)
+    print(
+        "Browser checks passed: unsaved edits are unreachable from outside the editor (chrome is folded away), Esc and 返回 ask before letting go, 继续编辑 keeps every character, discard then paper switch and navigation are clean, native refresh still warns; no mutating requests or question changes",
+        flush=True,
+    )
 
 
 def run():
@@ -307,9 +328,14 @@ def run():
     seed()
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     with (OUTPUT / "server.log").open("w", encoding="utf-8") as log:
-        server = subprocess.Popen([sys.executable, str(ROOT / "backend/manage.py"), "runserver",
-            f"127.0.0.1:{PORT}", "--noreload"], cwd=ROOT, env=os.environ.copy(), stdout=log,
-            stderr=subprocess.STDOUT, creationflags=flags)
+        server = subprocess.Popen(
+            [sys.executable, str(ROOT / "backend/manage.py"), "runserver", f"127.0.0.1:{PORT}", "--noreload"],
+            cwd=ROOT,
+            env=os.environ.copy(),
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            creationflags=flags,
+        )
         try:
             deadline = time.monotonic() + 30
             while time.monotonic() < deadline:
@@ -326,8 +352,13 @@ def run():
             # The Windows venv launcher creates a child Python process, so
             # terminate this exact process tree rather than the launcher only.
             if os.name == "nt":
-                subprocess.run(["taskkill", "/PID", str(server.pid), "/T", "/F"],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags, check=False)
+                subprocess.run(
+                    ["taskkill", "/PID", str(server.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=flags,
+                    check=False,
+                )
             else:
                 server.terminate()
             server.wait(timeout=10)

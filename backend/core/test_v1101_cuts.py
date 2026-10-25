@@ -39,24 +39,27 @@ def page(lines=(), strokes=(), height_px=2000):
 
 def item(number, regions, y, source="mineru", at_start=True, x=60.0):
     """A segmented question; its number is printed at the left end of the drawn lines (x=60)."""
-    return {"number": number,
-            "start": {"page": 0, "col": 0, "y": y, "x": x, "source": source, "at_start": at_start},
-            "regions": [{"page_idx": 0, "bbox": list(bbox)} for bbox in regions]}
+    return {
+        "number": number,
+        "start": {"page": 0, "col": 0, "y": y, "x": x, "source": source, "at_start": at_start},
+        "regions": [{"page_idx": 0, "bbox": list(bbox)} for bbox in regions],
+    }
 
 
 class InkCutTests(SimpleTestCase):
     def test_a_loose_box_no_longer_cuts_the_options_of_the_question_above(self):
         # 第 6 题选项行到 830，分母一直落到 856；第 7 题的字从 866 起，
         # MinerU 的框却从 854 起：原来第 6 题在 852 处被切，分母进了第 7 题。
-        image = page(lines=[(800, 830), (866, 890)],
-                     strokes=[(100, 836, 108, 856), (220, 836, 228, 856), (330, 836, 338, 856)])
+        image = page(
+            lines=[(800, 830), (866, 890)], strokes=[(100, 836, 108, 856), (220, 836, 228, 856), (330, 836, 338, 856)]
+        )
         q6 = item(6, [[*COLUMN[:1], 765, COLUMN[1], 852]], y=774)
         q7 = item(7, [[COLUMN[0], 845, COLUMN[1], 972]], y=854)
         self.assertEqual(cuts.snap_cuts([q6, q7], lambda _p: image), 1)
         bottom, top = q6["regions"][0]["bbox"][3], q7["regions"][0]["bbox"][1]
-        self.assertGreater(bottom, 856)   # 分母留在第 6 题
-        self.assertGreater(top, 856)      # 也不再出现在第 7 题顶上
-        self.assertLess(top, 866)         # 第 7 题第一行完整
+        self.assertGreater(bottom, 856)  # 分母留在第 6 题
+        self.assertGreater(top, 856)  # 也不再出现在第 7 题顶上
+        self.assertLess(top, 866)  # 第 7 题第一行完整
         self.assertLessEqual(top, bottom)
 
     def test_a_clean_cut_on_a_printed_page_does_not_move(self):
@@ -89,7 +92,7 @@ class InkCutTests(SimpleTestCase):
     def test_a_short_first_line_under_working_is_not_given_away(self):
         # 上一题的选项行 489–496（标签正在题号那一条上），手写演算 496–500 连到
         # 第 7 题只有 5.5 高的第一行 500–505.5。
-        for working in ((100, 496, 470, 500), (16, 496, 470, 500)):   # 也盖住题号那一条
+        for working in ((100, 496, 470, 500), (16, 496, 470, 500)):  # 也盖住题号那一条
             image = page(lines=[(489, 496), (500, 505.5), (515, 530)], strokes=[working])
             q6 = item(6, [[COLUMN[0], 300, COLUMN[1], 498]], y=310)
             q7 = item(7, [[COLUMN[0], 491, COLUMN[1], 700]], y=500)
@@ -101,8 +104,10 @@ class InkCutTests(SimpleTestCase):
         # 第 14 题最后一行的答题横线在 452.5–453.3，“四、解答题”的框从 454 起。
         image = page(lines=[(430, 450), (459, 470)], strokes=[(300, 452.5, 420, 453.0)])
         q14 = item(14, [[COLUMN[0], 375, COLUMN[1], 452]], y=384)
-        for heading in ({"page": 0, "col": 0, "y": 454.0, "bottom": 470.0, "text": "四、解答题"},
-                        {"page": 0, "col": 0, "x": 60.0, "y": 454.0, "bottom": 470.0, "text": "四、解答题"}):
+        for heading in (
+            {"page": 0, "col": 0, "y": 454.0, "bottom": 470.0, "text": "四、解答题"},
+            {"page": 0, "col": 0, "x": 60.0, "y": 454.0, "bottom": 470.0, "text": "四、解答题"},
+        ):
             q14 = item(14, [[COLUMN[0], 375, COLUMN[1], 452]], y=384)
             self.assertEqual(cuts.snap_cuts([q14], lambda _p: image, mock.Mock(headings=[heading])), 1)
             bottom = q14["regions"][0]["bbox"][3]
@@ -152,8 +157,11 @@ class InkCutTests(SimpleTestCase):
 
 def scratch_paper(top_right_text, kind="text", options=True):
     """Left column ends with question 7; the right column starts with something, then 8."""
-    seven = ("7. 已知 $\\alpha:x>m$，则实数 $m$ 的取值范围是（ ）A. $m\\geq 2$ B. $m>2$ C. $m<2$ D. $m\\leq 2$"
-             if options else "7. （15分）已知命题 $p$：$\\forall x\\geq 1$，求实数 $a$ 的取值范围.")
+    seven = (
+        "7. 已知 $\\alpha:x>m$，则实数 $m$ 的取值范围是（ ）A. $m\\geq 2$ B. $m>2$ C. $m<2$ D. $m\\leq 2$"
+        if options
+        else "7. （15分）已知命题 $p$：$\\forall x\\geq 1$，求实数 $a$ 的取值范围."
+    )
     return [
         block(0, 0, [60, 100, 470, 130], "一、选择题：在每小题给出的四个选项中，只有一个选项是正确的."),
         block(1, 0, [60, 700, 470, 760], "6. 下列函数中，在区间 $(-\\infty,0)$ 上单调递减的是（ ）"),
@@ -208,17 +216,25 @@ class ScratchSpillTests(SimpleTestCase):
         one = next(question for question in result["questions"] if question["number"] == 1)
         self.assertEqual([region["page_idx"] for region in one["regions"]], [0])
         self.assertEqual(one["segmentation_diagnostics"][0]["page_idx"], 1)
-        self.assertNotIn({"page_idx": one["segmentation_diagnostics"][0]["page_idx"],
-                          "bbox": one["segmentation_diagnostics"][0]["bbox"]}, one["regions"])
+        self.assertNotIn(
+            {
+                "page_idx": one["segmentation_diagnostics"][0]["page_idx"],
+                "bbox": one["segmentation_diagnostics"][0]["bbox"],
+            },
+            one["regions"],
+        )
         self.assertEqual(one["segmentation_diagnostics"][0]["action"], "pending_review")
         self.assertTrue(one["segmentation_flags"])
         self.assertFalse(one["segmentation"]["range_limited"])
 
     def test_the_numbered_opening_is_not_an_ambiguous_continuation(self):
-        result = segment.segment(PAGES[:1], [
-            block(0, 0, [60, 100, 950, 180], "1. $$a_{n+1}=2a_n+1$$", "equation"),
-            block(1, 0, [60, 220, 950, 300], "2. 计算下列各式的值。"),
-        ])
+        result = segment.segment(
+            PAGES[:1],
+            [
+                block(0, 0, [60, 100, 950, 180], "1. $$a_{n+1}=2a_n+1$$", "equation"),
+                block(1, 0, [60, 220, 950, 300], "2. 计算下列各式的值。"),
+            ],
+        )
         one = next(question for question in result["questions"] if question["number"] == 1)
         self.assertEqual(one["segmentation_diagnostics"], [])
         self.assertEqual(one["segmentation_flags"], [])
@@ -241,8 +257,7 @@ class ScratchSpillTests(SimpleTestCase):
     def test_book_safety_limit_is_explicit_when_it_stops_an_ambiguous_continuation(self):
         pages = [{**PAGES[0], "page_idx": index} for index in range(6)]
         blocks = [block(0, 0, [60, 800, 950, 900], "1. 已知数列满足下列关系，求数列通项。")]
-        blocks.extend(block(index, index, [60, 20, 950, 90], "$$a_{n+1}=2a_n+1$$", "equation")
-                      for index in range(1, 6))
+        blocks.extend(block(index, index, [60, 20, 950, 90], "$$a_{n+1}=2a_n+1$$", "equation") for index in range(1, 6))
         blocks.append(block(6, 5, [60, 110, 950, 180], "2. 计算下列各式的值。"))
         layout, starts = segment.analyse(pages, blocks)
         for start in starts:
@@ -251,17 +266,21 @@ class ScratchSpillTests(SimpleTestCase):
         self.assertEqual(len({region["page_idx"] for region in one["regions"]}), segment.BOOK_MAX_CARD_PAGES)
         self.assertTrue(one["segmentation"]["range_limited"])
         self.assertTrue(any("安全上限" in flag for flag in one["segmentation_flags"]))
-        self.assertEqual([diagnostic["action"] for diagnostic in one["segmentation_diagnostics"]],
-                         ["retained", "retained", "retained", "range_limited", "range_limited"])
+        self.assertEqual(
+            [diagnostic["action"] for diagnostic in one["segmentation_diagnostics"]],
+            ["retained", "retained", "retained", "range_limited", "range_limited"],
+        )
 
     def test_printed_rest_of_the_question_still_follows_it(self):
-        for text, kind in (("B. $\\forall x>0,y>0$", "text"),
-                           ("(2) 若 $b=c$，解关于 $x$ 的不等式", "text"),
-                           ("则实数 $a$ 的取值范围是", "text"),
-                           ("$\\mathrm{A}.\\ \\frac12\\quad\\mathrm{B}.\\ 1$", "text"),
-                           ("$A.\\ 1$", "text"),
-                           ("Which of the following statements is true", "text"),
-                           ("", "image")):
+        for text, kind in (
+            ("B. $\\forall x>0,y>0$", "text"),
+            ("(2) 若 $b=c$，解关于 $x$ 的不等式", "text"),
+            ("则实数 $a$ 的取值范围是", "text"),
+            ("$\\mathrm{A}.\\ \\frac12\\quad\\mathrm{B}.\\ 1$", "text"),
+            ("$A.\\ 1$", "text"),
+            ("Which of the following statements is true", "text"),
+            ("", "image"),
+        ):
             seven = self.question(scratch_paper(text, kind), 7)
             regions = seven["regions"]
             self.assertEqual(len(regions), 2, text or kind)
@@ -271,8 +290,10 @@ class ScratchSpillTests(SimpleTestCase):
 
 
 class SectionTypeTests(SimpleTestCase):
-    MULTI = ("二、选择题：本题共3小题，每小题6分，共18分.在每小题给出的选项中，有多项符合题目要求."
-             "全部选对的得6分，部分选对的得部分分，有选错的得0分.")
+    MULTI = (
+        "二、选择题：本题共3小题，每小题6分，共18分.在每小题给出的选项中，有多项符合题目要求."
+        "全部选对的得6分，部分选对的得部分分，有选错的得0分."
+    )
     SINGLE = "一、选择题：本大题共8小题，每小题5分，共计40分.每小题给出的四个选项中，只有一个选项是正确的."
     MIXED = "一、选择题：第1~8题只有一项符合题目要求，第9~11题有多项符合题目要求."
 
@@ -282,18 +303,23 @@ class SectionTypeTests(SimpleTestCase):
         self.assertEqual(qtypes.section_kind(self.MIXED), "unknown")
         self.assertEqual(qtypes.section_kind("三、填空题：本大题共3小题"), "unknown")
         self.assertEqual(segment._section_type(self.MULTI), "multiple_choice")
-        self.assertEqual(segment._section_type(self.MIXED), "single_choice")   # 仍按“选择题”
+        self.assertEqual(segment._section_type(self.MIXED), "single_choice")  # 仍按“选择题”
         self.assertEqual(segment._section_type("三、解答题"), "free_response")
 
     def test_wording_that_only_looks_like_a_rule_fixes_nothing(self):
         # A single-choice rule that forbids picking several.
-        self.assertEqual(qtypes.section_kind(
-            "一、选择题：在每小题给出的四个选项中，选出符合题目要求的一项，多选、错选、不选均不得分."), "unknown")
+        self.assertEqual(
+            qtypes.section_kind(
+                "一、选择题：在每小题给出的四个选项中，选出符合题目要求的一项，多选、错选、不选均不得分."
+            ),
+            "unknown",
+        )
         # A mixed heading cut short after its first half (headings keep 80 characters).
         self.assertEqual(qtypes.section_kind("一、选择题：第 $1 \\sim 8$ 题只有一项符合题目要求"), "unknown")
         self.assertEqual(qtypes.section_kind("一、选择题：1~8题只有一项符合题目要求"), "unknown")
-        self.assertEqual(qtypes.with_section("multiple_choice", "一、选择题：第1~8题只有一项符合题目要求"),
-                         "multiple_choice")
+        self.assertEqual(
+            qtypes.with_section("multiple_choice", "一、选择题：第1~8题只有一项符合题目要求"), "multiple_choice"
+        )
 
     def test_only_choice_readings_follow_the_heading(self):
         self.assertEqual(qtypes.with_section("single_choice", self.MULTI), "multiple_choice")
@@ -321,20 +347,27 @@ class SectionReadCardTests(v110.TempDataMixin, TestCase):
     def test_a_single_choice_reading_under_a_multiple_heading_is_multiple_choice(self):
         self.snapshot = {**self.snapshot, "section": SectionTypeTests.MULTI}
         options = {"A": "$y=x^2-6x+10$", "B": "$y=x-2\\sqrt{x}+3$", "C": "$y=x+\\dfrac{1}{x}$", "D": "$y=2$"}
-        result = self.read(tagged("下列各函数中，最小值为 2 的是（ ）", options),
-                           tagged("下列各函数中，最小值为 2 的是（ ）", options))
+        result = self.read(
+            tagged("下列各函数中，最小值为 2 的是（ ）", options), tagged("下列各函数中，最小值为 2 的是（ ）", options)
+        )
         self.assertEqual(result["question_type"], "multiple_choice")
 
     def test_snapshot_carries_the_section(self):
-        question = Question.objects.create(paper=self.paper, number=9, section=SectionTypeTests.MULTI,
-                                           regions=[{"page_idx": 0, "bbox": [50, 100, 480, 300]}])
+        question = Question.objects.create(
+            paper=self.paper,
+            number=9,
+            section=SectionTypeTests.MULTI,
+            regions=[{"page_idx": 0, "bbox": [50, 100, 480, 300]}],
+        )
         self.assertEqual(pipeline._snapshot(question)["section"], SectionTypeTests.MULTI)
 
 
 class InventedFigureNoteTests(SimpleTestCase):
     def test_a_note_instead_of_an_option_counts_as_not_read(self):
-        raw = ("【题型】多选题\n【题干】\n已知关于实数 $x,y$ 的二元函数 $f(x,y)=(x+1)y$，则\n"
-               "【A】（原卷此处为配图，无印刷文字）\n【B】$\\forall x>0,y>0$\n【C】$f(2x,x-a)\\geq -a-2$\n【D】$a\\geq 3$")
+        raw = (
+            "【题型】多选题\n【题干】\n已知关于实数 $x,y$ 的二元函数 $f(x,y)=(x+1)y$，则\n"
+            "【A】（原卷此处为配图，无印刷文字）\n【B】$\\forall x>0,y>0$\n【C】$f(2x,x-a)\\geq -a-2$\n【D】$a\\geq 3$"
+        )
         reading = readers.parse_reading(raw, 11)
         self.assertNotIn("A", reading["options"])
         self.assertIn("A", reading["figure_descriptions"])
@@ -352,8 +385,14 @@ class PipelineUsesInkCutsTests(v110.TempDataMixin, TestCase):
         paper = self.make_paper()
         group = QuestionGroup.objects.create(paper=paper, title="试卷", sequence=0)
         for item_block in scratch_paper("B. $\\forall x>0$"):
-            Block.objects.create(paper=paper, seq=item_block["seq"], type=item_block["type"], page_idx=0,
-                                 bbox=item_block["bbox"], text=item_block["text"])
+            Block.objects.create(
+                paper=paper,
+                seq=item_block["seq"],
+                type=item_block["type"],
+                page_idx=0,
+                bbox=item_block["bbox"],
+                text=item_block["text"],
+            )
         calls = []
 
         def spy(items, loader, layout):
@@ -361,8 +400,9 @@ class PipelineUsesInkCutsTests(v110.TempDataMixin, TestCase):
             return 0
 
         with mock.patch.object(cuts, "snap_cuts", side_effect=spy):
-            pipeline._collect_segmentation_items(paper, [group], locate_gaps=False,
-                                                 page_store=pipeline.ReadOnlyPageStore(paper))
+            pipeline._collect_segmentation_items(
+                paper, [group], locate_gaps=False, page_store=pipeline.ReadOnlyPageStore(paper)
+            )
         self.assertEqual(calls, [([6, 7, 8], True, True)])
 
 
@@ -374,15 +414,20 @@ class SectionTidyTests(v110.TempDataMixin, TestCase):
         self.paper = self.make_paper()
 
     def choice(self, number, **extra):
-        values = {"question_type": "single_choice", "section": SectionTypeTests.MULTI,
-                  "stem": "下列各函数中，最小值为 2 的是（ ）",
-                  "options": {"A": "$1$", "B": "$2$", "C": "$3$", "D": "$4$"},
-                  "state": Question.State.GREEN, "flags": []}
+        values = {
+            "question_type": "single_choice",
+            "section": SectionTypeTests.MULTI,
+            "stem": "下列各函数中，最小值为 2 的是（ ）",
+            "options": {"A": "$1$", "B": "$2$", "C": "$3$", "D": "$4$"},
+            "state": Question.State.GREEN,
+            "flags": [],
+        }
         values.update(extra)
         return self.card(self.paper, number=number, **values)
 
     def test_unreviewed_cards_become_multiple_choice_and_reviewed_ones_stay(self):
         from . import library
+
         fresh = self.choice(9)
         locked = self.choice(10, type_locked=True)
         edited = self.choice(11, edited=True)
@@ -400,8 +445,10 @@ class SnapToleranceTests(v110.TempDataMixin, TestCase):
     def setUp(self):
         self.use_temp_data()
         self.paper = self.make_paper()
-        self.blocks = [block(1, 0, [60, 120, 470, 160], "6. 下列函数中，单调递减的是（ ）"),
-                       block(2, 0, [60, 300, 470, 340], "7. 已知 $a>b$，则（ ）")]
+        self.blocks = [
+            block(1, 0, [60, 120, 470, 160], "6. 下列函数中，单调递减的是（ ）"),
+            block(2, 0, [60, 300, 470, 340], "7. 已知 $a>b$，则（ ）"),
+        ]
 
     def test_small_edge_moves_are_snap_only(self):
         old = [{"page_idx": 0, "bbox": [16, 100, 492, 290]}]

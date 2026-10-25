@@ -31,8 +31,9 @@ class StateNoteTests(SimpleTestCase):
             self.assertEqual(mineru.read_state(self.path), {"state": "pending", "for_seconds": 90})
             mineru.record_state(self.path, {"state": "running", "pages": 9, "total_pages": 4})
         with mock.patch.object(mineru.time, "time", return_value=1100.0):
-            self.assertEqual(mineru.read_state(self.path),
-                             {"state": "running", "for_seconds": 10, "pages": 4, "total_pages": 4})
+            self.assertEqual(
+                mineru.read_state(self.path), {"state": "running", "for_seconds": 10, "pages": 4, "total_pages": 4}
+            )
 
     def test_an_old_or_broken_note_is_ignored(self):
         with mock.patch.object(mineru.time, "time", return_value=1000.0):
@@ -46,12 +47,18 @@ class StateNoteTests(SimpleTestCase):
 
 class PollingReportsStateTests(SimpleTestCase):
     def test_the_states_minerus_answers_are_passed_on(self):
-        answers = iter([
-            {"extract_result": [{"state": "pending"}]},
-            {"extract_result": [{"state": "running", "extract_progress": {"extracted_pages": 2, "total_pages": 4}}]},
-            {"extract_result": [{"state": "converting"}]},
-            {"extract_result": [{"state": "done", "full_zip_url": "https://example.invalid/r.zip"}]},
-        ])
+        answers = iter(
+            [
+                {"extract_result": [{"state": "pending"}]},
+                {
+                    "extract_result": [
+                        {"state": "running", "extract_progress": {"extracted_pages": 2, "total_pages": 4}}
+                    ]
+                },
+                {"extract_result": [{"state": "converting"}]},
+                {"extract_result": [{"state": "done", "full_zip_url": "https://example.invalid/r.zip"}]},
+            ]
+        )
 
         def api(_session, _token, path, payload=None):
             if path == "file-urls/batch":
@@ -63,13 +70,17 @@ class PollingReportsStateTests(SimpleTestCase):
         source.write_bytes(b"%PDF-1.4")
         seen = []
         ok = mock.Mock(ok=True, status_code=200)
-        with mock.patch.object(mineru, "_api_json", side_effect=api), \
-                mock.patch.object(mineru.requests.Session, "put", return_value=ok), \
-                mock.patch.object(mineru, "_download_zip"), \
-                mock.patch.object(mineru.time, "sleep"):
+        with (
+            mock.patch.object(mineru, "_api_json", side_effect=api),
+            mock.patch.object(mineru.requests.Session, "put", return_value=ok),
+            mock.patch.object(mineru, "_download_zip"),
+            mock.patch.object(mineru.time, "sleep"),
+        ):
             mineru.request_extract_file("token", source, folder / "r.zip", 4, on_state=seen.append)
-        self.assertEqual([item["state"] for item in seen],
-                         ["uploading", "submitted", "pending", "running", "converting", "downloading"])
+        self.assertEqual(
+            [item["state"] for item in seen],
+            ["uploading", "submitted", "pending", "running", "converting", "downloading"],
+        )
         self.assertEqual(seen[3], {"state": "running", "pages": 2, "total_pages": 4})
 
     def test_a_failing_callback_does_not_stop_parsing(self):
@@ -81,11 +92,14 @@ class PollingReportsStateTests(SimpleTestCase):
         folder = Path(tempfile.mkdtemp())
         source = folder / "paper.pdf"
         source.write_bytes(b"%PDF-1.4")
-        with mock.patch.object(mineru, "_api_json", side_effect=api), \
-                mock.patch.object(mineru.requests.Session, "put", return_value=mock.Mock(ok=True)), \
-                mock.patch.object(mineru, "_download_zip"):
-            target = mineru.request_extract_file("token", source, folder / "r.zip", 1,
-                                                 on_state=mock.Mock(side_effect=OSError("disk")))
+        with (
+            mock.patch.object(mineru, "_api_json", side_effect=api),
+            mock.patch.object(mineru.requests.Session, "put", return_value=mock.Mock(ok=True)),
+            mock.patch.object(mineru, "_download_zip"),
+        ):
+            target = mineru.request_extract_file(
+                "token", source, folder / "r.zip", 1, on_state=mock.Mock(side_effect=OSError("disk"))
+            )
         self.assertEqual(target, folder / "r.zip")
 
 
@@ -99,8 +113,10 @@ class PaperShowsMinerUStateTests(v110.TempDataMixin, TestCase):
         mineru.record_state(note, {"state": "running", "pages": 1, "total_pages": 4})
         processing = Client().get(f"/api/papers/{paper.id}").json()["paper"]["processing"]
         self.assertEqual(processing["mineru"]["state"], "running")
-        self.assertEqual((processing["determinate"], processing["completed"], processing["total"], processing["unit"]),
-                         (True, 1, 4, "page"))
+        self.assertEqual(
+            (processing["determinate"], processing["completed"], processing["total"], processing["unit"]),
+            (True, 1, 4, "page"),
+        )
         note.unlink()
         processing = Client().get(f"/api/papers/{paper.id}").json()["paper"]["processing"]
         self.assertNotIn("mineru", processing)

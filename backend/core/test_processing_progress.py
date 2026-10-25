@@ -26,8 +26,7 @@ class ProcessingProgressTests(TestCase):
         waiting = make_paper("waiting.pdf", Paper.Status.QUEUED)
         Paper.objects.filter(pk=first.pk).update(created_at=now - timedelta(minutes=8))
         Paper.objects.filter(pk=waiting.pk).update(
-            created_at=now - timedelta(minutes=3),
-            updated_at=now - timedelta(seconds=14),
+            created_at=now - timedelta(minutes=3), updated_at=now - timedelta(seconds=14)
         )
         waiting.refresh_from_db()
 
@@ -60,8 +59,7 @@ class ProcessingProgressTests(TestCase):
     def test_chunked_mineru_progress_comes_from_persisted_chunk_states(self):
         paper = make_paper("book.pdf", Paper.Status.PARSING)
         for sequence, status in enumerate(
-            [ImportChunk.Status.PARSED, ImportChunk.Status.PARSED, ImportChunk.Status.PARSING],
-            start=1,
+            [ImportChunk.Status.PARSED, ImportChunk.Status.PARSED, ImportChunk.Status.PARSING], start=1
         ):
             start = (sequence - 1) * 100 + 1
             ImportChunk.objects.create(
@@ -79,10 +77,7 @@ class ProcessingProgressTests(TestCase):
         self.assertEqual((progress["completed"], progress["total"], progress["unit"]), (2, 3, "chunk"))
         self.assertEqual(progress["chunks"]["parsed"], 2)
         self.assertEqual(progress["chunks"]["parsing"], 1)
-        self.assertEqual(
-            progress["chunks"]["active_ranges"],
-            [{"sequence": 3, "page_start": 201, "page_end": 270}],
-        )
+        self.assertEqual(progress["chunks"]["active_ranges"], [{"sequence": 3, "page_start": 201, "page_end": 270}])
 
     def test_single_file_mineru_and_local_segmentation_do_not_claim_a_percentage(self):
         parsing = make_paper("exam.pdf", Paper.Status.PARSING)
@@ -113,12 +108,10 @@ class ProcessingProgressTests(TestCase):
         now = timezone.now()
         for number in range(1, 11):
             question = Question.objects.create(
-                paper=paper, number=number,
-                state=Question.State.GREEN if number <= 5 else Question.State.WAITING,
+                paper=paper, number=number, state=Question.State.GREEN if number <= 5 else Question.State.WAITING
             )
-            if number <= 5:   # one card finished every 4 seconds
-                Question.all_objects.filter(pk=question.pk).update(
-                    updated_at=now - timedelta(seconds=4 * (5 - number)))
+            if number <= 5:  # one card finished every 4 seconds
+                Question.all_objects.filter(pk=question.pk).update(updated_at=now - timedelta(seconds=4 * (5 - number)))
         paper.progress, paper.total = 5, 10
         paper.save(update_fields=["progress", "total", "updated_at"])
         progress = paper_json(paper, with_counts=False)["processing"]
@@ -154,8 +147,11 @@ class SettledCountsTests(TempDataMixin, TestCase):
 
     def publish(self, card):
         library.publish(card, queue_enrichment=False)
-        return PublishedQuestion.objects.filter(question=card, status=PublishedQuestion.Status.PUBLISHED)\
-            .order_by("-version").first()
+        return (
+            PublishedQuestion.objects.filter(question=card, status=PublishedQuestion.Status.PUBLISHED)
+            .order_by("-version")
+            .first()
+        )
 
     def counts(self, paper):
         return paper_json(paper, with_counts=True)["counts"]
@@ -163,16 +159,18 @@ class SettledCountsTests(TempDataMixin, TestCase):
     def test_published_card_with_cleared_tick_is_settled_and_stops_counting_as_todo(self):
         self.use_temp_data()
         paper = self.make_paper()
-        cards = [self.card(paper, number=number, question_type="free_response",
-                           stem=f"第 {number} 题：求 $x^2$ 的范围")
-                 for number in range(1, 11)]
+        cards = [
+            self.card(paper, number=number, question_type="free_response", stem=f"第 {number} 题：求 $x^2$ 的范围")
+            for number in range(1, 11)
+        ]
         for card in cards:
             library.approve(card, now=timezone.now())
             card.save()
             self.publish(card)
         # Untick them all, the way an AI pass or a previous session leaves them.
-        Question.objects.filter(paper=paper).update(approved=False, approved_at=None,
-                                                    approved_content_hash="", approval_source="")
+        Question.objects.filter(paper=paper).update(
+            approved=False, approved_at=None, approved_content_hash="", approval_source=""
+        )
 
         counts = self.counts(paper)
 
@@ -221,8 +219,13 @@ class SettledCountsTests(TempDataMixin, TestCase):
         self.use_temp_data()
         paper = self.make_paper()
         for number in range(1, 26):
-            self.card(paper, number=number, question_type="free_response", state=Question.State.GREEN,
-                      stem=f"第 {number} 题：求 $x^2$ 的范围")
+            self.card(
+                paper,
+                number=number,
+                question_type="free_response",
+                state=Question.State.GREEN,
+                stem=f"第 {number} 题：求 $x^2$ 的范围",
+            )
         Question.objects.filter(paper=paper, number__gt=21).update(state=Question.State.YELLOW)
 
         counts = self.counts(paper)
@@ -236,8 +239,13 @@ class SettledCountsTests(TempDataMixin, TestCase):
         self.use_temp_data()
         paper = self.make_paper()
         for number in range(1, 7):
-            self.card(paper, number=number, question_type="free_response", state=Question.State.WAITING,
-                      stem=f"第 {number} 题：求 $x^2$ 的范围")
+            self.card(
+                paper,
+                number=number,
+                question_type="free_response",
+                state=Question.State.WAITING,
+                stem=f"第 {number} 题：求 $x^2$ 的范围",
+            )
         for number in (7, 8):
             self.card(paper, number=number, question_type="free_response", stem=f"第 {number} 题：求 $x^2$ 的范围")
 
@@ -270,8 +278,9 @@ class SettledCountsTests(TempDataMixin, TestCase):
             library.approve(card, now=timezone.now())
             card.save()
             self.publish(card)
-        Question.objects.filter(paper=paper).update(approved=False, approved_at=None,
-                                                    approved_content_hash="", approval_source="")
+        Question.objects.filter(paper=paper).update(
+            approved=False, approved_at=None, approved_content_hash="", approval_source=""
+        )
 
         counts = self.counts(paper)
 

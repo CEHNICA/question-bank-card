@@ -4,6 +4,7 @@ The library entry is never used as a mutable OCR card. A save locks its source
 card, verifies that no unpublished work exists, and publishes the edited card
 in the same transaction. Existing solution overlays remain on their versions.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -31,9 +32,11 @@ class EditorError(ValueError):
 
 
 def _text(value, label, maximum):
-    if not isinstance(value, str) or any(
-        (ord(c) < 32 and c not in "\r\n\t") or 0xD800 <= ord(c) <= 0xDFFF for c in value
-    ) or len(value.encode("utf-16-le")) // 2 > maximum:
+    if (
+        not isinstance(value, str)
+        or any((ord(c) < 32 and c not in "\r\n\t") or 0xD800 <= ord(c) <= 0xDFFF for c in value)
+        or len(value.encode("utf-16-le")) // 2 > maximum
+    ):
         raise EditorError(f"{label}应为不超过 {maximum} 字的文字")
     return value.strip()
 
@@ -48,7 +51,10 @@ def _current_reason(publication, question):
         return "题库已有更新的版本，请重新打开后修改"
     if question.reread_requested or question.ocr_pending or question.state not in library.REVIEWABLE_STATES:
         return "来源题正在识读或尚未完成审核，请先处理来源题卡"
-    if not library.approval_is_current(question) or library.content_hash(library.final_content(question)) != publication.content_hash:
+    if (
+        not library.approval_is_current(question)
+        or library.content_hash(library.final_content(question)) != publication.content_hash
+    ):
         return "来源题卡有尚未入库的修改，请先处理来源题卡，未覆盖任何内容"
     return ""
 
@@ -58,14 +64,17 @@ def editor_data(publication):
     reason = _current_reason(publication, question)
     content = publication.content or {}
     return {
-        "ok": True, "publication": library.publication_json(publication),
+        "ok": True,
+        "publication": library.publication_json(publication),
         "revision": question.content_revision if question else None,
         "content_hash": publication.content_hash,
         "body_mode": content.get("body_mode", "text"),
-        "stem": content.get("stem", ""), "options": deepcopy(content.get("options") or {}),
+        "stem": content.get("stem", ""),
+        "options": deepcopy(content.get("options") or {}),
         "question_type": publication.question_type,
         "figures": deepcopy(content.get("figures") or []),
-        "editable": not bool(reason), "reason": reason,
+        "editable": not bool(reason),
+        "reason": reason,
     }
 
 
@@ -83,8 +92,13 @@ def _figures(publication, question, payload):
     files = {figure.get("file"): index for index, figure in enumerate(originals)}
     seen, result, indices = set(), [], []
     for value in requested:
-        if not isinstance(value, dict) or set(value) != {"file", "slot"} or not isinstance(value["file"], str) \
-                or not isinstance(value["slot"], str) or value["slot"] not in {"stem", *library.OPTION_KEYS}:
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"file", "slot"}
+            or not isinstance(value["file"], str)
+            or not isinstance(value["slot"], str)
+            or value["slot"] not in {"stem", *library.OPTION_KEYS}
+        ):
             raise EditorError("配图应提供已有图片 file 和题干或选项 slot")
         name = value["file"]
         if name not in files or name in seen:
@@ -106,8 +120,11 @@ def _verify_retained_assets(publication, question, indices):
     folder = root / "library" / str(publication.pk)
 
     def check_path(path):
-        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()) \
-                or any(parent.is_symlink() for parent in path.parents if parent != root.parent):
+        if (
+            path.is_symlink()
+            or not path.resolve().is_relative_to(root.resolve())
+            or any(parent.is_symlink() for parent in path.parents if parent != root.parent)
+        ):
             raise EditorError("配图目录异常，未覆盖原题", 409)
 
     for index in indices:
@@ -138,11 +155,14 @@ def _review_figures(question, previous_figures, now):
                 selected.add(key)
     ignored = sorted(available - selected)
     question.figure_review = {
-        "status": OK if question.figures else CONFIRMED_NO_FIGURE, "source": "human",
+        "status": OK if question.figures else CONFIRMED_NO_FIGURE,
+        "source": "human",
         "reason": "题库编辑时人工确认配图" if question.figures else "题库编辑时人工确认无图",
         "signals": ["manual_figure"] if question.figures else ["human_confirmed_no_figure"],
         "cue_matches": cue_matches(question.stem, question.options),
-        "ignored_candidates": ignored, "excluded_count": len(ignored), "confirmed_at": now.isoformat(),
+        "ignored_candidates": ignored,
+        "excluded_count": len(ignored),
+        "confirmed_at": now.isoformat(),
     }
 
 
@@ -151,8 +171,12 @@ def save(publication, payload):
     required = {"revision", "content_hash", "stem", "options", "question_type"}
     if not isinstance(payload, dict) or set(payload) - allowed or not required <= set(payload):
         raise EditorError("请提供原题版本、题干、选项和题型；答案解析请在解析编辑器修改")
-    if type(payload["revision"]) is not int or payload["revision"] < 0 \
-            or not isinstance(payload["content_hash"], str) or not re.fullmatch(r"[a-f0-9]{64}", payload["content_hash"]):
+    if (
+        type(payload["revision"]) is not int
+        or payload["revision"] < 0
+        or not isinstance(payload["content_hash"], str)
+        or not re.fullmatch(r"[a-f0-9]{64}", payload["content_hash"])
+    ):
         raise EditorError("原题版本不正确，请重新打开题目")
     stem = _text(payload["stem"], "题干", 20000)
     options = payload["options"]
@@ -171,8 +195,10 @@ def save(publication, payload):
     with transaction.atomic():
         try:
             paper = Paper.objects.select_for_update().get(pk=publication.paper_id)
-            question = Question.objects.select_for_update().select_related("paper", "group").get(
-                pk=publication.question_id, paper=paper,
+            question = (
+                Question.objects.select_for_update()
+                .select_related("paper", "group")
+                .get(pk=publication.question_id, paper=paper)
             )
             publication = PublishedQuestion.objects.select_for_update().get(pk=publication.pk)
         except (Paper.DoesNotExist, Question.DoesNotExist):
@@ -187,10 +213,14 @@ def save(publication, payload):
             raise EditorError("完整原图正文已经包含配图，不应另加重复的配图")
         _verify_retained_assets(publication, question, indices)
         previous_figures = deepcopy(question.figures)
-        tidied = prose.tidy_fields({
-            "stem": fix_symbols(stem), "options": {key: fix_symbols(value) for key, value in options.items() if value},
-            "question_type": kind,
-        }, origin=question.origin)
+        tidied = prose.tidy_fields(
+            {
+                "stem": fix_symbols(stem),
+                "options": {key: fix_symbols(value) for key, value in options.items() if value},
+                "question_type": kind,
+            },
+            origin=question.origin,
+        )
         question.stem, question.options = tidied["stem"].strip(), tidied["options"]
         # The explicitly selected type wins over a printed '(多选)' prefix.
         question.question_type = kind
@@ -219,6 +249,7 @@ def question_editor(request, publication_id):
     if request.method not in {"GET", "POST"}:
         return HttpResponseNotAllowed(["GET", "POST"])
     from .views import _body, _guard
+
     if request.method == "POST":
         rejected = _guard(request)
         if rejected is not None:
@@ -228,8 +259,16 @@ def question_editor(request, publication_id):
         if request.method == "GET":
             return JsonResponse(editor_data(publication))
         publication, created, revision = save(publication, _body(request))
-        return JsonResponse({"ok": True, "created": created, "publication": library.publication_json(publication),
-                             "revision": revision, "content_hash": publication.content_hash}, status=201 if created else 200)
+        return JsonResponse(
+            {
+                "ok": True,
+                "created": created,
+                "publication": library.publication_json(publication),
+                "revision": revision,
+                "content_hash": publication.content_hash,
+            },
+            status=201 if created else 200,
+        )
     except EditorError as error:
         return JsonResponse({"error": str(error)}, status=error.status)
     except (OSError, ValueError, OperationalError):

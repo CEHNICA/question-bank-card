@@ -49,8 +49,15 @@ def list_m3_papers() -> list[dict]:
         source = next((p for p in folder.glob("source.*") if p.is_file()), None)
         if source is None or not (folder / "mineru_result.zip").is_file():
             continue
-        result.append({"id": document_id, "filename": filename, "kind": kind, "created_at": created,
-                       "imported": document_id in imported})
+        result.append(
+            {
+                "id": document_id,
+                "filename": filename,
+                "kind": kind,
+                "created_at": created,
+                "imported": document_id in imported,
+            }
+        )
     return result
 
 

@@ -68,8 +68,10 @@ def run(page) -> None:
       return {labels: chip.querySelectorAll('.label').length, drops: chip.querySelectorAll('.drop').length,
               text: chip.textContent};
     }""")
-    check(shape["labels"] == 1 and shape["drops"] == 1,
-          f"名字和 × 是两段（label {shape['labels']} 段、× {shape['drops']} 段）")
+    check(
+        shape["labels"] == 1 and shape["drops"] == 1,
+        f"名字和 × 是两段（label {shape['labels']} 段、× {shape['drops']} 段）",
+    )
     check(shape["text"] == f"知识点：{SHORT_TAG}×", f"两段拼起来还是原来那句话：{shape['text']}")
 
     short = measure(page, SHORT_TAG)
@@ -83,8 +85,10 @@ def run(page) -> None:
     check(long["truncated"], "名字被截断了（没有硬撑成两行）")
     check(long["title"] == f"知识点：{LONG_TAG}", f"完整名字留在 title 里：{long['title']}")
     # 两边都是视口坐标，可以直接比。
-    check(long["chipRight"] <= long["railRight"] + 1,
-          f"这一行没有超出筛选栏（到 {long['chipRight']:.0f}，栏右缘 {long['railRight']:.0f}）")
+    check(
+        long["chipRight"] <= long["railRight"] + 1,
+        f"这一行没有超出筛选栏（到 {long['chipRight']:.0f}，栏右缘 {long['railRight']:.0f}）",
+    )
     page.screenshot(path=f"{SHOTS}/filter_chip_long.png")
 
     # 点 × 还得管用：它现在是两段文字拼的按钮，别把可点区域做没了。

@@ -51,82 +51,94 @@ NOTE_BODY = """    return total
       ? `原卷另有 ${pages} 页没切出题目，不在上面这 ${total} 道题里。需要更多题时可从原卷补齐。`
       : `原卷有 ${pages} 页没切出题目。需要更多题时可从原卷补齐。`;"""
 
-NOTE_GUARD = "    if (pages <= 0) return \"\";"
+NOTE_GUARD = '    if (pages <= 0) return "";'
 NOTE_CALL = """        const note = QBProgress.manualPagesNote(manualPages.length, c.all);
         if (note) statusText.append(el("span", "processing-detail", note));"""
-METER_FIGURE = "    $(\"meterFigure\").title = `这份卷子的进度：${c.approved} / ${c.all} 题已入库`;"
+METER_FIGURE = '    $("meterFigure").title = `这份卷子的进度：${c.approved} / ${c.all} 题已入库`;'
 EXPORT = "canContinueAiCut, manualPagesNote };"
 
 # (relative, description, original, mutation)
 MUTATIONS = [
-    ("frontend/app.js",
-     "the bar goes back to 不用再看, a second name for the number printed above it",
-     BAR_TITLE,
-     '    if (done || todo) bar.title = `不用再看 ${done} · 还要看 ${todo}`;'),
-
-    ("frontend/app.js",
-     "the bar hides the finished half whenever anything is still waiting",
-     BAR_TITLE,
-     """    if (done || todo) {
+    (
+        "frontend/app.js",
+        "the bar goes back to 不用再看, a second name for the number printed above it",
+        BAR_TITLE,
+        "    if (done || todo) bar.title = `不用再看 ${done} · 还要看 ${todo}`;",
+    ),
+    (
+        "frontend/app.js",
+        "the bar hides the finished half whenever anything is still waiting",
+        BAR_TITLE,
+        """    if (done || todo) {
       bar.title = todo
         ? `这条细线是这份卷子的进度：橙色 ${todo} 题还要看。`
         : `这条细线是这份卷子的进度：绿色 ${done} 题都处理完了，没有还要看的题。`;
-    }"""),
-
-    ("frontend/app.js",
-     "a fully finished paper claims some are still waiting",
-     BAR_TITLE,
-     """    if (done || todo) {
+    }""",
+    ),
+    (
+        "frontend/app.js",
+        "a fully finished paper claims some are still waiting",
+        BAR_TITLE,
+        """    if (done || todo) {
       bar.title = `这条细线是这份卷子的进度：绿色 ${done} 题已经处理完，橙色 ${todo} 题还要看。`;
-    }"""),
-
-    ("frontend/app.js",
-     "the missing-pages line stops saying which questions it is unrelated to",
-     NOTE_BODY,
-     """    return total
+    }""",
+    ),
+    (
+        "frontend/app.js",
+        "the missing-pages line stops saying which questions it is unrelated to",
+        NOTE_BODY,
+        """    return total
       ? `原卷另有 ${pages} 页没切出题目。需要更多题时可从原卷补齐。`
-      : `原卷有 ${pages} 页没切出题目。需要更多题时可从原卷补齐。`;"""),
-
-    ("frontend/app.js",
-     "the missing-pages line goes back to sounding like unfinished work",
-     NOTE_BODY,
-     """    return total
+      : `原卷有 ${pages} 页没切出题目。需要更多题时可从原卷补齐。`;""",
+    ),
+    (
+        "frontend/app.js",
+        "the missing-pages line goes back to sounding like unfinished work",
+        NOTE_BODY,
+        """    return total
       ? `${pages} 页尚未自动切出题目，可从原卷补齐。`
-      : `${pages} 页尚未自动切出题目，可从原卷补齐。`;"""),
-
-    ("frontend/app.js",
-     "with nothing cut yet the line still talks about these 0 questions",
-     NOTE_BODY,
-     """    return total
+      : `${pages} 页尚未自动切出题目，可从原卷补齐。`;""",
+    ),
+    (
+        "frontend/app.js",
+        "with nothing cut yet the line still talks about these 0 questions",
+        NOTE_BODY,
+        """    return total
       ? `原卷另有 ${pages} 页没切出题目，不在上面这 ${total} 道题里。需要更多题时可从原卷补齐。`
-      : `原卷另有 ${pages} 页没切出题目，不在上面这 0 道题里。需要更多题时可从原卷补齐。`;"""),
-
-    ("frontend/app.js",
-     "the line still shows up when there is no uncut page at all",
-     NOTE_GUARD,
-     '    if (pages < 0) return "";'),
-
-    ("frontend/app.js",
-     "the page stops going through manualPagesNote and says the old thing inline",
-     NOTE_CALL,
-     """        statusText.append(el("span", "processing-detail",
-          `${manualPages.length} 页尚未自动切出题目，可从原卷补齐。`));"""),
-
-    ("frontend/app.js",
-     "the empty line is appended anyway and leaves a blank row",
-     NOTE_CALL,
-     """        const note = QBProgress.manualPagesNote(manualPages.length, c.all);
-        statusText.append(el("span", "processing-detail", note));"""),
-
-    ("frontend/app.js",
-     "the progress figure hover goes back to 不用再看",
-     METER_FIGURE,
-     '    $("meterFigure").title = `${c.approved} / ${c.all} 题不用再看（已通过或已入库）`;'),
-
-    ("frontend/app.js",
-     "manualPagesNote stops being reachable, so tests can no longer call it",
-     EXPORT,
-     "canContinueAiCut };"),
+      : `原卷另有 ${pages} 页没切出题目，不在上面这 0 道题里。需要更多题时可从原卷补齐。`;""",
+    ),
+    (
+        "frontend/app.js",
+        "the line still shows up when there is no uncut page at all",
+        NOTE_GUARD,
+        '    if (pages < 0) return "";',
+    ),
+    (
+        "frontend/app.js",
+        "the page stops going through manualPagesNote and says the old thing inline",
+        NOTE_CALL,
+        """        statusText.append(el("span", "processing-detail",
+          `${manualPages.length} 页尚未自动切出题目，可从原卷补齐。`));""",
+    ),
+    (
+        "frontend/app.js",
+        "the empty line is appended anyway and leaves a blank row",
+        NOTE_CALL,
+        """        const note = QBProgress.manualPagesNote(manualPages.length, c.all);
+        statusText.append(el("span", "processing-detail", note));""",
+    ),
+    (
+        "frontend/app.js",
+        "the progress figure hover goes back to 不用再看",
+        METER_FIGURE,
+        '    $("meterFigure").title = `${c.approved} / ${c.all} 题不用再看（已通过或已入库）`;',
+    ),
+    (
+        "frontend/app.js",
+        "manualPagesNote stops being reachable, so tests can no longer call it",
+        EXPORT,
+        "canContinueAiCut };",
+    ),
 ]
 
 
@@ -141,8 +153,9 @@ def write_text(path: Path, text: str) -> None:
 
 
 def run() -> subprocess.CompletedProcess:
-    return subprocess.run(COMMAND, cwd=str(FRONTEND), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
+    return subprocess.run(
+        COMMAND, cwd=str(FRONTEND), capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
 
 
 def main() -> int:
@@ -167,8 +180,11 @@ def main() -> int:
         if not caught:
             print((broken.stdout or "")[-2000:] + (broken.stderr or "")[-2000:])
     survived = [item for item in results if not item[1]]
-    print(f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住" if not survived
-          else f"\n{len(survived)} 条变异漏过：{survived}")
+    print(
+        f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住"
+        if not survived
+        else f"\n{len(survived)} 条变异漏过：{survived}"
+    )
     return 1 if survived else 0
 
 

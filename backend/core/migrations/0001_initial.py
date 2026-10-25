@@ -7,7 +7,6 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
     dependencies = []
@@ -16,15 +15,7 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="Paper",
             fields=[
-                (
-                    "id",
-                    models.UUIDField(
-                        default=uuid.uuid4,
-                        editable=False,
-                        primary_key=True,
-                        serialize=False,
-                    ),
-                ),
+                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
                 ("filename", models.CharField(max_length=255)),
                 ("kind", models.CharField(max_length=8)),
                 ("sha256", models.CharField(db_index=True, max_length=64)),
@@ -55,22 +46,12 @@ class Migration(migrations.Migration):
                 ("created_at", models.DateTimeField(auto_now_add=True)),
                 ("updated_at", models.DateTimeField(auto_now=True)),
             ],
-            options={
-                "ordering": ["-created_at"],
-            },
+            options={"ordering": ["-created_at"]},
         ),
         migrations.CreateModel(
             name="Question",
             fields=[
-                (
-                    "id",
-                    models.BigAutoField(
-                        auto_created=True,
-                        primary_key=True,
-                        serialize=False,
-                        verbose_name="ID",
-                    ),
-                ),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
                 ("number", models.PositiveIntegerField()),
                 ("section", models.CharField(blank=True, max_length=120)),
                 ("question_type", models.CharField(default="unknown", max_length=24)),
@@ -112,28 +93,16 @@ class Migration(migrations.Migration):
                 (
                     "paper",
                     models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE,
-                        related_name="questions",
-                        to="core.paper",
+                        on_delete=django.db.models.deletion.CASCADE, related_name="questions", to="core.paper"
                     ),
                 ),
             ],
-            options={
-                "ordering": ["number", "id"],
-            },
+            options={"ordering": ["number", "id"]},
         ),
         migrations.CreateModel(
             name="Block",
             fields=[
-                (
-                    "id",
-                    models.BigAutoField(
-                        auto_created=True,
-                        primary_key=True,
-                        serialize=False,
-                        verbose_name="ID",
-                    ),
-                ),
+                ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
                 ("seq", models.PositiveIntegerField()),
                 ("type", models.CharField(max_length=40)),
                 ("page_idx", models.PositiveIntegerField()),
@@ -142,33 +111,19 @@ class Migration(migrations.Migration):
                 (
                     "paper",
                     models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE,
-                        related_name="blocks",
-                        to="core.paper",
+                        on_delete=django.db.models.deletion.CASCADE, related_name="blocks", to="core.paper"
                     ),
                 ),
             ],
             options={
                 "ordering": ["seq"],
-                "constraints": [
-                    models.UniqueConstraint(
-                        fields=("paper", "seq"), name="unique_block_seq"
-                    )
-                ],
+                "constraints": [models.UniqueConstraint(fields=("paper", "seq"), name="unique_block_seq")],
             },
         ),
         migrations.CreateModel(
             name="PublishedQuestion",
             fields=[
-                (
-                    "id",
-                    models.UUIDField(
-                        default=uuid.uuid4,
-                        editable=False,
-                        primary_key=True,
-                        serialize=False,
-                    ),
-                ),
+                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
                 ("source_filename", models.CharField(max_length=255)),
                 ("number", models.PositiveIntegerField()),
                 ("question_type", models.CharField(max_length=24)),
@@ -176,11 +131,7 @@ class Migration(migrations.Migration):
                 (
                     "status",
                     models.CharField(
-                        choices=[
-                            ("published", "Published"),
-                            ("superseded", "Superseded"),
-                            ("withdrawn", "Withdrawn"),
-                        ],
+                        choices=[("published", "Published"), ("superseded", "Superseded"), ("withdrawn", "Withdrawn")],
                         default="published",
                         max_length=16,
                     ),
@@ -214,9 +165,7 @@ class Migration(migrations.Migration):
             options={
                 "ordering": ["-published_at"],
                 "constraints": [
-                    models.UniqueConstraint(
-                        fields=("question", "version"), name="unique_question_version"
-                    )
+                    models.UniqueConstraint(fields=("question", "version"), name="unique_question_version")
                 ],
             },
         ),

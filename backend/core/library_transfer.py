@@ -27,6 +27,7 @@
 入库快照      归属的题 + 版本号
 ============  ==========================================
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -74,8 +75,14 @@ DELETION_BATCH_TABLE = "core_questiondeletionbatch"
 # 以前没排除 backups，结果是：自动备份把上一次的备份包也打了进去，每打一次
 # 包就大一倍（63 GB 的教训），最后把磁盘塞满，整个题库都打不开了。
 SKIP_DIRECTORIES = {"chunks", "pages", "backups", "imports"}
-SKIP_NAMES = {"features.json", "mineru_engine.json", "knowledge-points.txt",
-              "library-drafts.json", "worker.lock", "library-drafts.lock"}
+SKIP_NAMES = {
+    "features.json",
+    "mineru_engine.json",
+    "knowledge-points.txt",
+    "library-drafts.json",
+    "worker.lock",
+    "library-drafts.lock",
+}
 
 
 class TransferError(ValueError):
@@ -153,12 +160,14 @@ def list_backups() -> list[dict]:
             stat = path.stat()
         except OSError:
             continue
-        items.append({
-            "id": path.stem,
-            "name": path.name,
-            "size": stat.st_size,
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(stat.st_mtime)),
-        })
+        items.append(
+            {
+                "id": path.stem,
+                "name": path.name,
+                "size": stat.st_size,
+                "created_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(stat.st_mtime)),
+            }
+        )
     items.sort(key=lambda item: item["created_at"], reverse=True)
     return items
 
@@ -204,7 +213,8 @@ def run_auto_backup() -> dict:
     if free is not None and free < needed:
         raise TransferError(
             f"磁盘只剩 {free // (1024 * 1024)} MB 可用，打一份备份要 {needed // (1024 * 1024)} MB。"
-            "先腾点空间，或者把旧的备份包删掉。")
+            "先腾点空间，或者把旧的备份包删掉。"
+        )
     result = export_bundle(root, prefix=AUTO_BACKUP_PREFIX)
     prune_backups()
     return result
@@ -315,6 +325,7 @@ def _snapshot_database(target: Path) -> None:
 
 def contextlib_closing(value):
     from contextlib import closing
+
     return closing(value)
 
 
@@ -345,8 +356,7 @@ def _paper_files(paper) -> dict:
     """
     folder = data_root() / _uuid_text(paper.pk)
     files: dict[str, str] = {}
-    for label, value in (("source", paper.source_path), ("render", paper.render_path),
-                         ("zip", paper.zip_path)):
+    for label, value in (("source", paper.source_path), ("render", paper.render_path), ("zip", paper.zip_path)):
         if not value:
             continue
         name = Path(str(value)).name
@@ -368,11 +378,15 @@ def _manifest() -> dict:
     papers = []
     for paper in Paper.objects.all().order_by("created_at"):
         files = _paper_files(paper)
-        papers.append({
-            "id": str(paper.pk), "filename": paper.filename, "sha256": paper.sha256,
-            "questions": Question.objects.filter(paper=paper).count(),
-            "files": files,
-        })
+        papers.append(
+            {
+                "id": str(paper.pk),
+                "filename": paper.filename,
+                "sha256": paper.sha256,
+                "questions": Question.objects.filter(paper=paper).count(),
+                "files": files,
+            }
+        )
     return {
         "format": BUNDLE_FORMAT,
         "app_version": getattr(__import__("core.version", fromlist=["APP_VERSION"]), "APP_VERSION", ""),
@@ -472,8 +486,13 @@ def _export_bundle(directory: Path, prefix: str) -> dict:
             pass
         raise
     os.replace(temp, target)
-    return {"file": str(target), "name": target.name, "size": target.stat().st_size,
-            "counts": manifest["counts"], "created_at": manifest["created_at"]}
+    return {
+        "file": str(target),
+        "name": target.name,
+        "size": target.stat().st_size,
+        "counts": manifest["counts"],
+        "created_at": manifest["created_at"],
+    }
 
 
 # ---------------------------------------------------------------- 看一眼
@@ -535,14 +554,34 @@ class _Merge:
         # 包里有哪些条目，先看一遍：还原文件时要按名字一个个找。
         self._names = list(archive.namelist())
         self.report = {
-            "新增卷子": 0, "新增题目": 0, "补上答案": 0, "两边都有保留本机": 0,
-            "题号一样内容不同": 0, "两版解析都留着": 0, "新增标签": 0, "多贴的标签": 0,
-            "补进来的解析版本": 0, "补回的文件": 0, "补回原卷路径": 0,
+            "新增卷子": 0,
+            "新增题目": 0,
+            "补上答案": 0,
+            "两边都有保留本机": 0,
+            "题号一样内容不同": 0,
+            "两版解析都留着": 0,
+            "新增标签": 0,
+            "多贴的标签": 0,
+            "补进来的解析版本": 0,
+            "补回的文件": 0,
+            "补回原卷路径": 0,
         }
-        self.added = {"papers": [], "questions": [], "publications": [], "solutions": [],
-                      "tags": [], "groups": [], "relations": [], "assignments": [], "filled": [],
-                      "question_groups": [], "deletion_batches": [], "memberships": [], "blocks": [],
-                      "regions": []}
+        self.added = {
+            "papers": [],
+            "questions": [],
+            "publications": [],
+            "solutions": [],
+            "tags": [],
+            "groups": [],
+            "relations": [],
+            "assignments": [],
+            "filled": [],
+            "question_groups": [],
+            "deletion_batches": [],
+            "memberships": [],
+            "blocks": [],
+            "regions": [],
+        }
         # 预览和真合并要报出同一件事，所以两边共用这些记录。
         self.notes: list[str] = []
         self.reserved_numbers: dict[str, set] = {}
@@ -627,8 +666,10 @@ class _Merge:
             self.incoming.close()
             shutil.rmtree(source.parent, ignore_errors=True)
         self.report["本机原有"] = {
-            "卷子": _count(PAPER_TABLE), "题目": _count(QUESTION_TABLE),
-            "入库快照": _count(PUBLICATION_TABLE), "标签": _count(TAG_TABLE),
+            "卷子": _count(PAPER_TABLE),
+            "题目": _count(QUESTION_TABLE),
+            "入库快照": _count(PUBLICATION_TABLE),
+            "标签": _count(TAG_TABLE),
         }
         if self.notes:
             self.report["说明"] = list(self.notes)
@@ -673,12 +714,13 @@ class _Merge:
             group = group_map.get(str(row.get("librarytaggroup_id")))
             if not tag or not group:
                 continue
-            if self._local_exists(TAG_MEMBERSHIP_TABLE, '"librarytag_id"=? AND "librarytaggroup_id"=?',
-                                  (tag, group)):
+            if self._local_exists(TAG_MEMBERSHIP_TABLE, '"librarytag_id"=? AND "librarytaggroup_id"=?', (tag, group)):
                 continue
-            inserted = self._insert(TAG_MEMBERSHIP_TABLE,
-                                    {key: value for key, value in row.items() if key != "id"} |
-                                    {"librarytag_id": tag, "librarytaggroup_id": group})
+            inserted = self._insert(
+                TAG_MEMBERSHIP_TABLE,
+                {key: value for key, value in row.items() if key != "id"}
+                | {"librarytag_id": tag, "librarytaggroup_id": group},
+            )
             if inserted:
                 self.added["memberships"].append(inserted)
 
@@ -687,8 +729,11 @@ class _Merge:
             child = tag_map.get(str(relation.get("child_id")))
             if not parent or not child:
                 continue
-            if self._local_exists(RELATION_TABLE, '"parent_id"=? AND "child_id"=? AND "relation_type"=?',
-                                  (parent, child, relation.get("relation_type") or "HIERARCHY")):
+            if self._local_exists(
+                RELATION_TABLE,
+                '"parent_id"=? AND "child_id"=? AND "relation_type"=?',
+                (parent, child, relation.get("relation_type") or "HIERARCHY"),
+            ):
                 continue
             # 标签上下级这张表的主键是**整数**（不是 UUID），不能照抄对方的编号 ——
             # 那个编号在本机可能已经被另一条关系占着。给一条新的。
@@ -700,8 +745,9 @@ class _Merge:
 
     def _local_tag(self, kind: str, name: str) -> str | None:
         with connection.cursor() as cursor:
-            row = cursor.execute('SELECT id FROM "core_librarytag" WHERE kind=? AND name=? LIMIT 1',
-                                 (kind, name)).fetchone()
+            row = cursor.execute(
+                'SELECT id FROM "core_librarytag" WHERE kind=? AND name=? LIMIT 1', (kind, name)
+            ).fetchone()
         return str(row[0]) if row else None
 
     def _local_tag_group(self, name: str) -> str | None:
@@ -745,14 +791,27 @@ class _Merge:
         for paper in papers:
             local = self._local_paper(str(paper.get("sha256") or ""))
             if local is None:
-                self._add_paper(paper, blocks_by_paper, questions_by_paper, publications_by_question,
-                                solutions_by_publication, regions_by_question,
-                                groups_by_paper, batches_by_paper)
+                self._add_paper(
+                    paper,
+                    blocks_by_paper,
+                    questions_by_paper,
+                    publications_by_question,
+                    solutions_by_publication,
+                    regions_by_question,
+                    groups_by_paper,
+                    batches_by_paper,
+                )
             else:
-                self._merge_into_paper(local, paper, questions_by_paper.get(str(paper["id"]), []),
-                                       publications_by_question, solutions_by_publication, regions_by_question,
-                                       groups_by_paper.get(str(paper["id"]), []),
-                                       batches_by_paper.get(str(paper["id"]), []))
+                self._merge_into_paper(
+                    local,
+                    paper,
+                    questions_by_paper.get(str(paper["id"]), []),
+                    publications_by_question,
+                    solutions_by_publication,
+                    regions_by_question,
+                    groups_by_paper.get(str(paper["id"]), []),
+                    batches_by_paper.get(str(paper["id"]), []),
+                )
         # 已经撤回、题目又被删掉的旧快照：没有题目可跟，那就自己搬。
         # 少了它们，"只增不减"就成了空话（本机那份历史就少了几十条）。
         for publication in publications:
@@ -779,21 +838,35 @@ class _Merge:
             return None
         with connection.cursor() as cursor:
             rows = cursor.execute(
-                'SELECT id, archived FROM "core_paper" WHERE sha256=? ORDER BY archived ASC, created_at DESC',
-                (sha256,)).fetchall()
+                'SELECT id, archived FROM "core_paper" WHERE sha256=? ORDER BY archived ASC, created_at DESC', (sha256,)
+            ).fetchall()
         visible = [str(row[0]) for row in rows if not row[1]]
         if not visible:
             return None
         if len(visible) == 1:
             return visible[0]
         with connection.cursor() as cursor:
-            counts = {str(row[0]): int(row[1]) for row in cursor.execute(
-                'SELECT paper_id, COUNT(*) FROM "core_question" WHERE paper_id IN (%s) GROUP BY paper_id'
-                % ",".join("?" * len(visible)), visible).fetchall()}
+            counts = {
+                str(row[0]): int(row[1])
+                for row in cursor.execute(
+                    'SELECT paper_id, COUNT(*) FROM "core_question" WHERE paper_id IN (%s) GROUP BY paper_id'
+                    % ",".join("?" * len(visible)),
+                    visible,
+                ).fetchall()
+            }
         return max(visible, key=lambda paper_id: counts.get(paper_id, 0))
 
-    def _add_paper(self, paper, blocks_by_paper, questions_by_paper, publications_by_question,
-                   solutions_by_publication, regions_by_question, groups_by_paper, batches_by_paper) -> None:
+    def _add_paper(
+        self,
+        paper,
+        blocks_by_paper,
+        questions_by_paper,
+        publications_by_question,
+        solutions_by_publication,
+        regions_by_question,
+        groups_by_paper,
+        batches_by_paper,
+    ) -> None:
         incoming_id = str(paper["id"])
         row = {**paper}
         # 卷子的编号是 UUID，两台电脑各编各的 —— 但本机可能已经有这个编号了
@@ -824,8 +897,13 @@ class _Merge:
         # 题组和删除批次得先摆好：题目马上要指过去。
         self._merge_question_groups(paper_id, groups_by_paper.get(incoming_id, []))
         self._merge_deletion_batches(paper_id, batches_by_paper.get(incoming_id, []))
-        id_map = self._add_questions(paper_id, questions_by_paper.get(incoming_id, []),
-                                     publications_by_question, solutions_by_publication, regions_by_question)
+        id_map = self._add_questions(
+            paper_id,
+            questions_by_paper.get(incoming_id, []),
+            publications_by_question,
+            solutions_by_publication,
+            regions_by_question,
+        )
         self._fix_batch_question_ids(id_map)
 
     def _merge_question_groups(self, local_paper_id: str, incoming_groups: list) -> None:
@@ -859,13 +937,13 @@ class _Merge:
         with connection.cursor() as cursor:
             if sequence is not None:
                 row = cursor.execute(
-                    'SELECT id FROM "core_questiongroup" WHERE paper_id=? AND sequence=? LIMIT 1',
-                    (paper_id, sequence)).fetchone()
+                    'SELECT id FROM "core_questiongroup" WHERE paper_id=? AND sequence=? LIMIT 1', (paper_id, sequence)
+                ).fetchone()
                 return str(row[0]) if row else None
             if title:
                 row = cursor.execute(
-                    'SELECT id FROM "core_questiongroup" WHERE paper_id=? AND title=? LIMIT 1',
-                    (paper_id, title)).fetchone()
+                    'SELECT id FROM "core_questiongroup" WHERE paper_id=? AND title=? LIMIT 1', (paper_id, title)
+                ).fetchone()
         return str(row[0]) if row else None
 
     def _merge_deletion_batches(self, local_paper_id: str, incoming_batches: list) -> None:
@@ -899,11 +977,14 @@ class _Merge:
             if self.dry_run:
                 continue
             with connection.cursor() as cursor:
-                cursor.execute('UPDATE "core_questiondeletionbatch" SET "question_ids"=? WHERE id=?',
-                               (json.dumps(local_ids), batch_id))
+                cursor.execute(
+                    'UPDATE "core_questiondeletionbatch" SET "question_ids"=? WHERE id=?',
+                    (json.dumps(local_ids), batch_id),
+                )
 
-    def _add_questions(self, paper_id, questions, publications_by_question,
-                       solutions_by_publication, regions_by_question) -> dict:
+    def _add_questions(
+        self, paper_id, questions, publications_by_question, solutions_by_publication, regions_by_question
+    ) -> dict:
         """把一道卷上的若干道题整批搬进来，返回"对方编号 → 本机编号"的对照。
 
         **编号不能照抄**：题目的主键是整数自增，两台电脑各自从 1 开始编，
@@ -940,20 +1021,30 @@ class _Merge:
             if not target:
                 continue
             for publication in (publications_by_question or {}).get(source_id, []):
-                self._add_publication({**publication, "question_id": target, "paper_id": paper_id},
-                                      solutions_by_publication)
+                self._add_publication(
+                    {**publication, "question_id": target, "paper_id": paper_id}, solutions_by_publication
+                )
             for region in (regions_by_question or {}).get(source_id, []):
                 # 框选识读是整型主键，交给数据库自己编号。
-                inserted = self._insert(REGION_TABLE, {key: value for key, value in region.items() if key != "id"} |
-                                       {"question_id": target})
+                inserted = self._insert(
+                    REGION_TABLE, {key: value for key, value in region.items() if key != "id"} | {"question_id": target}
+                )
                 if inserted:
                     # 撤销时要删：题和卷子一删，这些识读记录还指着它们。
                     self.added["regions"].append(inserted)
         return id_map
 
-    def _merge_into_paper(self, local_paper_id, paper, incoming_questions,
-                          publications_by_question, solutions_by_publication, regions_by_question,
-                          incoming_groups, incoming_batches) -> None:
+    def _merge_into_paper(
+        self,
+        local_paper_id,
+        paper,
+        incoming_questions,
+        publications_by_question,
+        solutions_by_publication,
+        regions_by_question,
+        incoming_groups,
+        incoming_batches,
+    ) -> None:
         """同一份原卷：逐题比。本机有的不删，空着的补上。
 
         认题只认两样：**这套原卷**（按 sha256）+ **题号**。题号一样再看题干：
@@ -993,7 +1084,9 @@ class _Merge:
                         new_number = self._next_number(local_paper_id, group_id)
                         to_add.append({**question, "number": new_number})
                         self.report["题号一样内容不同"] += 1
-                        self.notes.append(f"第 {number} 题题号一样但内容不同，备份里的那道放到了第 {new_number} 题，两道都留着")
+                        self.notes.append(
+                            f"第 {number} 题题号一样但内容不同，备份里的那道放到了第 {new_number} 题，两道都留着"
+                        )
                         continue
             changed = []
             for field, _label in (("answer", "答案"), ("analysis", "解析")):
@@ -1009,8 +1102,14 @@ class _Merge:
                         for field, value in changed:
                             cursor.execute(f'UPDATE "core_question" SET "{field}"=? WHERE id=?', (value, local["id"]))
                             # 记下填进去之前是什么，撤销时才还原得回去。
-                            self.added["filled"].append({"question_id": str(local["id"]), "field": field,
-                                                        "old": local.get(field) or "", "new": value})
+                            self.added["filled"].append(
+                                {
+                                    "question_id": str(local["id"]),
+                                    "field": field,
+                                    "old": local.get(field) or "",
+                                    "new": value,
+                                }
+                            )
                 # 计数要放在 if 外面：预览时也要报出"会补上几道"，
                 # 不然老师看到的是 0，真合并却是 2。
                 self.report["补上答案"] += 1
@@ -1029,11 +1128,13 @@ class _Merge:
                     # 但两边各编各的号）—— 题上贴的标签要跟着本机那个走。
                     self.publication_map[str(publication["id"])] = str(local_snapshot["id"])
                     continue
-                self._add_publication({**publication, "question_id": local["id"], "paper_id": local_paper_id},
-                                      solutions_by_publication)
+                self._add_publication(
+                    {**publication, "question_id": local["id"], "paper_id": local_paper_id}, solutions_by_publication
+                )
         if to_add:
-            id_map = self._add_questions(local_paper_id, to_add, publications_by_question,
-                                          solutions_by_publication, regions_by_question)
+            id_map = self._add_questions(
+                local_paper_id, to_add, publications_by_question, solutions_by_publication, regions_by_question
+            )
             self._fix_batch_question_ids(id_map)
 
     def _add_publication(self, publication, solutions_by_publication) -> None:
@@ -1104,12 +1205,11 @@ class _Merge:
         """本卷末尾的空题号（题号在题组里才唯一，所以按题组算）。"""
         with connection.cursor() as cursor:
             if group_id is None:
-                row = cursor.execute('SELECT MAX(number) FROM "core_question" WHERE paper_id=?',
-                                     (paper_id,)).fetchone()
+                row = cursor.execute('SELECT MAX(number) FROM "core_question" WHERE paper_id=?', (paper_id,)).fetchone()
             else:
                 row = cursor.execute(
-                    'SELECT MAX(number) FROM "core_question" WHERE paper_id=? AND group_id=?',
-                    (paper_id, group_id)).fetchone()
+                    'SELECT MAX(number) FROM "core_question" WHERE paper_id=? AND group_id=?', (paper_id, group_id)
+                ).fetchone()
         highest = int(row[0] or 0) if row else 0
         reserved = self.reserved_numbers.setdefault(f"{paper_id}:{group_id}", set())
         candidate = highest + 1
@@ -1120,23 +1220,30 @@ class _Merge:
 
     def _local_publications(self, question_id: str) -> set[str]:
         with connection.cursor() as cursor:
-            return {str(row[0]) for row in cursor.execute(
-                'SELECT id FROM "core_publishedquestion" WHERE question_id=?', (question_id,)).fetchall()}
+            return {
+                str(row[0])
+                for row in cursor.execute(
+                    'SELECT id FROM "core_publishedquestion" WHERE question_id=?', (question_id,)
+                ).fetchall()
+            }
 
     def _local_publication(self, question_id: str, version) -> dict | None:
         """这道题本机有没有同一个版本号的入库快照。"""
         if version is None:
             return None
         with connection.cursor() as cursor:
-            cursor.execute('SELECT id, content_hash FROM "core_publishedquestion" WHERE question_id=? AND version=? LIMIT 1',
-                           (question_id, version))
+            cursor.execute(
+                'SELECT id, content_hash FROM "core_publishedquestion" WHERE question_id=? AND version=? LIMIT 1',
+                (question_id, version),
+            )
             row = cursor.fetchone()
         return {"id": str(row[0]), "content_hash": row[1]} if row else None
 
     def _local_solution_count(self, publication_id: str) -> int:
         with connection.cursor() as cursor:
-            row = cursor.execute('SELECT COUNT(*) FROM "core_librarysolution" WHERE publication_id=?',
-                                 (publication_id,)).fetchone()
+            row = cursor.execute(
+                'SELECT COUNT(*) FROM "core_librarysolution" WHERE publication_id=?', (publication_id,)
+            ).fetchone()
         return int(row[0]) if row else 0
 
     def _merge_assignments(self, assignments) -> None:
@@ -1145,11 +1252,10 @@ class _Merge:
             tag_id = self.tag_map.get(str(assignment.get("tag_id")))
             if not publication_id or not tag_id:
                 continue
-            if self._local_exists(ASSIGNMENT_TABLE, '"publication_id"=? AND "tag_id"=?',
-                                  (publication_id, tag_id)):
+            if self._local_exists(ASSIGNMENT_TABLE, '"publication_id"=? AND "tag_id"=?', (publication_id, tag_id)):
                 continue
             row = {key: value for key, value in assignment.items() if key != "id"}
-            row["id"] = uuid.uuid4().hex       # 主键是 UUID，两边各编各的
+            row["id"] = uuid.uuid4().hex  # 主键是 UUID，两边各编各的
             row["publication_id"] = publication_id
             row["tag_id"] = tag_id
             inserted = self._insert(ASSIGNMENT_TABLE, row)
@@ -1187,16 +1293,16 @@ class _Merge:
         """
         with connection.cursor() as cursor:
             row = cursor.execute(
-                'SELECT source_path, render_path, zip_path FROM "core_paper" WHERE id=?',
-                (local_paper_id,)).fetchone()
+                'SELECT source_path, render_path, zip_path FROM "core_paper" WHERE id=?', (local_paper_id,)
+            ).fetchone()
         if row is None:
             return
         files = self._manifest_files(str(incoming_paper.get("id") or ""))
         folder = _uuid_text(local_paper_id)
         changes: dict[str, str] = {}
-        for index, (label, column) in enumerate((("source", "source_path"),
-                                                 ("render", "render_path"),
-                                                 ("zip", "zip_path"))):
+        for index, (label, column) in enumerate(
+            (("source", "source_path"), ("render", "render_path"), ("zip", "zip_path"))
+        ):
             if str(row[index] or "").strip():
                 continue
             restored = self._restored_path(folder, files.get(label))
@@ -1209,8 +1315,7 @@ class _Merge:
             return
         with connection.cursor() as cursor:
             for column, value in changes.items():
-                cursor.execute(f'UPDATE "core_paper" SET "{column}"=? WHERE id=?',
-                               (value, local_paper_id))
+                cursor.execute(f'UPDATE "core_paper" SET "{column}"=? WHERE id=?', (value, local_paper_id))
 
     def _restored_path(self, folder: str, relative) -> str:
         """原卷文件在本机的绝对位置；清单里没有就留空。
@@ -1288,7 +1393,7 @@ class _Merge:
         for name in self._names:
             if not name.startswith(prefix) or name.endswith("/"):
                 continue
-            relative = name[len(prefix):]
+            relative = name[len(prefix) :]
             target_relative = self._target_relative(relative)
             if target_relative is None:
                 continue
@@ -1307,8 +1412,10 @@ class _Merge:
 
 def _same_stem(left: str, right: str) -> bool:
     """题干是不是同一道题：看开头三十个字。"""
+
     def head(value: str) -> str:
         return "".join(value.split())[:30]
+
     a, b = head(left), head(right)
     if not a or not b:
         return True
@@ -1353,8 +1460,12 @@ def _write_record(merge: _Merge) -> dict:
     record = {"id": f"{stamp}", "created_at": timezone.now().isoformat(), **merge.added}
     target = root / f"merge-{stamp}.json"
     target.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"id": record["id"], "created_at": record["created_at"],
-            "papers": len(merge.added["papers"]), "questions": len(merge.added["questions"])}
+    return {
+        "id": record["id"],
+        "created_at": record["created_at"],
+        "papers": len(merge.added["papers"]),
+        "questions": len(merge.added["questions"]),
+    }
 
 
 def list_records() -> list[dict]:
@@ -1367,12 +1478,17 @@ def list_records() -> list[dict]:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        records.append({"id": data.get("id"), "created_at": data.get("created_at"),
-                        "papers": len(data.get("papers") or []),
-                        "questions": len(data.get("questions") or []),
-                        "solutions": len(data.get("solutions") or []),
-                        "filled": len(data.get("filled") or []),
-                        "tags": len(data.get("tags") or [])})
+        records.append(
+            {
+                "id": data.get("id"),
+                "created_at": data.get("created_at"),
+                "papers": len(data.get("papers") or []),
+                "questions": len(data.get("questions") or []),
+                "solutions": len(data.get("solutions") or []),
+                "filled": len(data.get("filled") or []),
+                "tags": len(data.get("tags") or []),
+            }
+        )
     return records
 
 
@@ -1398,8 +1514,9 @@ def undo_last_merge() -> dict:
             if field not in ("answer", "analysis") or not question_id:
                 continue
             with connection.cursor() as cursor:
-                cursor.execute(f'UPDATE "core_question" SET "{field}"=? WHERE id=?',
-                               (item.get("old") or "", question_id))
+                cursor.execute(
+                    f'UPDATE "core_question" SET "{field}"=? WHERE id=?', (item.get("old") or "", question_id)
+                )
             removed["filled"] += 1
         for question_id in record.get("questions") or []:
             removed["questions"] += _delete("core_question", question_id)

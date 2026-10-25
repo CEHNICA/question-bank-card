@@ -15,16 +15,11 @@ def mark_existing_directory(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
-    dependencies = [
-        ('core', '0025_tag_operation_action_length'),
-    ]
+    dependencies = [("core", "0025_tag_operation_action_length")]
 
     operations = [
         migrations.AddField(
-            model_name='librarytagcatalogue',
-            name='initialized',
-            field=models.BooleanField(default=False),
+            model_name="librarytagcatalogue", name="initialized", field=models.BooleanField(default=False)
         ),
         migrations.RunPython(mark_existing_directory, migrations.RunPython.noop),
     ]

@@ -71,6 +71,7 @@ def library_rows(params, *, omit: str = ""):
     if answer in {"yes", "no"} and omit != "answer":
         missing = models.Q(content__answer="") | models.Q(content__answer__isnull=True)
         rows = rows.exclude(missing) if answer == "yes" else rows.filter(missing)
+
     def tag_ids(key):
         raw = params.get(key, "")
         values = raw if isinstance(raw, list) else str(raw or "").split(",")
@@ -85,28 +86,38 @@ def library_rows(params, *, omit: str = ""):
     if omit != "tag":
         all_ids, any_ids, excluded = tag_ids("tag_all"), tag_ids("tag_any"), tag_ids("tag_not")
         from .library_tagging import descendant_ids, relation_context
+
         context = relation_context() if all_ids or any_ids or excluded else {}
         if all_ids:
             for tag_id in all_ids:
-                rows = rows.filter(tag_assignments__tag_id__in=descendant_ids([tag_id], context=context),
-                                   tag_assignments__needs_review=False)
+                rows = rows.filter(
+                    tag_assignments__tag_id__in=descendant_ids([tag_id], context=context),
+                    tag_assignments__needs_review=False,
+                )
         if any_ids:
-            rows = rows.filter(tag_assignments__tag_id__in=descendant_ids(any_ids, context=context),
-                               tag_assignments__needs_review=False).distinct()
+            rows = rows.filter(
+                tag_assignments__tag_id__in=descendant_ids(any_ids, context=context),
+                tag_assignments__needs_review=False,
+            ).distinct()
         if excluded:
-            rows = rows.exclude(tag_assignments__in=LibraryTagAssignment.objects.filter(
-                tag_id__in=descendant_ids(excluded, context=context), needs_review=False))
+            rows = rows.exclude(
+                tag_assignments__in=LibraryTagAssignment.objects.filter(
+                    tag_id__in=descendant_ids(excluded, context=context), needs_review=False
+                )
+            )
         if all_ids:
             rows = rows.distinct()
         legacy = params.get("tag", "").strip()
         if legacy:
             rows = rows.filter(tags_text__contains=library.tags_text([legacy]))
         if params.get("untagged_knowledge") == "true":
-            rows = rows.exclude(tag_assignments__in=LibraryTagAssignment.objects.filter(
-                tag__kind="knowledge", needs_review=False))
+            rows = rows.exclude(
+                tag_assignments__in=LibraryTagAssignment.objects.filter(tag__kind="knowledge", needs_review=False)
+            )
         if params.get("tag_review") == "true":
-            rows = rows.filter(models.Q(tag_suggestions__status="pending")
-                               | models.Q(tag_assignments__needs_review=True)).distinct()
+            rows = rows.filter(
+                models.Q(tag_suggestions__status="pending") | models.Q(tag_assignments__needs_review=True)
+            ).distinct()
     for term in params.get("q", "").split()[:8]:
         key = library.search_key(term)
         if key:
@@ -118,10 +129,20 @@ def facet_counts(params) -> dict:
     sources, types, reviews, answers, tags = {}, {}, {"human": 0, "ai": 0}, {"yes": 0, "no": 0}, {}
     for row in library_rows(params, omit="document").values("paper_id", "source_filename", "published_at"):
         key = str(row["paper_id"]) if row["paper_id"] else ""
-        entry = sources.setdefault(key, {"document_id": key or None, "filename": row["source_filename"],
-            "count": 0, "first_published_at": row["published_at"], "last_published_at": row["published_at"]})
+        entry = sources.setdefault(
+            key,
+            {
+                "document_id": key or None,
+                "filename": row["source_filename"],
+                "count": 0,
+                "first_published_at": row["published_at"],
+                "last_published_at": row["published_at"],
+            },
+        )
         entry["count"] += 1
-        if row["published_at"] and (not entry["first_published_at"] or row["published_at"] < entry["first_published_at"]):
+        if row["published_at"] and (
+            not entry["first_published_at"] or row["published_at"] < entry["first_published_at"]
+        ):
             entry["first_published_at"] = row["published_at"]
         if row["published_at"] and (not entry["last_published_at"] or row["published_at"] > entry["last_published_at"]):
             entry["last_published_at"] = row["published_at"]
@@ -134,23 +155,33 @@ def facet_counts(params) -> dict:
         answers["yes" if str(value or "").strip() else "no"] += 1
     from .library_tagging import descendant_ids, relation_context
     from .models import LibraryTag
+
     context = relation_context()
     publications_by_tag = {}
     for tag_id, publication_id in LibraryTagAssignment.objects.filter(
-            publication__in=library_rows(params, omit="tag"), needs_review=False).values_list("tag_id", "publication_id"):
+        publication__in=library_rows(params, omit="tag"), needs_review=False
+    ).values_list("tag_id", "publication_id"):
         publications_by_tag.setdefault(str(tag_id), set()).add(str(publication_id))
     for tag in LibraryTag.objects.all():
         key, matching = str(tag.pk), set()
         for child in descendant_ids([key], context=context):
             matching.update(publications_by_tag.get(child, set()))
         if matching:
-            tags[key] = {"id": key, "tag": tag.name, "count": len(matching),
-                         "direct_count": len(publications_by_tag.get(key, set())), "subtree_count": len(matching)}
+            tags[key] = {
+                "id": key,
+                "tag": tag.name,
+                "count": len(matching),
+                "direct_count": len(publications_by_tag.get(key, set())),
+                "subtree_count": len(matching),
+            }
     return {
         "sources": sorted(sources.values(), key=lambda item: (item["filename"], item["document_id"] or "")),
-        "types": types, "reviews": reviews, "answers": answers,
+        "types": types,
+        "reviews": reviews,
+        "answers": answers,
         "tags": sorted(tags.values(), key=lambda item: (-item["count"], item["tag"])),
     }
+
 
 def serialize_items(publications) -> list[dict]:
     publications = list(publications)
@@ -158,9 +189,12 @@ def serialize_items(publications) -> list[dict]:
     waiting = library_jobs.pending_kinds(ids)
     failed = library_jobs.last_errors(ids)
     details = {}
-    for row in LibraryJob.objects.filter(publication_id__in=ids, status__in=library_jobs.ACTIVE) \
-            .values("publication_id", "kind", "executor", "status"):
-        details.setdefault(str(row["publication_id"]), []).append({key: row[key] for key in ("kind", "executor", "status")})
+    for row in LibraryJob.objects.filter(publication_id__in=ids, status__in=library_jobs.ACTIVE).values(
+        "publication_id", "kind", "executor", "status"
+    ):
+        details.setdefault(str(row["publication_id"]), []).append(
+            {key: row[key] for key in ("kind", "executor", "status")}
+        )
     items = []
     for item in publications:
         data = library.publication_json(item)
@@ -177,17 +211,27 @@ def resolve_ids(ids: list[str], *, include_items: bool = True) -> dict:
     if not include_items:
         rows = rows.only("id", "status", "question_id")
     found = {str(item.id): item for item in rows}
-    superseded_questions = {item.question_id for item in found.values()
-                            if item.status == PublishedQuestion.Status.SUPERSEDED and item.question_id}
+    superseded_questions = {
+        item.question_id
+        for item in found.values()
+        if item.status == PublishedQuestion.Status.SUPERSEDED and item.question_id
+    }
     replacements = {}
     if superseded_questions:
-        for item in PublishedQuestion.objects.filter(question_id__in=superseded_questions,
-                                                    status=PublishedQuestion.Status.PUBLISHED).only("id", "question_id") \
-                .order_by("-version", "-published_at", "-id"):
+        for item in (
+            PublishedQuestion.objects.filter(
+                question_id__in=superseded_questions, status=PublishedQuestion.Status.PUBLISHED
+            )
+            .only("id", "question_id")
+            .order_by("-version", "-published_at", "-id")
+        ):
             replacements.setdefault(item.question_id, str(item.id))
     live, missing = [], []
-    messages = {"not_found": "这道题已不存在", "withdrawn": "这道题已撤回",
-                "superseded": "这道题已有新版本，请核对后选择当前版本"}
+    messages = {
+        "not_found": "这道题已不存在",
+        "withdrawn": "这道题已撤回",
+        "superseded": "这道题已有新版本，请核对后选择当前版本",
+    }
     for key in ids:
         item = found.get(key)
         if item is not None and item.status == PublishedQuestion.Status.PUBLISHED:
@@ -221,25 +265,37 @@ def tag_work_counts() -> dict:
     """
     from . import library_tagging
     from .models import LibraryTagAssignment, LibraryTagSuggestion
+
     published = PublishedQuestion.Status.PUBLISHED
     revision = library_tagging.catalogue_state().revision
-    pending = LibraryTagSuggestion.objects.filter(status=LibraryTagSuggestion.Status.PENDING,
-                                                  publication__status=published)
+    pending = LibraryTagSuggestion.objects.filter(
+        status=LibraryTagSuggestion.Status.PENDING, publication__status=published
+    )
     waiting = set(pending.values_list("publication_id", flat=True))
-    reachable = set(pending.filter(taxonomy_revision=revision,
-                                   assignment_revision=F("publication__tag_revision"))
-                     .values_list("publication_id", flat=True))
-    flagged = set(LibraryTagAssignment.objects.filter(needs_review=True, publication__status=published)
-                  .values_list("publication_id", flat=True))
+    reachable = set(
+        pending.filter(taxonomy_revision=revision, assignment_revision=F("publication__tag_revision")).values_list(
+            "publication_id", flat=True
+        )
+    )
+    flagged = set(
+        LibraryTagAssignment.objects.filter(needs_review=True, publication__status=published).values_list(
+            "publication_id", flat=True
+        )
+    )
     live = PublishedQuestion.objects.filter(status=published)
-    untagged = live.exclude(tag_assignments__in=LibraryTagAssignment.objects.filter(
-        tag__kind="knowledge", needs_review=False))
+    untagged = live.exclude(
+        tag_assignments__in=LibraryTagAssignment.objects.filter(tag__kind="knowledge", needs_review=False)
+    )
     # 「还没打标签」和「点一下真能排上队」是两个数，不能混用。
     # 筛选按钮要的是前者；批量按钮要的是后者 —— 已经有建议在等或在跑的题，
     # 点了也不会再排一次。混用会让按钮写着 805、点下去却一道也没排上。
     already_asked = LibraryTagSuggestion.objects.filter(
-        status__in=[LibraryTagSuggestion.Status.QUEUED, LibraryTagSuggestion.Status.RUNNING,
-                    LibraryTagSuggestion.Status.PENDING]).values("publication_id")
+        status__in=[
+            LibraryTagSuggestion.Status.QUEUED,
+            LibraryTagSuggestion.Status.RUNNING,
+            LibraryTagSuggestion.Status.PENDING,
+        ]
+    ).values("publication_id")
     # 「没入库答案」和「连 AI 初稿都没有」是两个数，差值是「已经有 AI 初稿」的那些。
     # 三个数都按全库算：拿筛选后的数去减全库的数会减出负数（原来「-37 题」就是这么来的）。
     missing_answers = 0
@@ -251,20 +307,22 @@ def tag_work_counts() -> dict:
             ai_draft_answers += 1
         else:
             missing_answers += 1
-    processing = LibraryJob.objects.filter(executor=LibraryJob.Executor.API,
-                                           status__in=library_jobs.ACTIVE).aggregate(
+    processing = LibraryJob.objects.filter(executor=LibraryJob.Executor.API, status__in=library_jobs.ACTIVE).aggregate(
         tags=Count("pk", filter=models.Q(kind=LibraryJob.Kind.TAGS)),
-        answers=Count("pk", filter=models.Q(kind=LibraryJob.Kind.ANSWER)))
-    return {"untagged_knowledge": untagged.distinct().count(),
-            "untagged_ready": untagged.exclude(pk__in=already_asked).distinct().count(),
-            "missing_answer": missing_answers,
-            "missing_answer_total": missing_answers + ai_draft_answers,
-            "ai_draft_answers": ai_draft_answers,
-            "queued_tags": processing["tags"],
-            "queued_answers": processing["answers"],
-            "pending_review": len(waiting | flagged),
-            "pending_actionable": len(reachable),
-            "outdated_suggestions": len(waiting - reachable)}
+        answers=Count("pk", filter=models.Q(kind=LibraryJob.Kind.ANSWER)),
+    )
+    return {
+        "untagged_knowledge": untagged.distinct().count(),
+        "untagged_ready": untagged.exclude(pk__in=already_asked).distinct().count(),
+        "missing_answer": missing_answers,
+        "missing_answer_total": missing_answers + ai_draft_answers,
+        "ai_draft_answers": ai_draft_answers,
+        "queued_tags": processing["tags"],
+        "queued_answers": processing["answers"],
+        "pending_review": len(waiting | flagged),
+        "pending_actionable": len(reachable),
+        "outdated_suggestions": len(waiting - reachable),
+    }
 
 
 def dimension_presence() -> dict:
@@ -282,11 +340,11 @@ def dimension_presence() -> dict:
     papers = library_rows({})
     missing = models.Q(content__answer="") | models.Q(content__answer__isnull=True)
     from .models import LibraryTagAssignment
+
     return {
         "review_ai": papers.filter(review_source="ai").count(),
         "answer_missing": papers.filter(missing).count(),
-        "tags": (LibraryTagAssignment.objects.filter(needs_review=False)
-                 .values("tag_id").distinct().count()),
+        "tags": (LibraryTagAssignment.objects.filter(needs_review=False).values("tag_id").distinct().count()),
     }
 
 
@@ -302,6 +360,7 @@ def selected_tag_names(params) -> dict:
     而且它要是塞进 pk__in，会把整个列表页打成 500。
     """
     from .models import LibraryTag
+
     ids = []
     for key in ("tag_all", "tag_any", "tag_not"):
         for value in str(params.get(key, "") or "").split(","):
@@ -341,29 +400,56 @@ def library_list(request):
         ids = [str(pk) for pk in rows.values_list("id", flat=True)]
         return JsonResponse({"total": len(ids), "ids": ids})
     total = rows.count()
-    items = serialize_items(rows[offset:offset + limit])
+    items = serialize_items(rows[offset : offset + limit])
     next_offset = offset + len(items)
     if wanted_param:
         # 只为刷新而读：不带全库统计、排队数量这些重活，前端也只合并这几行。
-        return JsonResponse({
-            "total": total, "items": items, "sort": sort, "limit": limit, "offset": offset,
-            "has_more": next_offset < total, "next_offset": next_offset if next_offset < total else None,
-        })
+        return JsonResponse(
+            {
+                "total": total,
+                "items": items,
+                "sort": sort,
+                "limit": limit,
+                "offset": offset,
+                "has_more": next_offset < total,
+                "next_offset": next_offset if next_offset < total else None,
+            }
+        )
     ai_status = library_ai_settings.public_status()
     tag_work = tag_work_counts()
-    return JsonResponse({
-        "total": total, "items": items, "facets": facet_counts(request.GET),
-        "presence": dimension_presence(),
-        "selected_tag_names": selected_tag_names(request.GET),
-        "features": features.load(), "type_names": qtypes.TYPE_LABELS, "tag_work": tag_work,
-        # 题库页要分清「还没填密钥」「填了但没测过」「测过了」三种情况，
-        # 才能告诉老师下一步去哪。只给一个 api_ready，前端只能写一句笼统的话，
-        # 老师看了只会以为功能坏了。
-        "ai": {key: ai_status.get(key) for key in ("mode", "provider", "message", "api_ready",
-                                                    "key_configured", "configured", "status", "verified_at")},
-        "sort": sort, "limit": limit, "offset": offset,
-        "has_more": next_offset < total, "next_offset": next_offset if next_offset < total else None,
-    })
+    return JsonResponse(
+        {
+            "total": total,
+            "items": items,
+            "facets": facet_counts(request.GET),
+            "presence": dimension_presence(),
+            "selected_tag_names": selected_tag_names(request.GET),
+            "features": features.load(),
+            "type_names": qtypes.TYPE_LABELS,
+            "tag_work": tag_work,
+            # 题库页要分清「还没填密钥」「填了但没测过」「测过了」三种情况，
+            # 才能告诉老师下一步去哪。只给一个 api_ready，前端只能写一句笼统的话，
+            # 老师看了只会以为功能坏了。
+            "ai": {
+                key: ai_status.get(key)
+                for key in (
+                    "mode",
+                    "provider",
+                    "message",
+                    "api_ready",
+                    "key_configured",
+                    "configured",
+                    "status",
+                    "verified_at",
+                )
+            },
+            "sort": sort,
+            "limit": limit,
+            "offset": offset,
+            "has_more": next_offset < total,
+            "next_offset": next_offset if next_offset < total else None,
+        }
+    )
 
 
 @csrf_exempt
@@ -372,6 +458,7 @@ def library_batch(request):
         return HttpResponseNotAllowed(["POST"])
     # Import lazily so views may delegate to this module without an import cycle.
     from .views import _body, _guard
+
     rejected = _guard(request)
     if rejected is not None:
         return rejected
@@ -385,14 +472,36 @@ def library_batch(request):
     result = resolve_ids(ids)
     if "filters" in payload:
         filters = payload["filters"]
-        allowed = {"q", "document", "type", "review", "answer", "tag", "tag_all", "tag_any", "tag_not",
-                   "tag_mode", "untagged_knowledge", "tag_review"}
-        if (not isinstance(filters, dict) or set(filters) - allowed
-                or any(not isinstance(value, str) and not (key in {"tag_all", "tag_any", "tag_not"} and isinstance(value, list))
-                       for key, value in filters.items())):
+        allowed = {
+            "q",
+            "document",
+            "type",
+            "review",
+            "answer",
+            "tag",
+            "tag_all",
+            "tag_any",
+            "tag_not",
+            "tag_mode",
+            "untagged_knowledge",
+            "tag_review",
+        }
+        if (
+            not isinstance(filters, dict)
+            or set(filters) - allowed
+            or any(
+                not isinstance(value, str)
+                and not (key in {"tag_all", "tag_any", "tag_not"} and isinstance(value, list))
+                for key, value in filters.items()
+            )
+        ):
             return JsonResponse({"error": "筛选条件格式不正确"}, status=400)
         rows = library_rows(filters)
         matching = set(map(str, rows.filter(pk__in=ids).values_list("id", flat=True)))
-        result.update(matches={key: key in matching for key in ids}, total=rows.count(), facets=facet_counts(filters),
-            tag_work=tag_work_counts())
+        result.update(
+            matches={key: key in matching for key in ids},
+            total=rows.count(),
+            facets=facet_counts(filters),
+            tag_work=tag_work_counts(),
+        )
     return JsonResponse(result)

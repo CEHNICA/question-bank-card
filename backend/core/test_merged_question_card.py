@@ -10,6 +10,7 @@
 判据只看纸上印着的形状，不依赖切题结果 —— 这也是为什么它能在「锚点对账」
 这种循环检查（锚点漏一道、卡也跟着漏）之外提供证据。
 """
+
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
@@ -18,19 +19,32 @@ from . import pipeline, textnorm
 from .models import Question
 
 READING = {
-    "stem": "", "options": {}, "content_kind": "question", "figures": {},
-    "missing_figure": False, "number_seen": 1, "figure_descriptions": [],
+    "stem": "",
+    "options": {},
+    "content_kind": "question",
+    "figures": {},
+    "missing_figure": False,
+    "number_seen": 1,
+    "figure_descriptions": [],
     "unclear": False,
 }
 
 
 def snapshot(**changes):
     base = {
-        "id": 1, "number": 1, "group_id": None,
+        "id": 1,
+        "number": 1,
+        "group_id": None,
         "regions": [{"page_idx": 0, "bbox": [80, 160, 900, 240]}],
-        "candidates": [], "question_type": "free_response", "stem": "", "options": {},
-        "edited": False, "source_kind": Question.SourceKind.UNKNOWN,
-        "source_anchor_seq": 1, "segmentation_flags": [], "body_mode": "text",
+        "candidates": [],
+        "question_type": "free_response",
+        "stem": "",
+        "options": {},
+        "edited": False,
+        "source_kind": Question.SourceKind.UNKNOWN,
+        "source_anchor_seq": 1,
+        "segmentation_flags": [],
+        "body_mode": "text",
         "start_source": "mineru",
     }
     base.update(changes)
@@ -76,12 +90,12 @@ class MergedQuestionFlagTests(SimpleTestCase):
     store = staticmethod(type("Store", (), {"load": lambda self, page: object()})())
 
     def run_card(self, stem, **changes):
-        with patch.object(pipeline.readers, "primary_engine", return_value=object()), \
-                patch.object(pipeline.readers, "read_question",
-                             return_value={**READING, "stem": stem}), \
-                patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])), \
-                patch.object(pipeline.imaging, "jpeg_data_url",
-                             return_value="data:image/jpeg;base64,x"):
+        with (
+            patch.object(pipeline.readers, "primary_engine", return_value=object()),
+            patch.object(pipeline.readers, "read_question", return_value={**READING, "stem": stem}),
+            patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])),
+            patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:image/jpeg;base64,x"),
+        ):
             return pipeline.read_card(snapshot(**changes), self.store)
 
     def test_a_card_holding_two_questions_is_not_green(self):

@@ -3,6 +3,7 @@
 Only a synthetic PDF and test token enter the fixture. HTTPS storage URLs are
 rewritten by the test-only Session to the same loopback server; no cloud is used.
 """
+
 import json
 import socket
 import threading
@@ -65,8 +66,9 @@ def outage_transport(scenario):
             if scenario == "submit_503":
                 self.reply({"code": -10001}, 503)
                 return
-            self.reply({"code": 0, "data": {"batch_id": "fixture-only",
-                "file_urls": ["https://fixture.invalid/upload"]}})
+            self.reply(
+                {"code": 0, "data": {"batch_id": "fixture-only", "file_urls": ["https://fixture.invalid/upload"]}}
+            )
 
         def do_PUT(self):
             counts["upload"] += 1
@@ -121,7 +123,7 @@ def outage_transport(scenario):
 
         def request(self, method, url, **kwargs):
             if url.startswith("https://fixture.invalid/"):
-                url = origin + url[len("https://fixture.invalid"):]
+                url = origin + url[len("https://fixture.invalid") :]
             if not url.startswith(origin + "/"):
                 raise AssertionError("Outage tests must not contact a remote host")
             kwargs["timeout"] = (0.1, 0.04)
@@ -134,8 +136,9 @@ def outage_transport(scenario):
             patches.enter_context(mock.patch.object(mineru, "time", clock))
             patches.enter_context(mock.patch.object(mineru, "WAIT_SILENT", 4))
             patches.enter_context(mock.patch.object(mineru, "WAIT_ALIVE", 6))
-            patches.enter_context(mock.patch.dict("os.environ", {
-                "MINERU_TOKEN": "offline-fixture-token", "MINERU_TOKENS_JSON": ""}))
+            patches.enter_context(
+                mock.patch.dict("os.environ", {"MINERU_TOKEN": "offline-fixture-token", "MINERU_TOKENS_JSON": ""})
+            )
             patches.enter_context(mock.patch.object(pipeline.logger, "exception"))
             account_pool.reset_account_pools()
             yield counts
@@ -155,24 +158,46 @@ class MineruOutagePipelineTests(TestCase):
     paper = originals.ManualIntakeReviewTests.paper
 
     def post(self, paper, suffix, payload):
-        return self.client.post(f"/api/papers/{paper.pk}/{suffix}", json.dumps(payload),
-            content_type="application/json", HTTP_X_QB_REQUEST="1")
+        return self.client.post(
+            f"/api/papers/{paper.pk}/{suffix}",
+            json.dumps(payload),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
 
     def protected_paper(self, *, continuation=False, auto_fallback=False):
         paper = self.paper(mode="mineru", status="queued")
-        approved = Question.objects.create(paper=paper, number=1, stem="Saved human answer $x=3$",
-            options={"A": "human option"}, state="green", processing_mode="manual", edited=True,
-            question_type="free_response", regions=[{"page_idx": 0, "bbox": [50, 50, 900, 420]}])
+        approved = Question.objects.create(
+            paper=paper,
+            number=1,
+            stem="Saved human answer $x=3$",
+            options={"A": "human option"},
+            state="green",
+            processing_mode="manual",
+            edited=True,
+            question_type="free_response",
+            regions=[{"page_idx": 0, "bbox": [50, 50, 900, 420]}],
+        )
         library.approve(approved, now=timezone.now())
         approved.save()
         publication, _ = library.publish(approved)
-        draft = Question.objects.create(paper=paper, number=2, stem="Retained manual correction",
-            state="red", processing_mode="manual", edited=True, question_type="free_response",
-            regions=[{"page_idx": 1, "bbox": [50, 50, 900, 420]}])
+        draft = Question.objects.create(
+            paper=paper,
+            number=2,
+            stem="Retained manual correction",
+            state="red",
+            processing_mode="manual",
+            edited=True,
+            question_type="free_response",
+            regions=[{"page_idx": 1, "bbox": [50, 50, 900, 420]}],
+        )
         paper.processing_plan.update(auto_fallback=auto_fallback)
         if continuation:
-            paper.processing_plan.update(continue_preserve_existing=True,
-                continue_revision=0, continue_existing_question_ids=[approved.pk, draft.pk])
+            paper.processing_plan.update(
+                continue_preserve_existing=True,
+                continue_revision=0,
+                continue_existing_question_ids=[approved.pk, draft.pk],
+            )
         paper.save()
         return paper, publication
 
@@ -183,8 +208,11 @@ class MineruOutagePipelineTests(TestCase):
             "source": Path(paper.source_path).read_bytes(),
             "pages": deepcopy(paper.pages),
             "blocks": list(paper.blocks.order_by("seq").values()),
-            "files": {str(path.relative_to(self.root)): path.read_bytes()
-                for path in (self.root / "library" / str(publication.pk)).rglob("*") if path.is_file()},
+            "files": {
+                str(path.relative_to(self.root)): path.read_bytes()
+                for path in (self.root / "library" / str(publication.pk)).rglob("*")
+                if path.is_file()
+            },
         }
 
     def assert_protected(self, paper, publication, before, *, switched=False):
@@ -196,8 +224,14 @@ class MineruOutagePipelineTests(TestCase):
             before = deepcopy(before)
             for rows in (before["questions"], after["questions"]):
                 for row in rows:
-                    for key in ("processing_mode", "content_revision", "reread_requested",
-                            "ocr_pending", "state", "updated_at"):
+                    for key in (
+                        "processing_mode",
+                        "content_revision",
+                        "reread_requested",
+                        "ocr_pending",
+                        "state",
+                        "updated_at",
+                    ):
                         row.pop(key, None)
         self.assertEqual(after, before)
         self.assertFalse((pipeline.paper_dir(paper) / "mineru_result.zip").exists())
@@ -218,13 +252,16 @@ class MineruOutagePipelineTests(TestCase):
             shown = self.client.get(f"/api/papers/{paper.pk}").json()["paper"]
             self.assertEqual(len(shown["pages"]), 2)
             self.assertIsNone(shown["processing"])
-            with mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud, \
-                    mock.patch.object(readers, "chat") as read:
+            with (
+                mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud,
+                mock.patch.object(readers, "chat") as read,
+            ):
                 switched = self.post(paper, "processing", {"mode": "manual", "revision": 0})
             self.assertEqual(switched.status_code, 200, switched.content)
             self.assertTrue(switched.json()["manual_ready"])
-            self.assertEqual((switched.json()["paper"]["status"], switched.json()["paper"]["parse_mode"]),
-                ("ready", "manual"))
+            self.assertEqual(
+                (switched.json()["paper"]["status"], switched.json()["paper"]["parse_mode"]), ("ready", "manual")
+            )
             self.assert_protected(paper, publication, before, switched=True)
             cloud.assert_not_called()
             read.assert_not_called()
@@ -296,8 +333,10 @@ class MineruOutagePipelineTests(TestCase):
             if info["state"] == "pending":
                 switches.append(self.post(paper, "processing", {"mode": "manual", "revision": 0}))
 
-        with outage_transport("queue_pending") as counts, \
-                mock.patch.object(mineru, "record_state", side_effect=queued_then_manual):
+        with (
+            outage_transport("queue_pending") as counts,
+            mock.patch.object(mineru, "record_state", side_effect=queued_then_manual),
+        ):
             pipeline.process_paper(paper)
         self.assertEqual(len(switches), 1)
         self.assertEqual(switches[0].status_code, 200, switches[0].content)
@@ -317,8 +356,10 @@ class MineruOutagePipelineTests(TestCase):
         self.assertEqual(result.json()["paper"]["status"], "reading")
         paper.refresh_from_db()
         self.assertTrue(pipeline._preserve_continued_cards(paper))
-        with mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud, \
-                mock.patch.object(pipeline, "read_questions", wraps=pipeline.read_questions) as reading:
+        with (
+            mock.patch.object(pipeline, "request_extract_file_from_pool") as cloud,
+            mock.patch.object(pipeline, "read_questions", wraps=pipeline.read_questions) as reading,
+        ):
             pipeline.process_paper(paper)
         cloud.assert_not_called()
         self.assertEqual(reading.call_args.args[1], [])

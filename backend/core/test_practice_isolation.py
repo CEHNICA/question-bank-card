@@ -1,4 +1,5 @@
 """Exercise isolation at the shared queue and publishing entry points."""
+
 import json
 import tempfile
 from pathlib import Path
@@ -24,9 +25,16 @@ class PracticeIsolationTests(TransactionTestCase):
         return self.client.post(path, json.dumps(body), content_type="application/json", HTTP_X_QB_REQUEST="1")
 
     def test_explicit_auto_addition_stays_manual_and_does_not_queue(self):
-        result = self.post(f"/api/papers/{self.paper.pk}/questions", {
-            "number": 4, "regions": self.question.regions, "processing_mode": "auto",
-            "body_mode": "text", "question_type": "single_choice"})
+        result = self.post(
+            f"/api/papers/{self.paper.pk}/questions",
+            {
+                "number": 4,
+                "regions": self.question.regions,
+                "processing_mode": "auto",
+                "body_mode": "text",
+                "question_type": "single_choice",
+            },
+        )
         self.assertEqual(result.status_code, 201, result.content)
         added = self.paper.questions.get(number=4)
         self.assertEqual(added.processing_mode, "manual")
@@ -43,8 +51,7 @@ class PracticeIsolationTests(TransactionTestCase):
         self.question.save()
         previous = (self.question.stem, self.question.figures)
         previous_mode = self.question.processing_mode
-        for body in ({"regions": self.question.regions},
-                     {"regions": self.question.regions, "processing_mode": "auto"}):
+        for body in ({"regions": self.question.regions}, {"regions": self.question.regions, "processing_mode": "auto"}):
             response = self.post(f"/api/questions/{self.question.pk}/regions", body)
             self.assertEqual(response.status_code, 200, response.content)
             self.question.refresh_from_db()
@@ -81,9 +88,11 @@ class PracticeIsolationTests(TransactionTestCase):
         self.paper.processing_plan = {}
         self.paper.status = Paper.Status.QUEUED
         self.paper.save(update_fields=["processing_plan", "status"])
-        with mock.patch("core.pipeline._reader_parallelism", side_effect=AssertionError("reader started")), \
-                mock.patch("core.pipeline.request_extract_file_from_pool", side_effect=AssertionError("upload started")), \
-                mock.patch("core.pipeline.parse", wraps=pipeline.parse) as parsing:
+        with (
+            mock.patch("core.pipeline._reader_parallelism", side_effect=AssertionError("reader started")),
+            mock.patch("core.pipeline.request_extract_file_from_pool", side_effect=AssertionError("upload started")),
+            mock.patch("core.pipeline.parse", wraps=pipeline.parse) as parsing,
+        ):
             pipeline.read_questions(self.paper, [self.question])
             pipeline.process_paper(self.paper)
             self.assertFalse(pipeline.parse_ahead(self.paper))
@@ -105,9 +114,13 @@ class PracticeIsolationTests(TransactionTestCase):
         self.assertFalse(region_reads.pending())
 
     def test_retry_reparse_resegment_and_continue_cannot_queue_demo(self):
-        for action, state in (("retry", Paper.Status.FAILED), ("reparse", Paper.Status.PARSING),
-                              ("resegment", Paper.Status.READY), ("resegment/preview", Paper.Status.READY),
-                              ("continue-ai-cut", Paper.Status.READY)):
+        for action, state in (
+            ("retry", Paper.Status.FAILED),
+            ("reparse", Paper.Status.PARSING),
+            ("resegment", Paper.Status.READY),
+            ("resegment/preview", Paper.Status.READY),
+            ("continue-ai-cut", Paper.Status.READY),
+        ):
             self.paper.status = state
             self.paper.save(update_fields=["status"])
             response = self.post(f"/api/papers/{self.paper.pk}/{action}", {"revision": 0, "allow_cloud": True})

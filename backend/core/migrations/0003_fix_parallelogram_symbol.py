@@ -21,11 +21,6 @@ def forwards(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+    dependencies = [("core", "0002_paper_photos")]
 
-    dependencies = [
-        ("core", "0002_paper_photos"),
-    ]
-
-    operations = [
-        migrations.RunPython(forwards, migrations.RunPython.noop),
-    ]
+    operations = [migrations.RunPython(forwards, migrations.RunPython.noop)]

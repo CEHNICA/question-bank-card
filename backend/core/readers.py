@@ -142,8 +142,9 @@ def bounded_request(seconds: float, *, cancel=None):
 
 def _request_cancelled() -> bool:
     limits = _REQUEST_LIMITS.get()
-    return limits is not None and (time.monotonic() >= limits["deadline"]
-        or (limits["cancel"] is not None and limits["cancel"]()))
+    return limits is not None and (
+        time.monotonic() >= limits["deadline"] or (limits["cancel"] is not None and limits["cancel"]())
+    )
 
 
 def _check_request() -> None:
@@ -183,7 +184,7 @@ def _http_slot():
 
 @dataclass(frozen=True)
 class Engine:
-    provider: str   # a provider_catalog.VISION key: minimax | modelscope | siliconflow
+    provider: str  # a provider_catalog.VISION key: minimax | modelscope | siliconflow
     model: str
 
     @property
@@ -243,7 +244,7 @@ def _selected(name: str, default: str, allowed: set[str]) -> str:
 
 
 def _configured_selection(
-    configuration: dict | None, role: str, environment_name: str, default: str, allowed: set[str],
+    configuration: dict | None, role: str, environment_name: str, default: str, allowed: set[str]
 ) -> str:
     if configuration is None:
         return _selected(environment_name, default, allowed)
@@ -261,7 +262,7 @@ def engine_by_key(key: str, configuration: dict | None = None) -> Engine | None:
 
 def _primary_selection(configuration: dict | None = None) -> str:
     return _configured_selection(
-        configuration, "primary_engine", "QB_PRIMARY_ENGINE", "minimax_m3", {ASSISTANT, *ENGINE_CHOICES},
+        configuration, "primary_engine", "QB_PRIMARY_ENGINE", "minimax_m3", {ASSISTANT, *ENGINE_CHOICES}
     )
 
 
@@ -299,20 +300,38 @@ def primary_readiness(configuration: dict | None = None) -> dict:
     selected = _primary_selection(configuration)
     label = _service_label(selected)
     if selected == ASSISTANT:
-        return {"ready": False, "reason": "assistant_mode", "selected": selected, "label": label,
-                "engine": None, "used": "", "fallback_available": False}
+        return {
+            "ready": False,
+            "reason": "assistant_mode",
+            "selected": selected,
+            "label": label,
+            "engine": None,
+            "used": "",
+            "fallback_available": False,
+        }
     chosen = engine_by_key(selected, configuration)
     if chosen is not None:
-        return {"ready": True, "reason": "", "selected": selected, "label": chosen.label,
-                "engine": chosen, "used": chosen.provider, "fallback_available": False}
+        return {
+            "ready": True,
+            "reason": "",
+            "selected": selected,
+            "label": chosen.label,
+            "engine": chosen,
+            "used": chosen.provider,
+            "fallback_available": False,
+        }
     fallback = _first_configured(provider_catalog.PRIMARY_ORDER, configuration)
-    return {"ready": fallback is not None,
-            "reason": "" if fallback is not None else "none_configured",
-            "selected": selected, "label": label, "engine": fallback,
-            "used": fallback.provider if fallback is not None else "",
-            # The page shows the service that will really read, so a switch the
-            # user did not type is visible rather than silent.
-            "fallback_available": fallback is not None and fallback.provider != selected}
+    return {
+        "ready": fallback is not None,
+        "reason": "" if fallback is not None else "none_configured",
+        "selected": selected,
+        "label": label,
+        "engine": fallback,
+        "used": fallback.provider if fallback is not None else "",
+        # The page shows the service that will really read, so a switch the
+        # user did not type is visible rather than silent.
+        "fallback_available": fallback is not None and fallback.provider != selected,
+    }
 
 
 def _service_label(key: str) -> str:
@@ -340,24 +359,24 @@ def checker_engine(configuration: dict | None = None) -> Engine | None:
     if assistant_mode(configuration):
         return None
     selected = _configured_selection(
-        configuration, "checker_engine", "QB_CHECKER_ENGINE", "auto", {"auto", *ENGINE_CHOICES},
+        configuration, "checker_engine", "QB_CHECKER_ENGINE", "auto", {"auto", *ENGINE_CHOICES}
     )
     if selected != "auto":
         return engine_by_key(selected, configuration)
     primary = primary_engine(configuration)
     # “自动”按提供商选择另一家，而不是写死某一家。
-    other = _first_configured(provider_catalog.CHECKER_ORDER, configuration,
-                              skip=primary.provider if primary is not None else "")
+    other = _first_configured(
+        provider_catalog.CHECKER_ORDER, configuration, skip=primary.provider if primary is not None else ""
+    )
     return other or (None if _SELECTED_SERVICES_ONLY.get() else primary)
 
 
 def arbiter_engine(
-    primary: Engine | None = None, checker: Engine | None = None, configuration: dict | None = None,
+    primary: Engine | None = None, checker: Engine | None = None, configuration: dict | None = None
 ) -> Engine | None:
     """分歧裁决模型；默认沿用主读，也可显式选择复核或某一已配置引擎。"""
     selected = _configured_selection(
-        configuration, "arbiter_engine", "QB_ARBITER_ENGINE", "primary",
-        {"primary", "checker", *ENGINE_CHOICES},
+        configuration, "arbiter_engine", "QB_ARBITER_ENGINE", "primary", {"primary", "checker", *ENGINE_CHOICES}
     )
     if selected == "primary":
         return primary if primary is not None else primary_engine(configuration)
@@ -371,11 +390,10 @@ def engine_settings(configuration: dict | None = None) -> dict:
     selected = {
         "primary": _primary_selection(configuration),
         "checker": _configured_selection(
-            configuration, "checker_engine", "QB_CHECKER_ENGINE", "auto", {"auto", *ENGINE_CHOICES},
+            configuration, "checker_engine", "QB_CHECKER_ENGINE", "auto", {"auto", *ENGINE_CHOICES}
         ),
         "arbiter": _configured_selection(
-            configuration, "arbiter_engine", "QB_ARBITER_ENGINE", "primary",
-            {"primary", "checker", *ENGINE_CHOICES},
+            configuration, "arbiter_engine", "QB_ARBITER_ENGINE", "primary", {"primary", "checker", *ENGINE_CHOICES}
         ),
     }
     primary = primary_engine(configuration)
@@ -399,15 +417,23 @@ def engine_settings(configuration: dict | None = None) -> dict:
         "configured": {provider: configured(provider) for provider in provider_catalog.VISION},
         "pool_sizes": {provider: _reported_pool_size(provider) for provider in provider_catalog.VISION},
         "choices": [
-            {"key": spec["engine"], "provider": spec["label"], "provider_key": provider,
-             "model": models[provider], "available": configured(provider),
-             "free": models[provider] in spec["free_models"], "note": spec["note"]}
+            {
+                "key": spec["engine"],
+                "provider": spec["label"],
+                "provider_key": provider,
+                "model": models[provider],
+                "available": configured(provider),
+                "free": models[provider] in spec["free_models"],
+                "note": spec["note"],
+            }
             for provider, spec in provider_catalog.VISION.items()
         ],
         "suggested_models": preferences.SUGGESTED_MODELS,
         "free_models": preferences.FREE_MODELS,
-        "signup": {"mineru": provider_catalog.MINERU["signup"],
-                   **{provider: spec["signup"] for provider, spec in provider_catalog.VISION.items()}},
+        "signup": {
+            "mineru": provider_catalog.MINERU["signup"],
+            **{provider: spec["signup"] for provider, spec in provider_catalog.VISION.items()},
+        },
     }
 
 
@@ -476,20 +502,25 @@ def arbiter_prompt(number: int, first: dict, second: dict, witness: str = "") ->
                 lines.append(f"【{key}】{reading['options'][key]}")
         return "\n".join(lines)
 
-    return "\n\n".join([
-        TRANSCRIBE_RULES,
-        f"这段候选内容（显示编号 {number}）已经被独立誊录了两次，两次有出入。请对照原图逐字核对，给出正确的誊录和内容类型。"
-        "两次都对的地方照抄；有出入的地方以原图印刷体为准。",
-        f"【读法甲】\n{show(first)}",
-        f"【读法乙】\n{show(second)}",
-        *([
-            "【另一识别引擎的文字】（MinerU 按版面识别，可能混入手写、漏字或把公式写乱，只作参考；"
-            "有出入处以原图印刷体为准，但它常能帮你发现两种读法里被“改正”过的字）\n"
-            + witness.strip()[:1500]
-        ] if witness and witness.strip() else []),
-        "只按下面的格式输出正确结果，不要解释：\n【内容类型】例题/练习题/教材正文/标题/不确定"
-        "\n【题干】\n…\n【A】…\n【B】…\n【C】…\n【D】…\n【E】…（原卷有 E 选项才写；不是选择题就不写选项）",
-    ])
+    return "\n\n".join(
+        [
+            TRANSCRIBE_RULES,
+            f"这段候选内容（显示编号 {number}）已经被独立誊录了两次，两次有出入。请对照原图逐字核对，给出正确的誊录和内容类型。"
+            "两次都对的地方照抄；有出入的地方以原图印刷体为准。",
+            f"【读法甲】\n{show(first)}",
+            f"【读法乙】\n{show(second)}",
+            *(
+                [
+                    "【另一识别引擎的文字】（MinerU 按版面识别，可能混入手写、漏字或把公式写乱，只作参考；"
+                    "有出入处以原图印刷体为准，但它常能帮你发现两种读法里被“改正”过的字）\n" + witness.strip()[:1500]
+                ]
+                if witness and witness.strip()
+                else []
+            ),
+            "只按下面的格式输出正确结果，不要解释：\n【内容类型】例题/练习题/教材正文/标题/不确定"
+            "\n【题干】\n…\n【A】…\n【B】…\n【C】…\n【D】…\n【E】…（原卷有 E 选项才写；不是选择题就不写选项）",
+        ]
+    )
 
 
 def spot_check_prompt(spots: list[dict]) -> tuple[str, list[dict]]:
@@ -530,12 +561,13 @@ def parse_spot_answers(raw: str, order: list[dict]) -> list[str | None]:
 def locate_prompt(number: int) -> str:
     return (
         "图片左侧有红绿相间的编号刻度（01、02、…），每个编号对应它右侧的一条横带。"
-        f"这张图里有几道印刷题目。请找出第 {number} 题的印刷题号（\"{number}.\"）所在的横带编号。"
+        f'这张图里有几道印刷题目。请找出第 {number} 题的印刷题号（"{number}."）所在的横带编号。'
         "手写的数字不算。\n只输出一行：【刻度】编号。找不到就输出：【刻度】无"
     )
 
 
 # ---------------------------------------------------------------- 解析
+
 
 def split_tags(text: str) -> dict[str, str]:
     text = re.sub(r"<think>.*?</think>", "", str(text or ""), flags=re.S)
@@ -620,8 +652,7 @@ def strip_markdown_tables(value: str) -> tuple[str, bool]:
     removed = False
     index = 0
     while index < len(lines):
-        if (index + 1 < len(lines) and "|" in lines[index]
-                and MARKDOWN_TABLE_SEPARATOR.fullmatch(lines[index + 1])):
+        if index + 1 < len(lines) and "|" in lines[index] and MARKDOWN_TABLE_SEPARATOR.fullmatch(lines[index + 1]):
             removed = True
             index += 2
             while index < len(lines) and "|" in lines[index] and lines[index].strip():
@@ -660,7 +691,9 @@ def parse_reading(text: str, number: int) -> dict:
             other = int(re.search(r"\d+", role).group(0))
             figures[label] = "stem" if other == number else f"q{other}"
         else:
-            figures[label] = {"题干": "stem", "无关": "none", "表格": "table"}.get(role, role.translate(str.maketrans("ＡＢＣＤＥ", "ABCDE")))
+            figures[label] = {"题干": "stem", "无关": "none", "表格": "table"}.get(
+                role, role.translate(str.maketrans("ＡＢＣＤＥ", "ABCDE"))
+            )
     seen = re.findall(r"\d{1,2}", tags.get("题号", ""))
     stem = fix_symbols(clean_stem(tags["题干"], number))
     stem, labelled_kind = strip_type_label(stem)
@@ -675,7 +708,7 @@ def parse_reading(text: str, number: int) -> dict:
         # 模型偶尔把选项也写进题干末尾：从独占一行的"A."起截掉。
         cut = re.search(r"\n\s*A\s*[.．、:：]", stem)
         if cut:
-            stem = stem[:cut.start()].rstrip()
+            stem = stem[: cut.start()].rstrip()
     elif kind in {"single_choice", "multiple_choice"}:
         # 另一种写法：选项全写在【题干】里（“…（ ）A. √23 B. √5 C. √26 D. √11”），
         # 【A】–【D】为空。拆出来，否则两次识读只因写法不同而“不一致”。
@@ -718,7 +751,7 @@ def split_inline_options(stem: str) -> tuple[str, dict[str, str]]:
         return stem, {}
     if match.group("E"):
         options["E"] = fix_symbols(match.group("E").strip())
-    return stem[:match.start()].rstrip(), options
+    return stem[: match.start()].rstrip(), options
 
 
 FILLED_CHOICE = re.compile(r"(?<=[\u4e00-\u9fff\s，,。：:$=＝])([（(])\s*[A-EＡ-Ｅ]{1,5}\s*([)）])(?=\s*[。．.]?\s*$)")
@@ -740,6 +773,7 @@ def parse_band(text: str) -> int | None:
 
 # ---------------------------------------------------------------- 接口调用
 
+
 def _minimax_url() -> str:
     raw = os.environ.get("MINIMAX_BASE_URL", "").strip() or MINIMAX_DEFAULT_URL
     parts = urlsplit(raw)
@@ -759,8 +793,13 @@ def _post(url: str, key: str, payload: dict, timeout=(10, 150)) -> requests.Resp
                 if limits is not None and not limits.get("cancel_only"):
                     remaining = max(0.1, limits["deadline"] - time.monotonic())
                     actual_timeout = (min(timeout[0], remaining), min(timeout[1], remaining, 30))
-                response = requests.post(url, json=payload, timeout=actual_timeout, allow_redirects=False,
-                                         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+                response = requests.post(
+                    url,
+                    json=payload,
+                    timeout=actual_timeout,
+                    allow_redirects=False,
+                    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                )
         except (requests.Timeout, requests.ConnectionError):
             if attempt == len(BACKOFF):
                 raise ReaderUnavailable("连接模型服务超时或中断") from None
@@ -845,8 +884,11 @@ def _fallback_enabled() -> bool:
 
 def fallback_engines(engine: Engine) -> list[Engine]:
     """Other services with a key, in provider_catalog.CHECKER_ORDER."""
-    return [Engine(provider, provider_model(provider)) for provider in provider_catalog.CHECKER_ORDER
-            if provider != engine.provider and configured(provider)]
+    return [
+        Engine(provider, provider_model(provider))
+        for provider in provider_catalog.CHECKER_ORDER
+        if provider != engine.provider and configured(provider)
+    ]
 
 
 def chat(engine: Engine, prompt: str, image_urls: list[str], max_tokens: int = 3000) -> str:
@@ -912,8 +954,9 @@ def _chat_hedged(engine: Engine, prompt: str, image_urls: list[str], max_tokens:
     if not delay:
         return _chat_once(engine, prompt, image_urls, max_tokens)
     started = threading.Event()
-    first = _HEDGE_EXECUTOR.submit(contextvars.copy_context().run, _chat_once, engine, prompt,
-                                   image_urls, max_tokens, started)
+    first = _HEDGE_EXECUTOR.submit(
+        contextvars.copy_context().run, _chat_once, engine, prompt, image_urls, max_tokens, started
+    )
     # The clock starts when the request is on the wire.  Counting the time it
     # waited for a free account slot duplicated requests that were merely
     # queued; the duplicates took the slots, and a 30-page book ran with 20
@@ -927,8 +970,7 @@ def _chat_hedged(engine: Engine, prompt: str, image_urls: list[str], max_tokens:
         pass
     if not _has_spare_slot(engine):
         return first.result()
-    second = _HEDGE_EXECUTOR.submit(contextvars.copy_context().run, _chat_once, engine, prompt,
-                                    image_urls, max_tokens)
+    second = _HEDGE_EXECUTOR.submit(contextvars.copy_context().run, _chat_once, engine, prompt, image_urls, max_tokens)
     pending = {first, second}
     failure: BaseException | None = None
     while pending:
@@ -951,11 +993,23 @@ def _request(engine: Engine, messages: list[dict], max_tokens: int) -> tuple[str
     """
     base = {"model": engine.model, "messages": messages, "stream": False}
     if engine.provider == "minimax":
-        return _minimax_url(), {**base, "temperature": 0, "thinking": {"type": "disabled"}, "reasoning_split": True,
-                                "max_completion_tokens": max_tokens}, ()
+        return (
+            _minimax_url(),
+            {
+                **base,
+                "temperature": 0,
+                "thinking": {"type": "disabled"},
+                "reasoning_split": True,
+                "max_completion_tokens": max_tokens,
+            },
+            (),
+        )
     if engine.provider == "modelscope":
-        return MODELSCOPE_URL, {**base, "temperature": 0, "max_tokens": max_tokens,
-                                "enable_thinking": False}, ("enable_thinking",)
+        return (
+            MODELSCOPE_URL,
+            {**base, "temperature": 0, "max_tokens": max_tokens, "enable_thinking": False},
+            ("enable_thinking",),
+        )
     return SILICONFLOW_URL, {**base, "temperature": 0, "max_tokens": max_tokens}, ()
 
 
@@ -990,8 +1044,9 @@ def _has_spare_slot(engine: Engine) -> bool:
         return False
 
 
-def _chat_once(engine: Engine, prompt: str, image_urls: list[str], max_tokens: int = 3000,
-               started: threading.Event | None = None) -> str:
+def _chat_once(
+    engine: Engine, prompt: str, image_urls: list[str], max_tokens: int = 3000, started: threading.Event | None = None
+) -> str:
     content = [{"type": "text", "text": prompt}] + [
         {"type": "image_url", "image_url": {"url": url}} for url in image_urls
     ]
@@ -1020,12 +1075,17 @@ def _chat_once(engine: Engine, prompt: str, image_urls: list[str], max_tokens: i
     while True:
         try:
             _check_request()
-            with pool.lease(exclude=attempted, **({"cancel": _request_cancelled} if _REQUEST_LIMITS.get() is not None else {})) as lease:
+            with pool.lease(
+                exclude=attempted, **({"cancel": _request_cancelled} if _REQUEST_LIMITS.get() is not None else {})
+            ) as lease:
                 if started is not None:
                     started.set()
                 response = _post(url, lease.secret, variants[variant])
-                if response.status_code == 400 and (limit := _output_limit(response)) is not None \
-                        and limit < _max_tokens(variants[variant]):
+                if (
+                    response.status_code == 400
+                    and (limit := _output_limit(response)) is not None
+                    and limit < _max_tokens(variants[variant])
+                ):
                     # Some free models answer at most 1024 tokens.  Remembered,
                     # so the next question does not pay for the same refusal.
                     _OUTPUT_LIMITS[(engine.provider, engine.model)] = limit
@@ -1057,12 +1117,12 @@ def _chat_once(engine: Engine, prompt: str, image_urls: list[str], max_tokens: i
         except AccountPoolCancelled:
             raise ReaderRequestStopped("本次框选识读等待超时或已取消；原题未修改") from None
         except AccountPoolError:
-            if pool.quota_exhausted or (
-                plan_exhausted_slots and pool.enabled_size == 0
-            ) or len(plan_exhausted_slots) >= pool.size:
-                raise ReaderQuotaExhausted(
-                    TOKEN_PLAN_EXHAUSTED_MESSAGE
-                ) from None
+            if (
+                pool.quota_exhausted
+                or (plan_exhausted_slots and pool.enabled_size == 0)
+                or len(plan_exhausted_slots) >= pool.size
+            ):
+                raise ReaderQuotaExhausted(TOKEN_PLAN_EXHAUSTED_MESSAGE) from None
             # A round tries every enabled account once, so a second account is
             # still an immediate failover.  Only after the whole pool reports
             # 429 do we clear the exclusions and let AccountPool wait for the
@@ -1104,17 +1164,16 @@ def _chat_once(engine: Engine, prompt: str, image_urls: list[str], max_tokens: i
 
 
 def read_question(
-    engine: Engine,
-    image_url: str,
-    number: int,
-    with_figures: bool,
-    source_kind: str = "unknown",
+    engine: Engine, image_url: str, number: int, with_figures: bool, source_kind: str = "unknown"
 ) -> dict:
     prompt = transcribe_prompt(number, with_figures, source_kind)
     last_error = ""
     for attempt in range(2):
-        raw = chat(engine, prompt if not last_error else prompt + f"\n\n（上次输出不合格式：{last_error}。请严格按格式重写。）",
-                   [image_url])
+        raw = chat(
+            engine,
+            prompt if not last_error else prompt + f"\n\n（上次输出不合格式：{last_error}。请严格按格式重写。）",
+            [image_url],
+        )
         try:
             reading = parse_reading(raw, number)
         except ValueError as error:
@@ -1137,9 +1196,7 @@ def read_question(
     raise ReaderError(f"{engine.label} 两次输出都不合格式")
 
 
-def arbitrate(
-    engine: Engine, image_url: str, number: int, first: dict, second: dict, witness: str = "",
-) -> dict:
+def arbitrate(engine: Engine, image_url: str, number: int, first: dict, second: dict, witness: str = "") -> dict:
     raw = chat(engine, arbiter_prompt(number, first, second, witness), [image_url])
     try:
         reading = parse_reading(raw, number)
@@ -1184,7 +1241,9 @@ def classify_figures(engine: Engine, image_url: str, number: int, labels: list[s
             other = int(re.search(r"\d+", role).group(0))
             result[label] = "stem" if other == number else f"q{other}"
         else:
-            result[label] = {"题干": "stem", "无关": "none", "表格": "table"}.get(role, role.translate(str.maketrans("ＡＢＣＤＥ", "ABCDE")))
+            result[label] = {"题干": "stem", "无关": "none", "表格": "table"}.get(
+                role, role.translate(str.maketrans("ＡＢＣＤＥ", "ABCDE"))
+            )
     return result
 
 

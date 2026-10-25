@@ -32,76 +32,92 @@ COMMAND = ["node", "test_advanced_filters_panel.js"]
 LIBRARY_HTML = "frontend/library.html"
 LIBRARY_CSS = "frontend/library.css"
 
-GRID = ("  display: grid; grid-template-columns: repeat(auto-fit, minmax(292px, 1fr)); align-items: start; gap: 12px;\n")
+GRID = "  display: grid; grid-template-columns: repeat(auto-fit, minmax(292px, 1fr)); align-items: start; gap: 12px;\n"
 FLEX = "  display: flex; align-items: flex-start; gap: 10px 14px;"
-CARD = (".library-advanced[open] > .library-filters > * {\n"
-        "  display: flex; min-width: 0; flex-direction: column; gap: 7px; align-items: stretch;\n"
-        "  padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface);\n"
-        "}")
-FULL_ROW = (".library-advanced[open] > .library-filters > .library-facet,\n"
-            ".library-advanced[open] > .library-filters > .tag-saved-filter-box { grid-column: 1 / -1; }")
-FACET_COLUMN = (".library-advanced[open] > .library-filters .library-facet,\n"
-                ".library-advanced[open] > .library-filters .library-filter-group "
-                "{ flex-direction: column; align-items: stretch; gap: 7px; }")
-HIDE_EMPTY = (".library-advanced[open] > .library-filters > .library-filter-group:has([hidden]) { display: none; }")
-TAG_SELECT = (".library-advanced[open] > .library-filters #tagSelect { width: 100%; max-width: none; "
-              "min-height: 104px; border-radius: 8px; }")
-GROUP_HTML = ('<div class="library-filter-group">\r\n'
-              '                  <span class="library-filter-group-label">谁审核的</span>\r\n'
-              '                  <div id="reviewFilters" class="draft-filters" role="group" aria-label="谁审核的" hidden></div>\r\n'
-              '                </div>')
+CARD = (
+    ".library-advanced[open] > .library-filters > * {\n"
+    "  display: flex; min-width: 0; flex-direction: column; gap: 7px; align-items: stretch;\n"
+    "  padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface);\n"
+    "}"
+)
+FULL_ROW = (
+    ".library-advanced[open] > .library-filters > .library-facet,\n"
+    ".library-advanced[open] > .library-filters > .tag-saved-filter-box { grid-column: 1 / -1; }"
+)
+FACET_COLUMN = (
+    ".library-advanced[open] > .library-filters .library-facet,\n"
+    ".library-advanced[open] > .library-filters .library-filter-group "
+    "{ flex-direction: column; align-items: stretch; gap: 7px; }"
+)
+HIDE_EMPTY = ".library-advanced[open] > .library-filters > .library-filter-group:has([hidden]) { display: none; }"
+TAG_SELECT = (
+    ".library-advanced[open] > .library-filters #tagSelect { width: 100%; max-width: none; "
+    "min-height: 104px; border-radius: 8px; }"
+)
+GROUP_HTML = (
+    '<div class="library-filter-group">\r\n'
+    '                  <span class="library-filter-group-label">谁审核的</span>\r\n'
+    '                  <div id="reviewFilters" class="draft-filters" role="group" aria-label="谁审核的" hidden></div>\r\n'
+    "                </div>"
+)
 
 # (relative, description, original, mutation)
 MUTATIONS = [
-    (LIBRARY_CSS,
-     "the panel goes back to flex-wrap, and the columns stop lining up",
-     GRID, FLEX),
-
-    (LIBRARY_CSS,
-     "the cards stop stacking title over control",
-     CARD,
-     ".library-advanced[open] > .library-filters > * { display: flex; min-width: 0; flex-direction: row; "
-     "gap: 7px; align-items: stretch; }"),
-
-    (LIBRARY_CSS,
-     "the cards lose their outline and blur back into the pile",
-     CARD,
-     ".library-advanced[open] > .library-filters > * { display: flex; min-width: 0; "
-     "flex-direction: column; gap: 7px; align-items: stretch; }"),
-
-    (LIBRARY_CSS,
-     "the widest filter no longer gets a row of its own",
-     FULL_ROW,
-     ".library-advanced[open] > .library-filters > .library-facet, "
-     ".library-advanced[open] > .library-filters > .tag-saved-filter-box { }"),
-
-    (LIBRARY_CSS,
-     "题型 sits label-and-chips on one line again while every other card is stacked",
-     FACET_COLUMN,
-     ".library-advanced[open] > .library-filters .library-facet, "
-     ".library-advanced[open] > .library-filters .library-filter-group { }"),
-
-    (LIBRARY_CSS,
-     "an empty dimension leaves a title-only card behind",
-     HIDE_EMPTY,
-     "/* nothing hides an empty dimension */"),
-
-    (LIBRARY_CSS,
-     "the rule to hide an empty card loses a level of the selector and stops matching",
-     HIDE_EMPTY,
-     ".library-advanced[open] > .library-filter-group:has([hidden]) { display: none; }"),
-
-    (LIBRARY_CSS,
-     "the tag picker goes back to a narrow native listbox inside a wide card",
-     TAG_SELECT,
-     ".library-advanced[open] > .library-filters #tagSelect { }"),
-
-    (LIBRARY_HTML,
-     "谁审核的 loses its on-screen title again",
-     GROUP_HTML,
-     '<div class="library-filter-group">\r\n'
-     '                  <div id="reviewFilters" class="draft-filters" role="group" aria-label="谁审核的" hidden></div>\r\n'
-     '                </div>'),
+    (LIBRARY_CSS, "the panel goes back to flex-wrap, and the columns stop lining up", GRID, FLEX),
+    (
+        LIBRARY_CSS,
+        "the cards stop stacking title over control",
+        CARD,
+        ".library-advanced[open] > .library-filters > * { display: flex; min-width: 0; flex-direction: row; "
+        "gap: 7px; align-items: stretch; }",
+    ),
+    (
+        LIBRARY_CSS,
+        "the cards lose their outline and blur back into the pile",
+        CARD,
+        ".library-advanced[open] > .library-filters > * { display: flex; min-width: 0; "
+        "flex-direction: column; gap: 7px; align-items: stretch; }",
+    ),
+    (
+        LIBRARY_CSS,
+        "the widest filter no longer gets a row of its own",
+        FULL_ROW,
+        ".library-advanced[open] > .library-filters > .library-facet, "
+        ".library-advanced[open] > .library-filters > .tag-saved-filter-box { }",
+    ),
+    (
+        LIBRARY_CSS,
+        "题型 sits label-and-chips on one line again while every other card is stacked",
+        FACET_COLUMN,
+        ".library-advanced[open] > .library-filters .library-facet, "
+        ".library-advanced[open] > .library-filters .library-filter-group { }",
+    ),
+    (
+        LIBRARY_CSS,
+        "an empty dimension leaves a title-only card behind",
+        HIDE_EMPTY,
+        "/* nothing hides an empty dimension */",
+    ),
+    (
+        LIBRARY_CSS,
+        "the rule to hide an empty card loses a level of the selector and stops matching",
+        HIDE_EMPTY,
+        ".library-advanced[open] > .library-filter-group:has([hidden]) { display: none; }",
+    ),
+    (
+        LIBRARY_CSS,
+        "the tag picker goes back to a narrow native listbox inside a wide card",
+        TAG_SELECT,
+        ".library-advanced[open] > .library-filters #tagSelect { }",
+    ),
+    (
+        LIBRARY_HTML,
+        "谁审核的 loses its on-screen title again",
+        GROUP_HTML,
+        '<div class="library-filter-group">\r\n'
+        '                  <div id="reviewFilters" class="draft-filters" role="group" aria-label="谁审核的" hidden></div>\r\n'
+        "                </div>",
+    ),
 ]
 
 
@@ -116,8 +132,9 @@ def apply(source: str, original: str, mutation: str) -> str:
 
 
 def run() -> subprocess.CompletedProcess:
-    return subprocess.run(COMMAND, cwd=str(FRONTEND), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
+    return subprocess.run(
+        COMMAND, cwd=str(FRONTEND), capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
 
 
 def main() -> int:
@@ -146,8 +163,11 @@ def main() -> int:
         if not caught:
             print((broken.stdout or "")[-2000:] + (broken.stderr or "")[-2000:])
     survived = [item for item in results if not item[1]]
-    print(f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住" if not survived
-          else f"\n{len(survived)} 条变异漏过：{survived}")
+    print(
+        f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住"
+        if not survived
+        else f"\n{len(survived)} 条变异漏过：{survived}"
+    )
     return 1 if survived else 0
 
 

@@ -11,40 +11,149 @@ import unicodedata
 from difflib import SequenceMatcher
 
 SYMBOLS = {
-    "angle": "∠", "parallel": "∥", "perp": "⊥", "bot": "⊥", "triangle": "△", "bigtriangleup": "△",
-    "times": "×", "div": "÷", "cdot": "·", "pm": "±", "mp": "∓", "le": "≤", "leq": "≤", "leqslant": "≤",
-    "leqq": "≤", "ge": "≥", "geq": "≥", "geqslant": "≥", "geqq": "≥", "ne": "≠", "neq": "≠",
-    "approx": "≈", "equiv": "≡", "cong": "≅", "sim": "∽", "backsim": "∽", "pi": "π", "infty": "∞",
-    "in": "∈", "notin": "∉", "subset": "⊂", "subseteq": "⊆", "subsetneqq": "⊊", "supset": "⊃",
-    "supseteq": "⊇", "cup": "∪", "cap": "∩", "emptyset": "∅", "varnothing": "∅", "forall": "∀",
-    "exists": "∃", "neg": "¬", "because": "∵", "therefore": "∴", "circ": "°", "degree": "°",
-    "prime": "'", "cdots": "…", "ldots": "…", "dots": "…", "mid": "|", "vert": "|", "lvert": "|",
-    "rvert": "|", "rightarrow": "→", "to": "→", "Rightarrow": "⇒", "Leftrightarrow": "⇔",
-    "square": "□", "Box": "□", "lbrace": "{", "rbrace": "}", "{": "{", "}": "}",
-    "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ", "epsilon": "ε", "varepsilon": "ε",
-    "theta": "θ", "lambda": "λ", "mu": "μ", "rho": "ρ", "sigma": "σ", "tau": "τ", "phi": "φ",
-    "varphi": "φ", "omega": "ω", "Delta": "Δ", "Omega": "Ω", "odot": "⊙", "boldsymbol": "",
-    "mathbb": "", "mathrm": "", "mathbf": "", "mathit": "", "text": "", "textbf": "", "operatorname": "",
-    "overrightarrow": "→", "vec": "→", "dfrac": "frac", "tfrac": "frac",
+    "angle": "∠",
+    "parallel": "∥",
+    "perp": "⊥",
+    "bot": "⊥",
+    "triangle": "△",
+    "bigtriangleup": "△",
+    "times": "×",
+    "div": "÷",
+    "cdot": "·",
+    "pm": "±",
+    "mp": "∓",
+    "le": "≤",
+    "leq": "≤",
+    "leqslant": "≤",
+    "leqq": "≤",
+    "ge": "≥",
+    "geq": "≥",
+    "geqslant": "≥",
+    "geqq": "≥",
+    "ne": "≠",
+    "neq": "≠",
+    "approx": "≈",
+    "equiv": "≡",
+    "cong": "≅",
+    "sim": "∽",
+    "backsim": "∽",
+    "pi": "π",
+    "infty": "∞",
+    "in": "∈",
+    "notin": "∉",
+    "subset": "⊂",
+    "subseteq": "⊆",
+    "subsetneqq": "⊊",
+    "supset": "⊃",
+    "supseteq": "⊇",
+    "cup": "∪",
+    "cap": "∩",
+    "emptyset": "∅",
+    "varnothing": "∅",
+    "forall": "∀",
+    "exists": "∃",
+    "neg": "¬",
+    "because": "∵",
+    "therefore": "∴",
+    "circ": "°",
+    "degree": "°",
+    "prime": "'",
+    "cdots": "…",
+    "ldots": "…",
+    "dots": "…",
+    "mid": "|",
+    "vert": "|",
+    "lvert": "|",
+    "rvert": "|",
+    "rightarrow": "→",
+    "to": "→",
+    "Rightarrow": "⇒",
+    "Leftrightarrow": "⇔",
+    "square": "□",
+    "Box": "□",
+    "lbrace": "{",
+    "rbrace": "}",
+    "{": "{",
+    "}": "}",
+    "alpha": "α",
+    "beta": "β",
+    "gamma": "γ",
+    "delta": "δ",
+    "epsilon": "ε",
+    "varepsilon": "ε",
+    "theta": "θ",
+    "lambda": "λ",
+    "mu": "μ",
+    "rho": "ρ",
+    "sigma": "σ",
+    "tau": "τ",
+    "phi": "φ",
+    "varphi": "φ",
+    "omega": "ω",
+    "Delta": "Δ",
+    "Omega": "Ω",
+    "odot": "⊙",
+    "boldsymbol": "",
+    "mathbb": "",
+    "mathrm": "",
+    "mathbf": "",
+    "mathit": "",
+    "text": "",
+    "textbf": "",
+    "operatorname": "",
+    "overrightarrow": "→",
+    "vec": "→",
+    "dfrac": "frac",
+    "tfrac": "frac",
 }
-PUNCT = {"。": ".", "．": ".", "，": ",", "：": ":", "；": ";", "、": ",", "“": '"', "”": '"', "‘": "'",
-         "’": "'", "（": "(", "）": ")", "【": "[", "】": "]", "－": "-", "−": "-", "–": "-", "—": "-",
-         "～": "~", "∶": ":", "﹒": ".", "▱": "□", "丄": "⊥", "⩽": "≤", "⩾": "≥", "≦": "≤", "≧": "≥"}
-SPACING = re.compile(r"\\(?:left|right|big|Big|bigg|Bigg|displaystyle|textstyle|limits|nolimits|quad|qquad)(?![A-Za-z])|\\[,;:! ]")
+PUNCT = {
+    "。": ".",
+    "．": ".",
+    "，": ",",
+    "：": ":",
+    "；": ";",
+    "、": ",",
+    "“": '"',
+    "”": '"',
+    "‘": "'",
+    "’": "'",
+    "（": "(",
+    "）": ")",
+    "【": "[",
+    "】": "]",
+    "－": "-",
+    "−": "-",
+    "–": "-",
+    "—": "-",
+    "～": "~",
+    "∶": ":",
+    "﹒": ".",
+    "▱": "□",
+    "丄": "⊥",
+    "⩽": "≤",
+    "⩾": "≥",
+    "≦": "≤",
+    "≧": "≥",
+}
+SPACING = re.compile(
+    r"\\(?:left|right|big|Big|bigg|Bigg|displaystyle|textstyle|limits|nolimits|quad|qquad)(?![A-Za-z])|\\[,;:! ]"
+)
 COMMAND = re.compile(r"\\([A-Za-z]+|[{}])")
 SCORE = re.compile(r"[(（]\s*\d{1,2}\s*分\s*[)）]")
 BLANK = re.compile(r"_{2,}|\\underline\{\s*(?:\\quad|\\qquad|\\hspace\*?\{[^{}]{0,12}\}|~|\s)*\}|(?:\\_)+")
 # 魔搭 Qwen writes a fill-in blank as $\underline{\hspace{2em}}$: shown as ____.  Only a
 # span that is nothing but the blank: inside a formula, _ would start a subscript.
 _BLANK_ONLY = re.compile(r"\s*\\underline\{\s*(?:\\hspace\*?\{[^{}]{0,12}\}|\\quad|\\qquad|~|\\ |\s)*\}\s*")
-SUPERSCRIPTS = str.maketrans({
-    "⁰": "^0", "¹": "^1", "²": "^2", "³": "^3", "⁴": "^4",
-    "⁵": "^5", "⁶": "^6", "⁷": "^7", "⁸": "^8", "⁹": "^9",
-})
+SUPERSCRIPTS = str.maketrans(
+    {"⁰": "^0", "¹": "^1", "²": "^2", "³": "^3", "⁴": "^4", "⁵": "^5", "⁶": "^6", "⁷": "^7", "⁸": "^8", "⁹": "^9"}
+)
 
 
 def canon(
-    value: str, *, strip_trailing_punct: bool = True, collapse_empty_brackets: bool = True,
+    value: str,
+    *,
+    strip_trailing_punct: bool = True,
+    collapse_empty_brackets: bool = True,
     preserve_parallelogram: bool = False,
 ) -> str:
     # NFKC alone turns cm² into cm2 while LaTeX remains cm^2.  Preserve the
@@ -72,15 +181,14 @@ def same_reading(first: dict, second: dict) -> bool:
     if canon(first.get("stem", "")) != canon(second.get("stem", "")):
         return False
     keys = set(first.get("options") or {}) | set(second.get("options") or {})
-    return all(canon((first.get("options") or {}).get(k, "")) == canon((second.get("options") or {}).get(k, ""))
-               for k in keys)
+    return all(
+        canon((first.get("options") or {}).get(k, "")) == canon((second.get("options") or {}).get(k, "")) for k in keys
+    )
 
 
 def _reading_key(reading: dict) -> str:
     options = reading.get("options") or {}
-    return canon(reading.get("stem", "")) + "".join(
-        f"\u241f{key}:{canon(options[key])}" for key in sorted(options)
-    )
+    return canon(reading.get("stem", "")) + "".join(f"\u241f{key}:{canon(options[key])}" for key in sorted(options))
 
 
 def _differing_spans(source: str, target: str) -> list[tuple[int, int]]:
@@ -121,16 +229,10 @@ _PARALLELOGRAM_TOKEN = (
     r"\\(?:text|mathrm|mathbf)\{\s*(?:[□◻⬜▱]|\\(?:square|Box|parallelogram)(?![A-Za-z]))\s*\})"
 )
 _VERTICES = r"((?:[A-Z]\s*){2,5})"
-_TOKEN_BEFORE_VERTICES = re.compile(
-    _PARALLELOGRAM_TOKEN + r"\s*(?:\{\s*\}\s*)?(?=(?:[A-Z]\s*){2})"
-)
-_ONLY_PARALLELOGRAM = re.compile(
-    r"^\s*" + _PARALLELOGRAM_TOKEN + r"\s*(?:\{\s*\}\s*)?" + _VERTICES + r"\s*$"
-)
+_TOKEN_BEFORE_VERTICES = re.compile(_PARALLELOGRAM_TOKEN + r"\s*(?:\{\s*\}\s*)?(?=(?:[A-Z]\s*){2})")
+_ONLY_PARALLELOGRAM = re.compile(r"^\s*" + _PARALLELOGRAM_TOKEN + r"\s*(?:\{\s*\}\s*)?" + _VERTICES + r"\s*$")
 _MATH_SPAN = re.compile(r"(?<!\\)(\${1,2})(.*?)(?<!\\)\1", re.S)
-_TOKEN_BEFORE_MATH_VERTICES = re.compile(
-    _PARALLELOGRAM_TOKEN + r"\s*(?=\$\s*(?:[A-Z]\s*){2,5}\$)"
-)
+_TOKEN_BEFORE_MATH_VERTICES = re.compile(_PARALLELOGRAM_TOKEN + r"\s*(?=\$\s*(?:[A-Z]\s*){2,5}\$)")
 
 
 def fix_symbols(value: str) -> str:
@@ -141,7 +243,7 @@ def fix_symbols(value: str) -> str:
     result: list[str] = []
     start = 0
     for match in _MATH_SPAN.finditer(text):
-        result.append(_TOKEN_BEFORE_VERTICES.sub("▱", text[start:match.start()]))
+        result.append(_TOKEN_BEFORE_VERTICES.sub("▱", text[start : match.start()]))
         delimiter, body = match.group(1), match.group(2)
         whole = _ONLY_PARALLELOGRAM.fullmatch(body)
         if _BLANK_ONLY.fullmatch(body):
@@ -165,8 +267,7 @@ def fix_reading_symbols(value: dict) -> dict:
         fixed["stem"] = fix_symbols(fixed["stem"])
     if isinstance(fixed.get("options"), dict):
         fixed["options"] = {
-            key: fix_symbols(option) if isinstance(option, str) else option
-            for key, option in fixed["options"].items()
+            key: fix_symbols(option) if isinstance(option, str) else option for key, option in fixed["options"].items()
         }
     return fixed
 
@@ -203,7 +304,7 @@ def strip_example_label(text: str) -> str:
     match = _EXAMPLE_LABEL.match(value)
     if not match:
         return value
-    rest = value[match.end():]
+    rest = value[match.end() :]
     if not rest.strip() or _EXAMPLE_REFERENCE.match(rest):
         return value
     return rest
@@ -221,10 +322,10 @@ def strip_type_label(text: str) -> tuple[str, str | None]:
     """Drop a leading type note; return the text and the type it names."""
     value = str(text or "")
     match = _TYPE_LABEL.match(value)
-    if not match or not value[match.end():].strip():
+    if not match or not value[match.end() :].strip():
         return value, None
     kind = "single_choice" if match.group(1).startswith("单") else "multiple_choice"
-    return value[match.end():], kind
+    return value[match.end() :], kind
 
 
 # 教辅、汇编常在题目前印上出处：“[2026山东枣庄滕州二中月考]”“（2025·北京海淀·期中）”
@@ -253,7 +354,7 @@ def split_origin(text: str) -> tuple[str, str]:
     if not match:
         return value, ""
     opening, inner, closing = match.groups()
-    rest = value[match.end():]
+    rest = value[match.end() :]
     inner = inner.strip()
     if closing not in _ORIGIN_PAIRS[opening] or not rest.strip():
         return value, ""
@@ -277,7 +378,8 @@ def chinese_quotes(text: str) -> str:
         return value
     skipped = [(match.start(), match.end()) for match in _QUOTE_SKIP.finditer(value)]
     positions = [
-        index for index, character in enumerate(value)
+        index
+        for index, character in enumerate(value)
         if character == '"' and not any(start <= index < end for start, end in skipped)
     ]
     if not positions or len(positions) % 2:
@@ -291,12 +393,14 @@ def chinese_quotes(text: str) -> str:
         return value[index] if 0 <= index < len(value) else ""
 
     for opening, closing in zip(positions[0::2], positions[1::2]):
-        inner = value[opening + 1:closing]
+        inner = value[opening + 1 : closing]
         if "\n" in inner:
             return value
-        chinese = (_CJK_OR_MARK.match(neighbour(opening, -1) or " ")
-                   or _CJK_OR_MARK.match(neighbour(closing, 1) or " ")
-                   or _ORIGIN_CJK.search(inner))
+        chinese = (
+            _CJK_OR_MARK.match(neighbour(opening, -1) or " ")
+            or _CJK_OR_MARK.match(neighbour(closing, 1) or " ")
+            or _ORIGIN_CJK.search(inner)
+        )
         if chinese:
             characters[opening], characters[closing] = "“", "”"
     return "".join(characters)
@@ -364,16 +468,38 @@ def printed_question_numbers(witness: str, number: int | None = None) -> list[in
 # id=1386 第 23 题罩住两道题外加「用公式法解一元二次方程」「二次根式的乘除」两节新课。
 # 名单是从两本教材的块里量出来的（短、不含数字标点、全书反复出现），逐个裁图看过：
 # 「即」「所以」「山东教育出版社」「I」那几类同形状的短块不是标题，没有收进来。
-SECTION_HEADINGS = frozenset({
-    "数学理解", "问题解决", "联系拓广", "议一议", "做一做", "想一想", "读一读",
-    "回顾与思考", "综合与实践", "直觉的误导", "随堂练习", "知识技能", "学习目标",
-    "复习题", "总复习题", "习题",
-    # 这两本书的章节名。MinerU 常把「第X章」和标题拆成两块分开印，
-    # 所以只靠 ``_SECTION_HEADING`` 的「第X章…」会漏掉单独印的那一半。
-    "特殊平行四边形", "图形的相似", "一元二次方程", "二次函数", "二次根式的乘除",
-    "菱形的性质与判定", "矩形的性质与判定", "相似三角形的性质",
-    "二次函数的应用", "一元二次方程的应用",
-})
+SECTION_HEADINGS = frozenset(
+    {
+        "数学理解",
+        "问题解决",
+        "联系拓广",
+        "议一议",
+        "做一做",
+        "想一想",
+        "读一读",
+        "回顾与思考",
+        "综合与实践",
+        "直觉的误导",
+        "随堂练习",
+        "知识技能",
+        "学习目标",
+        "复习题",
+        "总复习题",
+        "习题",
+        # 这两本书的章节名。MinerU 常把「第X章」和标题拆成两块分开印，
+        # 所以只靠 ``_SECTION_HEADING`` 的「第X章…」会漏掉单独印的那一半。
+        "特殊平行四边形",
+        "图形的相似",
+        "一元二次方程",
+        "二次函数",
+        "二次根式的乘除",
+        "菱形的性质与判定",
+        "矩形的性质与判定",
+        "相似三角形的性质",
+        "二次函数的应用",
+        "一元二次方程的应用",
+    }
+)
 
 # 卷面自己印的大题/部分标题：一、选择题、二、填空题、第X部分/第X章。
 _SECTION_HEADING = re.compile(r"^(?:第[一二三四五六七八九十]+(?:部分|章)|[一二三四五六七八九十]+、)")
@@ -462,8 +588,7 @@ def missing_sub_questions(stem: str, blocks) -> list[int]:
     missing: set[int] = set()
     for before, after in zip(marks, marks[1:]):
         if after > before + 1:
-            missing.update(n for n in range(before + 1, min(after, _SUB_QUESTION_LIMIT + 1))
-                           if n not in present)
+            missing.update(n for n in range(before + 1, min(after, _SUB_QUESTION_LIMIT + 1)) if n not in present)
     if not missing:
         return []
 
@@ -481,10 +606,15 @@ def missing_sub_questions(stem: str, blocks) -> list[int]:
     flat = "\n".join(text for _position, text in sorted(printed))
     label = _SOLUTION_LABEL.search(flat)
     if label is not None:
-        flat = flat[:label.start()]
-    return sorted(n for n in missing
-                  if any(match.group(1) and int(match.group(1)) == n
-                         and flat[match.end():match.end() + 40].strip() for match in SUB_QUESTION_MARK.finditer(flat)))
+        flat = flat[: label.start()]
+    return sorted(
+        n
+        for n in missing
+        if any(
+            match.group(1) and int(match.group(1)) == n and flat[match.end() : match.end() + 40].strip()
+            for match in SUB_QUESTION_MARK.finditer(flat)
+        )
+    )
 
 
 # 判「读出来的题是不是另一道」用的取样：只认连续 6 个以上的汉字，公式和标点不算。
@@ -520,7 +650,7 @@ def anchor_reading_mismatch(printed: str, reading: str) -> str | None:
     probe = max(runs, key=len)[:10]
     squeezed = re.sub(r"\s+", "", str(reading or ""))
     for index in range(len(probe) - _ANCHOR_WINDOW + 1):
-        if probe[index:index + _ANCHOR_WINDOW] in squeezed:
+        if probe[index : index + _ANCHOR_WINDOW] in squeezed:
             return None
     return probe
 
@@ -567,16 +697,20 @@ def clean_stem(stem: str, number: int | None = None) -> str:
     # 从本题自己的题号那一行开始。
     if number is not None:
         own_line = re.search(rf"\n\s*{number}\s*[.．、]+(?!\d)\s*", text[:120])
-        if own_line and "\n" in text[:own_line.start() + 1] and len(text[:own_line.start()].strip()) <= 60 \
-                and not re.search(r"[(（]\s*\d\s*[)）]", text[:own_line.start()]):
-            text = text[own_line.start():].strip()
+        if (
+            own_line
+            and "\n" in text[: own_line.start() + 1]
+            and len(text[: own_line.start()].strip()) <= 60
+            and not re.search(r"[(（]\s*\d\s*[)）]", text[: own_line.start()])
+        ):
+            text = text[own_line.start() :].strip()
     match = NUMBER_PREFIX.match(text)
-    if match and _is_own_number(match.group(1), number) and not text[match.end():match.end() + 1].isdigit():
-        text = text[match.end():]
+    if match and _is_own_number(match.group(1), number) and not text[match.end() : match.end() + 1].isdigit():
+        text = text[match.end() :]
     else:
         bare = BARE_NUMBER_PREFIX.match(text)
         if bare and number is not None and int(bare.group(1)) == number:
-            text = text[bare.end():]
+            text = text[bare.end() :]
     text = re.sub(rf"^\s*{_SCORE_MARK}\s*", "", text)
     # 誊录规则明写「分值不要写进题干」，可原来只去题首那一个。识读把整句抄
     # 进来时（「计算（7分）：」），题首根本没有分值，这条就漏了——汶源第 16 题
@@ -638,7 +772,7 @@ _WITNESS_ANSWER = re.compile(r"(?<![A-Za-z])[(（]\s*[A-E]{1,5}\s*[)）]")
 
 def _html_script(match: re.Match) -> str:
     tag, inner = match.group(1).lower(), match.group(2)
-    before = match.string[:match.start()]
+    before = match.string[: match.start()]
     glued = bool(before) and bool(_SCRIPT_BASE.fullmatch(before[-1]))
     layout = (
         bool(_CJK_OR_CJK_PUNCT.search(inner))
@@ -663,8 +797,7 @@ def witness_key(value: str) -> str:
     text = _CASES_CLOSE.sub(r"\\end{cases}", text)
     # Inside math, ~ is only a non-breaking space; in prose it is a mark.
     text = _MATH_SEGMENT.sub(lambda m: m.group(0).replace("~", " "), text)
-    text = canon(text, strip_trailing_punct=False, collapse_empty_brackets=False,
-                 preserve_parallelogram=True)
+    text = canon(text, strip_trailing_punct=False, collapse_empty_brackets=False, preserve_parallelogram=True)
     text = re.sub(r"\.{3,}|⋯", "…", text)
     # ΔABC is the triangle; ≌ and \cong are both congruence; √3 and \sqrt{3}.
     text = re.sub(r"Δ(?=[A-Z]{3}(?![A-Za-z]))", "△", text)
@@ -709,7 +842,9 @@ def _harmless_gap(text: str, start: int, end: int) -> bool:
         return True
     # “A.2√3” / “A 2√3”: the dot after an option letter.
     return (
-        piece == "." and before in "ABCDE" and start >= 1
+        piece == "."
+        and before in "ABCDE"
+        and start >= 1
         and (start < 2 or not text[start - 2].isalnum() or bool(_CJK.match(text[start - 2])))
     )
 
@@ -749,15 +884,16 @@ def witness_agrees(reading: dict | None, witness: str) -> bool:
     # witness must still see that the model did not actually transcribe the
     # printed symbol: otherwise MinerU's ▱ would falsely make the card green.
     raw = str(reading.get("raw") or "")
-    if "▱" in expected and raw and (
-        _TOKEN_BEFORE_VERTICES.search(raw) or _TOKEN_BEFORE_MATH_VERTICES.search(raw)
-    ):
+    if "▱" in expected and raw and (_TOKEN_BEFORE_VERTICES.search(raw) or _TOKEN_BEFORE_MATH_VERTICES.search(raw)):
         return False
     # MinerU has no ▱: it prints the parallelogram sign as □.  When the reader
     # itself wrote ▱ (not a □ that parse_reading() turned into ▱), that □ in
     # front of the vertices supports it.
-    if raw and "▱" in raw and "□" in expected and not (
-        _TOKEN_BEFORE_VERTICES.search(raw) or _TOKEN_BEFORE_MATH_VERTICES.search(raw)
+    if (
+        raw
+        and "▱" in raw
+        and "□" in expected
+        and not (_TOKEN_BEFORE_VERTICES.search(raw) or _TOKEN_BEFORE_MATH_VERTICES.search(raw))
     ):
         expected = re.sub(r"□(?=[A-Z]{2,5})", "▱", expected)
     return _keys_agree(witness_key(reading_witness_text(reading)), expected)
@@ -782,9 +918,22 @@ _OBJECTION_GAP = 1
 # MinerU's usual confusions: a disagreement between these proves nothing
 # (in testing MinerU was wrong at every α/a and △/V spot).
 _OCR_LOOKALIKES = (
-    {"O", "0"}, {"o", "0"}, {"l", "1"}, {"I", "1"}, {"I", "l"},
-    {"α", "a"}, {"β", "B"}, {"γ", "y"}, {"ρ", "p"}, {"ω", "w"}, {"ν", "v"}, {"τ", "t"}, {"χ", "x"},
-    {"μ", "u"}, {"△", "V"}, {"∠", "L"},
+    {"O", "0"},
+    {"o", "0"},
+    {"l", "1"},
+    {"I", "1"},
+    {"I", "l"},
+    {"α", "a"},
+    {"β", "B"},
+    {"γ", "y"},
+    {"ρ", "p"},
+    {"ω", "w"},
+    {"ν", "v"},
+    {"τ", "t"},
+    {"χ", "x"},
+    {"μ", "u"},
+    {"△", "V"},
+    {"∠", "L"},
     # Letters whose capital is the small letter drawn larger: MinerU's case
     # is no evidence (胜利初二 #23 “边长为 c” / C, 胜利初四 #23 “v” / V).
     *({letter, letter.upper()} for letter in "cosuvwxzpk"),
@@ -870,8 +1019,7 @@ def _disagreement_spans(reading_key: str, paper_key: str) -> list[tuple[int, int
     """
     spans: list[tuple[int, int, int, int]] = []
     run: tuple[int, int, int, int] | None = None
-    for tag, i1, i2, j1, j2 in SequenceMatcher(None, reading_key, paper_key,
-                                               autojunk=False).get_opcodes():
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, reading_key, paper_key, autojunk=False).get_opcodes():
         if tag == "equal":
             if run and (i2 - i1) > _OBJECTION_GAP:
                 spans.append(run)
@@ -879,8 +1027,7 @@ def _disagreement_spans(reading_key: str, paper_key: str) -> list[tuple[int, int
             continue
         if run is not None:
             joined = _trimmed(reading_key, paper_key, run[0], i2, run[2], j2)
-            if (joined and joined[1] - joined[0] <= _OBJECTION_MAX
-                    and joined[3] - joined[2] <= _OBJECTION_MAX):
+            if joined and joined[1] - joined[0] <= _OBJECTION_MAX and joined[3] - joined[2] <= _OBJECTION_MAX:
                 run = joined
                 continue
             spans.append(run)
@@ -900,8 +1047,11 @@ def witness_objections(reading: dict | None, witness: str, *, context: int = 3) 
     # Each replacement on its own, then the joined stretches: joining is there to
     # catch the mistake the diff shredded, not to replace the rule that has been
     # reporting single substitutions all along.
-    spans = [(i1, i2, j1, j2) for tag, i1, i2, j1, j2
-             in SequenceMatcher(None, ka, kw, autojunk=False).get_opcodes() if tag == "replace"]
+    spans = [
+        (i1, i2, j1, j2)
+        for tag, i1, i2, j1, j2 in SequenceMatcher(None, ka, kw, autojunk=False).get_opcodes()
+        if tag == "replace"
+    ]
     for span in _disagreement_spans(ka, kw):
         if span not in spans:
             spans.append(span)
@@ -912,26 +1062,39 @@ def witness_objections(reading: dict | None, witness: str, *, context: int = 3) 
             continue
         if not _OBJECTION_CHARS.match(read) or not _OBJECTION_CHARS.match(seen):
             continue
-        left = ka[i1 - context:i1] if i1 >= context else ""
-        right = ka[i2:i2 + context]
+        left = ka[i1 - context : i1] if i1 >= context else ""
+        right = ka[i2 : i2 + context]
         # Either spelling of the context anchors the spot.  The raw one is what
         # this has always used; the clean one sees past a comma or a bracket a
         # neighbour disagreement left behind.  Reporting is for a person, so
         # either way of being sure is good enough.
-        raw = (len(left) >= context and len(right) >= context
-               and kw[j1 - context:j1] == left and kw[j2:j2 + context] == right)
+        raw = (
+            len(left) >= context
+            and len(right) >= context
+            and kw[j1 - context : j1] == left
+            and kw[j2 : j2 + context] == right
+        )
         clean_left, clean_right = _clean_before(ka, i1, context), _clean_after(ka, i2, context)
-        clean = (len(clean_left) >= context and len(clean_right) >= context
-                 and _clean_before(kw, j1, context) == clean_left
-                 and _clean_after(kw, j2, context) == clean_right)
+        clean = (
+            len(clean_left) >= context
+            and len(clean_right) >= context
+            and _clean_before(kw, j1, context) == clean_left
+            and _clean_after(kw, j2, context) == clean_right
+        )
         if not (raw or clean):
             continue
         # Report the context that anchored the spot, raw whenever it could:
         # that is the text the card searches to mark the spot, and the clean
         # spelling exists only to decide.
-        spots.append({"reading": read, "mineru": seen,
-                      "before": left if raw else clean_left,
-                      "after": right if raw else clean_right, "at": i1})
+        spots.append(
+            {
+                "reading": read,
+                "mineru": seen,
+                "before": left if raw else clean_left,
+                "after": right if raw else clean_right,
+                "at": i1,
+            }
+        )
     return spots
 
 
@@ -1044,8 +1207,11 @@ def spot_place(stem: str, options: dict, spot: dict) -> tuple[str, int, int] | N
 def spot_block(spot: dict, blocks: list[dict]) -> dict | None:
     """The MinerU box whose text holds MinerU's side of a spot: where to look on the paper."""
     before, seen, after = str(spot.get("before") or ""), str(spot.get("mineru") or ""), str(spot.get("after") or "")
-    keyed = [(witness_key(str(block.get("text") or "")), block) for block in blocks or []
-             if isinstance(block.get("bbox"), list) and len(block["bbox"]) == 4]
+    keyed = [
+        (witness_key(str(block.get("text") or "")), block)
+        for block in blocks or []
+        if isinstance(block.get("bbox"), list) and len(block["bbox"]) == 4
+    ]
     for needle in (before + seen + after, before + seen, seen + after):
         if len(needle) < 3:
             continue
@@ -1102,7 +1268,7 @@ def witness_choice(first: dict | None, second: dict | None, witness: str, *, con
             regions.append([i1, i2, j1, j2])
     votes: set[str] = set()
     for i1, i2, j1, j2 in regions:
-        left, right = ka[max(0, i1 - context):i1], ka[i2:i2 + context]
+        left, right = ka[max(0, i1 - context) : i1], ka[i2 : i2 + context]
         # Both sides need anchoring text.  At the very start or end a missing
         # passage “matches” trivially (a reading that dropped the opening
         # sentence would win), so such differences go to the arbiter.

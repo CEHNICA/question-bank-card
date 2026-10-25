@@ -43,8 +43,14 @@ for _stream in (sys.stdout, sys.stderr):
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
-COMMAND = ["node", "--test", "test_library_todo_merge.js", "test_library_context_sidebar.js",
-           "test_library_filter_bar.js", "test_library_compact.js"]
+COMMAND = [
+    "node",
+    "--test",
+    "test_library_todo_merge.js",
+    "test_library_context_sidebar.js",
+    "test_library_filter_bar.js",
+    "test_library_compact.js",
+]
 
 LIBRARY_JS = "frontend/library.js"
 LIBRARY_CSS = "frontend/library.css"
@@ -53,122 +59,134 @@ LIBRARY_READING_CSS = "frontend/library-reading.css"
 LOOK_CONTAINER = '      const g = node("div", "library-todo-look");\r\n'
 LOOK_CONTAINER_BUG = '      const g = node("div", "library-tool-actions library-todo-look");\r\n'
 
-LOOK_LOCK = ('    for (const control of document.querySelectorAll("#libraryTodos '
-             '.library-todo-look button")) control.disabled = selectedView;\r\n')
-LOOK_LOCK_LAST = '    applyBatchButtonState();\r\n'
-ORDER_SWAPPED = (LOOK_LOCK_LAST + LOOK_LOCK)
+LOOK_LOCK = (
+    '    for (const control of document.querySelectorAll("#libraryTodos '
+    '.library-todo-look button")) control.disabled = selectedView;\r\n'
+)
+LOOK_LOCK_LAST = "    applyBatchButtonState();\r\n"
+ORDER_SWAPPED = LOOK_LOCK_LAST + LOOK_LOCK
 
-PENDING_BIT = '    if (pendingCount) bits.push(`${pendingCount} 题等你核对`);\r\n'
-PENDING_BIT_OLD = '    if (pendingCount) bits.push(`${pendingCount} 题建议待采纳`);\r\n'
-UNTAGGED_BIT = '    if (missingCount) bits.push(`${missingCount} 题没知识点`);\r\n'
-UNTAGGED_BIT_OLD = '    if (missingCount) bits.push(`${missingCount} 题没打标签`);\r\n'
-ANSWER_BIT = '    if (answerCount) bits.push(`${answerCount} 题没答案`);\r\n'
+PENDING_BIT = "    if (pendingCount) bits.push(`${pendingCount} 题等你核对`);\r\n"
+PENDING_BIT_OLD = "    if (pendingCount) bits.push(`${pendingCount} 题建议待采纳`);\r\n"
+UNTAGGED_BIT = "    if (missingCount) bits.push(`${missingCount} 题没知识点`);\r\n"
+UNTAGGED_BIT_OLD = "    if (missingCount) bits.push(`${missingCount} 题没打标签`);\r\n"
+ANSWER_BIT = "    if (answerCount) bits.push(`${answerCount} 题没答案`);\r\n"
 
 
-HOVER_COST = '          + `点下去会调用 AI ${Number(state.total) || 0} 次（每道题一次），会消耗额度。`\r\n'
+HOVER_COST = "          + `点下去会调用 AI ${Number(state.total) || 0} 次（每道题一次），会消耗额度。`\r\n"
 HOVER_COST_VAGUE = '          + "每道题调用一次 AI，会消耗额度。"\r\n'
-CONFIRM_COST = '            + `这一次会调用 AI ${count} 次（每道题一次），会消耗额度。生成的标签只是建议，不会直接贴到题目上。`\r\n'
+CONFIRM_COST = "            + `这一次会调用 AI ${count} 次（每道题一次），会消耗额度。生成的标签只是建议，不会直接贴到题目上。`\r\n"
 CONFIRM_COST_VAGUE = '            + "每道题调用一次 AI，会消耗额度。生成的标签只是建议，不会直接贴到题目上。"\r\n'
 
-FREE_BORDER = '.library-todo-look .library-tool-action { border-color: transparent; }\n'
+FREE_BORDER = ".library-todo-look .library-tool-action { border-color: transparent; }\n"
 
 # 1.25.23 起，下面这四条锚点已经过期，不是这个脚本坏了，是那一版把同一件事做得更严了
 # （面板改按「标签 / 答案」分栏，筛选组挪进了 freeGroup()，付费按钮的选择器多了一层）。
 # 连同它们一起搬到了 tools\mutation_check_panel_anchor_split.py 的末尾。
 # 留着常量会让人以为它们还在被检查；删掉又看不出是迁移而不是遗忘 —— 所以留注释，
 # 再加一条硬约束，防止以后又写回同一个名字。
-RETIRED_IN_1_25_23 = ("FREE_HEAD", "FREE_HEAD_GONE", "COST_HEAD", "COST_HEAD_BARE",
-                      "PAID_BORDER", "PAID_BORDER_FLAT")
+RETIRED_IN_1_25_23 = ("FREE_HEAD", "FREE_HEAD_GONE", "COST_HEAD", "COST_HEAD_BARE", "PAID_BORDER", "PAID_BORDER_FLAT")
 assert not any(name in globals() for name in RETIRED_IN_1_25_23), (
-    "these anchors belong to 1.25.23 now — they are checked by "
-    "tools/mutation_check_panel_anchor_split.py")
+    "these anchors belong to 1.25.23 now — they are checked by tools/mutation_check_panel_anchor_split.py"
+)
 
-FILTER_COLUMNS = ('    display: grid; grid-template-columns: max-content max-content; '
-                  'justify-content: start;\n')
+FILTER_COLUMNS = "    display: grid; grid-template-columns: max-content max-content; justify-content: start;\n"
 # 这一条不是假想：第一版就是这么发的。auto 轨道的最大值虽然是 max-content，
 # 可它同时是能被 justify-content: stretch 撑大的那种轨道，所以只把 1fr 换成 auto
 # 之后两个控件之间仍有 395px。断言当时写的是「auto auto」，量到的正是这一版，
 # 于是它绿着发出去了 —— 装上实测才发现没生效。
-FILTER_COLUMNS_STRETCHED = '    display: grid; grid-template-columns: auto auto;\n'
-FILTER_COLUMNS_GAP = '    display: grid; grid-template-columns: minmax(0, 1fr) auto;\n'
-FILTER_COLUMNS_GAP_AREAS = (FILTER_COLUMNS_GAP
-                            + '    grid-template-areas: "source advanced" "types types";\n')
-FACET_LABEL = ('  .library-page .library-facet-label { padding-top: 3px; white-space: nowrap; }\n')
-FACET_SLOT = ('  .library-page .library-filterbar > .library-facet '
-              '{ grid-area: types; min-width: 0; }\n')
-NARROW_3COL = ('    .library-page .library-filterbar { grid-template-columns: minmax(0, 1fr) '
-               'auto auto; gap: 12px 6px; padding: 10px 10px 0; }\n')
-NARROW_2COL = ('    .library-page .library-filterbar { grid-template-columns: minmax(0, 1fr) '
-               'auto; gap: 12px 6px; padding: 10px 10px 0; }\n')
+FILTER_COLUMNS_STRETCHED = "    display: grid; grid-template-columns: auto auto;\n"
+FILTER_COLUMNS_GAP = "    display: grid; grid-template-columns: minmax(0, 1fr) auto;\n"
+FILTER_COLUMNS_GAP_AREAS = FILTER_COLUMNS_GAP + '    grid-template-areas: "source advanced" "types types";\n'
+FACET_LABEL = "  .library-page .library-facet-label { padding-top: 3px; white-space: nowrap; }\n"
+FACET_SLOT = "  .library-page .library-filterbar > .library-facet { grid-area: types; min-width: 0; }\n"
+NARROW_3COL = (
+    "    .library-page .library-filterbar { grid-template-columns: minmax(0, 1fr) "
+    "auto auto; gap: 12px 6px; padding: 10px 10px 0; }\n"
+)
+NARROW_2COL = (
+    "    .library-page .library-filterbar { grid-template-columns: minmax(0, 1fr) "
+    "auto; gap: 12px 6px; padding: 10px 10px 0; }\n"
+)
 
 # (relative, description, original, mutation)
 MUTATIONS = [
-    (LIBRARY_JS,
-     "the filter container takes .library-tool-actions back — the exact 1.25.20 bug: "
-     "AI queues, applyBatchButtonState sweeps the two free filters in, and they go grey "
-     "for the whole run while AI is working on them",
-     LOOK_CONTAINER, LOOK_CONTAINER_BUG),
-
-    (LIBRARY_JS,
-     "applyBatchButtonState runs before the filters are locked, so its queueBusy rule wins again",
-     LOOK_LOCK + LOOK_LOCK_LAST, ORDER_SWAPPED),
-
-    (LIBRARY_JS,
-     "the summary goes back to saying 建议待采纳 while the button says 待核对",
-     PENDING_BIT, PENDING_BIT_OLD),
-
-    (LIBRARY_JS,
-     "the summary goes back to saying 没打标签 while the button says 未标知识点",
-     UNTAGGED_BIT, UNTAGGED_BIT_OLD),
-
-    (LIBRARY_JS,
-     "the third number stops being real work and goes back to counting buttons below it",
-     ANSWER_BIT, ''),
-
+    (
+        LIBRARY_JS,
+        "the filter container takes .library-tool-actions back — the exact 1.25.20 bug: "
+        "AI queues, applyBatchButtonState sweeps the two free filters in, and they go grey "
+        "for the whole run while AI is working on them",
+        LOOK_CONTAINER,
+        LOOK_CONTAINER_BUG,
+    ),
+    (
+        LIBRARY_JS,
+        "applyBatchButtonState runs before the filters are locked, so its queueBusy rule wins again",
+        LOOK_LOCK + LOOK_LOCK_LAST,
+        ORDER_SWAPPED,
+    ),
+    (
+        LIBRARY_JS,
+        "the summary goes back to saying 建议待采纳 while the button says 待核对",
+        PENDING_BIT,
+        PENDING_BIT_OLD,
+    ),
+    (
+        LIBRARY_JS,
+        "the summary goes back to saying 没打标签 while the button says 未标知识点",
+        UNTAGGED_BIT,
+        UNTAGGED_BIT_OLD,
+    ),
+    (LIBRARY_JS, "the third number stops being real work and goes back to counting buttons below it", ANSWER_BIT, ""),
     # 上一版（tools\mutation_check_todo_merge.py）里有三条「整行删掉」的变异，锚点
     # 随这次改措辞一起过期，被搬到这里。搬的时候必须连搬，否则是悄悄少测了三条。
-    (LIBRARY_JS,
-     "the entry stops counting how many suggestions are waiting at all",
-     PENDING_BIT, ''),
-
-    (LIBRARY_JS,
-     "the entry stops counting how many questions have no knowledge tag",
-     UNTAGGED_BIT, ''),
-
-    (LIBRARY_JS,
-     "the hover stops counting AI calls — 807 calls reads like a small job again",
-     HOVER_COST, HOVER_COST_VAGUE),
-
-    (LIBRARY_JS,
-     "the confirmation, the last chance to catch a mistake, stops counting AI calls",
-     CONFIRM_COST, CONFIRM_COST_VAGUE),
-
-    (LIBRARY_CSS,
-     "the free filters stop being borderless text and match the paying buttons",
-     FREE_BORDER, ''),
-
-    (LIBRARY_READING_CSS,
-     "the first column goes back to 1fr: 来源 and 更多筛选 drift 777px apart again",
-     FILTER_COLUMNS, FILTER_COLUMNS_GAP),
-
-    (LIBRARY_READING_CSS,
-     "the columns go back to auto without justify-content: start — this is the exact "
-     "version that shipped first and still left a 395px hole, because auto tracks can be "
-     "stretched by justify-content: normal",
-     FILTER_COLUMNS, FILTER_COLUMNS_STRETCHED),
-
-    (LIBRARY_READING_CSS,
-     "the dead 'types types' row comes back and the filter bar silently regains 15px of nothing",
-     FILTER_COLUMNS, FILTER_COLUMNS_GAP_AREAS),
-
-    (LIBRARY_READING_CSS,
-     "a full-width row is reserved again for a facet that lives one level deeper and "
-     "never lands in it",
-     FACET_LABEL, FACET_SLOT + FACET_LABEL),
-
-    (LIBRARY_READING_CSS,
-     "the 559px layout reserves a third column for a control that no longer exists",
-     NARROW_2COL, NARROW_3COL),
+    (LIBRARY_JS, "the entry stops counting how many suggestions are waiting at all", PENDING_BIT, ""),
+    (LIBRARY_JS, "the entry stops counting how many questions have no knowledge tag", UNTAGGED_BIT, ""),
+    (
+        LIBRARY_JS,
+        "the hover stops counting AI calls — 807 calls reads like a small job again",
+        HOVER_COST,
+        HOVER_COST_VAGUE,
+    ),
+    (
+        LIBRARY_JS,
+        "the confirmation, the last chance to catch a mistake, stops counting AI calls",
+        CONFIRM_COST,
+        CONFIRM_COST_VAGUE,
+    ),
+    (LIBRARY_CSS, "the free filters stop being borderless text and match the paying buttons", FREE_BORDER, ""),
+    (
+        LIBRARY_READING_CSS,
+        "the first column goes back to 1fr: 来源 and 更多筛选 drift 777px apart again",
+        FILTER_COLUMNS,
+        FILTER_COLUMNS_GAP,
+    ),
+    (
+        LIBRARY_READING_CSS,
+        "the columns go back to auto without justify-content: start — this is the exact "
+        "version that shipped first and still left a 395px hole, because auto tracks can be "
+        "stretched by justify-content: normal",
+        FILTER_COLUMNS,
+        FILTER_COLUMNS_STRETCHED,
+    ),
+    (
+        LIBRARY_READING_CSS,
+        "the dead 'types types' row comes back and the filter bar silently regains 15px of nothing",
+        FILTER_COLUMNS,
+        FILTER_COLUMNS_GAP_AREAS,
+    ),
+    (
+        LIBRARY_READING_CSS,
+        "a full-width row is reserved again for a facet that lives one level deeper and never lands in it",
+        FACET_LABEL,
+        FACET_SLOT + FACET_LABEL,
+    ),
+    (
+        LIBRARY_READING_CSS,
+        "the 559px layout reserves a third column for a control that no longer exists",
+        NARROW_2COL,
+        NARROW_3COL,
+    ),
 ]
 
 
@@ -183,8 +201,9 @@ def apply(source: str, original: str, mutation: str) -> str:
 
 
 def run() -> subprocess.CompletedProcess:
-    return subprocess.run(COMMAND, cwd=str(FRONTEND), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
+    return subprocess.run(
+        COMMAND, cwd=str(FRONTEND), capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
 
 
 def main() -> int:
@@ -216,8 +235,11 @@ def main() -> int:
         if not caught:
             print((broken.stdout or "")[-2000:] + (broken.stderr or "")[-2000:])
     survived = [item for item in results if not item[1]]
-    print(f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住" if not survived
-          else f"\n{len(survived)} 条变异漏过：{survived}")
+    print(
+        f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住"
+        if not survived
+        else f"\n{len(survived)} 条变异漏过：{survived}"
+    )
     return 1 if survived else 0
 
 

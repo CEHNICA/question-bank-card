@@ -53,22 +53,17 @@ class Command(BaseCommand):
     help = "只给存量题卡补兜底提示，不重新切题、不调用识读服务"
 
     def add_arguments(self, parser):
+        parser.add_argument("--only", default="", help="逗号分隔，只跑这几条：" + "、".join(ORDER) + "（默认五条都跑）")
+        parser.add_argument("--paper", default="", help="只处理这一份资料的文件名（可重复用逗号分隔）；默认全部资料")
         parser.add_argument(
-            "--only", default="",
-            help="逗号分隔，只跑这几条：" + "、".join(ORDER) + "（默认五条都跑）")
-        parser.add_argument(
-            "--paper", default="",
-            help="只处理这一份资料的文件名（可重复用逗号分隔）；默认全部资料")
-        parser.add_argument(
-            "--list", action="store_true", dest="list_only",
-            help="只列出这份资料里每条会命中多少张，不写库")
+            "--list", action="store_true", dest="list_only", help="只列出这份资料里每条会命中多少张，不写库"
+        )
 
     def handle(self, *args, only="", paper="", list_only=False, **options):
         wanted = [name.strip() for name in only.split(",") if name.strip()] or list(ORDER)
         unknown = [name for name in wanted if name not in CHECKS]
         if unknown:
-            raise CommandError(
-                f"不知道这几条检查：{'、'.join(unknown)}；可选：" + "、".join(ORDER))
+            raise CommandError(f"不知道这几条检查：{'、'.join(unknown)}；可选：" + "、".join(ORDER))
 
         papers = Paper.objects.order_by("filename")
         names = [name.strip() for name in paper.split(",") if name.strip()]
@@ -101,7 +96,8 @@ class Command(BaseCommand):
 
         self.stdout.write(
             f"\n{len(papers)} 份资料，用时 {time.monotonic() - started:.1f}s，"
-            f"共挂上 {sum(totals.values())} 处提示（未调用识读服务）")
+            f"共挂上 {sum(totals.values())} 处提示（未调用识读服务）"
+        )
         if not list_only:
             after_green = self._green()
             self.stdout.write(f"绿卡 {before_green} → {after_green}")

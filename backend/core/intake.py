@@ -1,4 +1,5 @@
 """Accept and prepare original documents without calling recognition services."""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -13,8 +14,12 @@ from . import imaging, native_pdf, segment, source_images
 from .models import Block, Paper, Question, QuestionGroup, RegionRead
 
 MODES = {"auto", "manual", "native", "mineru"}
-BOOK_MANUAL_REASON = "教材或讲义中的题号可能按章节重新开始，本机暂不自动切题；已保留完整原页供手工框题，避免把不同章节的题合并。"
-MULTI_PAPER_MANUAL_REASON = "这份文件的题号多次从头开始，可能包含多套试卷。已保留完整原页供手工框题，避免把不同试卷的题合并。"
+BOOK_MANUAL_REASON = (
+    "教材或讲义中的题号可能按章节重新开始，本机暂不自动切题；已保留完整原页供手工框题，避免把不同章节的题合并。"
+)
+MULTI_PAPER_MANUAL_REASON = (
+    "这份文件的题号多次从头开始，可能包含多套试卷。已保留完整原页供手工框题，避免把不同试卷的题合并。"
+)
 
 
 def _native_segmentation_review(result: dict, blocks: list[dict]) -> tuple[list[dict], dict[int, list[str]], list[str]]:
@@ -27,27 +32,37 @@ def _native_segmentation_review(result: dict, blocks: list[dict]) -> tuple[list[
     for item in result.get("questions", []):
         number = item["number"]
         notes = list(dict.fromkeys(str(note) for note in item.get("segmentation_notes") or [] if note))
-        flags[number] = list(dict.fromkeys([
-            *(str(flag) for flag in item.get("segmentation_flags") or [] if flag), *notes,
-        ]))
+        flags[number] = list(
+            dict.fromkeys([*(str(flag) for flag in item.get("segmentation_flags") or [] if flag), *notes])
+        )
         messages.extend(notes)
         if notes or flags[number] or item.get("segmentation"):
-            diagnostics.append({
-                "code": "question_segmentation_review", "question_number": number,
-                "notes": notes, "flags": list(flags[number]),
-                "metadata": deepcopy(item.get("segmentation") or {}),
-            })
+            diagnostics.append(
+                {
+                    "code": "question_segmentation_review",
+                    "question_number": number,
+                    "notes": notes,
+                    "flags": list(flags[number]),
+                    "metadata": deepcopy(item.get("segmentation") or {}),
+                }
+            )
         for diagnostic in item.get("segmentation_diagnostics") or []:
             if isinstance(diagnostic, dict):
                 diagnostics.append({**deepcopy(diagnostic), "question_number": number})
 
     gaps: dict[int, dict] = {}
     for number, previous in result.get("missing") or []:
-        record = gaps.setdefault(previous.number, {
-            "code": "missing_question_numbers", "question_number": previous.number,
-            "previous_number": previous.number, "numbers": [], "page_idx": previous.page,
-            "source_anchor_seq": previous.seq,
-        })
+        record = gaps.setdefault(
+            previous.number,
+            {
+                "code": "missing_question_numbers",
+                "question_number": previous.number,
+                "previous_number": previous.number,
+                "numbers": [],
+                "page_idx": previous.page,
+                "source_anchor_seq": previous.seq,
+            },
+        )
         if number not in record["numbers"]:
             record["numbers"].append(number)
         warning = merged_question_flag(number)
@@ -60,8 +75,10 @@ def _native_segmentation_review(result: dict, blocks: list[dict]) -> tuple[list[
             record["bbox"] = list(block["bbox"])
         record["numbers"].sort()
         numbers = "、".join(str(number) for number in record["numbers"])
-        record["message"] = (f"没有找到第 {numbers} 题的题号，可能和第 {record['previous_number']} 题在同一张卡里；"
-                             "请对照原卷，必要时调整范围或手工补题。")
+        record["message"] = (
+            f"没有找到第 {numbers} 题的题号，可能和第 {record['previous_number']} 题在同一张卡里；"
+            "请对照原卷，必要时调整范围或手工补题。"
+        )
         messages.append(record["message"])
         diagnostics.append(record)
 
@@ -73,8 +90,12 @@ def _native_segmentation_review(result: dict, blocks: list[dict]) -> tuple[list[
         message = str(leading.get("message") or "").replace("MinerU 漏读了", "本地文字层未读到")
         message = message.replace("新增题卡仍按正常流程识读。", "")
         number = 1 if leading["status"] == "repaired" else leading.get("first_detected")
-        diagnostic = {**deepcopy(leading), "code": "leading_question_check",
-                      "question_number": number, "message": message}
+        diagnostic = {
+            **deepcopy(leading),
+            "code": "leading_question_check",
+            "question_number": number,
+            "message": message,
+        }
         candidate = blocks_by_seq.get(leading.get("candidate_seq"))
         if candidate:
             diagnostic.update(page_idx=candidate["page_idx"], bbox=list(candidate["bbox"]))
@@ -91,6 +112,7 @@ def prepare(paper: Paper, mode: str) -> Paper:
         raise ValueError("请选择手工框题或本地文字 PDF")
     # Reuse only local rendering/conversion, never pipeline.parse.
     from .pipeline import convert_docx_to_pdf, prepare_photos
+
     if paper.photos and not paper.render_path:
         prepare_photos(paper)
     if paper.kind == "docx" and not paper.render_path:
@@ -121,13 +143,18 @@ def prepare(paper: Paper, mode: str) -> Paper:
         plan["pages"] = [{**page, "mode": "manual"} for page in plan["pages"]]
     elif mode == "native" and extracted["blocks"]:
         usable = {page["page_idx"] for page in plan["pages"] if page["mode"] == "native"}
-        scopes = segment.numbering_scopes(paper.pages, [
-            block for block in extracted["blocks"] if block["page_idx"] in usable])
+        scopes = segment.numbering_scopes(
+            paper.pages, [block for block in extracted["blocks"] if block["page_idx"] in usable]
+        )
         if len(scopes) > 1:
             # Reuse the existing restart detector before the single-exam
             # segmenter can absorb a later paper into the previous one's tail.
-            plan.update(mode="manual", native_numbering_fallback=True,
-                local_scope_count=len(scopes), fallback_reason=MULTI_PAPER_MANUAL_REASON)
+            plan.update(
+                mode="manual",
+                native_numbering_fallback=True,
+                local_scope_count=len(scopes),
+                fallback_reason=MULTI_PAPER_MANUAL_REASON,
+            )
             plan.setdefault("warnings", []).append(MULTI_PAPER_MANUAL_REASON)
             plan["pages"] = [{**page, "mode": "manual"} for page in plan["pages"]]
     with transaction.atomic():
@@ -139,10 +166,15 @@ def prepare(paper: Paper, mode: str) -> Paper:
         paper.processing_plan = plan
         paper.status, paper.error = Paper.Status.READY, ""
         paper.save(update_fields=["processing_plan", "render_path", "pages", "status", "error", "updated_at"])
-        group = QuestionGroup.objects.create(paper=paper, title=paper.display_name,
-                    kind=QuestionGroup.Kind.EXAM if paper.material_type == "exam" else QuestionGroup.Kind.OTHER,
-                    sequence=0, page_start=1, page_end=len(paper.pages),
-                    metadata={"pages": list(range(len(paper.pages))), "source": "manual"})
+        group = QuestionGroup.objects.create(
+            paper=paper,
+            title=paper.display_name,
+            kind=QuestionGroup.Kind.EXAM if paper.material_type == "exam" else QuestionGroup.Kind.OTHER,
+            sequence=0,
+            page_start=1,
+            page_end=len(paper.pages),
+            metadata={"pages": list(range(len(paper.pages))), "source": "manual"},
+        )
         if extracted["blocks"]:
             Block.objects.bulk_create([Block(paper=paper, **block) for block in extracted["blocks"]], batch_size=300)
         if extracted["blocks"] and plan["mode"] == "native":
@@ -159,34 +191,62 @@ def prepare(paper: Paper, mode: str) -> Paper:
                     continue
                 regions = item["regions"]
                 start_page = min(region["page_idx"] for region in regions)
-                next_page = (min(region["page_idx"] for region in items[index + 1]["regions"])
-                             if index + 1 < len(items) else len(paper.pages))
+                next_page = (
+                    min(region["page_idx"] for region in items[index + 1]["regions"])
+                    if index + 1 < len(items)
+                    else len(paper.pages)
+                )
                 if any(page not in usable for page in range(start_page, next_page)):
                     # The layout builder omits unreadable slots, so merely
                     # checking its output regions cannot reveal a skipped scan
                     # continuation. A question before that boundary is manual.
                     warning = f"第 {item['number']} 题后方有无法读取的页面，未自动截成不完整题卡；请手工框出全部续页。"
                     plan["warnings"].append(warning)
-                    diagnostics.append({"code": "unreadable_continuation", "question_number": item["number"],
-                                        "page_indices": [page for page in range(start_page, next_page) if page not in usable],
-                                        "message": warning})
+                    diagnostics.append(
+                        {
+                            "code": "unreadable_continuation",
+                            "question_number": item["number"],
+                            "page_indices": [page for page in range(start_page, next_page) if page not in usable],
+                            "message": warning,
+                        }
+                    )
                     continue
                 # Do not extend a partial text-layer question onto a scan page.
                 if not all(r["page_idx"] in usable for r in regions):
-                    warning = f"第 {item['number']} 题的范围包含无法读取的页面，未自动截成不完整题卡；请手工框出全部续页。"
+                    warning = (
+                        f"第 {item['number']} 题的范围包含无法读取的页面，未自动截成不完整题卡；请手工框出全部续页。"
+                    )
                     plan["warnings"].append(warning)
-                    diagnostics.append({"code": "unreadable_continuation", "question_number": item["number"],
-                                        "page_indices": sorted({r["page_idx"] for r in regions if r["page_idx"] not in usable}),
-                                        "message": warning})
+                    diagnostics.append(
+                        {
+                            "code": "unreadable_continuation",
+                            "question_number": item["number"],
+                            "page_indices": sorted({r["page_idx"] for r in regions if r["page_idx"] not in usable}),
+                            "message": warning,
+                        }
+                    )
                     continue
                 draft = segment._text_in_regions(extracted["blocks"], regions)
-                Question.objects.create(paper=paper, group=group, number=item["number"],
-                    section=item.get("section", ""), question_type=item.get("question_type", "unknown"),
-                    regions=regions, regions_auto=regions, start_source="native", body_mode="source_image",
-                    processing_mode="manual", stem=draft, text_source="native", state=Question.State.YELLOW,
-                    flags=["本地文字层切题初稿，请对照原卷确认范围；正文保留原图。",
-                           *segmentation_flags.get(item["number"], [])],
-                    source_anchor_seq=item.get("source_anchor_seq"))
+                Question.objects.create(
+                    paper=paper,
+                    group=group,
+                    number=item["number"],
+                    section=item.get("section", ""),
+                    question_type=item.get("question_type", "unknown"),
+                    regions=regions,
+                    regions_auto=regions,
+                    start_source="native",
+                    body_mode="source_image",
+                    processing_mode="manual",
+                    stem=draft,
+                    text_source="native",
+                    state=Question.State.YELLOW,
+                    flags=[
+                        "本地文字层切题初稿，请对照原卷确认范围；正文保留原图。",
+                        *segmentation_flags.get(item["number"], []),
+                    ],
+                    source_anchor_seq=item.get("source_anchor_seq"),
+                )
                 created_numbers.add(item["number"])
             for diagnostic in diagnostics:
                 diagnostic["question_created"] = diagnostic.get("question_number") in created_numbers
@@ -209,6 +269,7 @@ def prepare_auto(paper: Paper, *, allow_cloud: bool = False, cloud_ready: bool =
     that comparison named missing questions that were never missing.
     """
     from . import pipeline
+
     try:
         prepare(paper, "native")
     except Exception:
@@ -239,11 +300,17 @@ def prepare_auto(paper: Paper, *, allow_cloud: bool = False, cloud_ready: bool =
                 # 1.12.7：照片本来就没有文字层，说「本地文字层没有可靠题卡」像是在说
                 # 老师的材料坏了。材料性质（没文字层）和能力问题（本机切不出题）分开说。
                 if paper.kind == "image":
-                    plan["fallback_reason"] = ("这份资料是照片，本机没有可用的文字层来切题，已保留原页供手工切题。"
-                        if not allow_cloud else "这份资料是照片，本机切不出题；云端切题未就绪，已保留原页供手工切题。")
+                    plan["fallback_reason"] = (
+                        "这份资料是照片，本机没有可用的文字层来切题，已保留原页供手工切题。"
+                        if not allow_cloud
+                        else "这份资料是照片，本机切不出题；云端切题未就绪，已保留原页供手工切题。"
+                    )
                 else:
-                    plan["fallback_reason"] = ("本地文字层没有可靠题卡，已保留原页供手工切题。"
-                        if not allow_cloud else "当前自动解析服务未就绪，已保留原页供手工切题。")
+                    plan["fallback_reason"] = (
+                        "本地文字层没有可靠题卡，已保留原页供手工切题。"
+                        if not allow_cloud
+                        else "当前自动解析服务未就绪，已保留原页供手工切题。"
+                    )
             plan["pages"] = [{**page, "mode": "manual"} for page in plan.get("pages", [])]
         paper.processing_plan = plan
         paper.save(update_fields=["processing_plan", "status", "updated_at"])
@@ -255,7 +322,8 @@ def prepare_auto(paper: Paper, *, allow_cloud: bool = False, cloud_ready: bool =
         # check it.  The reason the local attempt gave up is the sentence the
         # teacher actually needs, so it is not overwritten by the generic one.
         pipeline._fail_when_nothing_was_cut(
-            paper, int(plan.get("revision", 0)),
+            paper,
+            int(plan.get("revision", 0)),
             reason=f"自动切题没有切出任何题目：{plan.get('fallback_reason', '')}".strip(),
         )
         paper.refresh_from_db()
@@ -284,8 +352,13 @@ def fallback_manual(paper: Paper, revision: int, reason: str) -> bool:
 def _select_manual_locked(paper: Paper, pages: list[int], *, whole: bool) -> Paper:
     """Invalidate an old generation under its paper lock; keep every result."""
     plan = deepcopy(paper.processing_plan or {})
-    plan.update({"schema": 1, "revision": int(plan.get("revision", 0)) + 1,
-                 "mode": "manual" if whole else plan.get("mode", "mineru")})
+    plan.update(
+        {
+            "schema": 1,
+            "revision": int(plan.get("revision", 0)) + 1,
+            "mode": "manual" if whole else plan.get("mode", "mineru"),
+        }
+    )
     recorded = {item["page_idx"]: item for item in plan.get("pages", [])}
     for page in pages:
         recorded[page] = {**recorded.get(page, {}), "page_idx": page, "mode": "manual"}
@@ -312,15 +385,32 @@ def _select_manual_locked(paper: Paper, pages: list[int], *, whole: bool) -> Pap
             # ocr_suggestion and in 识读记录.
             if was_queued:
                 question.error = ""
-            question.save(update_fields=["processing_mode", "content_revision", "reread_requested", "ocr_pending", "state", "body_mode", "error", "updated_at"])
+            question.save(
+                update_fields=[
+                    "processing_mode",
+                    "content_revision",
+                    "reread_requested",
+                    "ocr_pending",
+                    "state",
+                    "body_mode",
+                    "error",
+                    "updated_at",
+                ]
+            )
     _ensure_manual_group(paper)
     return paper
 
 
 def _ensure_manual_group(paper: Paper) -> None:
     if paper.pages and not paper.question_groups.exists():
-        QuestionGroup.objects.create(paper=paper, title=paper.display_name, sequence=0,
-            page_start=1, page_end=len(paper.pages), metadata={"pages": list(range(len(paper.pages))), "source": "manual"})
+        QuestionGroup.objects.create(
+            paper=paper,
+            title=paper.display_name,
+            sequence=0,
+            page_start=1,
+            page_end=len(paper.pages),
+            metadata={"pages": list(range(len(paper.pages))), "source": "manual"},
+        )
 
 
 def select_manual(paper: Paper, selected_pages: list[int] | None = None) -> Paper:
@@ -365,8 +455,10 @@ def _prepare_manual_pages(paper: Paper, revision: int) -> Paper:
         plan = deepcopy(current.processing_plan or {})
         if plan.get("mode") != "manual" or int(plan.get("revision", 0)) != revision:
             raise ManualSwitchConflict("原卷处理方式已发生变化，请刷新后再继续")
-        plan.update(render_sha256=digest,
-                    pages=[{"page_idx": page["page_idx"], "mode": "manual", "warnings": []} for page in pages])
+        plan.update(
+            render_sha256=digest,
+            pages=[{"page_idx": page["page_idx"], "mode": "manual", "warnings": []} for page in pages],
+        )
         current.pages = pages
         current.processing_plan = plan
         current.status, current.error = Paper.Status.READY, ""
@@ -393,9 +485,9 @@ def switch_to_manual(paper: Paper, *, expected_revision: int | None = None) -> t
             raise ManualSwitchConflict("原卷处理方式已发生变化，请刷新后再继续")
         current = _select_manual_locked(current, list(range(len(current.pages))), whole=True)
         revision = int(current.processing_plan["revision"])
-        RegionRead.objects.filter(question__paper=current,
-            status__in=[RegionRead.Status.QUEUED, RegionRead.Status.RUNNING]).update(
-                status=RegionRead.Status.FAILED, error="已转为手工切题，原框选识读已停止。", updated_at=timezone.now())
+        RegionRead.objects.filter(
+            question__paper=current, status__in=[RegionRead.Status.QUEUED, RegionRead.Status.RUNNING]
+        ).update(status=RegionRead.Status.FAILED, error="已转为手工切题，原框选识读已停止。", updated_at=timezone.now())
     # Commit cancellation before any rendering. No worker or remote reply is
     # required; callbacks and result writes reject the obsolete revision.
     try:

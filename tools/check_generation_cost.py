@@ -47,8 +47,7 @@ def run(page) -> None:
         offset = following["next_offset"]
     tagged = sum(1 for item in items if item["tags"])
     check(backlog["total"] == len(items), f"题库共 {len(items)} 道，面板这边也说是 {backlog['total']} 道")
-    check(backlog["tags"] == len(items) - tagged,
-          f"还差标签的 {backlog['tags']} 道，和题库里一页页数出来的一致")
+    check(backlog["tags"] == len(items) - tagged, f"还差标签的 {backlog['tags']} 道，和题库里一页页数出来的一致")
 
     cost = page.locator("#libraryAICost").inner_text()
     check("调用" in cost and "次服务" in cost, f"费用那句话写明了调用次数：{cost}")
@@ -67,8 +66,10 @@ def run(page) -> None:
     intake_tags = served["features"]["knowledge_tags"] and served["on_intake"]["tags"]
     intake_answer = served["features"]["ai_answer"] and served["on_intake"]["answer"]
     both = "2 次" in cost
-    check(both == (intake_tags and intake_answer),
-          f"写着「2 次」和两个开关的实际状态一致（本机 标签入库={intake_tags} 答案入库={intake_answer}）")
+    check(
+        both == (intake_tags and intake_answer),
+        f"写着「2 次」和两个开关的实际状态一致（本机 标签入库={intake_tags} 答案入库={intake_answer}）",
+    )
 
     # 拨开关，费用那句话要当场跟着变，不能等保存后重读。
     intake_answer = page.locator("#libraryAIAnswerIntake")

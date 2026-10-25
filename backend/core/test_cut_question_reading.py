@@ -1,4 +1,5 @@
 """Saved crops -> explicit recognition -> normal drafts, with manual review."""
+
 import json
 import tempfile
 from copy import deepcopy
@@ -39,24 +40,36 @@ class CutQuestionReadingTests(TestCase):
         self.url = f"/api/papers/{self.original.pk}/read-cut-questions"
 
     def cut(self, number=1, **fields):
-        defaults = {"paper": self.original, "number": number, "body_mode": "source_image",
-            "processing_mode": "manual", "question_type": "free_response", "state": "yellow",
-            "regions": [{"page_idx": 1, "bbox": [50, 50, 900, 420]},
-                     {"page_idx": 0, "bbox": [50, 50, 900, 420]}]}
+        defaults = {
+            "paper": self.original,
+            "number": number,
+            "body_mode": "source_image",
+            "processing_mode": "manual",
+            "question_type": "free_response",
+            "state": "yellow",
+            "regions": [{"page_idx": 1, "bbox": [50, 50, 900, 420]}, {"page_idx": 0, "bbox": [50, 50, 900, 420]}],
+        }
         return Question.objects.create(**{**defaults, **fields})
 
     def post(self, payload=None, *, url=None):
-        return self.client.post(url or self.url, json.dumps(payload or {}),
-            content_type="application/json", HTTP_X_QB_REQUEST="1")
+        return self.client.post(
+            url or self.url, json.dumps(payload or {}), content_type="application/json", HTTP_X_QB_REQUEST="1"
+        )
 
     def test_queue_uses_saved_ordered_crops_and_does_not_read_or_modify_body(self):
-        question = self.cut(edited=False, stem="native text-layer evidence",
+        question = self.cut(
+            edited=False,
+            stem="native text-layer evidence",
             figures=[{"page_idx": 0, "bbox": [100, 100, 200, 200], "slot": "stem", "source": "manual"}],
-            figure_review={"status": "ok", "source": "human"}, flags=["manual range warning"])
+            figure_review={"status": "ok", "source": "human"},
+            flags=["manual range warning"],
+        )
         before = deepcopy(Question.objects.values().get(pk=question.pk))
-        with mock.patch("requests.sessions.Session.request", side_effect=AssertionError("unexpected cloud request")), \
-                mock.patch.object(readers, "chat") as model, \
-                mock.patch.object(pipeline, "request_extract_file_from_pool") as mineru:
+        with (
+            mock.patch("requests.sessions.Session.request", side_effect=AssertionError("unexpected cloud request")),
+            mock.patch.object(readers, "chat") as model,
+            mock.patch.object(pipeline, "request_extract_file_from_pool") as mineru,
+        ):
             result = self.post({"question_ids": [question.pk], "revisions": {str(question.pk): 0}, "revision": 0})
         self.assertEqual(result.status_code, 200, result.content)
         self.assertEqual(result.json()["queued_ids"], [question.pk])
@@ -87,8 +100,10 @@ class CutQuestionReadingTests(TestCase):
         result = self.post({"question_ids": []})
         self.assertEqual(result.status_code, 200, result.content)
         self.assertEqual(result.json()["queued_ids"], [eligible.pk])
-        self.assertEqual({item["id"] for item in result.json()["skipped"]},
-            {q.pk for q in [*protected, suggested] if q is not deleted})
+        self.assertEqual(
+            {item["id"] for item in result.json()["skipped"]},
+            {q.pk for q in [*protected, suggested] if q is not deleted},
+        )
         self.assertEqual(result.json()["converted_ids"], [suggested.pk])
         suggested.refresh_from_db()
         self.assertEqual((suggested.body_mode, suggested.stem), ("text", "successful saved suggestion"))
@@ -116,8 +131,7 @@ class CutQuestionReadingTests(TestCase):
     def test_no_reader_fails_without_queue_and_no_repeated_background_work(self):
         question = self.cut()
         before = Question.objects.values().get(pk=question.pk)
-        with mock.patch.object(views, "_vision_ready", return_value=False), \
-                mock.patch.object(readers, "chat") as model:
+        with mock.patch.object(views, "_vision_ready", return_value=False), mock.patch.object(readers, "chat") as model:
             result = self.post()
             self.assertEqual(pipeline.process_rereads(), 0)
         self.assertEqual(result.status_code, 409)
@@ -128,8 +142,10 @@ class CutQuestionReadingTests(TestCase):
     def test_stale_paper_or_question_version_rejects_entire_batch(self):
         first, changed = self.cut(), self.cut(2, content_revision=3)
         before = list(Question.objects.values().order_by("id"))
-        for payload in ({"revision": 1},
-                {"question_ids": [first.pk, changed.pk], "revisions": {str(first.pk): 0, str(changed.pk): 2}}):
+        for payload in (
+            {"revision": 1},
+            {"question_ids": [first.pk, changed.pk], "revisions": {str(first.pk): 0, str(changed.pk): 2}},
+        ):
             result = self.post(payload)
             self.assertEqual(result.status_code, 409, result.content)
             self.assertEqual(list(Question.objects.values().order_by("id")), before)
@@ -138,8 +154,12 @@ class CutQuestionReadingTests(TestCase):
         eligible = self.cut()
         deleted = self.cut(2, deleted_at=timezone.now())
         other = self.cut(3, paper=self.paper())
-        for invalid, status in (([True], 400), ([eligible.pk, eligible.pk], 400),
-                ([eligible.pk, other.pk], 409), ([eligible.pk, deleted.pk], 409)):
+        for invalid, status in (
+            ([True], 400),
+            ([eligible.pk, eligible.pk], 400),
+            ([eligible.pk, other.pk], 409),
+            ([eligible.pk, deleted.pk], 409),
+        ):
             result = self.post({"question_ids": invalid})
             self.assertEqual(result.status_code, status, result.content)
         eligible.refresh_from_db()
@@ -150,10 +170,18 @@ class CutQuestionReadingTests(TestCase):
         key, regions = question.source_key, deepcopy(question.regions)
         self.assertEqual(self.post().json()["queued"], 1)
         question.refresh_from_db()
+
         def answer(snapshot, store):
             self.assertEqual(snapshot["regions"], regions)
-            return {"stem": "Recognized draft", "options": {}, "question_type": "free_response",
-                "figures": [], "flags": [], "state": "green"}
+            return {
+                "stem": "Recognized draft",
+                "options": {},
+                "question_type": "free_response",
+                "figures": [],
+                "flags": [],
+                "state": "green",
+            }
+
         self.run_read(question, answer)
         question.refresh_from_db()
         self.assertEqual((question.body_mode, question.stem, question.state), ("text", "Recognized draft", "green"))
@@ -169,12 +197,18 @@ class CutQuestionReadingTests(TestCase):
         question = self.cut()
         self.post()
         question.refresh_from_db()
+
         def answer(snapshot, store):
-            self.post({"revision": question.content_revision, "regions": [
-                {"page_idx": 0, "bbox": [100, 100, 850, 500]}]}, url=f"/api/questions/{question.pk}/regions")
-            self.post({"stem": "latest actual manual correction", "question_type": "free_response"},
-                url=f"/api/questions/{question.pk}/text")
+            self.post(
+                {"revision": question.content_revision, "regions": [{"page_idx": 0, "bbox": [100, 100, 850, 500]}]},
+                url=f"/api/questions/{question.pk}/regions",
+            )
+            self.post(
+                {"stem": "latest actual manual correction", "question_type": "free_response"},
+                url=f"/api/questions/{question.pk}/text",
+            )
             return {"stem": "late model text", "flags": [], "state": "green"}
+
         self.run_read(question, answer)
         question.refresh_from_db()
         self.assertEqual((question.body_mode, question.stem), ("text", "latest actual manual correction"))
@@ -191,8 +225,12 @@ class CutQuestionReadingTests(TestCase):
         with mock.patch.object(pipeline, "read_card") as reader:
             self.assertEqual(pipeline.process_rereads(), 0)
         reader.assert_not_called()
-        self.assertEqual(self.post({"question_ids": [question.pk],
-            "revisions": {str(question.pk): question.content_revision}}).json()["queued"], 1)
+        self.assertEqual(
+            self.post(
+                {"question_ids": [question.pk], "revisions": {str(question.pk): question.content_revision}}
+            ).json()["queued"],
+            1,
+        )
         question.refresh_from_db()
         self.assertEqual(question.content_revision, 2)
 
@@ -225,8 +263,9 @@ class CutQuestionReadingTests(TestCase):
         question = self.cut()
         self.post()
         question.refresh_from_db()
-        protected = self.cut(2, ocr_pending=True, reread_requested=True,
-            ocr_suggestion={"revision": 0, "stem": "retained candidate"})
+        protected = self.cut(
+            2, ocr_pending=True, reread_requested=True, ocr_suggestion={"revision": 0, "stem": "retained candidate"}
+        )
         library.approve(protected, now=timezone.now())
         protected.save()
         with mock.patch.object(library_jobs, "queue_on_intake"):
@@ -261,15 +300,19 @@ class CutQuestionReadingTests(TestCase):
         first.refresh_from_db()
         second.refresh_from_db()
         called = []
+
         def answer(snapshot, store):
             called.append(snapshot["id"])
             self.assertEqual(self.stop().json()["stopped"], 2)
             return {"stem": "late model answer", "state": "green", "flags": []}
-        with mock.patch.object(pipeline, "ThreadPoolExecutor", manual_review.ImmediateExecutor), \
-                mock.patch.object(pipeline, "close_old_connections"), \
-                mock.patch.object(pipeline, "_reader_parallelism", return_value=1), \
-                mock.patch.object(readers, "assistant_mode", return_value=False), \
-                mock.patch.object(pipeline, "read_card", side_effect=answer):
+
+        with (
+            mock.patch.object(pipeline, "ThreadPoolExecutor", manual_review.ImmediateExecutor),
+            mock.patch.object(pipeline, "close_old_connections"),
+            mock.patch.object(pipeline, "_reader_parallelism", return_value=1),
+            mock.patch.object(readers, "assistant_mode", return_value=False),
+            mock.patch.object(pipeline, "read_card", side_effect=answer),
+        ):
             pipeline.read_questions(self.original, [first, second])
         self.assertEqual(called, [first.pk])
         for question in (first, second):
@@ -283,10 +326,12 @@ class CutQuestionReadingTests(TestCase):
         question = self.cut()
         self.post()
         question.refresh_from_db()
+
         def answer(snapshot, store):
             self.stop()
             self.assertEqual(self.post({"question_ids": [question.pk]}).json()["queued"], 1)
             return {"stem": "old late text", "state": "green", "flags": []}
+
         self.run_read(question, answer)
         question.refresh_from_db()
         self.assertEqual(question.content_revision, 3)
@@ -315,14 +360,20 @@ class CutQuestionReadingTests(TestCase):
         question.refresh_from_db()
         pool = account_pool.AccountPool("minimax", ("test-only",), per_account=1)
         engine = readers.Engine("minimax", "test-model")
+
         def wait(*, timeout):
             self.assertEqual(self.stop().json()["stopped"], 1)
+
         def answer(snapshot, store):
             return readers.chat(engine, "copy saved crop", ["test-image"])
-        with pool.lease(), mock.patch.object(pool._condition, "wait", side_effect=wait), \
-                mock.patch.object(readers, "account_pool", return_value=pool), \
-                mock.patch.object(readers, "_hedge_after", return_value=0), \
-                mock.patch.object(readers, "_post") as http:
+
+        with (
+            pool.lease(),
+            mock.patch.object(pool._condition, "wait", side_effect=wait),
+            mock.patch.object(readers, "account_pool", return_value=pool),
+            mock.patch.object(readers, "_hedge_after", return_value=0),
+            mock.patch.object(readers, "_post") as http,
+        ):
             self.run_read(question, answer)
         http.assert_not_called()
         question.refresh_from_db()
@@ -333,9 +384,12 @@ class WholeCropCancellationPolicyTests(SimpleTestCase):
     def test_cancel_only_keeps_whole_crop_http_timeout_and_chosen_service_policy(self):
         engine = readers.Engine("minimax", "test-model")
         response = mock.Mock(status_code=200)
-        with readers.cancellable_request(lambda: False), readers.selected_services_only(), \
-                mock.patch.object(readers.requests, "post", return_value=response) as post, \
-                mock.patch.object(readers, "_chat_hedged", return_value="original text") as chosen:
+        with (
+            readers.cancellable_request(lambda: False),
+            readers.selected_services_only(),
+            mock.patch.object(readers.requests, "post", return_value=response) as post,
+            mock.patch.object(readers, "_chat_hedged", return_value="original text") as chosen,
+        ):
             self.assertIs(readers._post("https://example.invalid", "test-only", {}), response)
             self.assertEqual(post.call_args.kwargs["timeout"], (10, 150))
             self.assertEqual(readers.chat(engine, "copy saved crop", ["test-image"]), "original text")
@@ -343,11 +397,15 @@ class WholeCropCancellationPolicyTests(SimpleTestCase):
 
     def test_cancel_only_does_not_accept_a_late_http_response(self):
         cancelled = False
+
         def post(*args, **kwargs):
             nonlocal cancelled
             cancelled = True
             return mock.Mock(status_code=200)
-        with readers.cancellable_request(lambda: cancelled), \
-                mock.patch.object(readers.requests, "post", side_effect=post):
+
+        with (
+            readers.cancellable_request(lambda: cancelled),
+            mock.patch.object(readers.requests, "post", side_effect=post),
+        ):
             with self.assertRaises(readers.ReaderRequestStopped):
                 readers._post("https://example.invalid", "test-only", {})

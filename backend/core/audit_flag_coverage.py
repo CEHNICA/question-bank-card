@@ -20,6 +20,7 @@
 残的，而卡是绿的。八下第 1 题「求 BD 的长」是最直观的一例：老师看到的是只有上
 半截的三角形，菱形的 B、D 两个顶点整个不见了。
 """
+
 import io
 import os
 import sys
@@ -42,30 +43,25 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 # 必须直接复用实现，不要在这里复刻一份正则 —— 复刻的那份在判据改动后会安静地
 # 报旧数字，不报错也不失败，比测试红更难发现。
 GUARDS = {
-    "题型标成填空题却无可填空格":
-        lambda c: qtypes.fill_blank_without_slot(c.question_type, c.stem),
-    "题干里混进了印刷解答":
-        lambda c: bool(textnorm.printed_solution_in_stem("", c.stem)),
-    "题干里混进了下一节的题号":
-        lambda c: bool(textnorm.merged_question_number(c.stem, c.number)),
-    "大题标题与题型冲突":
-        lambda c: bool(pipeline._section_kind_conflict(c.section, c.question_type)),
-    "选项字母断档":
-        lambda c: bool(pipeline._option_gaps(c.options or {}, c.figures or [])),
-    "读出了第 5 个及以后的选项":
-        lambda c: bool(pipeline._surplus_options(c.options or {}, c.figures or [])),
-    "两个选项读成一样":
-        lambda c: bool(pipeline._identical_options(c.options or {})),
-    "标题说选择题但一个选项都没有":
-        lambda c: pipeline._section_choice_without_options(
-            str(c.section or ""), c.options or {}, c.figures or []),
-    "坐标只读到一半":
-        lambda c: bool(pipeline._broken_coordinate(str(c.stem or ""))),
-    "配图被题目范围切掉":
-        lambda c: bool(figure_policy.candidates_cut_by_own_range(
-            c.regions or [], c.figure_candidates or [],
+    "题型标成填空题却无可填空格": lambda c: qtypes.fill_blank_without_slot(c.question_type, c.stem),
+    "题干里混进了印刷解答": lambda c: bool(textnorm.printed_solution_in_stem("", c.stem)),
+    "题干里混进了下一节的题号": lambda c: bool(textnorm.merged_question_number(c.stem, c.number)),
+    "大题标题与题型冲突": lambda c: bool(pipeline._section_kind_conflict(c.section, c.question_type)),
+    "选项字母断档": lambda c: bool(pipeline._option_gaps(c.options or {}, c.figures or [])),
+    "读出了第 5 个及以后的选项": lambda c: bool(pipeline._surplus_options(c.options or {}, c.figures or [])),
+    "两个选项读成一样": lambda c: bool(pipeline._identical_options(c.options or {})),
+    "标题说选择题但一个选项都没有": lambda c: pipeline._section_choice_without_options(
+        str(c.section or ""), c.options or {}, c.figures or []
+    ),
+    "坐标只读到一半": lambda c: bool(pipeline._broken_coordinate(str(c.stem or ""))),
+    "配图被题目范围切掉": lambda c: bool(
+        figure_policy.candidates_cut_by_own_range(
+            c.regions or [],
+            c.figure_candidates or [],
             ((c.read_a or {}).get("figures") or {}).keys(),
-            [figure.get("label") for figure in (c.figures or [])])),
+            [figure.get("label") for figure in (c.figures or [])],
+        )
+    ),
 }
 
 
@@ -88,8 +84,7 @@ def main() -> int:
     total_silent = sum(r[3] for r in rows)
     green = [c for c in cards if c.state == "green" and not c.flags]
     print(f"\n合计命中 {total_hits} 张，其中 {total_silent} 张是绿卡零旗标。")
-    print(f"全库绿卡零旗标 {len(green)} 张，守卫覆盖 {total_silent} 张 "
-          f"（{total_silent / max(len(green), 1):.1%}）。")
+    print(f"全库绿卡零旗标 {len(green)} 张，守卫覆盖 {total_silent} 张 （{total_silent / max(len(green), 1):.1%}）。")
     print("\n「绿卡零旗标」那一栏才是用户完全看不到的缺陷；已黄的那部分是重复提示。")
     return 0
 

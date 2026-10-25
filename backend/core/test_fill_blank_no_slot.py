@@ -15,6 +15,7 @@ r"""题型标成填空题，而题干里没有任何可填的空格 —— 卡�
   * 空括号 `(  )` / `（　）`，半角空格也算（九上第2题 id=1312）；
   * 填空位画在图里或表里，靠「填表」「填在…上」「填入」这些动词认（id=1293、id=846）。
 """
+
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
@@ -23,22 +24,38 @@ from . import pipeline, qtypes
 from .models import Question
 
 READING = {
-    "stem": "", "options": {}, "type": "fill_blank", "content_kind": "exercise",
-    "figures": {}, "missing_figure": False, "number_seen": 1,
-    "figure_descriptions": [], "unclear": False,
+    "stem": "",
+    "options": {},
+    "type": "fill_blank",
+    "content_kind": "exercise",
+    "figures": {},
+    "missing_figure": False,
+    "number_seen": 1,
+    "figure_descriptions": [],
+    "unclear": False,
 }
 
 
 def snapshot(**changes):
     base = {
-        "id": 1, "number": 1, "group_id": None,
+        "id": 1,
+        "number": 1,
+        "group_id": None,
         "regions": [{"page_idx": 0, "bbox": [80, 160, 900, 240]}],
-        "candidates": [], "question_type": "fill_blank", "stem": "", "options": {},
-        "edited": False, "source_kind": Question.SourceKind.EXERCISE,
-        "source_anchor_seq": 128, "segmentation_flags": [], "body_mode": "text",
-        "start_source": "mineru", "witness": "",
-        "witness_blocks": [{"seq": 128, "page_idx": 0, "bbox": [80, 160, 900, 200],
-                            "text": "1. 化简：", "type": "text"}],
+        "candidates": [],
+        "question_type": "fill_blank",
+        "stem": "",
+        "options": {},
+        "edited": False,
+        "source_kind": Question.SourceKind.EXERCISE,
+        "source_anchor_seq": 128,
+        "segmentation_flags": [],
+        "body_mode": "text",
+        "start_source": "mineru",
+        "witness": "",
+        "witness_blocks": [
+            {"seq": 128, "page_idx": 0, "bbox": [80, 160, 900, 200], "text": "1. 化简：", "type": "text"}
+        ],
     }
     base.update(changes)
     return base
@@ -46,49 +63,59 @@ def snapshot(**changes):
 
 class FillBlankWithoutSlotTests(SimpleTestCase):
     def test_a_calculation_question_read_as_fill_blank_is_a_hit(self):
-        self.assertTrue(qtypes.fill_blank_without_slot(
-            "fill_blank", "化简：\n（1）$\\sqrt{36}$；\n（2）$\\sqrt{\\dfrac{9}{4}}$。"))
+        self.assertTrue(
+            qtypes.fill_blank_without_slot("fill_blank", "化简：\n（1）$\\sqrt{36}$；\n（2）$\\sqrt{\\dfrac{9}{4}}$。")
+        )
 
     def test_a_free_response_with_several_sub_questions_is_a_hit(self):
         # 这类最容易被判成填空题：小问编号和 (1)(2) 的填空括号长得一样，
         # 但它是解答题。（）里必须有东西才算填空位。
-        self.assertTrue(qtypes.fill_blank_without_slot(
-            "fill_blank", "$x$ 取什么值时，下列各式在实数范围内有意义？\n"
-                          "(1) $\\sqrt{x-4}$；\n(2) $\\sqrt{1+x^2}$。"))
+        self.assertTrue(
+            qtypes.fill_blank_without_slot(
+                "fill_blank", "$x$ 取什么值时，下列各式在实数范围内有意义？\n(1) $\\sqrt{x-4}$；\n(2) $\\sqrt{1+x^2}$。"
+            )
+        )
 
     def test_another_type_is_left_alone(self):
-        for kind in ("free_response", "single_choice", "multiple_choice",
-                     "true_false", "unknown"):
-            self.assertFalse(qtypes.fill_blank_without_slot(
-                kind, "化简：\n（1）$\\sqrt{36}$。"), kind)
+        for kind in ("free_response", "single_choice", "multiple_choice", "true_false", "unknown"):
+            self.assertFalse(qtypes.fill_blank_without_slot(kind, "化简：\n（1）$\\sqrt{36}$。"), kind)
 
     def test_an_escaped_underscore_is_a_slot(self):
         # 九上第3题 id=1168：LaTeX 把下划线写成 \_\_\_\_\_\_。
-        self.assertFalse(qtypes.fill_blank_without_slot(
-            "fill_blank",
-            "已知反比例函数 $y=\\frac{m+1}{x}$ …那么 $m$ 的取值范围是 "
-            "\\_\\_\\_\\_\\_\\_。"))
+        self.assertFalse(
+            qtypes.fill_blank_without_slot(
+                "fill_blank", "已知反比例函数 $y=\\frac{m+1}{x}$ …那么 $m$ 的取值范围是 \\_\\_\\_\\_\\_\\_。"
+            )
+        )
 
     def test_an_empty_parenthesis_is_a_slot(self):
         # 九上第2题 id=1312：函数表达式后面挂一个空括号。
-        self.assertFalse(qtypes.fill_blank_without_slot(
-            "fill_blank",
-            "下列二次函数在同一直角坐标系中的图象如图所示，"
-            "将函数图象的序号填在对应函数表达式后面的括号里：\n"
-            "( 1 ) $y=2x^2$； ( )"))
+        self.assertFalse(
+            qtypes.fill_blank_without_slot(
+                "fill_blank",
+                "下列二次函数在同一直角坐标系中的图象如图所示，"
+                "将函数图象的序号填在对应函数表达式后面的括号里：\n"
+                "( 1 ) $y=2x^2$； ( )",
+            )
+        )
 
     def test_a_slot_written_in_a_figure_or_table_is_a_slot(self):
         # 填空位画在图里（八下 id=846「填在相应的箭头上」）或表里
         # （九上 id=1293「填表表示物体在前 5s 下落的高度」）。
-        for stem in ("将相应的条件填在相应的箭头上，使得下图能清楚地表达几种四边形之间的关系。",
-                     "物体从某一高度落下…填表表示物体在前 5 s 下落的高度：",
-                     "下列图形中各有多少个小圆圈？请填空。"):
+        for stem in (
+            "将相应的条件填在相应的箭头上，使得下图能清楚地表达几种四边形之间的关系。",
+            "物体从某一高度落下…填表表示物体在前 5 s 下落的高度：",
+            "下列图形中各有多少个小圆圈？请填空。",
+        ):
             self.assertFalse(qtypes.fill_blank_without_slot("fill_blank", stem), stem)
 
     def test_an_ordinary_pipe_table_is_not_a_slot(self):
         # 管道表里的空单元格不是填空位，这一格要留给「表里有空格」的那道判据。
-        self.assertTrue(qtypes.fill_blank_without_slot(
-            "fill_blank", "某商品单价如下：\n| 数量 | 1 | 2 |\n|---|---|---|\n| 单价 | 3 | 5 |"))
+        self.assertTrue(
+            qtypes.fill_blank_without_slot(
+                "fill_blank", "某商品单价如下：\n| 数量 | 1 | 2 |\n|---|---|---|\n| 单价 | 3 | 5 |"
+            )
+        )
 
 
 class FillBlankFlagTests(SimpleTestCase):
@@ -98,11 +125,12 @@ class FillBlankFlagTests(SimpleTestCase):
 
     def run_card(self, stem, *, kind="fill_blank", **changes):
         reading = {**READING, "stem": stem, "type": kind}
-        with patch.object(pipeline.readers, "primary_engine", return_value=object()), \
-                patch.object(pipeline.readers, "read_question", return_value=reading), \
-                patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])), \
-                patch.object(pipeline.imaging, "jpeg_data_url",
-                             return_value="data:image/jpeg;base64,x"):
+        with (
+            patch.object(pipeline.readers, "primary_engine", return_value=object()),
+            patch.object(pipeline.readers, "read_question", return_value=reading),
+            patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])),
+            patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:image/jpeg;base64,x"),
+        ):
             return pipeline.read_card(snapshot(**changes), self.store)
 
     def test_a_calculation_card_read_as_fill_blank_is_not_green(self):
@@ -112,8 +140,7 @@ class FillBlankFlagTests(SimpleTestCase):
         self.assertEqual(result["state"], Question.State.YELLOW)
 
     def test_a_real_fill_blank_stays_green(self):
-        result = self.run_card(
-            "在 $\\triangle ABC$ 中，$\\angle A=30°$，则 $\\angle B=$ ______。")
+        result = self.run_card("在 $\\triangle ABC$ 中，$\\angle A=30°$，则 $\\angle B=$ ______。")
 
         self.assertNotIn(qtypes.FLAG_FILL_NO_SLOT, result["flags"])
         self.assertEqual(result["state"], Question.State.GREEN)

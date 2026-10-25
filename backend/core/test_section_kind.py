@@ -13,6 +13,7 @@
 
     .\\backend\\.venv\\Scripts\\python.exe backend\\manage.py test core.test_section_kind
 """
+
 from types import SimpleNamespace
 from unittest import mock
 
@@ -46,8 +47,7 @@ class SectionKindTests(SimpleTestCase):
     def test_the_heading_prefix_is_what_counts(self):
         # “三、解答题（含填空）” still says 解答题; the word 填空 in parentheses
         # must not turn every card in the section into a conflict.
-        self.assertEqual(self.check("三、解答题（含填空）", "fill_blank"),
-                         ("解答题", "填空题"))
+        self.assertEqual(self.check("三、解答题（含填空）", "fill_blank"), ("解答题", "填空题"))
         self.assertIsNone(self.check("三、解答题（含填空）", "free_response"))
 
     def test_an_unknown_or_missing_side_is_quiet(self):
@@ -74,43 +74,66 @@ class AnalysisMarkTests(SimpleTestCase):
     def test_a_page_that_starts_with_analysis_is_cut_there(self):
         snapshot = {
             "regions": [{"page_idx": 1, "bbox": [60.0, 40.0, 930.0, 900.0]}],
-            "witness_blocks": [{"page_idx": 1, "bbox": [87.0, 300.0, 912.0, 340.0],
-                                "text": "【分析】本题考查勾股定理"}],
+            "witness_blocks": [
+                {"page_idx": 1, "bbox": [87.0, 300.0, 912.0, 340.0], "text": "【分析】本题考查勾股定理"}
+            ],
         }
-        self.assertEqual(pipeline._reading_regions(snapshot),
-                         [{"page_idx": 1, "bbox": [60.0, 40.0, 930.0, 298.0]}])
+        self.assertEqual(pipeline._reading_regions(snapshot), [{"page_idx": 1, "bbox": [60.0, 40.0, 930.0, 298.0]}])
 
     def test_an_analysis_marked_figure_counts_as_from_the_solution(self):
-        blocks = [{"page_idx": 1, "bbox": [87.0, 300.0, 912.0, 340.0],
-                   "text": "【分析】本题考查勾股定理"}]
+        blocks = [{"page_idx": 1, "bbox": [87.0, 300.0, 912.0, 340.0], "text": "【分析】本题考查勾股定理"}]
         candidates = [{"label": "1", "page_idx": 1, "bbox": [87.0, 500.0, 300.0, 620.0]}]
-        self.assertEqual(
-            pipeline._unclassified_below_solution(blocks, candidates, {}), (1, 1))
+        self.assertEqual(pipeline._unclassified_below_solution(blocks, candidates, {}), (1, 1))
 
 
-READING = {"stem": "已知在阳光下，垂直于地面高1米的标杆的影长也为1米，如图．则树高 $AB$ 等于____米．",
-           "options": {}, "type": "free_response", "content_kind": "exercise", "figures": {},
-           "missing_figure": False, "number_seen": 13, "figure_descriptions": [],
-           "unclear": False, "unreadable": False}
+READING = {
+    "stem": "已知在阳光下，垂直于地面高1米的标杆的影长也为1米，如图．则树高 $AB$ 等于____米．",
+    "options": {},
+    "type": "free_response",
+    "content_kind": "exercise",
+    "figures": {},
+    "missing_figure": False,
+    "number_seen": 13,
+    "figure_descriptions": [],
+    "unclear": False,
+    "unreadable": False,
+}
 
 
 class SectionKindWiringTests(SimpleTestCase):
     def read(self, reading, section):
         snapshot = {
-            "id": 1, "number": 13, "group_id": None,
+            "id": 1,
+            "number": 13,
+            "group_id": None,
             "regions": [{"page_idx": 1, "bbox": [60.0, 300.0, 930.0, 700.0]}],
-            "candidates": [], "question_type": "free_response", "section": section,
-            "stem": "", "options": {}, "edited": False,
-            "source_kind": Question.SourceKind.UNKNOWN, "source_anchor_seq": 8,
-            "segmentation_flags": [], "body_mode": "text", "start_source": "mineru",
-            "witness_blocks": [{"page_idx": 1, "bbox": [80.0, 320.0, 700.0, 360.0],
-                                "text": "13. 已知在阳光下，垂直于地面高1米的标杆的影长也为1米"}],
+            "candidates": [],
+            "question_type": "free_response",
+            "section": section,
+            "stem": "",
+            "options": {},
+            "edited": False,
+            "source_kind": Question.SourceKind.UNKNOWN,
+            "source_anchor_seq": 8,
+            "segmentation_flags": [],
+            "body_mode": "text",
+            "start_source": "mineru",
+            "witness_blocks": [
+                {
+                    "page_idx": 1,
+                    "bbox": [80.0, 320.0, 700.0, 360.0],
+                    "text": "13. 已知在阳光下，垂直于地面高1米的标杆的影长也为1米",
+                }
+            ],
         }
-        with mock.patch.object(readers, "primary_engine", return_value=object()), \
-                mock.patch.object(readers, "read_question", return_value=reading), \
-                mock.patch.object(pipeline.imaging, "stack_regions",
-                                  return_value=(SimpleNamespace(height=700, width=1400), [])), \
-                mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:url"):
+        with (
+            mock.patch.object(readers, "primary_engine", return_value=object()),
+            mock.patch.object(readers, "read_question", return_value=reading),
+            mock.patch.object(
+                pipeline.imaging, "stack_regions", return_value=(SimpleNamespace(height=700, width=1400), [])
+            ),
+            mock.patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:url"),
+        ):
             return pipeline.read_card(snapshot, SimpleNamespace(load=lambda page: object()))
 
     def test_the_conflict_lands_on_the_card_and_yellows_it(self):

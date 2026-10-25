@@ -2,6 +2,7 @@
 
 给老师看到的每一句都是人话：做了什么、动了几样、接下来点哪里。
 """
+
 from __future__ import annotations
 
 import shutil
@@ -19,6 +20,7 @@ MAX_UPLOAD_BYTES = library_transfer.MAX_BUNDLE_BYTES
 
 def _guard(request, *, json_body=True):
     from .views import _guard as guard
+
     return guard(request, json_body=json_body)
 
 
@@ -30,6 +32,7 @@ def _error(message: str, status: int = 400) -> JsonResponse:
 
 def _body(request, limit: int = 100_000) -> dict | None:
     from .views import _body as body
+
     return body(request, limit=limit)
 
 
@@ -54,11 +57,17 @@ def export_view(request):
     except OSError:
         return _error("备份没写成，检查一下那个文件夹能不能写入。", status=500)
     counts = result.get("counts") or {}
-    response = JsonResponse({
-        "file": result["file"], "name": result["name"], "size": result["size"],
-        "papers": counts.get("papers", 0), "questions": counts.get("questions", 0),
-        "tags": counts.get("tags", 0), "publications": counts.get("publications", 0),
-    })
+    response = JsonResponse(
+        {
+            "file": result["file"],
+            "name": result["name"],
+            "size": result["size"],
+            "papers": counts.get("papers", 0),
+            "questions": counts.get("questions", 0),
+            "tags": counts.get("tags", 0),
+            "publications": counts.get("publications", 0),
+        }
+    )
     response["Cache-Control"] = "no-store"
     return response
 
@@ -72,9 +81,11 @@ def choose_directory_view(request):
     if rejected:
         return rejected
     from .export_preferences import desktop_capable
+
     if not desktop_capable():
         return _error("只有 Windows 桌面版能选文件夹；网页版请用浏览器的下载。", status=409)
     from .native_folder_picker import FolderPickerError, choose_directory
+
     try:
         chosen = choose_directory("", "选择备份要存放的文件夹")
     except FolderPickerError as error:
@@ -123,13 +134,18 @@ def inspect_view(request):
         shutil.rmtree(path.parent, ignore_errors=True)
     manifest = result["manifest"]
     counts = manifest.get("counts") or {}
-    response = JsonResponse({
-        "created_at": manifest.get("created_at"), "machine": manifest.get("machine"),
-        "app_version": manifest.get("app_version"),
-        "papers": counts.get("papers", 0), "questions": counts.get("questions", 0),
-        "tags": counts.get("tags", 0), "publications": counts.get("publications", 0),
-        "report": result["report"],
-    })
+    response = JsonResponse(
+        {
+            "created_at": manifest.get("created_at"),
+            "machine": manifest.get("machine"),
+            "app_version": manifest.get("app_version"),
+            "papers": counts.get("papers", 0),
+            "questions": counts.get("questions", 0),
+            "tags": counts.get("tags", 0),
+            "publications": counts.get("publications", 0),
+            "report": result["report"],
+        }
+    )
     response["Cache-Control"] = "no-store"
     return response
 
@@ -171,18 +187,21 @@ def auto_backups_view(request):
             return _error("备份记录只能在本机题库中查看", 403)
         backups = library_transfer.list_backups()
         from core import features
-        response = JsonResponse({
-            "backups": backups,
-            "due": library_transfer.backup_due(),
-            "keep": library_transfer.BACKUP_KEEP,
-            "interval_days": library_transfer.BACKUP_INTERVAL_DAYS,
-            # 1.26.21：告诉老师这些包一共占了多少磁盘、下一份什么时候打 ——
-            # 让他一眼知道代价，不用猜。
-            "total_bytes": sum(int(item.get("size") or 0) for item in backups),
-            "folder": str(library_transfer.backups_root()),
-            # 1.26.22：自动备份可以关；关掉以后「现在备份一次」照旧能用。
-            "enabled": features.enabled("auto_backup"),
-        })
+
+        response = JsonResponse(
+            {
+                "backups": backups,
+                "due": library_transfer.backup_due(),
+                "keep": library_transfer.BACKUP_KEEP,
+                "interval_days": library_transfer.BACKUP_INTERVAL_DAYS,
+                # 1.26.21：告诉老师这些包一共占了多少磁盘、下一份什么时候打 ——
+                # 让他一眼知道代价，不用猜。
+                "total_bytes": sum(int(item.get("size") or 0) for item in backups),
+                "folder": str(library_transfer.backups_root()),
+                # 1.26.22：自动备份可以关；关掉以后「现在备份一次」照旧能用。
+                "enabled": features.enabled("auto_backup"),
+            }
+        )
         response["Cache-Control"] = "no-store"
         return response
     if request.method != "POST":
@@ -196,10 +215,14 @@ def auto_backups_view(request):
         return _error(str(error))
     except OSError:
         return _error("备份没写成，检查一下软件的文件夹能不能写入。", status=500)
-    response = JsonResponse({
-        "file": result["file"], "name": result["name"], "size": result["size"],
-        "backups": library_transfer.list_backups(),
-    })
+    response = JsonResponse(
+        {
+            "file": result["file"],
+            "name": result["name"],
+            "size": result["size"],
+            "backups": library_transfer.list_backups(),
+        }
+    )
     response["Cache-Control"] = "no-store"
     return response
 
@@ -222,13 +245,18 @@ def auto_backup_inspect_view(request):
         return _error("这个备份包读不出来，没法看。", status=400)
     manifest = result["manifest"]
     counts = manifest.get("counts") or {}
-    response = JsonResponse({
-        "created_at": manifest.get("created_at"), "machine": manifest.get("machine"),
-        "app_version": manifest.get("app_version"),
-        "papers": counts.get("papers", 0), "questions": counts.get("questions", 0),
-        "tags": counts.get("tags", 0), "publications": counts.get("publications", 0),
-        "report": result["report"],
-    })
+    response = JsonResponse(
+        {
+            "created_at": manifest.get("created_at"),
+            "machine": manifest.get("machine"),
+            "app_version": manifest.get("app_version"),
+            "papers": counts.get("papers", 0),
+            "questions": counts.get("questions", 0),
+            "tags": counts.get("tags", 0),
+            "publications": counts.get("publications", 0),
+            "report": result["report"],
+        }
+    )
     response["Cache-Control"] = "no-store"
     return response
 
@@ -275,6 +303,3 @@ def records_view(request):
     response = JsonResponse({"removed": removed})
     response["Cache-Control"] = "no-store"
     return response
-
-
-

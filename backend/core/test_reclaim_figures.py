@@ -7,14 +7,15 @@
 这些用例钉住两件事：该抢回来的一定抢回来，以及**不该抢的绝不抢**——
 抢错会把一道本来正确的题改坏，比漏掉一张图更糟。
 """
+
 from __future__ import annotations
 
 from django.test import SimpleTestCase
 
 from . import pipeline
 
-FOLD = [365.0, 176.0, 535.0, 308.0]     # 折正方形：第 15 题的图，压在第 14 题的范围里
-GRAPH = [94.0, 181.0, 272.0, 305.0]     # 行程图：第 14 题自己的
+FOLD = [365.0, 176.0, 535.0, 308.0]  # 折正方形：第 15 题的图，压在第 14 题的范围里
+GRAPH = [94.0, 181.0, 272.0, 305.0]  # 行程图：第 14 题自己的
 CUE_TEXT = "15. 如图，正方形纸片 $ABCD$ 中，"
 
 
@@ -33,19 +34,17 @@ def candidate(seq: int, bbox: list[float], page_idx: int = 0) -> dict:
 def two_cards(holder_figures: list[dict]) -> list[dict]:
     """第 14 题的范围一路铺到 y=322，第 15 题从 y=315 才开始——折叠图整张在第 14 题里。"""
     return [
-        {"number": 14, "regions": [{"page_idx": 0, "bbox": [70.0, 77.0, 923.0, 322.0]}],
-         "figure_candidates": list(holder_figures)},
-        {"number": 15, "regions": [{"page_idx": 0, "bbox": [70.0, 315.0, 923.0, 387.0]}],
-         "figure_candidates": []},
+        {
+            "number": 14,
+            "regions": [{"page_idx": 0, "bbox": [70.0, 77.0, 923.0, 322.0]}],
+            "figure_candidates": list(holder_figures),
+        },
+        {"number": 15, "regions": [{"page_idx": 0, "bbox": [70.0, 315.0, 923.0, 387.0]}], "figure_candidates": []},
     ]
 
 
 def default_fixture(*, holder_figures: list[dict] | None = None, stem: str = CUE_TEXT):
-    blocks = [
-        image(1, GRAPH),
-        image(2, FOLD),
-        text(3, stem, [80.0, 320.0, 900.0, 380.0]),
-    ]
+    blocks = [image(1, GRAPH), image(2, FOLD), text(3, stem, [80.0, 320.0, 900.0, 380.0])]
     if holder_figures is None:
         holder_figures = [candidate(1, GRAPH), candidate(2, FOLD)]
     return two_cards(holder_figures), blocks
@@ -103,11 +102,7 @@ class ReclaimStrandedFiguresTests(SimpleTestCase):
         """
         far = [365.0, 50.0, 535.0, 182.0]
         below = [94.0, 800.0, 272.0, 900.0]
-        blocks = [
-            image(2, far),
-            image(5, below),
-            text(3, CUE_TEXT, [80.0, 320.0, 900.0, 380.0]),
-        ]
+        blocks = [image(2, far), image(5, below), text(3, CUE_TEXT, [80.0, 320.0, 900.0, 380.0])]
         items = two_cards([candidate(2, far), candidate(5, below)])
 
         self.assertEqual(pipeline.reclaim_stranded_figures(items, blocks), [])
@@ -117,7 +112,7 @@ class ReclaimStrandedFiguresTests(SimpleTestCase):
         # 两张图上下叠着放（横向范围相同），下面那张确实更靠近第 15 题上边缘，
         # 「近的赢」是对的——这和并排的两张不是一回事，见下面那条。
         items, blocks = default_fixture()
-        nearer = [365.0, 240.0, 535.0, 312.0]     # 更靠近第 15 题上边缘
+        nearer = [365.0, 240.0, 535.0, 312.0]  # 更靠近第 15 题上边缘
         blocks.append(image(4, nearer))
         items[0]["figure_candidates"].append(candidate(4, nearer))
 
@@ -132,15 +127,15 @@ class ReclaimStrandedFiguresTests(SimpleTestCase):
         几何上分不出哪一张是第 16 题的——抢过去只会把第 15 题改坏，而补图之前
         第 15 题两张候选框都在，识读本来就能分对。
         """
-        moon = [121.0, 168.0, 216.0, 251.0]       # 希波克拉底月牙，第 15 题自己的
-        road = [275.0, 156.0, 384.0, 251.0]      # 两条公路，第 16 题自己的
+        moon = [121.0, 168.0, 216.0, 251.0]  # 希波克拉底月牙，第 15 题自己的
+        road = [275.0, 156.0, 384.0, 251.0]  # 两条公路，第 16 题自己的
         items = [
-            {"number": 15,
-             "regions": [{"page_idx": 1, "bbox": [53.0, 93.0, 490.0, 275.0]}],
-             "figure_candidates": [candidate(37, moon), candidate(38, road)]},
-            {"number": 16,
-             "regions": [{"page_idx": 1, "bbox": [53.0, 268.0, 492.0, 420.0]}],
-             "figure_candidates": []},
+            {
+                "number": 15,
+                "regions": [{"page_idx": 1, "bbox": [53.0, 93.0, 490.0, 275.0]}],
+                "figure_candidates": [candidate(37, moon), candidate(38, road)],
+            },
+            {"number": 16, "regions": [{"page_idx": 1, "bbox": [53.0, 268.0, 492.0, 420.0]}], "figure_candidates": []},
         ]
         blocks = [
             image(37, moon, page_idx=1),
@@ -157,8 +152,9 @@ class ReclaimStrandedFiguresTests(SimpleTestCase):
 
     def test_a_page_without_any_chart_changes_nothing(self):
         blocks = [text(3, CUE_TEXT, [80.0, 320.0, 900.0, 380.0])]
-        items = [{"number": 15, "regions": [{"page_idx": 0, "bbox": [70.0, 315.0, 923.0, 387.0]}],
-                  "figure_candidates": []}]
+        items = [
+            {"number": 15, "regions": [{"page_idx": 0, "bbox": [70.0, 315.0, 923.0, 387.0]}], "figure_candidates": []}
+        ]
 
         self.assertEqual(pipeline.reclaim_stranded_figures(items, blocks), [])
         self.assertEqual(items[0]["figure_candidates"], [])
@@ -175,14 +171,9 @@ class HangingFigureTests(SimpleTestCase):
     EXAMPLE = "例 1 如图 1-29，在 $\\triangle ABC$ 中，$AB=AC$，$AD$ 是中线。"
 
     def hanging_fixture(self, extra_cards=(), extra_blocks=()):
-        blocks = [
-            image(2, self.CHART),
-            text(3, self.EXAMPLE, [90.0, 100.0, 880.0, 145.0]),
-            *extra_blocks,
-        ]
+        blocks = [image(2, self.CHART), text(3, self.EXAMPLE, [90.0, 100.0, 880.0, 145.0]), *extra_blocks]
         items = [
-            {"number": 1, "regions": [{"page_idx": 0, "bbox": [81.0, 94.0, 899.0, 151.0]}],
-             "figure_candidates": []},
+            {"number": 1, "regions": [{"page_idx": 0, "bbox": [81.0, 94.0, 899.0, 151.0]}], "figure_candidates": []},
             *extra_cards,
         ]
         return items, blocks
@@ -201,9 +192,13 @@ class HangingFigureTests(SimpleTestCase):
     def test_a_chart_whose_centre_sits_in_another_question_is_left_alone(self):
         # 图心落在另一张卡的范围里，说明它是那道题的图，只是起点碰巧压在这里。
         items, blocks = self.hanging_fixture(
-            extra_cards=[{"number": 2,
-                          "regions": [{"page_idx": 0, "bbox": [70.0, 180.0, 920.0, 240.0]}],
-                          "figure_candidates": []}],
+            extra_cards=[
+                {
+                    "number": 2,
+                    "regions": [{"page_idx": 0, "bbox": [70.0, 180.0, 920.0, 240.0]}],
+                    "figure_candidates": [],
+                }
+            ]
         )
 
         self.assertEqual(pipeline.reclaim_stranded_figures(items, blocks), [])
@@ -211,9 +206,13 @@ class HangingFigureTests(SimpleTestCase):
 
     def test_a_hanging_chart_already_owned_is_not_stolen(self):
         items, blocks = self.hanging_fixture(
-            extra_cards=[{"number": 2,
-                          "regions": [{"page_idx": 0, "bbox": [70.0, 300.0, 920.0, 380.0]}],
-                          "figure_candidates": [candidate(2, self.CHART)]}],
+            extra_cards=[
+                {
+                    "number": 2,
+                    "regions": [{"page_idx": 0, "bbox": [70.0, 300.0, 920.0, 380.0]}],
+                    "figure_candidates": [candidate(2, self.CHART)],
+                }
+            ]
         )
 
         self.assertEqual(pipeline.reclaim_stranded_figures(items, blocks), [])

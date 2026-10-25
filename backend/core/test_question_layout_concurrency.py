@@ -3,6 +3,7 @@
 The child process owns a freshly migrated temporary database and only synthetic
 paper rows. It has no worker, credentials, original user files or network access.
 """
+
 import json
 import os
 import subprocess
@@ -12,7 +13,7 @@ from pathlib import Path
 
 from django.test import SimpleTestCase
 
-SQLITE_RACE = r'''
+SQLITE_RACE = r"""
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -95,7 +96,7 @@ assert receipt["id"] == results[winner]["id"]
 assert QuestionLayoutOperation.objects.filter(paper=paper).count() == 1
 print(json.dumps({"real_connections": len(physical_connections), "results": results,
     "layout_revision": paper.layout_revision, "retry": receipt}, ensure_ascii=True))
-'''
+"""
 
 
 class QuestionLayoutSQLiteConcurrencyTests(SimpleTestCase):
@@ -103,21 +104,30 @@ class QuestionLayoutSQLiteConcurrencyTests(SimpleTestCase):
         with tempfile.TemporaryDirectory(prefix="tiyouju-layout-sqlite-race-") as directory:
             root = Path(directory)
             environment = {
-                key: value for key, value in os.environ.items()
+                key: value
+                for key, value in os.environ.items()
                 if not key.upper().startswith(("QB_", "TIYOUJU_", "DJANGO_", "PYTHONPATH"))
                 and not any(token in key.upper() for token in ("API_KEY", "TOKEN", "SECRET", "PASSWORD"))
             }
-            environment.update({
-                "DJANGO_SETTINGS_MODULE": "qb_server.settings",
-                "QB_DATABASE": str(root / "synthetic.sqlite3"),
-                "QB_DATA_ROOT": str(root / "data"),
-                "QB_USER_ROOT": str(root / "user"),
-                "QB_SECRETS_FILE": str(root / "absent-secrets.json"),
-                "PYTHONIOENCODING": "utf-8",
-            })
-            result = subprocess.run([sys.executable, "-c", SQLITE_RACE],
-                cwd=Path(__file__).resolve().parents[1], env=environment,
-                capture_output=True, text=True, encoding="utf-8", timeout=60)
+            environment.update(
+                {
+                    "DJANGO_SETTINGS_MODULE": "qb_server.settings",
+                    "QB_DATABASE": str(root / "synthetic.sqlite3"),
+                    "QB_DATA_ROOT": str(root / "data"),
+                    "QB_USER_ROOT": str(root / "user"),
+                    "QB_SECRETS_FILE": str(root / "absent-secrets.json"),
+                    "PYTHONIOENCODING": "utf-8",
+                }
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", SQLITE_RACE],
+                cwd=Path(__file__).resolve().parents[1],
+                env=environment,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=60,
+            )
             self.assertEqual(result.returncode, 0, result.stdout + "\n" + result.stderr)
             evidence = json.loads(result.stdout.strip().splitlines()[-1])
             self.assertEqual(evidence["real_connections"], 2)

@@ -71,33 +71,21 @@ def backfill_source_identity(apps, schema_editor):
             question.source_anchor_seq = _anchor_for(question, blocks_by_page)
             pending.append(question)
             if len(pending) >= 500:
-                Question.all_objects.bulk_update(
-                    pending, ["source_kind", "source_anchor_seq"], batch_size=500,
-                )
+                Question.all_objects.bulk_update(pending, ["source_kind", "source_anchor_seq"], batch_size=500)
                 pending.clear()
         if pending:
-            Question.all_objects.bulk_update(
-                pending, ["source_kind", "source_anchor_seq"], batch_size=500,
-            )
+            Question.all_objects.bulk_update(pending, ["source_kind", "source_anchor_seq"], batch_size=500)
 
 
 class Migration(migrations.Migration):
-
-    dependencies = [
-        ("core", "0010_question_recycle_bin"),
-    ]
+    dependencies = [("core", "0010_question_recycle_bin")]
 
     operations = [
         migrations.AddField(
             model_name="question",
             name="source_kind",
             field=models.CharField(
-                choices=[
-                    ("example", "例题"),
-                    ("exercise", "练习"),
-                    ("manual", "人工补录"),
-                    ("unknown", "未分类"),
-                ],
+                choices=[("example", "例题"), ("exercise", "练习"), ("manual", "人工补录"), ("unknown", "未分类")],
                 default="unknown",
                 max_length=16,
             ),
@@ -111,12 +99,7 @@ class Migration(migrations.Migration):
             model_name="questiondeletionbatch",
             name="origin",
             field=models.CharField(
-                choices=[
-                    ("user", "人工删除"),
-                    ("resegment", "重新切题自动排除"),
-                ],
-                default="user",
-                max_length=16,
+                choices=[("user", "人工删除"), ("resegment", "重新切题自动排除")], default="user", max_length=16
             ),
         ),
         migrations.AddField(
@@ -127,8 +110,7 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name="question",
             index=models.Index(
-                fields=["paper", "group", "source_kind", "source_anchor_seq"],
-                name="question_source_anchor",
+                fields=["paper", "group", "source_kind", "source_anchor_seq"], name="question_source_anchor"
             ),
         ),
         migrations.RunPython(backfill_source_identity, migrations.RunPython.noop),

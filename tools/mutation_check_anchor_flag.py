@@ -4,6 +4,7 @@ Two mutations, each neutering one of the two code paths the test claims to
 tie together. The test must go red both times; if it stays green it is not
 actually holding the invariant down.
 """
+
 import pathlib
 import subprocess
 import sys
@@ -13,25 +14,27 @@ sys.stdout.reconfigure(encoding="utf-8")
 root = pathlib.Path(__file__).resolve().parents[1]
 pipeline = root / "backend/core/pipeline.py"
 venv = root / "packaging/.build/venv/Scripts/python.exe"
-target = "core.test_anchor_flag_reconcile.AnchorReadingFlagReconcileTests" \
-         ".test_read_card_and_this_pass_say_the_same_thing"
+target = (
+    "core.test_anchor_flag_reconcile.AnchorReadingFlagReconcileTests.test_read_card_and_this_pass_say_the_same_thing"
+)
 
 original = pipeline.read_bytes()
 
 READ_CARD_ANCHOR = (
-    '        flags.append(\n'
+    "        flags.append(\n"
     '            f"这张卡题号那一行印着「{probe}…」，但识读出来的内容里认不出这句话，"\n'
     '            f"卡上可能是另一道题；请对照原书确认这张卡的范围和内容")'
 )
-RECONCILE_ANCHOR = (
-    '            f"这张卡题号那一行印着「{probe}…」，但识读出来的内容里认不出这句话，"'
-)
+RECONCILE_ANCHOR = '            f"这张卡题号那一行印着「{probe}…」，但识读出来的内容里认不出这句话，"'
 
 
 def run():
     proc = subprocess.run(
         [str(venv), "manage.py", "test", target],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
         cwd=root / "backend",
     )
     out = proc.stdout + proc.stderr
@@ -50,8 +53,10 @@ try:
 
     cases = [
         ("识读那一刻不再挂这条提示", text.replace(READ_CARD_ANCHOR, "        pass")),
-        ("事后补的那一遍改了措辞，两处对不上",
-         text.replace(RECONCILE_ANCHOR, '            f"事后补：印着「{probe}…」，认不出来，"')),
+        (
+            "事后补的那一遍改了措辞，两处对不上",
+            text.replace(RECONCILE_ANCHOR, '            f"事后补：印着「{probe}…」，认不出来，"'),
+        ),
     ]
     all_red = True
     for label, mutated in cases:

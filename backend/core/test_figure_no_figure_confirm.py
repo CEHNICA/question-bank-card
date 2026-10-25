@@ -7,6 +7,7 @@
 这几个测试钉住后端本来就有的行为：空配图 + 全部候选进 ignored，落
 confirmed_no_figure、解除阻止。前端补按钮后必须走通这条路，不能再在前端把它拦下。
 """
+
 from __future__ import annotations
 
 import json
@@ -31,11 +32,18 @@ class ZeroFigureConfirmTests(TempDataMixin, TestCase):
         self.first_key = "0:100,120,300,320"
         self.second_key = "0:400,420,700,720"
         self.question = self.card(
-            self.paper, number=1, question_type="single_choice", stem="下列说法正确的是。",
-            options={"A": "甲"}, figures=[], figure_candidates=[self.first, self.second],
+            self.paper,
+            number=1,
+            question_type="single_choice",
+            stem="下列说法正确的是。",
+            options={"A": "甲"},
+            figures=[],
+            figure_candidates=[self.first, self.second],
             figure_review={
-                "status": "conflict", "signals": ["candidate_unclassified"],
-                "unclassified_count": 2, "excluded_count": 0,
+                "status": "conflict",
+                "signals": ["candidate_unclassified"],
+                "unclassified_count": 2,
+                "excluded_count": 0,
             },
             state=Question.State.YELLOW,
         )
@@ -44,7 +52,8 @@ class ZeroFigureConfirmTests(TempDataMixin, TestCase):
         return self.client.post(
             f"/api/questions/{self.question.pk}/figures",
             data=json.dumps({"figures": figures, "ignored_candidates": ignored}),
-            content_type="application/json", HTTP_X_QB_REQUEST="1",
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
         )
 
     def test_confirming_every_candidate_irrelevant_lands_on_no_figure(self):
@@ -64,11 +73,13 @@ class ZeroFigureConfirmTests(TempDataMixin, TestCase):
         before = self.client.get(f"/api/papers/{self.paper.pk}")
         self.assertEqual(before.status_code, 200, before.content)
         self.assertEqual(before.json()["questions"][0]["figure_review"]["status"], "conflict")
-        self.assertEqual(
-            self.post_figures(figures=[], ignored=[self.first_key, self.second_key]).status_code, 200)
-        approved = self.client.post(f"/api/questions/{self.question.pk}/approve",
-                                    json.dumps({"approved": True}),
-                                    content_type="application/json", HTTP_X_QB_REQUEST="1")
+        self.assertEqual(self.post_figures(figures=[], ignored=[self.first_key, self.second_key]).status_code, 200)
+        approved = self.client.post(
+            f"/api/questions/{self.question.pk}/approve",
+            json.dumps({"approved": True}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
         self.assertEqual(approved.status_code, 200, approved.content)
         self.question.refresh_from_db()
         self.assertTrue(self.question.publications.exists())

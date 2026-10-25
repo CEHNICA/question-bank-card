@@ -10,6 +10,7 @@
 找（调用方给的是按 segment.center_in_regions 过滤过的块），所以一块
 答案文字只可能属于一道题，不会被两道卡同时认领。
 """
+
 import re
 
 # 【答案】/【参考答案】/［答案］/(答案)：，中英文括号都收。
@@ -39,7 +40,7 @@ def marks(blocks: list[dict]) -> list[str]:
             following = NEXT.search(text, hit.end())
             stop = following.start() if following else len(text)
             cursor = hit.end()
-            value = text[hit.end():stop].strip(" 　:：;；.。,，、")
+            value = text[hit.end() : stop].strip(" 　:：;；.。,，、")
             if value:
                 found.append(value[:MAX_VALUE])
     return found

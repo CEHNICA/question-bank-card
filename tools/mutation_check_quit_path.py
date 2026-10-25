@@ -49,10 +49,8 @@ ALIVE_ALWAYS = "return bool(hwnd) and True"
 # 「while _window_alive(user32, hwnd):」整份文件出现两次（主退出循环、重开的陪窗
 # 循环），光换第一处只会换到陪窗那个，主退出循环一点没变 —— 等于什么都没验。
 # 所以带上下一行把它锁死：主退出循环里跟的是服务存活检查，陪窗循环里没有。
-WAIT_LOOP = ("while _window_alive(user32, hwnd):\n"
-             "        if web.poll() is not None:")
-WAIT_LOOP_FOREVER = ("while _window_alive(user32, hwnd) or True:\n"
-                     "        if web.poll() is not None:")
+WAIT_LOOP = "while _window_alive(user32, hwnd):\n        if web.poll() is not None:"
+WAIT_LOOP_FOREVER = "while _window_alive(user32, hwnd) or True:\n        if web.poll() is not None:"
 # 窗口没出现时的重查要退避，别每 100ms 起一个 PowerShell
 LOOKUP_BACKOFF = "next_lookup = time.monotonic() + ("
 LOOKUP_NO_BACKOFF = "next_lookup = 0.0 + ("
@@ -86,49 +84,76 @@ STRICT_OFF = "    if False:\n        return 0"
 
 MUTATIONS = [
     # 退出卡住的根因：判据退回「还剩几个后台进程」
-    (APP_WINDOW, WINDOW_TESTS,
-     "「关好了」不再只看窗口句柄，于是又要去数后台进程 —— 崩溃收集器还没退干净就又开始等了",
-     ALIVE_IS_HANDLE, ALIVE_ALWAYS),
-    (APP_WINDOW, WINDOW_TESTS,
-     "等待窗口消失的循环变成死等，窗口一关也停不下来",
-     WAIT_LOOP, WAIT_LOOP_FOREVER),
-
+    (
+        APP_WINDOW,
+        WINDOW_TESTS,
+        "「关好了」不再只看窗口句柄，于是又要去数后台进程 —— 崩溃收集器还没退干净就又开始等了",
+        ALIVE_IS_HANDLE,
+        ALIVE_ALWAYS,
+    ),
+    (APP_WINDOW, WINDOW_TESTS, "等待窗口消失的循环变成死等，窗口一关也停不下来", WAIT_LOOP, WAIT_LOOP_FOREVER),
     # 窗口赖着不走时的兜底
-    (APP_WINDOW, WINDOW_TESTS,
-     "拿不到窗口句柄时不再有上限，浏览器留一个进程就能让退出永远停在这一行",
-     BACKSTOP, BACKSTOP_REMOVED),
-
+    (
+        APP_WINDOW,
+        WINDOW_TESTS,
+        "拿不到窗口句柄时不再有上限，浏览器留一个进程就能让退出永远停在这一行",
+        BACKSTOP,
+        BACKSTOP_REMOVED,
+    ),
     # 守护线程的资源争抢
-    (APP_WINDOW, WINDOW_TESTS,
-     "窗口还没出现时每一轮都重新定位，守护线程被自己起的 PowerShell 拖垮",
-     LOOKUP_BACKOFF, LOOKUP_NO_BACKOFF),
-
+    (
+        APP_WINDOW,
+        WINDOW_TESTS,
+        "窗口还没出现时每一轮都重新定位，守护线程被自己起的 PowerShell 拖垮",
+        LOOKUP_BACKOFF,
+        LOOKUP_NO_BACKOFF,
+    ),
     # 退出收尾
-    (APP_WINDOW, WINDOW_TESTS,
-     "退出时不再清掉那条没人再听的控制请求",
-     CLEAR_CONTROL, CLEAR_CONTROL_SKIPPED),
-
+    (APP_WINDOW, WINDOW_TESTS, "退出时不再清掉那条没人再听的控制请求", CLEAR_CONTROL, CLEAR_CONTROL_SKIPPED),
     # 白屏那一侧：重开时会不会连到不相干或半死的服务
-    (LAUNCHER, LAUNCHER_TESTS,
-     "重开时不再核对登着的那个进程还在不在，于是连到退出卡住留下的半死服务",
-     PID_GUARD, PID_GUARD_REMOVED),
-    (LAUNCHER, LAUNCHER_TESTS,
-     "服务正在收尾时不再宽限地重试，直接当成没在运行 —— 两份服务抢同一个数据库",
-     SECOND_CHANCE, SECOND_CHANCE_REMOVED),
-    (LAUNCHER, LAUNCHER_TESTS,
-     "进程明明已经退出，却一律说它还活着，于是永远连着一个死端口",
-     STILL_ACTIVE, STILL_ACTIVE_ALWAYS),
-
+    (
+        LAUNCHER,
+        LAUNCHER_TESTS,
+        "重开时不再核对登着的那个进程还在不在，于是连到退出卡住留下的半死服务",
+        PID_GUARD,
+        PID_GUARD_REMOVED,
+    ),
+    (
+        LAUNCHER,
+        LAUNCHER_TESTS,
+        "服务正在收尾时不再宽限地重试，直接当成没在运行 —— 两份服务抢同一个数据库",
+        SECOND_CHANCE,
+        SECOND_CHANCE_REMOVED,
+    ),
+    (
+        LAUNCHER,
+        LAUNCHER_TESTS,
+        "进程明明已经退出，却一律说它还活着，于是永远连着一个死端口",
+        STILL_ACTIVE,
+        STILL_ACTIVE_ALWAYS,
+    ),
     # 认错窗口 → 以为用户关了窗 → 白屏
-    (APP_WINDOW, WINDOW_TESTS,
-     "认窗口又退回只看面积，于是挑中那个比题有据窗口还大的空白临时窗",
-     TITLE_MATCH, TITLE_NEVER),
-    (APP_WINDOW, WINDOW_TESTS,
-     "即使标题对得上，也不优先用题有据窗口 —— 而是用那个空白临时窗",
-     PREFER_NAMED, PREFER_NAMED_OFF),
-    (APP_WINDOW, WINDOW_TESTS,
-     "等着应用窗口出现时不再只认标题，于是第一把就抓一个临时窗口回来",
-     STRICT_NO_WINDOW, STRICT_OFF),
+    (
+        APP_WINDOW,
+        WINDOW_TESTS,
+        "认窗口又退回只看面积，于是挑中那个比题有据窗口还大的空白临时窗",
+        TITLE_MATCH,
+        TITLE_NEVER,
+    ),
+    (
+        APP_WINDOW,
+        WINDOW_TESTS,
+        "即使标题对得上，也不优先用题有据窗口 —— 而是用那个空白临时窗",
+        PREFER_NAMED,
+        PREFER_NAMED_OFF,
+    ),
+    (
+        APP_WINDOW,
+        WINDOW_TESTS,
+        "等着应用窗口出现时不再只认标题，于是第一把就抓一个临时窗口回来",
+        STRICT_NO_WINDOW,
+        STRICT_OFF,
+    ),
 ]
 
 
@@ -151,11 +176,11 @@ def run(runner, timeout: float = 90.0) -> subprocess.CompletedProcess:
     """
     cwd, command = runner
     try:
-        return subprocess.run(command, cwd=str(cwd), capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=timeout)
+        return subprocess.run(
+            command, cwd=str(cwd), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
+        )
     except subprocess.TimeoutExpired:
-        return subprocess.CompletedProcess(
-            command, 1, "", "测试挂死：这条变异让循环再也出不来（也算被挡住）")
+        return subprocess.CompletedProcess(command, 1, "", "测试挂死：这条变异让循环再也出不来（也算被挡住）")
 
 
 def run_baseline(runner) -> subprocess.CompletedProcess:
@@ -183,7 +208,8 @@ def check_nothing_left_behind() -> None:
     if problems:
         raise SystemExit(
             "锚点对不上，很可能上一次这个脚本被中途杀掉、变异没还原。\n"
-            "先 git diff 看清楚源文件现在是什么样，修好再跑。\n" + "\n".join(problems))
+            "先 git diff 看清楚源文件现在是什么样，修好再跑。\n" + "\n".join(problems)
+        )
 
 
 def main() -> int:
@@ -196,8 +222,7 @@ def main() -> int:
         # 锚点必须唯一。出现两次以上时 replace(..., 1) 换到的是别处，等于什么都没验。
         count = source.count(original)
         if count != 1:
-            raise SystemExit(
-                f"{relative}: anchor appears {count} times, it must be unique:\n{original!r}")
+            raise SystemExit(f"{relative}: anchor appears {count} times, it must be unique:\n{original!r}")
         try:
             mutated = apply(source, original, mutation)
         except SystemExit as error:
@@ -221,8 +246,11 @@ def main() -> int:
         if not caught:
             print((broken.stdout or "")[-2000:] + (broken.stderr or "")[-2000:])
     survived = [item for item in results if not item[1]]
-    print(f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住" if not survived
-          else f"\n{len(survived)} 条变异漏过：{survived}")
+    print(
+        f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住"
+        if not survived
+        else f"\n{len(survived)} 条变异漏过：{survived}"
+    )
     return 1 if survived else 0
 
 

@@ -6,7 +6,6 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.AddField(
-            model_name="regionread", name="recommendation",
-            field=models.JSONField(default=dict, blank=True),
-        ),
+            model_name="regionread", name="recommendation", field=models.JSONField(default=dict, blank=True)
+        )
     ]

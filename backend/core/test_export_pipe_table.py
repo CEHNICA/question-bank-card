@@ -5,6 +5,7 @@
 管道表就会以普通文字的身份一路通过：HTML 表格有「表格尚未转换」的拒绝，
 Markdown 表格没有，成品卷上就是一串 `| 星期 | 一 |` 而老师毫无察觉。
 """
+
 from django.test import SimpleTestCase
 
 from . import library_export
@@ -18,10 +19,9 @@ def as_text(official, start, end):
     """客户端把整段当普通文字送回来的样子。"""
     return {
         "source": official,
-        "blocks": [{
-            "type": "text", "start": start, "end": end,
-            "segments": [{"type": "text", "start": start, "end": end}],
-        }],
+        "blocks": [
+            {"type": "text", "start": start, "end": end, "segments": [{"type": "text", "start": start, "end": end}]}
+        ],
     }
 
 
@@ -73,15 +73,31 @@ class ProperTableBlockTests(SimpleTestCase):
         tail = "\n求总数。"
         expected = library_export._table_source(TABLE, "第 1 题")
         blocks = [
-            {"type": "text", "start": 0, "end": u16(head),
-             "segments": [{"type": "text", "start": 0, "end": u16(head)}]},
-            {"type": "table", "start": u16(head), "end": u16(head) + u16(TABLE),
-             "rows": [[{**cell, "segments": [{"type": "text", "start": 0, "end": u16(cell["source"])}]}
-                               for cell in row] for row in expected]},
-            {"type": "text", "start": u16(head) + u16(TABLE), "end": u16(official),
-             "segments": [{"type": "text", "start": u16(head) + u16(TABLE), "end": u16(official)}]},
+            {
+                "type": "text",
+                "start": 0,
+                "end": u16(head),
+                "segments": [{"type": "text", "start": 0, "end": u16(head)}],
+            },
+            {
+                "type": "table",
+                "start": u16(head),
+                "end": u16(head) + u16(TABLE),
+                "rows": [
+                    [{**cell, "segments": [{"type": "text", "start": 0, "end": u16(cell["source"])}]} for cell in row]
+                    for row in expected
+                ],
+            },
+            {
+                "type": "text",
+                "start": u16(head) + u16(TABLE),
+                "end": u16(official),
+                "segments": [{"type": "text", "start": u16(head) + u16(TABLE), "end": u16(official)}],
+            },
         ]
         result = library_export._field({"source": official, "blocks": blocks}, official, "第 1 题 · 题干")
         self.assertEqual([block["type"] for block in result], ["text", "table", "text"])
-        self.assertEqual([[cell["source"] for cell in row] for row in result[1]["rows"]],
-                         [["星期", "一", "二"], ["增减", "+5", "-2"]])
+        self.assertEqual(
+            [[cell["source"] for cell in row] for row in result[1]["rows"]],
+            [["星期", "一", "二"], ["增减", "+5", "-2"]],
+        )

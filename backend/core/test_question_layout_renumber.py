@@ -1,4 +1,5 @@
 """Renumber a selected original-paper question without replacing its identity."""
+
 from copy import deepcopy
 from unittest import mock
 
@@ -43,7 +44,11 @@ class QuestionLayoutRenumberTests(TestCase):
         self.first.figures = [{"slot": "stem", "page_idx": 0, "bbox": [60, 100, 180, 180], "source": "manual"}]
         self.first.figure_candidates = [{"page_idx": 0, "bbox": [60, 100, 180, 180], "label": "原配图"}]
         self.first.answer, self.first.analysis, self.first.origin = "人工答案", "人工解析", "合成出处"
-        self.first.read_a, self.first.read_b, self.first.read_c = {"stem": "甲旧稿"}, {"stem": "乙旧稿"}, {"stem": "裁决旧稿"}
+        self.first.read_a, self.first.read_b, self.first.read_c = (
+            {"stem": "甲旧稿"},
+            {"stem": "乙旧稿"},
+            {"stem": "裁决旧稿"},
+        )
         self.first.source_kind, self.first.source_anchor_seq = "mineru", 14
         self.first.save()
         self.approve(self.first)
@@ -54,9 +59,22 @@ class QuestionLayoutRenumberTests(TestCase):
         operation, repeated = self.mutate(self.renumber())
         self.assertFalse(repeated)
         after = Question.objects.values().get(pk=self.first.pk)
-        changed = {"number", "content_revision", "ocr_pending", "reread_requested", "ocr_suggestion",
-                   "state", "error", "flags", "approved", "approved_at", "approved_content_hash",
-                   "approval_source", "approval_agent", "updated_at"}
+        changed = {
+            "number",
+            "content_revision",
+            "ocr_pending",
+            "reread_requested",
+            "ocr_suggestion",
+            "state",
+            "error",
+            "flags",
+            "approved",
+            "approved_at",
+            "approved_content_hash",
+            "approval_source",
+            "approval_agent",
+            "updated_at",
+        }
         for name, value in before.items():
             if name not in changed:
                 self.assertEqual(after[name], value, name)
@@ -81,8 +99,9 @@ class QuestionLayoutRenumberTests(TestCase):
         self.rejected(self.renumber(4))
 
     def test_other_group_and_layout_history_do_not_reserve_target_number(self):
-        other_group = QuestionGroup.objects.create(paper=self.paper, title="另一组", sequence=1,
-            page_start=1, page_end=2, metadata={"pages": [0, 1]})
+        other_group = QuestionGroup.objects.create(
+            paper=self.paper, title="另一组", sequence=1, page_start=1, page_end=2, metadata={"pages": [0, 1]}
+        )
         self.question(4, group=other_group)
         batch = QuestionDeletionBatch.objects.create(paper=self.paper, question_ids=[], origin="layout")
         historical = self.question(4, deleted_at=timezone.now(), deletion_batch=batch)
@@ -130,16 +149,22 @@ class QuestionLayoutRenumberTests(TestCase):
     def test_noop_preserves_approval_pending_reads_and_last_effective_undo(self):
         previous, _ = self.mutate(self.payload(sources=[self.second]))
         self.approve(self.first)
-        Question.objects.filter(pk=self.first.pk).update(ocr_pending=True, reread_requested=True,
-            ocr_suggestion={"revision": self.first.content_revision, "stem": "保留的识读建议"})
-        pending = RegionRead.objects.create(question=self.first, page_idx=0, bbox=[50, 80, 200, 100], target="stem", status="queued")
+        Question.objects.filter(pk=self.first.pk).update(
+            ocr_pending=True,
+            reread_requested=True,
+            ocr_suggestion={"revision": self.first.content_revision, "stem": "保留的识读建议"},
+        )
+        pending = RegionRead.objects.create(
+            question=self.first, page_idx=0, bbox=[50, 80, 200, 100], target="stem", status="queued"
+        )
         self.paper.refresh_from_db()
         revision = self.paper.layout_revision
         before = Question.objects.values().get(pk=self.first.pk)
         payload = self.renumber(1)
         operation, _ = self.mutate(payload)
         self.assertEqual(Question.objects.values().get(pk=self.first.pk), before)
-        self.paper.refresh_from_db(); pending.refresh_from_db()
+        self.paper.refresh_from_db()
+        pending.refresh_from_db()
         self.assertEqual(self.paper.layout_revision, revision)
         self.assertEqual(pending.status, "queued")
         self.assertTrue(operation.after_snapshot["no_change"])
@@ -202,20 +227,38 @@ class QuestionLayoutRenumberTests(TestCase):
                 elif change == "approval":
                     self.approve(question)
                 elif change == "ocr":
-                    Question.objects.filter(pk=question.pk).update(ocr_suggestion={"revision": question.content_revision, "stem": "后来建议"})
+                    Question.objects.filter(pk=question.pk).update(
+                        ocr_suggestion={"revision": question.content_revision, "stem": "后来建议"}
+                    )
                 elif change == "region_read":
-                    RegionRead.objects.create(question=question, page_idx=0, bbox=[50, 80, 200, 100], target="stem", status="done", text="后来结果")
+                    RegionRead.objects.create(
+                        question=question,
+                        page_idx=0,
+                        bbox=[50, 80, 200, 100],
+                        target="stem",
+                        status="done",
+                        text="后来结果",
+                    )
                 else:
                     self.publication(question)
                 self.rejected_undo(operation)
 
     def test_number_change_cancels_old_region_read_and_invalidates_whole_question_suggestion(self):
-        Question.objects.filter(pk=self.first.pk).update(ocr_pending=True, reread_requested=True,
-            ocr_suggestion={"revision": self.first.content_revision, "stem": "旧建议"})
-        pending = RegionRead.objects.create(question=self.first, page_idx=0, bbox=[50, 80, 200, 100], target="stem", status="running")
-        completed = RegionRead.objects.create(question=self.first, page_idx=0, bbox=[50, 80, 200, 100], target="stem", status="done", text="原识读历史")
+        Question.objects.filter(pk=self.first.pk).update(
+            ocr_pending=True,
+            reread_requested=True,
+            ocr_suggestion={"revision": self.first.content_revision, "stem": "旧建议"},
+        )
+        pending = RegionRead.objects.create(
+            question=self.first, page_idx=0, bbox=[50, 80, 200, 100], target="stem", status="running"
+        )
+        completed = RegionRead.objects.create(
+            question=self.first, page_idx=0, bbox=[50, 80, 200, 100], target="stem", status="done", text="原识读历史"
+        )
         self.mutate(self.renumber())
-        self.first.refresh_from_db(); pending.refresh_from_db(); completed.refresh_from_db()
+        self.first.refresh_from_db()
+        pending.refresh_from_db()
+        completed.refresh_from_db()
         self.assertFalse(self.first.ocr_pending or self.first.reread_requested or self.first.ocr_suggestion)
         self.assertEqual(pending.status, "failed")
         self.assertIn("题号", pending.error)
@@ -227,11 +270,23 @@ class QuestionLayoutRenumberTests(TestCase):
         self.first.save(update_fields=["processing_mode"])
         before_text, before_regions = self.first.stem, deepcopy(self.first.regions)
         operations = []
+
         def late_read(*unused):
             operations.append(self.mutate(self.renumber())[0])
-            return {"stem": "迟到结果不得覆盖人工正文", "options": {}, "question_type": "free_response",
-                    "state": "green", "flags": [], "error": "", "text_source": "single", "figures": [],
-                    "read_a": {"stem": "迟到结果"}, "read_b": {}, "read_c": {}}
+            return {
+                "stem": "迟到结果不得覆盖人工正文",
+                "options": {},
+                "question_type": "free_response",
+                "state": "green",
+                "flags": [],
+                "error": "",
+                "text_source": "single",
+                "figures": [],
+                "read_a": {"stem": "迟到结果"},
+                "read_b": {},
+                "read_c": {},
+            }
+
         fixtures.manual_review.ManualIntakeReviewTests.run_read(self, self.first, late_read)
         self.first.refresh_from_db()
         self.assertEqual((self.first.number, self.first.stem, self.first.regions), (4, before_text, before_regions))
@@ -243,7 +298,9 @@ class QuestionLayoutRenumberTests(TestCase):
 
     def test_failed_receipt_rolls_back_number_approval_and_cancelled_read(self):
         self.approve(self.first)
-        RegionRead.objects.create(question=self.first, page_idx=0, bbox=[50, 80, 200, 100], target="stem", status="running")
+        RegionRead.objects.create(
+            question=self.first, page_idx=0, bbox=[50, 80, 200, 100], target="stem", status="running"
+        )
         payload = self.renumber()
         before = self.state()
         with mock.patch.object(QuestionLayoutOperation, "save", side_effect=RuntimeError("synthetic receipt failure")):
@@ -256,7 +313,9 @@ class QuestionLayoutRenumberTests(TestCase):
         shown = self.client.get(f"/api/papers/{self.paper.pk}").json()
         source = next(row for row in shown["questions"] if row["id"] == self.first.pk)
         payload = self.renumber()
-        payload["sources"] = [{"id": source["id"], "revision": source["content_revision"], "fingerprint": source["layout_fingerprint"]}]
+        payload["sources"] = [
+            {"id": source["id"], "revision": source["content_revision"], "fingerprint": source["layout_fingerprint"]}
+        ]
         saved = self.post(url, payload)
         self.assertEqual(saved.status_code, 200, saved.content)
         data = saved.json()

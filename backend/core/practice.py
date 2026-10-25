@@ -1,4 +1,5 @@
 """Offline practice selection and export. Never create formal publications or jobs."""
+
 from __future__ import annotations
 
 import hashlib
@@ -33,6 +34,7 @@ def page(request, paper_id):
     except ExportError as error:
         return JsonResponse({"error": str(error)}, status=error.status)
     from .views import _frontend
+
     return _frontend("practice.html", "text/html; charset=utf-8")(request)
 
 
@@ -42,12 +44,19 @@ def library_view(request, paper_id):
     try:
         paper = _paper(paper_id)
         from .views import question_json
+
         items = []
         for question in paper.questions.select_related("paper").order_by("number", "id"):
             if library.approval_is_current(question):
                 content = question_json(question)
-                items.append({"id": str(question.source_key), "number": question.number,
-                    "fingerprint": question.approved_content_hash, "content": content})
+                items.append(
+                    {
+                        "id": str(question.source_key),
+                        "number": question.number,
+                        "fingerprint": question.approved_content_hash,
+                        "content": content,
+                    }
+                )
         response = JsonResponse({"paper": str(paper.pk), "items": items, "practice": True})
         response["Cache-Control"] = "no-store"
         return response
@@ -71,13 +80,24 @@ def _capture(paper, payload):
     captured, total_bytes = [], 0
     for key in ids:
         question = found.get(key)
-        if question is None or not library.approval_is_current(question) or fingerprints[key] != question.approved_content_hash:
+        if (
+            question is None
+            or not library.approval_is_current(question)
+            or fingerprints[key] != question.approved_content_hash
+        ):
             raise ExportError("练习题已修改或尚未通过，请返回核对后重选。", 409)
         image_body = source_images.is_image(question)
-        files = [("body", source_images.asset_file(question, index))
-                 for index in range(len(source_images.assets(question)))] if image_body else [
-                 (figure["slot"].removeprefix("option_"), library.figure_file(question, index))
-                 for index, figure in enumerate(question.figures)]
+        files = (
+            [
+                ("body", source_images.asset_file(question, index))
+                for index in range(len(source_images.assets(question)))
+            ]
+            if image_body
+            else [
+                (figure["slot"].removeprefix("option_"), library.figure_file(question, index))
+                for index, figure in enumerate(question.figures)
+            ]
+        )
         images = []
         for slot, path in files:
             if path.stat().st_size > MAX_IMAGE_BYTES:
@@ -91,12 +111,32 @@ def _capture(paper, payload):
                 if image.format != "PNG":
                     raise ExportError("练习图片未完整载入。", 409)
                 size = image.size
-            images.append({"slot": slot, "bytes": data, "size": size,
-                "sha256": hashlib.sha256(data).hexdigest(), "name": path.name})
-        content = {"stem": question.stem, "options": deepcopy(question.options), "origin": "",
-                   "body_mode": question.body_mode}
-        captured.append({"id": key, "type": question.question_type, "content": content,
-            "selected": {}, "ai": False, "images": images, "solution_images": []})
+            images.append(
+                {
+                    "slot": slot,
+                    "bytes": data,
+                    "size": size,
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "name": path.name,
+                }
+            )
+        content = {
+            "stem": question.stem,
+            "options": deepcopy(question.options),
+            "origin": "",
+            "body_mode": question.body_mode,
+        }
+        captured.append(
+            {
+                "id": key,
+                "type": question.question_type,
+                "content": content,
+                "selected": {},
+                "ai": False,
+                "images": images,
+                "solution_images": [],
+            }
+        )
     options = _print_options({"document": "questions", "student_info": False, "answer_space": "small"}, ids=ids)
     return captured, options
 
@@ -107,7 +147,11 @@ def _recheck(paper_id, payload):
     found = {str(q.source_key): q for q in paper.questions.select_related("paper").filter(source_key__in=ids)}
     for key in ids:
         question = found.get(key)
-        if not question or not library.approval_is_current(question) or question.approved_content_hash != payload["fingerprints"][key]:
+        if (
+            not question
+            or not library.approval_is_current(question)
+            or question.approved_content_hash != payload["fingerprints"][key]
+        ):
             raise ExportError("练习内容已改变，请重新预览。", 409)
 
 
@@ -116,6 +160,7 @@ def output_view(request, paper_id, *, preview=False):
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
     from .views import _body, _guard
+
     rejected = _guard(request)
     if rejected:
         return rejected
@@ -132,7 +177,9 @@ def output_view(request, paper_id, *, preview=False):
             data, pages = library_pdf._render(document)
             _recheck(paper_id, payload)
             response = HttpResponse(data, content_type="application/pdf")
-            response["Content-Disposition"] = "attachment; filename=practice.pdf; filename*=UTF-8''" + quote("新手练习卷.pdf")
+            response["Content-Disposition"] = "attachment; filename=practice.pdf; filename*=UTF-8''" + quote(
+                "新手练习卷.pdf"
+            )
             response["X-Page-Count"] = str(pages)
         response["X-Question-Count"] = str(len(captured))
         response["Cache-Control"] = "no-store"

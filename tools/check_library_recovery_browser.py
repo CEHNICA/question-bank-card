@@ -34,24 +34,43 @@ def payload(items):
     types = {}
     for item in items:
         types[item["question_type"]] = types.get(item["question_type"], 0) + 1
-    return {"items": items, "total": len(items), "features": {"ai_answer": False},
-        "facets": {"sources": [], "types": types, "answers": {"yes": 0, "no": len(items)},
-                   "reviews": {"human": len(items)}, "tags": []}}
+    return {
+        "items": items,
+        "total": len(items),
+        "features": {"ai_answer": False},
+        "facets": {
+            "sources": [],
+            "types": types,
+            "answers": {"yes": 0, "no": len(items)},
+            "reviews": {"human": len(items)},
+            "tags": [],
+        },
+    }
 
 
 def fixtures():
     long = "长公式：$" + "+".join(["x^2"] * 28) + "=0$。"
     fraction = "长分数：$\\dfrac{1}{" + "+".join(["x^2"] * 24) + "}=24681$。"
     proof = "证明：$\\dfrac{x^2}{(2-y)(2-z)}+\\dfrac{y^2}{(2-z)(2-x)}+\\dfrac{z^2}{(2-x)(2-y)}\\geq3$。"
-    items = [question("choice-a", 1), question("choice-long", 2, stem=long),
-        question("choice-fraction", 3, stem=fraction), question("fill-a", 4, "fill_blank", "填空测试：$1+1=$____。"),
-        question("proof-a", 5, "free_response", proof)]
+    items = [
+        question("choice-a", 1),
+        question("choice-long", 2, stem=long),
+        question("choice-fraction", 3, stem=fraction),
+        question("fill-a", 4, "fill_blank", "填空测试：$1+1=$____。"),
+        question("proof-a", 5, "free_response", proof),
+    ]
     for n in range(6, 10):
-        body = f"分页测试第 {n} 题 START{n}。\n\n" + "\n\n".join(
-            f"第 {line:02d} 小问：计算 $x^2+{line}$，请写出解题过程。" for line in range(1, 11)) + f"\n\nEND{n}"
+        body = (
+            f"分页测试第 {n} 题 START{n}。\n\n"
+            + "\n\n".join(f"第 {line:02d} 小问：计算 $x^2+{line}$，请写出解题过程。" for line in range(1, 11))
+            + f"\n\nEND{n}"
+        )
         items.append(question(f"proof-{n}", n, "free_response", body))
-    giant = "超长单题 START10。\n\n" + "\n\n".join(
-        f"第 {line:03d} 小问：说明依据，验证 $a+b\\geq2\\sqrt{{ab}}$。" for line in range(1, 221)) + "\n\nEND10"
+    giant = (
+        "超长单题 START10。\n\n"
+        + "\n\n".join(f"第 {line:03d} 小问：说明依据，验证 $a+b\\geq2\\sqrt{{ab}}$。" for line in range(1, 221))
+        + "\n\nEND10"
+    )
     items.append(question("proof-10", 10, "free_response", giant))
     extreme_latex = "\\dfrac{1}{" + "+".join(["x^2"] * 80) + "}=987654321"
     extreme = question("extreme-fraction", 11, "free_response", f"不可分超宽公式：${extreme_latex}$。")
@@ -61,17 +80,34 @@ def fixtures():
 
 def pdf_info(path):
     import pymupdf
+
     document = pymupdf.open(path)
     pages = []
     for index, page in enumerate(document):
         raw = page.get_text("rawdict")
-        spans = [span for block in raw["blocks"] if "lines" in block for line in block["lines"] for span in line["spans"]]
+        spans = [
+            span for block in raw["blocks"] if "lines" in block for line in block["lines"] for span in line["spans"]
+        ]
         chars = [char for span in spans for char in span["chars"]]
-        pages.append({"page": index + 1, "text": page.get_text(),
-            "width": page.rect.width, "height": page.rect.height,
-            "min_x_font_pt": min((span["size"] for span in spans if any(c["c"] == "x" for c in span["chars"])), default=None),
-            "outside_page": [c for c in chars if c["bbox"][0] < -1 or c["bbox"][2] > page.rect.width + 1
-                or c["bbox"][1] < -1 or c["bbox"][3] > page.rect.height + 1]})
+        pages.append(
+            {
+                "page": index + 1,
+                "text": page.get_text(),
+                "width": page.rect.width,
+                "height": page.rect.height,
+                "min_x_font_pt": min(
+                    (span["size"] for span in spans if any(c["c"] == "x" for c in span["chars"])), default=None
+                ),
+                "outside_page": [
+                    c
+                    for c in chars
+                    if c["bbox"][0] < -1
+                    or c["bbox"][2] > page.rect.width + 1
+                    or c["bbox"][1] < -1
+                    or c["bbox"][3] > page.rect.height + 1
+                ],
+            }
+        )
         # A visual QA copy accompanies every page; this is PDF rendering, not product mutation.
         page.get_pixmap(matrix=pymupdf.Matrix(1.6, 1.6), alpha=False).save(OUT / f"{path.stem}-page-{index + 1}.png")
     document.close()
@@ -89,14 +125,26 @@ def run(port):
     thread.start()
     try:
         with sync_playwright() as p:
-            browser_path = next((str(v) for v in (Path(p.chromium.executable_path),
-                Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-                Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if v.is_file()), None)
+            browser_path = next(
+                (
+                    str(v)
+                    for v in (
+                        Path(p.chromium.executable_path),
+                        Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                        Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                    )
+                    if v.is_file()
+                ),
+                None,
+            )
             browser = p.chromium.launch(headless=True, **({"executable_path": browser_path} if browser_path else {}))
             context = browser.new_context(viewport={"width": 650, "height": 950})
-            context.add_init_script("localStorage.setItem('qb-basket', JSON.stringify(['choice-a','missing-fixture']));")
+            context.add_init_script(
+                "localStorage.setItem('qb-basket', JSON.stringify(['choice-a','missing-fixture']));"
+            )
             page = context.new_page()
             page.on("pageerror", lambda error: report["errors"].append(str(error)))
+
             def intercept(route):
                 request = route.request
                 parsed = urlparse(request.url)
@@ -109,9 +157,16 @@ def run(port):
                     # 都是「这一道不行」，别的题照常给 —— 不能整单失败，
                     # 那会把篮里好好的题也一起标成未载入。
                     gone = [] if behavior["missing"] == "ok" else ["missing-fixture"]
-                    route.fulfill(json={"items": [known[i] for i in wanted if i in known and i not in gone],
-                                        "missing": [{"id": i, "reason": behavior["missing"] if i in gone else "not_found"}
-                                                    for i in wanted if i not in known or i in gone]})
+                    route.fulfill(
+                        json={
+                            "items": [known[i] for i in wanted if i in known and i not in gone],
+                            "missing": [
+                                {"id": i, "reason": behavior["missing"] if i in gone else "not_found"}
+                                for i in wanted
+                                if i not in known or i in gone
+                            ],
+                        }
+                    )
                     return
                 if parsed.hostname != "127.0.0.1" or request.method != "GET":
                     report["forbidden_requests"].append(f"{request.method} {request.url}")
@@ -136,6 +191,7 @@ def run(port):
                     raise AssertionError(f"Unexpected API request: {request.url}")
                 else:
                     route.continue_()
+
             context.route("**/*", intercept)
             page.goto(f"http://127.0.0.1:{port}/library")
             page.wait_for_load_state("networkidle")
@@ -198,7 +254,9 @@ def run(port):
             open_basket()
             page.locator("#basketButton").click()
             expect(page.locator("#printMissing")).to_be_visible()
-            missing_remove = page.locator("#printMissing .print-missing-row").get_by_role("button", name=re.compile("^移出"))
+            missing_remove = page.locator("#printMissing .print-missing-row").get_by_role(
+                "button", name=re.compile("^移出")
+            )
             expect(missing_remove).to_have_count(1)
             expect(missing_remove).to_have_text("移出试题篮")
             missing_remove.click()
@@ -217,7 +275,9 @@ def run(port):
             open_basket()
             page.locator("#basketButton").click()
             expect(page.locator(".print-question")).to_have_count(5)
-            screen_long_text = page.locator('.print-question[data-question-id="choice-long"] .qb-stem-body').text_content()
+            screen_long_text = page.locator(
+                '.print-question[data-question-id="choice-long"] .qb-stem-body'
+            ).text_content()
             for width in (650, 390):
                 page.set_viewport_size({"width": width, "height": 950})
                 # 这道是 28 项的长分数：版心放得下，排版会把它缩到仍然看得清，
@@ -231,7 +291,9 @@ def run(port):
                 report[f"focus-{width}"] = active_steps
                 for _ in range(32):
                     page.keyboard.press("Tab")
-                    step = page.evaluate("({inside:!!document.activeElement.closest('#printSheet'), tag:document.activeElement.tagName, classes:document.activeElement.className, open:document.querySelector('#printSheet').open, id:document.activeElement.id, label:document.activeElement.getAttribute('aria-label')})")
+                    step = page.evaluate(
+                        "({inside:!!document.activeElement.closest('#printSheet'), tag:document.activeElement.tagName, classes:document.activeElement.className, open:document.querySelector('#printSheet').open, id:document.activeElement.id, label:document.activeElement.getAttribute('aria-label')})"
+                    )
                     active_steps.append(step)
                     if not step["inside"] and step["tag"] == "BODY":
                         # Tab 转到底会短暂停在 <body>。这本身不致命：关键是
@@ -249,11 +311,14 @@ def run(port):
                     page.keyboard.press("Shift+Tab")
                     assert page.evaluate("!!document.activeElement.closest('#printSheet')")
                 page.screenshot(path=str(OUT / f"preview-hint-focus-{width}.png"))
+
             # 每题的排序/移出按钮在「调整」折叠里（真人也得先展开），关着的时候按钮不可见也点不到。
             # 而且一次只能开一个 —— 打开一个会把别的收起来。所以按题号单独拉，
             # evaluate_all 一次全开会被产品自己的逻辑立刻关掉，只剩最后一个开着。
             def open_tools(number):
-                tools = page.locator(".print-question-tools", has=page.locator(f'button[aria-label="第 {number} 题下移"]'))
+                tools = page.locator(
+                    ".print-question-tools", has=page.locator(f'button[aria-label="第 {number} 题下移"]')
+                )
                 if tools.get_attribute("open") is None:
                     tools.locator("> summary").click()
                     expect(tools).to_have_attribute("open", "")
@@ -268,7 +333,12 @@ def run(port):
             open_tools(1)
             page.get_by_role("button", name="第 1 题下移", exact=True).click()
             assert page.locator(".print-question").evaluate_all("e => e.map(n => n.dataset.questionId)") == [
-                "choice-long", "choice-a", "choice-fraction", "fill-a", "proof-a"]
+                "choice-long",
+                "choice-a",
+                "choice-fraction",
+                "fill-a",
+                "proof-a",
+            ]
             # 换完序会重排版、工具面板整个换掉，得重新拉开。
             open_tools(1)
             page.get_by_role("button", name="第 1 题下移", exact=True).click()
@@ -283,7 +353,9 @@ def run(port):
                 page.keyboard.press("Escape")
                 if not page.evaluate("document.querySelector('#printSheet').open"):
                     break
-            after_escape = page.evaluate("({open:document.querySelector('#printSheet').open, focus:document.activeElement.id || document.activeElement.tagName})")
+            after_escape = page.evaluate(
+                "({open:document.querySelector('#printSheet').open, focus:document.activeElement.id || document.activeElement.tagName})"
+            )
             assert not after_escape["open"], {"连按 Esc 三次预览还开着": after_escape}
             assert after_escape["focus"] in ("basketButton", "searchInput"), {"Esc 关掉预览后焦点落在": after_escape}
             open_basket()
@@ -308,10 +380,19 @@ def run(port):
                 assert all(v["min_x_font_pt"] is None or v["min_x_font_pt"] >= 8.75 for v in info["pages"]), info
                 report["pdfs"].append(info)
                 page.emulate_media(media="screen")
-            assert page.locator('.print-question[data-question-id="choice-long"] .qb-stem-body').text_content() == screen_long_text
+            assert (
+                page.locator('.print-question[data-question-id="choice-long"] .qb-stem-body').text_content()
+                == screen_long_text
+            )
             # PDF hooks may attach fitting metadata, but must preserve equation markup/content.
-            assert page.locator('.print-question[data-question-id="choice-long"] .qb-stem-body .katex-html').text_content().endswith("=0")
-            report["checks"].append("28-term formula tail and moderate fraction print fully at readable size; screen math content retained")
+            assert (
+                page.locator('.print-question[data-question-id="choice-long"] .qb-stem-body .katex-html')
+                .text_content()
+                .endswith("=0")
+            )
+            report["checks"].append(
+                "28-term formula tail and moderate fraction print fully at readable size; screen math content retained"
+            )
             # 走过一轮 page.pdf() 之后焦点落在「调整」标题上、Esc 也不关卷（原因未查清）。
             # 这里走真人一定会用的那条路：点「返回题库」，焦点要回到能接着干活的控件。
             page.locator("#closePrint").click()
@@ -329,9 +410,12 @@ def run(port):
             # evaluate_all 不等待，立刻量会量到排版中间态：先等题数对上再读。
             page.wait_for_function(
                 "count => new Set([...document.querySelectorAll('.print-question')].map(n => n.dataset.questionId)).size === count",
-                arg=len(items), timeout=20000)
+                arg=len(items),
+                timeout=20000,
+            )
             paper_count = page.locator(".print-question").evaluate_all(
-                "nodes => new Set(nodes.map(n => n.dataset.questionId)).size")
+                "nodes => new Set(nodes.map(n => n.dataset.questionId)).size"
+            )
             assert paper_count == len(items), {"卷面上的题数": paper_count, "篮里": len(items)}
             page.emulate_media(media="print")
             page.evaluate("document.fonts.ready")
@@ -344,8 +428,9 @@ def run(port):
             flat = re.sub(r"\s+", "", combined)
             assert len(info["pages"]) >= 3, info
             assert flat.count("说明依据") == 220, flat.count("说明依据")
-            assert all(f"第{n:03d}小问" in flat for n in range(1, 221)), \
-                [n for n in range(1, 221) if f"第{n:03d}小问" not in flat]
+            assert all(f"第{n:03d}小问" in flat for n in range(1, 221)), [
+                n for n in range(1, 221) if f"第{n:03d}小问" not in flat
+            ]
             assert "END10" in flat, flat[-500:]
             assert all(not v["outside_page"] for v in info["pages"]), info
             report["pdfs"].append(info)
@@ -362,7 +447,10 @@ def run(port):
             open_basket()
             page.locator("#basketButton").click()
             expect(page.locator("#printButton")).to_be_disabled()
-            assert any(word in page.locator("#printSheet").inner_text() for word in ("太宽", "过宽", "放不下", "无法适配", "调整"))
+            assert any(
+                word in page.locator("#printSheet").inner_text()
+                for word in ("太宽", "过宽", "放不下", "无法适配", "调整")
+            )
             page.screenshot(path=str(OUT / "extreme-formula-print-blocked.png"))
             page.emulate_media(media="print")
             page.evaluate("document.fonts.ready")
@@ -381,7 +469,8 @@ def run(port):
             report["pdfs"].append(info)
             report["checks"].append(
                 "unfittable formula blocks the app's own print and export with a notice; "
-                "the browser shortcut path prints the full LaTeX source instead of cutting it at the page edge")
+                "the browser shortcut path prints the full LaTeX source instead of cutting it at the page edge"
+            )
             page.emulate_media(media="screen")
             page.keyboard.press("Escape")
             restored = page.evaluate("document.activeElement.id")

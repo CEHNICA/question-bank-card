@@ -47,6 +47,7 @@ def seed():
     api(f"/api/library/{target['id']}/tags", {"tags": SEED_TAGS})
     return target["id"], original
 
+
 SIZES = [
     (1920, 1080, "1920×1080 桌面"),
     (1536, 864, "1536×864 笔记本"),
@@ -154,16 +155,20 @@ def run(page) -> None:
 
         open_panel(page)
         panel = measure_panel(page)
-        check(panel["dialog"]["height"] <= height or panel["scrollable"],
-              f"面板 {panel['dialog']['height']:.0f}px 在 {height}px 高的屏上放得下（放不下就内部滚动）")
+        check(
+            panel["dialog"]["height"] <= height or panel["scrollable"],
+            f"面板 {panel['dialog']['height']:.0f}px 在 {height}px 高的屏上放得下（放不下就内部滚动）",
+        )
         check(inside(page, "#libraryAISave"), "「保存 API 设置」在视口内")
         check(inside(page, "#libraryAIKnowledgeCount"), "知识点目录那行在视口内")
 
         catalogue = measure_catalogue(page)
         check(inside(page, "#libraryAIKnowledgeSearch"), "目录预览的搜索框在视口内")
         check(inside(page, ".catalogue-foot"), "目录预览的底栏说明在视口内")
-        check(catalogue["listScrolls"] or catalogue["list"]["height"] <= height,
-              f"73 个知识点在 {height}px 高的屏上能看完或自己滚（列高 {catalogue['list']['height']:.0f}px）")
+        check(
+            catalogue["listScrolls"] or catalogue["list"]["height"] <= height,
+            f"73 个知识点在 {height}px 高的屏上能看完或自己滚（列高 {catalogue['list']['height']:.0f}px）",
+        )
         if height <= 768:
             page.screenshot(path=f"{SHOTS}/small_{width}x{height}_catalogue.png")
 
@@ -173,8 +178,10 @@ def run(page) -> None:
         else:
             check(inside(page, "#tagEditorSave"), "标签对话框的「保存标签」在视口内")
             check(inside(page, "#tagEditorList"), "标签对话框的目录列表在视口内")
-            check(editor["listScrolls"] or editor["list"]["height"] <= height,
-                  f"73 个知识点在 {height}px 高的屏上能看完或自己滚（列高 {editor['list']['height']:.0f}px）")
+            check(
+                editor["listScrolls"] or editor["list"]["height"] <= height,
+                f"73 个知识点在 {height}px 高的屏上能看完或自己滚（列高 {editor['list']['height']:.0f}px）",
+            )
             page.keyboard.press("Escape")
             if height <= 768:
                 page.screenshot(path=f"{SHOTS}/small_{width}x{height}_tageditor.png")

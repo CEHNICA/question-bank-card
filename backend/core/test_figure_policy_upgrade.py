@@ -77,8 +77,7 @@ class FigureCuePolicyV3Tests(TestCase):
             "画出函数 $y=3^x$ 的图象，并说明其性质。",
             "画出下列函数的图象，并通过图象判断函数的单调性。",
             "作出温度随时间变化的一个可能的示意图。",
-            "在同一直角坐标系中画出函数 $y=3^x$ 和 "
-            "$y=\\left(\\dfrac{1}{3}\\right)^x$ 的图象。",
+            "在同一直角坐标系中画出函数 $y=3^x$ 和 $y=\\left(\\dfrac{1}{3}\\right)^x$ 的图象。",
             "画出函数 $f(x)$，$g(x)$ 的图象，并比较它们的最小值。",
             "Sketch the graph of y=x^2.",
         ]
@@ -87,16 +86,19 @@ class FigureCuePolicyV3Tests(TestCase):
                 self.assertEqual(figure_policy.cue_matches(text), [])
                 self.assertTrue(figure_policy.asks_student_to_draw(text))
                 review = figure_policy.automatic_review(
-                    stem=text, options={}, candidate_labels=set(), assignments={}, figures=[],
-                    reader_missing=True,
+                    stem=text, options={}, candidate_labels=set(), assignments={}, figures=[], reader_missing=True
                 )
                 self.assertEqual(review["status"], figure_policy.OK)
                 self.assertIn("reader_missing_resolved", review["signals"])
                 self.assertIn("student_drawing_request", review["signals"])
 
         supplied = figure_policy.automatic_review(
-            stem="根据下图画出函数的大致图象。", options={}, candidate_labels=set(),
-            assignments={}, figures=[], reader_missing=True,
+            stem="根据下图画出函数的大致图象。",
+            options={},
+            candidate_labels=set(),
+            assignments={},
+            figures=[],
+            reader_missing=True,
         )
         self.assertEqual(supplied["status"], figure_policy.BLOCKED_MISSING)
         self.assertTrue(supplied["cue_matches"])
@@ -105,7 +107,8 @@ class FigureCuePolicyV3Tests(TestCase):
         review = figure_policy.automatic_review(
             stem="函数图象如图所示，选择正确解析式。",
             options={"A": "x", "B": "2x", "C": "3x", "D": "4x"},
-            candidate_labels=set(), assignments={},
+            candidate_labels=set(),
+            assignments={},
             figures=[{"slot": "stem", "page_idx": 0, "bbox": [100, 200, 300, 400]}],
             reader_missing=True,
         )
@@ -115,10 +118,13 @@ class FigureCuePolicyV3Tests(TestCase):
     def test_bound_data_table_phrase_is_contextual_not_a_missing_image_claim(self):
         stem = "汽车每小时耗油量与速度有下列数据：求最合适的函数模型。"
         without_crop = figure_policy.automatic_review(
-            stem=stem, options={}, candidate_labels=set(), assignments={}, figures=[],
+            stem=stem, options={}, candidate_labels=set(), assignments={}, figures=[]
         )
         with_crop = figure_policy.automatic_review(
-            stem=stem, options={}, candidate_labels={"1"}, assignments={"1": "stem"},
+            stem=stem,
+            options={},
+            candidate_labels={"1"},
+            assignments={"1": "stem"},
             figures=[{"slot": "stem", "page_idx": 0, "bbox": [100, 200, 800, 300]}],
         )
         self.assertEqual(without_crop["status"], figure_policy.OK)
@@ -127,26 +133,24 @@ class FigureCuePolicyV3Tests(TestCase):
 
     def test_badge_geometry_is_narrow_and_never_overrides_assignment(self):
         badge = {"label": "5", "seq": 9, "page_idx": 0, "bbox": [92, 790, 129, 815]}
-        same_size_elsewhere = {
-            "label": "1", "seq": 10, "page_idx": 0, "bbox": [300, 790, 337, 815],
-        }
+        same_size_elsewhere = {"label": "1", "seq": 10, "page_idx": 0, "bbox": [300, 790, 337, 815]}
         self.assertTrue(figure_policy.is_likely_textbook_section_badge(badge))
         self.assertFalse(figure_policy.is_likely_textbook_section_badge(same_size_elsewhere))
         self.assertEqual(
             figure_policy._automatic_decoration_labels(
-                candidates=[badge], assignments={"5": "A"}, kind="single_choice", options={},
+                candidates=[badge], assignments={"5": "A"}, kind="single_choice", options={}
             ),
             set(),
         )
         self.assertEqual(
             figure_policy._automatic_decoration_labels(
-                candidates=[badge], assignments={}, kind="single_choice", options={},
+                candidates=[badge], assignments={}, kind="single_choice", options={}
             ),
             set(),
         )
         self.assertEqual(
             figure_policy._automatic_decoration_labels(
-                candidates=[badge], assignments={"1": "A"}, kind="single_choice", options={},
+                candidates=[badge], assignments={"1": "A"}, kind="single_choice", options={}
             ),
             {"5"},
         )
@@ -186,18 +190,23 @@ class StoredFigureReviewUpgradeTests(TestCase):
     def test_saved_free_response_normalisation_does_not_recreate_missing_choice_flags(self):
         question = question_stub(
             figure_review={"status": figure_policy.BLOCKED_MISSING, "source": "automatic"},
-            stem=(
-                "下列哪一组中的函数相同？\n"
-                "(1) 比较第一组函数；\n(2) 比较第二组函数；\n(3) 比较第三组函数。"
-            ),
+            stem=("下列哪一组中的函数相同？\n(1) 比较第一组函数；\n(2) 比较第二组函数；\n(3) 比较第三组函数。"),
             question_type="free_response",
             read_a={
-                "stem": "原始主读", "type": "single_choice", "options": {},
-                "figures": {}, "missing_figure": False, "figure_descriptions": [],
+                "stem": "原始主读",
+                "type": "single_choice",
+                "options": {},
+                "figures": {},
+                "missing_figure": False,
+                "figure_descriptions": [],
             },
             read_b={
-                "stem": "原始复读", "type": "free_response", "options": {},
-                "figures": {}, "missing_figure": False, "figure_descriptions": [],
+                "stem": "原始复读",
+                "type": "free_response",
+                "options": {},
+                "figures": {},
+                "missing_figure": False,
+                "figure_descriptions": [],
             },
         )
 
@@ -216,8 +225,10 @@ class StoredFigureReviewUpgradeTests(TestCase):
             figure_candidates=[real, badge],
             figures=[{"slot": "stem", "page_idx": 102, "bbox": real["bbox"], "source": "auto"}],
             read_a={
-                "stem": "根据计费方法回答问题。", "type": "free_response",
-                "figures": {"1": "stem"}, "missing_figure": False,
+                "stem": "根据计费方法回答问题。",
+                "type": "free_response",
+                "figures": {"1": "stem"},
+                "missing_figure": False,
                 "figure_descriptions": [],
             },
         )
@@ -236,13 +247,13 @@ class StoredFigureReviewUpgradeTests(TestCase):
         question = question_stub(
             figure_review={"status": figure_policy.CONFLICT, "source": "automatic"},
             stem="求函数的定义域。",
-            figure_candidates=[{
-                "label": "1", "seq": 2657, "page_idx": 124,
-                "bbox": [92, 835, 127, 862],
-            }],
+            figure_candidates=[{"label": "1", "seq": 2657, "page_idx": 124, "bbox": [92, 835, 127, 862]}],
             read_a={
-                "stem": "求函数的定义域。", "type": "free_response",
-                "figures": {}, "missing_figure": False, "figure_descriptions": [],
+                "stem": "求函数的定义域。",
+                "type": "free_response",
+                "figures": {},
+                "missing_figure": False,
+                "figure_descriptions": [],
             },
         )
 
@@ -253,14 +264,8 @@ class StoredFigureReviewUpgradeTests(TestCase):
         self.assertEqual(upgraded["excluded_count"], 1)
 
     def test_recovered_input_overrides_a_misassigned_section_badge(self):
-        badge = {
-            "label": "1", "seq": 5383, "page_idx": 262,
-            "bbox": [95, 65, 131, 90],
-        }
-        recovered = {
-            "label": "2", "seq": 5375, "page_idx": 261,
-            "bbox": [717, 760, 882, 885], "recovered_input": True,
-        }
+        badge = {"label": "1", "seq": 5383, "page_idx": 262, "bbox": [95, 65, 131, 90]}
+        recovered = {"label": "2", "seq": 5375, "page_idx": 261, "bbox": [717, 760, 882, 885], "recovered_input": True}
 
         resolved = pipeline._resolve_automatic_figure_assignments(
             stem="如图，正方形 ABCD 的边长为 1。",
@@ -274,76 +279,68 @@ class StoredFigureReviewUpgradeTests(TestCase):
 
     def test_batch_refresh_restores_recovered_input_and_keeps_raw_reads(self):
         paper = Paper.objects.create(
-            filename="recovered.pdf", kind="pdf", sha256="c" * 64,
-            source_path="data/recovered/source.pdf",
+            filename="recovered.pdf", kind="pdf", sha256="c" * 64, source_path="data/recovered/source.pdf"
         )
-        badge = {
-            "label": "1", "seq": 5383, "page_idx": 262,
-            "bbox": [95, 65, 131, 90],
-        }
-        recovered = {
-            "label": "2", "seq": 5375, "page_idx": 261,
-            "bbox": [717, 760, 882, 885], "recovered_input": True,
-        }
+        badge = {"label": "1", "seq": 5383, "page_idx": 262, "bbox": [95, 65, 131, 90]}
+        recovered = {"label": "2", "seq": 5375, "page_idx": 261, "bbox": [717, 760, 882, 885], "recovered_input": True}
         raw_read = {
-            "stem": "如图，正方形 ABCD 的边长为 1。", "type": "free_response",
-            "figures": {"1": "stem", "2": "none"}, "missing_figure": False,
-            "figure_descriptions": [], "raw": "immutable reader evidence",
+            "stem": "如图，正方形 ABCD 的边长为 1。",
+            "type": "free_response",
+            "figures": {"1": "stem", "2": "none"},
+            "missing_figure": False,
+            "figure_descriptions": [],
+            "raw": "immutable reader evidence",
         }
         question = Question.objects.create(
-            paper=paper, number=23, stem=raw_read["stem"], question_type="free_response",
+            paper=paper,
+            number=23,
+            stem=raw_read["stem"],
+            question_type="free_response",
             figure_candidates=[badge, recovered],
-            figures=[{
-                "slot": "stem", "page_idx": 262, "bbox": badge["bbox"],
-                "source": "auto",
-            }],
+            figures=[{"slot": "stem", "page_idx": 262, "bbox": badge["bbox"], "source": "auto"}],
             read_a=copy.deepcopy(raw_read),
             figure_review={"status": figure_policy.OK, "source": "automatic"},
-            flags=[], state=Question.State.GREEN,
+            flags=[],
+            state=Question.State.GREEN,
         )
 
         stats = figure_policy.persist_automatic_review_upgrades([question])
 
         question.refresh_from_db()
         self.assertEqual(stats["updated"], 1)
-        self.assertEqual(question.figures, [{
-            "slot": "stem", "page_idx": 261, "bbox": recovered["bbox"],
-            "source": "auto",
-        }])
+        self.assertEqual(
+            question.figures, [{"slot": "stem", "page_idx": 261, "bbox": recovered["bbox"], "source": "auto"}]
+        )
         self.assertEqual(question.figure_review["status"], figure_policy.OK)
         self.assertEqual(question.state, Question.State.GREEN)
         self.assertEqual(question.read_a, raw_read)
 
     def test_badge_sized_option_crop_is_never_removed(self):
-        option = {
-            "slot": "A", "page_idx": 3, "bbox": [95, 65, 131, 90],
-            "source": "auto",
-        }
+        option = {"slot": "A", "page_idx": 3, "bbox": [95, 65, 131, 90], "source": "auto"}
         self.assertEqual(figure_policy.without_automatic_textbook_badges([option]), [option])
 
     def test_batch_refresh_removes_automatically_bound_section_badge(self):
         paper = Paper.objects.create(
-            filename="badge.pdf", kind="pdf", sha256="b" * 64,
-            source_path="data/badge/source.pdf",
+            filename="badge.pdf", kind="pdf", sha256="b" * 64, source_path="data/badge/source.pdf"
         )
-        badge = {
-            "label": "1", "seq": 2320, "page_idx": 107,
-            "bbox": [110, 579, 144, 602],
-        }
+        badge = {"label": "1", "seq": 2320, "page_idx": 107, "bbox": [110, 579, 144, 602]}
         question = Question.objects.create(
-            paper=paper, number=10, stem="求函数的最大值。",
-            question_type="free_response", figure_candidates=[badge],
-            figures=[{
-                "slot": "stem", "page_idx": 107, "bbox": badge["bbox"],
-                "source": "auto",
-            }],
+            paper=paper,
+            number=10,
+            stem="求函数的最大值。",
+            question_type="free_response",
+            figure_candidates=[badge],
+            figures=[{"slot": "stem", "page_idx": 107, "bbox": badge["bbox"], "source": "auto"}],
             read_a={
-                "stem": "求函数的最大值。", "type": "free_response",
-                "figures": {"1": "stem"}, "missing_figure": False,
+                "stem": "求函数的最大值。",
+                "type": "free_response",
+                "figures": {"1": "stem"},
+                "missing_figure": False,
                 "figure_descriptions": [],
             },
             figure_review={"status": figure_policy.CONFLICT, "source": "automatic"},
-            flags=[figure_policy.FLAG_UNCUED_FIGURE], state=Question.State.YELLOW,
+            flags=[figure_policy.FLAG_UNCUED_FIGURE],
+            state=Question.State.YELLOW,
         )
 
         stats = figure_policy.persist_automatic_review_upgrades([question])
@@ -404,9 +401,10 @@ class StoredFigureReviewUpgradeTests(TestCase):
 
         self.assertEqual(upgraded["status"], figure_policy.OK)
         self.assertEqual(upgraded["cue_matches"], ["如图"])
-        self.assertNotIn(figure_policy.FLAG_UNCUED_FIGURE,
-                         pipeline._flags_after_figure_review(
-                             [figure_policy.FLAG_UNCUED_FIGURE], upgraded, question.figures))
+        self.assertNotIn(
+            figure_policy.FLAG_UNCUED_FIGURE,
+            pipeline._flags_after_figure_review([figure_policy.FLAG_UNCUED_FIGURE], upgraded, question.figures),
+        )
 
     def test_source_less_legacy_review_is_also_recomputed(self):
         question = question_stub(
@@ -429,10 +427,7 @@ class StoredFigureReviewUpgradeTests(TestCase):
             "signals": ["human_confirmed_no_figure"],
             "confirmed_at": "2026-09-27T00:00:00+08:00",
         }
-        question = question_stub(
-            figure_review=copy.deepcopy(human),
-            stem="如图所示，求阴影面积。",
-        )
+        question = question_stub(figure_review=copy.deepcopy(human), stem="如图所示，求阴影面积。")
 
         self.assertEqual(figure_policy.stored_or_derived_review(question), human)
 
@@ -458,10 +453,7 @@ class StoredFigureReviewUpgradeTests(TestCase):
 
     def test_read_time_recalculation_does_not_write_source_or_published_snapshot(self):
         paper = Paper.objects.create(
-            filename="policy-v1.pdf",
-            kind="pdf",
-            sha256="1" * 64,
-            source_path="data/policy-v1/source.pdf",
+            filename="policy-v1.pdf", kind="pdf", sha256="1" * 64, source_path="data/policy-v1/source.pdf"
         )
         old_review = {
             "status": figure_policy.CONFLICT,
@@ -508,50 +500,48 @@ class StoredFigureReviewUpgradeTests(TestCase):
 
     def test_explicit_batch_refresh_persists_only_automatic_reviews_and_keeps_other_flags(self):
         paper = Paper.objects.create(
-            filename="refresh.pdf", kind="pdf", sha256="3" * 64,
-            source_path="data/refresh/source.pdf",
+            filename="refresh.pdf", kind="pdf", sha256="3" * 64, source_path="data/refresh/source.pdf"
         )
         automatic = Question.objects.create(
-            paper=paper, number=1, stem="求函数的定义域。", question_type="free_response",
-            figure_candidates=[{
-                "label": "1", "seq": 1, "page_idx": 0, "bbox": [92, 100, 127, 125],
-            }],
+            paper=paper,
+            number=1,
+            stem="求函数的定义域。",
+            question_type="free_response",
+            figure_candidates=[{"label": "1", "seq": 1, "page_idx": 0, "bbox": [92, 100, 127, 125]}],
             read_a={
-                "stem": "求函数的定义域。", "type": "free_response",
-                "figures": {}, "missing_figure": False, "figure_descriptions": [],
+                "stem": "求函数的定义域。",
+                "type": "free_response",
+                "figures": {},
+                "missing_figure": False,
+                "figure_descriptions": [],
             },
-            figure_review={
-                "status": figure_policy.CONFLICT, "source": "automatic",
-                "policy_version": 2,
-            },
+            figure_review={"status": figure_policy.CONFLICT, "source": "automatic", "policy_version": 2},
             flags=[figure_policy.FLAG_UNFOUND_FIGURE, "两次识读不一致"],
             state=Question.State.YELLOW,
         )
         human_review = {
-            "status": figure_policy.CONFIRMED_NO_FIGURE, "source": "human",
-            "reason": "已人工确认本题确实无图", "signals": ["human_confirmed_no_figure"],
+            "status": figure_policy.CONFIRMED_NO_FIGURE,
+            "source": "human",
+            "reason": "已人工确认本题确实无图",
+            "signals": ["human_confirmed_no_figure"],
         }
         human = Question.objects.create(
-            paper=paper, number=2, stem="如图所示。", question_type="free_response",
-            figure_review=copy.deepcopy(human_review), flags=[figure_policy.FLAG_NO_FIGURE],
+            paper=paper,
+            number=2,
+            stem="如图所示。",
+            question_type="free_response",
+            figure_review=copy.deepcopy(human_review),
+            flags=[figure_policy.FLAG_NO_FIGURE],
             state=Question.State.YELLOW,
         )
 
-        stats = figure_policy.persist_automatic_review_upgrades(
-            Question.objects.filter(paper=paper).order_by("id")
-        )
+        stats = figure_policy.persist_automatic_review_upgrades(Question.objects.filter(paper=paper).order_by("id"))
 
         automatic.refresh_from_db()
         human.refresh_from_db()
-        self.assertEqual(stats, {
-            "seen": 2, "updated": 1, "unchanged": 0, "human_skipped": 1,
-            "state_skipped": 0,
-        })
+        self.assertEqual(stats, {"seen": 2, "updated": 1, "unchanged": 0, "human_skipped": 1, "state_skipped": 0})
         self.assertEqual(automatic.figure_review["status"], figure_policy.AUTO_EXCLUDED)
-        self.assertEqual(
-            automatic.figure_review["policy_version"],
-            figure_policy.FIGURE_REVIEW_POLICY_VERSION,
-        )
+        self.assertEqual(automatic.figure_review["policy_version"], figure_policy.FIGURE_REVIEW_POLICY_VERSION)
         self.assertEqual(automatic.flags, ["两次识读不一致"])
         self.assertEqual(automatic.state, Question.State.YELLOW)
         self.assertEqual(human.figure_review, human_review)

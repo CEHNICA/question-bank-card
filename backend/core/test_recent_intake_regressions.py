@@ -1,4 +1,5 @@
 """Manual cuts must keep their recognized content when readers become unavailable."""
+
 from copy import deepcopy
 from unittest import mock
 
@@ -49,18 +50,26 @@ class RecentIntakeRegressionsTests(TransactionTestCase):
                 page = document.new_page(width=595, height=842)
                 for offset in range(2):
                     number = offset + 1 if repeated else index * 2 + offset + 1
-                    page.insert_text((40, 100 + offset * 200),
-                        f"{number}. Find paper {index + 1} question {offset + 1} x when x + 2 = 5.")
+                    page.insert_text(
+                        (40, 100 + offset * 200),
+                        f"{number}. Find paper {index + 1} question {offset + 1} x when x + 2 = 5.",
+                    )
             return self.paper(data=document.tobytes())
 
     def test_combined_exam_pdf_keeps_all_pages_without_merging_restarted_numbering(self):
         paper = self.exam()
         original = source_images.source_identity(paper)
-        with mock.patch.object(intake.segment, "segment", side_effect=AssertionError("unexpected single-exam segmentation")), \
-                mock.patch.object(pipeline, "parse", side_effect=AssertionError("unexpected cloud parsing")):
+        with (
+            mock.patch.object(
+                intake.segment, "segment", side_effect=AssertionError("unexpected single-exam segmentation")
+            ),
+            mock.patch.object(pipeline, "parse", side_effect=AssertionError("unexpected cloud parsing")),
+        ):
             paper = intake.prepare_auto(paper, cloud_ready=True)
         # 自动切题一题没切出就是硬失败，不能以“待你终审”的样子交到审核页。
-        self.assertEqual((paper.material_type, paper.status, paper.processing_plan["mode"]), ("exam", "failed", "manual"))
+        self.assertEqual(
+            (paper.material_type, paper.status, paper.processing_plan["mode"]), ("exam", "failed", "manual")
+        )
         self.assertIn("自动切题没有切出", paper.error)
         self.assertTrue(paper.processing_plan["native_numbering_fallback"])
         self.assertEqual(paper.processing_plan["local_scope_count"], 2)
@@ -105,9 +114,11 @@ class RecentIntakeRegressionsTests(TransactionTestCase):
     def test_local_book_does_not_merge_repeated_chapter_numbers_into_exam_cards(self):
         paper = self.book()
         original = source_images.source_identity(paper)
-        with mock.patch.object(pipeline, "parse", side_effect=AssertionError("unexpected cloud parsing")), \
-                mock.patch.object(pipeline, "read_card", side_effect=AssertionError("unexpected reading")), \
-                mock.patch.object(intake.segment, "segment", side_effect=AssertionError("unexpected exam segmentation")):
+        with (
+            mock.patch.object(pipeline, "parse", side_effect=AssertionError("unexpected cloud parsing")),
+            mock.patch.object(pipeline, "read_card", side_effect=AssertionError("unexpected reading")),
+            mock.patch.object(intake.segment, "segment", side_effect=AssertionError("unexpected exam segmentation")),
+        ):
             paper = intake.prepare_auto(paper, cloud_ready=True)
         # 1.25.36：书保留原页、不自动切题是预期结果，记成「待你终审」而不是失败。
         self.assertEqual((paper.status, paper.processing_plan["mode"]), ("ready", "manual"))
@@ -128,7 +139,11 @@ class RecentIntakeRegressionsTests(TransactionTestCase):
             response.close()
 
     def test_local_book_cloud_route_requires_explicit_permission_and_configured_service(self):
-        for allow_cloud, cloud_ready, expected in ((False, True, "manual"), (True, False, "manual"), (True, True, "mineru")):
+        for allow_cloud, cloud_ready, expected in (
+            (False, True, "manual"),
+            (True, False, "manual"),
+            (True, True, "mineru"),
+        ):
             with self.subTest(allow_cloud=allow_cloud, cloud_ready=cloud_ready):
                 paper = intake.prepare_auto(self.book(), allow_cloud=allow_cloud, cloud_ready=cloud_ready)
                 self.assertEqual(paper.processing_plan["mode"], expected)
@@ -153,16 +168,22 @@ class RecentIntakeRegressionsTests(TransactionTestCase):
                 client = mock.Mock()
                 client.upload.return_value = {"paper": {"id": str(paper.pk), "filename": "book.pdf", "status": "ready"}}
                 if interface == "mcp":
-                    cli_tests.cli.mcp_call(client, "upload_paper", {"paths": [source], "book": True, "allow_cloud": allow_cloud})
+                    cli_tests.cli.mcp_call(
+                        client, "upload_paper", {"paths": [source], "book": True, "allow_cloud": allow_cloud}
+                    )
                 else:
-                    args = cli_tests.cli.build_parser().parse_args(["upload", source, "--book", *(["--allow-cloud"] if allow_cloud else [])])
+                    args = cli_tests.cli.build_parser().parse_args(
+                        ["upload", source, "--book", *(["--allow-cloud"] if allow_cloud else [])]
+                    )
                     cli_tests.cli.cmd_upload(client, args)
                 parameters = client.upload.call_args.args[1]
-                self.assertEqual(parameters, {"material_type": "book", "parse_mode": "auto", "allow_cloud": "1" if allow_cloud else "0"})
+                self.assertEqual(
+                    parameters,
+                    {"material_type": "book", "parse_mode": "auto", "allow_cloud": "1" if allow_cloud else "0"},
+                )
 
     def published_text(self):
-        question = self.cut(body_mode="text", stem="Published recognized question",
-            text_source="single", state="green")
+        question = self.cut(body_mode="text", stem="Published recognized question", text_source="single", state="green")
         library.approve(question, now=timezone.now())
         question.save()
         with mock.patch.object(library_jobs, "queue_on_intake"):
@@ -196,8 +217,7 @@ class RecentIntakeRegressionsTests(TransactionTestCase):
             refused = self.post(f"/api/questions/{question.pk}/reread", {"by": "ai", "agent": "test"})
             self.assertEqual(refused.status_code, 409, refused.content)
             self.assertEqual(Question.objects.values().get(pk=question.pk), original)
-            allowed = self.post(f"/api/questions/{question.pk}/reread",
-                {"by": "ai", "agent": "test", "force": True})
+            allowed = self.post(f"/api/questions/{question.pk}/reread", {"by": "ai", "agent": "test", "force": True})
         self.assertEqual(allowed.status_code, 200, allowed.content)
         question.refresh_from_db()
         self.assertTrue(question.reread_requested and question.ocr_pending)
@@ -217,17 +237,26 @@ class RecentIntakeRegressionsTests(TransactionTestCase):
         self.assertEqual(publication.content, content)
 
     def test_manual_text_reread_without_vision_service_is_rejected_without_changes(self):
-        question = self.cut(body_mode="text", edited=True, stem="Existing manual correction",
-            options={"A": "1", "B": "2"}, origin="Printed source", type_locked=True,
-            text_source="human", state="green",
+        question = self.cut(
+            body_mode="text",
+            edited=True,
+            stem="Existing manual correction",
+            options={"A": "1", "B": "2"},
+            origin="Printed source",
+            type_locked=True,
+            text_source="human",
+            state="green",
             figures=[{"page_idx": 0, "bbox": [100, 100, 250, 250], "slot": "stem", "source": "manual"}],
-            read_a={"stem": "Old recognition"})
+            read_a={"stem": "Old recognition"},
+        )
         before = deepcopy(Question.objects.values().get(pk=question.pk))
         for available, assistant in ((False, False), (True, True)):
-            with self.subTest(available=available, assistant=assistant), \
-                    mock.patch.object(views, "_vision_ready", return_value=available), \
-                    mock.patch.object(readers, "assistant_mode", return_value=assistant), \
-                    mock.patch.object(pipeline, "read_card") as read:
+            with (
+                self.subTest(available=available, assistant=assistant),
+                mock.patch.object(views, "_vision_ready", return_value=available),
+                mock.patch.object(readers, "assistant_mode", return_value=assistant),
+                mock.patch.object(pipeline, "read_card") as read,
+            ):
                 result = self.post(f"/api/questions/{question.pk}/reread")
                 self.assertEqual(result.status_code, 409, result.content)
                 self.assertIn("看图读题模型", result.json()["error"])
@@ -236,20 +265,37 @@ class RecentIntakeRegressionsTests(TransactionTestCase):
 
     def test_outage_on_recognized_manual_cut_keeps_text_options_and_manual_figure(self):
         figure = {"page_idx": 0, "bbox": [100, 100, 250, 250], "slot": "stem", "source": "manual"}
-        question = self.cut(body_mode="text", stem="Existing recognized question",
-            question_type="single_choice", options={"A": "1", "B": "2", "C": "3", "D": "4"},
-            origin="Printed source", text_source="single", type_locked=True, state="green",
-            figures=[figure], reread_requested=True, ocr_pending=True)
+        question = self.cut(
+            body_mode="text",
+            stem="Existing recognized question",
+            question_type="single_choice",
+            options={"A": "1", "B": "2", "C": "3", "D": "4"},
+            origin="Printed source",
+            text_source="single",
+            type_locked=True,
+            state="green",
+            figures=[figure],
+            reread_requested=True,
+            ocr_pending=True,
+        )
         primary = readers.Engine("minimax", "mock-model")
         actual_read = pipeline.read_card
-        with mock.patch.object(readers, "primary_engine", return_value=primary), \
-                mock.patch.object(readers, "read_question", side_effect=readers.ReaderUnavailable("Simulated outage")), \
-                mock.patch.object(pipeline.features, "enabled", return_value=False):
+        with (
+            mock.patch.object(readers, "primary_engine", return_value=primary),
+            mock.patch.object(readers, "read_question", side_effect=readers.ReaderUnavailable("Simulated outage")),
+            mock.patch.object(pipeline.features, "enabled", return_value=False),
+        ):
             self.run_read(question, actual_read)
         question.refresh_from_db()
-        self.assertEqual((question.stem, question.options, question.origin, question.question_type),
-            ("Existing recognized question", {"A": "1", "B": "2", "C": "3", "D": "4"},
-             "Printed source", "single_choice"))
+        self.assertEqual(
+            (question.stem, question.options, question.origin, question.question_type),
+            (
+                "Existing recognized question",
+                {"A": "1", "B": "2", "C": "3", "D": "4"},
+                "Printed source",
+                "single_choice",
+            ),
+        )
         self.assertEqual(question.figures, [figure])
         self.assertEqual((question.state, question.error), ("red", "Simulated outage"))
         self.assertEqual(question.read_a["error"], "Simulated outage")
@@ -257,12 +303,22 @@ class RecentIntakeRegressionsTests(TransactionTestCase):
 
     def test_nonempty_local_ocr_fallback_is_still_available_to_existing_pipeline(self):
         primary = readers.Engine("minimax", "mock-model")
-        snapshot = {"id": 1, "number": 1, "question_type": "free_response", "candidates": [],
-            "regions": [{"page_idx": 0, "bbox": [40, 40, 900, 480]}], "double_read": False,
-            "fallback_draft": "1. Existing printed OCR question"}
-        with mock.patch.object(readers, "primary_engine", return_value=primary), \
-                mock.patch.object(readers, "read_question", side_effect=readers.ReaderUnavailable("Simulated outage")), \
-                mock.patch.object(pipeline.imaging, "stack_regions", return_value=(Image.new("RGB", (80, 80), "white"), [])):
+        snapshot = {
+            "id": 1,
+            "number": 1,
+            "question_type": "free_response",
+            "candidates": [],
+            "regions": [{"page_idx": 0, "bbox": [40, 40, 900, 480]}],
+            "double_read": False,
+            "fallback_draft": "1. Existing printed OCR question",
+        }
+        with (
+            mock.patch.object(readers, "primary_engine", return_value=primary),
+            mock.patch.object(readers, "read_question", side_effect=readers.ReaderUnavailable("Simulated outage")),
+            mock.patch.object(
+                pipeline.imaging, "stack_regions", return_value=(Image.new("RGB", (80, 80), "white"), [])
+            ),
+        ):
             result = pipeline.read_card(snapshot, store=mock.Mock())
         self.assertEqual(result["stem"], "Existing printed OCR question")
         self.assertEqual(result["state"], "yellow")

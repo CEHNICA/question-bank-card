@@ -8,6 +8,7 @@ at anything the directory no longer has, so they are safe to bring back.
 Dry run by default. Pass --apply to write. The live database is copied first and every
 touched row is recorded so the change can be reversed from the backup.
 """
+
 import argparse
 import json
 import os
@@ -56,15 +57,19 @@ def main():
         "select id, publication_id, taxonomy_revision, prompt_version, status, message, "
         "resolved_at, updated_at, job_id from core_librarytagsuggestion "
         "where status = 'stale' and message = ? and substr(resolved_at, 1, 16) = ? "
-        "order by id", (SWEEP_MESSAGE, SWEEP_BUCKET)).fetchall()
+        "order by id",
+        (SWEEP_MESSAGE, SWEEP_BUCKET),
+    ).fetchall()
     now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S.%f+00:00")
     print("标签目录当前版本:", revision)
     print("待捞回的批次:", len(targets))
     print("其中带任务的:", sum(1 for row in targets if row["job_id"]))
     print()
     for row in targets[:3]:
-        print("  例：题目 %s，生成时的目录版本 %s，提示版本 %s"
-              % (row["publication_id"], row["taxonomy_revision"], row["prompt_version"]))
+        print(
+            "  例：题目 %s，生成时的目录版本 %s，提示版本 %s"
+            % (row["publication_id"], row["taxonomy_revision"], row["prompt_version"])
+        )
     if len(targets) > 3:
         print("  …其余 %d 批同型" % (len(targets) - 3))
     print()
@@ -98,15 +103,15 @@ def main():
             "update core_librarytagsuggestion set status = 'pending', message = ?, "
             "resolved_at = null, taxonomy_revision = ?, updated_at = ? "
             "where status = 'stale' and message = ? and substr(resolved_at, 1, 16) = ?",
-            (RECOVER_MESSAGE, revision, now, SWEEP_MESSAGE, SWEEP_BUCKET))
+            (RECOVER_MESSAGE, revision, now, SWEEP_MESSAGE, SWEEP_BUCKET),
+        )
         changed = connection.total_changes
         print("已写回:", changed, "批")
 
     remaining = cursor.execute(
-        "select count(*) from core_librarytagsuggestion where status = 'stale' "
-        "and message = ?", (SWEEP_MESSAGE,)).fetchone()[0]
-    pending = cursor.execute(
-        "select count(*) from core_librarytagsuggestion where status = 'pending'").fetchone()[0]
+        "select count(*) from core_librarytagsuggestion where status = 'stale' and message = ?", (SWEEP_MESSAGE,)
+    ).fetchone()[0]
+    pending = cursor.execute("select count(*) from core_librarytagsuggestion where status = 'pending'").fetchone()[0]
     print("仍是历史记录的旧建议:", remaining)
     print("现在待核对的批次:", pending)
     connection.close()

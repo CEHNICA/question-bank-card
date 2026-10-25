@@ -37,26 +37,65 @@ class LibraryBrowseDraftTests(TestCase):
         self.client = Client()
         self.serial = 0
 
-    def publication(self, *, source="甲卷.pdf", paper=None, question=None, number=None,
-                    kind="single_choice", answer="", review="human", tags=(), version=1,
-                    status="published", stem="虚构题：若 $x+1=3$，求 $x$。"):
+    def publication(
+        self,
+        *,
+        source="甲卷.pdf",
+        paper=None,
+        question=None,
+        number=None,
+        kind="single_choice",
+        answer="",
+        review="human",
+        tags=(),
+        version=1,
+        status="published",
+        stem="虚构题：若 $x+1=3$，求 $x$。",
+    ):
         self.serial += 1
-        paper = paper or (question.paper if question else None) or Paper.objects.create(
-            filename=source, kind="pdf", sha256="a" * 64)
-        question = question or Question.objects.create(paper=paper, number=number or self.serial,
-                                                       question_type=kind, stem=stem, state="green")
-        content = {"stem": stem, "options": {}, "answer": answer, "analysis": "", "figures": [],
-                   "origin": "虚构出处", "source_filename": source, "document_id": str(paper.id),
-                   "question_type": kind, "sources": []}
+        paper = (
+            paper
+            or (question.paper if question else None)
+            or Paper.objects.create(filename=source, kind="pdf", sha256="a" * 64)
+        )
+        question = question or Question.objects.create(
+            paper=paper, number=number or self.serial, question_type=kind, stem=stem, state="green"
+        )
+        content = {
+            "stem": stem,
+            "options": {},
+            "answer": answer,
+            "analysis": "",
+            "figures": [],
+            "origin": "虚构出处",
+            "source_filename": source,
+            "document_id": str(paper.id),
+            "question_type": kind,
+            "sources": [],
+        }
         return PublishedQuestion.objects.create(
-            paper=paper, question=question, number=number or self.serial, source_filename=source,
-            question_type=kind, version=version, status=status, review_source=review, content=content,
-            content_hash=library.content_hash(content), search_text=library.search_key(stem),
-            extras={"tags": list(tags)}, tags_text=library.tags_text(tags))
+            paper=paper,
+            question=question,
+            number=number or self.serial,
+            source_filename=source,
+            question_type=kind,
+            version=version,
+            status=status,
+            review_source=review,
+            content=content,
+            content_hash=library.content_hash(content),
+            search_text=library.search_key(stem),
+            extras={"tags": list(tags)},
+            tags_text=library.tags_text(tags),
+        )
 
     def mutate(self, method, url, body=None, *, header=True, content_type="application/json"):
-        return getattr(self.client, method)(url, data=json.dumps(body or {}), content_type=content_type,
-                                           **({"HTTP_X_QB_REQUEST": "1"} if header else {}))
+        return getattr(self.client, method)(
+            url,
+            data=json.dumps(body or {}),
+            content_type=content_type,
+            **({"HTTP_X_QB_REQUEST": "1"} if header else {}),
+        )
 
     def create_draft(self, **changes):
         return self.mutate("post", "/api/library/drafts", {"title": "单元练习", "ids": [], **changes})
@@ -103,8 +142,7 @@ class LibraryBrowseDraftTests(TestCase):
         early = self.publication(source="a卷.pdf", number=1)
         other = self.publication(source="c卷.pdf", number=1)
         body = self.client.get("/api/library", {"sort": "number"}).json()
-        self.assertEqual([item["id"] for item in body["items"]],
-                         [str(early.id), str(other.id), str(later.id)])
+        self.assertEqual([item["id"] for item in body["items"]], [str(early.id), str(other.id), str(later.id)])
         self.assertEqual(body["sort"], "number")
 
     def test_a_book_is_ordered_by_where_it_prints_not_by_its_number(self):
@@ -112,26 +150,37 @@ class LibraryBrowseDraftTests(TestCase):
         # 编——真库两本教材里「第 1 题」各有 94 / 82 张，按题号排等于把各章的第
         # 1 题堆在一起（698 张里只有 14 张落在书上位置）。版面锚点才是原卷顺序：
         # 14 份资料按它排 100% 等于原卷顺序，试卷按它排和按题号排一模一样。
-        book = Paper.objects.create(filename="教材.pdf", kind="pdf", sha256="b" * 64,
-                                    material_type=Paper.MaterialType.BOOK)
+        book = Paper.objects.create(
+            filename="教材.pdf", kind="pdf", sha256="b" * 64, material_type=Paper.MaterialType.BOOK
+        )
         printed = []
         for _serial, anchor in enumerate((50, 10, 30, 20, 40), 1):
             question = Question.objects.create(
-                paper=book, number=1, question_type="single_choice", state="green",
-                stem=f"第 {anchor} 页那一条", source_anchor_seq=anchor)
-            printed.append((anchor, self.publication(source="教材.pdf", paper=book,
-                                                     question=question, number=1)))
+                paper=book,
+                number=1,
+                question_type="single_choice",
+                state="green",
+                stem=f"第 {anchor} 页那一条",
+                source_anchor_seq=anchor,
+            )
+            printed.append((anchor, self.publication(source="教材.pdf", paper=book, question=question, number=1)))
         by_source = self.client.get("/api/library", {"sort": "source"}).json()
-        self.assertEqual([item["id"] for item in by_source["items"]],
-                         [str(item.id) for _anchor, item in sorted(printed)])
+        self.assertEqual(
+            [item["id"] for item in by_source["items"]], [str(item.id) for _anchor, item in sorted(printed)]
+        )
 
     def test_a_card_without_a_layout_anchor_goes_last_without_moving_the_others(self):
         book = Paper.objects.create(filename="教材.pdf", kind="pdf", sha256="c" * 64)
         with_anchor, without = [], None
         for _serial, anchor in enumerate((30, None, 10), 1):
             question = Question.objects.create(
-                paper=book, number=1, question_type="single_choice", state="green",
-                stem=f"锚点 {anchor}", source_anchor_seq=anchor)
+                paper=book,
+                number=1,
+                question_type="single_choice",
+                state="green",
+                stem=f"锚点 {anchor}",
+                source_anchor_seq=anchor,
+            )
             item = self.publication(source="教材.pdf", paper=book, question=question, number=1)
             if anchor:
                 with_anchor.append((anchor, item))
@@ -139,8 +188,9 @@ class LibraryBrowseDraftTests(TestCase):
                 without = item
         items = self.client.get("/api/library", {"sort": "source"}).json()["items"]
         # 人工框选、切题后没有版面块的排在最后，不能把其余题的顺序顶乱。
-        self.assertEqual([item["id"] for item in items],
-                         [str(item.id) for _anchor, item in sorted(with_anchor)] + [str(without.id)])
+        self.assertEqual(
+            [item["id"] for item in items], [str(item.id) for _anchor, item in sorted(with_anchor)] + [str(without.id)]
+        )
 
     def test_default_page_has_forty_items(self):
         for _ in range(41):
@@ -222,7 +272,9 @@ class LibraryBrowseDraftTests(TestCase):
             self.assertEqual(self.mutate("post", "/api/library/batch", {"ids": ids}).status_code, 400)
         self.assertEqual(self.mutate("post", "/api/library/batch", {"ids": [], "minimax_key": "fake"}).status_code, 400)
         self.assertEqual(self.mutate("post", "/api/library/batch", {"ids": []}, header=False).status_code, 403)
-        self.assertEqual(self.mutate("post", "/api/library/batch", {"ids": []}, content_type="text/plain").status_code, 415)
+        self.assertEqual(
+            self.mutate("post", "/api/library/batch", {"ids": []}, content_type="text/plain").status_code, 415
+        )
         self.assertEqual(self.client.get("/api/library/batch").status_code, 405)
 
     def test_draft_crud_keeps_order_and_safe_print_defaults(self):
@@ -236,9 +288,10 @@ class LibraryBrowseDraftTests(TestCase):
         listing = self.client.get("/api/library/drafts").json()
         self.assertEqual(listing["total"], 1)
         self.assertEqual(listing["drafts"][0]["id"], draft["id"])
-        url = f'/api/library/drafts/{draft["id"]}'
-        updated = self.mutate("put", url, {"title": "期末练习", "revision": 1,
-                                         "print_options": {"origin": True}}).json()["draft"]
+        url = f"/api/library/drafts/{draft['id']}"
+        updated = self.mutate(
+            "put", url, {"title": "期末练习", "revision": 1, "print_options": {"origin": True}}
+        ).json()["draft"]
         self.assertEqual((updated["title"], updated["revision"]), ("期末练习", 2))
         self.assertEqual(updated["ids"], draft["ids"])
         self.assertFalse(updated["print_options"]["ai_answers"])
@@ -248,7 +301,7 @@ class LibraryBrowseDraftTests(TestCase):
 
     def test_revision_conflict_never_overwrites_another_windows_changes(self):
         draft = self.create_draft().json()["draft"]
-        url = f'/api/library/drafts/{draft["id"]}'
+        url = f"/api/library/drafts/{draft['id']}"
         self.assertEqual(self.mutate("put", url, {"title": "窗口甲", "revision": 1}).status_code, 200)
         original = library_drafts.draft_path().read_bytes()
         self.assertEqual(self.mutate("put", url, {"title": "窗口乙", "revision": 1}).status_code, 409)
@@ -262,21 +315,28 @@ class LibraryBrowseDraftTests(TestCase):
         selected.status = "superseded"
         selected.save(update_fields=["status"])
         replacement = self.publication(question=selected.question, version=2)
-        body = self.client.get(f'/api/library/drafts/{draft["id"]}').json()["draft"]
+        body = self.client.get(f"/api/library/drafts/{draft['id']}").json()["draft"]
         self.assertFalse(body["validity"]["valid"])
         self.assertEqual(body["ids"], [str(selected.id)])
         self.assertEqual(body["validity"]["missing"][0]["replacement_id"], str(replacement.id))
         self.assertEqual(library_drafts.draft_path().read_bytes(), before_file)
         selected.delete()
-        body = self.client.get(f'/api/library/drafts/{draft["id"]}').json()["draft"]
+        body = self.client.get(f"/api/library/drafts/{draft['id']}").json()["draft"]
         self.assertEqual(body["validity"]["missing"][0]["reason"], "not_found")
 
     def test_strict_draft_fields_reject_content_credentials_and_bad_switches(self):
-        for changes in ({"title": ""}, {"title": "a" * 121}, {"title": "名称\n换行"},
-                        {"ids": [str(uuid.uuid4())] * 501}, {"ids": [1]},
-                        {"content": {"stem": "不能写题面"}}, {"minimax_key": "fake"},
-                        {"print_options": {"answers": 1}}, {"print_options": {"key": "fake"}},
-                        {"revision": True}):
+        for changes in (
+            {"title": ""},
+            {"title": "a" * 121},
+            {"title": "名称\n换行"},
+            {"ids": [str(uuid.uuid4())] * 501},
+            {"ids": [1]},
+            {"content": {"stem": "不能写题面"}},
+            {"minimax_key": "fake"},
+            {"print_options": {"answers": 1}},
+            {"print_options": {"key": "fake"}},
+            {"revision": True},
+        ):
             self.assertEqual(self.create_draft(**changes).status_code, 400)
         self.assertFalse(library_drafts.draft_path().exists())
 
@@ -297,57 +357,73 @@ class LibraryBrowseDraftTests(TestCase):
         draft = created.json()["draft"]
         # 存盘走 JSON，第几张图的序号回来是 "0" 而不是 0；预览和 Word 两边都按序号
         # 取值，取之前先转成数字，所以这里就是字符串，不另开一套类型。
-        self.assertEqual(draft["print_options"]["figure_overrides"],
-                         {str(first.id): {"width": {"0": 60.5}, "align": "left", "breaks": [1]}})
-        self.assertEqual(list(PublishedQuestion.objects.order_by("pk").values("pk", "content", "content_hash")), before,
-                         "配图调整不能写回题库")
+        self.assertEqual(
+            draft["print_options"]["figure_overrides"],
+            {str(first.id): {"width": {"0": 60.5}, "align": "left", "breaks": [1]}},
+        )
+        self.assertEqual(
+            list(PublishedQuestion.objects.order_by("pk").values("pk", "content", "content_hash")),
+            before,
+            "配图调整不能写回题库",
+        )
 
         # 下次打开还在。
-        again = self.client.get(f'/api/library/drafts/{draft["id"]}').json()["draft"]
+        again = self.client.get(f"/api/library/drafts/{draft['id']}").json()["draft"]
         self.assertEqual(again["print_options"]["figure_overrides"], draft["print_options"]["figure_overrides"])
 
         # 去掉一道题，它的配图设置也跟着走 —— 和选项排版、留白一个规矩。
-        url = f'/api/library/drafts/{draft["id"]}'
+        url = f"/api/library/drafts/{draft['id']}"
         kept = self.mutate("put", url, {"revision": 1, "ids": [str(second.id)]}).json()["draft"]
         self.assertEqual(kept["print_options"]["figure_overrides"], {}, "题被移出卷子，它的配图设置也不留")
 
         # 没改动的题不该占位置：默认的居中不算调整。
-        self.mutate("put", url, {"revision": 2, "ids": [str(first.id), str(second.id)],
-                                 "print_options": {"figure_overrides": {str(first.id): {"align": "center"}}}})
+        self.mutate(
+            "put",
+            url,
+            {
+                "revision": 2,
+                "ids": [str(first.id), str(second.id)],
+                "print_options": {"figure_overrides": {str(first.id): {"align": "center"}}},
+            },
+        )
         quiet = self.client.get(url).json()["draft"]
         self.assertEqual(quiet["print_options"]["figure_overrides"], {}, "选了跟默认一样的居中，就当没动过")
 
     def test_bad_figure_adjustments_are_refused_with_readable_words(self):
         selected, other = self.publication(), self.publication()
         for bad in (
-            {"align": "top"},                              # 没有这个位置
-            {"width": {0: 0}},                             # 缩到 0，图就没了
-            {"width": {0: 179}},                           # 比整张 A4 的版心还宽
-            {"width": {0: -20}},                           # 负数
-            {"width": {0: "宽一点"}},                      # 不是数字
-            {"width": {"第一张": 60}},                     # 序号得是数字
-            {"breaks": "第二张"},                           # 换行要一张一张列出来
+            {"align": "top"},  # 没有这个位置
+            {"width": {0: 0}},  # 缩到 0，图就没了
+            {"width": {0: 179}},  # 比整张 A4 的版心还宽
+            {"width": {0: -20}},  # 负数
+            {"width": {0: "宽一点"}},  # 不是数字
+            {"width": {"第一张": 60}},  # 序号得是数字
+            {"breaks": "第二张"},  # 换行要一张一张列出来
             {"breaks": [-1]},
-            {"scale": 2},                                  # 没有的选项
+            {"scale": 2},  # 没有的选项
         ):
             with self.subTest(bad=bad):
-                response = self.create_draft(ids=[str(selected.id)],
-                                             print_options={"figure_overrides": {str(selected.id): bad}})
+                response = self.create_draft(
+                    ids=[str(selected.id)], print_options={"figure_overrides": {str(selected.id): bad}}
+                )
                 self.assertEqual(response.status_code, 400, response.content[:200])
                 self.assertNotIn("Traceback", response.content.decode("utf-8"))
 
         # 没选进这份卷子的题，不接受它的配图设置。
-        stray = self.create_draft(ids=[str(selected.id)],
-                                  print_options={"figure_overrides": {str(other.id): {"align": "left"}}})
+        stray = self.create_draft(
+            ids=[str(selected.id)], print_options={"figure_overrides": {str(other.id): {"align": "left"}}}
+        )
         self.assertEqual(stray.status_code, 400)
         self.assertFalse(library_drafts.draft_path().exists())
 
     def test_mutations_require_local_request_header_and_json(self):
         self.assertEqual(self.mutate("post", "/api/library/drafts", {"ids": []}, header=False).status_code, 403)
-        self.assertEqual(self.mutate("post", "/api/library/drafts", {"ids": []}, content_type="text/plain").status_code, 415)
+        self.assertEqual(
+            self.mutate("post", "/api/library/drafts", {"ids": []}, content_type="text/plain").status_code, 415
+        )
         draft = self.create_draft().json()["draft"]
         for method in ("put", "delete"):
-            self.assertEqual(self.mutate(method, f'/api/library/drafts/{draft["id"]}', header=False).status_code, 403)
+            self.assertEqual(self.mutate(method, f"/api/library/drafts/{draft['id']}", header=False).status_code, 403)
 
     def test_unreadable_store_is_not_replaced_by_an_empty_one(self):
         target = library_drafts.draft_path()
@@ -367,14 +443,14 @@ class LibraryBrowseDraftTests(TestCase):
         response = self.client.get("/api/library/drafts")
         self.assertEqual(response.status_code, 409)
         self.assertNotIn("fake-never-return", response.content.decode())
-        self.assertEqual(self.mutate("put", f'/api/library/drafts/{draft["id"]}', {"title": "新名"}).status_code, 409)
+        self.assertEqual(self.mutate("put", f"/api/library/drafts/{draft['id']}", {"title": "新名"}).status_code, 409)
         self.assertEqual(target.read_bytes(), original)
 
     def test_failed_atomic_replace_preserves_previous_draft_and_removes_temp_file(self):
         draft = self.create_draft().json()["draft"]
         original = library_drafts.draft_path().read_bytes()
         with mock.patch.object(library_drafts.os, "replace", side_effect=OSError("simulated write failure")):
-            response = self.mutate("put", f'/api/library/drafts/{draft["id"]}', {"title": "未保存"})
+            response = self.mutate("put", f"/api/library/drafts/{draft['id']}", {"title": "未保存"})
         self.assertEqual(response.status_code, 500)
         self.assertEqual(library_drafts.draft_path().read_bytes(), original)
         self.assertEqual(list(self.root.glob(".library-drafts-*.json")), [])
@@ -392,6 +468,7 @@ class LibraryBrowseDraftTests(TestCase):
     def test_simultaneous_saves_do_not_lose_drafts(self):
         def save(index):
             return library_drafts._save({"title": f"草稿{index}", "ids": []})["id"]
+
         with ThreadPoolExecutor(max_workers=8) as pool:
             ids = list(pool.map(save, range(8)))
         stored = library_drafts._read()["drafts"]
@@ -406,7 +483,9 @@ class LibraryBrowseDraftTests(TestCase):
     def test_draft_list_is_sorted_by_latest_save(self):
         first = self.create_draft(title="甲").json()["draft"]
         second = self.create_draft(title="乙").json()["draft"]
-        self.assertEqual([item["id"] for item in self.client.get("/api/library/drafts").json()["drafts"]],
-                         [second["id"], first["id"]])
-        self.mutate("put", f'/api/library/drafts/{first["id"]}', {"title": "甲更新"})
+        self.assertEqual(
+            [item["id"] for item in self.client.get("/api/library/drafts").json()["drafts"]],
+            [second["id"], first["id"]],
+        )
+        self.mutate("put", f"/api/library/drafts/{first['id']}", {"title": "甲更新"})
         self.assertEqual(self.client.get("/api/library/drafts").json()["drafts"][0]["id"], first["id"])

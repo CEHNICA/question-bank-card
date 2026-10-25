@@ -1,4 +1,5 @@
 """Exercise optional hierarchy blueprints and AI context, offline only."""
+
 from django.test import TestCase
 
 from core import library_jobs, library_tagging

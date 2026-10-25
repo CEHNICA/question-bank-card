@@ -13,6 +13,7 @@ any line that would still run off the page (there should never be one).
 Every line is reported on its own. Word writes one centred table per line now,
 so a lone picture on a second line is a real case to look at, not an average.
 """
+
 import json
 import os
 import sqlite3
@@ -59,8 +60,7 @@ def before_lines(sizes):
 def dashed(snapshot_id):
     """Pictures live under the dashed form of the snapshot id."""
     value = str(snapshot_id)
-    return (f"{value[:8]}-{value[8:12]}-{value[12:16]}-{value[16:20]}-{value[20:32]}"
-            if len(value) == 32 else value)
+    return f"{value[:8]}-{value[8:12]}-{value[12:16]}-{value[16:20]}-{value[20:32]}" if len(value) == 32 else value
 
 
 def picture_sizes(snapshot_id, figures):
@@ -79,8 +79,7 @@ def picture_sizes(snapshot_id, figures):
 con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
 con.row_factory = sqlite3.Row
 rows = con.execute(
-    "SELECT id, number, source_filename, content FROM core_publishedquestion"
-    " WHERE status = 'published'"
+    "SELECT id, number, source_filename, content FROM core_publishedquestion WHERE status = 'published'"
 ).fetchall()
 
 gap_mm = PREVIEW_FIGURE_GAP_PX * 25.4 / PREVIEW_PX_PER_INCH
@@ -90,8 +89,7 @@ for row in rows:
         content = json.loads(row["content"] or "{}")
     except Exception:
         continue
-    figures = [f for f in (content.get("figures") or []) if isinstance(f, dict)
-               and f.get("slot") == "stem"]
+    figures = [f for f in (content.get("figures") or []) if isinstance(f, dict) and f.get("slot") == "stem"]
     if len(figures) < 2:
         continue
     sizes = picture_sizes(row["id"], figures)
@@ -106,17 +104,15 @@ for row in rows:
     print(f"      分行 {lines}  图宽 {mm} mm")
     start = 0
     for number, count in enumerate(lines, 1):
-        chunk = paper[start:start + count]
+        chunk = paper[start : start + count]
         start += count
         line_mm = sum(w for w, _ in chunk) + gap_mm * max(count - 1, 0)
         slack = (PREVIEW_TEXT_WIDTH_MM - line_mm) / 2
         if slack < -0.1:
             over += 1
-            print(f"      第 {number} 行 {count} 图  内容宽 {line_mm:.1f}mm"
-                  f"  <-- 排不下，会超出版心")
+            print(f"      第 {number} 行 {count} 图  内容宽 {line_mm:.1f}mm  <-- 排不下，会超出版心")
         else:
-            print(f"      第 {number} 行 {count} 图  内容宽 {line_mm:.1f}mm"
-                  f"  左留 {slack:.1f}mm")
+            print(f"      第 {number} 行 {count} 图  内容宽 {line_mm:.1f}mm  左留 {slack:.1f}mm")
     if lines != was:
         changed += 1
         print(f"      (96 dpi would have made it {was})")

@@ -23,11 +23,7 @@ SHOTS = "tmp/tagsys"
 SEED = ["导数在研究函数中的应用", "导数的运算"]
 OTHER = ["随机抽样"]
 
-PAGES = [
-    ("/", "录入终审"),
-    ("/library", "题库"),
-    ("/settings", "设置"),
-]
+PAGES = [("/", "录入终审"), ("/library", "题库"), ("/settings", "设置")]
 
 results: list[tuple[bool, str]] = []
 
@@ -62,10 +58,18 @@ def sweep(page) -> None:
     for path, name in PAGES:
         errors: list[str] = []
         failed: list[str] = []
-        page.on("console", lambda message, bag=errors: bag.append(f"{message.type}: {message.text}")
-                if message.type == "error" else None)
-        page.on("response", lambda response, bag=failed: bag.append(f"{response.status} {response.url}")
-                if response.status >= 400 else None)
+        page.on(
+            "console",
+            lambda message, bag=errors: (
+                bag.append(f"{message.type}: {message.text}") if message.type == "error" else None
+            ),
+        )
+        page.on(
+            "response",
+            lambda response, bag=failed: (
+                bag.append(f"{response.status} {response.url}") if response.status >= 400 else None
+            ),
+        )
         page.goto("about:blank")
         page.goto(f"{BASE}{path}", wait_until="networkidle")
         page.wait_for_timeout(1500)

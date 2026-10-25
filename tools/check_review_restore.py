@@ -19,14 +19,28 @@ def main():
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as pw:
-        executable = next((str(p) for p in (Path(pw.chromium.executable_path),
-            Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
-            Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe")) if p.is_file()), None)
+        executable = next(
+            (
+                str(p)
+                for p in (
+                    Path(pw.chromium.executable_path),
+                    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+                    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+                )
+                if p.is_file()
+            ),
+            None,
+        )
         browser = pw.chromium.launch(headless=True, **({"executable_path": executable} if executable else {}))
         context = browser.new_context(viewport={"width": 1400, "height": 950})
-        context.add_init_script("localStorage.setItem('qb-welcome-seen','1');"
-                                "window.__early = () => sessionStorage.getItem('qb-review-state')")
-        context.route("**/*", lambda r: r.continue_() if urlparse(r.request.url).hostname in ("127.0.0.1", "localhost") else r.abort())
+        context.add_init_script(
+            "localStorage.setItem('qb-welcome-seen','1');"
+            "window.__early = () => sessionStorage.getItem('qb-review-state')"
+        )
+        context.route(
+            "**/*",
+            lambda r: r.continue_() if urlparse(r.request.url).hostname in ("127.0.0.1", "localhost") else r.abort(),
+        )
         page = context.new_page()
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
@@ -35,7 +49,12 @@ def main():
         page.goto(f"{url}/?paper={args.paper}")
         page.wait_for_load_state("networkidle")
         print("after load      :", page.evaluate("() => sessionStorage.getItem('qb-review-state')"))
-        print("papers in list  :", page.evaluate("() => document.querySelectorAll('#paperList .paper-item, #paperList li, #paperList a').length"))
+        print(
+            "papers in list  :",
+            page.evaluate(
+                "() => document.querySelectorAll('#paperList .paper-item, #paperList li, #paperList a').length"
+            ),
+        )
         print("state.paperId   :", page.evaluate("() => document.querySelectorAll('.card').length"))
 
         page.get_by_role("tab", name="需要核查", exact=False).first.click()

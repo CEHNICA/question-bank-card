@@ -7,26 +7,17 @@ def existing_approvals_are_human(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
-    dependencies = [
-        ("core", "0012_block_table_html"),
-    ]
+    dependencies = [("core", "0012_block_table_html")]
 
     operations = [
         migrations.AddField(
-            model_name="question",
-            name="approval_source",
-            field=models.CharField(blank=True, default="", max_length=8),
+            model_name="question", name="approval_source", field=models.CharField(blank=True, default="", max_length=8)
         ),
         migrations.AddField(
-            model_name="question",
-            name="approval_agent",
-            field=models.CharField(blank=True, default="", max_length=40),
+            model_name="question", name="approval_agent", field=models.CharField(blank=True, default="", max_length=40)
         ),
         migrations.AddField(
-            model_name="publishedquestion",
-            name="review_source",
-            field=models.CharField(default="human", max_length=8),
+            model_name="publishedquestion", name="review_source", field=models.CharField(default="human", max_length=8)
         ),
         migrations.AddField(
             model_name="publishedquestion",

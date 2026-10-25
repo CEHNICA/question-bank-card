@@ -6,6 +6,7 @@ not own and then returning at once, which ended the process and with it the
 thread that carries those buttons out. Each mutation below puts that back and
 requires the tests to go red.
 """
+
 import shutil
 import subprocess
 import sys
@@ -28,10 +29,7 @@ MUTATIONS = [
         "    started = time.monotonic()\n"
         "    while window.poll() is None:\n"
         "        time.sleep(0.5)",
-        "    profile = window_profile()\n"
-        "    started = time.monotonic()\n"
-        "    while False:\n"
-        "        time.sleep(0.5)",
+        "    profile = window_profile()\n    started = time.monotonic()\n    while False:\n        time.sleep(0.5)",
     ),
 ]
 
@@ -54,13 +52,15 @@ try:
             continue
         TARGET.write_bytes(raw.replace(old.encode("utf-8"), new.encode("utf-8"), 1))
         result = subprocess.run(
-            [str(ROOT / "packaging" / ".build" / "venv" / "Scripts" / "python.exe"),
-             "-m", "unittest", TESTS],
-            cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            [str(ROOT / "packaging" / ".build" / "venv" / "Scripts" / "python.exe"), "-m", "unittest", TESTS],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         out = result.stdout + result.stderr
-        names = sorted({line.split("]")[-1].strip()
-                        for line in out.splitlines() if line.startswith("FAIL:")})
+        names = sorted({line.split("]")[-1].strip() for line in out.splitlines() if line.startswith("FAIL:")})
         if result.returncode != 0:
             print(f"[PASS] {label}")
             for name in names:

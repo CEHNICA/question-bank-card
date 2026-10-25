@@ -19,10 +19,14 @@ from .readers import FIGURE_RULES, TRANSCRIBE_RULES, parse_reading
 from .textnorm import witness_agrees, witness_key
 
 CONTINGENCY = "| | 优级品 | 非优级品 |\n|---|---|---|\n| 甲车间 | | |\n| 乙车间 | | |"
-MINERU_DATA = ("<table><tr><td></td><td>优级品</td><td>合格品</td></tr>"
-               "<tr><td>甲车间</td><td>26</td><td>24</td></tr><tr><td>乙车间</td><td>70</td><td>28</td></tr></table>")
-MINERU_CONTINGENCY = ("<table><tr><td></td><td>优级品</td><td>非优级品</td></tr>"
-                      "<tr><td>甲车间</td><td></td><td></td></tr><tr><td>乙车间</td><td></td><td></td></tr></table>")
+MINERU_DATA = (
+    "<table><tr><td></td><td>优级品</td><td>合格品</td></tr>"
+    "<tr><td>甲车间</td><td>26</td><td>24</td></tr><tr><td>乙车间</td><td>70</td><td>28</td></tr></table>"
+)
+MINERU_CONTINGENCY = (
+    "<table><tr><td></td><td>优级品</td><td>非优级品</td></tr>"
+    "<tr><td>甲车间</td><td></td><td></td></tr><tr><td>乙车间</td><td></td><td></td></tr></table>"
+)
 
 
 class TableTextTests(SimpleTestCase):
@@ -31,7 +35,7 @@ class TableTextTests(SimpleTestCase):
         [table] = tables.markdown_tables(text)
         self.assertTrue(table["header"])
         self.assertEqual(table["rows"], [["", "优级品", "非优级品"], ["甲车间", "", ""], ["乙车间", "", ""]])
-        self.assertEqual(text[table["start"]:table["end"]], CONTINGENCY)
+        self.assertEqual(text[table["start"] : table["end"]], CONTINGENCY)
         self.assertEqual(tables.without_tables(text), "（1）填写如下列联表：\n\n能否认为有差异？")
 
     def test_absolute_value_is_not_a_table_and_stays_in_a_cell(self):
@@ -41,10 +45,13 @@ class TableTextTests(SimpleTestCase):
         self.assertFalse(table["header"])
 
     def test_mineru_html_becomes_markdown_or_clean_html(self):
-        self.assertEqual(tables.to_text(MINERU_CONTINGENCY),
-                         "|  | 优级品 | 非优级品 |\n|---|---|---|\n| 甲车间 |  |  |\n| 乙车间 |  |  |")
-        entity = tables.to_text("<table><tr><td> $\\triangle ABC$ </td><td>A&#x27;(4,2)</td></tr>"
-                                "<tr><td>x|y</td><td>1</td></tr></table>")
+        self.assertEqual(
+            tables.to_text(MINERU_CONTINGENCY),
+            "|  | 优级品 | 非优级品 |\n|---|---|---|\n| 甲车间 |  |  |\n| 乙车间 |  |  |",
+        )
+        entity = tables.to_text(
+            "<table><tr><td> $\\triangle ABC$ </td><td>A&#x27;(4,2)</td></tr><tr><td>x|y</td><td>1</td></tr></table>"
+        )
         self.assertIn("| $\\triangle ABC$ | A'(4,2) |", entity)
         self.assertIn("| x\\|y | 1 |", entity)
         merged = tables.to_text('<table><tr><td rowspan="2">x</td><td>1</td></tr><tr><td>2</td></tr></table>')
@@ -58,8 +65,10 @@ class TableTextTests(SimpleTestCase):
         # The number printed before the question text does not stop the match.
         placed = tables.insert_table(stem, "| a | b |\n| 1 | 2 |", ["17. 某工厂检验，数据如下："], key=witness_key)
         self.assertTrue(placed.startswith("某工厂检验，数据如下：\n| a | b |"))
-        self.assertEqual(tables.insert_table("已知", "| a | b |\n| 1 | 2 |", ["无关的话"], key=witness_key),
-                         "已知\n| a | b |\n| 1 | 2 |")
+        self.assertEqual(
+            tables.insert_table("已知", "| a | b |\n| 1 | 2 |", ["无关的话"], key=witness_key),
+            "已知\n| a | b |\n| 1 | 2 |",
+        )
 
     def test_prose_check_leaves_the_table_out(self):
         reading = {"stem": f"某工厂检验，数据如下：\n{CONTINGENCY}\n能否认为两车间有差异？", "options": {}}
@@ -86,8 +95,9 @@ class ReadingTableTests(SimpleTestCase):
         reading = parse_reading(raw, 17)
         self.assertEqual(reading["figures"], {"1": "table", "2": "stem"})
         self.assertIn("| 甲车间 | | |", reading["stem"])
-        review = automatic_review(stem=reading["stem"], options={}, candidate_labels={"1"},
-                                  assignments={"1": "table"}, figures=[])
+        review = automatic_review(
+            stem=reading["stem"], options={}, candidate_labels={"1"}, assignments={"1": "table"}, figures=[]
+        )
         self.assertNotIn("candidate_unclassified", review["signals"])
         self.assertIn("candidate_text_table", review["signals"])
         self.assertEqual(review["status"], "ok")
@@ -109,7 +119,10 @@ class TableBlockTests(TestCase):
         override.enable()
         self.addCleanup(override.disable)
         self.paper = Paper.objects.create(
-            filename="gaokao.pdf", kind="pdf", sha256="d" * 64, source_path=str(self.root / "s.pdf"),
+            filename="gaokao.pdf",
+            kind="pdf",
+            sha256="d" * 64,
+            source_path=str(self.root / "s.pdf"),
             pages=[{"page_idx": 2, "width": 1000, "height": 1000}, {"page_idx": 3, "width": 1000, "height": 1000}],
             status=Paper.Status.READY,
         )
@@ -122,10 +135,12 @@ class TableBlockTests(TestCase):
         return path
 
     def test_new_parse_keeps_the_table_html(self):
-        path = self.archive([
-            {"type": "text", "text": "数据如下：", "bbox": [80, 580, 900, 600], "page_idx": 0},
-            {"type": "table", "table_body": MINERU_DATA, "bbox": [87, 615, 907, 769], "page_idx": 0},
-        ])
+        path = self.archive(
+            [
+                {"type": "text", "text": "数据如下：", "bbox": [80, 580, 900, 600], "page_idx": 0},
+                {"type": "table", "table_body": MINERU_DATA, "bbox": [87, 615, 907, 769], "page_idx": 0},
+            ]
+        )
         blocks = load_blocks(path, 1)
         self.assertNotIn("html", blocks[0])
         self.assertEqual(blocks[1]["html"], MINERU_DATA)
@@ -144,23 +159,40 @@ class TableBlockTests(TestCase):
         self.archive(entries)
         # An older paper: the blocks were saved before the HTML was kept.
         for seq, entry in enumerate(entries):
-            Block.objects.create(paper=self.paper, seq=seq, type=entry["type"], page_idx=entry["page_idx"],
-                                 bbox=entry["bbox"], text=entry.get("text", ""))
-        candidates = [{"page_idx": 2, "bbox": [87, 615, 907, 769]}, {"page_idx": 2, "bbox": [87, 824, 907, 900]},
-                      {"page_idx": 3, "bbox": [87, 51, 907, 91]}]
+            Block.objects.create(
+                paper=self.paper,
+                seq=seq,
+                type=entry["type"],
+                page_idx=entry["page_idx"],
+                bbox=entry["bbox"],
+                text=entry.get("text", ""),
+            )
+        candidates = [
+            {"page_idx": 2, "bbox": [87, 615, 907, 769]},
+            {"page_idx": 2, "bbox": [87, 824, 907, 900]},
+            {"page_idx": 3, "bbox": [87, 51, 907, 91]},
+        ]
         return Question.objects.create(
-            paper=self.paper, number=17, question_type="free_response",
+            paper=self.paper,
+            number=17,
+            question_type="free_response",
             regions=[{"page_idx": 2, "bbox": [50, 560, 950, 995]}, {"page_idx": 3, "bbox": [50, 5, 950, 130]}],
             regions_auto=[{"page_idx": 2, "bbox": [50, 560, 950, 995]}, {"page_idx": 3, "bbox": [50, 5, 950, 130]}],
             figure_candidates=candidates,
             figures=[{"slot": "stem", "source": "auto", **candidate} for candidate in candidates],
             stem="某工厂检验，数据如下：\n（1）填写如下列联表：\n能否认为有差异？",
-            state=Question.State.GREEN, approved=True, approved_at=timezone.now(),
+            state=Question.State.GREEN,
+            approved=True,
+            approved_at=timezone.now(),
         )
 
     def post(self, question, body):
-        return self.client.post(f"/api/questions/{question.pk}/figure-table", data=json.dumps(body),
-                                 content_type="application/json", HTTP_X_QB_REQUEST="1")
+        return self.client.post(
+            f"/api/questions/{question.pk}/figure-table",
+            data=json.dumps(body),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
 
     def test_old_paper_learns_its_tables_once(self):
         self.make_card()
@@ -191,8 +223,10 @@ class TableBlockTests(TestCase):
         self.assertFalse(data["figure_blocked"])
         question.refresh_from_db()
         self.assertTrue(question.edited)
-        self.assertEqual(sorted(question.figure_review["ignored_candidates"]),
-                         ["2:87,615,907,769", "2:87,824,907,900", "3:87,51,907,91"])
+        self.assertEqual(
+            sorted(question.figure_review["ignored_candidates"]),
+            ["2:87,615,907,769", "2:87,824,907,900", "3:87,51,907,91"],
+        )
         self.assertEqual(len(tables.all_tables(question.stem)), 2)
         self.assertEqual(library.final_content(question)["figures"], [])
 

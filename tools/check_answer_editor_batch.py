@@ -64,16 +64,19 @@ def restore(baseline: dict) -> None:
         for pub_id, (_original, before) in baseline.items():
             key = db_key(pub_id)
             extra = connection.execute(
-                "select id from core_librarysolution where publication_id = ?", (key,)).fetchall()
+                "select id from core_librarysolution where publication_id = ?", (key,)
+            ).fetchall()
             fresh = [row[0] for row in extra if row[0] not in before]
             for solution_id in fresh:
                 connection.execute("DELETE FROM core_librarysolution WHERE id = ?", (solution_id,))
             left = connection.execute(
-                "select count(*) from core_librarysolution where publication_id = ?", (key,)).fetchone()[0]
+                "select count(*) from core_librarysolution where publication_id = ?", (key,)
+            ).fetchone()[0]
             if left != len(before):
                 missed.append((pub_id, f"删了 {len(fresh)} 行，还剩 {left}，跑之前是 {len(before)}"))
-            written = connection.execute("UPDATE core_publishedquestion SET extras = ? WHERE id = ?",
-                                         (baseline[pub_id][0], key)).rowcount
+            written = connection.execute(
+                "UPDATE core_publishedquestion SET extras = ? WHERE id = ?", (baseline[pub_id][0], key)
+            ).rowcount
             if written != 1:
                 missed.append((pub_id, f"还原 extras 改了 {written} 行"))
         connection.commit()
@@ -85,8 +88,9 @@ def restore(baseline: dict) -> None:
 def extras_of(pub_id: str) -> tuple[str, str]:
     connection = sqlite3.connect(DB)
     try:
-        raw = connection.execute("SELECT extras FROM core_publishedquestion WHERE id = ?",
-                                 (db_key(pub_id),)).fetchone()[0]
+        raw = connection.execute(
+            "SELECT extras FROM core_publishedquestion WHERE id = ?", (db_key(pub_id),)
+        ).fetchone()[0]
     finally:
         connection.close()
     raw = raw or "{}"
@@ -96,8 +100,9 @@ def extras_of(pub_id: str) -> tuple[str, str]:
 def solution_count(pub_id: str) -> int:
     connection = sqlite3.connect(DB)
     try:
-        return connection.execute("SELECT count(*) FROM core_librarysolution WHERE publication_id = ?",
-                                 (db_key(pub_id),)).fetchone()[0]
+        return connection.execute(
+            "SELECT count(*) FROM core_librarysolution WHERE publication_id = ?", (db_key(pub_id),)
+        ).fetchone()[0]
     finally:
         connection.close()
 
@@ -105,8 +110,11 @@ def solution_count(pub_id: str) -> int:
 def latest_answer(pub_id: str) -> str | None:
     connection = sqlite3.connect(DB)
     try:
-        row = connection.execute("SELECT answer FROM core_librarysolution WHERE publication_id = ?"
-                                 " ORDER BY created_at DESC, id DESC LIMIT 1", (db_key(pub_id),)).fetchone()
+        row = connection.execute(
+            "SELECT answer FROM core_librarysolution WHERE publication_id = ?"
+            " ORDER BY created_at DESC, id DESC LIMIT 1",
+            (db_key(pub_id),),
+        ).fetchone()
     finally:
         connection.close()
     return row[0] if row else None
@@ -118,8 +126,9 @@ def pick_without_answers(page, connection) -> list[str]:
         candidate = (node.get_attribute("id") or "").removeprefix("q-")
         if not candidate:
             continue
-        row = connection.execute("SELECT extras FROM core_publishedquestion WHERE id = ?",
-                                 (db_key(candidate),)).fetchone()
+        row = connection.execute(
+            "SELECT extras FROM core_publishedquestion WHERE id = ?", (db_key(candidate),)
+        ).fetchone()
         if row and "solution_id" not in (json.loads(row[0] or "{}") or {}):
             picked.append(candidate)
         if len(picked) == COUNT:
@@ -131,11 +140,15 @@ def open_question(page, number: int) -> None:
     for index, row in enumerate(page.query_selector_all("#answerEditorDialog .answer-list-row")):
         head = row.query_selector("strong")
         if head and head.text_content().strip().startswith(f"第 {number} 题"):
-            page.locator("#answerEditorDialog .answer-list-row").nth(index) \
-                .locator("button.answer-list-question").click()
-            page.wait_for_function("n => { const p = document.querySelector('.answer-editor-place');"
-                                   " return p && p.textContent.startsWith('第 ' + n + ' 题'); }",
-                                   arg=number, timeout=20000)
+            page.locator("#answerEditorDialog .answer-list-row").nth(index).locator(
+                "button.answer-list-question"
+            ).click()
+            page.wait_for_function(
+                "n => { const p = document.querySelector('.answer-editor-place');"
+                " return p && p.textContent.startsWith('第 ' + n + ' 题'); }",
+                arg=number,
+                timeout=20000,
+            )
             return
     raise AssertionError(f"题号带里找不到「第 {number} 题」这一行")
 
@@ -145,8 +158,11 @@ def status_text(page) -> str:
 
 
 def wait_saved(page) -> str:
-    page.wait_for_function("() => { const s = document.querySelector('.answer-editor-status');"
-                           " return s && s.textContent.includes('已保存'); }", timeout=30000)
+    page.wait_for_function(
+        "() => { const s = document.querySelector('.answer-editor-status');"
+        " return s && s.textContent.includes('已保存'); }",
+        timeout=30000,
+    )
     return status_text(page)
 
 
@@ -154,8 +170,7 @@ def snapshot() -> dict:
     """全库解析行分布。键统一成带横杠的，和界面给的编号对得上。"""
     connection = sqlite3.connect(DB)
     try:
-        rows = connection.execute(
-            "select publication_id, count(*) from core_librarysolution group by 1").fetchall()
+        rows = connection.execute("select publication_id, count(*) from core_librarysolution group by 1").fetchall()
     finally:
         connection.close()
     return {dashed(pub): count for pub, count in rows}
@@ -164,8 +179,12 @@ def snapshot() -> dict:
 def solution_ids(pub_id: str) -> set:
     connection = sqlite3.connect(DB)
     try:
-        return {row[0] for row in connection.execute(
-            "select id from core_librarysolution where publication_id = ?", (db_key(pub_id),))}
+        return {
+            row[0]
+            for row in connection.execute(
+                "select id from core_librarysolution where publication_id = ?", (db_key(pub_id),)
+            )
+        }
     finally:
         connection.close()
 
@@ -199,9 +218,15 @@ def walk(baseline: dict) -> dict:
             page.wait_for_selector("#typeFilters button")
 
             picked = pick_without_answers(page, connection)
-            originals = {pub: (connection.execute(
-                "SELECT extras FROM core_publishedquestion WHERE id = ?", (db_key(pub),)).fetchone()[0] or "{}")
-                for pub in picked}
+            originals = {
+                pub: (
+                    connection.execute(
+                        "SELECT extras FROM core_publishedquestion WHERE id = ?", (db_key(pub),)
+                    ).fetchone()[0]
+                    or "{}"
+                )
+                for pub in picked
+            }
             connection.close()
             if not check(len(picked) == COUNT, f"挑到 {len(picked)} 道本来没有解析的题"):
                 return {}
@@ -213,34 +238,44 @@ def walk(baseline: dict) -> dict:
                 page.locator(f"article#q-{pub_id} .library-card-select").check()
                 page.locator("#addSelected").click()
                 page.wait_for_timeout(120)
-            check(page.locator("#basketCount").inner_text().strip() == str(COUNT),
-                  f"{COUNT} 道题都进了篮（篮里写着 {page.locator('#basketCount').inner_text().strip()}）")
+            check(
+                page.locator("#basketCount").inner_text().strip() == str(COUNT),
+                f"{COUNT} 道题都进了篮（篮里写着 {page.locator('#basketCount').inner_text().strip()}）",
+            )
 
             if not page.locator("#basketPanel").is_visible():
                 page.locator("#basketHandle").click()
                 page.wait_for_selector("#basketPanel", state="visible")
             page.locator("#basketButton").click()
             page.wait_for_selector("#printSheet[open]")
-            page.wait_for_function(f"() => document.querySelectorAll('#printPaper .print-question').length >= {COUNT}",
-                                   timeout=60000)
+            page.wait_for_function(
+                f"() => document.querySelectorAll('#printPaper .print-question').length >= {COUNT}", timeout=60000
+            )
             blocks = page.eval_on_selector_all(
-                "#printPaper .print-question", "nodes => nodes.map(n => n.dataset.questionId)")
+                "#printPaper .print-question", "nodes => nodes.map(n => n.dataset.questionId)"
+            )
             repeated = sorted({i for i in blocks if blocks.count(i) > 1})
-            check(len(set(blocks)) == COUNT,
-                  f"预览里有 {len(blocks)} 个题块、{len(set(blocks))} 道题，和篮里 {COUNT} 道对得上"
-                  + (f"（同一道题的小问拆成了多块：{repeated}）" if repeated else ""))
+            check(
+                len(set(blocks)) == COUNT,
+                f"预览里有 {len(blocks)} 个题块、{len(set(blocks))} 道题，和篮里 {COUNT} 道对得上"
+                + (f"（同一道题的小问拆成了多块：{repeated}）" if repeated else ""),
+            )
             if len(set(blocks)) != COUNT:
                 return baseline
             # 卷面是按题型重排过的，编辑器里的「第 N 题」跟的是卷面顺序，不是篮里的顺序。
             # 拿错就等于在量另一道题 —— 这里先换算好。
             paper_order = list(dict.fromkeys(blocks))
-            check(sorted(paper_order) == sorted(picked),
-                  f"卷面顺序和篮里是同一批题（卷面第 1 题 = 篮里第 {picked.index(paper_order[0]) + 1} 题）")
+            check(
+                sorted(paper_order) == sorted(picked),
+                f"卷面顺序和篮里是同一批题（卷面第 1 题 = 篮里第 {picked.index(paper_order[0]) + 1} 题）",
+            )
             check(not page.locator("#printMissing").is_visible(), "没有「尚未载入」的提示")
             try:
                 page.wait_for_function(
                     "() => { const s = document.getElementById('printPageStatus');"
-                    " return s && !s.textContent.includes('正在排版'); }", timeout=90000)
+                    " return s && !s.textContent.includes('正在排版'); }",
+                    timeout=90000,
+                )
             except Exception:
                 check(False, "排版报了完成（一直卡在「正在排版…」，下面的量都不可信）")
 
@@ -268,16 +303,14 @@ def walk(baseline: dict) -> dict:
             # ── 二、默认保存只进这份卷子：多一版行，但题库不指向它 ──
             one, two = paper_order[0], paper_order[1]
             open_question(page, 1)
-            check(not page.locator("#answerEditorSync").is_checked(),
-                  "「同时保存到题库」默认没勾")
+            check(not page.locator("#answerEditorSync").is_checked(), "「同时保存到题库」默认没勾")
             base_rows = snapshot()
             base_link = extras_of(one)[1]
             page.locator("#answerEditorSave").click()
             check("已保存" in wait_saved(page), f"卷面第 1 题存下来了：{status_text(page)[:40]}")
             grew = [pub for pub, count in snapshot().items() if count > base_rows.get(pub, 0)]
             check(grew == [one], f"保存确实落在卷面第 1 题上（多出行的：{grew}）")
-            check(extras_of(one)[1] == base_link,
-                  f"没勾同步时题库不指向新存的那一版（仍挂着 {base_link or '没有'}）")
+            check(extras_of(one)[1] == base_link, f"没勾同步时题库不指向新存的那一版（仍挂着 {base_link or '没有'}）")
 
             # ── 三、勾上同步再存一道：题库和卷子都得有 ──────────────
             survivors = []
@@ -286,8 +319,10 @@ def walk(baseline: dict) -> dict:
                 if page.locator("#answerEditorResult").input_value() != MARK + str(number):
                     survivors.append((number, page.locator("#answerEditorResult").input_value()))
             check(not survivors, f"保存第 1 题之后，另外 {COUNT - 1} 道没保存的字还在（丢的：{survivors}）")
-            check(page.locator(".answer-editor-place").inner_text().strip().endswith(f"共 {COUNT} 题"),
-                  f"题号带还是 {COUNT} 道：{page.locator('.answer-editor-place').inner_text().strip()}")
+            check(
+                page.locator(".answer-editor-place").inner_text().strip().endswith(f"共 {COUNT} 题"),
+                f"题号带还是 {COUNT} 道：{page.locator('.answer-editor-place').inner_text().strip()}",
+            )
 
             open_question(page, 2)
             page.locator("label:has(#answerEditorSync)").click()
@@ -298,8 +333,10 @@ def walk(baseline: dict) -> dict:
             said = wait_saved(page)
             check("已保存到题库" in said, f"卷面第 2 题存下来了：{said[:40]}")
             after_rows = snapshot()
-            check(after_rows.get(two, 0) == base_rows.get(two, 0) + 1,
-                  f"勾了同步，卷面第 2 题在题库里多了一版（{base_rows.get(two, 0)} → {after_rows.get(two, 0)}）")
+            check(
+                after_rows.get(two, 0) == base_rows.get(two, 0) + 1,
+                f"勾了同步，卷面第 2 题在题库里多了一版（{base_rows.get(two, 0)} → {after_rows.get(two, 0)}）",
+            )
             linked = extras_of(two)[1]
             check(bool(linked) and linked != base_link, f"题库把新存的那一版挂上了：{linked or '没有'}")
             if not linked:
@@ -312,9 +349,11 @@ def walk(baseline: dict) -> dict:
             page.locator("#answerEditorSave").click()
             wait_saved(page)
             after_rows = snapshot()
-            check(after_rows.get(two, 0) == base_rows.get(two, 0) + 1,
-                  f"同一道题存了两次，题库里是 {after_rows.get(two, 0)} 版"
-                  f"（{base_rows.get(two, 0)} → {after_rows.get(two, 0)}）")
+            check(
+                after_rows.get(two, 0) == base_rows.get(two, 0) + 1,
+                f"同一道题存了两次，题库里是 {after_rows.get(two, 0)} 版"
+                f"（{base_rows.get(two, 0)} → {after_rows.get(two, 0)}）",
+            )
             check(latest_answer(two) == MARK + "2-改", f"生效的是最后存的那一版：{latest_answer(two)}")
 
             # ── 五、关掉再打开，看到的是刚存的那一版 ──────────────
@@ -330,16 +369,24 @@ def walk(baseline: dict) -> dict:
             page.locator("#managePrintAnswers").click()
             page.wait_for_selector("#answerEditorDialog[open]")
             open_question(page, 2)
-            check(page.locator("#answerEditorResult").input_value() == MARK + "2-改",
-                  f"重新打开还是刚才那版：{page.locator('#answerEditorResult').input_value()!r}")
-            check(not any(word in status_text(page) for word in UNSAVED),
-                  f"状态栏没把它说成还有没保存的东西：{status_text(page)[:40]}")
+            check(
+                page.locator("#answerEditorResult").input_value() == MARK + "2-改",
+                f"重新打开还是刚才那版：{page.locator('#answerEditorResult').input_value()!r}",
+            )
+            check(
+                not any(word in status_text(page) for word in UNSAVED),
+                f"状态栏没把它说成还有没保存的东西：{status_text(page)[:40]}",
+            )
             open_question(page, 1)
-            check(page.locator("#answerEditorResult").input_value() == MARK + "1",
-                  f"只存进这份卷子的第 1 题也还在：{page.locator('#answerEditorResult').input_value()!r}")
+            check(
+                page.locator("#answerEditorResult").input_value() == MARK + "1",
+                f"只存进这份卷子的第 1 题也还在：{page.locator('#answerEditorResult').input_value()!r}",
+            )
             open_question(page, 3)
-            check(page.locator("#answerEditorResult").input_value() == "",
-                  f"确认返回后，没保存的内容真的没被带回来（{page.locator('#answerEditorResult').input_value()!r}）")
+            check(
+                page.locator("#answerEditorResult").input_value() == "",
+                f"确认返回后，没保存的内容真的没被带回来（{page.locator('#answerEditorResult').input_value()!r}）",
+            )
             page.screenshot(path=f"{SHOTS}/answer-editor-reopened.png")
             check(not errors, f"全程没有脚本报错（{errors[:2]}）")
         finally:

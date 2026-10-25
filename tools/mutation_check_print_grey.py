@@ -34,97 +34,101 @@ COMMAND = ["node", "test_print_grey_explanations.js"]
 LIBRARY_JS = "frontend/library.js"
 LIBRARY_CSS = "frontend/library.css"
 
-SPLIT_TITLE = ('    split.title = !printState.items.length ? "先把未载入的选题处理掉，才能分别导出题目卷与答案卷"\n'
-               '      : printState.missing.length ? `这次有 ${printState.missing.length} 道题没载入，先处理掉才能分别导出`\n'
-               '      : !printState.availableAnswers ? "这次组卷的题还没有答案或解析，拆不出答案卷"\n'
-               '      : "导出两份文件：一份只有题目，一份只有答案与解析";')
+SPLIT_TITLE = (
+    '    split.title = !printState.items.length ? "先把未载入的选题处理掉，才能分别导出题目卷与答案卷"\n'
+    "      : printState.missing.length ? `这次有 ${printState.missing.length} 道题没载入，先处理掉才能分别导出`\n"
+    '      : !printState.availableAnswers ? "这次组卷的题还没有答案或解析，拆不出答案卷"\n'
+    '      : "导出两份文件：一份只有题目，一份只有答案与解析";'
+)
 NO_ANSWER_TITLE = '      : !printState.availableAnswers ? "这次组卷的题还没有答案或解析，拆不出答案卷"\n'
 STATUS_GUARD = "    if (items.length && !available) {"
-STATUS_NAMES_OPTION = '和「输出内容」里的「答案与解析」'
-STATUS_NAMES_SWITCH = '「附 AI 参考（未核对）」'
-STATUS_NAMES_ESCAPE = '先在顶栏的「答案解析」里补上答案'
-SPACE_TITLE = ('    $("printIndividualSpace").title = !item ? "先在上面选一道题，才能逐题调整"\n'
-               '      : item.question_type !== "free_response" ? "只对解答题有用，这道题留白没有意义"\n'
-               '      : $("printDocument").value === "answers" ? "输出内容选了「答案与解析」，卷上没有做题的空白"\n'
-               '      : ($("printDocument").value === "combined" && $("printAnswerLayout").value === "inline") ? "答案紧跟在题目后面，不留做题的空白"\n'
-               '      : "这一题在卷面上留多少空白给学生写过程";')
-SPACE_DOCUMENT_BRANCHES = ('      : $("printDocument").value === "answers" ? "输出内容选了「答案与解析」，卷上没有做题的空白"\n'
-                           '      : ($("printDocument").value === "combined" && $("printAnswerLayout").value === "inline") ? "答案紧跟在题目后面，不留做题的空白"\n')
-BREAK_TITLE = ('    $("printIndividualBreak").title = !item ? "先在上面选一道题，才能逐题调整"\n'
-               '      : id === printState.firstQuestion ? "第一题本来就在第一页，不用再另起一页"\n'
-               '      : "让这道题从新的一页开始印";')
-CSS_RULE = (".print-advanced > summary, .print-individual > summary { box-sizing: border-box; "
-            "min-height: 30px; padding-block: 5px; line-height: 20px; cursor: pointer; "
-            "font-size: 13px; font-weight: 600; }")
+STATUS_NAMES_OPTION = "和「输出内容」里的「答案与解析」"
+STATUS_NAMES_SWITCH = "「附 AI 参考（未核对）」"
+STATUS_NAMES_ESCAPE = "先在顶栏的「答案解析」里补上答案"
+SPACE_TITLE = (
+    '    $("printIndividualSpace").title = !item ? "先在上面选一道题，才能逐题调整"\n'
+    '      : item.question_type !== "free_response" ? "只对解答题有用，这道题留白没有意义"\n'
+    '      : $("printDocument").value === "answers" ? "输出内容选了「答案与解析」，卷上没有做题的空白"\n'
+    '      : ($("printDocument").value === "combined" && $("printAnswerLayout").value === "inline") ? "答案紧跟在题目后面，不留做题的空白"\n'
+    '      : "这一题在卷面上留多少空白给学生写过程";'
+)
+SPACE_DOCUMENT_BRANCHES = (
+    '      : $("printDocument").value === "answers" ? "输出内容选了「答案与解析」，卷上没有做题的空白"\n'
+    '      : ($("printDocument").value === "combined" && $("printAnswerLayout").value === "inline") ? "答案紧跟在题目后面，不留做题的空白"\n'
+)
+BREAK_TITLE = (
+    '    $("printIndividualBreak").title = !item ? "先在上面选一道题，才能逐题调整"\n'
+    '      : id === printState.firstQuestion ? "第一题本来就在第一页，不用再另起一页"\n'
+    '      : "让这道题从新的一页开始印";'
+)
+CSS_RULE = (
+    ".print-advanced > summary, .print-individual > summary { box-sizing: border-box; "
+    "min-height: 30px; padding-block: 5px; line-height: 20px; cursor: pointer; "
+    "font-size: 13px; font-weight: 600; }"
+)
 
 # (relative, description, original, mutation)
 MUTATIONS = [
-    (LIBRARY_JS,
-     "the greyed split button goes back to saying nothing on hover",
-     SPLIT_TITLE,
-     '    split.title = "";'),
-
-    (LIBRARY_JS,
-     "having no answers still promises two files",
-     NO_ANSWER_TITLE,
-     ""),
-
-    (LIBRARY_JS,
-     "the status line never says which entries are blocked",
-     STATUS_GUARD,
-     "    if (false) {"),
-
-    (LIBRARY_JS,
-     "the status line keeps complaining even after the answers are there",
-     STATUS_GUARD,
-     "    if (items.length) {"),
-
-    (LIBRARY_JS,
-     "the status line stops naming the locked 答案与解析 option",
-     STATUS_NAMES_OPTION,
-     "和"),
-
-    (LIBRARY_JS,
-     "the status line points at a vague 「that switch」 instead of naming it",
-     STATUS_NAMES_SWITCH,
-     "上面那个开关"),
-
-    (LIBRARY_JS,
-     "with no AI answers available, the real way out is no longer named",
-     STATUS_NAMES_ESCAPE,
-     "就只能先出题目卷了"),
-
-    (LIBRARY_JS,
-     "本题留白 goes back to having no hover text",
-     SPACE_TITLE,
-     '    $("printIndividualSpace").title = "";'),
-
-    (LIBRARY_JS,
-     "本题留白 always blames the question type, even when the paper is answers-only",
-     SPACE_DOCUMENT_BRANCHES,
-     ""),
-
-    (LIBRARY_JS,
-     "这题另起一页 goes back to having no hover text",
-     BREAK_TITLE,
-     '    $("printIndividualBreak").title = "";'),
-
-    (LIBRARY_CSS,
-     "the two section bars shrink back to a 20px click target",
-     CSS_RULE,
-     ".print-advanced > summary, .print-individual > summary { cursor: pointer; font-size: 13px; font-weight: 600; }"),
-
-    (LIBRARY_CSS,
-     "the section bars lose their disclosure triangle to a flex display",
-     CSS_RULE,
-     ".print-advanced > summary, .print-individual > summary { display: flex; align-items: center; min-height: 30px; "
-     "cursor: pointer; font-size: 13px; font-weight: 600; }"),
-
-    (LIBRARY_CSS,
-     "only 更多排版 gets the taller click target, 调整单题 stays 20px",
-     CSS_RULE,
-     ".print-advanced > summary { box-sizing: border-box; min-height: 30px; padding-block: 5px; line-height: 20px; "
-     "cursor: pointer; font-size: 13px; font-weight: 600; }"),
+    (LIBRARY_JS, "the greyed split button goes back to saying nothing on hover", SPLIT_TITLE, '    split.title = "";'),
+    (LIBRARY_JS, "having no answers still promises two files", NO_ANSWER_TITLE, ""),
+    (LIBRARY_JS, "the status line never says which entries are blocked", STATUS_GUARD, "    if (false) {"),
+    (
+        LIBRARY_JS,
+        "the status line keeps complaining even after the answers are there",
+        STATUS_GUARD,
+        "    if (items.length) {",
+    ),
+    (LIBRARY_JS, "the status line stops naming the locked 答案与解析 option", STATUS_NAMES_OPTION, "和"),
+    (
+        LIBRARY_JS,
+        "the status line points at a vague 「that switch」 instead of naming it",
+        STATUS_NAMES_SWITCH,
+        "上面那个开关",
+    ),
+    (
+        LIBRARY_JS,
+        "with no AI answers available, the real way out is no longer named",
+        STATUS_NAMES_ESCAPE,
+        "就只能先出题目卷了",
+    ),
+    (
+        LIBRARY_JS,
+        "本题留白 goes back to having no hover text",
+        SPACE_TITLE,
+        '    $("printIndividualSpace").title = "";',
+    ),
+    (
+        LIBRARY_JS,
+        "本题留白 always blames the question type, even when the paper is answers-only",
+        SPACE_DOCUMENT_BRANCHES,
+        "",
+    ),
+    (
+        LIBRARY_JS,
+        "这题另起一页 goes back to having no hover text",
+        BREAK_TITLE,
+        '    $("printIndividualBreak").title = "";',
+    ),
+    (
+        LIBRARY_CSS,
+        "the two section bars shrink back to a 20px click target",
+        CSS_RULE,
+        ".print-advanced > summary, .print-individual > summary { cursor: pointer; font-size: 13px; font-weight: 600; }",
+    ),
+    (
+        LIBRARY_CSS,
+        "the section bars lose their disclosure triangle to a flex display",
+        CSS_RULE,
+        ".print-advanced > summary, .print-individual > summary { display: flex; align-items: center; min-height: 30px; "
+        "cursor: pointer; font-size: 13px; font-weight: 600; }",
+    ),
+    (
+        LIBRARY_CSS,
+        "only 更多排版 gets the taller click target, 调整单题 stays 20px",
+        CSS_RULE,
+        ".print-advanced > summary { box-sizing: border-box; min-height: 30px; padding-block: 5px; line-height: 20px; "
+        "cursor: pointer; font-size: 13px; font-weight: 600; }",
+    ),
 ]
 
 
@@ -139,8 +143,9 @@ def apply(source: str, original: str, mutation: str) -> str:
 
 
 def run() -> subprocess.CompletedProcess:
-    return subprocess.run(COMMAND, cwd=str(FRONTEND), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace")
+    return subprocess.run(
+        COMMAND, cwd=str(FRONTEND), capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
 
 
 def main() -> int:
@@ -169,8 +174,11 @@ def main() -> int:
         if not caught:
             print((broken.stdout or "")[-2000:] + (broken.stderr or "")[-2000:])
     survived = [item for item in results if not item[1]]
-    print(f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住" if not survived
-          else f"\n{len(survived)} 条变异漏过：{survived}")
+    print(
+        f"\n{len(results) - len(survived)}/{len(results)} 条变异均被挡住"
+        if not survived
+        else f"\n{len(survived)} 条变异漏过：{survived}"
+    )
     return 1 if survived else 0
 
 

@@ -57,24 +57,32 @@ class SavedExampleLabelCleanupTests(TestCase):
         override.enable()
         self.addCleanup(override.disable)
         self.paper = Paper.objects.create(
-            filename="必修一.pdf", kind="pdf", sha256="e" * 64,
+            filename="必修一.pdf",
+            kind="pdf",
+            sha256="e" * 64,
             source_path=str(Path(temp.name) / "source.pdf"),
             pages=[{"page_idx": 0, "width": 1000, "height": 1000}],
-            status=Paper.Status.READY, material_type=Paper.MaterialType.BOOK,
+            status=Paper.Status.READY,
+            material_type=Paper.MaterialType.BOOK,
         )
         self.group = QuestionGroup.objects.create(
-            paper=self.paper, title="1.1 集合", sequence=0, page_start=1, page_end=1,
-            metadata={"pages": [0]},
+            paper=self.paper, title="1.1 集合", sequence=0, page_start=1, page_end=1, metadata={"pages": [0]}
         )
 
     def card(self, stem, **extra):
         # 1.10: an undecided type blocks approval; these cards are about labels.
         extra.setdefault("question_type", "free_response")
         return Question.objects.create(
-            paper=self.paper, group=self.group, number=extra.pop("number", 1), stem=stem,
+            paper=self.paper,
+            group=self.group,
+            number=extra.pop("number", 1),
+            stem=stem,
             regions=[{"page_idx": 0, "bbox": [20, 100, 900, 260]}],
-            read_a={"stem": stem, "raw": f"【题干】{stem}"}, read_b={"stem": stem},
-            state=Question.State.GREEN, source_kind=Question.SourceKind.EXAMPLE, **extra,
+            read_a={"stem": stem, "raw": f"【题干】{stem}"},
+            read_b={"stem": stem},
+            state=Question.State.GREEN,
+            source_kind=Question.SourceKind.EXAMPLE,
+            **extra,
         )
 
     def approve(self, question):
@@ -113,8 +121,9 @@ class SavedExampleLabelCleanupTests(TestCase):
         self.assertEqual(PublishedQuestion.objects.count(), 1)
 
     def test_stale_approval_stays_stale_and_other_cards_are_untouched(self):
-        stale = self.card("例2 已知集合A={1,2}", number=2, approved=True,
-                          approved_at=timezone.now(), approved_content_hash="0" * 64)
+        stale = self.card(
+            "例2 已知集合A={1,2}", number=2, approved=True, approved_at=timezone.now(), approved_content_hash="0" * 64
+        )
         reference = self.card("例2中的集合A有几个元素？", number=3)
         plain = self.card("已知集合B={3}", number=4)
 

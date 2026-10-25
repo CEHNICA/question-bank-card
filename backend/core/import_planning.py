@@ -75,11 +75,7 @@ def pdf_requires_chunks(total_pages: int, material_type: str, hard_max_pages: in
 
 
 def plan_pdf_chunks(
-    total_pages: int,
-    max_pages: int,
-    *,
-    start_page: int = 1,
-    end_page: int | None = None,
+    total_pages: int, max_pages: int, *, start_page: int = 1, end_page: int | None = None
 ) -> list[PageChunk]:
     """Split a selected PDF range into contiguous, non-overlapping chunks.
 
@@ -127,12 +123,7 @@ def _chunk_value(chunk: PageChunk | Mapping, name: str):
     return getattr(chunk, name)
 
 
-def validate_chunk_coverage(
-    chunks: Iterable[PageChunk | Mapping],
-    *,
-    expected_start: int,
-    expected_end: int,
-) -> bool:
+def validate_chunk_coverage(chunks: Iterable[PageChunk | Mapping], *, expected_start: int, expected_end: int) -> bool:
     """Require an ordered, exact cover of the selected original-page interval.
 
     Returning ``True`` makes this convenient in guards and tests. Invalid input
@@ -155,25 +146,17 @@ def validate_chunk_coverage(
         page_map = tuple(int(page) for page in _chunk_value(chunk, "page_map"))
 
         if sequence != expected_sequence:
-            raise ChunkCoverageError(
-                f"分片序号应为 {expected_sequence}，实际为 {sequence}"
-            )
+            raise ChunkCoverageError(f"分片序号应为 {expected_sequence}，实际为 {sequence}")
         if end < start:
             raise ChunkCoverageError(f"第 {sequence} 个分片的页码范围倒置")
         if start < next_page:
-            raise ChunkCoverageError(
-                f"第 {sequence} 个分片从第 {start} 页开始，与前一分片重叠"
-            )
+            raise ChunkCoverageError(f"第 {sequence} 个分片从第 {start} 页开始，与前一分片重叠")
         if start > next_page:
-            raise ChunkCoverageError(
-                f"第 {sequence} 个分片从第 {start} 页开始，漏掉了第 {next_page} 页"
-            )
+            raise ChunkCoverageError(f"第 {sequence} 个分片从第 {start} 页开始，漏掉了第 {next_page} 页")
 
         expected_map = tuple(range(start, end + 1))
         if page_map != expected_map:
-            raise ChunkCoverageError(
-                f"第 {sequence} 个分片的原始页映射与页码范围不一致"
-            )
+            raise ChunkCoverageError(f"第 {sequence} 个分片的原始页映射与页码范围不一致")
         next_page = end + 1
 
     if next_page - 1 < expected_end:
@@ -223,9 +206,7 @@ class QuestionGroupingPlan:
         return bool(self.signals)
 
 
-def _normalize_numbering_pages(
-    pages: Iterable[NumberingPage | Mapping | Sequence[int]],
-) -> list[NumberingPage]:
+def _normalize_numbering_pages(pages: Iterable[NumberingPage | Mapping | Sequence[int]]) -> list[NumberingPage]:
     normalized: list[NumberingPage] = []
     previous_page = 0
     for fallback_page, item in enumerate(pages, start=1):
@@ -251,9 +232,7 @@ def _normalize_numbering_pages(
 
 
 def analyze_question_number_structure(
-    pages: Iterable[NumberingPage | Mapping | Sequence[int]],
-    *,
-    material_type: str = MATERIAL_EXAM,
+    pages: Iterable[NumberingPage | Mapping | Sequence[int]], *, material_type: str = MATERIAL_EXAM
 ) -> QuestionGroupingPlan:
     """Detect restarts/overlaps without deleting or merging any question.
 
@@ -313,21 +292,13 @@ def analyze_question_number_structure(
     for boundary_page, reason in boundaries:
         groups.append(
             SuggestedQuestionGroup(
-                sequence=len(groups),
-                page_start=group_start,
-                page_end=boundary_page - 1,
-                reason=group_reason,
+                sequence=len(groups), page_start=group_start, page_end=boundary_page - 1, reason=group_reason
             )
         )
         group_start = boundary_page
         group_reason = reason
     groups.append(
-        SuggestedQuestionGroup(
-            sequence=len(groups),
-            page_start=group_start,
-            page_end=last_page,
-            reason=group_reason,
-        )
+        SuggestedQuestionGroup(sequence=len(groups), page_start=group_start, page_end=last_page, reason=group_reason)
     )
 
     return QuestionGroupingPlan(
@@ -339,9 +310,7 @@ def analyze_question_number_structure(
 
 
 def analyze_page_number_ranges(
-    page_ranges: Iterable[tuple[int, int] | None],
-    *,
-    material_type: str = MATERIAL_EXAM,
+    page_ranges: Iterable[tuple[int, int] | None], *, material_type: str = MATERIAL_EXAM
 ) -> QuestionGroupingPlan:
     """Adapter for photo-page evidence represented as inclusive ``(low, high)`` ranges."""
 

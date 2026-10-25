@@ -28,18 +28,14 @@ def scan_pdf(pages: int = 1) -> bytes:
     Image.new("RGB", (595, 842), "white").save(buffer, format="PNG")
     with fitz.open() as document:
         for _ in range(pages):
-            document.new_page(width=595, height=842).insert_image(
-                fitz.Rect(0, 0, 595, 842), stream=buffer.getvalue())
+            document.new_page(width=595, height=842).insert_image(fitz.Rect(0, 0, 595, 842), stream=buffer.getvalue())
         return document.tobytes()
 
 
 CLOUD_BLOCKS = [
-    {"page_idx": 0, "seq": 0, "type": "text", "bbox": [40.0, 60.0, 540.0, 200.0],
-     "text": "1. 设 x = 1，求 y 的值。"},
-    {"page_idx": 0, "seq": 1, "type": "text", "bbox": [40.0, 240.0, 540.0, 380.0],
-     "text": "2. 设 x = 2，求 y 的值。"},
-    {"page_idx": 0, "seq": 2, "type": "text", "bbox": [40.0, 420.0, 540.0, 560.0],
-     "text": "3. 设 x = 3，求 y 的值。"},
+    {"page_idx": 0, "seq": 0, "type": "text", "bbox": [40.0, 60.0, 540.0, 200.0], "text": "1. 设 x = 1，求 y 的值。"},
+    {"page_idx": 0, "seq": 1, "type": "text", "bbox": [40.0, 240.0, 540.0, 380.0], "text": "2. 设 x = 2，求 y 的值。"},
+    {"page_idx": 0, "seq": 2, "type": "text", "bbox": [40.0, 420.0, 540.0, 560.0], "text": "3. 设 x = 3，求 y 的值。"},
 ]
 
 
@@ -50,9 +46,11 @@ class CloudContentBecomesAutomaticAgainTests(TestCase):
     def cloud_parsed_paper(self, *, pages: int = 1):
         """A scan import that is queued for the cloud, exactly as a photo is."""
         paper = self.paper(data=scan_pdf(pages))
-        with mock.patch.object(pipeline, "readers"), \
-                mock.patch.object(readers, "configured", return_value=True), \
-                mock.patch.object(readers, "_reading_ready", return_value=True, create=True):
+        with (
+            mock.patch.object(pipeline, "readers"),
+            mock.patch.object(readers, "configured", return_value=True),
+            mock.patch.object(readers, "_reading_ready", return_value=True, create=True),
+        ):
             paper = intake.prepare_auto(paper, allow_cloud=True, cloud_ready=True)
         self.assertEqual(paper.processing_plan["mode"], "mineru")
         # The import has no text layer, so every page starts out marked manual.
@@ -60,9 +58,11 @@ class CloudContentBecomesAutomaticAgainTests(TestCase):
         return paper
 
     def run_parse(self, paper, blocks):
-        with mock.patch.object(pipeline, "request_extract_file_from_pool"), \
-                mock.patch.object(pipeline, "load_blocks", return_value=blocks), \
-                mock.patch.object(pipeline.Path, "is_file", return_value=True):
+        with (
+            mock.patch.object(pipeline, "request_extract_file_from_pool"),
+            mock.patch.object(pipeline, "load_blocks", return_value=blocks),
+            mock.patch.object(pipeline.Path, "is_file", return_value=True),
+        ):
             pipeline.parse(paper, revision=int(paper.processing_plan["revision"]))
         paper.refresh_from_db()
         return paper
@@ -71,8 +71,9 @@ class CloudContentBecomesAutomaticAgainTests(TestCase):
         paper = self.cloud_parsed_paper()
         self.run_parse(paper, CLOUD_BLOCKS)
         pages = paper.processing_plan["pages"]
-        self.assertEqual([p["mode"] for p in pages], ["mineru"],
-                         "the cloud read this page, so it is no longer a manual page")
+        self.assertEqual(
+            [p["mode"] for p in pages], ["mineru"], "the cloud read this page, so it is no longer a manual page"
+        )
         self.assertTrue(pages[0]["text_characters"] > 0)
 
     def test_a_page_the_cloud_found_nothing_on_stays_manual_and_says_so(self):
@@ -90,21 +91,31 @@ class CloudContentBecomesAutomaticAgainTests(TestCase):
         self.run_parse(paper, CLOUD_BLOCKS)
         pipeline.segment_paper(paper)
         paper.refresh_from_db()
-        self.assertGreaterEqual(paper.questions.count(), 1,
-                                "the run had printed question numbers; dropping them all is the bug")
+        self.assertGreaterEqual(
+            paper.questions.count(), 1, "the run had printed question numbers; dropping them all is the bug"
+        )
         self.assertEqual(paper.status, Paper.Status.READING)
 
     def test_a_run_that_drops_everything_says_which_pages_why(self):
         # 云端什么也没读回来时，题号可以被算出来，但题卡必须留在原卷上给人框。
         # 以前这里是静默 continue，现在要说出来。
         paper = self.paper(data=scan_pdf())
-        group = QuestionGroup.objects.create(paper=paper, title=paper.display_name, sequence=0,
-            page_start=1, page_end=1, metadata={"pages": [0], "source": "manual"})
+        group = QuestionGroup.objects.create(
+            paper=paper,
+            title=paper.display_name,
+            sequence=0,
+            page_start=1,
+            page_end=1,
+            metadata={"pages": [0], "source": "manual"},
+        )
         for block in CLOUD_BLOCKS:
             Block.objects.create(paper=paper, **block)
         paper.status = Paper.Status.SEGMENTING
-        paper.processing_plan = {"revision": 3, "mode": "mineru",
-                                 "pages": [{"page_idx": 0, "mode": "manual", "warnings": []}]}
+        paper.processing_plan = {
+            "revision": 3,
+            "mode": "mineru",
+            "pages": [{"page_idx": 0, "mode": "manual", "warnings": []}],
+        }
         paper.save()
         with self.assertRaises(RuntimeError) as caught:
             pipeline.segment_paper(paper)
@@ -123,8 +134,14 @@ class TheFailedCutOffersTheWayBackTests(TestCase):
 
     def test_a_failed_cut_with_a_saved_parse_is_recoverable_without_paying_again(self):
         paper = self.paper(data=scan_pdf())
-        Block.objects.create(paper=paper, page_idx=0, seq=0, type="text",
-                             bbox=[40.0, 60.0, 540.0, 200.0], text="1. 设 x = 1，求 y 的值。")
+        Block.objects.create(
+            paper=paper,
+            page_idx=0,
+            seq=0,
+            type="text",
+            bbox=[40.0, 60.0, 540.0, 200.0],
+            text="1. 设 x = 1，求 y 的值。",
+        )
         paper.status = Paper.Status.FAILED
         paper.error = "自动切题没有切出任何题目：本地文字层没有可靠题卡。"
         paper.processing_plan = {"revision": 3, "mode": "mineru"}

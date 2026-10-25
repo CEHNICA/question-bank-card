@@ -6,6 +6,7 @@ fail. Files are snapshotted first and restored byte-exact afterwards.
 Everything goes through bytes on purpose: read_text()/write_text() would
 translate CRLF to LF and leave the working copy dirty after a restore.
 """
+
 import pathlib
 import subprocess
 import sys
@@ -25,7 +26,11 @@ def restore():
 def run():
     proc = subprocess.run(
         ["node", "frontend/test_review_counts.js"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=root,
     )
     return proc.returncode, (proc.stderr or proc.stdout).strip().splitlines()
 

@@ -42,8 +42,9 @@ def is_demo(paper: Paper) -> bool:
 
 
 def existing_demo() -> Paper | None:
-    return next((paper for paper in Paper.objects.filter(archived=False).order_by("-created_at")
-                 if is_demo(paper)), None)
+    return next(
+        (paper for paper in Paper.objects.filter(archived=False).order_by("-created_at") if is_demo(paper)), None
+    )
 
 
 def create_demo_paper(*, reset: bool = False, course: str = "full") -> Paper:
@@ -57,12 +58,16 @@ def create_demo_paper(*, reset: bool = False, course: str = "full") -> Paper:
     fixture = json.loads((root / "demo-paper.json").read_text(encoding="utf-8"))
     pdf = (root / "demo-paper.pdf").read_bytes()
     paper = Paper(
-        filename=fixture["filename"], task_name=fixture["name"], kind="pdf",
+        filename=fixture["filename"],
+        task_name=fixture["name"],
+        kind="pdf",
         # Not the PDF's own digest: uploading the public demo PDF itself must
         # start a real reading, not open this practice copy.
         sha256=hashlib.sha256(pdf + b"\0qb-practice").hexdigest(),
-        material_type=Paper.MaterialType.EXAM, pages=fixture["pages"],
-        status=Paper.Status.READY, structure={DEMO_MARK: True, "course": course},
+        material_type=Paper.MaterialType.EXAM,
+        pages=fixture["pages"],
+        status=Paper.Status.READY,
+        structure={DEMO_MARK: True, "course": course},
         processing_plan={"mode": "manual", "revision": 0} if course == "basics" else {},
     )
     folder = settings.DATA_ROOT / str(paper.id)
