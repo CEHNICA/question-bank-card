@@ -206,7 +206,7 @@ python tools/check_export_tag_refactor.py --database <db> --base http://127.0.0.
 | 版本一致性 | 源码 `version.py` = 1.27.0；产物 `tiyouju.exe --version` = **tiyouju 1.27.0**（打包脚本硬闸校验） |
 | 可运行文件夹 | `work/question-bank-card/packaging/dist/QuestionBankCard/` |
 | 便携 ZIP | `work/candidate/QuestionBankCard-1.27.0-portable.zip`（**62.0 MB**） |
-| SHA-256 | `575c0755c622987ae82809c8a0ec9aab8bd0548465ec308a78cbaa018c729265` |
+| SHA-256 | `6d3b75e6fd978d46d5dc92a101aee4452556afb0c76adb7b6d58d82022afa88d` |
 | 校验文件 | `QuestionBankCard-1.27.0-portable.zip.sha256`（同目录） |
 | ZIP 完整性 | `zipfile.testzip()` → **OK** |
 | 解压后启动 | 从 ZIP 解压 → `tiyouju.exe --version` = 1.27.0 → 起服务 8797 → `/api/library/search` **200**、`/library/concepts` **200 且含三入口** |
@@ -255,6 +255,57 @@ PID 80756  QuestionBankCard.exe --internal-role runserver 127.0.0.1:8768
 | 文件 mtime | **2026-10-25 00:02:14** | 本轮开始前 ✓ |
 
 **生产库一个字节都没被改过。安装版还是 1.26.31。**
+
+---
+
+## 6.5 装到本机后的实测（2026-10-25 02:33 起）
+
+**这一节是后来加的** —— 候选装到本机、真实库跑过迁移之后的结果。
+
+### 备份（先做，SHA-256 校验过）
+
+| 备份 | 位置 | 校验 |
+|---|---|---|
+| 数据库 | `%LOCALAPPDATA%\QuestionBankCard\backups\before-1.27.0-20261025-023315\db.sqlite3` | SHA-256 与原文件**一致** ✓ |
+| 旧安装目录（程序层） | `work\old-install-1.26.31-20261025-023535\`（5542 个文件，193.6 MB） | 版本核对为 1.26.31 ✓ |
+| 软件自己打的 | `%LOCALAPPDATA%\QuestionBankCard\backups\pre-migrate-20261025-023835-031a15ff.sqlite3` | 软件检测到 schema 变化后**自动**备份的 ✓ |
+
+### 先在副本上验迁移，再动真库
+
+用备份的副本跑完整迁移（不是猜）：
+
+| 检查 | 结果 |
+|---|---|
+| 0030 / 0031 是否应用 | OK |
+| 题库 | **869**（807 published + 12 superseded + 50 withdrawn，分状态不变） |
+| 标签 / 关联 / 候选 | **306 / 21 / 904**（一位不差） |
+| 候选状态分布 | accepted 7 / failed 38 / pending 443 / queued 367 / stale 49 —— **一位不差** |
+| 旧关联的 `role` | 全部 `legacy` —— **没有一条被自动升级成「主要考查」** |
+| 旧关联的 `evidence_status` | 全部 `unbound` —— 旧记录未绑定具体依据 |
+
+### 装上之后（真实数据）
+
+| 检查 | 结果 |
+|---|---|
+| 安装目录版本 | `tiyouju 1.27.0` |
+| 桌面快捷方式 | **不用改** —— 路径没变（`...\Programs\QuestionBankCard\QuestionBankCard.exe`），只换了文件内容 |
+| 真实库迁移 | 0030 + 0031 应用成功，数据一位不差 |
+| 题库页 / 新工作台页 | HTTP 200 ✓ |
+| 空查询 | count = **807**（正是正式题数），列表 50 条封顶 |
+| 搜「一次函数」 | 命中 24 个概念；选「一次函数」→ **已确认匹配 0 题、旧标签命中 1 题** |
+
+### 装到真机上才暴露的两个问题（已修）
+
+1. **旧记录在概念检索里被整条排除** —— 概念分组只认 `primary`，那 21 条旧记录（role=legacy）连「旧标签命中」那一桶都进不去，搜「一次函数」显示「已确认匹配 0 题」。已修：旧记录命中也算匹配，但归 legacy 桶，理由写明「旧标签命中，未定位具体解法」。
+
+2. **旧关联的 `evidence_status` 是 0030 给的默认值 `current`** —— 对新增的行没问题，但迁移前就存在的旧关联一条都没绑定到新的结构化依据，说「依据当前有效」是骗人。已补 **0031 迁移**把它改成 `unbound`。
+
+**这两个都是用真实数据才显形的** —— 隔离的 18 道虚构题里没有旧记录，测不出来。
+
+### 启动方式的坑
+
+用 `cmd /c start "" cmd /c "<exe>"` 启动时，**cmd 窗口闪退会把 exe 一起带走**（日志里是「窗口已关闭，停止服务」，不是崩溃）。
+GUI 应用直接 `Start-Process <exe>`（等同双击）就稳定：45 秒后 3 个进程俱在，8768 在听。
 
 ---
 
