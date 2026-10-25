@@ -106,6 +106,39 @@ class QuestionGroup(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    def scope_label(self) -> str:
+        """题组在原卷上的位置标签，例如「第 3 页 · 第 3 组」。
+
+        题组名必须让老师一眼看出它管的是原卷哪一块。文件名、切片序号
+        这类内部标识认不出范围，同一份资料里多个组会长得一模一样。
+        """
+        pages = sorted({page for page in (self.metadata or {}).get("pages") or [] if type(page) is int})
+        if pages:
+            first, last = pages[0] + 1, pages[-1] + 1
+            page_part = f"第 {first} 页" if first == last else f"第 {first}–{last} 页"
+        elif self.page_start and self.page_end:
+            first, last = self.page_start, self.page_end
+            page_part = f"第 {first} 页" if first == last else f"第 {first}–{last} 页"
+        else:
+            page_part = ""
+        group_part = f"第 {self.sequence + 1} 组"
+        return " · ".join(part for part in (page_part, group_part) if part)
+
+    def display_title(self) -> str:
+        """显示用的题组名。
+
+        试卷的组名以前直接甩文件名，同一份资料里几个组长得一模一样，
+        认不出是哪一块，改用位置标签。教材的章节名（"第三章 · 习题"）
+        老师认得出来，保留它，只在认不出时退回位置标签。
+        """
+        title = (self.title or "").strip()
+        label = self.scope_label()
+        if self.kind == self.Kind.CHAPTER and title and "章" in title:
+            return title
+        if label:
+            return label
+        return title or f"第 {self.sequence + 1} 组"
+
     class Meta:
         ordering = ["sequence", "id"]
         constraints = [

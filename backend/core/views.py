@@ -515,7 +515,7 @@ def paper_json(paper: Paper, *, with_counts: bool = True, rows: list[Question] |
         "question_groups": [
             {
                 "id": group.pk,
-                "title": group.title,
+                "title": group.display_title(),
                 "sequence": group.sequence,
                 "pages": list((group.metadata or {}).get("pages") or []),
             }
@@ -674,7 +674,7 @@ def question_json(question: Question, table_blocks: list[dict] | None = None) ->
         "ocr_pending": question.ocr_pending,
         "question_images": question_images,
         "group": (
-            {"id": question.group_id, "title": question.group.title, "sequence": question.group.sequence}
+            {"id": question.group_id, "title": question.group.display_title(), "sequence": question.group.sequence}
             if question.group_id
             else None
         ),
@@ -737,7 +737,11 @@ def _question_trash_json(batch: QuestionDeletionBatch) -> dict:
                 "id": question.pk,
                 "number": question.number,
                 "group": (
-                    {"id": question.group_id, "title": question.group.title, "sequence": question.group.sequence}
+                    {
+                        "id": question.group_id,
+                        "title": question.group.display_title(),
+                        "sequence": question.group.sequence,
+                    }
                     if question.group_id
                     else None
                 ),

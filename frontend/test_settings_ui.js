@@ -240,8 +240,10 @@ assert.match(js, /engines\.saved\?\.\[role\]\s*\|\|\s*engines\.selected/);
 assert.doesNotMatch(js, /AI 两次一致|AI 三读多数一致/);
 
 // 手工切题统一由原卷校正器保存；题组选择和 group_id 都在同一布局请求中。
-assert.match(layout, /groups\(\)\.forEach\(\(g\) => \{ const o = el\("option"/);
+// 题组按当前页自动推导，只有这一页真的横跨两个题组时才让老师选一次。
+assert.match(layout, /owners\.forEach\(\(g\) => \{ const o = el\("option"/);
 assert.match(layout, /group_id: t\.group_id/);
+assert.match(layout, /pickGroupForPages\(groups\(\), pages, state\.questions\)/);
 assert.match(js, /openPageDialog\("view"/);
 assert.doesNotMatch(js, /api\/papers\/\$\{state\.paperId\}\/questions/);
 

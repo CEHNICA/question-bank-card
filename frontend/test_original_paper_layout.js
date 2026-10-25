@@ -49,6 +49,35 @@ assert.equal(L.validate(renumber, questions, pages), "", "same number on the sou
 assert.equal(L.movedEnough({ clientX: 10, clientY: 10 }, { clientX: 13, clientY: 13 }), false, "three-pixel diagonal jitter is harmless");
 assert.equal(L.movedEnough({ clientX: 10, clientY: 10 }, { clientX: 14, clientY: 10 }), true);
 assert.deepEqual(L.moveBox([800, 850, 999, 998], 20, 20), [801, 852, 1000, 1000]);
+
+// A group's label must name the place it covers, not the file it came from.
+const scopeGroups = [
+  { id: 187, sequence: 0, pages: [0], title: "IMG20261025105610 等 3 张照片" },
+  { id: 188, sequence: 1, pages: [0], title: "IMG20261025105610 等 3 张照片（2）" },
+  { id: 191, sequence: 4, pages: [2], title: "IMG20261025105610 等 3 张照片（5）" },
+  { id: 192, sequence: 5, pages: [2], title: "IMG20261025105610 等 3 张照片（6）" }
+];
+assert.equal(L.groupTitle(scopeGroups[0]), "第 1 页 · 第 1 组", "a group is named by the page it covers, never by the source file");
+assert.equal(L.groupTitle(scopeGroups[2]), "第 3 页 · 第 5 组");
+assert.equal(L.groupCoversPage(scopeGroups[2], 2), true);
+assert.equal(L.groupCoversPage(scopeGroups[2], 1), false);
+
+// A new question belongs to the scope that owns the page it is framed on.
+// Picking the first group put it into an unrelated scope on any paper with
+// more than one group.
+const scopeQuestions = [
+  { id: 1, number: 7, group: { id: 191 }, regions: [r(2, [50, 260, 530, 400])] },
+  { id: 2, number: 2, group: { id: 191 }, regions: [r(2, [530, 135, 970, 195])] },
+  { id: 3, number: 9, group: { id: 192 }, regions: [r(2, [477, 677, 949, 814])] }
+];
+assert.equal(L.pickGroupForPages(scopeGroups, [2], scopeQuestions).id, 192, "the scope whose numbering already reached furthest on the page wins");
+assert.equal(L.pickGroupForPages(scopeGroups, [0], scopeQuestions).id, 188,
+  "page 1 is shared by two scopes; the one that actually holds questions wins over the empty shell");
+assert.equal(L.pickGroupForPages(scopeGroups, [9], scopeQuestions), null, "a page no scope owns has no answer");
+const singleOwner = [{ id: 5, sequence: 0, pages: [3] }];
+assert.equal(L.pickGroupForPages(singleOwner, [3], scopeQuestions).id, 5);
+assert.equal(L.pickGroupForPages(scopeGroups, [2], scopeQuestions.slice(0, 1)).id, 191,
+  "without a numbering hint the later scope wins, so a new question moves forward instead of back");
 const evidence = L.sourceEvidence({ questions: [a, b], region_reads: [{ id: 4, question_id: 1, text: "旧识读" }, { id: 5, question_id: 2 }], publications: [{ id: 8, question_id: 1 }, { id: 9, question_id: 2 }], library_jobs: [{ id: 11, publication_id: 8, result: { answer: "旧答案" } }, { id: 12, publication_id: 9 }] }, 1);
 assert.equal(evidence.question.edited_stem, "人工文字");
 assert.deepEqual(evidence.region_reads.map((item) => item.id), [4]);
@@ -89,7 +118,7 @@ async function run() {
   global.requestAnimationFrame = (callback) => callback();
   const nodes = new Map(); const $ = (id) => { if (!nodes.has(id)) { const node = new Node(); node.id = id; nodes.set(id, node); } return nodes.get(id); };
   const dialog = { mode: "view", page: 0, imageReady: true, saving: false, tool: "select", spacePan: false };
-  const state = { paperId: 7, paper: { id: 7, layout_revision: 9, pages, question_groups: [{ id: 10, title: "组10" }, { id: 20, title: "组20" }] }, questions: JSON.parse(JSON.stringify(questions)) };
+  const state = { paperId: 7, paper: { id: 7, layout_revision: 9, pages, question_groups: [{ id: 10, sequence: 0, pages: [0, 1], title: "组10" }, { id: 20, sequence: 1, pages: [0], title: "组20" }] }, questions: JSON.parse(JSON.stringify(questions)) };
   const writes = [], messages = [];
   let serverConflict = false, serverOccupiedNumber = false, serverLoseResponse = false, lookupError = false, receipt = null, surface, nextQuestionId = 100, completed = 0;
   let historyData = { operations: [], latest_operation: null }, delayedHistory = null;
@@ -507,6 +536,56 @@ async function run() {
   assert.equal($("pageLayoutPanel").querySelector("#pageLayoutDeleteQuestion"), null, "an empty split result cannot delete its saved source question");
   assert.equal($("pageLayoutPanel").querySelector("#pageLayoutEmptyRange"), null);
   assert.equal($("pageDialogSave").disabled, true);
-  console.log("Original-paper layout: overlap ordering, direct selection, split/merge bounds, pointer thresholds, clean in-place save, manual-only edits, lost-response recovery, return actions, empty-frame recovery and protected question deletion: OK");
+
+  // The group of a new question follows the page it is framed on. It used to
+  // default to the first group in the paper, which dropped the question into
+  // an unrelated scope on any paper with more than one group.
+  controller.close();
+  state.paper.question_groups = [
+    { id: 187, sequence: 0, pages: [0], title: "第 1 页 · 第 1 组" },
+    { id: 188, sequence: 1, pages: [0], title: "第 1 页 · 第 2 组" },
+    { id: 191, sequence: 2, pages: [2], title: "第 3 页 · 第 3 组" },
+    { id: 192, sequence: 3, pages: [2], title: "第 3 页 · 第 4 组" }
+  ];
+  state.questions = [
+    { id: 71, number: 7, group: { id: 191, sequence: 2, pages: [2], title: "第 3 页 · 第 3 组" }, question_type: "free_response", regions: [r(2, [50, 260, 530, 400])], content_revision: 1, layout_fingerprint: "a".repeat(64), color_index: 0 },
+    { id: 72, number: 9, group: { id: 192, sequence: 3, pages: [2], title: "第 3 页 · 第 4 组" }, question_type: "free_response", regions: [r(2, [477, 677, 949, 814])], content_revision: 1, layout_fingerprint: "b".repeat(64), color_index: 1 }
+  ];
+  dialog.page = 2;
+  controller.open("view", null); await Promise.resolve(); await Promise.resolve();
+  await controller.begin("add");
+  assert.equal(snapshot().targets[0].group_id, 192, "a new question starts in the scope that owns the current page");
+  assert.equal(snapshot().targets[0].number, 1, "the number is the scope's free slot, so existing numbers stay put");
+  await drawRegion(420);
+  assert.equal(snapshot().targets[0].group_id, 192, "framing the question keeps the scope the page belongs to");
+  const picker = $("pageLayoutPanel").querySelector("#pageLayoutGroup");
+  assert.ok(picker, "a page shared by two scopes needs one clear choice");
+  assert.deepEqual(picker.children.map((o) => o.value), [191, 192], "the picker only offers the scopes that own this page");
+  assert.deepEqual(picker.children.map((o) => o.textContent), ["第 3 页 · 第 3 组", "第 3 页 · 第 4 组"],
+    "each scope is named by where it sits on the paper, not by the file it came from");
+
+  // A page owned by a single scope needs no choice at all.
+  state.paper.question_groups = [
+    { id: 191, sequence: 2, pages: [2], title: "第 3 页 · 第 3 组" },
+    { id: 192, sequence: 3, pages: [2], title: "第 3 页 · 第 4 组" }
+  ];
+  controller.close();
+  controller.open("view", null); await Promise.resolve(); await Promise.resolve();
+  await controller.begin("add");
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutGroup"), null,
+    "a page owned by one scope needs no group picker at all");
+  controller.close();
+
+  // Editing an existing question never changes its scope, so the field is
+  // noise there and must not be shown.
+  controller.open("regions", state.questions[0]);
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutGroup"), null, "adjusting an existing question shows no group picker");
+  controller.close();
+  controller.open("view", null); await Promise.resolve(); await Promise.resolve();
+  await controller.begin("split");
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutGroup"), null, "splitting keeps the original scope, so no picker appears");
+  controller.close();
+
+  console.log("Original-paper layout: overlap ordering, direct selection, split/merge bounds, pointer thresholds, clean in-place save, manual-only edits, lost-response recovery, return actions, empty-frame recovery, protected question deletion and page-scoped group choice: OK");
 }
 run().catch((error) => { console.error(error); process.exitCode = 1; });

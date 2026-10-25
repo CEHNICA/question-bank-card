@@ -10,6 +10,63 @@
   const regions = (items) => (items || []).map((r) => ({ page_idx: r.page_idx, bbox: [...r.bbox] }));
   const groupId = (q) => q.group?.id ?? q.group_id ?? null;
   const targetOf = (q) => ({ number: q.number, group_id: groupId(q), question_type: q.question_type || "unknown", regions: regions(q.regions) });
+  // A group owns a set of pages. The same page can belong to several groups
+  // (two exams side by side, or a book split into two scopes), so the page
+  // alone is not always enough to pick one group.
+  function groupPages(group) {
+    const pages = group?.pages;
+    if (Array.isArray(pages)) return pages.filter((page) => typeof page === "number");
+    return [];
+  }
+  function groupCoversPage(group, page) {
+    const pages = groupPages(group);
+    if (pages.length) return pages.includes(page);
+    return false;
+  }
+  // The group label must let the teacher recognise the scope without
+  // remembering which exam or chapter a title came from.
+  function groupTitle(group) {
+    const pages = groupPages(group);
+    const sequence = Number.isInteger(group?.sequence) ? group.sequence + 1 : null;
+    let page = null;
+    if (pages.length) {
+      const first = Math.min(...pages) + 1, last = Math.max(...pages) + 1;
+      page = first === last ? `第 ${first} 页` : `第 ${first}–${last} 页`;
+    }
+    const parts = [page, sequence ? `第 ${sequence} 组` : null].filter(Boolean);
+    return parts.length ? parts.join(" · ") : (group?.title || "未分组");
+  }
+  // Pick the scope a new question belongs to. When several scopes share the
+  // page, the teacher keeps numbering downwards, so the scope whose questions
+  // already reach highest on that page wins; the last scope breaks a tie.
+  // This keeps "add a question" moving forward instead of jumping back to the
+  // first group.
+  function pickGroupForPages(groups, pages, questions = []) {
+    const wanted = [...new Set(pages)].filter((page) => typeof page === "number");
+    if (!wanted.length) return null;
+    const candidates = groups.filter((g) => wanted.every((page) => groupCoversPage(g, page)));
+    if (!candidates.length) return null;
+    if (candidates.length === 1) return candidates[0];
+    const page = wanted[0];
+    const highest = new Map(candidates.map((g) => [g.id, null]));
+    questions.forEach((q) => {
+      const gid = groupId(q);
+      if (!highest.has(gid)) return;
+      if (!(q.regions || []).some((r) => r.page_idx === page)) return;
+      const number = Number(q.number);
+      const held = highest.get(gid);
+      if (held === null || number > held) highest.set(gid, number);
+    });
+    return candidates.slice().sort((a, b) => {
+      const left = highest.get(a.id), right = highest.get(b.id);
+      if (left !== right) {
+        if (left === null) return 1;
+        if (right === null) return -1;
+        return right - left;
+      }
+      return b.sequence - a.sequence;
+    })[0];
+  }
   const colorOf = (q, fallback = 0) => COLORS[Number.isInteger(q.color_index) && q.color_index >= 0 && q.color_index < 6 ? q.color_index : fallback % 6];
   function hitTest(questions, page, point) {
     const hits = [];
@@ -110,6 +167,10 @@
     const readOnly = () => Boolean(state.paper?.archived) || Boolean(state.paper?.status && state.paper.status !== "ready");
     const groups = () => state.paper?.question_groups || [];
     const label = (q) => `${q.group?.title || groups().find((g) => g.id === groupId(q))?.title || "未分组"} · 第 ${q.number} 题`;
+    // The scope a new question belongs to, decided by the page it sits on.
+    function pickScope(pages) {
+      return pickGroupForPages(groups(), pages, state.questions);
+    }
     const status = (q) => host.isApproved(q) ? "已核对" : q.ocr_pending ? "识读中 · 待核对" : "待核对";
     const snap = () => draft ? JSON.stringify({ kind: draft.kind, sources: draft.sources, targets: draft.targets }) : "";
     // A merge changes the visible question set even when the user keeps the
@@ -230,7 +291,14 @@
       const selected = selectedQuestion();
       const qs = kind === "add" ? [] : sources || (selected ? [selected] : []);
       if (host.ensureSourcesReady && !(await host.ensureSourcesReady(qs.map((q) => q.id)))) return;
-      const defaultGroup = options.groupId !== undefined ? options.groupId : selected ? groupId(selected) : groups()[0]?.id ?? null;
+      // A new question belongs to the scope that owns the page it sits on.
+      // Picking the first group put it into an unrelated scope on any paper
+      // that has more than one group.
+      const page = Number.isInteger(options.page) ? options.page : dialog.page;
+      const defaultGroup = options.groupId !== undefined ? options.groupId
+        : selected ? groupId(selected)
+          : kind === "add" ? pickScope([page])?.id ?? null
+            : groups()[0]?.id ?? null;
       try { draft = createDraft(kind, qs, state.questions, defaultGroup); }
       catch (error) { toast(error.message, "error"); return; }
       continuousAdd = kind === "add" && options.continuous !== false;
@@ -246,6 +314,21 @@
       if (Number.isInteger(options.page) && state.paper.pages.some((page) => page.page_idx === options.page)) dialog.page = options.page;
       dialog.tool = continuousAdd ? "draw" : "select"; sync(); trackCropDraft(); redraw();
       if (kind === "renumber") { const input = panel.querySelector("#pageLayoutNumber"); input?.focus(); input?.select?.(); }
+    }
+    // After the teacher framed a new question, the frame's own page decides
+    // which scope it belongs to. Re-derive it here so the group and the
+    // question number follow the frame instead of an earlier guess.
+    function syncAddGroup() {
+      if (draft?.kind !== "add") return;
+      const target = current();
+      if (!target) return;
+      const pages = (target.regions || []).map((r) => r.page_idx);
+      if (!pages.length) return;
+      const group = pickScope(pages);
+      if (!group || group.id === target.group_id) return;
+      const next = nextNumber(state.questions, group.id);
+      target.group_id = group.id;
+      if (next !== null && !target.numberTouched) target.number = next;
     }
     function restore(redo) {
       if (!draft || dialog.saving || lookupFailed) return;
@@ -442,13 +525,24 @@
       const t = current();
       if (draft.kind !== "regions") {
         const num = el("input"); num.id = "pageLayoutNumber"; num.type = "number"; num.min = "1"; num.max = "999"; num.value = t.number ?? "";
-        num.addEventListener("change", () => change(() => { t.number = Number(num.value); })); panel.append(labeledField("题号", num));
-        if (draft.kind !== "add" || groups().length > 1) {
-          const group = el("select"); group.id = "pageLayoutGroup";
-          if (!groups().length) { const o = el("option", "", "未分组"); o.value = ""; group.append(o); }
-          groups().forEach((g) => { const o = el("option", "", g.title || `第 ${g.sequence + 1} 组`); o.value = g.id; group.append(o); }); group.value = t.group_id ?? "";
-          // Splitting and merging remain inside their original group.
-          group.disabled = draft.kind !== "add"; group.addEventListener("change", () => change(() => { t.group_id = group.value ? Number(group.value) : null; })); panel.append(labeledField("题组", group));
+        num.addEventListener("change", () => change(() => { t.number = Number(num.value); t.numberTouched = true; })); panel.append(labeledField("题号", num));
+        // The group of an existing question never changes here, so the field
+        // is noise. Only a brand new question can land in two scopes at once,
+        // and only then is a choice needed.
+        if (draft.kind === "add") {
+          const pages = [...new Set((t.regions || []).map((r) => r.page_idx))];
+          const scope = pages.length ? pickScope(pages) : null;
+          const owners = pages.length ? groups().filter((g) => pages.every((page) => groupCoversPage(g, page))) : [];
+          if (owners.length > 1) {
+            const group = el("select"); group.id = "pageLayoutGroup";
+            owners.forEach((g) => { const o = el("option", "", g.title || groupTitle(g)); o.value = g.id; group.append(o); });
+            group.value = String(t.group_id ?? scope?.id ?? "");
+            group.addEventListener("change", () => change(() => { t.group_id = group.value ? Number(group.value) : null; }));
+            panel.append(labeledField("题组", group));
+            panel.append(el("p", "hint", "这一页同时属于两个题组，请选这道题算在哪个题组里。"));
+          } else if (scope) {
+            panel.append(el("p", "layout-current", `题组：${scope.title || groupTitle(scope)}`));
+          }
         }
         const type = el("select"); type.id = "pageLayoutType";
         Object.entries(host.TYPE_NAMES).forEach(([value, name]) => { const o = el("option", "", name); o.value = value; type.append(o); }); type.value = t.question_type;
@@ -684,7 +778,9 @@
           const page = dialog.page, zoom = dialog.zoom, zoomMode = dialog.zoomMode;
           const stage = $("pageStage"), top = stage.scrollTop, left = stage.scrollLeft;
           const number = nextNumberAfter(saved);
-          await begin("add", null, { continuous: true, groupId: saved ? groupId(saved) : null, number, questionType: saved?.question_type || "unknown", page: page });
+          // Continuing on the same scope keeps the numbering straight; when
+          // there is nothing saved yet, fall back to the page's own scope.
+          await begin("add", null, { continuous: true, groupId: saved ? groupId(saved) : undefined, number, questionType: saved?.question_type || "unknown", page: page });
           dialog.page = page; dialog.zoom = zoom; dialog.zoomMode = zoomMode;
           requestAnimationFrame(() => { if (dialog.layoutWorkspace) stage.scrollTo({ top, left }); });
           toast(number === null ? "题目已保存。题号已到 999，请为下一题手动填写题号。" : "题目已保存；已准备下一题。", "success");
@@ -882,7 +978,7 @@
       const blur = () => cancel();
       // The second corner is a separate click; it need not come from the same
       // pointer id as the first click. The page and active draft stay locked.
-      dialog.sketch = { cancel: () => { clean(); dialog.tool = "select"; configure(); render(); }, complete: (e) => { if (!draft || page !== dialog.page || target !== draft.active) return; const b = bboxAt(e); clean(); if (b[2] - b[0] <= 8 || b[3] - b[1] <= 8) { dialog.tool = "select"; configure(); render(); renderStage(); toast("范围太小，请重新框选", "error"); return; } dialog.tool = "select"; change(() => { current().regions.push({ page_idx: page, bbox: b }); selectedPart = current().regions.length - 1; }); } };
+      dialog.sketch = { cancel: () => { clean(); dialog.tool = "select"; configure(); render(); }, complete: (e) => { if (!draft || page !== dialog.page || target !== draft.active) return; const b = bboxAt(e); clean(); if (b[2] - b[0] <= 8 || b[3] - b[1] <= 8) { dialog.tool = "select"; configure(); render(); renderStage(); toast("范围太小，请重新框选", "error"); return; } dialog.tool = "select"; change(() => { current().regions.push({ page_idx: page, bbox: b }); selectedPart = current().regions.length - 1; syncAddGroup(); }); } };
       window.addEventListener("pointermove", move); window.addEventListener("pointercancel", cancel); window.addEventListener("blur", blur);
     }
     function keydown(event) {
@@ -922,5 +1018,5 @@
     const x = Math.min(1000 - w, Math.max(0, bbox[0] + dx)), y = Math.min(1000 - h, Math.max(0, bbox[1] + dy));
     return [x, y, x + w, y + h].map((v) => Math.round(v * 10) / 10);
   }
-  return { COLORS, groupId, targetOf, colorOf, hitTest, nextNumber, createDraft, resizeSplit, validate, payload, movedEnough, moveBox, sourceEvidence, createController };
+  return { COLORS, groupId, targetOf, colorOf, hitTest, nextNumber, createDraft, resizeSplit, validate, payload, movedEnough, moveBox, sourceEvidence, createController, groupPages, groupCoversPage, groupTitle, pickGroupForPages };
 });

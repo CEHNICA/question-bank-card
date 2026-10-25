@@ -140,7 +140,7 @@ def final_content(question: Question) -> dict:
         "document_id": str(question.paper_id),
         "source_filename": question.paper.display_name,
         "source_group": (
-            {"id": question.group_id, "title": question.group.title, "sequence": question.group.sequence}
+            {"id": question.group_id, "title": question.group.display_title(), "sequence": question.group.sequence}
             if question.group_id
             else None
         ),
