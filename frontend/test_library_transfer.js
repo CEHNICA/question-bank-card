@@ -41,7 +41,7 @@ function makeDom() {
 }
 
 function boot({ inspect = {}, merge = {}, records = { records: [] }, exportBody = {}, choose = { selected: true, directory: "D:/备份" },
-  auto = { backups: [{ id: "题有据自动备份-20261020-050000", name: "题有据自动备份-20261020-050000.zip", size: 12 * 1024 * 1024, created_at: "2026-10-20T05:00:00" }], due: false, keep: 10, total_bytes: 12 * 1024 * 1024 } } = {}) {
+  auto = { backups: [{ id: "题有据自动备份-20261020-050000", name: "题有据自动备份-20261020-050000.zip", size: 12 * 1024 * 1024, created_at: "2026-10-20T05:00:00" }], due: false, keep: 2, total_bytes: 12 * 1024 * 1024 } } = {}) {
   const dom = makeDom();
   const calls = [];
   const context = vm.createContext({
@@ -216,6 +216,33 @@ assert.match(html, /<script src="\/static\/library-transfer\.js" defer><\/script
   assert.equal(label.title, "题有据自动备份-20261020-050000.zip", "文件名放在提示里，不占正中间");
   const called = calls.filter((call) => call.url === "/api/backup/auto");
   assert.ok(called.length, "读了一次自动备份列表");
+}
+
+// 9 之二 1.26.26：老师 10 月 24 日说这一区「介绍的太麻烦，简洁点，就是备份两次就可以了」。
+// 这一版量的是**页面上真印出来的那几句话**：说清留两份就够，同一件事别反复说。
+{
+  const { dom, window } = boot();
+  window.LibraryTransfer.mount(dom.document.getElementById("transferSettingsMount"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const box = dom.document.getElementById("transferAuto");
+  const summary = text(box);
+  const whole = text(dom.document.getElementById("transferSettingsMount"));
+  assert.match(whole, /只留最近两份（今天和昨天）/, "一句话就说清留几份");
+  assert.match(summary, /一共 1 份，占 12\.0 MB。旧的自动删掉。/, "眼下有几份、多大，一句说完");
+  // 同一件事不许在三处各说一遍。
+  assert.equal((whole.match(/不联网、不上传/g) || []).length, 1, "「不联网、不上传」只说一次");
+  assert.equal((whole.match(/今天和昨天/g) || []).length, 1, "「今天和昨天」只说一次");
+  assert.doesNotMatch(whole, /题库再大十倍/, "「题库再大十倍」那句解释删掉");
+  assert.doesNotMatch(whole, /10 份/, "份数不能写死成别的数");
+  // 开关旁边那句也压短了，但「救什么」这件事还得说。
+  assert.match(summary, /救的是「题库自己坏了」/, "说清楚它到底救什么");
+  assert.doesNotMatch(summary, /升级出错/, "「升级出错」那句删掉");
+  // 打开开关后那句也得按真数说，不能再写死。
+  const toggle = box.children.find((child) => child.className === "settings-switch");
+  toggle.children[0].checked = true;
+  await toggle.children[0].listeners.change[0]();
+  assert.match(dom.document.getElementById("transferStatusauto").textContent, /留最近 2 份/,
+    "打开时说的是后台给的真实份数");
 }
 
 // 10. 1.26.22：自动备份可以关掉 —— 用不上就别占磁盘；关掉以后手动那份照旧能用。

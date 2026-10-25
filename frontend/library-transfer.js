@@ -204,6 +204,8 @@
     try {
       const body = await json("/api/backup/auto");
       const backups = body.backups || [];
+      // 留几份由后台说了算（1.26.23 起是两份），话里就不写死数字。
+      const keep = body.keep || 2;
       box.replaceChildren();
       if (!backups.length) {
         box.append(el("p", "settings-footnote", "还没有自动备份过。软件每天会自己打一份，也可以现在就打一份。"));
@@ -223,11 +225,10 @@
           list.append(item);
         });
         box.append(list);
-        const keep = body.keep || 2;
         const total = megabytes(body.total_bytes || 0);
-        box.append(el("p", "settings-footnote",
-          `一共 ${backups.length} 份，占 ${total}；只留最近 ${keep} 份（今天和昨天），旧的自动删掉。`
-          + "题库再大十倍，这里也只占两份的量。包放在本机，不联网、不上传。"));
+        // 1.26.26：这段以前把同一件事说了三遍（留几份、占多少、放在哪），
+        // 老师看着只觉得绕。留几份在标题下那句话里已经说了，这里只报眼下有几份、多大。
+        box.append(el("p", "settings-footnote", `一共 ${backups.length} 份，占 ${total}。旧的自动删掉。`));
       }
       // 1.26.22：自动备份开关 —— 用不上就关掉，随时能再打开。
       const toggle = el("label", "settings-switch");
@@ -239,7 +240,7 @@
         try {
           await post("/api/settings/features", { features: { auto_backup: input.checked } });
           status("auto", input.checked
-            ? "已打开：每天在本机打一份备份，留最近 10 份。"
+            ? `已打开：每天在本机打一份备份，留最近 ${keep} 份。`
             : "已关闭：以后不再自动打备份。想留一份可以点「现在备份一次」。", false);
         } catch (error) {
           input.checked = !input.checked;
@@ -249,8 +250,8 @@
       toggle.append(input, el("span", "", "每天自动打一份备份"));
       box.append(toggle);
       box.append(el("p", "settings-footnote",
-        "它救的是「题库自己坏了」：软件出毛病、升级出错或磁盘写坏时，能把题库救回来。"
-        + "误删的题有回收站，原卷在你自己的硬盘上，这两样它不管。"));
+        "救的是「题库自己坏了」：软件出毛病、磁盘写坏时能救回来。"
+        + "误删的题找回收站，原卷在你自己的硬盘上。"));
       const now = el("button", "button", "现在备份一次");
       now.type = "button";
       now.disabled = busy;
@@ -397,9 +398,10 @@
 
     // 1.26.17：本机自动备份 —— 每天自己打一份，存在软件自己的文件夹里。
     // 1.26.21：改成每天一份；1.26.23：只留两份（今天和昨天），题库再大也只占两份。
+    // 1.26.26：这段话精简 —— 老师 10 月 24 日说「介绍的太麻烦，简洁点，就是备份两次就可以了」。
     const autoBox = el("section", "settings-section");
     autoBox.append(el("h3", "", "本机自动备份"),
-      el("p", "settings-footnote", "每天自己打一个备份包，放在软件自己的文件夹里，只留最近 2 份（今天和昨天）。不联网、不上传。"));
+      el("p", "settings-footnote", "每天自动打一份备份，只留最近两份（今天和昨天）。放在本机，不联网、不上传。"));
     const autoInner = el("div");
     autoInner.id = "transferAuto";
     const autoStatus = el("p", "transfer-status");
