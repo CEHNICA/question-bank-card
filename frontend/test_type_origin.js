@@ -48,9 +48,12 @@ assert.match(js, /params\.get\("fix"\) === "type" && typeBlocksApproval\(questio
 assert.match(library, /link\.href = draftLink\(item, "&fix=type"\);/);
 assert.match(library, /"题型待核对 · 去选题型"/);
 
-// 题源: its own field in 改字, its own line on the card, its own span in the library.
-assert.match(js, /originRow\.append\(el\("span", "", "题源"\), origin\);/);
-assert.match(js, /origin: origin\.value/);
+// 题源: its own field, its own line on the card, its own span in the library.
+// 1.26.30：改字里那个输入框撤了 —— 同一件事只留「更多」一个入口。
+// 老师原话：「就是这个题目来源的话，最好是可以修改，放在更多里面。」
+assert.match(js, /button\("修改题目来源"/);
+assert.doesNotMatch(js, /originRow\.append/);
+assert.doesNotMatch(js, /origin: origin\.value/);
 assert.match(js, /const origin = el\("p", "card-origin"\);/);
 assert.match(library, /node\("span", "library-origin", `题源：\$\{item\.origin\}`\)/);
 // Printing the source is a choice, off by default.

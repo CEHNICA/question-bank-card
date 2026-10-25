@@ -18,7 +18,8 @@ assert.doesNotMatch(js, /timer = setTimeout\(\(\) => \{\s*const data = collect\(
 // preview have to be direct children of it rather than of the card body.
 assert.match(js, /card\.append\(bar, previewBox\);\s*card\.querySelector\("\.card-body"\)\.append\(editor\);/);
 assert.match(js, /const editor = el\("form", "editor"\);/);
-assert.match(js, /editor\.append\(originRow, stemRow, tableTools, optionBox, extra\);/);
+// 1.26.30：改字面板里那个题源输入框撤了 —— 改题源只在「更多」里做。
+assert.match(js, /editor\.append\(stemRow, tableTools, optionBox, extra\);/);
 // The pixel-nudging layout code is gone with it: a margin that moves the thing it
 // measures, guarded by window width and image load timing, was the actual bug.
 assert.doesNotMatch(js, /const alignPreviewWithStem|const placePreview|--preview-room/);

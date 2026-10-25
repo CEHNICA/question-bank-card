@@ -112,14 +112,20 @@ switch ($Task) {
     Invoke-Step "前端测试" { & node --test (Join-Path $Repo "frontend\test_*.js") }
     Invoke-Step "桌面外壳测试" {
       Push-Location $Repo
-      try { & $python -m unittest test_launcher test_backup test_app_window test_credential_dialog test_packaging test_assistant_setup test_create_shortcut } finally { Pop-Location }
+      try { & $python -m unittest test_launcher test_backup test_app_window test_credential_dialog test_packaging test_assistant_setup test_create_shortcut test_dev_script } finally { Pop-Location }
     }
   }
 
   "check" {
+    # 三个子任务各是一个独立进程。它们的退出码必须看 ——
+    # 以前不看，有一次前端测试红了 3 条，这里照样打印「全过了」，
+    # 老师看着「全过了」就以为没事了。失败就要说出来，不能骗人。
     & $MyInvocation.MyCommand.Path -Task lint
+    if ($LASTEXITCODE -ne 0) { Fail "代码规范检查没过" }
     & $MyInvocation.MyCommand.Path -Task type
+    if ($LASTEXITCODE -ne 0) { Fail "类型检查没过" }
     & $MyInvocation.MyCommand.Path -Task test
+    if ($LASTEXITCODE -ne 0) { Fail "测试没过" }
     Say "全过了。"
   }
 

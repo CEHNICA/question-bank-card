@@ -47,7 +47,7 @@ jobs:
         run: python -m mypy --config-file pyproject.toml backend/core
 
       - name: Test desktop launcher
-        run: python -m unittest test_launcher test_backup test_app_window test_credential_dialog test_packaging test_assistant_setup test_create_shortcut
+        run: python -m unittest test_launcher test_backup test_app_window test_credential_dialog test_packaging test_assistant_setup test_create_shortcut test_dev_script
       - name: Test backend
         working-directory: backend
         env:

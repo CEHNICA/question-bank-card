@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections import Counter
 from difflib import SequenceMatcher
 
 SYMBOLS = {
@@ -338,13 +339,70 @@ _ORIGIN_YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
 _ORIGIN_WORDS = re.compile(
     r"月考|期中|期末|模拟|联考|调研|质检|质量检测|统考|中考|高考|真题|[一二三四]模|学年|学期|"
     r"检测|竞赛|期初|开学考|会考|学考|学业水平|适应性|诊断|摸底|新课标|新高考|全国[甲乙丙]?卷|"
-    r"考试|测试|测评"
+    r"阶段练|考试|测试|测评"
 )
 _ORIGIN_SCORE = re.compile(r"满分|\d\s*分(?![校类析])")
 # A year alone is not a source: “（2022年北京冬奥会期间）某商店……” is task text.
 # With a year, a source also names its paper: “·”-separated parts, a 卷, or a school.
 _ORIGIN_PAPER = re.compile(r"·|卷|[一二三四五六七八九十\d]中|中学|附中|高中|学校|外国语|实验学校")
 _ORIGIN_CJK = re.compile(r"[一-鿿]")
+# 全国卷的几种写法：全国甲、全国甲理、全国甲文。带年份才认，光一个“全国甲”不算。
+_ORIGIN_NATIONAL = re.compile(r"全国[甲乙丙][理文数]?")
+# 出处常写成“年份+卷别/考试名，题号，分值，难度”：
+#   （2021新高考Ⅰ，7，5分，中）  （2021全国甲理，13，5分，易）
+# 后三段是题号、分值、难度，不是出处本身。以前整段里一看见“N分”就放过，
+# 这类标记一个都认不出来 —— 标记留在题干里，既没法按出处找题，组卷打印时
+# 还会印在学生卷子上。现在只拿第一段判定，后几段不参与否决。
+_ORIGIN_SEGMENT = re.compile(r"[，,、]")
+
+
+# 比出处时不算的东西：空格和标点。「2021新高考Ⅰ，7，5分，中」跟「2021新高考Ⅰ」
+# 差的就是这些。
+_SOURCE_KEY = re.compile(r"[\s，,、。．.：:；;（）()【】\[\]·・\-—_～~]")
+
+
+def _source_head(value: str) -> str:
+    """一段出处里说话的那一截：第一个逗号之前。后面几段是题号、分值、难度。"""
+    text = str(value or "").strip()
+    for separator in ("，", ","):
+        if separator in text:
+            text = text.split(separator)[0]
+    return _SOURCE_KEY.sub("", text)
+
+
+def split_origin_note(text: str) -> tuple[str, str]:
+    """把题干开头那道出处摘下来（老师手动指定出处时用）。
+
+    自动识别只认最开头那一段 —— 但出处常常前面还压着一道栏目名
+    （「（创新考法）（2024江苏南通一中月考，6）……」）。老师点名要改出处时，
+    那一段在哪儿都找得到：栏目名留在题干里，出处那一段摘走。
+
+    返回 (剩下的题干, 出处)；没找到就是 (原样, "")。
+    """
+    value = str(text or "")
+    stem, origin = split_origin(value)
+    if origin:
+        return stem, origin
+    lead = _ORIGIN_LEAD.match(value)
+    if not lead:
+        return value, ""
+    stem2, origin2 = split_origin(value[lead.end() :])
+    if not origin2:
+        return value, ""
+    return value[: lead.end()] + stem2, origin2
+
+
+def same_source_note(printed: str, origin: str) -> bool:
+    """题干开头印的那段出处，和卡上记的，是不是同一件事。
+
+    是同一件事才把那段括号从题干搬走 —— 否则老师什么都没改、随手点一下保存，
+    题干里另一段出处就被悄悄删掉了。
+    """
+    left = _source_head(printed)
+    right = _source_head(origin)
+    if not left or not right:
+        return False
+    return left.startswith(right) or right.startswith(left)
 
 
 def split_origin(text: str) -> tuple[str, str]:
@@ -358,9 +416,16 @@ def split_origin(text: str) -> tuple[str, str]:
     inner = inner.strip()
     if closing not in _ORIGIN_PAIRS[opening] or not rest.strip():
         return value, ""
-    if len(_ORIGIN_CJK.findall(inner)) < 2 or _ORIGIN_SCORE.search(inner):
+    if len(_ORIGIN_CJK.findall(inner)) < 2:
         return value, ""
-    if not (_ORIGIN_WORDS.search(inner) or (_ORIGIN_YEAR.search(inner) and _ORIGIN_PAPER.search(inner))):
+    # 只拿第一段判定：后几段是题号、分值、难度。
+    head = _ORIGIN_SEGMENT.split(inner)[0].strip()
+    if not head or _ORIGIN_SCORE.search(head):
+        return value, ""
+    if not (
+        _ORIGIN_WORDS.search(head)
+        or (_ORIGIN_YEAR.search(head) and (_ORIGIN_PAPER.search(head) or _ORIGIN_NATIONAL.search(head)))
+    ):
         return value, ""
     return rest.lstrip(), inner
 
@@ -623,8 +688,61 @@ _ANCHOR_PROSE = re.compile(r"如图所示|求证|计算下列|已知如图|如�
 _ANCHOR_TAIL_NUMBER = re.compile(r"\d{1,3}\s*[.．、]")
 _ANCHOR_WINDOW = 4
 
+# 教辅在题前印的出处：「(2025届江苏盐城射阳中学开学考,6)」「（2024全国甲理，6，5分，易）」。
+# 它说的是这道题从哪来，不是题目本身 —— 识读时就被单独拆进「题源」字段了。
+# 这里判它比 ``split_origin`` 宽一点：``split_origin`` 把带分值的段落（「(2024全国甲理,
+# 6,5分,易)」「（本小题满分12分）」）一律当题面的一部分，两种混在一起分不开；
+# 这里只把「含满分」当题面，其余含年份/考试名/学校名的都当出处。
+_SOURCE_NOTE_LEAD = re.compile(r"^[ \t　]*[\[【(（]([^\[\]【】()（）\n$\\]{4,60})[\]】)）]")
+_SOURCE_NOTE_YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
+_SOURCE_NOTE_PAPER = re.compile(r"·|卷|[一二三四五六七八九十\d]中|中学|附中|高中|学校|外国语|实验学校|全国[甲乙丙]")
+_SOURCE_NOTE_WORDS = re.compile(
+    r"月考|期中|期末|模拟|联考|调研|质检|质量检测|统考|中考|高考|真题|模考|学年|学期|"
+    r"开学考|会考|学考|学业水平|适应性|诊断|摸底|新课标|新高考|全国[甲乙丙]|考试|测试|测评"
+)
+# 一段字里有多少是那句出处的。出处那句通常整段都在「题源」里，题干不会。
+_SOURCE_NOTE_OVERLAP = 0.6
 
-def anchor_reading_mismatch(printed: str, reading: str) -> str | None:
+
+def _source_note(printed: str) -> str:
+    """印刷行开头成对括号里的出处那一段；认不出来返回空串。
+
+    要的是「这一段是出处」这件事，不是要把出处拆下来存 —— 拆是 ``split_origin``
+    的活，这里只是别把出处当题目文字去取样。
+    """
+    body = _OTHER_QUESTION_NUMBER.sub("", str(printed or "").strip(), count=1)
+    match = _SOURCE_NOTE_LEAD.match(body)
+    if not match:
+        return ""
+    inner = match.group(1).strip()
+    if len(_ORIGIN_CJK.findall(inner)) < 2 or "满分" in inner:
+        return ""
+    if (_SOURCE_NOTE_YEAR.search(inner) and _SOURCE_NOTE_PAPER.search(inner)) or _SOURCE_NOTE_WORDS.search(inner):
+        return inner
+    return ""
+
+
+def _is_source_note(run: str, notes: list[str]) -> bool:
+    """run 这段字是不是就是那句出处。
+
+    同一个字在出处里出现过就算数：认字可能有出入（「届」认成「眉」），但出处那句
+    的用词高度重合，题干不会。
+    """
+    if not run or not notes:
+        return False
+    for note in notes:
+        pool = Counter(note)
+        hit = 0
+        for char in run:
+            if pool.get(char):
+                pool[char] -= 1
+                hit += 1
+        if hit / len(run) >= _SOURCE_NOTE_OVERLAP:
+            return True
+    return False
+
+
+def anchor_reading_mismatch(printed: str, reading: str, origin: str = "") -> str | None:
     """卡上题号那一行印的话，读出来的内容里一点都认不出时，返回那句话。
 
     教材最后一道题的范围常常一路罩到下一节正文，识读就可能把正文读成题干 ——
@@ -638,6 +756,14 @@ def anchor_reading_mismatch(printed: str, reading: str) -> str | None:
     比对必须容得下**改写**：模型会把「化去根号内的分母」读成「化简下列各式根号
     内的分母」。所以取一段最长的实词，再看有没有任何 4 个字原样出现在读出来的
     内容里；一个都没有，才是读成了别的东西。
+
+    ⚠️ **出处那一句不能拿来比**（2026-10-24 实测）。教辅在题前印出处
+    「(2025届江苏盐城射阳中学开学考,6)」，这一句比题干还长，原来被当题目文字取样；
+    可它早就被单独拆进「题源」字段了，压根不在题干里 —— 于是每一张带出处的题都被
+    报成「认不出这句话，卡上可能是另一道题」。真库 10 张里 9 张是这么误报的
+    （#1085~#1099，同一份卷子）。现在先把出处剔掉，probe 落在真正的题干上：误报
+    没了，判据本身也没削弱 —— 卡片真装了另一道题时，probe 照样认不出（#1100 就是
+    这种，它锚在第 7 题、卡上装的是第 1 题）。
     """
     body = _ANCHOR_PROSE.sub("", str(printed or "").strip())
     body = _OTHER_QUESTION_NUMBER.sub("", body, count=1)
@@ -647,7 +773,14 @@ def anchor_reading_mismatch(printed: str, reading: str) -> str | None:
     runs = _ANCHOR_HAN.findall(body)
     if not runs:
         return None
-    probe = max(runs, key=len)[:10]
+    # 出处那句不算题目内容：它不在题干里，拿它去比对必然认不出。两处都认：
+    # 卡片上的「题源」字段，和印刷行开头括号里那一段（两者可能对不上）。
+    notes = [note for note in (origin, _source_note(printed)) if note]
+    candidates = [run for run in runs if not _is_source_note(run, notes)]
+    if not candidates:
+        # 这一行除了出处没有别的可取样的文字 —— 没有可比的题目内容，不报。
+        return None
+    probe = max(candidates, key=len)[:10]
     squeezed = re.sub(r"\s+", "", str(reading or ""))
     for index in range(len(probe) - _ANCHOR_WINDOW + 1):
         if probe[index : index + _ANCHOR_WINDOW] in squeezed:

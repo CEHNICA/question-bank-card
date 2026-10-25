@@ -90,7 +90,7 @@ from .pipeline import (
     promote_saved_readings,
     reorder_photo_pages,
 )
-from .textnorm import fix_reading_symbols, fix_symbols, witness_key
+from .textnorm import fix_reading_symbols, fix_symbols, same_source_note, split_origin_note, witness_key
 from .version import APP_VERSION
 
 FRONTEND = settings.FRONTEND_ROOT
@@ -2955,6 +2955,26 @@ def question_action(request, question_id, action: str):
             question.error = ""
             # 保存编辑和终审是两个独立动作；人必须看到保存后的最终版本再点“通过”。
             _clear_approval(question)
+        elif action == "origin":
+            # 只改题目来源（题源）。出处是教辅印在题前的那一段
+            # “（2021新高考Ⅰ，7，5分，中）” —— 它说的是题从哪里来，不是题目本身：
+            # 留在题干里，组卷打印时会印在学生卷子上，也没法按出处找题。
+            # 题干开头那一段像出处的括号标记会一并搬走，题干别的一个字都不动。
+            if "origin" not in payload or not isinstance(payload["origin"], str) or len(payload["origin"]) > 400:
+                return _error("题目来源格式不正确")
+            origin = prose.clean_origin(payload["origin"])
+            stem, marker = split_origin_note(question.stem)
+            # 只有题干里印的那段跟新填的是同一件事，才把它从题干搬走。
+            # 否则老师什么都没改、随手点一下保存，题干里另一段出处就被悄悄删了。
+            moved = bool(marker and origin and same_source_note(marker, origin))
+            if moved:
+                question.stem = stem
+                question.edited = True
+                question.text_source = "human"
+            if moved or origin != question.origin:
+                question.origin = origin
+                # 题源进了审批的校验值（组卷时可能印在卷面上）：改了就得重新核对。
+                _clear_approval(question)
         elif action == "type":
             # 只改题型（题卡头上的题型下拉、题库里“题型待核对”点进来）。改了题型，
             # 题目内容就变了，和改字一样要重新标记通过。

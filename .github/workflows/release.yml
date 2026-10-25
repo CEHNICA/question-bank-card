@@ -50,7 +50,7 @@ jobs:
           python -m ruff format --check backend tools
           npm run lint
           python -m mypy --config-file pyproject.toml backend/core
-          python -m unittest test_launcher test_backup test_app_window test_credential_dialog test_packaging test_assistant_setup test_create_shortcut
+          python -m unittest test_launcher test_backup test_app_window test_credential_dialog test_packaging test_assistant_setup test_create_shortcut test_dev_script
           Push-Location backend; try { python manage.py test core } finally { Pop-Location }
           node --test frontend/test_*.js
 

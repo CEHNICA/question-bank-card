@@ -605,6 +605,25 @@
     </div>
   </dialog>
 
+  <dialog id="originDialog" class="page-dialog" aria-labelledby="originDialogTitle">
+    <div class="dialog-head">
+      <div>
+        <h3 id="originDialogTitle">修改题目来源</h3>
+        <p class="hint">题目来源是教辅印在题前的那一段，例如 2021新高考Ⅰ，7，5分，中。留空表示这道题没有来源。</p>
+      </div>
+      <div class="dialog-tools">
+        <button id="originDialogSave" class="button primary" type="button">保存</button>
+        <button id="originDialogClose" class="button" type="button" data-close>取消</button>
+      </div>
+    </div>
+    <div class="dialog-body">
+      <label class="field inline">
+        <span>题目来源</span>
+        <input id="originInput" type="text" maxlength="120" spellcheck="false" placeholder="例如 2021新高考Ⅰ，7，5分，中">
+      </label>
+    </div>
+  </dialog>
+
   <dialog id="viewerDialog" class="viewer-dialog" aria-labelledby="viewerTitle">
     <div class="viewer-head">
       <h3 id="viewerTitle"></h3>

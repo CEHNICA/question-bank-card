@@ -3923,7 +3923,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (q.origin) {
       const origin = el("p", "card-origin");
       origin.append(el("span", "card-origin-label", "题源"), document.createTextNode(q.origin));
-      origin.title = "题干前印的出处，单独存放；组卷打印时默认不印。在“改字”里可以修改";
+      origin.title = "题干前印的出处，单独存放；组卷打印时默认不印。在「更多」里可以修改";
       body.append(origin);
     }
     const regionPanel = regionReadPanel(card, q);
@@ -3983,6 +3983,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     more.append(summary);
     const menu = el("div", "more-menu");
     menu.append(button("查看识读记录", "quiet small", () => { more.open = false; toggleReads(card, q); }));
+    menu.append(button("修改题目来源", "quiet small", () => { more.open = false; openOriginEditor(q); },
+      "填这道题是从哪套卷子上借来的；题干开头那串出处会一并搬走"));
     if (q.body_mode !== "source_image") {
       menu.append(button("框选识读（纠错）", "quiet small", () => { more.open = false; openPageDialog("read", q); }, "只重读需要纠正的一小块，确认替换位置后再保存"));
       // 照片题在动作行里有一个醒目的「重新 AI 识读」按钮并写清了后果，而 PDF 题
@@ -4124,6 +4126,45 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   // ---------------------------------------------------------------- 题卡动作
+
+  // 题目来源（题源）：教辅印在题前的那一段出处。识读时认得出来的已经自动搬到
+  // 「题源」里；认不出来的、或者老师自己知道出处的，在这里补。
+  // 题干开头那串括号一并搬走 —— 它说的是题从哪里来，不是题目本身。
+  function openOriginEditor(q) {
+    const dialog = $("originDialog");
+    if (!dialog) return;
+    $("originInput").value = q.origin || "";
+    dialog.dataset.questionId = q.id;
+    const save = $("originDialogSave");
+    if (!save.dataset.bound) {
+      // 第一次打开时绑一次就够了 —— 每次打开都多挂一个监听器的话，
+      // 点一下保存就会发两次请求。
+      save.dataset.bound = "1";
+      save.addEventListener("click", () => saveOrigin());
+    }
+    dialog.showModal();
+    $("originInput").focus();
+  }
+
+  async function saveOrigin() {
+    const dialog = $("originDialog");
+    const id = Number(dialog.dataset.questionId);
+    const before = questionById(id);
+    if (!before) { dialog.close(); return; }
+    const save = $("originDialogSave");
+    save.disabled = true;
+    try {
+      const data = await api(`/api/questions/${id}/origin`, { method: "POST", body: { origin: $("originInput").value } });
+      dialog.close();
+      applyQuestion(data);
+      const after = data.question || {};
+      toast(after.stem && after.stem !== before.stem ? "题目来源已保存，题干开头的出处已搬走" : "题目来源已保存", "success");
+    } catch (error) {
+      toast(error.message, "error");
+    } finally {
+      save.disabled = false;
+    }
+  }
 
   function applyQuestion(data) {
     if (data.question) {
@@ -5929,13 +5970,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       option.selected = value === q.question_type;
       typeSelect.append(option);
     });
-    const origin = el("input", "origin-input");
-    origin.value = q.origin || "";
-    origin.maxLength = 120;
-    origin.placeholder = "题干前印的出处，例如 2026山东枣庄滕州二中月考；没有就留空";
-    origin.spellcheck = false;
-    const originRow = el("label", "field inline");
-    originRow.append(el("span", "", "题源"), origin);
     const stem = el("textarea", "stem-input");
     stem.value = q.stem;
     stem.rows = 2;
@@ -6073,15 +6107,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     bar.append(back, place, el("span", "editor-bar-spacer"), typeField);
     if (shortcutNote) bar.append(shortcutNote);
     bar.append(saveButton);
-    editor.append(originRow, stemRow, tableTools, optionBox, extra);
+    editor.append(stemRow, tableTools, optionBox, extra);
 
     const collect = () => ({
       stem: stem.value,
       options: Object.fromEntries(OPTION_KEYS.map((k) => [k, optionInputs[k].value]).filter(([, v]) => v.trim())),
       question_type: typeSelect.value,
       answer: answer.value,
-      analysis: analysis.value,
-      origin: origin.value
+      analysis: analysis.value
     });
     editGuard.track(q.id, collect, () => close(), () => stem.focus({ preventScroll: true }));
     const previewInputs = new Map([[stem, "stem"], [answer, "answer"], [analysis, "analysis"],
