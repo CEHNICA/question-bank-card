@@ -11,12 +11,12 @@
 
 | 目录 | 版本 | HEAD | 分支 | 结论 |
 |---|---|---|---|---|
-| `<旧源码目录>` | 1.22.0 | `8c4d6c6851d17250614290c875cbbaccd5deffe0` | `feature/original-paper-layout` | **旧版，只能参考，不能当基线** |
-| `<更旧的源码目录>` | 1.10.9 | `886227e6815fb53342161c73fde00d2107b52004` | `improve/1.10.0` | 更旧 |
-| `<另一个源码副本>` | 1.26.6 | `e1d71dbec227` | `main` | 落后，且有 9 个未提交改动 |
+| `<本机路径>\Documents\Codex\2026-10-08\question-bank-card-pdf-fix` | 1.22.0 | `8c4d6c6851d17250614290c875cbbaccd5deffe0` | `feature/original-paper-layout` | **旧版，只能参考，不能当基线** |
+| `<本机路径>\Documents\Codex\2026-09-28\题有据改进\question-bank-card` | 1.10.9 | `886227e6815fb53342161c73fde00d2107b52004` | `improve/1.10.0` | 更旧 |
+| `<本机路径>\Documents\破甲\qbc-latest` | 1.26.6 | `e1d71dbec227` | `main` | 落后，且有 9 个未提交改动 |
 | GitHub `CEHNICA/question-bank-card` main | 1.26.28 | `f945d59d8007` | `main` | **比安装版旧** |
 
-安装版实测：`tiyouju.exe --version` → `tiyouju 1.26.31`（安装目录 `<安装目录>`）。
+安装版实测：`tiyouju.exe --version` → `tiyouju 1.26.31`（安装目录 `<本机路径>\AppData\Local\Programs\QuestionBankCard`）。
 
 GitHub Releases 最新只到 `v1.26.28`（2026-10-25 04:10 UTC 发布），全部 24 个分支里没有任何一个版本号 ≥ 1.26.29。**所以 1.26.31 是本机构建、尚未推送的版本，只能从本机找。**
 
@@ -41,7 +41,7 @@ ff6285f  1.26.29：切题时不再让老师替程序选题组；题组名改成�
 f945d59  1.26.28：给项目装上专业开发环境，顺带修一个会悄悄丢东西的问题
 ```
 
-仓库里另外两个 worktree（`<另一个 worktree>` 在 `fix-quit-hang` 分支、`<另一个 worktree>` 在 1.26.29 的 detached HEAD）**没有动**。
+仓库里另外两个 worktree（`D:\qbj_1238` 在 `fix-quit-hang` 分支、`D:\qbj_rel_12630` 在 1.26.29 的 detached HEAD）**没有动**。
 
 ## 3. 主仓库里那 3 个未提交改动 —— 处理方式
 
@@ -64,12 +64,12 @@ f945d59  1.26.28：给项目装上专业开发环境，顺带修一个会悄悄�
 | 改动带完整测试（两个 test 文件共 181 行新增） | 是写完的功能，不是调试残留 |
 
 **处理**：主仓库工作区**一个字节都没动**。改动以 `git diff` 导出成补丁
-`ben/work/baseline-uncommitted.patch`（14903 字节），在新 worktree 里 `git apply` 重放。
+`work/baseline-uncommitted.patch`（14903 字节），在新 worktree 里 `git apply` 重放。
 
 ## 4. 隔离环境
 
 ```
-worktree： <本次工作目录>\work\question-bank-card
+worktree： <本机路径>\Documents\Codex\2026-10-24\ben\work\question-bank-card
 分支：     feature/tag-system-refactor（从 ccdb8f0 开）
 ```
 
@@ -77,13 +77,13 @@ worktree： <本次工作目录>\work\question-bank-card
 
 | 隔离项 | 生产 | 本次开发 |
 |---|---|---|
-| 数据库 | `<生产数据目录>\db.sqlite3`（53.5 MB，验收期间仍在被写） | `QB_DATABASE` 环境变量指向 worktree 内的独立 sqlite |
+| 数据库 | `<本机路径>\AppData\Local\QuestionBankCard\db.sqlite3`（53.5 MB，验收期间仍在被写） | `QB_DATABASE` 环境变量指向 worktree 内的独立 sqlite |
 | 数据目录 | 同上 | `QB_DATA_ROOT` 指向独立目录 |
 | 端口 | 8768 | 8799（开发实例） |
 | 凭据 | 用户真实密钥 | 不读取、不写入、不打印 |
 
 **生产库全程只读、且只读副本**：设计决策所依据的标签数据统计，取自
-`<生产数据目录>\backups\db-before-1.26.29-20261024-210545.sqlite3`
+`<本机路径>\AppData\Local\QuestionBankCard\backups\db-before-1.26.29-20261024-210545.sqlite3`
 （1.26.29 迁移前的备份），以 `file:///...?mode=ro` 只读打开。没有对生产库执行任何写操作。
 
 ### 基线一致性核对

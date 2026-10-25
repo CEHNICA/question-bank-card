@@ -19,7 +19,7 @@
 
 | 要确认的 | 怎么查 | 本次实测 |
 |---|---|---|
-| 主库的真实路径 | `start_question_bank.py` 的 `USER_ROOT` → `DATABASE`。**不是**看哪个文件名叫 `db.sqlite3` | `<生产数据目录>\db.sqlite3`（53.5 MB） |
+| 主库的真实路径 | `start_question_bank.py` 的 `USER_ROOT` → `DATABASE`。**不是**看哪个文件名叫 `db.sqlite3` | `<本机路径>\AppData\Local\QuestionBankCard\db.sqlite3`（53.5 MB） |
 | 当前有没有进程在用 | `Get-NetTCPConnection -LocalPort 8768 -State Listen` + 进程列表 | 三个进程：主窗口、`run_worker`、`runserver 8768` |
 | 备份能不能用 | 「一致性备份 + SHA-256 校验」——在线 SQLite 不能只复制主文件，WAL 一致性要一起考虑 | 软件自带 `data\backups\` 每日自动备份；另有 `backups\pre-migrate-*.sqlite3` 手动备份 |
 
@@ -119,7 +119,7 @@ GET  /api/library/migration?action=report&batch=tag-refactor-1
 
 ## 5. 演练记录（虚构旧库，2026-10-25 实测）
 
-演练库：`ben/work/isolated/rehearsal.sqlite3`，虚构数据由 `tools/make_legacy_fixture.py` 生成。
+演练库：`work/isolated/rehearsal.sqlite3`，虚构数据由 `tools/make_legacy_fixture.py` 生成。
 
 造出来的旧数据：27 个标签、19 条正式关联、4 条候选、1 个章节容器、2 条上下级关系（含 1 组父子类型不一致）。
 

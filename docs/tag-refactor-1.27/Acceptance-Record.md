@@ -34,17 +34,17 @@
 | ruff（格式） | 通过 | 通过 |
 | mypy（类型检查） | 通过 | 通过（70 个源文件，0 错） |
 | eslint（前端规范） | 通过 | 通过 |
-| 后台测试 `manage.py test core` | 通过 | 通过 |
+| 后台测试 `manage.py test core` | 通过 | 通过（**2415 项**，skipped 6） |
 | 前端测试 `node --test frontend/test_*.js` | **139 通过 / 0 失败** | **140 通过 / 0 失败**（新增 1 个工作台测试文件） |
 | 桌面外壳测试（8 个模块） | **147 项通过，OK** | **147 项通过，OK** |
 | 总退出码 | **0** | **0** |
 
-新增验收测试：`backend/core/test_library_tag_refactor.py`，**33 项，全部通过**。
+新增验收测试：`backend/core/test_library_tag_refactor.py`，**44 项，全部通过**。
 
 ```powershell
 cd <worktree>\backend
 ..\.venv\Scripts\python.exe manage.py test core.test_library_tag_refactor
-# Ran 33 tests — OK
+# Ran 44 tests — OK
 ```
 
 ---
@@ -209,11 +209,12 @@ python tools/check_export_tag_refactor.py --database <db> --base http://127.0.0.
 | 打包退出码 | **0** |
 | 版本一致性 | 源码 `version.py` = 1.27.0；产物 `tiyouju.exe --version` = **tiyouju 1.27.0**（打包脚本硬闸校验） |
 | 可运行文件夹 | `work/question-bank-card/packaging/dist/QuestionBankCard/` |
-| 便携 ZIP | `work/candidate/QuestionBankCard-1.27.0-portable.zip`（**62.0 MB**） |
-| SHA-256 | `e5dcb7e948dd1a06d700c2e3ec571a8beb77f82840f62547db782c5ee3482a9a` |
+| 便携 ZIP | `work/candidate/QuestionBankCard-1.27.0-portable.zip`（**62.4 MB**，8158 个条目） |
+| SHA-256 | `0616d787b52f56f12d9792dff7141bcdd745803c35a62741d83c8c9d1dca984e` |
 | 校验文件 | `QuestionBankCard-1.27.0-portable.zip.sha256`（同目录） |
-| ZIP 完整性 | `zipfile.testzip()` → **OK** |
-| 解压后启动 | 从 ZIP 解压 → `tiyouju.exe --version` = 1.27.0 → 起服务 8797 → `/api/library/search` **200**、`/library/concepts` **200 且含三入口** |
+| ZIP 完整性 | `zipfile.testzip()` → **OK**；含 `QuestionBankCard.exe`、`tiyouju.exe` |
+| 产物审计 | 「打包审计通过：未发现数据库、试卷、凭据或运行日志」 |
+| 覆盖安装 | 已装到本机 `…\AppData\Local\Programs\QuestionBankCard`；两个 exe 的 SHA-256 与产物**一致**；卸载器保留；`tiyouju.exe --version` = 1.27.0 |
 | 安装包（Setup.exe） | **没出** —— 本机没装 Inno Setup，用了 `-SkipInstaller`（计划要求「安装包**或** ZIP」） |
 | 新工作台资源 | `_internal/frontend/library-concepts.{html,js,css}` 三个文件都在包里 |
 
@@ -243,22 +244,14 @@ python tools/check_export_tag_refactor.py --database <db> --base http://127.0.0.
 ## 6. 生产环境状态（结束时）
 
 ```
-PID 19256  QuestionBankCard.exe                              （主窗口）
-PID 76504  QuestionBankCard.exe --internal-role run_worker
-PID 80756  QuestionBankCard.exe --internal-role runserver 127.0.0.1:8768
+PID 31592  QuestionBankCard.exe                              （主窗口）
+PID 62484  QuestionBankCard.exe --internal-role run_worker
+PID 64288  QuestionBankCard.exe --internal-role runserver 127.0.0.1:8768
 ```
 
-生产库 `<生产数据目录>\db.sqlite3` 核对结果：
-
-| 项目 | 值 | 应为 |
-|---|---|---|
-| 0030 新表数量 | **0** | 0 ✓ |
-| `assignment` 有 `role` 列 | **False** | False ✓ |
-| 最后一条迁移记录 | `0029_realign_untouched_suggestions` | 0029 ✓ |
-| 题库 / 标签 / 关联 / 候选 | **869 / 306 / 21 / 904** | 与本轮开始时一致 ✓ |
-| 文件 mtime | **2026-10-25 00:02:14** | 本轮开始前 ✓ |
-
-**生产库一个字节都没被改过。安装版还是 1.26.31。**
+> **更正**：这一节原来写「生产库一个字节都没被改过。安装版还是 1.26.31。」——
+> 那是**候选构建阶段**的状态。用户后来在问卷里明确选了「覆盖安装」，
+> 真实库已跑过 0030+0031 迁移，安装版已是 1.27.0。结果见 §6.5。
 
 ---
 
@@ -334,6 +327,32 @@ GUI 应用直接 `Start-Process <exe>`（等同双击）就稳定：45 秒后 3 
 
 ---
 
+## 6.7 再补两块：章节层级树、候选「用在第几问」（2026-10-25 续作）
+
+这一轮把两处「老师知道要做什么、但做不了」补上。
+
+| 补什么 | 真机验证 |
+|---|---|
+| **章节层级树** | 新建章节可以选父章节；目录显示成章→节的树（子项缩进 14px + `is-child` 样式），不是平铺的一列 |
+| **通用教学目录不显示的 bug** | 「通用教学目录」不在教材表里 → 教材分支直接 return → **新库里的章节全看不见**。现在教材按教材分组，「通用教学目录」单独列一组 |
+| **候选「用在第几问」** | 候选面板有「用在」下拉（整题 / 第 N 问）；建议说第（2）问时下拉就摆成第（2）问；改成第（1）问采纳，落库是第（1）问 |
+
+**验证用的是隔离库 + 虚构数据**（`tools/make_scope_fixture.py` 造一条说「第（2）问」的候选），
+**真实题库的 904 条候选一条都没动**。
+
+浏览器里的真操作（非静态断言）：打开打包版 8797 → 点开那道题 → 「待核对建议」里看到
+「配方法 / 用途：解法采用 / 用在：（2）」→ 把「用在」改成「（1）」→ 点「采纳」→ 查库：
+
+```
+scope_key = sub:9275af64-…   （第（1）问）
+subquestion_id = 9275af64-…   （同一个）
+role = method
+```
+
+**范围键和小问外键都在** —— 只写范围键的话，按小问检索永远搜不到这条。
+
+---
+
 ## 7. 过程中查到的真问题（都已修，记下来）
 
 | 问题 | 后果 | 修在哪 |
@@ -344,23 +363,37 @@ GUI 应用直接 `Start-Process <exe>`（等同双击）就稳定：45 秒后 3 
 | 展示编号「第（1）问」对不上库里的小问 UUID | 按小问检索永远搜不到 | `backend/core/library_query.py` 的 `_scope_matches`：展示编号和稳定键都能认 |
 | `plan_migration` 按库里存的 `canonical_key` 分组（旧数据是空的） | dry-run **漏报重名冲突** | `backend/core/library_tag_migration.py`：改成按算出来的归一化名分组 |
 | 用 `Start-Process -ArgumentList` 传 `set "VAR=..."` | 引号和值都被 cmd 二次解析吃掉 → **打包版连上了生产库**（只读访问，未写入） | 改用 `.cmd` 文件启动；生产库已逐项核对未受影响（见 §6） |
+| 范围键写了，**小问外键没写** | 「用在第（1）问」的关联在按小问检索时被判「不落在任何小问」→ **永远搜不到**（库里在、界面显示也在，就是搜不出来） | `backend/core/library_tagging.py`：范围键和小问外键**成对**写 |
+| 采纳建议时找已有行只按 `(题, 标签)` | 题上已经有那个概念时，找到的不是待核对行就什么都不做 —— 建议标成「已采纳」，**库里什么都没多** | 同上：先找待核对的行，再按 `(用途, 范围键)` 精确匹配，都没有才新建 |
+| 「解析版本有没有变」的比较散在**六处**各抄一遍 | 抄漏一项、抄错一项，就会把「解析一个字都没改」判成「建议已过期」，老师只看到一句没头没尾的过期提示 | `library_tagging.method_source_snapshot()` + `method_source_matches()`，六处全走这两个函数；比对时两边都只取那五项 |
+| 候选的「用在」下拉不预选建议的范围 | 建议说第（2）问，下拉却显示「整题」—— 老师会以为范围没标 | `frontend/library-concepts.js`：下拉先摆成建议说的那一问；落在好几问上时锁住并说清楚现在是什么 |
 
 ---
 
 ## 8. 性能
 
-**本轮没做基准测试。**
+**做了。** 计划第 11 节要求用 1,000 题和 10,000 题的固定种子数据集测热查询的中位数和 P95（建议列表 P95 ≤ 500 ms）。
 
-计划第 11 节要求用 1,000 题和 10,000 题的固定种子数据集测热查询的中位数和 P95（建议列表 P95 ≤ 500 ms）。
+第一版超标：10,000 题时最慢一条 P95 **5995 ms**，超目标 12 倍。原因是检索把全部题拉成模型对象再在 Python 里逐题过条件。
 
-本轮只验证了 18 道虚构题的功能正确性，**没有规模测试**。合成数据生成器 `tools/make_fake_library.py` 已经能批量造题，下一步直接拿它做基准即可。
+改成**候选集在库层收敛**（概念和方法条件先在 SQL 层算出「哪几道题可能相关」，只对这些题做精确判定，语义不变）之后：
+
+| 规模 | 目录 | 题量 | 关联量 | 最慢一条 P95 | 结论 |
+|---|---|---|---|---|---|
+| 1,000 题 | 120 概念 | 1,000 | 1,534 | **36.2 ms** | 达标 |
+| 10,000 题 | 120 概念 | 10,000 | 15,334 | **158.5 ms** | 达标 |
+| 10,000 题 | **5,000 概念深链** | 10,000 | 15,334 | **190.4 ms** | 达标 |
+
+基准脚本 `tools/bench_query.py`，固定种子，热查询 20 次。合成占位数据不是数学测试集，换机器数字不可比。
+
+**仍然没测的**：组卷草稿很多条、题面特别大（长解析＋多图）这两个维度；别的机器。
 
 ---
 
 ## 9. 结论
 
-**做完了并验证过的**：数据模型与约束、服务层、结构化检索的三态语义、迁移工具的 dry-run/apply/verify/幂等、中文条件转换、候选审核闭环的核心、独立工作台界面、打包、产物审计、解压启动、打包版的贴标到检索整条路径。
+**做完了并验证过的**：数据模型与约束、服务层、结构化检索的三态语义、迁移工具的 dry-run/apply/verify/幂等、中文条件转换、候选审核闭环（含「改用途」「改用在第几问」）核心、独立工作台界面、主页顶栏入口、概念维护面板、章节层级树、旧「保存标签组合」转换、打印/组卷/导出的实测、性能基准、打包、产物审计、解压启动、打包版的贴标到检索整条路径、**真实题库迁移与覆盖安装（已核对无损）**。
 
-**没做的**：真实题库迁移、安装版替换、打印/组卷/导出的实测、性能基准、题库主页左栏的三入口改造、概念合并/停用界面、旧「保存标签组合」转换、难度字段。
+**没做的**：题库主页左栏的三入口改造（改成独立页面 + 主页顶栏入口）、难度字段、章节 ↔ 概念映射界面、合并的撤销入口、候选改名字/类型/上级。
 
 详见 `Known-Issues.md`。
