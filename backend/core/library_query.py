@@ -397,6 +397,18 @@ def _concept_group_match(rows: list[LibraryTagAssignment], group: dict, expanded
     roles = set(group["roles"])
     picked = [row for row in rows if str(row.tag_id) in allowed and row.role in roles and _is_confirmed(row)]
     if not picked:
+        # 旧记录也要算数 —— 它进的是「旧标签命中」那一桶，不是「已确认匹配」，
+        # 但不能因为它不是 primary 就当这道题跟这个概念无关。
+        legacy = [row for row in rows if str(row.tag_id) in allowed and row.role == ROLE_LEGACY]
+        if legacy:
+            return {
+                "matched": True,
+                "pending": False,
+                "legacy": True,
+                "roles": [ROLE_LEGACY],
+                "tag_ids": sorted({str(row.tag_id) for row in legacy}),
+                "names": sorted({row.tag.name for row in legacy}),
+            }
         # 压根没这条关联 → 不匹配；有，但还没确认 → **未知**。
         # 这两件事混在一起，「未整理」就成了一个没有意义的数字。
         pending = [row for row in rows if str(row.tag_id) in allowed and row.role in roles]
@@ -720,10 +732,12 @@ def _reasons_for(
     """一条结果为什么命中。界面上要能点进去看依据。"""
     reasons: list[dict] = []
     for group in concepts:
+        # 旧记录命中要说清是旧的，不能跟正式匹配一个说法。
+        label = "旧标签命中：" if group.get("legacy") else "概念匹配："
         reasons.append(
             {
-                "kind": "concept",
-                "text": "概念匹配：" + "、".join(group.get("names") or []),
+                "kind": "legacy" if group.get("legacy") else "concept",
+                "text": label + "、".join(group.get("names") or []),
                 "roles": group.get("roles") or [],
                 "tag_ids": group.get("tag_ids") or [],
                 "scope_keys": sorted(
