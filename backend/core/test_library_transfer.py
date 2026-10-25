@@ -349,6 +349,9 @@ class ReferencedRowsTests(TransferFixture):
 
     def test_the_merge_brings_the_rows_the_questions_point_at(self):
         self.build_references()
+        # 分组是整表跟着快照走的。数目看导出时库里有多少 —— 1.27.0 的 0030 迁移
+        # 建了四个内置的类型分组，写死 1 会对不上。
+        expected_groups = LibraryTagGroup.objects.count()
         bundle = self.export()
         self.forget_local_rows()
 
@@ -356,7 +359,7 @@ class ReferencedRowsTests(TransferFixture):
 
         self.assertEqual(QuestionGroup.objects.count(), 1, "题组得跟着题走")
         self.assertEqual(QuestionDeletionBatch.objects.count(), 1, "删除批次得跟着题走")
-        self.assertEqual(LibraryTagGroup.objects.count(), 1, "标签目录得跟着标签走")
+        self.assertEqual(LibraryTagGroup.objects.count(), expected_groups, "标签目录得跟着标签走")
         self.assertEqual(LibraryTagAssignment.objects.count(), 1, "题上贴的标签得跟着快照走")
 
     def test_the_merge_leaves_no_dangling_reference(self):

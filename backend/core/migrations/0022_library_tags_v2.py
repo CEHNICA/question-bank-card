@@ -65,7 +65,13 @@ def seed_and_migrate_tags(apps, schema_editor):
         )
         nonlocal_legacy_group = None
         # The legacy group is created only if a legacy label actually needs it.
-        nonlocal_legacy_group = LibraryTagGroup.objects.filter(system_key="system:legacy-tags").first()
+        # 1.27.0：同名也要查 —— 0030 那个迁移把「历史标签」变成了内置分组
+        # （builtin:legacy），组名是唯一的。这段被重跑时（测试里就是这么干的）
+        # 再建一个同名的就撞唯一约束了。查得到就复用。
+        nonlocal_legacy_group = (
+            LibraryTagGroup.objects.filter(system_key="system:legacy-tags").first()
+            or LibraryTagGroup.objects.filter(name="历史标签").first()
+        )
         if nonlocal_legacy_group is None:
             nonlocal_legacy_group = LibraryTagGroup.objects.create(
                 system_key="system:legacy-tags", name="历史标签", color="#7d8188", position=99

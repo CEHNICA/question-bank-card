@@ -87,7 +87,7 @@ class TagGroupTests(TestCase):
 
     def test_a_group_can_be_created_and_renamed(self):
         self.mutate("create_group", name="上周那套卷子")
-        group = LibraryTagGroup.objects.get()
+        group = LibraryTagGroup.objects.get(name="上周那套卷子")
         self.assertEqual(group.name, "上周那套卷子")
 
         self.mutate("update_group", group_id=str(group.pk), name="五月卷")
@@ -96,7 +96,7 @@ class TagGroupTests(TestCase):
 
     def test_a_tag_can_be_moved_in_and_out_of_a_group(self):
         self.mutate("create_group", name="常用")
-        group = LibraryTagGroup.objects.get()
+        group = LibraryTagGroup.objects.get(name="常用")
         tag = self.make_tag("二次函数的最值")
 
         self.mutate("group_membership", group_id=str(group.pk), tag_id=str(tag.pk), present=True)
@@ -107,7 +107,7 @@ class TagGroupTests(TestCase):
 
     def test_several_tags_can_be_moved_in_one_go(self):
         self.mutate("create_group", name="常用")
-        group = LibraryTagGroup.objects.get()
+        group = LibraryTagGroup.objects.get(name="常用")
         first = self.make_tag("二次函数的最值")
         second = self.make_tag("配方法")
 
@@ -118,7 +118,7 @@ class TagGroupTests(TestCase):
 
     def test_deleting_a_group_keeps_the_tags(self):
         self.mutate("create_group", name="常用")
-        group = LibraryTagGroup.objects.get()
+        group = LibraryTagGroup.objects.get(name="常用")
         tag = self.make_tag("配方法")
         self.mutate("group_membership", group_id=str(group.pk), tag_id=str(tag.pk), present=True)
 
@@ -130,7 +130,7 @@ class TagGroupTests(TestCase):
 
     def test_group_changes_can_be_undone(self):
         self.mutate("create_group", name="常用")
-        group = LibraryTagGroup.objects.get()
+        group = LibraryTagGroup.objects.get(name="常用")
         tag = self.make_tag("配方法")
         self.mutate("group_membership", group_id=str(group.pk), tag_id=str(tag.pk), present=True)
         operation = LibraryTagOperation.objects.filter(action="catalogue:group_membership").first()
@@ -140,37 +140,39 @@ class TagGroupTests(TestCase):
         group.refresh_from_db()
         self.assertEqual(group.tags.count(), 0)
 
-    def test_system_groups_do_not_count_as_classified(self):
-        """教材章节那套系统分组不算「已归类」。
+    def test_builtin_kind_groups_are_real_groups(self):
+        """1.27.0：类型变成了**真的分组** —— 迁移建好的，和老师自建的一样。
 
-        每个标签都挂在某个章节下，说它「没归类」是骗人 —— 未分类说的是
-        没归到老师自己建的分组里。
+        「未分类」的口径也跟着改成「不属于任何分组」：删掉一个分组，
+        里面那批标签就回到这里。
         """
-        system = LibraryTagGroup.objects.create(name="初中 · 函数", system_key="seed-group:1")
-        tag = self.make_tag("配方法")
-        system.tags.add(tag)
         self.mutate("create_group", name="老师自建的组")
 
         rows = library_tagging._catalogue_rows()
-        self.assertEqual(rows["ungrouped_count"], 1)
         names = {group["name"]: group for group in rows["groups"]}
-        self.assertTrue(names["初中 · 函数"]["system"])
-        self.assertFalse(names["老师自建的组"]["system"])
+        self.assertTrue(names["知识点"]["builtin"], "知识点是内置分组")
+        self.assertTrue(names["历史标签"]["builtin"], "历史标签是内置分组")
+        self.assertFalse(names["老师自建的组"]["builtin"], "自建的组不是内置的")
+        # 教材章节那套带 section 标记 —— 界面上不当分组显示（那是章节树的事）。
+        sections = [row for row in rows["groups"] if row["section"]]
+        self.assertTrue(
+            all(str(row["system_key"] or "").startswith("seed-group:") for row in sections),
+            "带 section 标记的只有教材章节那套",
+        )
 
     def test_catalogue_reports_groups_and_initials(self):
         self.mutate("create_group", name="常用")
-        group = LibraryTagGroup.objects.get()
+        group = LibraryTagGroup.objects.get(name="常用")
         inside = self.make_tag("爱情")
         outside = self.make_tag("白噪音")
         self.mutate("group_membership", group_id=str(group.pk), tag_id=str(inside.pk), present=True)
 
         rows = library_tagging._catalogue_rows()
-        self.assertEqual(len(rows["groups"]), 1)
-        self.assertEqual(rows["groups"][0]["name"], "常用")
-        self.assertEqual(rows["groups"][0]["tag_count"], 1)
-        self.assertEqual(rows["ungrouped_count"], 1)
+        mine = next(row for row in rows["groups"] if row["name"] == "常用")
+        self.assertEqual(mine["tag_count"], 1)
         by_id = {row["id"]: row for row in rows["tags"]}
         self.assertEqual(by_id[str(inside.pk)]["initial"], "A")
         self.assertEqual(by_id[str(inside.pk)]["group_ids"], [str(group.pk)])
         self.assertEqual(by_id[str(outside.pk)]["initial"], "B")
-        self.assertEqual(by_id[str(outside.pk)]["group_ids"], [])
+        # 「爱情」归了组，「白噪音」还谁都没归 —— 除了内置的类型组（测试库里迁移归的）。
+        self.assertNotIn(str(group.pk), by_id[str(outside.pk)]["group_ids"])
