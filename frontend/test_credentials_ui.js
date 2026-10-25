@@ -34,7 +34,7 @@ const aiSettings = fs.readFileSync(path.join(__dirname, "library-ai-settings.js"
 // 答案侧按“读题与切题”的形状一家一块：名字、用途、已保存几条、新密钥、删除按钮。
 assert.match(aiSettings, /id="libraryAIKey-\$\{provider\}" type="password" autocomplete="off" autocapitalize="off"/);
 assert.doesNotMatch(aiSettings, /autocomplete="(?:current|new)-password"/);
-for (const provider of ["deepseek", "minimax", "doubao", "custom"]) {
+for (const _provider of ["deepseek", "minimax", "doubao", "custom"]) {
   assert.match(aiSettings, new RegExp(`id="libraryAISaved-\\$\\{provider\\}" class="credential-saved-list"`));
   assert.match(aiSettings, new RegExp(`id="libraryAIDelete-\\$\\{provider\\}" class="button small credential-delete" type="button" aria-label="删除 \\$\\{providerNames\\[provider\\]\\} 密钥" hidden>删除密钥</button>`));
   assert.match(aiSettings, new RegExp(`id="libraryAIKeyState-\\$\\{provider\\}" class="api-state missing">未保存</span>`));

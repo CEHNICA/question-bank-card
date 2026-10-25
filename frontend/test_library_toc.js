@@ -3,7 +3,7 @@
 // 群里那位同学的原话：「目录能不能自己根据教材目录来编写」—— 这里验的是
 // 把课本目录的**文字**解析成一棵树这件事：认得常见的几种写法、分得清层级、
 // 不把页码行当目录。
-const assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path");
+const assert = require("node:assert/strict"), path = require("node:path");
 const toc = require(path.join(__dirname, "library-toc.js"));
 
 const names = tree => toc.flatten(tree.roots).map(entry => `${"  ".repeat(entry.depth)}${entry.name}`);

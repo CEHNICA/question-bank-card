@@ -111,5 +111,5 @@ assert(focusKeys.more.some(item => item.keys.includes("O") && item.label.include
 assert(focusKeys.more.some(item => item.keys.includes("Shift+O") && item.label.includes("全部")));
 // A click on 展开 / the row, or E, is a manual expand: it stays open when J/K moves on.
 assert.match(js, /setExpanded\(q\.id, collapsed\);/);
-assert.match(js, /state\.autoExpanded\.delete\(q\.id\);    \/\/ 正在改的题，离开时不收回/);
+assert.match(js, /state\.autoExpanded\.delete\(q\.id\); {4}\/\/ 正在改的题，离开时不收回/);
 console.log("expand shortcut checks: OK");

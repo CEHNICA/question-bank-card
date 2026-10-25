@@ -131,7 +131,7 @@ assert.match(examLayout, /row\.style\.rowGap\s*=\s*"0"/,
 // about which one they are editing.
 assert.match(examLayout, /const chosenWidth = Number\(image\.dataset\.figureWidth\) \|\| Number\(image\.dataset\.solutionWidth\)/,
   "a teacher-set figure width takes precedence, then an answer-diagram width, then the 150 dpi default");
-assert.match(exporter, /def _figure_paper_size\([^)]*forced_mm=None\)/,
+assert.match(exporter, /def _figure_paper_size\([^)]*forced_mm=None\s*\)/,
   "the exporter has to accept a teacher-set width at all");
 assert.match(exporter, /float\(forced_mm\) if forced_mm else width \* 25\.4 \/ PREVIEW_FIGURE_DPI/,
   "the teacher-set width replaces the 150 dpi term in the exporter too, rather than scaling it");

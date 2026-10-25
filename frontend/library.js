@@ -1145,7 +1145,7 @@
     // 把「焦点在哪儿」重置了。那一下用户看不见，键盘用户感觉得到：按完 Esc 一看，
     // 焦点跑到页首去了。这里守着补上：焦点不在 summary 又不在 body（用户自己点到别处
     // 了）就立刻收手，最多守两秒。
-    let until = performance.now() + 2000;
+    const until = performance.now() + 2000;
     const hold = () => {
       if (!summary?.isConnected || performance.now() > until) return;
       const active = document.activeElement;
@@ -1664,7 +1664,6 @@
   try { Object.entries(JSON.parse(sessionStorage.getItem(suggestionDraftKey + ":requests") || "{}")).forEach(([id, attempt]) => suggestionAttempts.set(id, attempt)); } catch (_) {}
   function suggestionDraft(item, suggestion) { return suggestionDrafts[item.id + ":" + suggestion.id] ||= {}; }
   function saveSuggestionDrafts() { try { sessionStorage.setItem(suggestionDraftKey, JSON.stringify(suggestionDrafts)); sessionStorage.setItem(suggestionDraftKey + ":requests", JSON.stringify(Object.fromEntries(suggestionAttempts))); } catch (_) {} }
-  let tagManagerQuery = "";
   let tagTargetIds = [], tagRevisions = {}, tagMemberships = {}, tagActiveSection = "all", tagPickerView = "all", tagUndoId = "", tagOperationHistory = [];
   // 1.25.94：批量窗口刚打开时的落地页 —— 先摆「最近用过的 + 收藏」，不铺满两百多条。
   let tagPickerLanding = true;
@@ -1993,7 +1992,7 @@
     const go = node("button", "button button-small", "去右边面板核对");
     go.type = "button";
     go.title = "关掉这个窗口，右边详情面板上会直接列出 AI 建议的标签，可以改名、采纳或拒绝";
-    go.addEventListener("click", function() { dialog.close(); focusInspectorTag(item); });
+    go.addEventListener("click", function() { tagDialog.close(); focusInspectorTag(item); });
     ai.append(aiTitle, go); box.append(ai);
   }
   const kindLabels = { knowledge: "知识点", method: "解题方法", custom: "自定义", legacy: "历史标签" };
@@ -2197,7 +2196,7 @@
       tagUndoId = result.operation_id; $("tagPickerUndo").hidden = false;
       $("tagPickerStatus").textContent = remove ? "已从本次选题移除「" + tag.name + "」" : "已添加「" + tag.name + "」";
       if (refreshFailed) $("tagPickerStatus").textContent += "；已保存，当前状态载入失败，请重新打开标签窗口";
-      try { let recent = JSON.parse(localStorage.getItem("qb-library-recent-tags") || "[]").filter(function(id) { return id !== tag.id; }); recent.push(tag.id); localStorage.setItem("qb-library-recent-tags", JSON.stringify(recent.slice(-20))); } catch (_) {}
+      try { const recent = JSON.parse(localStorage.getItem("qb-library-recent-tags") || "[]").filter(function(id) { return id !== tag.id; }); recent.push(tag.id); localStorage.setItem("qb-library-recent-tags", JSON.stringify(recent.slice(-20))); } catch (_) {}
       renderTagPicker(); await refreshTaggedPublications(payload.publication_ids, result);
       return true;
     } catch (error) {
@@ -2309,8 +2308,7 @@
       if (!result.count) { status.textContent = "还没认出目录内容。"; return; }
       apply.disabled = true; status.textContent = "正在建…";
       try {
-        const answer = await catalogueAction("create_tags_batch", { kind: "knowledge", nodes: result.roots });
-        const created = (answer.catalogue?.tags || []).length;
+        await catalogueAction("create_tags_batch", { kind: "knowledge", nodes: result.roots });
         toast(`教材目录建好了：新增 ${result.count} 个节点。`, "success");
         await loadTagCatalogue();
         directory.tags = [];
@@ -2427,8 +2425,7 @@
     const name = field(label + "名称", "tagCatalogueName", node("input"), true);
     name.required = true; name.maxLength = 80; name.value = record?.name || (fromPicker ? $("tagPickerSearch")?.value.trim() : "") || "";
     name.placeholder = "例如：课堂例题、易错题";
-    let kind, description, aliases, conditions, scope, levelChoices, parentChoices, relatedChoices;
-    kind = field("标签类型", "tagCatalogueKind", node("select"));
+    const kind = field("标签类型", "tagCatalogueKind", node("select"));
     [["custom", "自定义标签"], ["knowledge", "知识点"], ["method", "解题方法"]].forEach(function(entry) { kind.add(new Option(entry[1], entry[0])); });
     if (record?.kind === "legacy") kind.add(new Option("历史标签", "legacy"));
     kind.value = record?.kind || defaults.kind || "custom"; kind.disabled = editing;
@@ -2453,16 +2450,22 @@
     [["", "默认"], ["#bb575d", "红色"], ["#4f8278", "绿色"], ["#477a9e", "蓝色"], ["#8965a5", "紫色"], ["#bf8545", "橙色"], ["#438b94", "青色"]].forEach(function(entry) { color.add(new Option(entry[1], entry[0])); });
     if (record?.color && !Array.from(color.options).some(function(option) { return option.value === record.color; })) color.add(new Option("当前颜色", record.color));
     color.value = record?.color || "";
-    description = field("简短说明（可选）", "tagCatalogueDescription", node("textarea"), true);
+    const description = field("简短说明（可选）", "tagCatalogueDescription", node("textarea"), true);
     description.rows = 2; description.maxLength = 300; description.value = record?.description || "";
-    parentChoices = field("上级标签（可多选；留空作为顶级）", "tagCatalogueParents", node("select"), true); parentChoices.multiple = true; parentChoices.size = 5;
+    const parentChoices = field("上级标签（可多选；留空作为顶级）", "tagCatalogueParents", node("select"), true); parentChoices.multiple = true; parentChoices.size = 5;
     const chosenParents = record?.parent_ids || defaults.parent_ids || [];
     const renderParents = () => {
       const selected = parentChoices.options.length ? Array.from(parentChoices.selectedOptions).map(option => option.value) : chosenParents;
       parentChoices.replaceChildren();
-      (tagCatalogue.tags || []).filter(tag => tag.active && tag.kind === kind.value && tag.id !== record?.id).forEach(tag => {
-        const option = new Option(tag.name, tag.id); option.selected = selected.includes(tag.id); parentChoices.append(option);
-      });
+      // 1.26.28：上级不再按类型筛。1.26.27 拆掉后台那道关卡以后，跨类型挂着是常事，
+      // 标签管理页的「设置父标签」也早就能选别类的上级 —— 这里要是还按类型筛，
+      // 他编辑那颗标签一保存，这条上下级关系就被悄悄抹掉了。
+      tagParentCandidates(tagCatalogue.tags || [], { excludeId: record?.id || "", keepIds: chosenParents })
+        .forEach((candidate) => {
+          const option = new Option(candidate.label, candidate.id);
+          option.selected = selected.map(String).includes(String(candidate.id));
+          parentChoices.append(option);
+        });
     };
     renderParents(); kind.addEventListener("change", renderParents);
     // 1.25.38：从「正在看的标签」里点新建时，上级已经替你选好了。写明建在谁下面，
@@ -2476,21 +2479,21 @@
           "会建在「" + names.join("、") + "」下面；不想挂在这里，就取消选中上面的上级。"));
       }
     }
-    relatedChoices = field("相关方法（知识与方法的联系，不作为上级）", "tagCatalogueRelatedMethods", node("select"), true); relatedChoices.multiple = true; relatedChoices.size = 4;
+    const relatedChoices = field("相关方法（知识与方法的联系，不作为上级）", "tagCatalogueRelatedMethods", node("select"), true); relatedChoices.multiple = true; relatedChoices.size = 4;
     (tagCatalogue.tags || []).filter(tag => tag.active && tag.kind === "method").forEach(tag => {
       const option = new Option(tag.name, tag.id); option.selected = (record?.related_method_ids || []).includes(tag.id); relatedChoices.append(option);
     });
     const syncRelated = () => { relatedChoices.parentElement.hidden = kind.value !== "knowledge"; };
     kind.addEventListener("change", syncRelated); syncRelated();
-    scope = field("适用小问（留空表示整题）", "tagCatalogueScope", node("input"), true); scope.placeholder = "例如：1,2";
+    const scope = field("适用小问（留空表示整题）", "tagCatalogueScope", node("input"), true); scope.placeholder = "例如：1,2";
     const syncScope = function() { scope.parentElement.hidden = !(fromPicker && !editing && kind.value === "method"); };
     kind.addEventListener("change", syncScope); syncScope();
     const advanced = node("details", "tag-catalogue-wide"); advanced.append(node("summary", "", "别名、学段与适用条件"));
     const advancedFields = node("div", "tag-catalogue-editor-body");
     const extra = function(title, control) { const row = node("label", "tag-catalogue-field tag-catalogue-wide"); row.append(node("span", "", title), control); advancedFields.append(row); return control; };
-    aliases = extra("别名（用逗号分隔）", node("input")); aliases.value = (record?.aliases || []).join("，");
-    conditions = extra("适用条件（可选）", node("textarea")); conditions.rows = 2; conditions.maxLength = 2000; conditions.value = record?.conditions || "";
-    levelChoices = node("fieldset", "tag-catalogue-wide"); levelChoices.append(node("legend", "", "适用学段"));
+    const aliases = extra("别名（用逗号分隔）", node("input")); aliases.value = (record?.aliases || []).join("，");
+    const conditions = extra("适用条件（可选）", node("textarea")); conditions.rows = 2; conditions.maxLength = 2000; conditions.value = record?.conditions || "";
+    const levelChoices = node("fieldset", "tag-catalogue-wide"); levelChoices.append(node("legend", "", "适用学段"));
     ["初中", "高中"].forEach(function(level) { const row = node("label", "tag-catalogue-check"), check = node("input"); check.type = "checkbox"; check.value = level; check.checked = (record?.levels || ["初中", "高中"]).includes(level); row.append(check, node("span", "", level)); levelChoices.append(row); });
     advancedFields.append(levelChoices); advanced.append(advancedFields); body.append(advanced);
     const status = node("p", "tag-catalogue-status"); status.id = "tagCatalogueStatus"; status.setAttribute("role", "status");
@@ -2498,7 +2501,8 @@
     cancel.type = "button"; save.type = "submit"; save.id = "tagCatalogueSave"; save.value = fromPicker && !editing ? "apply" : "save";
     const createOnly = node("button", "button", "仅创建标签"); createOnly.type = "submit"; createOnly.id = "tagCatalogueCreateOnly"; createOnly.value = "save"; createOnly.hidden = !(fromPicker && !editing);
     footer.append(cancel, save, createOnly); form.append(body, status, footer); dialog.append(header, form); document.body.append(dialog);
-    let saving = false, created = null, attempt = null, applyAttempt = {}, composing = false;
+    let saving = false, created = null, attempt = null, composing = false;
+    const applyAttempt = {};
     form.addEventListener("compositionstart", function() { composing = true; });
     form.addEventListener("compositionend", function() { composing = false; });
     form.addEventListener("keydown", function(event) { if (event.key === "Enter" && (composing || event.isComposing || event.keyCode === 229)) event.preventDefault(); });
@@ -2694,7 +2698,7 @@
     }
   }
   async function openTagSuggestionHistory(item) {
-    let dialog = node("dialog", "tag-history-dialog");
+    const dialog = node("dialog", "tag-history-dialog");
     const heading = node("header", "tag-picker-head"), title = node("h2", "", "AI 标签记录 · 第 " + item.number + " 题");
     const close = node("button", "button", "关闭"); close.type = "button"; heading.append(title, close);
     const list = node("div", "tag-history-list"), footer = node("footer", "tag-picker-foot"), status = node("span", "helper"), previous = node("button", "button button-small", "较新记录"), next = node("button", "button button-small", "更早记录");
@@ -3315,19 +3319,60 @@
   // 让子标签顶它的位。底层走目录的 set_parents（操作记录里能撤销）。
   // 1.26.24：拖放之后不再直接挂上去，先问一句「这两颗标签怎么排」——
   // 可以成为子标签，也可以并列（共享同一个上级）。两种排法在同一个地方说清楚。
-  function tagDescendants(root) {
+  // 1.26.28：后代不再按类型算。1.26.27 以后老师的标签是一棵跨类型的树 ——
+  // 解题方法可以是知识点的子标签。只认同类型的话，成环的那一道就拦不住，
+  // 白白把请求发给后台，再换来一句「会形成循环」。
+  function tagDescendants(root, tags) {
+    const all = tags || (tagCatalogue.tags || []);
     const out = new Set();
-    const stack = [(tagCatalogue.tags || []).find(t => String(t.id) === String(root.id))];
+    const stack = [all.find(t => String(t.id) === String(root.id))];
     while (stack.length) {
       const current = stack.pop();
       if (!current) continue;
-      for (const child of (tagCatalogue.tags || [])) {
-        if ((child.parent_ids || []).some(pid => String(pid) === String(current.id) && child.kind === current.kind)) {
+      for (const child of all) {
+        if ((child.parent_ids || []).some(pid => String(pid) === String(current.id))) {
           if (!out.has(String(child.id))) { out.add(String(child.id)); stack.push(child); }
         }
       }
     }
     return out;
+  }
+
+  // 1.26.28：编辑一颗标签时，能选的上级有哪些 —— 跟标签管理页的「设置父标签」
+  // 用同一套规矩：不按类型分家。已经挂着的那种一律留着（哪怕它已停用），
+  // 不然老师改个名字一保存，那条上下级关系就被悄悄抹掉了。
+  // 自己和自己的后代不列 —— 选上去会成环。
+  function tagParentCandidates(tags, options) {
+    const all = tags || [];
+    const settings = options || {};
+    const excludeId = String(settings.excludeId || "");
+    const keepIds = new Set((settings.keepIds || []).map(String));
+    const blocked = tagDescendants({ id: excludeId }, all);
+    const rows = all.filter((tag) => {
+      const id = String(tag.id);
+      if (id === excludeId || blocked.has(id)) return false;
+      if (tag.active === false && !keepIds.has(id)) return false;
+      return true;
+    });
+    // 名字按「类型 + 名字」才算唯一，所以两颗标签可能同名却分属不同类型。
+    // 那时把类型标出来，他才分得清下拉里那颗是哪一类；不重名的就不标，
+    // 免得满屏都是括号。
+    // 按**整个目录**里的同名情况来数，不能只看候选 —— 他正在编辑的那颗自己
+    // 不在候选里，可它照样会跟下拉里那颗撞名。
+    const kindsByName = new Map();
+    all.forEach((tag) => {
+      const key = String(tag.name || "");
+      const seen = kindsByName.get(key) || new Set();
+      seen.add(tag.kind);
+      kindsByName.set(key, seen);
+    });
+    return rows.map((tag) => {
+      const ambiguous = (kindsByName.get(String(tag.name || "")) || new Set()).size > 1;
+      return {
+        id: tag.id, name: tag.name, kind: tag.kind,
+        label: ambiguous ? tag.name + "（" + (kindLabels[tag.kind] || "标签") + "）" : tag.name,
+      };
+    });
   }
 
   // 1.26.24：两颗标签各挂在谁下面、是不是同一个上级 —— 拖放那一下就靠这两句说话。
@@ -3534,7 +3579,7 @@
       const otherFresh = tagById.get(String(other.tag.id)) || other.tag;
       return (otherFresh.parent_ids || []).some(pid => String(pid) === String(link.tag.id) && otherFresh.kind === link.tag.kind);
     });
-    const renderChips = attached.filter(link => !isCovered(link))
+    attached.filter(link => !isCovered(link))
       .forEach((link) => {
       const tag = link.tag;
       const wrapper = node("div", "library-tag-chip"), chip = tagHoverChip(item, link, "library-tag");

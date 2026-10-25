@@ -140,7 +140,7 @@ function harness() {
   const app = fs.readFileSync(path.join(__dirname, "app.js"), "utf8"), listeners = [];
   // The app uses CRLF on Windows; locate the actual navigation listener via
   // its unique anchor expression without depending on line-ending style.
-  const match = app.match(/  document\.addEventListener\("click", \(event\) => \{\s*const link = event\.target\.closest\?\.\("a\[href\]"\);[\s\S]*?\n  \}\);/);
+  const match = app.match(/ {2}document\.addEventListener\("click", \(event\) => \{\s*const link = event\.target\.closest\?\.\("a\[href\]"\);[\s\S]*?\n {2}\}\);/);
   assert(match, "Exercise the actual review-page navigation listener");
   let appLeaves = 0;
   const appContext = { URL, document: { addEventListener: (name, listener) => listeners.push(listener) }, editGuard: { hasPendingWork: () => true },

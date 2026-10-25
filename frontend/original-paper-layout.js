@@ -89,7 +89,7 @@
   function createController(host) {
     const { dialog, state, $, el, button, api, toast, cropView, renderStage, renderPageTabs, goToDialogPage, pointFrom, placeBox, setCropSaving, trackCropDraft, confirmDialog } = host;
     let draft = null, baseline = "", history = [], future = [], selectedId = null, operations = [], latestOperation = null, request = null;
-    let pageOnly = false, groupFilter = "", selectedPart = null, confirmOpen = false, conflict = false, lookupFailed = false, previewOpen = true;
+    let selectedPart = null, confirmOpen = false, conflict = false, lookupFailed = false, previewOpen = true;
     let manualSession = false, continuousAdd = false, saveDisposition = null;
     let generation = 0, closing = false, draftRevision = null, pendingAfterSave = null, lastFrameTap = null, lastDeleted = null;
     const kindNames = { regions: "调整范围", renumber: "修改题号", add: "补题", split: "拆题", merge: "合题" };
@@ -318,7 +318,7 @@
       generation += 1; dialog.layoutWorkspace = true; selectedId = q?.id ?? null;
       lastDeleted = null;
       draft = null; baseline = ""; history = []; future = []; request = null; operations = []; latestOperation = null; selectedPart = null;
-      confirmOpen = false; conflict = false; lookupFailed = false; pageOnly = false; groupFilter = ""; manualSession = true; continuousAdd = false; saveDisposition = null;
+      confirmOpen = false; conflict = false; lookupFailed = false; manualSession = true; continuousAdd = false; saveDisposition = null;
       if (mode === "regions" && q && !readOnly()) { draft = createDraft("regions", [q], state.questions); baseline = snap(); selectedPart = Number.isInteger(options.focusRegionIndex) ? options.focusRegionIndex : 0; }
       draftRevision = state.paper.layout_revision;
       dialog.tool = "select"; dialog.scrolled = true;

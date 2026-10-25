@@ -56,6 +56,10 @@ include = ["core*"]
 line-length = 120
 target-version = "py312"
 extend-exclude = ["packaging/.build", "packaging/dist", "tmp", ".git", "backend/.venv"]
+# 这个项目习惯把一长串键值写在一行里（比如符号表）。默认的「魔法尾逗号」会把它们
+# 拆成一行一个，代码凭空长两万行 —— 那是把代码改难读，不是整理格式。
+[tool.ruff.format]
+skip-magic-trailing-comma = true
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RET", "PIE", "RSE"]
@@ -89,6 +93,9 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["core"]
 combine-as-imports = true
+# 跟上面的 skip-magic-trailing-comma 配套：这两条是一对，
+# 一条管格式化、一条管 import 排序，拧成相反的方向会打架。
+split-on-trailing-comma = false
 
 # ---------------------------------------------------------------- 类型检查
 # mypy：先把「明显写错」那几类挑出来，不是给全仓库上满配。
@@ -109,6 +116,47 @@ disallow_untyped_defs = false
 # 存量代码类型标注不全，一次性开 strict 会淹掉真正的问题。
 # 先把错误压到能一眼看完的量，再逐步收紧。
 disable_error_code = ["no-untyped-def", "no-any-return", "misc"]
+
+# ---- 还没写类型标注的模块（2026-10-24 实测 32 个模块、264 条）----
+# 这些模块先不进类型门禁：把它们放进来之前，先把标注补上、把下面这些条数清掉。
+# 清单在 docs/类型检查待办.md 里，逐条记着 —— mypy 已经把它们挑出来了，
+# 别让它们烂在脑子里。其中不少是「可能是 None 却直接用」这类真隐患。
+[[tool.mypy.overrides]]
+module = [
+  "core.account_pool",              # 2 条
+  "core.credential_settings",       # 1 条
+  "core.cuts",                      # 5 条
+  "core.features",                  # 1 条
+  "core.figure_assignment",         # 6 条
+  "core.figure_claims",             # 3 条
+  "core.figure_policy",             # 6 条
+  "core.imaging",                   # 4 条
+  "core.import_planning",           # 1 条
+  "core.intake",                    # 1 条
+  "core.library_ai_settings",       # 5 条
+  "core.library_browse",            # 5 条
+  "core.library_drafts",            # 4 条
+  "core.library_jobs",              # 10 条
+  "core.library_tagging",           # 19 条
+  "core.library_transfer",          # 22 条
+  "core.library",                   # 11 条
+  "core.m3import",                  # 1 条
+  "core.management.commands.run_worker",  # 1 条
+  "core.mineru",                    # 9 条
+  "core.native_pdf",                # 3 条
+  "core.photos",                    # 9 条
+  "core.pipeline",                  # 71 条
+  "core.preferences",               # 3 条
+  "core.provider_catalog",          # 1 条
+  "core.reader_test",               # 1 条
+  "core.readers",                   # 12 条
+  "core.region_reads",              # 9 条
+  "core.segment",                   # 23 条
+  "core.textnorm",                  # 1 条
+  "core.views",                     # 11 条
+  "core.worker_lock",               # 3 条
+]
+ignore_errors = true
 
 [[tool.mypy.overrides]]
 module = ["core.tests", "core.migrations.*", "core.test_.*"]

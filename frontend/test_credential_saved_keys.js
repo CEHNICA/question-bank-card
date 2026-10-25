@@ -14,7 +14,6 @@ const start = source.indexOf('  Object.entries(CREDENTIAL_FIELDS).forEach(([serv
 const listeners = source.slice(start, source.indexOf("  // Queue the values captured", start));
 const apiFunction = between("  async function api(", "  let toastTimer =");
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { resolve, reject, promise }; };
-const turns = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 const response = (body, ok = true) => ({ ok, status: ok ? 200 : 409, json: async () => body });
 const copy = (value) => JSON.parse(JSON.stringify(value));
 

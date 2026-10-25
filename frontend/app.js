@@ -1985,6 +1985,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (q) setCurrent(q.id, { scroll: true, focus: true });
   }
 
+  // 旧的「切题完成」入口：现在生产上走 returnFromOriginalLayout。
+  // 但四个测试（test_manual_cut_complete、test_cut_reading_stages、
+  // test_automatic_cut_reading、test_teaching）仍然从源码里把这段取出来跑，
+  // 盯的是「切题完成不自动调用 AI 识读」这条安全线。
+  // 等那几个测试改成盯新入口，这段就可以删了。
+  // eslint-disable-next-line no-unused-vars
   async function enterCutReadingStage(paperId = state.paperId, questionIds = null) {
     if (!paperId || state.paperId !== paperId) return false;
     if ($("pageDialog").open) $("pageDialog").close();
@@ -4856,7 +4862,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   let credentialSession = 0;
   let credentialFocusFrame = 0;
   let credentialServices = {};
-  let credentialTab = "reading";
   let credentialAnswersMounted = false;
 
   function visionPickerReady() {
@@ -5532,7 +5537,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("credentialDialog").addEventListener("close", () => {
     // Native close events are queued; reopening can happen before this runs.
     if ($("credentialDialog").open) return;
-    const session = ++credentialSession;
+    ++credentialSession;
     credentialClosing = false;
     credentialCloseTask = null;
     credentialStateRequest += 1;

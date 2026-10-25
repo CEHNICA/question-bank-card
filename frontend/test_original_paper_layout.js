@@ -16,7 +16,7 @@ const supplement = L.createDraft("add", [a], questions, 20);
 assert.deepEqual(supplement.sources, [], "supplement never treats a previously selected question as a source");
 assert.equal(supplement.targets[0].group_id, 20);
 assert.equal(supplement.targets[0].number, 2);
-let split = L.createDraft("split", [a], questions);
+const split = L.createDraft("split", [a], questions);
 assert.deepEqual(split.targets[0].regions, a.regions, "first split target inherits all ranges");
 assert.deepEqual(split.targets[1].regions, [], "other split target is blank, never duplicates source ranges");
 assert.equal(split.targets[1].number, 3);
@@ -90,7 +90,8 @@ async function run() {
   const nodes = new Map(); const $ = (id) => { if (!nodes.has(id)) { const node = new Node(); node.id = id; nodes.set(id, node); } return nodes.get(id); };
   const dialog = { mode: "view", page: 0, imageReady: true, saving: false, tool: "select", spacePan: false };
   const state = { paperId: 7, paper: { id: 7, layout_revision: 9, pages, question_groups: [{ id: 10, title: "组10" }, { id: 20, title: "组20" }] }, questions: JSON.parse(JSON.stringify(questions)) };
-  const writes = [], messages = []; let controller, serverConflict = false, serverOccupiedNumber = false, serverLoseResponse = false, lookupError = false, receipt = null, surface, nextQuestionId = 100, completed = 0;
+  const writes = [], messages = [];
+  let serverConflict = false, serverOccupiedNumber = false, serverLoseResponse = false, lookupError = false, receipt = null, surface, nextQuestionId = 100, completed = 0;
   let historyData = { operations: [], latest_operation: null }, delayedHistory = null;
   const host = { dialog, state, $, el: (tag, cls, text) => new Node(tag, cls, text),
     button: (text, cls, fn) => { const n = new Node("button", cls, text); n.addEventListener("click", fn); return n; },
@@ -124,7 +125,7 @@ async function run() {
     isApproved: (item) => Boolean(item.approved), applyCanonical: (data) => { state.paper = data.paper; state.questions = data.questions; }, reloadCanonical: async () => {},
     returnReview: async () => { completed += 1; }, completeManualCut: async () => { completed += 1; }
   };
-  controller = L.createController(host); controller.open("regions", state.questions[0]); host.renderStage();
+  const controller = L.createController(host); controller.open("regions", state.questions[0]); host.renderStage();
   const snapshot = () => JSON.parse(controller.snapshot().layout);
   const pointer = (x, y, id = 11, target = surface) => ({ clientX: x, clientY: y, pointerId: id, button: 0, target });
   const labelNode = () => surface.querySelector('[data-layout-drag-label="0"]');
@@ -436,7 +437,8 @@ async function run() {
   // The workspace needs its own reachable undo for a real deletion receipt:
   // a toast outside the modal cannot be the only recovery control.
   const savedSingle = JSON.parse(JSON.stringify(state.questions.find((item) => item.id === single.id)));
-  const restoreCalls = []; let restoreResult = false, pendingRestore = null, resolveRestore = null;
+  const restoreCalls = []; const restoreResult = false;
+  let pendingRestore = null, resolveRestore = null;
   host.restoreDeletedBatch = async (paperId, batchId) => {
     restoreCalls.push({ paperId, batchId });
     const result = pendingRestore ? await pendingRestore : restoreResult;

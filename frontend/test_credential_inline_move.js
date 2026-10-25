@@ -22,7 +22,7 @@ const listeners = js.slice(listenersStart, js.indexOf("  // Queue the values cap
 // 离开这一页的守卫在切片之外，单独取一段出来测（它守着"刚填的密钥别悄悄没了"）。
 const leaveStart = js.indexOf("  async function prepareSettingsLeave()");
 const afterLeave = js.slice(leaveStart + 10);
-const nextTop = afterLeave.search(/\n  (async )?function /);
+const nextTop = afterLeave.search(/\n {2}(async )?function /);
 const leaveGuard = js.slice(leaveStart, leaveStart + 10 + (nextTop > 0 ? nextTop : afterLeave.length));
 // 1.26.13：看图读题这一段的"测试连接"也在切片之外，单独取出来。
 const probeStart = js.indexOf("  async function testVisionConnection(provider)");

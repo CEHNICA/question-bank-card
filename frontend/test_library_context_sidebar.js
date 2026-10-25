@@ -81,7 +81,7 @@ assert.match(js, /function captureLibraryViewport\(\)[\s\S]*?anchorTop[\s\S]*?fu
   "library refreshes retain the selected question's viewport position");
 assert.match(js, /else restoreLibraryViewport\(viewport\)/,
   "quiet reloads restore the reading position unless an explicit focus target takes precedence");
-assert.match(css, /\.library-card\.inspector-active[^\{]*\{[^}]*outline:[^}]*box-shadow:/,
+assert.match(css, /\.library-card\.inspector-active[^{]*\x7B[^}]*outline:[^}]*box-shadow:/,
   "the question linked to the inspector has a persistent green outline and glow");
 assert.match(js, /tag-suggestion-retry-inline[\s\S]*?重新建议[\s\S]*?queueJobs\("tags", \{ ids: \[item\.id\], retry: true \}\)/,
   "a failed tag suggestion can be retried from the same visible error panel");
@@ -241,7 +241,7 @@ assert.match(js, /menu\.open = todoMenuOpen/, "batch tasks are folded by default
 // 1.25.96：toggle 里除了记下展开状态，还得管面板的显隐和位置（面板搬出了 details，
 // 收起不再自动隐藏），但「记住老师选的开合状态」这条不能丢。
 assert.match(js, /menu\.addEventListener\("toggle", \(\) => \{[\s\S]*?todoMenuOpen = menu\.open;[\s\S]*?\}\)/, "the batch disclosure stays in its chosen state during in-page filter refreshes");
-assert.doesNotMatch(js.match(/function renderTodos\(\)[\s\S]*?\n  function currentFilterPayload/)?.[0] || "", /标签管理/, "the tag manager is not duplicated inside task actions");
+assert.doesNotMatch(js.match(/function renderTodos\(\)[\s\S]*?\n {2}function currentFilterPayload/)?.[0] || "", /标签管理/, "the tag manager is not duplicated inside task actions");
 assert.doesNotMatch(js, /\$\{message\}。请到“设置 → API 配置”检查服务商、密钥和模型/,
   "unknown worker failures do not falsely blame API configuration");
 

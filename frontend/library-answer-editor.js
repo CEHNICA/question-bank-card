@@ -6,7 +6,7 @@
     let dialog, controls, current = null, items = [], scope = "paper", scopeContext = null, selection = new Set(), drafts = new Map(), singleMode = false;
     let token = 0, epoch = 0, loading = false, saving = false, uploading = false, queueing = false, cancelling = false, polling = false, closing = false;
     let pollTimer = null, previewTimer = null, pollAgain = false, jobs = new Map(), returnFocus, requestedIds = new Set(), watchedSince = 0, queueNote = "";
-let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPreview = false, positionArmed = false;
+let lastField = "analysis", positionFrame = 0, positionArmed = false;
     let apiSettings = null, checkingApi = false, apiSettingsError = "";
     const requests = new Map(), pendingSaves = new Set(), MAX_WATCH = 10 * 60 * 1000;
     const jobsPending = new Set(["queued", "pending", "running", "waiting"]);
@@ -51,7 +51,6 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
     function stopWaiting() {
       root.clearTimeout(pollTimer); root.clearTimeout(previewTimer);
       if (positionFrame) { root.cancelAnimationFrame?.(positionFrame); positionFrame = 0; }
-      userScrolledPreview = false;
       for (const [controller, request] of requests) if (!request.keepAfterClose) controller.abort();
     }
     function schedulePreview() { root.clearTimeout(previewTimer); previewTimer = root.setTimeout(() => { if (dialog?.open && current) renderPreview(); }, 120); }
@@ -206,11 +205,10 @@ let lastField = "analysis", positionFrame = 0, composing = false, userScrolledPr
       for (const [input, field] of FIELDS) {
         for (const type of ["focus", "click", "select", "keyup", "pointerup"]) {
           input.addEventListener(type, () => {
-            lastField = field; positionArmed = true; userScrolledPreview = false; updatePosition();
+            lastField = field; positionArmed = true; updatePosition();
           });
         }
-        input.addEventListener("compositionstart", () => { composing = true; });
-        input.addEventListener("compositionend", () => { composing = false; updatePosition(); });
+        input.addEventListener("compositionend", () => { updatePosition(); });
       }
       // The user browsing the preview by hand must not be fought: following
       // resumes the moment the caret moves again.

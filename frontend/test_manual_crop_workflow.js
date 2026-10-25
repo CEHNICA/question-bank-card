@@ -12,8 +12,10 @@ assert.deepEqual(moveCropBox([800, 850, 999, 998], 20, 20), [801, 852, 1000, 100
 assert.deepEqual(moveCropBox([10.1, 20.2, 300.3, 400.4], 5, 0), [15.1, 20.2, 305.3, 400.4]);
 
 (async () => {
-  let boxes = [{ page_idx: 1, bbox: [20, 30, 800, 200] }, { page_idx: 0, bbox: [10, 10, 500, 300] }];
-  let number = "3", group = "12", ignored = [];
+  const boxes = [{ page_idx: 1, bbox: [20, 30, 800, 200] }, { page_idx: 0, bbox: [10, 10, 500, 300] }];
+  const number = "3";
+  let group = "12";
+  let ignored = [];
   const guard = createEditGuard();
   let closed = 0, resumed = 0;
   const track = () => guard.track("crop", () => cropDraftSnapshot(boxes, number, group, ignored), () => { closed += 1; guard.release("crop"); }, () => { resumed += 1; });

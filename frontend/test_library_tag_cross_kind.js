@@ -110,13 +110,12 @@ function makeContext(extra = {}) {
   return { context, requests, toasts };
 }
 
-const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 (async function main() {
   // ---- 一、把知识点标签拖到解题方法标签上 → 真的挂上去 --------------------
   {
     const { context, requests, toasts } = makeContext();
-    const [parent, knowledge, method] = context.tagCatalogue.tags;
+    const [, knowledge, method] = context.tagCatalogue.tags;
     await context.nestTagUnder({ id: "pub-1" }, knowledge, method);
     assert.equal(requests.length, 1, "跨类型的挂靠要真的发出请求");
     assert.equal(requests[0].body.action, "add_parent");
@@ -129,7 +128,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
   // ---- 二、让两颗不同类型的标签并列 → set_parents --------------------------
   {
     const { context, requests, toasts } = makeContext();
-    const [parent, knowledge, method] = context.tagCatalogue.tags;
+    const [, knowledge, method] = context.tagCatalogue.tags;
     await context.makeSiblingOf({ id: "pub-1" }, knowledge, method);
     assert.equal(requests.length, 1, "跨类型的并列要真的发出请求");
     assert.equal(requests[0].body.action, "set_parents");

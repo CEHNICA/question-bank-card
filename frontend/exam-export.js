@@ -139,6 +139,8 @@
     const quoted = header?.match(/filename="([^"]+)"/i)?.[1];
     if (encoded) { try { name = decodeURIComponent(encoded.replace(/^"|"$/g, "")); } catch { /* Use the known fallback. */ } }
     else if (quoted) name = quoted;
+    // 文件名里不能有的字符：控制字符（\u0000-\u001f）也要去掉，这里就是故意要它们。
+    // eslint-disable-next-line no-control-regex
     name = String(name).replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, "_").replace(/[. ]+$/g, "").slice(0, 180);
     if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(name)) name = `试卷-${name}`;
     return name || "试卷.docx";

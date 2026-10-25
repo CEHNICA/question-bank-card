@@ -1120,7 +1120,7 @@
     const end = Math.max(start, selection.end);
     const collapsed = start === end;
     const doc = container.ownerDocument || document;
-    let scope = Array.from(container.querySelectorAll("[data-qb-field]")).find((node) => node.dataset.qbField === field);
+    const scope = Array.from(container.querySelectorAll("[data-qb-field]")).find((node) => node.dataset.qbField === field);
     // 1.25.38：预览里没有这一栏（多半是空着）时，不再在末尾补一行
     // 「答案：（当前为空）」——它排在解析后面，看起来像多出来的一道空答案。
     // 没有可对应的地方就不画光标。

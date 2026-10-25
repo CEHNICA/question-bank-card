@@ -32,7 +32,7 @@ assert.match(js, /requestAnimationFrame\(\(\) => \$\("welcomeSkip"\)\.focus\(\)\
 assert.match(js, /以后需要云处理或主动识读时，再到设置 → API 配置里填写密钥/);
 assert.match(js, /if \(readPref\("qb-welcome-seen", ""\) !== "1"\) openWelcome\(\);/);
 assert.match(js, /writePref\("qb-welcome-seen", "1"\)/);
-const steps = js.match(/const TOUR_STEPS = \[([\s\S]*?)\n  \];/)[1];
+const steps = js.match(/const TOUR_STEPS = \[([\s\S]*?)\n {2}\];/)[1];
 for (const title of ["上传资料", "继续已有试卷", "核对后通过，自动入库", "找题和组卷", "遇到问题时看帮助"]) {
   assert.ok(steps.includes(`title: "${title}"`));
 }

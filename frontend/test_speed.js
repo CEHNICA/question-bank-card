@@ -16,7 +16,7 @@ assert.match(css, /content-visibility: auto; contain-intrinsic-size: auto 320px;
 assert.match(css, /\.card\.compact \{ contain-intrinsic-size: auto 52px; \}/);
 assert.match(css, /\.card\.is-current, \.card\.editing \{ content-visibility: visible; \}/);
 // The card already clips its content, so waiting cannot hide a menu that used to show.
-assert.match(css, /overflow: clip; transition: box-shadow \.18s, border-color \.18s;\n  \/\* 1\.10\.3/);
+assert.match(css, /overflow: clip; transition: box-shadow \.18s, border-color \.18s;\n {2}\/\* 1\.10\.3/);
 
 // One pass over the cards in the list, no selector search per card.
 const render = js.slice(js.indexOf("function renderCards()"), js.indexOf("function cardNodes()"));

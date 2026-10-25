@@ -9,10 +9,9 @@
   },
   "scripts": {
     "test": "node --test frontend/test_*.js",
-    "lint": "eslint frontend --ext .js",
-    "lint:fix": "eslint frontend --ext .js --fix",
-    "format": "prettier --write \"frontend/**/*.js\" \"frontend/**/*.css\"",
-    "format:check": "prettier --check \"frontend/**/*.js\" \"frontend/**/*.css\""
+    "lint": "eslint frontend",
+    "lint:fix": "eslint frontend --fix",
+    "format": "prettier --write"
   },
   "devDependencies": {
     "eslint": "9.39.1",

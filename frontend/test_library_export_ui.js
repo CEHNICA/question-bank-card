@@ -38,7 +38,6 @@ function stubElement() {
   };
 }
 controls.printFigureList = stubElement();
-const stubDocument = { createElement: tag => { const element = stubElement(); element.tagName = tag; return element; } };
 const ui = { printAnswers: {}, printOrigin: {}, printAi: {}, paper: { querySelectorAll: () => [], querySelector: () => null } };
 const state = { features: { ai_answer: false } };
 const printState = { items: [{}], missing: [], loading: false, exporting: false, availableAnswers: 0, tooWide: 0, autoOrigin: new Set() };

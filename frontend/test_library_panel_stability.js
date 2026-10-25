@@ -18,9 +18,6 @@ const fs = require("node:fs");
 const js = fs.readFileSync(require.resolve("./library.js"), "utf8");
 const css = fs.readFileSync(require.resolve("./library.css"), "utf8");
 
-const notEqual = (haystack, needle, message) =>
-  assert.notEqual(haystack.indexOf(needle), -1, message);
-
 // ── 一、后端得把这个数算出来，而且不能受筛选影响 ──
 assert.match(js, /state\.presence = body\.presence \|\| state\.presence/,
   "接口返回的 presence 被存下来");

@@ -37,12 +37,16 @@ export default [
     rules: {
       // 真正会咬人的几条。
       "no-undef": "error",
-      "no-unused-vars": ["error", { args: "none", varsIgnorePattern: "^_" }],
+      // catch 里的错误参数有时就是不用（错误在别处已经记过了），不查。
+      "no-unused-vars": ["error", { args: "none", varsIgnorePattern: "^_", caughtErrors: "none" }],
       "no-var": "error",
       "prefer-const": "error",
       eqeqeq: ["error", "always", { null: "ignore" }],
       "no-implicit-globals": "off",
-      "no-loop-func": "warn",
+      // JS 的 for(let …) 本来就是每轮一份绑定，这条规则在 JS 里几乎全是误报
+      //（它是从 Python 的闭包坑照搬来的）。真正会出事的是 var 循环变量，
+      // 那个由上面的 no-var 挡着。
+      "no-loop-func": "off",
       "no-const-assign": "error",
       "no-dupe-keys": "error",
       "no-dupe-args": "error",
@@ -58,17 +62,23 @@ export default [
       "no-shadow-restricted-names": "error",
       "no-unused-private-class-members": "error",
       "no-useless-escape": "error",
+      // 中文排版里全角空格（　）是故意用的，不算「不规则空白」。
+      // 正则里那几条也全是故意要匹配全角/零宽字符的。
+      "no-irregular-whitespace": ["error", { skipStrings: true, skipTemplates: true, skipComments: true, skipRegExps: true }],
       "no-empty": ["error", { allowEmptyCatch: true }],
     },
   },
   {
     // 测试文件：可以用 node 专有东西，也可以有没用的参数。
+    // 测试里的假 DOM 故意叫 Element / document / Node —— 那是在沙箱里替身，
+    // 不是「不小心把浏览器全局重定义了一遍」，所以 builtinGlobals 关掉。
     files: ["frontend/test_*.js"],
     languageOptions: {
       globals: { ...globals.node },
     },
     rules: {
-      "no-unused-vars": ["error", { args: "none", varsIgnorePattern: "^_" }],
+      "no-unused-vars": ["error", { args: "none", varsIgnorePattern: "^_", caughtErrors: "none" }],
+      "no-redeclare": ["error", { builtinGlobals: false }],
     },
   },
 ];

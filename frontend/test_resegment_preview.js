@@ -38,7 +38,7 @@ for (const label of ["原样保留", "新增题卡", "例题去解", "范围变�
   assert.match(js, new RegExp(label));
 }
 
-const flow = js.match(/async function resegmentPaper\(\)[\s\S]*?\n  \$\("resegment"\)\.addEventListener/)?.[0] || "";
+const flow = js.match(/async function resegmentPaper\(\)[\s\S]*?\n {2}\$\("resegment"\)\.addEventListener/)?.[0] || "";
 assert.match(flow, /\/resegment\/preview`[^]*method:\s*"POST"/);
 assert.doesNotMatch(flow, /confirmDialog/);
 assert.match(js, /if \(!resegmentPreview\.report \|\| !\$\("resegmentAcknowledge"\)\.checked/);

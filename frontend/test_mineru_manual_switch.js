@@ -28,7 +28,6 @@ function harness(options = {}) {
     newUploadReadContinuations: new Set(["paper"]), $,
     paperReadSubmissionPending: () => false,
     syncTrashControls() {}, suggestedSplitGroups: () => [], paperSummary: () => "解析中", el: () => ({}),
-    paperReadSubmissionPending: () => false,
     renderCutReadingStage() { order.push("entries"); },
     closePageDialog() { $("pageDialog").close(); },
     toast: (message, kind) => messages.push({ message, kind }),

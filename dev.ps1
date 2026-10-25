@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     题有据的开发环境入口。一条命令装好、跑检查、跑测试、打包、发布。
 
@@ -38,6 +38,11 @@ $Repo = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Venv = Join-Path $Repo "backend\.venv"
 $VenvPython = Join-Path $Venv "Scripts\python.exe"
 $BuildPython = Join-Path $Repo "packaging\.build\venv\Scripts\python.exe"
+
+# Windows 的控制台默认编码装不下中文，pip 的输出会直接崩在这一步。
+# 打包脚本也是这么设的（packaging/build.ps1 里的 PYTHONUTF8）。
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
 
 function Say([string]$Message) {
   Write-Host "==> $Message" -ForegroundColor Cyan
@@ -91,10 +96,8 @@ switch ($Task) {
     $python = Get-Python
     Invoke-Step "ruff 自动修" { & $python -m ruff check --fix (Join-Path $Repo "backend") (Join-Path $Repo "tools") }
     Invoke-Step "ruff 格式化" { & $python -m ruff format (Join-Path $Repo "backend") (Join-Path $Repo "tools") }
-    if (Get-Command npm -ErrorAction SilentlyContinue) {
-      Invoke-Step "prettier 格式化" { & npm run --prefix $Repo format }
-      Invoke-Step "eslint 自动修" { & npm run --prefix $Repo lint:fix }
-    }
+    # 前端不整体过 prettier：这一版的测试大量按源码文本断言，格式一变就红一片。
+    # 要格式化单个新文件用：npm run format -- frontend/xxx.js
     Say "改完了。跑一次测试确认没改坏：.\dev.ps1 test"
   }
 

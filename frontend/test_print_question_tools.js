@@ -30,7 +30,7 @@ const tool = context.printTools([item], [item], 0, 1);
 assert.equal(tool.tagName, "details"); assert.equal(tool.open, false);
 assert.equal(tool.children[0].tagName, "summary"); assert.equal(tool.children[0].textContent, "调整");
 assert.equal(tool.children[0].attributes["aria-label"], "第 1 题排版操作");
-const actions = tool.children[1], [up, down, remove, options, space, page, answer] = actions.children;
+const actions = tool.children[1], [up, down, , options, space, page, answer] = actions.children;
 assert.equal(actions.attributes.role, "group");
 assert.equal(up.disabled, true); assert.equal(down.disabled, true); assert.equal(page.disabled, true);
 assert.equal(options.children.some(value => value.value === "vertical"), true);

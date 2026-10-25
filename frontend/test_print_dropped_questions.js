@@ -31,19 +31,17 @@ const focused = { current: null };
 const state = { basket: ["a", "b", "c"], catalog: new Map(), features: { ai_answer: false } };
 const printState = { token: 0, items: [{ id: "a" }, { id: "b" }], missing: [], dropped: [], loading: false,
   exporting: false, availableAnswers: 0, tooWide: 0 };
-let rendered = 0;
 let saved = 0;
-let refreshed = 0;
 
 const node = (tag, className = "", text) => { const el = new El(tag); el.className = className; el.textContent = text ?? ""; return el; };
 const sandbox = {
   "$": get, node, state, printState, console,
   document: { activeElement: null, createElement: tag => new El(tag) },
   setTimeout, clearTimeout,
-  renderPrint() { rendered++; sandbox.renderPrintMissing(); },
-  render() { rendered++; },
+  renderPrint() { sandbox.renderPrintMissing(); },
+  render() { },
   saveBasket() { saved++; },
-  openPrint() { refreshed++; },
+  openPrint() { },
   swapBasketForReplacement() { return false; },
   missingReason(item) { return item.reason === "withdrawn" ? "这道题已撤回" : "这道题已不存在"; },
 };
