@@ -2437,29 +2437,37 @@ def resolve_suggestion_view(request, suggestion_id):
         return JsonResponse({"error": "同类型标签已存在，请选择现有标签"}, status=409)
 
 
-def _scope_key_for_suggestion(publication, scope):
-    """候选建议的范围 → 规范化范围键。
+def _scope_parts_for_suggestion(publication, scope):
+    """候选建议的范围 → [(范围键, 小问), ...]。
 
     旧建议里的小问是展示编号（「1」），这里换成那道题里对应的小问的稳定编号。
     换不到就退回整题 —— 不能凭编号猜一个不存在的小问。
+
+    返回空列表表示「整题」。
+
+    范围键和小问必须成对给出去：范围键是唯一性约束的一部分，
+    小问外键才是检索时认「用在第几问」的那一头。只写范围键不写外键，
+    这条关联在按小问检索时会被当成「不落在任何小问」，永远搜不到。
     """
     from .models import LibrarySubquestion
 
-    if not isinstance(scope, dict) or scope.get("whole", True):
-        return "whole"
+    if not isinstance(scope, dict):
+        return []
     labels = scope.get("subquestions")
     if not isinstance(labels, list) or not labels:
-        return "whole"
+        return []
     wanted = {str(item).strip() for item in labels}
     rows = LibrarySubquestion.objects.filter(publication=publication).order_by("position", "id")
     picked = []
     for row in rows:
         label = (row.display_label or "").strip("（）() \t　")
         if label in wanted or row.stable_key in {f"sq:{item}" for item in wanted}:
-            picked.append(str(row.pk))
+            picked.append(row)
     if not picked:
-        return "whole"
-    return "+".join(f"sub:{item}" for item in picked)
+        return []
+    # 多个小问拆成多条关联：一条关联只带一个小问外键，
+    # 硬拼成 sub:a+sub:b 的键，谁也认不清是哪一问。
+    return [(f"sub:{row.pk}", row) for row in picked]
 
 
 def resolve_suggestion(suggestion_id, payload):
@@ -2557,7 +2565,10 @@ def resolve_suggestion(suggestion_id, payload):
                 role = str(edit.get("role") or item.get("role") or "primary")
                 if role not in dict(LibraryTagAssignment.Role.choices):
                     raise TaggingError("用途不正确")
-                scope_key = _scope_key_for_suggestion(publication, item.get("scope"))
+                # 人工改过的范围按改的写 —— 建议说「用在第（2）问」，
+                # 老师改成第（1）问，就按第（1）问落库。
+                scope = edit.get("scope") or item.get("scope") or {"whole": True}
+                item["scope"] = scope
                 tag = None
                 if item.get("tag_id"):
                     tag = LibraryTag.objects.filter(pk=item["tag_id"], active=True).first()
@@ -2574,7 +2585,7 @@ def resolve_suggestion(suggestion_id, payload):
                         kind = override.get("kind", item.get("kind"))
                         if kind not in {LibraryTag.Kind.KNOWLEDGE, LibraryTag.Kind.METHOD}:
                             raise TaggingError("新 AI 标签类型应为知识点或解题方法")
-                        scope = override.get("scope", item.get("scope") or {"whole": True})
+                        scope = edit.get("scope") or override.get("scope") or item.get("scope") or {"whole": True}
                         if kind == LibraryTag.Kind.KNOWLEDGE and scope != {"whole": True}:
                             raise TaggingError("改为知识点后，适用范围必须是整题")
                         if kind == LibraryTag.Kind.METHOD and scope != {"whole": True}:
@@ -2662,41 +2673,61 @@ def resolve_suggestion(suggestion_id, payload):
                         item["scope"] = scope
                 if not tag:
                     raise TaggingError("建议中的标签已停用或不存在，请改选后重试", 409)
-                existing = LibraryTagAssignment.objects.filter(publication=publication, tag=tag).first()
-                if existing and existing.needs_review:
-                    existing.needs_review = False
-                    existing.source = LibraryTagAssignment.Source.AI_ACCEPTED
-                    existing.generation_source = suggestion.generation_source
-                    existing.rationale = str(item.get("rationale") or "")[:500]
-                    existing.evidence = str(item.get("evidence") or "")[:500]
-                    existing.scope = item.get("scope") or {"whole": True}
-                    existing.role = role
-                    existing.scope_key = scope_key
-                    existing.source_snapshot = {
-                        "suggestion_id": str(suggestion.pk),
-                        "method_source": suggestion.method_source,
-                    }
-                    existing.save()
-                elif not existing:
-                    LibraryTagAssignment.objects.create(
-                        publication=publication,
-                        tag=tag,
-                        source=LibraryTagAssignment.Source.AI_ACCEPTED,
-                        generation_source=suggestion.generation_source,
-                        rationale=str(item.get("rationale") or "")[:500],
-                        evidence=str(item.get("evidence") or "")[:500],
-                        scope=item.get("scope") or {"whole": True},
-                        role=role,
-                        scope_key=scope_key,
-                        source_snapshot={
+                # 范围到这里才算最终定下来了（新标签分支可能改过它），
+                # 所以范围键和小问这时候才算。
+                scope_parts = _scope_parts_for_suggestion(publication, scope)
+                # 整题就是一条；落在多个小问上就拆成多条，每条记清是哪一问。
+                parts = scope_parts or [("whole", None)]
+                written_keys: list[str] = []
+                for scope_key, subquestion_row in parts:
+                    # 先找「待核对」的旧行 —— 那是给这条建议留的槽位；
+                    # 没有再找用途和范围都对得上的正式行，认准了才动它。
+                    # 只按 (题, 标签) 找会把落在别处范围的行也当成同一条，
+                    # 结果建议被标成「已采纳」却什么都没落库。
+                    existing = LibraryTagAssignment.objects.filter(
+                        publication=publication, tag=tag, needs_review=True
+                    ).first()
+                    if existing is None:
+                        existing = LibraryTagAssignment.objects.filter(
+                            publication=publication, tag=tag, role=role, scope_key=scope_key
+                        ).first()
+                    if existing and existing.needs_review:
+                        existing.needs_review = False
+                        existing.source = LibraryTagAssignment.Source.AI_ACCEPTED
+                        existing.generation_source = suggestion.generation_source
+                        existing.rationale = str(item.get("rationale") or "")[:500]
+                        existing.evidence = str(item.get("evidence") or "")[:500]
+                        existing.scope = item.get("scope") or {"whole": True}
+                        existing.role = role
+                        existing.scope_key = scope_key
+                        existing.subquestion = subquestion_row
+                        existing.source_snapshot = {
                             "suggestion_id": str(suggestion.pk),
                             "method_source": suggestion.method_source,
-                        },
-                    )
+                        }
+                        existing.save()
+                    elif not existing:
+                        LibraryTagAssignment.objects.create(
+                            publication=publication,
+                            tag=tag,
+                            source=LibraryTagAssignment.Source.AI_ACCEPTED,
+                            generation_source=suggestion.generation_source,
+                            rationale=str(item.get("rationale") or "")[:500],
+                            evidence=str(item.get("evidence") or "")[:500],
+                            scope=item.get("scope") or {"whole": True},
+                            role=role,
+                            scope_key=scope_key,
+                            subquestion=subquestion_row,
+                            source_snapshot={
+                                "suggestion_id": str(suggestion.pk),
+                                "method_source": suggestion.method_source,
+                            },
+                        )
+                    written_keys.append(scope_key)
                 entries[index]["decision"] = "accepted"
                 entries[index]["accepted_tag_id"] = str(tag.pk)
                 entries[index]["role"] = role
-                entries[index]["scope_key"] = scope_key
+                entries[index]["scope_key"] = "+".join(written_keys)
         else:
             for index in indices:
                 entries[index]["decision"] = "rejected"

@@ -151,4 +151,27 @@ assert.match(
 assert.match(css, /@media \(max-width: 820px\)/, "窄窗口有单独布局");
 assert.match(css, /@media \(max-width: 1180px\)/, "中等窗口有单独布局");
 
+// 候选建议要能改「用在第几问」—— 建议说第（2）问，老师改成第（1）问，
+// 落库就得是第（1）问。这一条不是按钮，是改范围本身。
+assert.match(js, /"用在"/, "候选上标出「用在」");
+assert.match(js, /scope: value \? \{ subquestions: \[value\] \} : \{ whole: true \}/, "改范围就是改这条建议的范围");
+assert.match(
+  js,
+  /option\.value = String\(sub\.stable_key \|\| ""\)\.replace\(\/\^sq:\/, ""\)/,
+  "范围值用小问的稳定编号，不是展示编号",
+);
+
+// 后端：范围键和小问外键必须成对落库。
+// 只写范围键不写外键，这条关联在按小问检索时会被当成「不落在任何小问」。
+assert.match(
+  fs.readFileSync(path.join(__dirname, "..", "backend", "core", "library_tagging.py"), "utf8"),
+  /existing\.subquestion = subquestion_row/,
+  "采纳候选时把落在哪一问一起写进去",
+);
+assert.match(
+  fs.readFileSync(path.join(__dirname, "..", "backend", "core", "library_tagging.py"), "utf8"),
+  /subquestion=subquestion_row/,
+  "新建关联时也写清落在哪一问",
+);
+
 console.log("找题与整理工作台：入口分离、五块整理、条件条、分区计数、窄窗口布局：OK");

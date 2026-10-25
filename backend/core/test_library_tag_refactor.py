@@ -424,6 +424,114 @@ class CandidateEditTests(RefactorTestBase):
         self.assertEqual(suggestion.suggestions[0]["rationale"], original[0]["rationale"])
         self.assertEqual(suggestion.suggestions[0]["decision"], "accepted")
 
+    def test_accept_writes_the_scope_the_teacher_changed(self):
+        """建议说第（2）问，老师改成第（1）问，落库就得是第（1）问。"""
+        publication = self.make_publication(stem="（1）求证 AB=CD。\n（2）求证 AB∥CD。")
+        subquestions = library_concepts.ensure_subquestions(publication)
+        self.assertEqual(len(subquestions), 2)
+        suggestion = self._pending(publication)
+        library_tagging.resolve_suggestion(
+            suggestion.pk,
+            {
+                "action": "accept",
+                "indices": [0],
+                "edits": {"0": {"scope": {"subquestions": ["1"]}}},
+                "request_id": str(uuid.uuid4()),
+                "expected_revision": publication.tag_revision,
+            },
+        )
+        row = LibraryTagAssignment.objects.get(publication=publication)
+        self.assertEqual(row.scope_key, f"sub:{subquestions[0].pk}")
+        self.assertEqual(row.subquestion_id, subquestions[0].pk)
+
+    def test_accept_adds_a_scoped_row_when_the_tag_is_already_on_the_question(self):
+        """题上已经有整题关联了，采纳「用在第（1）问」得另加一条，不是当作没这回事。"""
+        from core.models import LibraryTagSuggestion
+
+        publication = self.make_publication(stem="（1）求证 AB=CD。\n（2）求证 AB∥CD。")
+        subquestions = library_concepts.ensure_subquestions(publication)
+        method = self.make_concept("候选方法", kind="method")
+        # 题上已经有这个方法的关联（老师自己加过，落在某个解法分支上）。
+        variant = library_concepts.ensure_variant(publication, "解法一")
+        self.attach(publication, method, role="method", variant=variant, rationale="这个解法用了这个方法")
+        publication.refresh_from_db()
+        catalogue = library_tagging.catalogue_state()
+        suggestion = LibraryTagSuggestion.objects.create(
+            publication=publication,
+            status=LibraryTagSuggestion.Status.PENDING,
+            taxonomy_revision=catalogue.revision,
+            assignment_revision=publication.tag_revision,
+            suggestions=[
+                {
+                    "name": "候选方法",
+                    "tag_id": str(method.pk),
+                    "kind": "method",
+                    "role": "method",
+                    "scope": {"subquestions": ["1"]},
+                    "rationale": "虚构建议的理由。",
+                    "evidence": "虚构建议的依据。",
+                }
+            ],
+        )
+
+        library_tagging.resolve_suggestion(
+            suggestion.pk,
+            {
+                "action": "accept",
+                "indices": [0],
+                "request_id": str(uuid.uuid4()),
+                "expected_revision": publication.tag_revision,
+            },
+        )
+
+        rows = LibraryTagAssignment.objects.filter(publication=publication, tag=method)
+        self.assertEqual(rows.count(), 2, "原来那条留着，第（1）问那条另加")
+        scoped = next(row for row in rows if row.scope_key.startswith("sub:"))
+        self.assertEqual(scoped.subquestion_id, subquestions[0].pk)
+
+    def test_accept_splits_a_multi_subquestion_suggestion_into_several_rows(self):
+        """建议说用在第（1）（2）问，两问各记一条 —— 一条关联只带一个小问。"""
+        from core.models import LibraryTagSuggestion
+
+        publication = self.make_publication(stem="（1）求证 AB=CD。\n（2）求证 AB∥CD。")
+        subquestions = library_concepts.ensure_subquestions(publication)
+        method = self.make_concept("候选方法", kind="method")
+        catalogue = library_tagging.catalogue_state()
+        suggestion = LibraryTagSuggestion.objects.create(
+            publication=publication,
+            status=LibraryTagSuggestion.Status.PENDING,
+            taxonomy_revision=catalogue.revision,
+            assignment_revision=publication.tag_revision,
+            suggestions=[
+                {
+                    "name": "候选方法",
+                    "tag_id": str(method.pk),
+                    "kind": "method",
+                    "role": "method",
+                    "scope": {"subquestions": ["1", "2"]},
+                    "rationale": "虚构建议的理由。",
+                    "evidence": "虚构建议的依据。",
+                }
+            ],
+        )
+
+        library_tagging.resolve_suggestion(
+            suggestion.pk,
+            {
+                "action": "accept",
+                "indices": [0],
+                "request_id": str(uuid.uuid4()),
+                "expected_revision": publication.tag_revision,
+            },
+        )
+
+        rows = LibraryTagAssignment.objects.filter(publication=publication, tag=method)
+        self.assertEqual(rows.count(), 2)
+        self.assertEqual(
+            {row.subquestion_id for row in rows}, {subquestions[0].pk, subquestions[1].pk}, "两问各记各的，别混成一条"
+        )
+        self.assertEqual({row.scope_key for row in rows}, {f"sub:{subquestions[0].pk}", f"sub:{subquestions[1].pk}"})
+
     def test_accept_without_edit_uses_the_suggested_role(self):
         """没改就按建议里的用途写，不能落成「旧关联，作用未细分」。"""
         publication = self.make_publication()

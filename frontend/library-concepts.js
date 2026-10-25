@@ -1359,6 +1359,30 @@
         });
         roleRow.append(roleSelect);
         box.append(roleRow);
+
+        // 「用在第几问」—— 建议说第（2）问，老师改成第（1）问，就按改的落库。
+        const scopeRow = el("div", "concepts-suggestion-role-row");
+        scopeRow.append(el("span", "concepts-suggestion-role-label", "用在"));
+        const scopeSelect = el("select", "concepts-inline-select");
+        const whole = el("option", "", "整题");
+        whole.value = "";
+        scopeSelect.append(whole);
+        (state.detail.subquestions || []).forEach((sub) => {
+          const option = el("option", "", sub.display_label || sub.stable_key);
+          option.value = String(sub.stable_key || "").replace(/^sq:/, "");
+          scopeSelect.append(option);
+        });
+        if (scopeSelect.options.length > 1) {
+          scopeSelect.addEventListener("change", () => {
+            const value = scopeSelect.value;
+            state.edits[index] = {
+              ...(state.edits[index] || {}),
+              scope: value ? { subquestions: [value] } : { whole: true },
+            };
+          });
+          scopeRow.append(scopeSelect);
+          box.append(scopeRow);
+        }
         if (entry.rationale) box.append(el("p", "concepts-suggestion-why", entry.rationale));
         if (entry.evidence) {
           const details = el("details", "concepts-suggestion-evidence");
