@@ -206,7 +206,7 @@ python tools/check_export_tag_refactor.py --database <db> --base http://127.0.0.
 | 版本一致性 | 源码 `version.py` = 1.27.0；产物 `tiyouju.exe --version` = **tiyouju 1.27.0**（打包脚本硬闸校验） |
 | 可运行文件夹 | `work/question-bank-card/packaging/dist/QuestionBankCard/` |
 | 便携 ZIP | `work/candidate/QuestionBankCard-1.27.0-portable.zip`（**62.0 MB**） |
-| SHA-256 | `4dec3a2f3ecee5ba31a27c43ffb9c99ae9b95d508a8979e8c8000029fed09c34` |
+| SHA-256 | `575c0755c622987ae82809c8a0ec9aab8bd0548465ec308a78cbaa018c729265` |
 | 校验文件 | `QuestionBankCard-1.27.0-portable.zip.sha256`（同目录） |
 | ZIP 完整性 | `zipfile.testzip()` → **OK** |
 | 解压后启动 | 从 ZIP 解压 → `tiyouju.exe --version` = 1.27.0 → 起服务 8797 → `/api/library/search` **200**、`/library/concepts` **200 且含三入口** |
