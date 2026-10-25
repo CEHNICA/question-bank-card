@@ -113,7 +113,8 @@ assert.doesNotMatch(catalogueFn, /LibraryTagSuggestion\.objects\.filter\(\s*stat
 assert.match(managerJs, /const goReview = button\("回题库核对 AI 标签建议", \(\) => \{ close\(\); options\.onReviewSuggestions\?\.\(\); \}/,
   "taking the exit closes the directory first, then asks the library to filter");
 assert.match(managerJs, /usageNoteBox\.append\(usageNoteText, goReview\)/, "the note holds the text and the exit together");
-assert.match(managerJs, /results\.append\(location, listHeading, usageNoteBox, bulk, list, rootHint, mapHost\)/,
+// 1.27.0：多了一条「历史标签」的说明，它也在列表正上方 —— 两条说明条都紧贴列表。
+assert.match(managerJs, /results\.append\(location, listHeading, legacyNoteBox, usageNoteBox, bulk, list, rootHint, mapHost\)/,
   "the note sits directly above the list, where the 0 题 rows are");
 assert.match(managerJs, /const note = usageNote\(state\.catalogue\);\s*\n\s*usageNoteBox\.hidden = !note;/,
   "when there is nothing to say the bar is hidden, not left blank");

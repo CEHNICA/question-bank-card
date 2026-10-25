@@ -135,11 +135,16 @@
     const goReview = button("回题库核对 AI 标签建议", () => { close(); options.onReviewSuggestions?.(); }, "button button-small");
     goReview.id = "tagManagerGoReviewSuggestions";
     usageNoteBox.append(usageNoteText, goReview);
+    // 1.27.0：选中「历史标签」时，列表正上方要说清楚这一组是什么。
+    // 「历史标签」这四个字光看名字猜不出来 —— 悬停提示不算说明，得摆在这儿。
+    const legacyNoteBox = element("div", "tag-directory-usage-note tag-directory-legacy-note"); legacyNoteBox.id = "tagManagerLegacyNote";
+    const legacyNoteText = element("p");
+    legacyNoteBox.append(legacyNoteText);
     const list = element("div", "tag-directory-list"); list.id = "tagManagerList"; list.setAttribute("aria-label", "标签列表");
     // 1.25.60：没有上下级的类型或「顶级」这一层，中间不再重复左边树的根节点。
     const rootHint = element("div", "tag-directory-root-hint"); rootHint.id = "tagManagerRootHint"; rootHint.hidden = true;
     const mapHost = element("div", "tag-directory-map-host"); mapHost.id = "tagManagerMap"; mapHost.hidden = true;
-    results.append(location, listHeading, usageNoteBox, bulk, list, rootHint, mapHost);
+    results.append(location, listHeading, legacyNoteBox, usageNoteBox, bulk, list, rootHint, mapHost);
     const detail = element("aside", "tag-directory-detail"); detail.id = "tagManagerDetail"; detail.setAttribute("aria-label", "选中标签的信息");
     body.append(sidebar, results, detail);
     const history = element("details", "tag-directory-history"), historySummary = element("summary", "", "操作记录与撤销"), historyList = element("div", "tag-directory-history-list");
@@ -426,6 +431,11 @@
         control.append(element("span", "", kinds[kind]), element("small", "", count));
         control.title = systemGroupHint(kind, count);
         scopeNav.append(control);
+        // 「历史标签」这四个字老师看不懂 —— 只给悬停提示等于没给。
+        // 在它下面常驻一行字：旧版迁进来的、已经停用、一道题都没贴。
+        if (kind === "legacy") {
+          scopeNav.append(element("p", "tag-directory-group-note", "旧版迁入 · 已停用 · 没贴在题上"));
+        }
       }
       // 标签群组：老师自己分的组。标题上带数量，右边一个「＋」新建。
       const groupTitle = element("div", "tag-directory-group-title");
@@ -509,6 +519,14 @@
       };
     }
     function renderUsageNote() {
+      // 1.27.0：选中「历史标签」时先把这一组是什么说清楚 —— 常驻的一条，
+      // 不是悬停提示。悬停不算说明。
+      const legacy = state.scope === "kind:legacy";
+      legacyNoteBox.hidden = !legacy;
+      if (legacy) {
+        const count = (state.catalogue.tags || []).filter((tag) => tag.kind === "legacy").length;
+        legacyNoteText.textContent = "这 " + count + " 个是从旧版题库迁进来的标签：都已经停用，一道题也没贴。放着不动不影响别的，等你有空再决定去留。";
+      }
       const note = usageNote(state.catalogue);
       usageNoteBox.hidden = !note;
       if (!note) return;

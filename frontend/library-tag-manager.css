@@ -102,6 +102,12 @@
 .tag-directory-usage-note { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 11px 14px; background: #eff6f2; border-bottom: 1px solid #dce9e1; }
 .tag-directory-usage-note[hidden] { display: none; }
 .tag-directory-usage-note > p { margin: 0; font-size: 12px; line-height: 1.6; color: #3f4a44; }
+/* 1.27.0：「历史标签」这一组的说明 —— 摆在结果区正上方，常驻可见。
+   悬停提示不算说明 —— 老师不会去悬停一个看不懂的词。 */
+.tag-directory-legacy-note { background: #fbf6ec; border-bottom-color: #eee0c9; }
+.tag-directory-legacy-note > p { color: #6a5326; }
+/* 左栏里「历史标签」底下那一行小字。 */
+.tag-directory-group-note { margin: -2px 0 6px; padding: 0 10px 4px; color: var(--muted, #747971); font-size: 10.5px; line-height: 1.5; }
 .tag-directory-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 11px 14px; background: #eff6f2; border-bottom: 1px solid #dce9e1; }
 .tag-directory-bulk[hidden] { display: none; }
 .tag-directory-bulk > strong { font-size: 12px; margin-right: 2px; }

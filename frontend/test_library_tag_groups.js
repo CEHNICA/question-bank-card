@@ -66,10 +66,21 @@ assert.match(managerJs, /"catalogue:create_group": "新建标签群组"/, "操�
 assert.match(managerJs, /"catalogue:delete_group": "删除标签群组"/, "操作记录里有「删除标签群组」");
 assert.match(managerJs, /"catalogue:group_membership_batch": "批量调整标签所属分组"/, "操作记录里有「批量调整标签所属分组」");
 
-// 「历史标签」这个词老师看不懂 —— 得说清楚它是什么。
+// 「历史标签」这个词老师看不懂 —— 得说清楚它是什么，而且要**常驻可见**。
+// 悬停提示不算说明（这是这个项目一贯的规矩）。
 assert.match(managerJs, /function systemGroupHint\(kind, count\)/, "系统默认分组有说明");
 assert.match(managerJs, /历史标签：.*旧版题库迁进来的标签，都已停用，一道题也没贴/,
   "「历史标签」说清楚是什么：旧版迁入、已停用、没贴在题上");
+assert.match(managerJs, /tag-directory-group-note", "旧版迁入 · 已停用 · 没贴在题上"/,
+  "左栏「历史标签」底下常驻一行说明");
+assert.match(managerJs, /legacyNoteBox\.hidden = !legacy/, "选中历史标签时结果区上方有常驻说明");
+assert.match(managerJs, /这 " \+ count \+ " 个是从旧版题库迁进来的标签/,
+  "选中历史标签时把这一组说清楚");
+// 说不实的话比不说更糟 —— 「不会再被搜到」没核实过（检索并不按 active 过滤），
+// 这些标签只是恰好一道题都没贴。
+assert.doesNotMatch(managerJs, /不会再被搜到/, "不写没核实过的断言");
+assert.match(managerCss, /\.tag-directory-legacy-note \{/, "历史标签的说明有自己的样式");
+assert.match(managerCss, /\.tag-directory-group-note \{/, "左栏那行常驻说明有样式");
 
 // ---------------------------------------------------------------- 后端
 
