@@ -794,18 +794,15 @@ def _catalogue_rows():
             publications.update(publications_by_tag.get(key, set()))
         row["subtree_count"] = len(publications)
         tags.append(row)
-    # 1.27.0：标签群组。模型和撤销一直都在，只是 1.25 之后界面上没有入口了 ——
-    # 老师要的是「把这些标签归到一组」，不是「改标签的上下级」。
+    # 1.27.0：标签分组。老师自己分的组，和四个内置的类型组（知识点 / 解题方法 /
+    # 自定义 / 历史标签）是**同一种东西** —— 都能改名、能删、能往里放标签。
     #
-    # 系统分组（system_key 非空）是教材章节那套，界面上由类型树呈现，
-    # 不再在「标签群组」里重复列一遍。老师自建的分组才是这里的主角。
+    # 教材章节那套（seed-group:*）和更早的旧分组不摆在这里 —— 它们对应的是
+    # 「按教材浏览」那一段的章节树，摆出来就是同一批东西列两遍。
     groups = []
-    user_group_ids = set()
     for group in LibraryTagGroup.objects.all():
         members = list(group.tags.all())
-        system = bool(group.system_key)
-        if not system:
-            user_group_ids.add(str(group.pk))
+        key = str(group.system_key or "")
         groups.append(
             {
                 "id": str(group.pk),
@@ -813,12 +810,13 @@ def _catalogue_rows():
                 "color": group.color,
                 "position": group.position,
                 "system_key": group.system_key,
-                "system": system,
+                "builtin": key.startswith("builtin:"),
+                "section": key.startswith("seed-group:"),
                 "tag_count": len(members),
             }
         )
-    # 「未分类」说的是没归到**老师自建分组**里的那些。
-    ungrouped_count = sum(1 for row in tags if not (set(row["group_ids"]) & user_group_ids))
+    # 「未分类」= 不属于任何分组的那些。删掉一个分组，里面那批标签就回到这里。
+    ungrouped_count = sum(1 for row in tags if not row["group_ids"])
     # 1.25.12：标签管理页以前只说「299 个标签」，然后每行自己写「0 题」。走进来的人
     # 只看见一整屏 0，既不知道题库里到底有多少道题，也不知道其实只有两道贴过标签 ——
     # 更不知道后台已经攒着几百条能直接采纳的 AI 建议（采纳不花钱）。

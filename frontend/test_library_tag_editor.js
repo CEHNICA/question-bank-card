@@ -93,15 +93,12 @@ assert.match(managerJs, /group_membership/, "the manager can move a tag in and o
 assert.match(managerJs, /group_membership_batch/, "selected tags can be moved into a group in one go");
 assert.match(managerJs, /所属分组/, "the tag detail says which groups the tag belongs to");
 assert.match(managerJs, /未分类/, "the sidebar separates tags that belong to no group");
-assert.match(managerJs, /标签群组 \(/, "the sidebar lists the groups with a count");
+assert.match(managerJs, /标签分组 \(/, "the sidebar lists the groups with a count");
 assert.match(managerJs, /tagManagerTreeNav/, "the manager browses top-level tags as a hierarchy");
-// 1.27.0：知识点 / 解题方法 / 自定义 / 历史标签 这四项是「系统默认分组」——
-// 它们本来就是一组一组的，画在分组栏里，点得动、筛得出。
-assert.match(managerJs, /系统默认分组/, "左栏有「系统默认分组」这一栏");
-assert.match(managerJs, /for \(const kind of \["knowledge", "method", "custom", "legacy"\]\) \{\n {8}const count = tags\.filter\(\(tag\) => tag\.kind === kind\)\.length;/,
-  "四个类型都作为系统默认分组列出来");
-assert.match(managerJs, /state\.scope\.startsWith\("kind:"\) && tag\.kind !== state\.scope\.slice\(5\)/,
-  "点哪个系统默认分组，右边就只列哪一类");
+// 1.27.0：知识点 / 解题方法 / 自定义 / 历史标签 现在是**真的标签分组**（迁移建的），
+// 和老师自建的并列，不分「系统」「用户」两档。
+assert.match(managerJs, /"标签分组 \(" \+ tagGroups\(\)\.length \+ "\)"/, "左栏只有一档「标签分组」");
+assert.doesNotMatch(managerJs, /系统默认分组/, "没有「系统分组」的特殊一档");
 assert.doesNotMatch(libraryJs, /tagCatalogue\.groups|tagActiveGroup|tagManagerGroup|group_keys|group_ids|所属分组|导入所选分组/,
   "the question tag picker and templates read chapters, not groups");
 assert.match(libraryJs, /tagSubtree\(/, "the picker filters by a chapter and everything under it");

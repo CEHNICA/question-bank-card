@@ -112,8 +112,8 @@
    悬停提示不算说明 —— 老师不会去悬停一个看不懂的词。 */
 .tag-directory-legacy-note { background: #fbf6ec; border-bottom-color: #eee0c9; }
 .tag-directory-legacy-note > p { color: #6a5326; }
-/* 左栏里「历史标签」底下那一行小字。 */
-.tag-directory-group-note { margin: -2px 0 6px; padding: 0 10px 4px; color: var(--muted, #747971); font-size: 10.5px; line-height: 1.5; }
+/* 左栏里「历史标签」底下那一行小字。独立一行，不塞进分组行里。 */
+.tag-directory-group-note { display: block; margin: -3px 0 4px; padding: 0 10px 3px; color: var(--muted, #747971); font-size: 10.5px; line-height: 1.5; }
 .tag-directory-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 11px 14px; background: #eff6f2; border-bottom: 1px solid #dce9e1; }
 .tag-directory-bulk[hidden] { display: none; }
 .tag-directory-bulk > strong { font-size: 12px; margin-right: 2px; }

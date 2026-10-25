@@ -21,16 +21,16 @@ const initials = fs.readFileSync(path.join(__dirname, "..", "backend", "core", "
 assert.match(managerJs, /entry\(scopeNav, "all", "全部"/, "左栏第一项是「全部」");
 assert.match(managerJs, /entry\(scopeNav, "ungrouped", "未分类"/, "左栏有「未分类」");
 assert.match(managerJs, /entry\(scopeNav, "favorite", "常用标签"/, "左栏有「常用标签」");
-assert.match(managerJs, /"标签群组 \(" \+ tagGroups\(\)\.length \+ "\)"/, "左栏列出标签群组并带数量");
+assert.match(managerJs, /"标签分组 \(" \+ tagGroups\(\)\.length \+ "\)"/, "左栏列出标签分组并带数量");
 assert.match(managerJs, /id = "tagManagerCreateGroup"/, "左栏能新建分组");
 assert.match(managerJs, /tag-directory-group-manage/, "分组旁边有管理入口（改名/删除）");
 
-// 「未分类」是按「没归到任何**老师自建分组**」算的 —— 系统分组（教材章节那套）
-// 不算，每个标签都挂在某个章节下，说它「没归类」是骗人。
-assert.match(managerJs, /function isUngrouped\(tag\) \{[\s\S]*?mine\.has\(String\(id\)\)/,
-  "未分类 = 没有归到任何自建分组");
-assert.match(managerJs, /function tagGroups\(\) \{ return \(state\.catalogue\.groups \|\| \[\]\)\.filter\(\(group\) => !group\.system\); \}/,
-  "系统分组不在「标签群组」里重复列一遍");
+// 1.27.0：「未分类」= 没归到**任何**分组 —— 类型已经变成真分组了，
+// 不再有「系统分组不算」这回事。
+assert.match(managerJs, /function isUngrouped\(tag\) \{ return !\(tag\.group_ids \|\| \[\]\)\.length; \}/,
+  "未分类 = 没有归到任何分组");
+assert.match(managerJs, /function tagGroups\(\) \{ return \(state\.catalogue\.groups \|\| \[\]\)\.filter\(\(group\) => !group\.section\); \}/,
+  "教材章节那套不当分组显示（那是章节树的事）");
 
 // ---------------------------------------------------------------- 右侧网格
 
@@ -77,19 +77,28 @@ assert.match(managerJs, /undoLast\.hidden = !state\.lastOperation/, "没有可�
 
 // 「历史标签」这个词老师看不懂 —— 得说清楚它是什么，而且要**常驻可见**。
 // 悬停提示不算说明（这是这个项目一贯的规矩）。
-assert.match(managerJs, /function systemGroupHint\(kind, count\)/, "系统默认分组有说明");
-assert.match(managerJs, /历史标签：.*旧版题库迁进来的标签，都已停用，一道题也没贴/,
-  "「历史标签」说清楚是什么：旧版迁入、已停用、没贴在题上");
 assert.match(managerJs, /tag-directory-group-note", "旧版迁入 · 已停用 · 没贴在题上"/,
   "左栏「历史标签」底下常驻一行说明");
 assert.match(managerJs, /legacyNoteBox\.hidden = !legacy/, "选中历史标签时结果区上方有常驻说明");
-assert.match(managerJs, /这 " \+ count \+ " 个是从旧版题库迁进来的标签/,
+assert.match(managerJs, /legacyNoteText\.textContent = "这 " \+ legacyGroup\.tag_count \+ " 个是从旧版题库迁进来的标签/,
   "选中历史标签时把这一组说清楚");
 // 说不实的话比不说更糟 —— 「不会再被搜到」没核实过（检索并不按 active 过滤），
 // 这些标签只是恰好一道题都没贴。
 assert.doesNotMatch(managerJs, /不会再被搜到/, "不写没核实过的断言");
 assert.match(managerCss, /\.tag-directory-legacy-note \{/, "历史标签的说明有自己的样式");
 assert.match(managerCss, /\.tag-directory-group-note \{/, "左栏那行常驻说明有样式");
+
+// 1.27.0：分组只有一种 —— 内置的类型组和老师自建的，是同一种东西。
+// 类型变成了真的分组（迁移建 4 个组 + 306 条归属），所以界面上不再有
+// 「系统默认分组」那一档，也不再有按 kind 筛的那一档。
+assert.match(managerJs, /"标签分组 \(" \+ tagGroups\(\)\.length \+ "\)"/, "左栏只有一档「标签分组」");
+assert.doesNotMatch(managerJs, /系统默认分组/, "没有「系统分组」的特殊一档");
+assert.doesNotMatch(managerJs, /state\.scope\.startsWith\("kind:"\)/, "不再按类型筛 —— 类型已经是分组了");
+assert.match(managerJs, /function tagGroups\(\) \{ return \(state\.catalogue\.groups \|\| \[\]\)\.filter\(\(group\) => !group\.section\); \}/,
+  "教材章节那套不当分组显示（那是章节树的事）");
+assert.match(managerJs, /function isUngrouped\(tag\) \{ return !\(tag\.group_ids \|\| \[\]\)\.length; \}/,
+  "未分类 = 不属于任何分组");
+assert.match(managerJs, /group\.system_key === "builtin:legacy"/, "历史标签组按内置标记认，不靠名字");
 
 // ---------------------------------------------------------------- 后端
 

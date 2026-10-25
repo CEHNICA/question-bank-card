@@ -47,8 +47,9 @@
     function savedScope() {
       try {
         const value = root.localStorage?.getItem(SCOPE_KEY);
-        // 1.27.0：「kind:xxx」是系统默认分组（知识点 / 解题方法 / 自定义 / 历史标签）。
-        if (typeof value === "string" && value.startsWith("kind:")) return value;
+        // 1.27.0：类型已经变成真分组了，以前那个「按类型筛」的 scope（kind:xxx）
+        // 不再存在 —— 认成「全部」，别把人留在一个筛不出东西的视图里。
+        if (typeof value === "string" && value.startsWith("kind:")) return "all";
         return ["all", "ungrouped", "favorite", "used"].includes(value) ? value : "all";
       } catch { return "all"; }
     }
@@ -221,24 +222,14 @@
     // 1.27.0：标签群组。老师自己分的组 —— 「这几个标签是我上周那套卷子用的」。
     // 模型和接口一直都在（1.25 之后只是界面上没入口了），这里把它接回来。
     // 系统分组（教材章节那套）由左边的类型树呈现，不在这里重复列一遍。
-    function tagGroups() { return (state.catalogue.groups || []).filter((group) => !group.system); }
+    // 1.27.0：分组只有一种 —— 内置的类型组（知识点 / 解题方法 / 自定义 / 历史标签）
+    // 和老师自建的，是**同一种东西**。教材章节那套（section）不摆在这儿：
+    // 那是「按教材浏览」那一段的事，列两遍就是重复。
+    function tagGroups() { return (state.catalogue.groups || []).filter((group) => !group.section); }
     function groupById(id) { return (state.catalogue.groups || []).find((group) => String(group.id) === String(id)) || null; }
-    function groupsOf(tag) { return ((tag && tag.group_ids) || []).map(groupById).filter((group) => group && !group.system); }
-    // 「未分类」= 还没归到任何**老师自建分组**里。系统分组不算 ——
-    // 每个标签都挂在某个教材章节下，说它「没归类」是骗人。
-    function isUngrouped(tag) {
-      const mine = new Set(tagGroups().map((group) => String(group.id)));
-      return !(tag.group_ids || []).some((id) => mine.has(String(id)));
-    }
-    // 1.27.0：系统默认分组的说清楚是什么。
-    // 「历史标签」这个词老师看不懂 —— 它是旧版题库迁进来的、已经停用、
-    // 一道题也没贴的旧标签，不是「以前的知识点」。
-    function systemGroupHint(kind, count) {
-      if (kind === "legacy") return "历史标签：" + count + " 个从旧版题库迁进来的标签，都已停用，一道题也没贴，等你决定去留。";
-      if (kind === "knowledge") return "知识点：" + count + " 个数学知识点。";
-      if (kind === "method") return "解题方法：" + count + " 个解题方法。";
-      return "自定义标签：" + count + " 个你自己起的标签。";
-    }
+    function groupsOf(tag) { return ((tag && tag.group_ids) || []).map(groupById).filter((group) => group && !group.section); }
+    // 没归到任何分组里的那些。删掉一个分组，里面那批标签就回到这儿。
+    function isUngrouped(tag) { return !(tag.group_ids || []).length; }
     function relationIds(tag, field) { return (tag[field] || []).map((value) => String(typeof value === "object" ? value.id : value)); }
     function parentsOf(tag) { return relationIds(tag, "parent_ids").map(tagById).filter(Boolean); }
     function childrenOf(tag) {
@@ -437,33 +428,22 @@
       entry(scopeNav, "all", "全部", tags.length, state.scope === "all" && !state.groupId, flat("all"));
       entry(scopeNav, "ungrouped", "未分类", ungrouped, state.scope === "ungrouped" && !state.groupId, flat("ungrouped"));
       entry(scopeNav, "favorite", "常用标签", favorites, state.scope === "favorite" && !state.groupId, flat("favorite"));
-      // 1.27.0：系统默认分组。知识点 / 解题方法 / 自定义 / 历史标签 —— 这四类
-      // 本身就是一组一组的，点得动、筛得出，就跟老师自建的分组摆在一处。
-      scopeNav.append(element("h2", "tag-directory-nav-heading", "系统默认分组"));
-      for (const kind of ["knowledge", "method", "custom", "legacy"]) {
-        const count = tags.filter((tag) => tag.kind === kind).length;
-        const scope = "kind:" + kind;
-        const control = button("", () => {
-          state.scope = scope; state.groupId = ""; state.hierarchyKind = ""; state.hierarchyNode = ""; state.hierarchyTrail = [];
-          rememberScope(); render();
-        }, "tag-directory-group" + (state.scope === scope ? " active" : ""));
-        control.dataset.navId = scope; control.setAttribute("aria-pressed", String(state.scope === scope));
-        control.append(element("span", "", kinds[kind]), element("small", "", count));
-        control.title = systemGroupHint(kind, count);
-        scopeNav.append(control);
-        // 「历史标签」这四个字老师看不懂 —— 只给悬停提示等于没给。
-        // 在它下面常驻一行字：旧版迁进来的、已经停用、一道题都没贴。
-        if (kind === "legacy") {
-          scopeNav.append(element("p", "tag-directory-group-note", "旧版迁入 · 已停用 · 没贴在题上"));
-        }
-      }
-      // 标签群组：老师自己分的组。标题上带数量，右边一个「＋」新建。
+      // 1.27.0：标签分组只有一种 —— 内置的类型组（知识点 / 解题方法 / 自定义 /
+      // 历史标签）和老师自建的，是同一种东西：都能改名、能删、能往里放标签，
+      // 每一步都能撤销。摆在一段里，不分「系统」「自己」两档。
       const groupTitle = element("div", "tag-directory-group-title");
-      groupTitle.append(element("h2", "tag-directory-nav-heading", "标签群组 (" + tagGroups().length + ")"));
+      groupTitle.append(element("h2", "tag-directory-nav-heading", "标签分组 (" + tagGroups().length + ")"));
       const addGroup = button("＋", () => openGroupDialog(), "tag-directory-add-group");
       addGroup.id = "tagManagerCreateGroup"; addGroup.title = "新建一个标签群组";
       groupTitle.append(addGroup); scopeNav.append(groupTitle);
-      tagGroups().forEach((group) => {
+      // 内置的类型组排在前面，老师自建的排在后面 —— 不然自建的会插在内置组中间
+      // （数据库按名字的码位排，不是按拼音）。
+      const orderedGroups = [...tagGroups()].sort((a, b) => {
+        if (Boolean(a.builtin) !== Boolean(b.builtin)) return a.builtin ? -1 : 1;
+        return (Number(a.position) || 0) - (Number(b.position) || 0)
+          || String(a.name).localeCompare(String(b.name), "zh-CN");
+      });
+      orderedGroups.forEach((group) => {
         const active = state.groupId === String(group.id);
         const row = element("div", "tag-directory-group-row");
         const pick = button("", () => { state.groupId = active ? "" : String(group.id); state.scope = "all"; state.hierarchyKind = ""; state.hierarchyNode = ""; state.hierarchyTrail = []; render(); }, "tag-directory-group" + (active ? " active" : ""));
@@ -472,7 +452,13 @@
         const manage = button("⋯", (event) => { event.stopPropagation(); openGroupMenu(group, event); }, "tag-directory-group-manage");
         manage.setAttribute("aria-label", "管理分组「" + group.name + "」");
         manage.title = "改名或删除这个分组";
+        // 「历史标签」这四个字老师看不懂 —— 只给悬停提示等于没给。
+        // 在它下面常驻一行字：旧版迁进来的、已经停用、一道题都没贴。
+        // 这一行是**独立一行**，不塞进分组那一行里 —— 塞进去会被挤成竖排。
         row.append(pick, manage); scopeNav.append(row);
+        if (group.system_key === "builtin:legacy") {
+          scopeNav.append(element("p", "tag-directory-group-note", "旧版迁入 · 已停用 · 没贴在题上"));
+        }
       });
       if (!tagGroups().length) scopeNav.append(element("p", "tag-directory-nav-hint", "还没有分组。点上面的「＋」建一个，把标签归进去。"));
       sidebar.scrollTop = scroll;
@@ -541,11 +527,11 @@
     function renderUsageNote() {
       // 1.27.0：选中「历史标签」时先把这一组是什么说清楚 —— 常驻的一条，
       // 不是悬停提示。悬停不算说明。
-      const legacy = state.scope === "kind:legacy";
+      const legacyGroup = tagGroups().find((group) => group.system_key === "builtin:legacy");
+      const legacy = Boolean(legacyGroup) && state.groupId === String(legacyGroup.id);
       legacyNoteBox.hidden = !legacy;
       if (legacy) {
-        const count = (state.catalogue.tags || []).filter((tag) => tag.kind === "legacy").length;
-        legacyNoteText.textContent = "这 " + count + " 个是从旧版题库迁进来的标签：都已经停用，一道题也没贴。放着不动不影响别的，等你有空再决定去留。";
+        legacyNoteText.textContent = "这 " + legacyGroup.tag_count + " 个是从旧版题库迁进来的标签：都已经停用，一道题也没贴。放着不动不影响别的，等你有空再决定去留。";
       }
       const note = usageNote(state.catalogue);
       usageNoteBox.hidden = !note;
@@ -574,9 +560,6 @@
         // 1.27.0：未分类 = 还没归到任何标签群组；选中某个分组时只列组里的。
         if (state.scope === "ungrouped" && !isUngrouped(tag)) return false;
         if (state.groupId && !(tag.group_ids || []).includes(state.groupId)) return false;
-        // 1.27.0：系统默认分组（知识点 / 解题方法 / 自定义 / 历史标签）——
-        // 点哪一类，右边就只列哪一类。
-        if (state.scope.startsWith("kind:") && tag.kind !== state.scope.slice(5)) return false;
         const searchText = normalized([tag.name, tag.description, tag.conditions, ...(tag.aliases || []),
           ...parentPaths(tag).map((path) => path.map((node) => node.name).join(" "))].join(" "));
         return !query || query.split(/\s+/).every((part) => searchText.includes(part));
@@ -909,6 +892,11 @@
     }
     // 1.27.0：建一个分组 / 给分组改名。
     // 分组只是把标签归到一起 —— 老师自己的一套分类，跟标签的上下级不是一回事。
+    // 新组排在现有组后面，不跟内置组挤在一起。
+    function nextGroupPosition() {
+      const positions = tagGroups().map((group) => Number(group.position) || 0);
+      return positions.length ? Math.max(...positions) + 1 : 0;
+    }
     function openGroupDialog(existing = null) {
       if (state.busy) return;
       const dialog = element("dialog", "tag-directory-dialog");
@@ -924,7 +912,8 @@
         if (!name) { message.textContent = "给这个分组起个名字。"; input.focus(); return; }
         save.disabled = true; cancel.disabled = true;
         const ok = await run(() => options.action(existing ? "update_group" : "create_group",
-          existing ? { group_id: existing.id, name } : { name }), existing ? "分组已改名" : "分组已建好");
+          existing ? { group_id: existing.id, name } : { name, position: nextGroupPosition() }),
+        existing ? "分组已改名" : "分组已建好");
         save.disabled = false; cancel.disabled = false;
         if (ok) dialog.close();
       }, "button button-primary");
