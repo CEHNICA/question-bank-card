@@ -452,16 +452,22 @@
       const summary = el("p", "hint", `合题顺序：${label(q)}`);
       const start = button("编辑合题结果", "small primary", () => begin("merge", chosen.map((id) => state.questions.find((x) => x.id === id)))); start.id = "pageLayoutMergeBegin";
       // Two cards that both carry options cannot be merged: their option keys
-      // would repeat. The teacher is told here, not after a save is refused.
-      const withOptions = () => chosen.filter((id) => {
-        const card = state.questions.find((item) => item.id === id);
-        return card?.options && Object.keys(card.options).length;
-      }).length > 1;
+      // would repeat. Cards of different types cannot either: the merged card
+      // would carry one type and the words of the other. The teacher is told
+      // here, not after a save is refused.
+      const chosenCards = () => chosen.map((id) => state.questions.find((item) => item.id === id)).filter(Boolean);
+      const withOptions = () => chosenCards().filter((card) => card.options && Object.keys(card.options).length).length > 1;
+      const mixedTypes = () => {
+        const kinds = new Set(chosenCards().map((card) => card.question_type).filter((kind) => kind && kind !== "unknown"));
+        return kinds.size > 1;
+      };
       const warning = el("p", "layout-warning");
       const refresh = () => {
         summary.textContent = `合题顺序：${chosen.map((id) => label(state.questions.find((x) => x.id === id))).join(" → ")}`;
-        const blocked = withOptions();
-        warning.textContent = blocked ? "这几道题都有选项，合并后选项会重复，不能合。选择题被切开请用「调整范围」把两半框回去。" : "";
+        const blocked = withOptions() || mixedTypes();
+        warning.textContent = withOptions()
+          ? "这几道题都有选项，合并后选项会重复，不能合。选择题被切开请用「调整范围」把两半框回去。"
+          : mixedTypes() ? "这几道题的题型不一样，合并后题目会对不上。请先确认它们是不是同一道题。" : "";
         warning.hidden = !blocked;
         start.disabled = blocked;
       };

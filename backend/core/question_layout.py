@@ -271,13 +271,21 @@ def _merged_content(sources) -> dict:
     A merge is the teacher's judgement that these cards were one question all
     along, so the words already read stay. Two choice questions cannot be
     merged: their option keys would collide, and a choice question cut in half
-    is fixed by adjusting the range instead.
+    is fixed by adjusting the range instead. Cards of different types cannot
+    be merged either: the merged card would carry one type and the words of
+    the other.
     """
+    from . import qtypes
+
     with_options = [row for row in sources if row.options]
     if len(with_options) > 1:
         raise LayoutError("这几道题都有选项，合并后选项会重复。选择题被切开请用「调整范围」把两半框回去。", 409)
+    types = {str(row.question_type or "unknown") for row in sources}
+    kinds = {kind for kind in types if qtypes.decided(kind)}
+    if len(kinds) > 1:
+        raise LayoutError("这几道题的题型不一样，合并后题目会对不上。请先确认它们是不是同一道题。", 409)
     options = deepcopy(with_options[0].options) if with_options else {}
-    figures = []
+    figures: list[dict] = []
     for row in sources:
         figures.extend(deepcopy(row.figures or []))
     return {

@@ -415,6 +415,24 @@ class QuestionLayoutTests(TestCase):
         self.rejected(payload, 409)
         self.assertTrue(Question.objects.filter(pk=first.pk).exists(), "a refused merge leaves both cards alone")
 
+    def test_merge_refuses_cards_of_different_types(self):
+        first = self.question(7, options={}, question_type="free_response")
+        second = self.question(8, options={}, question_type="single_choice")
+        payload = self.payload(
+            "merge",
+            sources=[first, second],
+            targets=[
+                {
+                    "number": 7,
+                    "group_id": self.group.pk,
+                    "question_type": "free_response",
+                    "regions": [*self.pieces(page=0, top=80), *self.pieces(page=1, top=200)],
+                }
+            ],
+        )
+        self.rejected(payload, 409)
+        self.assertTrue(Question.objects.filter(pk=first.pk).exists(), "a refused merge leaves both cards alone")
+
     def test_merge_keeps_the_figures_of_every_merged_card(self):
         first = self.question(7, options={}, figures=[{"slot": "stem", "page_idx": 0, "bbox": [10, 10, 20, 20]}])
         second = self.question(8, options={}, figures=[{"slot": "stem", "page_idx": 1, "bbox": [30, 30, 40, 40]}])

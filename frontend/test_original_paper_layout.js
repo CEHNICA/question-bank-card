@@ -588,9 +588,10 @@ async function run() {
   // keys would repeat. The teacher hears it while picking, not after a
   // refused save.
   state.questions = [
-    { ...state.questions[0], id: 81, number: 1, options: { A: "甲", B: "乙" }, stem: "第一道", group: { id: 10, sequence: 0, pages: [0, 1], title: "组10" } },
-    { ...state.questions[1], id: 82, number: 2, options: { A: "丙", B: "丁" }, stem: "第二道", group: { id: 10, sequence: 0, pages: [0, 1], title: "组10" } },
-    { ...state.questions[2], id: 83, number: 3, options: {}, stem: "没有选项", group: { id: 10, sequence: 0, pages: [0, 1], title: "组10" } }
+    { ...state.questions[0], id: 81, number: 1, options: { A: "甲", B: "乙" }, stem: "第一道", question_type: "single_choice", group: { id: 10, sequence: 0, pages: [0, 1], title: "组10" } },
+    { ...state.questions[1], id: 82, number: 2, options: { A: "丙", B: "丁" }, stem: "第二道", question_type: "single_choice", group: { id: 10, sequence: 0, pages: [0, 1], title: "组10" } },
+    { ...state.questions[2], id: 83, number: 3, options: {}, stem: "没有选项", question_type: "single_choice", group: { id: 10, sequence: 0, pages: [0, 1], title: "组10" } },
+    { ...state.questions[2], id: 84, number: 4, options: {}, stem: "题型不同", question_type: "free_response", group: { id: 10, sequence: 0, pages: [0, 1], title: "组10" } }
   ];
   controller.open("regions", state.questions[0]);
   await $("pageLayoutPanel").querySelector("#pageLayoutMerge").emit("click");
@@ -612,6 +613,13 @@ async function run() {
   await second.emit("change");
   assert.equal($("pageLayoutPanel").querySelector("#pageLayoutMergeBegin").disabled, false,
     "a card without options can be merged");
+  // Cards of different types cannot be merged either.
+  const other = $("pageLayoutPanel").querySelector('[data-layout-merge-id="84"]');
+  other.checked = true;
+  await other.emit("change");
+  assert.equal($("pageLayoutPanel").querySelector("#pageLayoutMergeBegin").disabled, true,
+    "cards of different types cannot be merged");
+  assert.match($("pageLayoutPanel").querySelector(".layout-warning").textContent, /题型不一样/);
   controller.close();
 
   console.log("Original-paper layout: overlap ordering, direct selection, merge bounds, pointer thresholds, clean in-place save, manual-only edits, lost-response recovery, return actions, empty-frame recovery, protected question deletion, page-scoped group choice and the choice-question merge guard: OK");
