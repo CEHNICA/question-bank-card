@@ -63,8 +63,20 @@ class LibraryTagHierarchyTests(TestCase):
             self.parents(a, c)
         self.assertEqual(library_tagging.catalogue_state().revision, revision)
         self.assertEqual(LibraryTagRelation.objects.count(), 2)
+
+    def test_a_tag_can_hang_under_a_tag_of_another_kind(self):
+        """1.26.27：上下级不再限同一类。老师的标签是他自己的一棵树，
+        「分类讨论」既是知识点也是解题方法 —— 硬按类型分家只会让他在两个地方各贴一次。"""
+        knowledge, method = self.tag("分类讨论"), self.tag("分类讨论法", "method")
+        self.parents(method, knowledge)
+        self.assertEqual(
+            set(LibraryTagRelation.objects.filter(child=method).values_list("parent_id", flat=True)),
+            {knowledge.pk})
+        row = next(tag for tag in library_tagging._catalogue_rows()["tags"] if tag["id"] == str(method.pk))
+        self.assertEqual(row["parent_ids"], [str(knowledge.pk)], "目录里也要看得见这个上级")
+        # 环还是要拦住的 —— 跟类型无关。
         with self.assertRaises(library_tagging.TaggingError):
-            self.parents(c, self.tag("构造函数", "method"))
+            self.parents(knowledge, method)
 
     def test_relation_neighbors_create_move_remove_undo(self):
         a, b = self.tag("三角形"), self.tag("圆")

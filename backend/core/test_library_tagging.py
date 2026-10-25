@@ -403,11 +403,13 @@ class FormalLibraryTaggingTests(TestCase):
         self.assertFalse(LibraryTag.objects.filter(pk=source.pk).exists())
         self.assertTrue(LibraryTagAssignment.objects.filter(publication=publication, tag=target).exists())
 
-    def test_batch_merge_invalid_type_and_methods_scope_overflow_roll_back(self):
+    def test_batch_merge_across_kinds_and_methods_scope_overflow_roll_back(self):
+        """1.26.27：合并不再按类型拦（老师的标签是他自己的一棵树）；
+        但方法的小问范围溢出仍然要拦。"""
         wrong, target = self.tag("不同类别来源", "knowledge"), self.tag("不同类别目标", "custom")
         response = self.client.get("/api/library/tags/impact?action=merge_tags_batch&source_ids="
             + str(wrong.pk) + "&target_id=" + str(target.pk), HTTP_X_QB_REQUEST="1")
-        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.status_code, 200, response.content)
         publication = self.publication()
         first, second, method_target = self.tag("范围甲", "method"), self.tag("范围乙", "method"), self.tag("范围目标", "method")
         LibraryTagAssignment.objects.create(publication=publication, tag=first,
@@ -423,6 +425,32 @@ class FormalLibraryTaggingTests(TestCase):
         self.assertEqual(LibraryTagAssignment.objects.filter(publication=publication).count(), 2)
         publication.refresh_from_db()
         self.assertEqual(publication.tag_revision, 0)
+
+    def test_merging_across_kinds_keeps_the_target_kind(self):
+        """1.26.27：知识点合成到解题方法上 —— 类型跟着「保留的那颗」走，
+        适用范围变成整题（知识点本来就是整题，方法原来只对第 2 小问有效）。"""
+        knowledge, method = self.tag("分类讨论"), self.tag("分类讨论法", "method")
+        publication = self.publication()
+        LibraryTagAssignment.objects.create(publication=publication, tag=knowledge, scope={"whole": True})
+        LibraryTagAssignment.objects.create(publication=publication, tag=method, scope={"subquestions": ["2"]})
+        preview = library_tagging._impact_data("merge_tags_batch", source_ids=[str(knowledge.pk)],
+                                              target_id=str(method.pk))
+        saved = self.post_json("/api/library/tags", {"action": "merge_tags_batch",
+            "source_ids": [str(knowledge.pk)], "target_id": str(method.pk),
+            "impact_token": preview["token"], "confirmed": True, "revision": preview["revision"],
+            "request_id": str(uuid.uuid4())})
+        self.assertEqual(saved.status_code, 200, saved.content)
+        self.assertFalse(LibraryTag.objects.filter(pk=knowledge.pk).exists(), "源标签被合并掉了")
+        self.assertTrue(LibraryTag.objects.filter(pk=method.pk).exists(), "保留的那颗还在")
+        assignment = LibraryTagAssignment.objects.get(publication=publication, tag=method)
+        self.assertEqual(assignment.scope, {"whole": True}, "合成后这个方法在这道题上适用整题")
+        # 撤销要能把它还原回去。
+        undo = self.post_json("/api/library/tags/undo", {"operation_id": saved.json()["operation_id"]})
+        self.assertEqual(undo.status_code, 200, undo.content)
+        self.assertTrue(LibraryTag.objects.filter(pk=knowledge.pk).exists(), "撤销后源标签回来了")
+        self.assertEqual(
+            set(LibraryTagAssignment.objects.filter(publication=publication).values_list("tag_id", flat=True)),
+            {knowledge.pk, method.pk})
 
     def test_suggestion_history_can_be_filtered_by_question_and_paginated(self):
         publication = self.publication()

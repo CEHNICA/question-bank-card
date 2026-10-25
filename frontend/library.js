@@ -3419,7 +3419,7 @@
   async function nestTagUnder(item, draggedTag, parentTag) {
     if (!draggedTag || !parentTag) return;
     if (String(draggedTag.id) === String(parentTag.id)) return;
-    if (draggedTag.kind !== parentTag.kind) { toast("知识点和解题方法是两类，不能相互挂靠。", "error"); return; }
+    // 1.26.27：不再按类型拦。老师的标签是他自己的一棵树，类型只是标签的一个属性。
     // 不让拖成自己的后代（防环）——两个方向都要拦。
     if (tagDescendants(parentTag).has(String(draggedTag.id))) { toast("「" + draggedTag.name + "」是「" + parentTag.name + "」的子标签，把它挂回去会成环。", "error"); return; }
     if (tagDescendants(draggedTag).has(String(parentTag.id))) { toast("「" + draggedTag.name + "」是「" + parentTag.name + "」的上级，把它挂到下面会成环。", "error"); return; }
@@ -3433,7 +3433,6 @@
   async function makeSiblingOf(item, draggedTag, siblingTag) {
     if (!draggedTag || !siblingTag) return;
     if (String(draggedTag.id) === String(siblingTag.id)) return;
-    if (draggedTag.kind !== siblingTag.kind) { toast("知识点和解题方法是两类，不能相互挂靠。", "error"); return; }
     if (tagDescendants(draggedTag).has(String(siblingTag.id))) { toast("「" + draggedTag.name + "」是「" + siblingTag.name + "」的上级，两颗没法并列。", "error"); return; }
     const parentIds = (siblingTag.parent_ids || []).map(String);
     if (tagSameParents(draggedTag, siblingTag)) { toast("「" + draggedTag.name + "」和「" + siblingTag.name + "」已经是同一个上级的了，本来就并列。", "info"); return; }
@@ -3519,7 +3518,6 @@
       const parentTag = (tagCatalogue.tags || []).find(t => String(t.id) === String(targetChip.dataset.tagId));
       if (!draggedTag || !parentTag) return;
       if (String(draggedTag.id) === String(parentTag.id)) return;
-      if (draggedTag.kind !== parentTag.kind) { toast("知识点和解题方法是两类，不能相互挂靠。", "error"); return; }
       // 1.26.24：先问「怎么排」，别直接挂上去。
       openTagRelationChoice(item, draggedTag, parentTag);
     });
@@ -6215,8 +6213,8 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
 
   function directoryChildren(tag) {
     const id = String(tag.id);
-    return directory.tags.filter(child => child.kind === tag.kind
-      && (child.parent_ids || []).some(parent => String(parent) === id))
+    // 1.26.27：子节点不再限同一类 —— 老师把解题方法挂在知识点下面，目录里要看得见。
+    return directory.tags.filter(child => (child.parent_ids || []).some(parent => String(parent) === id))
       .sort((a, b) => String(a.name).localeCompare(String(b.name), "zh-CN"));
   }
 
@@ -6343,6 +6341,10 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     }
     const name = node("button", "library-directory-name", tag.name);
     name.type = "button";
+    // 1.26.27：跨类型的子标签标出它是哪一类 —— 不然老师会以为那颗标签不见了。
+    if (tag.kind !== directory.kind) {
+      name.append(node("small", "library-directory-kind", "· " + (DIRECTORY_KINDS[tag.kind] || "标签")));
+    }
     // 1.25.85：名字在面板里被截掉时，鼠标停上来能看见完整标签名 + 描述。description 之前
     // 单独顶在前面，名字被截后没法直接看到——放到 title 里一起 hover 看。
     name.title = tag.description ? `${tag.name} — ${tag.description}` : tag.name;

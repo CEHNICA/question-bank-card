@@ -22,7 +22,15 @@
     return value;
   }
   function normalized(text) { return String(text || "").normalize("NFKC").toLocaleLowerCase(); }
-  function compatible(source, target) { return source.kind === target.kind || (source.kind === "legacy" && ["knowledge", "custom"].includes(target.kind)); }
+  // 1.26.27：合并不再按类型拦 —— 保留哪一颗都能选。老师的标签是他自己的一棵树，
+  // 「分类讨论」既是知识点也是解题方法，那就合成一颗，类型跟着保留的那颗走。
+  // 单独拎出来是为了能单独验：以前这条规矩藏在合并对话框里，改没改只能靠点。
+  function mergeCandidates(catalogue, sources) {
+    const chosen = sources || [];
+    return (catalogue || []).filter((tag) => tag.active !== false)
+      .filter((tag) => !(chosen.length === 1 && chosen[0].id === tag.id))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), "zh-CN"));
+  }
 
   function create(options) {
     const mount = options.mount;
@@ -325,7 +333,7 @@
           const id = String(tag.id);
           if (shown.has(id)) return;         // 一个标签挂多个上级时只画一次
           shown.add(id);
-          const children = childrenOf(tag).filter((child) => child.kind === state.hierarchyKind && !ancestors.has(String(child.id)));
+          const children = childrenOf(tag).filter((child) => !ancestors.has(String(child.id)));
           const open = state.treeOpen.has(id);
           const row = element("div", "tag-directory-tree-row");
           row.dataset.treeTagId = id;
@@ -338,6 +346,11 @@
           const name = button(tag.name, () => browseHierarchy(tag), "tag-directory-tree-name"
             + (String(tag.id) === String(state.hierarchyNode) ? " current" : ""));
           name.title = "打开「" + tag.name + "」这一层";
+          // 1.26.27：跨类型的子标签也画在它爹下面，名字后头标出它是哪一类 ——
+          // 不然老师会以为那颗标签不见了。
+          if (tag.kind !== state.hierarchyKind) {
+            name.append(element("small", "tag-directory-tree-kind", "· " + (kinds[tag.kind] || "标签")));
+          }
           // 1.25.80：文件夹页若只看本级题数，整列都是 0 题，没人能看出"这一章下面到底有没有题"。
           // 本章在题目上多数靠子标签贴上去，subtree_count 才是老师判断"是不是常用"的真数。
           const sub = subtreeCount(tag);
@@ -435,8 +448,12 @@
         // 1.25.38：搜索不再被「当前分类」挡住 —— 原来在知识点里搜不到解题方法，
         // 可搜索框并没有说范围。现在有搜索词就搜全部类型，结果里标出类型和上级路径。
         if (!query && state.hierarchyKind && state.scope === "all") {
-          if (tag.kind !== state.hierarchyKind) return false;
-          if (state.hierarchyNode && !relationIds(tag, "parent_ids").includes(String(state.hierarchyNode))) return false;
+          // 1.26.27：这一层里也列出**别类**的子标签 —— 老师把解题方法挂在知识点下面，
+          // 打开这一章就要看得见它（列表按类型分着排，那颗会落在「解题方法」那一段里）。
+          const childOfNode = Boolean(state.hierarchyNode)
+            && relationIds(tag, "parent_ids").includes(String(state.hierarchyNode));
+          if (tag.kind !== state.hierarchyKind && !childOfNode) return false;
+          if (state.hierarchyNode && !childOfNode) return false;
           if (!state.hierarchyNode && parentsOf(tag).some((parent) => parent.kind === tag.kind)) return false;
         }
         // 1.25.38：「用过的」只看确实贴过题的标签（含下级）。
@@ -557,7 +574,8 @@
       const multiple = ["parents", "methods"].includes(mode), methodMode = mode === "methods",
         blocked = descendantsOf(tag), existingIds = new Set(relationIds(tag, methodMode ? "related_method_ids" : "parent_ids"));
       const candidates = (state.catalogue.tags || []).filter((candidate) => {
-        if (candidate.kind !== (methodMode ? "method" : tag.kind)) return false;
+        // 1.26.27：父标签不再限同一类（「相关方法」那条关系仍然是知识点→解题方法，不变）。
+        if (methodMode && candidate.kind !== "method") return false;
         if (candidate.active === false && !existingIds.has(String(candidate.id))) return false;
         if (!methodMode && (String(candidate.id) === String(tag.id) || blocked.has(String(candidate.id)))) return false;
         if (!multiple && existingIds.has(String(candidate.id))) return false;
@@ -706,8 +724,9 @@
       if (sources.length > 20) { setNotice("一次最多合并 20 个标签；请先按分类或搜索缩小范围。", true); return; }
       const dialog = element("dialog", "tag-directory-merge-dialog"), title = element("h2", "", "合并标签"), targetLabel = element("label", "", "保留哪个标签？"), target = element("select");
       target.id = "tagManagerMergeTarget"; target.add(new Option("选择保留的标签…", ""));
-      (state.catalogue.tags || []).filter((tag) => tag.active !== false && sources.every((source) => source.id === tag.id || compatible(source, tag)) && !(sources.length === 1 && sources[0].id === tag.id))
-        .sort((a, b) => String(a.name).localeCompare(String(b.name), "zh-CN")).forEach((tag) => target.add(new Option(tag.name + "（" + (tag.count || 0) + " 题）", tag.id)));
+      // 1.26.27：保留哪一颗都能选 —— 不再按类型拦。
+      mergeCandidates(state.catalogue.tags, sources)
+        .forEach((tag) => target.add(new Option(tag.name + "（" + (tag.count || 0) + " 题）", tag.id)));
       targetLabel.append(target); const mergeStatus = element("p", "tag-directory-hint"); mergeStatus.setAttribute("role", "status");
       mergeStatus.textContent = "保留目标标签；其余所选标签及题目关联合并到目标，重复关联会整理。";
       const actions = element("footer"), cancel = button("取消", () => dialog.close()), submit = button("合并", async () => {
@@ -717,7 +736,13 @@
         const succeeded = await run(async () => {
           const impact = await options.request("/api/library/tags/impact?action=merge_tags_batch&source_ids=" + encodeURIComponent(sourceIds.join(",")) + "&target_id=" + encodeURIComponent(targetId));
           const targetTag = (state.catalogue.tags || []).find((tag) => String(tag.id) === targetId);
-          if (!window.confirm("把 " + sourceIds.length + " 个标签合并到「" + targetTag.name + "」？\n影响 " + (impact.question_count || 0) + " 道当前题和 " + (impact.historical_count || 0) + " 道历史版本。原标签名称和来源会保留在历史中，操作可撤销。")) return false;
+          // 1.26.27：类型不同也能合，但有一件事会跟着变 —— 合并后按「保留的那颗」的类型走，
+          // 解题方法的小问范围会变成整题（知识点本来就是整题）。先说清楚再动手。
+          const mixed = sources.some((source) => String(source.id) !== targetId && source.kind !== targetTag.kind);
+          const scopeNote = mixed
+            ? "\n注意：类型不同 —— 合并后按「" + kinds[targetTag.kind] + "」算，原来「只对某几小问有效」的解题方法会变成整题。"
+            : "";
+          if (!window.confirm("把 " + sourceIds.length + " 个标签合并到「" + targetTag.name + "」？\n影响 " + (impact.question_count || 0) + " 道当前题和 " + (impact.historical_count || 0) + " 道历史版本。原标签名称和来源会保留在历史中，操作可撤销。" + scopeNote)) return false;
           const result = await options.action("merge_tags_batch", { source_ids: sourceIds, target_id: targetId, impact_token: impact.token, confirmed: true });
           state.selected.clear(); state.selected.add(targetId); state.focused = targetId; return result;
         }, "已合并标签，可在操作记录中撤销");

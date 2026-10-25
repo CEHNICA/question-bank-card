@@ -174,8 +174,10 @@ def _validate_relations(rows):
         if parent == child:
             raise TaggingError("标签不能成为自己的上级")
         if relation_type == LibraryTagRelation.Type.HIERARCHY:
-            if kinds[parent] != kinds[child]:
-                raise TaggingError("知识点、方法和自定义标签的上下级须分别建立")
+            # 1.26.27：上下级不再要求同一类。老师的标签是他自己的一棵树，
+            # 「分类讨论」既是知识点也是解题方法 —— 那就是同一棵树上的两个位置，
+            # 硬按类型分家只会让他在两个地方各贴一次。
+            # 分类仍然有用：它决定「相关方法」这类专属关系，以及解题方法的小问范围。
             children.setdefault(parent, set()).add(child)
         elif relation_type == LibraryTagRelation.Type.RELATED_METHOD:
             if kinds[parent] != LibraryTag.Kind.KNOWLEDGE or kinds[child] != LibraryTag.Kind.METHOD:
@@ -752,10 +754,10 @@ def _merge_tags_selection(source_ids, target_id):
     for source in sources:
         if source.pk == target.pk:
             raise TaggingError("合并目标不能同时作为待合并标签")
-        if source.kind != target.kind and source.kind != LibraryTag.Kind.LEGACY:
-            raise TaggingError("只能合并同类型标签；历史标签可整理为知识点或自定义标签")
-        if source.kind == LibraryTag.Kind.LEGACY and target.kind == LibraryTag.Kind.METHOD:
-            raise TaggingError("历史标签不能直接映射为解题方法；请先核对解析和小问范围")
+        # 1.26.27：不再按类型拦合并。老师的标签是他自己的一棵树，
+        # 「分类讨论」既是知识点也是解题方法 —— 那就合成一颗，类型跟着「保留的那颗」走。
+        # 唯一会变的是适用范围：知识点是整题，合成到解题方法上时，
+        # 原来「只对第 2 小问有效」的方法会变成整题（确认框里会说明）。
     return sources, target
 
 
@@ -1069,10 +1071,9 @@ def catalogue_mutation(payload: dict) -> dict:
         elif action == "merge_tags":
             source = get_object_or_404(LibraryTag, pk=payload.get("source_id"))
             target = get_object_or_404(LibraryTag, pk=payload.get("target_id"))
-            if source.pk == target.pk or (source.kind != target.kind and source.kind != LibraryTag.Kind.LEGACY):
-                raise TaggingError("只能合并同类型标签；历史标签可整理为知识点或自定义标签")
-            if source.kind == LibraryTag.Kind.LEGACY and target.kind == LibraryTag.Kind.METHOD:
-                raise TaggingError("历史标签不能直接映射为解题方法；请先核对解析和小问范围")
+            if source.pk == target.pk:
+                raise TaggingError("合并目标不能同时作为待合并标签")
+            # 1.26.27：跨类型也允许合并（类型跟着保留的那颗走）。
             _redirect_relations([source.pk], target.pk)
             before = {"source": tag_json(source), "target": tag_json(target),
                       "assignments": []}

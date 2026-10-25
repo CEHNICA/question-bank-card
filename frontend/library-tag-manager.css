@@ -59,6 +59,9 @@
 .tag-directory-tree-name { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; color: var(--ink, #262c29); font: inherit; font-size: 12px; text-align: left; padding: 4px 6px; border-radius: 5px; cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tag-directory-tree-name:hover { background: #eeefea; }
 .tag-directory-tree-name.current { background: #e3f0ea; color: #1d7062; font-weight: 600; }
+/* 1.26.27：跨类型的子标签画在它爹下面时，名字后头标出它是哪一类 ——
+   不然老师会以为那颗标签不见了。 */
+.tag-directory-tree-name .tag-directory-tree-kind { margin-left: 5px; color: var(--muted, #747971); font-size: 11px; font-weight: 400; }
 .tag-directory-tree-row > small { flex: 0 0 auto; color: var(--muted, #747971); font-size: 11px; font-variant-numeric: tabular-nums; }
 /* 1.25.80：文件夹里把题数从「本级 N 题」换成「含下级 N 题」，免得整列 0 题
    让老师以为这一章真没内容；子标签贴的题不会显示在章根上。 */
