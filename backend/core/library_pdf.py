@@ -760,6 +760,9 @@ def export_pdf_view(request):
         return JsonResponse({"error": "导出内容超过 2 MiB，请减少选题、分批导出"}, status=413)
     except word.ExportError as error:
         return JsonResponse({"error": str(error)}, status=error.status)
+    except Exception as error:  # noqa: BLE001 - 意外错也要说人话，不能只剩一张 500 网页
+        diagnostic = word.unexpected_export_error("PDF", error)
+        return JsonResponse({"error": word.export_failed_message("PDF", diagnostic)}, status=500)
     response = HttpResponse(data, content_type="application/pdf")
     response["Content-Disposition"] = "attachment; filename=practice.pdf; filename*=UTF-8''" + quote(filename)
     response["X-Question-Count"], response["X-Page-Count"] = str(count), str(pages)

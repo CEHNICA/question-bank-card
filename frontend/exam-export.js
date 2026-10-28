@@ -253,7 +253,9 @@
       const response = await root.fetch(format === "pdf" ? "/api/library/export-pdf" : "/api/library/export-docx", { method: "POST", headers, body });
       if (!response.ok) {
         let detail; try { detail = await response.json(); } catch { /* Keep the local error. */ }
-        throw new Error(detail?.error || `${format === "pdf" ? "PDF" : "Word"} 未能导出，请稍后重试。`);
+        // 走到这里说明后台没给出原因（正常情况下它总会说清楚哪一步不行）。
+        // 不能再让用户「稍后重试」——要是原因其实是永久性的，重试一万次也没用。
+        throw new Error(detail?.error || `${format === "pdf" ? "PDF" : "Word"} 没能导出，后台没给出原因。请再试一次；一直这样就把出问题的题目和时间告诉开发者。`);
       }
       const mime = response.headers.get("Content-Type")?.split(";", 1)[0].trim();
       if (mime === "application/json") {

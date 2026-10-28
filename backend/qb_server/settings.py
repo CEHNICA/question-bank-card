@@ -39,5 +39,11 @@ LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "handlers": {"console": {"class": "logging.StreamHandler"}},
-    "loggers": {"core": {"handlers": ["console"], "level": "INFO"}},
+    "loggers": {
+        "core": {"handlers": ["console"], "level": "INFO"},
+        # 后台出了没接住的错时，Django 把堆栈交给这个 logger。
+        # 以前只配了 "core"，这个 logger 没人接 —— 堆栈哪儿也不去，事后连
+        # 「为什么失败」都查不到（8.6 MB 的 web.log 里一条堆栈都没有）。
+        "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+    },
 }

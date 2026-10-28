@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -436,6 +437,23 @@ class AgentDocsTests(unittest.TestCase):
 
 
 @unittest.skipUnless(os.name == "nt" and shutil.which("powershell"), "Windows installer verification")
+def _remove_tree_with_retry(path: Path, attempts: int = 16) -> None:
+    """删临时目录：Windows 上刚跑完的 tiyouju.exe 可能还占着文件（WinError 32）。
+
+    拿不到文件不是测试失败的理由 —— 那不是测试要验的东西，重试几次它自己会松开。
+    """
+    for attempt in range(attempts):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.25)
+
+
 class InstallerReceiptTests(unittest.TestCase):
     """Exercise the generated installer with private temporary app directories.
 
@@ -481,7 +499,8 @@ class InstallerReceiptTests(unittest.TestCase):
         )
 
     def run_case(self, installed, release="1.10.14", cli="1.10.14"):
-        with tempfile.TemporaryDirectory(dir=self.root, prefix="case-") as temporary:
+        temporary = tempfile.mkdtemp(dir=self.root, prefix="case-")
+        try:
             app_root = Path(temporary) / "Programs" / "QuestionBankCard"
             app_root.mkdir(parents=True)
             shutil.copyfile(self.stubs[installed], app_root / "QuestionBankCard.exe")
@@ -503,6 +522,8 @@ try {{ & '{str(installer).replace("'", "''")}' }}
 catch {{ Write-Output $_.Exception.Message; exit 9 }}
 """
             return self.powershell(command)
+        finally:
+            _remove_tree_with_retry(Path(temporary))
 
     def test_verified_installation_has_choices_and_invitation(self):
         result = self.run_case("1.10.14")

@@ -13,11 +13,13 @@ import base64
 import hashlib
 import io
 import json
+import logging
 import re
 import tempfile
 import threading
 import time
 import unicodedata
+import uuid
 import warnings
 import xml.sax
 import zipfile
@@ -130,12 +132,32 @@ class ExportError(ValueError):
         self.status = status
 
 
+logger = logging.getLogger("core.export")
+
+
 class _Unrepresentable(Exception):
     """Valid KaTeX rendering that Word's own equation model cannot express."""
 
 
 def _fail(where, message, status=400):
     raise ExportError(f"{where}：{message}", status)
+
+
+def unexpected_export_error(kind: str, error: BaseException) -> str:
+    """记下一个没接住的导出错，给老师一句能转述的话和一个查得到的号。
+
+    导出这条路上，已知的失败都带原因（配图损坏、文件缺失、浏览器排不了版、请求太大）。
+    没被接住的那种错以前只留下一张 HTML 的 500 页：网页上只能显示「Word 未能导出，
+    请稍后重试」，日志里连堆栈都没有 —— 用户重试一万次也没用，开发者事后也查不出
+    到底为什么。这里给一个诊断号并把堆栈记进日志；老师把这个号报过来就能查到。
+    """
+    diagnostic = f"EX-{uuid.uuid4().hex[:12].upper()}"
+    logger.exception("export %s failed unexpectedly (%s): %s", kind, diagnostic, error)
+    return diagnostic
+
+
+def export_failed_message(kind: str, diagnostic: str) -> str:
+    return f"{kind}导出没完成（诊断号 {diagnostic}）：你的题和原卷都没动。可以再试一次；还是这样就把这个号发给开发者。"
 
 
 def _utf16_map(source: str, where: str) -> dict[int, int]:
@@ -2418,6 +2440,9 @@ def export_docx_view(request):
         return JsonResponse({"error": "导出内容超过 2 MiB，请减少选题、分批导出"}, status=413)
     except ExportError as error:
         return JsonResponse({"error": str(error)}, status=error.status)
+    except Exception as error:  # noqa: BLE001 - 意外错也要说人话，不能只剩一张 500 网页
+        diagnostic = unexpected_export_error("Word", error)
+        return JsonResponse({"error": export_failed_message("Word", diagnostic)}, status=500)
     response = HttpResponse(data, content_type=mime)
     response["Content-Disposition"] = (
         "attachment; filename=practice."
