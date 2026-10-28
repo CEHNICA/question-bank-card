@@ -83,13 +83,22 @@ assert.match(libraryJs, /window\.QBLibraryTagManager\.create\(/, "the question l
 assert.match(libraryHtml, /library-tag-manager\.js[\s\S]*?library\.js/, "the manager module loads before its consumer");
 assert.match(managerCss, /\.tag-directory-body \{[^}]*grid-template-columns:/,
   "sidebar, results and selected-tag details have distinct layout regions");
-assert.doesNotMatch(managerJs, /group_membership|create_group|update_group|delete_group|groupSelect/,
-  "the manager offers no group folder; chapters are parent tags");
-assert.doesNotMatch(managerJs, /memberships\(|所属分组|未分组|个人分组/,
-  "group wording is gone from the tag manager");
+// 1.27.0：标签群组做回来了 —— 老师自己分的组（「上周那套卷子」用的那几颗）。
+// 1.25 的时候界面上去掉了分组（章节用父标签表达），1.27.0 把它接回来：
+// 分组是分组，上下级是上下级，两件事分开。
+assert.match(managerJs, /create_group/, "the manager can create a tag group");
+assert.match(managerJs, /update_group/, "the manager can rename a tag group");
+assert.match(managerJs, /delete_group/, "the manager can delete a tag group");
+assert.match(managerJs, /group_membership/, "the manager can move a tag in and out of a group");
+assert.match(managerJs, /group_membership_batch/, "selected tags can be moved into a group in one go");
+assert.match(managerJs, /所属分组/, "the tag detail says which groups the tag belongs to");
+assert.match(managerJs, /未分类/, "the sidebar separates tags that belong to no group");
+assert.match(managerJs, /标签分组 \(/, "the sidebar lists the groups with a count");
 assert.match(managerJs, /tagManagerTreeNav/, "the manager browses top-level tags as a hierarchy");
-assert.match(managerJs, /for \(const kind of \["knowledge", "method", "custom", "legacy"\]\) \{[\s\S]*?entry\(hierarchyNav/,
-  "custom and legacy tags have their own level entry");
+// 1.27.0：知识点 / 解题方法 / 自定义 / 历史标签 现在是**真的标签分组**（迁移建的），
+// 和老师自建的并列，不分「系统」「用户」两档。
+assert.match(managerJs, /"标签分组 \(" \+ tagGroups\(\)\.length \+ "\)"/, "左栏只有一档「标签分组」");
+assert.doesNotMatch(managerJs, /系统默认分组/, "没有「系统分组」的特殊一档");
 assert.doesNotMatch(libraryJs, /tagCatalogue\.groups|tagActiveGroup|tagManagerGroup|group_keys|group_ids|所属分组|导入所选分组/,
   "the question tag picker and templates read chapters, not groups");
 assert.match(libraryJs, /tagSubtree\(/, "the picker filters by a chapter and everything under it");
@@ -139,7 +148,10 @@ assert.match(managerJs, /hierarchyTrail/, "返回上级按进来的路退，有�
 assert.match(managerJs, /if \(!query && state\.hierarchyKind && state\.scope === "all"\)/, "有搜索词时不再被当前分类挡住");
 assert.match(managerJs, /tag-directory-path-line/, "搜索结果补一行上级路径");
 assert.match(managerJs, /一次最多合并 20 个标签/, "合并超过 20 个先要求缩小范围");
-assert.match(managerJs, /entry\(scopeNav, "used"/, "快速查看里有「用过的」");
+// 1.27.0：左栏的分类换成「全部 / 未分类 / 常用标签 / 标签群组」，
+// 「用过的」那个入口换成了「未分类」—— 老师更常问「哪些还没归组」。
+assert.match(managerJs, /entry\(scopeNav, "ungrouped"/, "左栏里有「未分类」");
+assert.match(managerJs, /entry\(scopeNav, "favorite", "常用标签"/, "左栏里有「常用标签」");
 
 console.log("Formal tag picker, legacy compatibility, AI review, migration report and undo integration: OK");
 
@@ -160,4 +172,5 @@ assert.match(managerJs, /tag-directory-tree-toggle/, "每层都有展开箭头")
 assert.match(managerJs, /if \(open\) \{\s*const next = new Set/, "展开后递归画下一层");
 assert.match(managerJs, /kindHasHierarchy/, "没有上下级的类型不再长左树");
 assert.match(managerJs, /tag-directory-root-hint/, "顶级这一层中间换成提示，不重复左树");
-assert.match(managerJs, /这一类没有上下级/, "平铺类型的提示");
+// 1.27.0：类型不再是「树」，教材章节树才是树 —— 提示文字固定下来了。
+assert.match(managerJs, /点 ▸ 展开文件夹，点名字打开这一层；每一级都能贴题。/, "章节树的提示");

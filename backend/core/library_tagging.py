@@ -32,6 +32,7 @@ from .models import (
     LibraryTagSuggestion,
     PublishedQuestion,
 )
+from .pinyin_initials import initial_for
 
 MAX_NAME = 100
 MAX_ALIASES = 20
@@ -109,6 +110,30 @@ def _clean_color(value) -> str:
     if color and not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
         raise TaggingError("颜色格式应为 #RRGGBB")
     return color
+
+
+def _clean_group_name(value) -> str:
+    """群组名。跟标签名一样要限长，但允许重名以外的规矩 —— 重名由数据库挡。"""
+    return _clean_name(value, "分组名")
+
+
+def _clean_group_position(value) -> int:
+    try:
+        position = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(position, 9999))
+
+
+def _group_snapshot(group) -> dict:
+    """群组的一份可还原快照 —— 撤销靠它把名字、颜色、顺序放回去。"""
+    return {
+        "id": str(group.pk),
+        "name": group.name,
+        "color": group.color,
+        "position": group.position,
+        "system_key": group.system_key,
+    }
 
 
 def _clean_scope(tag, value):
@@ -260,6 +285,11 @@ def tag_json(tag: LibraryTag, *, count=None, context=None) -> dict:
         "active": tag.active,
         "favorite": tag.favorite,
         "system_key": tag.system_key,
+        # 标签管理窗口按分组归类：这几项决定它落在哪一栏。
+        # 取的是 pk —— groups.all() 给的是模型对象，str() 出来是
+        # 「LibraryTagGroup object (…)」，前端按 id 匹配就全落空。
+        "group_ids": sorted(str(value.pk) for value in tag.groups.all()),
+        "initial": initial_for(tag.name),
     }
     context = relation_context() if context is None else context
     neighbors = context.get(str(tag.pk), {})
@@ -757,13 +787,36 @@ def _catalogue_rows():
     for tag_id, publication_id in live.values_list("tag_id", "publication_id"):
         publications_by_tag.setdefault(str(tag_id), set()).add(str(publication_id))
     tags = []
-    for tag in LibraryTag.objects.all():
+    for tag in LibraryTag.objects.prefetch_related("groups").all():
         row = tag_json(tag, count=counts.get(str(tag.pk), 0), context=context)
         publications = set()
         for key in descendant_ids([tag.pk], context=context):
             publications.update(publications_by_tag.get(key, set()))
         row["subtree_count"] = len(publications)
         tags.append(row)
+    # 1.27.0：标签分组。老师自己分的组，和四个内置的类型组（知识点 / 解题方法 /
+    # 自定义 / 历史标签）是**同一种东西** —— 都能改名、能删、能往里放标签。
+    #
+    # 教材章节那套（seed-group:*）和更早的旧分组不摆在这里 —— 它们对应的是
+    # 「按教材浏览」那一段的章节树，摆出来就是同一批东西列两遍。
+    groups = []
+    for group in LibraryTagGroup.objects.all():
+        members = list(group.tags.all())
+        key = str(group.system_key or "")
+        groups.append(
+            {
+                "id": str(group.pk),
+                "name": group.name,
+                "color": group.color,
+                "position": group.position,
+                "system_key": group.system_key,
+                "builtin": key.startswith("builtin:"),
+                "section": key.startswith("seed-group:"),
+                "tag_count": len(members),
+            }
+        )
+    # 「未分类」= 不属于任何分组的那些。删掉一个分组，里面那批标签就回到这里。
+    ungrouped_count = sum(1 for row in tags if not row["group_ids"])
     # 1.25.12：标签管理页以前只说「299 个标签」，然后每行自己写「0 题」。走进来的人
     # 只看见一整屏 0，既不知道题库里到底有多少道题，也不知道其实只有两道贴过标签 ——
     # 更不知道后台已经攒着几百条能直接采纳的 AI 建议（采纳不花钱）。
@@ -779,6 +832,8 @@ def _catalogue_rows():
     return {
         "revision": state.revision,
         "tags": tags,
+        "groups": groups,
+        "ungrouped_count": ungrouped_count,
         "total": len(tags),
         "max_name": MAX_NAME,
         "initialized": state.initialized,
@@ -1633,6 +1688,68 @@ def catalogue_mutation(payload: dict) -> dict:
                 "publication_guards": {
                     key: _publication_guard(PublishedQuestion.objects.get(pk=key)) for key in publications
                 },
+            }
+        elif action == "create_group":
+            # 1.27.0：建一个标签群组。老师要的是「把标签归到一组自己管」，
+            # 不是「改标签的上下级」—— 这两件事在界面上是分开的。
+            name = _clean_group_name(payload.get("name"))
+            group = LibraryTagGroup.objects.create(
+                name=name,
+                color=_clean_color(payload.get("color")),
+                position=_clean_group_position(payload.get("position")),
+            )
+            after = {"group": _group_snapshot(group)}
+        elif action == "update_group":
+            group = get_object_or_404(LibraryTagGroup, pk=payload.get("group_id"))
+            before = {"group": _group_snapshot(group)}
+            if "name" in payload:
+                group.name = _clean_group_name(payload["name"])
+            if "color" in payload:
+                group.color = _clean_color(payload["color"])
+            if "position" in payload:
+                group.position = _clean_group_position(payload["position"])
+            group.save()
+            after = {"group": _group_snapshot(group)}
+        elif action == "delete_group":
+            group = get_object_or_404(LibraryTagGroup, pk=payload.get("group_id"))
+            # 删组之前记下组里有哪些标签 —— 撤销要把它们放回原处。
+            before = {
+                "group": _group_snapshot(group),
+                "tag_ids": sorted(str(value) for value in group.tags.values_list("id", flat=True)),
+            }
+            group.tags.clear()
+            group.delete()
+            after = {}
+        elif action == "group_membership":
+            group = get_object_or_404(LibraryTagGroup, pk=payload.get("group_id"))
+            tag = get_object_or_404(LibraryTag, pk=payload.get("tag_id"))
+            wanted = bool(payload.get("present"))
+            present = group.tags.filter(pk=tag.pk).exists()
+            if wanted == present:
+                # 本来就是这样，不写操作记录 —— 撤销没有可还原的东西。
+                before = {"group_id": str(group.pk), "tag_id": str(tag.pk), "present": present}
+                after = {"group_id": str(group.pk), "tag_id": str(tag.pk), "present": present}
+            else:
+                before = {"group_id": str(group.pk), "tag_id": str(tag.pk), "present": present}
+                group.tags.add(tag) if wanted else group.tags.remove(tag)
+                after = {"group_id": str(group.pk), "tag_id": str(tag.pk), "present": wanted}
+        elif action == "group_membership_batch":
+            group = get_object_or_404(LibraryTagGroup, pk=payload.get("group_id"))
+            raw_ids = payload.get("tag_ids")
+            if not isinstance(raw_ids, list) or not raw_ids or len(raw_ids) > 500:
+                raise TaggingError("请选择要归组的标签")
+            tag_ids = [str(value) for value in raw_ids]
+            tags = list(LibraryTag.objects.filter(pk__in=tag_ids))
+            if len(tags) != len(set(tag_ids)):
+                raise TaggingError("选中的标签有不存在或重复的，请刷新后重试", 409)
+            wanted = bool(payload.get("present"))
+            memberships = [{"tag_id": str(tag.pk), "present": group.tags.filter(pk=tag.pk).exists()} for tag in tags]
+            before = {"group_id": str(group.pk), "memberships": memberships}
+            for tag in tags:
+                group.tags.add(tag) if wanted else group.tags.remove(tag)
+            after = {
+                "group_id": str(group.pk),
+                "memberships": [{"tag_id": str(tag.pk), "present": wanted} for tag in tags],
             }
         else:
             raise TaggingError("不认识的目录操作")

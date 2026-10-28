@@ -173,7 +173,9 @@ class FormalLibraryTaggingTests(TestCase):
         self.assertEqual(LibraryTag.objects.count(), before)
         blank = self.client.get("/api/library/tags", HTTP_X_QB_REQUEST="1").json()
         self.assertEqual(blank["tags"], [])
-        self.assertNotIn("groups", blank)
+        # 1.27.0：分组做回来了，接口要报分组清单（空目录就是空清单）。
+        self.assertEqual(blank["groups"], [])
+        self.assertEqual(blank["ungrouped_count"], 0)
         self.assertFalse(blank["initialized"])
         key = templates["packages"][0]["section_keys"][0]
         applied = self.post_json(
@@ -280,28 +282,44 @@ class FormalLibraryTaggingTests(TestCase):
         self.assertFalse(LibraryTag.objects.filter(name="虚构第一章").exists(), "撤销要把刚建的目录节点带走")
         self.assertFalse(LibraryTag.objects.filter(name="虚构 1.1").exists())
 
-    def test_the_catalogue_never_carries_groups_any_more(self):
+    def test_the_catalogue_carries_groups_and_each_tag_says_which_ones(self):
+        """1.27.0：标签群组做回来了 —— 目录报分组清单，每颗标签报自己属于哪些组。
+
+        1.25 的时候分组只在模型里（章节改用父标签表达），界面上没有入口。
+        """
         body = self.client.get("/api/library/tags", HTTP_X_QB_REQUEST="1").json()
-        self.assertNotIn("groups", body)
+        self.assertIn("groups", body)
         self.assertTrue(body["tags"])
+        # 每颗标签报的是「属于哪些组」（group_ids），不是把整张分组表挂在标签上。
         self.assertFalse(any("groups" in tag for tag in body["tags"]))
+        for tag in body["tags"]:
+            self.assertIn("group_ids", tag)
+            self.assertIn("initial", tag)
         detail = self.client.get("/api/library/tags/%s/relations" % body["tags"][0]["id"], HTTP_X_QB_REQUEST="1").json()
         self.assertNotIn("groups", detail["tag"])
+        self.assertIn("group_ids", detail["tag"])
 
-    def test_group_actions_are_refused_and_leave_the_catalogue_untouched(self):
+    def test_malformed_group_actions_are_refused_and_leave_the_catalogue_untouched(self):
+        """1.27.0：标签群组做回来了，但参数不对的照样要拒。
+
+        失败的请求不能让目录版本往前跑 —— 否则界面上看到的编号对不上，
+        下一次操作会拿着一个已经过期的版本号来。
+        """
         tag = self.tag("拒绝分组操作的标签")
         revision = library_tagging.catalogue_state().revision
-        for action, extra in (
-            ("create_group", {"name": "新的分组"}),
-            ("update_group", {"group_id": str(uuid.uuid4())}),
-            ("group_membership", {"group_id": str(uuid.uuid4()), "tag_id": str(tag.pk), "present": True}),
-            ("group_membership_batch", {"group_id": str(uuid.uuid4()), "tag_ids": [str(tag.pk)], "mode": "add"}),
-            ("delete_group", {"group_id": str(uuid.uuid4())}),
+        missing = str(uuid.uuid4())
+        for action, extra, expected in (
+            ("create_group", {}, 400),
+            ("create_group", {"name": "   "}, 400),
+            ("update_group", {"group_id": missing, "name": "改名"}, 404),
+            ("group_membership", {"group_id": missing, "tag_id": str(tag.pk), "present": True}, 404),
+            ("group_membership_batch", {"group_id": missing, "tag_ids": [str(tag.pk)], "present": True}, 404),
+            ("delete_group", {"group_id": missing}, 404),
         ):
             result = self.post_json(
                 "/api/library/tags", {"action": action, "revision": revision, "request_id": str(uuid.uuid4()), **extra}
             )
-            self.assertEqual(result.status_code, 400, action + ": " + result.content.decode())
+            self.assertEqual(result.status_code, expected, action + ": " + result.content.decode())
         self.assertEqual(library_tagging.catalogue_state().revision, revision)
         self.assertFalse(LibraryTagGroup.objects.filter(name="新的分组").exists())
 
