@@ -103,6 +103,8 @@ function scenario() {
     paperRefreshToken: 0, ACTIVE_STATUS: new Set(), clearTimeout() {}, setTimeout() { throw new Error("Unexpected poll"); },
     $: (id) => ({ open: false }), normalizeRegionRead: (q) => q,
     renderPaper() {}, renderPaperList() {}, renderViewer() {}, readNewlyCutUpload() {}, regionReadPending: () => false, toast() {},
+    // 1.26.33：轮询里会顺带把读完的框选结果抄进剪贴板，这一段不在本用例的范围里。
+    autoCopyClipboardReads() {},
     api: () => new Promise((resolve) => waits.push(resolve)) };
   const oldPoll = vm.runInNewContext(refresh + "\nrefreshPaper();", refreshContext);
   const newPoll = vm.runInNewContext(refresh + "\nrefreshPaper();", refreshContext);

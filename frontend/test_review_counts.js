@@ -87,16 +87,15 @@ const reread = callText('button("让 AI 重读这题"');
 assert.ok(argCount(reread) >= 4,
   "让 AI 重读这题 must carry hover text — it is the only re-read entry for PDF papers");
 assert.match(reread, /全部片段/, "the hover text says what gets re-read");
-assert.match(reread, /框选识读/, "the hover text points at the narrower option");
+assert.match(reread, /按 C/, "the hover text points at the narrower option, now the C shortcut");
 assert.match(reread, /改过/,
   "the hover text warns that re-reading replaces text the teacher already edited");
 
-// Its neighbour must keep saying the opposite thing: a small patch, not the whole
-// question. Two entries to the same AI feature are fine as long as the difference
-// between them is written where the teacher can see it.
-const patch = callText('button("框选识读（纠错）"');
-assert.ok(argCount(patch) >= 4, "框选识读（纠错）keeps its hover text");
-assert.match(patch, /一小块/, "框选识读（纠错）still says it only re-reads a small piece");
+// 1.26.33：「框选识读（纠错）」这个入口撤了。窄的那一路现在是快捷键 C ——
+// 在原卷上框一块，读到的字直接进剪贴板，不填题卡。
+assert.doesNotMatch(js, /button\("框选识读（纠错）"/, "框选识读（纠错）is no longer a menu entry");
+assert.match(js, /case "c": if \(q\) \{ event\.preventDefault\(\); openClipboardRead\(q\); \} break;/,
+  "the narrower read is now the C shortcut");
 
 // The photo-paper path keeps its prominent, fully explained button.
 const photoRead = callText('button(q.ocr_pending ? "AI 识读中……"');

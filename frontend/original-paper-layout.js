@@ -207,7 +207,7 @@
       $("pageDialogComplete").replaceChildren(el("span", "", "返回审核"), el("span", "kbd-hint", "Ctrl+Enter"));
       $("pageDialogComplete").title = "保存当前改动后返回审核；不会自动识读";
       $("pageDialogClose").textContent = "关闭";
-      ["numberField", "cropTypeField", "groupField", "readTargetField", "pageToolControls"].forEach((id) => { $(id).hidden = true; });
+      ["numberField", "cropTypeField", "groupField", "pageToolControls"].forEach((id) => { $(id).hidden = true; });
       $("pageManualCut").hidden = readOnly();
       $("pageManualCut").textContent = "从这页补题";
       $("pageHistoryControls").hidden = !draft && !lastDeleted;

@@ -781,6 +781,41 @@ const QBRegionAssist = (() => {
   return { recommendedPrefill };
 })();
 
+// 1.26.33：把读出来的字送进剪贴板。浏览器接口不给用时（窗口没有焦点、没有权限），
+// 退回到隐藏文本框那种老办法；两条路都不通就老实说不行，别让老师以为复制成功了。
+const QBClipboard = (() => {
+  "use strict";
+  const FALLBACK_HINT = "这个浏览器不让程序自动复制，请点「复制到剪贴板」自己复制一次。";
+  async function copyText(text, env = (typeof globalThis === "object" ? globalThis : {})) {
+    const value = String(text ?? "");
+    if (!value) return { ok: false, error: "没有文字可复制。" };
+    const clipboard = env?.navigator?.clipboard;
+    if (clipboard && typeof clipboard.writeText === "function") {
+      try { await clipboard.writeText(value); return { ok: true, how: "clipboard" }; }
+      catch (error) { /* 落到下面那条老路 */ }
+    }
+    const doc = env?.document;
+    if (doc?.body && typeof doc.execCommand === "function") {
+      try {
+        const area = doc.createElement("textarea");
+        area.value = value;
+        area.setAttribute("readonly", "");
+        area.style.position = "fixed";
+        area.style.top = "0";
+        area.style.opacity = "0";
+        doc.body.append(area);
+        area.focus();
+        area.select();
+        const copied = doc.execCommand("copy");
+        area.remove();
+        if (copied) return { ok: true, how: "fallback" };
+      } catch (error) { /* 落到失败 */ }
+    }
+    return { ok: false, error: FALLBACK_HINT };
+  }
+  return { copyText, FALLBACK_HINT };
+})();
+
 const QBRegionWait = (() => {
   const REQUEST_TIMEOUT_MS = 15000;
   const JOB_TIMEOUT_MS = 120000;
@@ -930,6 +965,7 @@ if (typeof module !== "undefined" && module.exports) {
     ...QBEdits,
     ...QBRegionAssist,
     ...QBRegionWait,
+    QBClipboard,
     ...QBManualCrop,
     ...QBCutReading,
     ...QBReviewGuidance,
@@ -1620,6 +1656,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     state.paper = data.paper;
     $("archivedPaperNotice").hidden = !data.paper.archived;
     state.questions = data.questions.map(normalizeRegionRead);
+    autoCopyClipboardReads(state.questions);
     const index = state.papers.findIndex((paper) => paper.id === data.paper.id);
     if (index >= 0) { state.papers[index] = data.paper; renderPaperList(); }
     renderPaper();
@@ -2712,6 +2749,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         break;
       case "r": if (q) { event.preventDefault(); openPageDialog("regions", q); } break;
       case "f": if (q) { event.preventDefault(); openPageDialog(q.body_mode === "source_image" ? "regions" : "figures", q); } break;
+      // 1.26.33：框选识读，抄到剪贴板。审核页、放大对照页、题库页都能按 C。
+      case "c": if (q) { event.preventDefault(); openClipboardRead(q); } break;
       case "n":
         event.preventDefault();
         if (!event.repeat) focusNextReview();
@@ -3285,6 +3324,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     else if (key === "0") { event.preventDefault(); requestViewerFit(); }
     else if (key.toLowerCase() === "w") { event.preventDefault(); setViewerWidth(); }
     else if (key.toLowerCase() === "e") { event.preventDefault(); editFromViewer(); }
+    else if (key.toLowerCase() === "c") {
+      // 1.26.33：在这里也能框选识别，结果直接进剪贴板。
+      event.preventDefault();
+      const q = questionById(viewer.id);
+      $("viewerDialog").close();
+      if (q) openClipboardRead(q);
+    }
     else if (key.toLowerCase() === "r" || key.toLowerCase() === "f") {
       event.preventDefault();
       const q = questionById(viewer.id);
@@ -3690,7 +3736,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       if (!/^两次识读不一致/.test(text)) return flag;
       if (difference.hasVisibleMarks) return "识读结果有差异；请核对题面中标黄的位置";
       if (difference.observedOnly.length) return "识读结果有差异；另一份识读记录可在下方查看";
-      return "识读记录中曾有出入；可在“更多 → 查看识读记录”中查看。";
+      // 1.26.33：「更多」里的「查看识读记录」撤了，这里不能再指向那个已经不在的门。
+      return "识读记录中曾有出入，现用的是定下来的那一版；请对照原卷确认。";
     });
     // 同一句失败原本出现在两处：题卡上的这串提示，和原图下面“AI 识读结果”
     // 面板里的那句。识读失败只由那个面板负责，这里不再重复。
@@ -3982,15 +4029,17 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     summary.append(icon("chevron"));
     more.append(summary);
     const menu = el("div", "more-menu");
-    menu.append(button("查看识读记录", "quiet small", () => { more.open = false; toggleReads(card, q); }));
+    // 1.26.33：「查看识读记录」和「框选识读（纠错）」都撤了。识读记录现在只在
+    // 「其他读法还有不同内容」那块里展开（那里才是它有用的时候）；框选识读改成
+    // 快捷键 C —— 在任何要改字的地方按一下，框一块读出来直接进剪贴板。
     menu.append(button("修改题目来源", "quiet small", () => { more.open = false; openOriginEditor(q); },
       "填这道题是从哪套卷子上借来的；题干开头那串出处会一并搬走"));
     if (q.body_mode !== "source_image") {
-      menu.append(button("框选识读（纠错）", "quiet small", () => { more.open = false; openPageDialog("read", q); }, "只重读需要纠正的一小块，确认替换位置后再保存"));
       // 照片题在动作行里有一个醒目的「重新 AI 识读」按钮并写清了后果，而 PDF 题
       // （题库里的大头）走的是这一行。以前这里一点说明都没有，用户既不知道它会
-      // 替换掉现有文字，也分不清它和上面「框选识读」的范围差别。
-      menu.append(button("让 AI 重读这题", "quiet small", () => { more.open = false; rereadQuestion(q); }, "重读这道题的全部片段并替换现有文字（改过的地方会先问你）；只纠一小块用「框选识读（纠错）」"));
+      // 替换掉现有文字，也分不清它和整卷识读的范围差别。
+      menu.append(button("让 AI 重读这题", "quiet small", () => { more.open = false; rereadQuestion(q); },
+        "重读这道题的全部片段并替换现有文字（改过的地方会先问你）；只想读一小块，按 C 在原卷上框一块，读到的字直接进剪贴板"));
     }
     menu.append(button("删除这张卡", "quiet small danger", () => { more.open = false; deleteQuestion(q); }));
     more.append(menu);
@@ -4118,13 +4167,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     anchor.after(readsNode(q));
   }
 
-  function toggleReads(card, q) {
-    const existing = card.querySelector(`.reads[data-question-id="${q.id}"]`);
-    if (existing) { existing.remove(); return; }
-    const box = readsNode(q);
-    card.querySelector(".card-actions").after(box);
-  }
-
   // ---------------------------------------------------------------- 题卡动作
 
   // 题目来源（题源）：教辅印在题前的那一段出处。识读时认得出来的已经自动搬到
@@ -4178,6 +4220,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const index = state.papers.findIndex((paper) => paper.id === data.paper.id);
       if (index >= 0) { state.papers[index] = data.paper; renderPaperList(); }
     }
+    autoCopyClipboardReads(state.questions);
     renderPaper();
   }
 
@@ -6199,6 +6242,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         event.preventDefault();
         if (!event.repeat) editor.requestSubmit();
       }
+      // 1.26.33：改字的时候也能去原卷上框一块，读到的字直接进剪贴板，再粘回来。
+      else if (event.key.toLowerCase() === "c" && !event.ctrlKey && !event.metaKey && !event.shiftKey
+        && !QBUpload.isEditingTarget(event.target)) {
+        event.preventDefault();
+        openClipboardRead(q);
+      }
     });
     editor.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -6274,10 +6323,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   // ---------------------------------------------------------------- 框选识读（1.10.2）
 
-  // Start with an AI suggestion; retain a target the person already chose.
-  function readTargetGuess(q) {
-    if (q.region_read?.target && ["auto", "stem", ...OPTION_KEYS].includes(q.region_read.target)) return q.region_read.target;
-    return "auto";
+  // 1.26.33：这一路现在只做一件事 —— 在原卷上框一块，读出来，抄到剪贴板。
+  // 快捷键 C：审核页、放大对照页按 C 都到这里；题库页按 C 会带着这道题跳过来。
+  function openClipboardRead(q) {
+    if (!q) { toast("先选中一道题，才能在原卷上框选识别", "error"); return; }
+    openPageDialog("read", q);
   }
 
   const regionSubmissions = new Map();
@@ -6441,12 +6491,58 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     openEditor(card, q, { regionInsert: read.text });
   }
 
+  // 1.26.33：读完就抄进剪贴板；抄不进去（窗口没焦点、浏览器不给）时给一个按钮，
+  // 让老师自己按一下 —— 按钮在鼠标点击里，浏览器一定肯给。
+  // 抄的动作挂在数据上（每次识读的结果一出现就抄），不挂在画卡片上：
+  // 老师正在改字时卡片不会重画，挂在画卡片上就抄不成了。
+  const clipboardCopies = new Map();
+  function clipboardCopyKey(questionId, read) { return `${questionId}:${read?.id ?? read?.client_request_id ?? "pending"}`; }
+
+  function autoCopyClipboardReads(questions) {
+    for (const q of questions || []) {
+      const read = q?.region_read;
+      if (!read || read.target !== "clipboard" || read.status !== "done" || !read.text) continue;
+      const key = clipboardCopyKey(q.id, read);
+      if (clipboardCopies.has(key)) continue;
+      clipboardCopies.set(key, { pending: true });
+      void QBClipboard.copyText(read.text).then((result) => {
+        clipboardCopies.set(key, result);
+        renderCards();
+      });
+    }
+  }
+
+  function clipboardCopyBlock(q, read) {
+    const block = el("div", "region-clipboard");
+    const note = el("p", "hint", "");
+    const copy = button("复制到剪贴板", "small primary", async () => {
+      const result = await QBClipboard.copyText(read.text);
+      clipboardCopies.set(clipboardCopyKey(q.id, read), result);
+      note.textContent = clipboardCopyNote(result);
+      copy.textContent = result.ok ? "再复制一次" : "复制到剪贴板";
+    });
+    block.append(note, copy);
+    const done = clipboardCopies.get(clipboardCopyKey(q.id, read));
+    note.textContent = clipboardCopyNote(done);
+    if (done?.ok) copy.textContent = "再复制一次";
+    return block;
+  }
+
+  function clipboardCopyNote(result) {
+    if (!result) return "读完会直接复制到剪贴板。";
+    if (result.pending) return "正在复制到剪贴板…";
+    if (result.ok) return "已复制到剪贴板，可以直接粘贴（Ctrl+V）。";
+    return result.error || "没有复制成功，请点「复制到剪贴板」自己复制。";
+  }
+
   function regionReadPanel(card, q) {
     const read = q.region_read;
     if (!read) return null;
     const panel = el("section", `region-read ${read.status}`);
     const head = el("div", "region-read-head");
-    head.append(el("strong", "", `框选识读 · ${read.target_name || read.target}`));
+    head.append(el("strong", "", read.target === "clipboard"
+      ? "框选识读 · 复制到剪贴板"
+      : `框选识读 · ${read.target_name || read.target}`));
     panel.append(head);
     if (regionReadPending(q)) {
       panel.append(el("p", "hint", read.status === "queued"
@@ -6459,11 +6555,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const text = el("div", "region-read-text");
       R.renderTypeset(text, read.text);
       panel.append(text);
-      if (read.engine) panel.append(el("p", "hint", `${read.engine} 读了框里的这一块；请对照原卷确认后再填入`));
+      if (read.engine) panel.append(el("p", "hint", read.target === "clipboard"
+        ? `${read.engine} 读了框里的这一块；请对照原卷确认后再用`
+        : `${read.engine} 读了框里的这一块；请对照原卷确认后再填入`));
     }
     const actions = el("div", "region-read-actions");
     if (read.status === "done" && read.text) {
-      if (read.target === "auto") {
+      if (read.target === "clipboard") {
+        panel.append(clipboardCopyBlock(q, read));
+      } else if (read.target === "auto") {
         const r = read.recommendation || {};
         const prefill = QBRegionAssist.recommendedPrefill(q, read);
         const suggestion = el("div", "region-recommendation");
@@ -6772,14 +6872,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("pageDialogComplete").hidden = dialog.mode !== "new";
     $("pageDialogSave").hidden = ["view", "new"].includes(dialog.mode) || dialog.practiceRead;
     $("pageDialogSave").classList.toggle("primary", dialog.mode !== "new");
-    $("pageDialogSave").textContent = dialog.mode === "read" ? "识读这一块" : "保存";
-    $("pageDialogSave").title = "保存当前改动（Ctrl+Enter）";
+    $("pageDialogSave").textContent = dialog.mode === "read" ? "识读并复制到剪贴板" : "保存";
+    $("pageDialogSave").title = dialog.mode === "read"
+      ? "把框里看到的字读出来，抄到剪贴板（Ctrl+Enter）"
+      : "保存当前改动（Ctrl+Enter）";
     $("pageDialogSaveNext").replaceChildren(document.createTextNode("保存并框下一题"), el("span", "kbd-hint", "Shift+Enter"));
     $("pageDialogSaveNext").title = "保存后立即开始框下一题（Shift+Enter；仅画布中生效）";
     $("pageDialogComplete").replaceChildren(document.createTextNode("返回审核"), el("span", "kbd-hint", "Ctrl+Enter"));
     $("pageDialogClose").textContent = dialog.mode === "view" ? "关闭" : dialog.mode === "new" ? "返回" : "取消";
     $("pageDialogComplete").title = "返回审核（Ctrl+Enter）；保存与 AI 识读分开进行";
-    $("readTargetField").hidden = dialog.mode !== "read";
     $("numberField").hidden = dialog.mode !== "new";
     $("cropTypeField").hidden = dialog.mode !== "new";
     $("groupField").hidden = dialog.mode !== "new" || (state.paper.question_groups || []).length < 2;
@@ -6894,7 +6995,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       : mode === "figures"
         ? "点蓝色候选图，或单击一个角、移动鼠标、再单击另一个角固定新框；无需按住鼠标。双击下一张图的左上角可复制附近框的尺寸，适合四个同样大小的选项图。再选归属（S 题干 · A–E 选项 · X 无关 · J 接在上一张图下面，用于被分页切开的表格或图）。Esc 取消未完成的新框；已有框仍可拖动和缩放。点标签改归属，拖标签只挪标签；保存后需重新审核。"
         : mode === "read"
-          ? "框住要单独识读的印刷字。选择“自动推荐（AI）”时，AI 会结合现有题面建议替换位置；也可以指定题干或选项。读完先看替换前后，再确认填入改字。"
+          ? "在原卷上框住要读的一块，AI 会把框里看到的字都读出来（印刷的和手写的都认），读完自动复制到剪贴板。框要盖住整行字，别只框一个字。"
           : mode === "view" ? "在原卷上查看题框、补题、调整范围或修改题号。完成切题后，你可以主动选择 AI 识读或直接原图审核。"
             : "框出完整题目，包括选项和配图；跨栏或跨页可添加多段。保存只保留原图，不会自动识读。";
     // The offline practice can demonstrate drawing and the real target picker,
@@ -6903,13 +7004,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     dialog.practiceRead = mode === "read" && Boolean(state.paper.demo);
     $("pageDialogSave").disabled = dialog.practiceRead;
     $("pageDialogSave").title = dialog.practiceRead ? "示例只练画框；真实识读需要可用的读题服务" : "";
-    if (dialog.practiceRead) $("pageDialogHint").textContent = "离线示例：可练画框和选择自动推荐，不会调用 AI 或生成识读结果。真实题目识读后，先确认替换前后，再填入改字、核对保存。";
+    if (dialog.practiceRead) $("pageDialogHint").textContent = "离线示例：可练画框，不会调用 AI 或生成识读结果。真实题目里框一块，AI 会读出框里的字并复制到剪贴板。";
     $("pageDialogClose").textContent = mode === "view" ? "关闭" : "取消";
     updatePageCanvasHint();
     $("numberField").hidden = mode !== "new";
-    $("readTargetField").hidden = mode !== "read";
     configureCropActions();
-    if (mode === "read") $("readTargetSelect").value = readTargetGuess(q);
     const groups = state.paper.question_groups || [];
     $("groupField").hidden = mode !== "new" || groups.length < 2;
     if (mode === "new") {
@@ -8172,13 +8271,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       } else if (dialog.mode === "read") {
         const box = dialog.boxes[dialog.boxes.length - 1];
         if (!box) { toast("请先在原卷上框出要识读的那一块", "error"); return; }
-        const target = $("readTargetSelect").value;
+        // 1.26.33：这一路只有一种用法 —— 读出来抄到剪贴板。
+        const target = "clipboard";
         const pending = queueRegionRead(q, box, target);
         $("pageDialogClose").disabled = false;
         $("pageDialogClose").textContent = "取消识读";
         await pending;
         if (dialog.session !== session) return;
-        toast(`AI 正在读框里的字，读完显示在第 ${q.number} 题的题卡上`);
+        toast(`AI 正在读框里的字，读完直接复制到剪贴板`);
         refreshPaper();
       } else { showCropResult("请使用“切题与校正”窗口补题，题目范围已保留。", true); return; }
       closeFigureSlotMenu({ cancelPending: true, rerender: false });
@@ -9740,9 +9840,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         if (isApproved(questionById(draft))) { state.expanded.add(draft); renderCards(); }
         setCurrent(draft, { focus: true });
         document.querySelector(`[data-id="${draft}"]`)?.scrollIntoView({ block: "start" });
-        // 从题库里“题型待核对”点过来：直接去选题型。
+        // 从题库里"题型待核对"点过来：直接去选题型。
         if (params.get("fix") === "type" && typeBlocksApproval(questionById(draft))) {
           requestAnimationFrame(() => focusTypePicker(questionById(draft)));
+        }
+        // 1.26.33：从题库按 C 过来 —— 直接打开框选识读，读完抄到剪贴板。
+        if (params.get("read") === "clipboard") {
+          requestAnimationFrame(() => openClipboardRead(questionById(draft)));
         }
       }
     } else {

@@ -6,6 +6,10 @@
 
 网页只排队（网页进程拿不到密钥），后台工作者读完写回。读出来的文字不直接改
 题卡：由人看过后点“填入”，经“改字”保存，和人工改字一样要重新审核。
+
+2026-10-28：多了一个目标「复制到剪贴板」（CLIPBOARD）。这一路不找填入位置，
+只把框里看到的一切（印刷的和手写的都认）誊录出来，交给网页复制到剪贴板，
+让人随便粘到别处去。
 """
 
 from __future__ import annotations
@@ -27,8 +31,14 @@ from .models import RegionRead
 logger = logging.getLogger("core")
 
 FIELDS = ("stem", "A", "B", "C", "D", "E")
-TARGETS = ("auto", *FIELDS)
-TARGET_NAMES = {"auto": "AI 推荐位置", "stem": "题干", **{key: f"选项 {key}" for key in "ABCDE"}}
+CLIPBOARD = "clipboard"
+TARGETS = ("auto", CLIPBOARD, *FIELDS)
+TARGET_NAMES = {
+    "auto": "AI 推荐位置",
+    CLIPBOARD: "复制到剪贴板",
+    "stem": "题干",
+    **{key: f"选项 {key}" for key in "ABCDE"},
+}
 NO_ENGINE = "框选识读要用看图读题的服务，当前需要服务密钥：请先在“设置 → 服务与密钥”中配置；也可以直接手动改字"
 PAD = 6.0  # 框外多留一点（页面单位），免得切到笔画
 MIN_LONG_SIDE = 1100  # 小块放大到这么大再给模型看
@@ -47,6 +57,8 @@ class RegionError(ValueError):
 def prompt(target: str, context: dict | None = None) -> str:
     if target == "auto":
         return auto_prompt(context)
+    if target == CLIPBOARD:
+        return clipboard_prompt()
     if target == "stem":
         rule = "这一块是题干的一部分：照原样誊录，题号不要写。"
     else:
@@ -59,6 +71,25 @@ def prompt(target: str, context: dict | None = None) -> str:
             "- 看不清的字写成 [?]，不要猜，也不要补全框外的内容。",
             f"- {rule}",
             "只输出誊录的文字，不要解释，不要加【】标签、引号或代码块。框里没有印刷文字时只输出：无",
+        ]
+    )
+
+
+def clipboard_prompt() -> str:
+    """把框里看到的一切誊录出来：印刷的和手写的都认。
+
+    这一路和「只誊录印刷体」那一路不一样：它的用处是把框里的内容原样搬到别处
+    （粘贴到 Word、微信、别的软件），所以手写的板书、老师写的答案也要读出来。
+    """
+    return "\n".join(
+        [
+            "图片是从一张试卷、黑板或作业本上框出的一小块。请把框里能看到的所有文字都誊录出来：",
+            "- 印刷的字要誊录；手写的字（学生写的、老师写的、板书上的）也要誊录，一样都不能漏。",
+            "- 同一处既有印刷又有手写时，先写印刷的，再写手写的，手写的另起一行。",
+            "- 圈画、勾叉、划线等批改符号不用写；印刷的字上画了 × 或圈，照样誊录印刷的字。",
+            "- 数学式用 LaTeX，行内公式用 $...$ 包住；中文和中文标点照原样。",
+            "- 按从上到下、从左到右的顺序写；看不清的字写成 [?]，不要猜，也不要补全框外的内容。",
+            "只输出誊录的文字，不要解释，不要加【】标签、引号或代码块。框里没有文字时只输出：无",
         ]
     )
 
@@ -101,7 +132,11 @@ def clean(raw: str, target: str, *, max_chars: int | None = 4000) -> str:
     text = textnorm.fix_symbols(text.strip())
     text, _described = readers.strip_bracketed_figure_descriptions(text)
     if text.strip() in {"", "无", "（无）", "(无)"}:
-        raise RegionError("框里没有读到印刷文字，换个位置框一下试试")
+        raise RegionError(
+            "框里没有读到文字。把框拉大一点，让整行字都在框里，或者换个位置再框一次。"
+            if target == CLIPBOARD
+            else "框里没有读到印刷文字，换个位置框一下试试"
+        )
     return text.strip()[:max_chars] if max_chars else text.strip()
 
 
@@ -342,6 +377,15 @@ def crop(page: Image.Image, bbox: list[float]) -> Image.Image:
     return piece
 
 
+def _max_tokens(target: str) -> int:
+    """How much room the model gets for this kind of read."""
+    if target == "auto":
+        return 1800
+    if target == CLIPBOARD:
+        return 1200  # 框里可能同时有印刷体和手写，字数比只誊录印刷体多
+    return 800
+
+
 def run(job: RegionRead) -> tuple[str, str]:
     from .pipeline import PageStore
 
@@ -364,13 +408,16 @@ def run(job: RegionRead) -> tuple[str, str]:
         return not active.exists()
 
     with readers.bounded_request(remaining, cancel=cancel):
-        raw = readers.chat(engine, prompt(job.target, base), [url], max_tokens=1800 if job.target == "auto" else 800)
+        raw = readers.chat(engine, prompt(job.target, base), [url], max_tokens=_max_tokens(job.target))
     if job.target == "auto":
         text, job.recommendation = _auto_reply(raw, base)
         if _crop_overlaps_figure(job, base):
             job.recommendation = _manual(
                 base, text, "所框区域主要落在已有配图中，无法可靠确定替换片段；识读文字已保留。"
             )
+    elif job.target == CLIPBOARD:
+        text = clean(raw, CLIPBOARD)
+        job.recommendation = _manual(base, text, "框里看到的字都已誊录；复制到剪贴板后，请对照原卷核对再用。")
     else:
         text = clean(raw, job.target)
         job.recommendation = _manual(

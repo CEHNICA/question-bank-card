@@ -1196,6 +1196,84 @@ def read_question(
     raise ReaderError(f"{engine.label} 两次输出都不合格式")
 
 
+# 一道题读不出文字时，先问清楚这块范围里到底有没有印刷出来的内容。
+# 判据和「插图是不是整幅手写」那道闸门用同一把尺子：只要有一个印刷出来的元素
+# 就算「有」—— 印刷题里混着学生的手写批注时，誊录仍然只取印刷体。这条不能松：
+# 一旦让模型去读手写，印在纸上的那道题反而读不成（老师 2026-10-28 的原话：
+# 「印刷题目有时候会混杂着大量的手写，如果他真的能把手写看出来，那题目基本上
+# 就没法看了」）。
+PRINTED_TEXT_PROMPT = """这块范围里有没有印刷出来的内容？
+判断标准很硬：只要有任何一个印刷出来的元素——印上去的字、字母、数字、线条、标注、表格边框、书页照片——就算「有」，哪怕上面还压着学生用铅笔写的字、辅助线和批注。
+整块从头到尾都是手写板书、草稿、涂画，才算「没有」。
+截图软件的工具栏、按钮、页码这类界面上的东西不是题目内容，也算「没有」。
+
+只回答「有」或「没有」。不要解释。"""
+
+
+def has_printed_text(engine: Engine, image_url: str) -> bool | None:
+    """这块范围里有没有印刷出来的内容；``None`` 是没判出来。
+
+    判不出来时不能往「手写」那边倒：猜错一次，印刷题就会被说成手写题，
+    老师照着提示去手写誊录，反而把一道本来读得出来的题弄坏。
+    """
+    raw = chat(engine, PRINTED_TEXT_PROMPT, [image_url], max_tokens=20)
+    raw = re.sub(r"<think>.*?</think>", "", str(raw or ""), flags=re.S).strip()
+    first = raw.split("\n")[0].strip() if raw else ""
+    if not first:
+        return None
+    if re.search(r"没有|无印刷|不存在|全是手写|^无$", first):
+        return False
+    if "有" in first:
+        return True
+    return None
+
+
+HANDWRITING_RULES = """你是数学资料誊录员。这块内容整块都是手写的（老师写在纸上或白板上、板书、草稿、拍照），没有印刷文字。请把上面的手写内容誊录成文字：
+- 手写的题目、条件、选项、算式都誊录下来；数学式用 LaTeX，行内公式用 $...$ 包住；中文照原样。
+- 图里手画的示意图（几何图、函数图象、坐标系、数轴、表格）不要改写成文字说明；如果它被蓝框编号标出了，在【配图】里写「编号=题干」。
+- 看不清、拿不准的字写成 [?]，不要猜、不要补。
+- 题号不要写进题干；小问 (1)(2)… 各起一行。
+- 逐字照抄：老师写错的地方也照抄，不要改正。"""
+
+HANDWRITING_FORMAT = """只按下面的格式输出，不要输出别的内容：
+【内容类型】手写
+【题号】手写题号（没有就留空）
+【题型】单选题/多选题/填空题/判断题/解答题
+【题干】
+题干文字
+【A】…
+【B】…
+【C】…
+【D】…
+【E】…（原卷没有 E 选项就不写这一行）
+【配图】…"""
+
+
+def handwriting_prompt(number: int, with_figures: bool = True) -> str:
+    parts = [HANDWRITING_RULES, HANDWRITING_FORMAT if with_figures else HANDWRITING_FORMAT.replace("【配图】…\n", "")]
+    parts.append(f"候选显示编号为 {number}。这是程序切出的候选范围；不要为了迎合编号而虚构题号或题目性质。")
+    return "\n\n".join(parts)
+
+
+def read_handwritten(engine: Engine, image_url: str, number: int, with_figures: bool = True) -> dict:
+    """誊录一整块手写内容。读不出正文就算失败，不留半截。"""
+    raw = chat(engine, handwriting_prompt(number, with_figures), [image_url])
+    try:
+        reading = parse_reading(raw, number)
+    except ValueError as error:
+        raise ReaderError(f"{engine.label} 誊录输出不合格式：{error}") from None
+    stem = str(reading.get("stem") or "").strip()
+    if not stem or "无法识别" in stem or "无法读取" in stem:
+        raise ReaderError(f"{engine.label} 誊录结果里没有正文")
+    # 誊出来的是手写，不是「认输了」；题型没写出来也只是手写没标题型，
+    # 不该按「识读交了白卷」处理。
+    reading["unreadable"] = False
+    reading["engine"] = answered_by(engine).label
+    reading["raw"] = raw[:6000]
+    reading["handwritten"] = True
+    return reading
+
+
 def arbitrate(engine: Engine, image_url: str, number: int, first: dict, second: dict, witness: str = "") -> dict:
     raw = chat(engine, arbiter_prompt(number, first, second, witness), [image_url])
     try:

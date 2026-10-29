@@ -1683,6 +1683,9 @@ dialog > .teaching-dock .teach-panel p { font-size: 12px; line-height: 1.55; }
 .region-location-context summary, .region-manual-target summary { cursor: pointer; color: var(--ink-2); }
 .region-location-context .paper { margin-top: 8px; padding: 10px; background: #fff; overflow-x: auto; }
 .region-manual-target select { max-width: 100%; margin: 8px 6px 4px 0; }
+/* 1.26.33：框选识读读完抄到剪贴板 —— 状态一句话 + 一个按钮。 */
+.region-clipboard { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.region-clipboard .hint { margin: 0; flex: 1 1 220px; min-width: 0; }
 mark.qb-mark.region-location { background: var(--accent-soft); outline: 2px solid var(--accent); border-radius: 3px; }
 @media (max-width: 760px) { .region-location-comparison { grid-template-columns: minmax(0, 1fr); } }
 .editor input.prefilled { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); background: var(--accent-soft); }

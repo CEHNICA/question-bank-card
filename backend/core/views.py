@@ -2779,7 +2779,7 @@ def question_region_read(request, question_id):
         return _error("题目已发生变化，请刷新后重新框选", 409)
     target = payload.get("target", "auto")
     if target not in region_reads.TARGETS:
-        return _error("请选择读出来的文字填到题干还是哪个选项")
+        return _error("框选识读的方式不正确，请重新框选")
     page_idx = payload.get("page_idx")
     pages = {int(page["page_idx"]) for page in question.paper.pages or []}
     if type(page_idx) is not int or page_idx not in pages:

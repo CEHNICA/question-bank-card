@@ -6236,6 +6236,19 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     if (ordinary && event.key === "?" && ui.sheet.hidden && !document.querySelector("dialog[open]")) {
       event.preventDefault(); window.QBShortcutHelp?.open("library");
     }
+    // 1.26.33：题库里按 C —— 把当前选中这道题带到原卷上框选识别，读完直接进剪贴板。
+    // 那边是原卷画布，题库这边没有画布，所以是带着这道题跳过去，不是就地框。
+    if (ordinary && event.key.toLowerCase() === "c" && ui.sheet.hidden && !document.querySelector("dialog[open]")) {
+      const current = state.inspectorId ? state.catalog.get(state.inspectorId) : null;
+      if (!current) { event.preventDefault(); toast("先选中一道题，再按 C 就能在原卷上框选识别。", "error"); }
+      else if (!current.document_id || !current.draft_id) {
+        event.preventDefault();
+        toast("这道题没有对应的题卡，先到录入终审里打开它，再按 C 框选识别。", "error");
+      } else {
+        event.preventDefault();
+        window.location.href = draftLink(current, "&read=clipboard");
+      }
+    }
     // 1.25.8：题库页按空格打开当前选中题的全屏看题。以前这一页只认「/」和「?」，
     // 空格什么也不做 —— 按下去像软件没反应。焦点在按钮或折叠上时，空格仍然是
     // 「按一下就执行」，不能让路；一道题也没选中时也不拦，那时空格照旧往下翻页。

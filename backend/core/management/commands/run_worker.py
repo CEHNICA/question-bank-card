@@ -14,7 +14,7 @@ from django.db import close_old_connections
 from core import credential_settings, library_jobs, preferences, region_reads
 from core.account_pool import lease_priority, reset_account_pools
 from core.models import Paper, Question
-from core.pipeline import parse_ahead, process_paper, process_rereads, reading_tail
+from core.pipeline import parse_ahead, process_paper, process_rereads, reading_tail, recover_interrupted_readings
 from core.worker_lock import SingleInstance
 
 ACTIVE = [Paper.Status.QUEUED, Paper.Status.PARSING, Paper.Status.SEGMENTING, Paper.Status.READING]
@@ -331,6 +331,9 @@ class Command(BaseCommand):
         try:
             library_jobs.recover_interrupted()
             region_reads.recover_interrupted()
+            # 题卡这一路以前没有：上一轮识读死在写结果那一步时，题卡会永远停在
+            # 「正在识读」，界面上一直转圈，还没有一句能说的话。
+            recover_interrupted_readings()
         except Exception:
             logging.getLogger("core").exception("library job recovery failed")
         stop = threading.Event()

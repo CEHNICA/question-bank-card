@@ -4560,6 +4560,50 @@ def _exclude_handwritten_candidates(engine, store, labels: dict, figure_source: 
     return found
 
 
+# 读不出文字时要说清是哪种情况：范围里有印刷内容（多半是框偏了或图太糊），
+# 还是整块都是手写（那就改成誊录它）。两种情况给的提示和下一步完全不同，
+# 一句「识读未返回有效正文」谁也看不懂（老师 2026-10-28 的要求：
+# 「识别不出来题目之后给他一个反馈」）。
+HANDWRITTEN_FLAG = "这道题是手写的，文字是识读誊录的，请对照原图核对"
+EMPTY_STEM_PRINTED = (
+    "这道题里有印刷文字，这次没读出来：多半是范围框偏了或图太糊。点「调整范围」框准一点，再点「AI 识读这题」重读一次。"
+)
+EMPTY_STEM_HANDWRITTEN = (
+    "这道题没有印刷内容，是手写题或照片题，识读誊不出字。"
+    "请点「改字」对照原图把题干写下来 —— 这张图里的图形程序已经认好了，可以直接用。"
+)
+EMPTY_STEM_UNKNOWN = (
+    "这道题没读到文字。对照原图看一眼：手写题或照片题请点「改字」自己写下来；"
+    "印刷题多半是范围框偏了或图太糊，点「调整范围」框准再识读一次。"
+)
+
+
+def _handwritten_fallback(primary, image_url: str, number: int) -> tuple[str, dict | None]:
+    """读不出文字时：先问有没有印刷内容，整块手写就改成誊录它。
+
+    返回 (判断, 誊录结果)：
+    - ``"printed"``：范围里有印刷内容 —— 不是手写题，多半是框偏了或图太糊；
+    - ``"handwritten"``：一个字印刷都没有 —— 整块是手写；
+    - ``"unknown"``：没判出来。不能往手写那边猜：猜错一次，印刷题就会被说成
+      手写题，老师照着提示去手写誊录，反而把一道本来读得出来的题弄坏。
+    """
+    try:
+        printed = readers.has_printed_text(primary, image_url)
+    except readers.ReaderQuotaExhausted:
+        raise
+    except readers.ReaderError:
+        printed = None
+    if printed is not False:
+        return ("printed" if printed is True else "unknown"), None
+    try:
+        reading = readers.read_handwritten(primary, image_url, number)
+    except readers.ReaderQuotaExhausted:
+        raise
+    except readers.ReaderError:
+        return "handwritten", None
+    return "handwritten", reading
+
+
 def read_card(snapshot: dict, store: PageStore) -> dict:
     """纯计算，不碰数据库（在线程里运行）。返回要写回题卡的字段。"""
     if "draft" in snapshot:
@@ -4816,6 +4860,28 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         final = a_text or b_text
         source = "single"
         flags.append(f"只有一次识读成功（另一次：{errors.get('b') or errors.get('a')}）")
+
+    empty_stem_error = ""
+    if not str(final.get("stem") or "").strip():
+        # 这次一个字都没读出来。先问清楚这块范围里到底有没有印刷内容：
+        # 有 —— 多半是范围框偏了或图太糊，提示老师重新框；一个字印刷都没有
+        # —— 整块是手写，那就改成誊录它（誊出来的是手写原样，人还要核对，
+        # 所以挂一条提示，不当成读对了）。判断用的是没画蓝框的干净图，
+        # 免得程序自己画的框被当成印刷内容。
+        verdict, handwritten = _handwritten_fallback(primary, clean_url, number)
+        if handwritten is not None:
+            final = handwritten
+            source = "handwritten"
+            a_text = handwritten
+            figure_source = handwritten
+            update["read_a"] = handwritten
+            flags.append(HANDWRITTEN_FLAG)
+        else:
+            empty_stem_error = {
+                "printed": EMPTY_STEM_PRINTED,
+                "handwritten": EMPTY_STEM_HANDWRITTEN,
+                "unknown": EMPTY_STEM_UNKNOWN,
+            }[verdict]
 
     final, restored_options = _restore_skipped_options(
         final, [r for r in (a_text, b_text, update.get("read_c")) if isinstance(r, dict)], witness
@@ -5099,11 +5165,15 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         # 这样绿的：原页上「车轮旋转时看起来像个圆面，这说明 ___」完整存在，切题
         # 范围也确实罩住了那一行（不是切错，是识读交白卷而系统照收）。
         # 正文保留原图的卡题干本来就是空的，那条路不适用，所以排除掉。
-        flags.append(FLAG_EMPTY_STEM)
+        # 说清了原因的那句（框偏了，还是整块手写）代替这条笼统提示，不并排挂两条。
+        if not empty_stem_error:
+            flags.append(FLAG_EMPTY_STEM)
     if final.get("unreadable"):
         # 不是空，是识读认了输。同一张图重读一次就能读出来（readers.read_question
         # 已经为它重发过一次），两次都这样才落到这里，所以只能靠提示告诉人。
-        flags.append(FLAG_UNREADABLE_STEM)
+        # 说清了原因的那句（框偏了，还是整块手写）代替这条，不并排挂两条。
+        if not empty_stem_error:
+            flags.append(FLAG_UNREADABLE_STEM)
     # 原卷印在题后的答案。誊录提示词（readers.OUTPUT_FORMAT）只有题号、题型、
     # 题干、选项和配图，没有答案这一栏，所以这道题在原页上明明印着【答案】A，
     # 识读回来的卡上却是空的。出卷时答案卷上就印「（原卷未提供答案）」。
@@ -5142,6 +5212,10 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     # teacher typed on the card alone.
     if printed_answer:
         reading["answer"] = printed_answer
+    if empty_stem_error:
+        # 题干是空的，卡不能是绿的：这句话留在卡上，等老师处理。
+        reading["error"] = empty_stem_error
+        reading["state"] = Question.State.YELLOW
     return reading
 
 
@@ -5600,7 +5674,7 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
             suggestion = {
                 "revision": question.content_revision,
                 "paper_revision": revision,
-                "error": (fields.get("error") or "识读未返回有效正文")
+                "error": (fields.get("error") or EMPTY_STEM_UNKNOWN)
                 if source_current
                 else "原卷文件或裁片已变化，本轮识读未写入，请重新确认原卷范围。",
                 "state": Question.State.RED,
@@ -5646,8 +5720,7 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
         _apply_reading_fields(question, fields)
 
     def persist(question_id: int, fields: dict) -> None:
-        with transaction.atomic():
-            _persist_locked(question_id, fields)
+        _write_reading_result(lambda: _persist_locked(question_id, fields))
 
     # Keep at most PARALLEL card jobs in flight.  Submitting the complete book
     # up front prevents a confirmed quota failure from stopping queued work.
@@ -6628,6 +6701,59 @@ def parse_ahead(paper: Paper) -> bool:
 ACTIVE_PAPER_STATUSES = (Paper.Status.QUEUED, Paper.Status.PARSING, Paper.Status.SEGMENTING, Paper.Status.READING)
 
 
+def _write_reading_result(write) -> None:
+    """把识读结果写回去；撞上 SQLite 锁就重来一次。
+
+    SQLite 上「先读后写」的事务遇到别的连接在写，会直接报 database is locked
+    —— 这种死锁不吃 busy_timeout（不会等满 30 秒），是立刻失败的。
+    识读结果是一次模型调用的钱，不能因为一次锁就丢掉：整段事务重来一次，
+    新事务没有旧快照，会照常排队等那个写完。
+    """
+    for attempt in range(3):
+        try:
+            with transaction.atomic():
+                write()
+            return
+        except OperationalError as error:
+            if not _is_sqlite_lock_conflict(error) or attempt == 2:
+                raise
+            logger.warning("识读结果写入遇到库锁，重试第 %d 次", attempt + 1)
+            time.sleep(0.5 * (attempt + 1))
+
+
+def release_stuck_readings(question_ids) -> int:
+    """把这一批里还停在「正在识读」的题卡放出来。
+
+    识读结果写不进去时（SQLite 撞锁、程序被关掉），题卡会一直停在「正在识读」：
+    界面上永远转圈，还没有一句能说的话。放出来，老师点一下就能重试。
+    """
+    message = "上次识读没有完成，请重新识读这道题。"
+    released = 0
+    for question in Question.objects.filter(pk__in=list(question_ids), ocr_pending=True):
+        question.ocr_pending = False
+        question.reread_requested = False
+        question.ocr_suggestion = {"revision": question.content_revision, "error": message, "state": Question.State.RED}
+        question.error = message
+        if question.state in {Question.State.WAITING, Question.State.READING}:
+            question.state = Question.State.YELLOW
+        question.save(
+            update_fields=["ocr_pending", "reread_requested", "ocr_suggestion", "error", "state", "updated_at"]
+        )
+        released += 1
+    return released
+
+
+def recover_interrupted_readings() -> int:
+    """worker 启动时把「卡在识读中」的题卡放出来。
+
+    worker 刚起来时不可能有在跑的识读。所以「正在识读」而又没有排队请求
+    （reread_requested=False）的题卡，一定是上一轮死在写结果那一步 ——
+    它会永远停在「正在识读」。这里放它出来，让老师能重试。
+    """
+    ids = list(Question.objects.filter(ocr_pending=True, reread_requested=False).values_list("pk", flat=True))
+    return release_stuck_readings(ids)
+
+
 def process_rereads(*, idle_papers_only: bool = False) -> int:
     """人工调整范围或点"重读"后的单题重读。
 
@@ -6650,5 +6776,13 @@ def process_rereads(*, idle_papers_only: bool = False) -> int:
             logger.warning("reread paused because the configured vision plan is exhausted")
             _set_if_plan_current(paper, run_revision, status=Paper.Status.FAILED, error=str(error)[:500])
             break
+        except Exception:
+            # 写结果那一步撞上锁时，这一批题会一直停在「正在识读」——
+            # 放出来，老师点一下就能重试，不能让它们永远转圈。
+            try:
+                release_stuck_readings([question.pk for question in questions])
+            except Exception:
+                logger.exception("failed to release questions left in reading state")
+            raise
         count += len(questions)
     return count

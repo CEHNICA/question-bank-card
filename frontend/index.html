@@ -177,7 +177,7 @@
             <h3 id="settingsAboutTitle">隐私、版本与源码</h3>
             <ul class="settings-privacy">
               <li><strong>原卷</strong>先留在本机。只有你明确允许本次云处理、已经配好服务、而且本机确实切不出题时，才会把原卷发给 MinerU。</li>
-              <li><strong>题目截图</strong>只在你用 AI 读题或补答案时才发给你选的那家服务。主动框选识读选「自动推荐」时，会连当前题干和选项文字一起发。</li>
+              <li><strong>题目截图</strong>只在你用 AI 读题或补答案时才发给你选的那家服务。主动框选识读时，只发你框住的那一块原图。</li>
               <li><strong>个人信息</strong>不会被预先擦掉：姓名、手写、批改痕迹都还在图上。请先确认你有权处理这些资料。</li>
             </ul>
             <div class="about-row"><span>版本</span><strong id="aboutVersion">题有据</strong></div>
@@ -499,17 +499,6 @@
         <label id="cropTypeField" class="number-field" hidden>题型 <select id="cropTypeSelect" aria-label="新题题型"></select></label>
         <label id="groupField" class="number-field" hidden>题组
           <select id="groupSelect"></select>
-        </label>
-        <label id="readTargetField" class="number-field" hidden>读出来的字填到
-          <select id="readTargetSelect">
-            <option value="auto">自动推荐（AI）</option>
-            <option value="stem">题干</option>
-            <option value="A">选项 A</option>
-            <option value="B">选项 B</option>
-            <option value="C">选项 C</option>
-            <option value="D">选项 D</option>
-            <option value="E">选项 E</option>
-          </select>
         </label>
         <button id="pageDialogSave" class="button primary" type="button">保存</button>
         <button id="pageDialogSaveNext" class="button primary" type="button" aria-keyshortcuts="Shift+Enter" hidden>保存并框下一题<span class="kbd-hint">Shift+Enter</span></button>

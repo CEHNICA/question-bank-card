@@ -63,10 +63,12 @@ assert.match(css, /mark\.qb-mark\.spot \{/);
 assert.match(js, /openPageDialog\("read", q\)/);
 assert.doesNotMatch(html, /id="pageCropRead"/);
 assert.match(js, /\$\("pageDialogComplete"\)\.addEventListener\("click"/);
-assert.match(html, /<label id="readTargetField" class="number-field" hidden>读出来的字填到/);
-assert.match(html, /<option value="A">选项 A<\/option>/);
-assert.match(js, /\$\("readTargetField"\)\.hidden = dialog\.mode !== "read"/);
-assert.match(js, /\$\("pageDialogSave"\)\.textContent = dialog\.mode === "read" \? "识读这一块" : "保存";/);
+// 1.26.33：这一路只抄剪贴板，不再让老师选「填到题干还是哪个选项」。
+assert.doesNotMatch(html, /id="readTargetSelect"/, "the target picker is gone");
+assert.doesNotMatch(html, /id="readTargetField"/, "the target picker label is gone");
+assert.doesNotMatch(js, /readTargetGuess/, "the old target guess is gone");
+assert.match(js, /\$\("pageDialogSave"\)\.textContent = dialog\.mode === "read" \? "识读并复制到剪贴板" : "保存";/);
+assert.match(js, /const target = "clipboard";/, "框选识读固定走剪贴板这一路");
 // One box: a new one replaces the old.
 assert.match(js, /if \(dialog\.mode === "read"\) dialog\.boxes = \[\];/);
 assert.match(js, /function queueRegionRead\(q, box, target\)/);
@@ -86,10 +88,9 @@ assert.match(js, /prefilled\.classList\.add\("prefilled"\);/);
 assert.match(js, /method: "DELETE", body, signal/);
 // Without a clipboard (an older browser) it says so instead of failing silently.
 assert.match(js, /openEditor\(card, q, \{ regionInsert: read\.text \}\)/);
-// New reads offer AI positioning while an explicitly chosen target is retained.
-const guess = js.slice(js.indexOf("function readTargetGuess(q)"), js.indexOf("function regionReadPending(q)"));
-assert.match(guess, /return "auto"/);
-assert.match(html, /<option value="auto">自动推荐（AI）<\/option>/);
+// 1.26.33：「自动推荐（AI）」那一档没有了 —— 这一路只抄剪贴板。
+assert.doesNotMatch(html, /<option value="auto">自动推荐（AI）<\/option>/);
+// 别的入口（比如 AI 助手）排出来的识读记录，仍旧能在题卡上填入改字。
 assert.match(js, /确认位置并填入改字/);
 
 console.log("spots / region read checks: OK");

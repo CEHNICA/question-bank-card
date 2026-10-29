@@ -130,7 +130,8 @@ function harness(options = {}) {
     const collect = between("    const collect = () => ({", "    editGuard.track(");
     assert.doesNotMatch(collect, /origin/,
       "改字保存时不能再带题源 —— 那件事只在「更多」里做，两处各改各的会打架");
-    const editor = between("  function openEditorPanel(", "  function readTargetGuess(");
+    // 1.26.33：框选识读那一段改了（readTargetGuess 撤了），这里跟着往后挪一格。
+    const editor = between("  function openEditorPanel(", "  // ---------------------------------------------------------------- 框选识读");
     assert.doesNotMatch(editor, /origin-input/,
       "改字面板里那个题源输入框撤掉了 —— 同一件事只留一个入口");
   }

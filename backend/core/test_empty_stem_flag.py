@@ -63,25 +63,34 @@ class EmptyStemFlagTests(SimpleTestCase):
     store = staticmethod(type("Store", (), {"load": lambda self, page: object()})())
 
     def run_card(self, reading, **changes):
+        # 1.26.33：读不出字时程序会多问一句「这块范围里到底有没有印刷内容」。
+        # 这里不让它真的去调模型 —— 判不出来（None）时给的是「两种可能都写上」那句话；
+        # 另外两种答案各有测试守着（core.test_handwritten_reading）。
         with (
             patch.object(pipeline.readers, "primary_engine", return_value=object()),
             patch.object(pipeline.readers, "read_question", return_value=reading),
+            patch.object(pipeline.readers, "has_printed_text", return_value=None),
             patch.object(pipeline.imaging, "stack_regions", return_value=(object(), [])),
             patch.object(pipeline.imaging, "jpeg_data_url", return_value="data:image/jpeg;base64,x"),
         ):
             return pipeline.read_card(snapshot(**changes), self.store)
 
-    def test_a_reader_that_returns_nothing_is_flagged_not_shipped_green(self):
+    def assert_told_why(self, result):
+        """1.26.33：说清原因的那句代替笼统提示 —— 同一件事只说一次，不并排挂两条。"""
+        self.assertEqual(result["state"], Question.State.YELLOW)
+        self.assertTrue(result["error"], "题卡上要有一句能照着做的话")
+        self.assertNotIn(pipeline.FLAG_EMPTY_STEM, result["flags"], "笼统提示不和具体原因并排挂")
+
+    def test_a_reader_that_returns_nothing_is_not_shipped_green_and_says_why(self):
         result = self.run_card(EMPTY_READING)
 
         self.assertEqual(result["stem"], "")
-        self.assertIn(pipeline.FLAG_EMPTY_STEM, result["flags"])
-        self.assertEqual(result["state"], Question.State.YELLOW)
+        self.assert_told_why(result)
 
     def test_a_whitespace_only_stem_is_treated_as_empty(self):
         result = self.run_card({**EMPTY_READING, "stem": "\n  \n"})
 
-        self.assertIn(pipeline.FLAG_EMPTY_STEM, result["flags"])
+        self.assert_told_why(result)
 
     def test_a_card_that_keeps_the_source_image_may_have_no_stem(self):
         result = self.run_card(EMPTY_READING, body_mode="source_image")
@@ -100,10 +109,10 @@ class EmptyStemFlagTests(SimpleTestCase):
         result = self.run_card({**EMPTY_READING, "number_seen": None}, start_source="located")
 
         self.assertIn(pipeline.FLAG_LOCATED_WITHOUT_NUMBER, result["flags"])
-        self.assertIn(pipeline.FLAG_EMPTY_STEM, result["flags"])
+        self.assert_told_why(result)
 
     def test_a_reader_that_did_see_the_number_does_not_raise_the_range_flag(self):
         result = self.run_card(EMPTY_READING, start_source="located")
 
         self.assertNotIn(pipeline.FLAG_LOCATED_WITHOUT_NUMBER, result["flags"])
-        self.assertIn(pipeline.FLAG_EMPTY_STEM, result["flags"])
+        self.assert_told_why(result)

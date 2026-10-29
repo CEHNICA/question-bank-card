@@ -14,12 +14,12 @@
     if (scene === "review" && options.comparison) return { scene, title: "放大对照", note,
       primary: [row("上一题 / 下一题", "←", "→"), row("通过并继续", "Enter"), row("返回题卡", "Esc")],
       more: [row("下一题 / 上一题", "N", "J", "K"), row("撤销当前题通过", "U"), row("改字", "E"), row("调整范围 / 配图", "R", "F"),
-        row("返回题卡", "Space"), row("全题 / 适宽", "0", "W"), row("缩小 / 放大原卷", "−", "+"), row("鼠标所在位置缩放", "Ctrl+滚轮"), row("打开快捷键说明", "?")],
+        row("框选识读到剪贴板", "C"), row("返回题卡", "Space"), row("全题 / 适宽", "0", "W"), row("缩小 / 放大原卷", "−", "+"), row("鼠标所在位置缩放", "Ctrl+滚轮"), row("打开快捷键说明", "?")],
       extra: "Enter 不撤销已通过的题；继续看下一题。撤销使用 U 或返回题卡取消勾选。" };
     if (scene === "review") return { scene, title: TITLES[scene], note,
       primary: [row("下一道需要核查的题", "N"), row("通过并继续", "Enter"), row("上一题", "K")],
       more: [row("下一张 / 上一张题卡", "J", "K"), row("放大对照原卷 / 返回", "Space"),
-        row("撤销当前题通过", "U"), row("改字", "E"), row("审核改字中保存", "Ctrl+Enter"), row("取消改字", "Esc"),
+        row("撤销当前题通过", "U"), row("改字", "E"), row("框选识读到剪贴板", "C"), row("审核改字中保存", "Ctrl+Enter"), row("取消改字", "Esc"),
         row("调整范围 / 配图", "R", "F"), row("展开 / 收起已通过题", "O"), row("已通过题全部展开 / 收起", "Shift+O"),
         row("题卡放大镜开 / 关", "L"), row("专注开 / 关", "Z"), row("全屏审核开 / 关", "Q"), row("退出全屏审核", "Esc"),
         row("全部 / 需要核查 / 已入库", "1", "2", "3"), ...(options.aiFilter ? [row("AI 通过筛选", "4")] : []),
@@ -32,7 +32,7 @@
       const primary = layoutWorkspace
         ? [row("保存当前题", "S", "Enter", "Ctrl+S"), row("保存并框下一题", "Shift+Enter"), row("返回审核", "Ctrl+Enter"), row("取消未固定的新框", "Esc")]
         : mode === "new" ? [row("保存当前题", "S", "Enter", "Ctrl+S"), row("保存并框下一题", "Shift+Enter"), row("返回审核", "Ctrl+Enter"), row("取消新框", "Esc")]
-          : editing ? [...(!options.practiceRead ? [row(mode === "read" ? "识读这一块" : "保存当前修改", "Ctrl+Enter")] : []), row("移动选中框", "方向键"), row("取消新框 / 返回", "Esc")]
+          : editing ? [...(!options.practiceRead ? [row(mode === "read" ? "识读并复制到剪贴板" : "保存当前修改", "Ctrl+Enter")] : []), row("移动选中框", "方向键"), row("取消新框 / 返回", "Esc")]
             : [row("上一页 / 下一页", "PageUp", "PageDown"), row("适页 / 适宽", "0", "W"), row("返回", "Esc")];
       return { scene, title: mode === "figures" ? "配图" : mode === "regions" ? "切题与校正" : mode === "read" ? "框选识读" : mode === "view" ? "切题与校正" : "手工切题", note: "切题与校正时，先单击题框再直接调整；输入框、中文输入法和其他弹窗中不会触发画布快捷键。",
         primary, more: [...(mode === "new" ? [row("保存并框下一题（兼容）", "Shift+Enter"), row("返回审核（兼容）", "Ctrl+Enter")] : []),
@@ -41,13 +41,13 @@
           row("上一页 / 下一页", "PageUp", "PageDown"), row("适页 / 适宽", "0", "W"), row("缩小 / 放大", "−", "+"), row("画布缩放", "Ctrl+滚轮"),
           ...(editing ? [row("平移画布", "Space+拖动", "中键拖动")] : [row("平移画布", "左键拖动")]),
           ...(mode === "figures" ? [row("归属菜单：题干 / 选项 / 无关 / 接上一图", "S", "A–E", "X", "J")] : [])],
-        extra: layoutWorkspace || mode === "new" ? "新增题画框时光标变为十字；两次点击固定范围后可直接调整。双击已保存题框返回对应审核卡。普通调整直接保存，拆题和合题会先显示影响并让你确认；保存和返回都不会自动识读。" : options.practiceRead ? "示例仅练习画框，不提交识读。" : mode === "view" ? "查看原卷不会改动题目。" : "先点选要调整的框；保存时会保留未保存提醒和核查要求。" };
+        extra: layoutWorkspace || mode === "new" ? "新增题画框时光标变为十字；两次点击固定范围后可直接调整。双击已保存题框返回对应审核卡。普通调整直接保存，拆题和合题会先显示影响并让你确认；保存和返回都不会自动识读。" : options.practiceRead ? "示例仅练习画框，不提交识读。" : mode === "view" ? "查看原卷不会改动题目。" : mode === "read" ? "框住要读的一块，点「识读并复制到剪贴板」；框里印刷和手写的字都会读出来，读完直接进剪贴板，原题一个字也不改。" : "先点选要调整的框；保存时会保留未保存提醒和核查要求。" };
     }
     if (scene === "library") return { scene, title: TITLES[scene], note,
       primary: options.fullScreen ? [row("上一题 / 下一题", "←", "→"), row("返回题库", "Esc", "空格"), row("看题缩放", "Ctrl+滚轮"), row("适合宽度", "0")]
         : [row("搜索题目", "/"), row("全屏看题（当前选中题）", "空格"), row("全屏上一题 / 下一题", "←", "→"), row("全屏返回题库", "Esc"), row("撤销当前题上一次标签改动", "Ctrl+Z")],
-      more: options.fullScreen ? [] : [row("全屏看题缩放", "Ctrl+滚轮"), row("打开快捷键说明", "?")],
-      extra: "空格是全屏看题的开关：题库页按它打开当前选中题，进去以后再按一下退回来。放大用工具栏的＋／－、Ctrl＋滚轮或 0。答案默认收在「看答案」里，点一下才显示。" + "左右键仅在全屏看题中切题，按打开时的筛选或试题篮顺序浏览。宽公式正在横向滚动时，左右键保留给公式。标签可悬停、聚焦或点击浏览上下级；箭头只浏览，点击名称替换当前标签。Esc 关闭标签浮层，Tab 切换操作，Enter 执行。" };
+      more: options.fullScreen ? [] : [row("到原卷上框选识别（结果进剪贴板）", "C"), row("全屏看题缩放", "Ctrl+滚轮"), row("打开快捷键说明", "?")],
+      extra: "空格是全屏看题的开关：题库页按它打开当前选中题，进去以后再按一下退回来。放大用工具栏的＋／－、Ctrl＋滚轮或 0。答案默认收在「看答案」里，点一下才显示。" + "按 C 会带着当前选中这道题回到原卷上框选识别，读到的字直接进剪贴板。" + "左右键仅在全屏看题中切题，按打开时的筛选或试题篮顺序浏览。宽公式正在横向滚动时，左右键保留给公式。标签可悬停、聚焦或点击浏览上下级；箭头只浏览，点击名称替换当前标签。Esc 关闭标签浮层，Tab 切换操作，Enter 执行。" };
     if (scene === "answers") return { scene, title: TITLES[scene], note,
       primary: [row("保存答案解析", "Ctrl+S"), row("返回 / 先取消未完成的框", "Esc")],
       more: [row("粘贴解析图片", "Ctrl+V"), row("文字框中换行", "Enter")],
