@@ -14,6 +14,9 @@ const source = fs.readFileSync(require.resolve("./app.js"), "utf8").replace(/\r\
 const cut = (from, to) => source.slice(source.indexOf(from), source.indexOf(to));
 const helpers = cut('  const REVIEW_STATE_KEY = "qb-review-state";', "  function el(tag, className, text)");
 const setFilter = cut("  function setFilter(key)", "  function renderFilters(");
+// 1.26.34：setCurrent 会报一声「老师此刻在看哪道题」，助手据此绕开。
+// 这段要一起切进来，切少了 setCurrent 里的 reportTeacherActivity 就不存在。
+const teacherActivity = cut("  let teacherActivityTimer = 0;", "  function setCurrent(id, {");
 const setCurrent = cut("  function setCurrent(id, {", "  function markReading(");
 const setExpanded = cut("  function setExpanded(id, on,", "  // J/K 跳到一张收起的题");
 
@@ -39,7 +42,7 @@ function harness(options = {}) {
     requestAnimationFrame: callback => callback(), toast() {},
     teach: () => {}, cardNodes: () => [], markReading: () => {}
   };
-  vm.runInNewContext(helpers + setFilter + setCurrent + setExpanded, context);
+  vm.runInNewContext(helpers + teacherActivity + setFilter + setCurrent + setExpanded, context);
   return { context, store, renders, saved: () => JSON.parse(store.get("qb-review-state")).papers[context.state.paperId] };
 }
 

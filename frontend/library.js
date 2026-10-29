@@ -68,6 +68,8 @@
     // 出不出现只看这个，不看当前筛选下的数字 —— 1.25.24 的原话是「我选择了两三个
     // 标签之后，这个界面就变了，格局就变了」。
     presence: { review_ai: 0, answer_missing: 0, tags: 0 },
+    // 1.26.34：助手交上来了什么、谁在干活、老师此刻在哪。
+    assistantBoard: null,
     selectedTagNames: {},
     loading: false,
     token: 0,
@@ -300,6 +302,8 @@
       }
       // 助手任务只等待工具写回；API 任务由后台处理。两种结果都刷新显示。
       scheduleJobRefresh();
+      // 助手工作台和题库列表是两件事：它慢一点也不能拖住列表。
+      void loadAssistantWorkbench();
     } catch (error) {
       if (token === state.token) {
         setStatus(state.items.length ? "当前显示上一次读取的结果，尚未应用这次筛选。" : "题库尚未读取成功。", "warn");
@@ -3729,6 +3733,172 @@
     return buttons;
   }
 
+  // ---------------------------------------------------------------- 助手工作台（1.26.34）
+  // 助手交上来的东西都在这一块里：一处地方、一套动作。
+  // 采纳之前题面一个字不动 —— 采纳是老师点了才改，改完卡上留一条提醒，
+  // 老师对着原卷核对、再点通过，题库才更新。
+  const ASSISTANT_FIELD_LABELS = {
+    stem: "题干", options: "选项", question_type: "题型",
+    answer: "答案", analysis: "解析", origin: "题源",
+  };
+
+  async function loadAssistantWorkbench() {
+    try {
+      const response = await fetch("/api/library/assistant/workbench?limit=50", { cache: "no-store" });
+      if (!response.ok) return;
+      state.assistantBoard = await response.json();
+    } catch (_) { /* 读不到就保持上一次的样子，别打断题库 */ }
+    renderAssistantWorkbench();
+  }
+
+  function assistantFieldText(field, value) {
+    if (field === "options") {
+      const options = value || {};
+      const text = Object.entries(options).filter(([, item]) => String(item || "").trim())
+        .map(([key, item]) => `${key}. ${item}`).join("　");
+      return text || "（无选项）";
+    }
+    if (field === "question_type") return QB.TYPE_NAMES[value] || value || "（未定）";
+    return String(value || "").trim() || "（空）";
+  }
+
+  function assistantDiffRow(field, before, after) {
+    const row = node("div", "library-assistant-diff-row");
+    row.append(node("span", "library-assistant-diff-label", ASSISTANT_FIELD_LABELS[field] || field));
+    const sides = node("div", "library-assistant-diff-sides");
+    const old = node("div", "library-assistant-diff before");
+    old.append(node("span", "library-assistant-diff-tag", "原来"), node("span", "", assistantFieldText(field, before)));
+    const now = node("div", "library-assistant-diff after");
+    now.append(node("span", "library-assistant-diff-tag", "改成"), node("span", "", assistantFieldText(field, after)));
+    sides.append(old, now);
+    row.append(sides);
+    return row;
+  }
+
+  async function openProposalQuestion(proposal, button) {
+    button.disabled = true;
+    try {
+      const response = await fetch(`/api/library?ids=${encodeURIComponent(proposal.publication_id)}&limit=1`, { cache: "no-store" });
+      const body = await response.json();
+      const item = (body.items || [])[0];
+      if (!item) { toast("这道题已经不在题库里了。", "error"); return; }
+      openQuestion(item);
+    } catch (_) { toast("这道题一时打不开，请稍后再试。", "error"); } finally { button.disabled = false; }
+  }
+
+  async function decideProposal(proposal, action, button) {
+    button.disabled = true;
+    const others = Array.from(button.closest(".library-assistant-item")?.querySelectorAll("button") || []);
+    others.forEach((other) => { other.disabled = true; });
+    try {
+      const response = await fetch(`/api/library/assistant/proposals/${encodeURIComponent(proposal.id)}/decide`, {
+        method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" },
+        body: JSON.stringify({ action, by: "老师" }) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "没能处理这条改动");
+      toast(body.message || (action === "accept" ? "已采纳。" : "已记下不采纳。"), action === "accept" ? "success" : "");
+      await loadAssistantWorkbench();
+      if (action === "accept") void load({ quiet: true });
+    } catch (error) {
+      toast(error.message || "没能处理这条改动", "error");
+      others.forEach((other) => { other.disabled = false; });
+    }
+  }
+
+  function renderAssistantWorkbench() {
+    const board = $("assistantWorkbench");
+    const body = $("assistantWorkbenchBody");
+    if (!board || !body) return;
+    const data = state.assistantBoard;
+    if (!data) { board.hidden = true; return; }
+    const proposals = data.proposals || [];
+    const running = data.running || [];
+    if (!proposals.length && !running.length) {
+      board.hidden = true;
+      body.replaceChildren();
+      $("assistantWorkbenchCount").textContent = "";
+      return;
+    }
+    const wasHidden = board.hidden;
+    board.hidden = false;
+    $("assistantWorkbenchCount").textContent = proposals.length ? `${proposals.length} 条待核对` : "助手在干活";
+    body.replaceChildren();
+
+    const teacher = data.teacher || {};
+    if (teacher.here) {
+      body.append(node("p", "library-assistant-board-note",
+        `你正在看第 ${teacher.number} 题${teacher.state === "editing" ? "，还没保存" : ""}。助手会绕开这道题。`));
+    }
+    if (running.length) {
+      const line = running.map((job) => `${job.agent || "助手"} 领走了第 ${job.number} 题（${job.kind === "tags" ? "贴标签" : "补答案"}）`).join("；");
+      body.append(node("p", "library-assistant-board-note", `正在干的活：${line}。`));
+    }
+
+    proposals.forEach((proposal) => {
+      const item = node("li", "library-assistant-item");
+      const head = node("div", "library-assistant-item-head");
+      const title = node("button", "library-assistant-item-title", `第 ${proposal.number} 题`);
+      title.type = "button";
+      title.title = "打开这道题，对照原卷看";
+      title.addEventListener("click", () => void openProposalQuestion(proposal, title));
+      const meta = node("span", "library-assistant-item-meta",
+        `${proposal.source_filename || ""} · ${proposal.agent || "助手"} 交上来 · 改了${(proposal.changed || []).map((key) => ASSISTANT_FIELD_LABELS[key] || key).join("、")}`);
+      head.append(title, meta);
+      item.append(head);
+
+      const diff = node("details", "library-assistant-diff");
+      diff.append(node("summary", "", "看改了什么"));
+      (proposal.changed || []).forEach((key) => {
+        diff.append(assistantDiffRow(key, (proposal.before || {})[key], (proposal.after || {})[key]));
+      });
+      item.append(diff);
+
+      const actions = node("div", "library-assistant-item-actions");
+      const accept = node("button", "button button-small", "采纳这道改动");
+      accept.type = "button";
+      accept.title = "把题卡改成助手提议的样子。改完卡上会留一条提醒，你对照原卷核对后再点通过，题库才更新。";
+      accept.addEventListener("click", () => void decideProposal(proposal, "accept", accept));
+      const reject = node("button", "button button-quiet button-small", "不采纳这道改动");
+      reject.type = "button";
+      reject.title = "不改题面。这条记下来，同一个助手不会再提一样的改法。";
+      reject.addEventListener("click", () => void decideProposal(proposal, "reject", reject));
+      actions.append(accept, reject);
+      item.append(actions);
+      body.append(item);
+    });
+    // 有待核对的就把块展开：老师不用自己去找这一块。
+    if (wasHidden && proposals.length) board.open = true;
+  }
+
+  // 1.26.34：报一声「老师此刻在这道题上做什么」，助手据此绕开。
+  // 离开这道题就报空；开着的时候两分钟报一次，助手那边就不会把「十分钟前」当成现在。
+  const teacherActivity = { questionId: null, state: "viewing", timer: 0, beat: 0 };
+  function reportTeacherActivity(questionId, mode) {
+    teacherActivity.questionId = questionId || null;
+    teacherActivity.state = mode || "viewing";
+    window.clearTimeout(teacherActivity.timer);
+    teacherActivity.timer = window.setTimeout(() => { void sendTeacherActivity(); }, 250);
+    scheduleTeacherHeartbeat();
+  }
+  function scheduleTeacherHeartbeat() {
+    window.clearTimeout(teacherActivity.beat);
+    if (!teacherActivity.questionId) return;
+    teacherActivity.beat = window.setTimeout(() => {
+      void sendTeacherActivity();
+      scheduleTeacherHeartbeat();
+    }, 120000);
+  }
+  async function sendTeacherActivity() {
+    const body = teacherActivity.questionId
+      ? { question_id: teacherActivity.questionId, state: teacherActivity.state }
+      : {};
+    try {
+      await fetch("/api/teacher-presence", {
+        method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" },
+        body: JSON.stringify(body) });
+    } catch (_) { /* 报不上也不影响什么 */ }
+  }
+
   function render() {
     const viewport = captureLibraryViewport();
     renderFacets();
@@ -4188,6 +4358,8 @@ $("selectedViewCount").textContent = String(state.basket.length);
     const dialog = $("questionDialog");
     const refreshing = dialog.open && state.questionReturnId === item.id;
     const scroll = refreshing ? dialog.scrollTop : 0;
+    // 1.26.34：老师打开了哪道题，报给助手，助手绕开这道题。
+    reportTeacherActivity(item.draft_id || null, "viewing");
     $("questionTitle").textContent = `${item.source_filename} · ${sourceLocator(item)}`;
     $("questionVersion").textContent = `${QB.TYPE_NAMES[item.question_type] || item.question_type} · 第 ${item.version} 版 · ${formatDate(item.published_at)} 入库${item.review?.source === "ai" ? " · AI 审核，待人工核对" : ""}`;
     const paper = $("questionContent");
@@ -4214,7 +4386,12 @@ $("selectedViewCount").textContent = String(state.basket.length);
     const editQuestion = node("button", "button button-small", "修改题目");
     editQuestion.type = "button"; editQuestion.addEventListener("click", () => openQuestionEditor(item));
     actions.append(source, editQuestion, editAnswer, ...jobButtons(item), node("span", "actions-spacer"), add);
-    if (!dialog.open) { state.questionReturnFocus = document.activeElement; dialog.showModal(); }
+    if (!dialog.open) {
+      state.questionReturnFocus = document.activeElement;
+      dialog.showModal();
+      // 1.26.34：窗口关了，就告诉助手老师不在这儿了。
+      dialog.addEventListener("close", () => { reportTeacherActivity(null, "viewing"); }, { once: true });
+    }
     state.questionReturnId = item.id;
     state.questionSignature = questionSignature(item);
     if (refreshing) dialog.scrollTop = scroll;
@@ -4537,6 +4714,8 @@ $("selectedViewCount").textContent = String(state.basket.length);
   let answerEditor = null;
   let questionEditor = null;
   function openQuestionEditor(item) {
+    // 1.26.34：老师正在改这道题，报给助手，助手别来动它。
+    reportTeacherActivity(item.draft_id || null, "editing");
     if (!questionEditor) questionEditor = window.LibraryQuestionEditor.create({ node, QB, notify: toast, confirm: confirmDialog,
       onSaved: (before, after) => {
         state.catalog.set(after.id, after);

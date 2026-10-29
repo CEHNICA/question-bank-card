@@ -2731,6 +2731,71 @@ def _apply_figure_review(question: Question, review: dict) -> None:
         question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
 
 
+def _apply_text_edit(question: Question, payload: dict, actor: tuple[str, str]) -> None:
+    """把一份题面改动写到题卡上。
+
+    1.26.34：助手交上来的题面改动和老师自己改字走同一条路 —— 同样的清洗、同样的
+    提醒、同样的「改了就重新待核对」。助手和人只有署名不一样，规则不打折。
+    题目本身没动过，就不动它。
+    """
+    previous_ignored = _saved_ignored_candidates(question)
+    stem = payload.get("stem")
+    options = payload.get("options", {})
+    if not isinstance(stem, str) or not stem.strip() or len(stem) > 20000:
+        raise ValueError("题干不能为空")
+    if (
+        not isinstance(options, dict)
+        or set(options) - set(library.OPTION_KEYS)
+        or not all(isinstance(v, str) and len(v) <= 4000 for v in options.values())
+    ):
+        raise ValueError("选项格式不正确")
+    kind = payload.get("question_type", question.question_type)
+    if kind not in TYPES:
+        raise ValueError("题型不正确")
+    for key in ("answer", "analysis"):
+        if key in payload and (not isinstance(payload[key], str) or len(payload[key]) > 20000):
+            raise ValueError("答案或解析格式不正确")
+    if "origin" in payload and (not isinstance(payload["origin"], str) or len(payload["origin"]) > 400):
+        raise ValueError("题源格式不正确")
+    origin = prose.clean_origin(payload["origin"]) if "origin" in payload else question.origin
+    tidied = prose.tidy_fields(
+        {
+            "stem": fix_symbols(stem.strip()),
+            "options": {k: fix_symbols(v.strip()) for k, v in options.items() if v.strip()},
+            "question_type": kind,
+            "answer": fix_symbols(payload.get("answer", question.answer).strip()),
+            "analysis": fix_symbols(payload.get("analysis", question.analysis).strip()),
+        },
+        origin=origin,
+    )
+    previous_type = question.question_type
+    question.stem = tidied["stem"].strip()
+    question.options = tidied["options"]
+    question.question_type = tidied.get("question_type", kind)
+    question.answer = tidied["answer"]
+    question.analysis = tidied["analysis"]
+    question.origin = tidied["origin"]
+    if question.question_type != previous_type and qtypes.decided(question.question_type):
+        question.type_locked = True
+    question.edited = True
+    question.body_mode = "text"
+    question.reread_requested = False
+    # “assistant”：AI 助手（tiyouju）改的字，题卡上不说成“人工修改”。
+    question.text_source = "assistant" if actor[0] == "ai" else "human"
+    # 只留下截图范围的提醒；“MinerU 初稿”这类提醒随这次改字一起解决。
+    question.flags = [f for f in question.flags if not figure_flag(f) and "截图" in f and f not in TEXT_DRAFT_FLAGS]
+    question.figure_review = {}
+    review = stored_or_derived_review(question, ignored_candidates=previous_ignored)
+    if previous_ignored:
+        review = {**review, "ignored_candidates": previous_ignored, "excluded_count": len(previous_ignored)}
+    _apply_figure_review(question, review)
+    question.flags = qtypes.with_flag(question.flags, question.question_type)
+    question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
+    question.error = ""
+    # 保存编辑和终审是两个独立动作；人必须看到保存后的最终版本再点“通过”。
+    _clear_approval(question)
+
+
 @csrf_exempt
 def question_region_read(request, question_id):
     """框选识读：POST 排队读原卷上框出的一小块（只读，不改题卡）；DELETE 收起结果。"""
@@ -2897,64 +2962,10 @@ def question_action(request, question_id, action: str):
             question.error = ""
             _clear_approval(question)
         elif action == "text":
-            previous_ignored = _saved_ignored_candidates(question)
-            stem = payload.get("stem")
-            options = payload.get("options", {})
-            if not isinstance(stem, str) or not stem.strip() or len(stem) > 20000:
-                return _error("题干不能为空")
-            if (
-                not isinstance(options, dict)
-                or set(options) - set(library.OPTION_KEYS)
-                or not all(isinstance(v, str) and len(v) <= 4000 for v in options.values())
-            ):
-                return _error("选项格式不正确")
-            kind = payload.get("question_type", question.question_type)
-            if kind not in TYPES:
-                return _error("题型不正确")
-            for key in ("answer", "analysis"):
-                if key in payload and (not isinstance(payload[key], str) or len(payload[key]) > 20000):
-                    return _error("答案或解析格式不正确")
-            if "origin" in payload and (not isinstance(payload["origin"], str) or len(payload["origin"]) > 400):
-                return _error("题源格式不正确")
-            origin = prose.clean_origin(payload["origin"]) if "origin" in payload else question.origin
-            tidied = prose.tidy_fields(
-                {
-                    "stem": fix_symbols(stem.strip()),
-                    "options": {k: fix_symbols(v.strip()) for k, v in options.items() if v.strip()},
-                    "question_type": kind,
-                    "answer": fix_symbols(payload.get("answer", question.answer).strip()),
-                    "analysis": fix_symbols(payload.get("analysis", question.analysis).strip()),
-                },
-                origin=origin,
-            )
-            previous_type = question.question_type
-            question.stem = tidied["stem"].strip()
-            question.options = tidied["options"]
-            question.question_type = tidied.get("question_type", kind)
-            question.answer = tidied["answer"]
-            question.analysis = tidied["analysis"]
-            question.origin = tidied["origin"]
-            if question.question_type != previous_type and qtypes.decided(question.question_type):
-                question.type_locked = True
-            question.edited = True
-            question.body_mode = "text"
-            question.reread_requested = False
-            # “assistant”：AI 助手（tiyouju）改的字，题卡上不说成“人工修改”。
-            question.text_source = "assistant" if actor[0] == "ai" else "human"
-            # 只留下截图范围的提醒；“MinerU 初稿”这类提醒随这次改字一起解决。
-            question.flags = [
-                f for f in question.flags if not figure_flag(f) and "截图" in f and f not in TEXT_DRAFT_FLAGS
-            ]
-            question.figure_review = {}
-            review = stored_or_derived_review(question, ignored_candidates=previous_ignored)
-            if previous_ignored:
-                review = {**review, "ignored_candidates": previous_ignored, "excluded_count": len(previous_ignored)}
-            _apply_figure_review(question, review)
-            question.flags = qtypes.with_flag(question.flags, question.question_type)
-            question.state = Question.State.YELLOW if question.flags else Question.State.GREEN
-            question.error = ""
-            # 保存编辑和终审是两个独立动作；人必须看到保存后的最终版本再点“通过”。
-            _clear_approval(question)
+            try:
+                _apply_text_edit(question, payload, actor)
+            except ValueError as error:
+                return _error(str(error))
         elif action == "origin":
             # 只改题目来源（题源）。出处是教辅印在题前的那一段
             # “（2021新高考Ⅰ，7，5分，中）” —— 它说的是题从哪里来，不是题目本身：
@@ -4064,6 +4075,117 @@ def library_assistant_prepare(request):
 @csrf_exempt
 def library_assistant_complete(request):
     return _library_assistant_action(request, "complete")
+
+
+# ---------------------------------------------------------------- 助手工作台（1.26.34）
+
+
+@csrf_exempt
+def library_assistant_workbench(request):
+    """题库页里那块「助手工作台」读的东西：一屏看完助手交上来了什么。"""
+    from . import assistant_workbench
+
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return _error("助手工作台只能在本机查看", 403)
+    try:
+        limit = int(request.GET.get("limit", "50"))
+        return JsonResponse(assistant_workbench.workbench(limit=limit))
+    except assistant_workbench.WorkbenchError as error:
+        return _error(str(error), getattr(error, "status", 400))
+    except (ValueError, TypeError):
+        return _error("助手工作台读取格式不正确")
+
+
+@csrf_exempt
+def library_assistant_propose(request):
+    """助手交一份题面改动。题面不动，等人点采纳。"""
+    return _assistant_workbench_action(request, "propose")
+
+
+@csrf_exempt
+def library_assistant_claim(request):
+    """助手领一批活；每道活带到期时间，助手没了活会自己回来。"""
+    return _assistant_workbench_action(request, "claim")
+
+
+@csrf_exempt
+def library_assistant_release(request):
+    """助手把活交回池子。"""
+    return _assistant_workbench_action(request, "release")
+
+
+@csrf_exempt
+def library_assistant_whereami(request):
+    """助手问一句：老师此刻在哪、我刚提的有没有被否决。"""
+    from . import assistant_workbench
+
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return _error("助手只能在本机查看老师的位置", 403)
+    return JsonResponse(assistant_workbench.whereami())
+
+
+@csrf_exempt
+def library_assistant_proposal_decide(request, proposal_id):
+    """人点采纳或不采纳。采纳前题面一个字不动。"""
+    from . import assistant_workbench
+
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected is not None:
+        return rejected
+    payload = _body(request)
+    if payload is None:
+        return _error("处理提案的请求必须是 JSON 对象")
+    payload = {**payload, "proposal_id": str(proposal_id)}
+    try:
+        return JsonResponse(assistant_workbench.decide(payload))
+    except assistant_workbench.WorkbenchError as error:
+        return _error(str(error), getattr(error, "status", 409))
+
+
+@csrf_exempt
+def teacher_presence(request):
+    """题库页/审核页报一声：老师此刻在这道题上做什么。助手据此绕开。"""
+    from . import assistant_workbench
+
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return _error("在场信息只能在本机记录", 403)
+    rejected = _guard(request)
+    if rejected is not None:
+        return rejected
+    payload = _body(request)
+    if payload is None:
+        return _error("在场信息请求必须是 JSON 对象")
+    try:
+        return JsonResponse(assistant_workbench.set_presence(payload))
+    except assistant_workbench.WorkbenchError as error:
+        return _error(str(error), getattr(error, "status", 400))
+
+
+def _assistant_workbench_action(request, action):
+    from . import assistant_workbench
+
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return _error("助手操作只能在本机使用", 403)
+    rejected = _guard(request)
+    if rejected is not None:
+        return rejected
+    payload = _body(request)
+    if payload is None:
+        return _error("助手请求必须是 JSON 对象")
+    try:
+        return JsonResponse(getattr(assistant_workbench, action)(payload))
+    except assistant_workbench.WorkbenchError as error:
+        return _error(str(error), getattr(error, "status", 409))
 
 
 def _library_assistant_action(request, action):

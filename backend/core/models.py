@@ -441,6 +441,11 @@ class LibraryJob(models.Model):
     tag_scope = models.BooleanField(default=False)
     result = models.JSONField(default=dict, blank=True)
     agent = models.CharField(max_length=120, blank=True, default="")
+    # 1.26.34：助手领走一道活时记下到期时间。助手中途没了，活自己回到池子里，
+    # 别的助手能接着领；不记到期时间的话，这道活会一直占着，别人永远领不走。
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    attempts = models.PositiveIntegerField(default=0)
     status = models.CharField(max_length=8, choices=Status.choices, default=Status.QUEUED, db_index=True)
     error = models.CharField(max_length=300, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -607,6 +612,64 @@ class LibraryTagOperation(models.Model):
 
     class Meta:
         ordering = ["-created_at", "-id"]
+
+
+class AssistantProposal(models.Model):
+    """助手交上来的题面改动，等人点头。
+
+    1.26.34：助手对**已经入库**的题不能直接改字 —— 改了就把老师打过的勾弄没了，
+    老师还不知道。所以助手的改动先落成提案：题面一个字不动，等老师在题库页
+    「助手工作台」里点采纳才真的改；不采纳也要记下来，同一个助手下次别再提一样的改法。
+    """
+
+    class Kind(models.TextChoices):
+        TEXT = "text", "题面改动"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "待核对"
+        ACCEPTED = "accepted", "已采纳"
+        REJECTED = "rejected", "不采纳"
+        STALE = "stale", "题目已变化"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    publication = models.ForeignKey(PublishedQuestion, on_delete=models.CASCADE, related_name="assistant_proposals")
+    question = models.ForeignKey(Question, on_delete=models.CASCADE, related_name="assistant_proposals")
+    agent = models.CharField(max_length=120, blank=True, default="")
+    kind = models.CharField(max_length=12, choices=Kind.choices, default=Kind.TEXT)
+    # 助手提议的题面：{"stem": ..., "options": {...}, "question_type": ..., "answer": ..., "analysis": ...}
+    payload = models.JSONField(default=dict, blank=True)
+    # 提议时题面长什么样 —— 老师要对着「原来是这样 → 改成这样」看，不是凭空一句「已改」。
+    before = models.JSONField(default=dict, blank=True)
+    fingerprint = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING, db_index=True)
+    message = models.CharField(max_length=300, blank=True, default="")
+    decided_by = models.CharField(max_length=120, blank=True, default="")
+    decided_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [models.Index(fields=["status", "created_at"], name="assistant_proposal_state")]
+
+
+class TeacherActivity(models.Model):
+    """老师此刻在看哪道题、有没有没保存的改动。
+
+    1.26.34：助手和老师在同一台电脑上干活。助手要知道老师正在动哪道题，就绕开它，
+    别在老师改到一半时把这道题领走或提改法。
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    question = models.OneToOneField(Question, on_delete=models.CASCADE, related_name="teacher_activity")
+    paper = models.ForeignKey(Paper, on_delete=models.CASCADE, related_name="teacher_activity")
+    # viewing = 正在看；editing = 正在改字（有没保存的改动）
+    state = models.CharField(max_length=16, default="viewing")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+        indexes = [models.Index(fields=["paper", "state"], name="teacher_activity_paper")]
 
 
 class LibrarySolution(models.Model):

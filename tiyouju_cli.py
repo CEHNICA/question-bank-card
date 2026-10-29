@@ -1204,6 +1204,85 @@ def cmd_enrich(client: Client, args) -> dict:
             "prepare": cmd_enrich_prepare, "submit": cmd_enrich_submit}[args.enrich_command](client, args)
 
 
+# ---------------------------------------------------------------- 助手工作台（1.26.34）
+
+
+def cmd_claim(client: Client, args) -> dict:
+    """领一批助手活。
+
+    每道活都带一个到期时间：助手中途没了（断网、崩了、关掉了），这道活会自己回到
+    池子里，别的助手能接着领；不会一直占着，别人永远领不走。
+    """
+    limit = getattr(args, "limit", 10)
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 50:
+        raise CliError("一次最多领 50 道")
+    payload = {
+        "agent": _enrichment_agent(client, args),
+        "limit": limit,
+        "kinds": list(getattr(args, "kinds", None) or ENRICH_KINDS),
+    }
+    ids = getattr(args, "ids", None)
+    if ids:
+        payload["ids"] = _enrichment_ids(ids)
+    return client.post("/api/library/assistant/claim", payload)
+
+
+def cmd_release(client: Client, args) -> dict:
+    """把没干完的助手活交回池子，别的助手能接着领。"""
+    job_ids = list(getattr(args, "job_id", None) or [])
+    if not job_ids:
+        raise CliError("请给出要交回的任务 ID（--job-id）")
+    return client.post("/api/library/assistant/release", {
+        "agent": _enrichment_agent(client, args), "ids": _enrichment_ids(job_ids),
+    })
+
+
+def cmd_propose(client: Client, args) -> dict:
+    """交一份题面改动的提案。
+
+    已经入库的题，助手不要直接改字 —— 直接改会把老师打过的勾弄没。改法先交成提案：
+    题面一个字不动，等老师在题库页点「采纳」。
+    """
+    publication_id = _enrichment_ids([args.publication_id])[0]
+    fields = {}
+    stem = read_text_arg(args.stem, getattr(args, "stem_file", None))
+    if stem is not None:
+        fields["stem"] = stem
+    options = {}
+    for item in args.option or []:
+        key, sep, value = item.partition("=")
+        key = key.strip().upper()
+        if not sep or key not in OPTION_KEYS:
+            raise CliError(f"--option 写成 A=内容（A 到 E），收到的是“{item}”")
+        if str(value).strip():
+            options[key] = value
+    if options:
+        fields["options"] = options
+    if args.type:
+        fields["question_type"] = args.type
+    if args.answer is not None:
+        fields["answer"] = args.answer
+    if args.analysis is not None:
+        fields["analysis"] = args.analysis
+    if getattr(args, "origin", None) is not None:
+        fields["origin"] = args.origin
+    if not fields:
+        raise CliError("请至少写一项要改的内容")
+    return client.post("/api/library/assistant/propose", {
+        "publication_id": publication_id, "agent": _enrichment_agent(client, args), "fields": fields,
+    })
+
+
+def cmd_workbench(client: Client, args) -> dict:
+    """读助手工作台：助手交上来了什么、谁在干活、老师此刻在哪。"""
+    return client.get("/api/library/assistant/workbench?limit=50")
+
+
+def cmd_whereami(client: Client, args) -> dict:
+    """问一句：老师此刻在哪、我刚提的有没有被否决。"""
+    return client.get("/api/library/assistant/whereami")
+
+
 SHOWERS = {
     "status": show_status, "config": show_config, "papers": show_papers, "upload": show_upload, "wait": show_wait, "cards": show_cards,
     "show": show_card, "fix": show_fix, "figures": show_figures, "approve": show_approve, "publish": show_publish,
@@ -1228,6 +1307,9 @@ MCP_INSTRUCTIONS = (
     "用户要整批生成时，逐个入库题prepare，再按每个kind分别submit，不把多道题合成一段答案。"
     "用户明确要以后新题入库时自动处理，可configure_enrichment_auto设置自动排队（默认关闭），所需feature仍需显式启用。"
     "自动任务在新题入库之后创建；助手模式由当前助手继续领取完成，不声称已在OCR前生成答案或已常驻豆包。"
+    "已经入库的题不要直接改字：改法用 propose_question_change 交成提案，题面不动，等老师点采纳。"
+    "批量干活先 claim_work 领一批（每道活带到期时间，助手没了活会自己回到池子里），干不完 release_work 交回。"
+    "where_is_the_teacher 告诉你老师此刻在哪、你刚提的有没有被否决。"
 )
 
 
@@ -1307,6 +1389,34 @@ MCP_TOOLS = [
         "tags": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"type": "string"}},
         "answer": {"type": "string"}, "analysis": {"type": "string"},
     }, ["job_id", "fingerprint"])),
+    ("claim_work", "领一批助手活。每道活带到期时间；助手中途没了，活会自己回到池子里，别的助手能接着领。", _schema({
+        "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+        "kinds": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"type": "string", "enum": list(ENRICH_KINDS)}},
+        "ids": {"type": "array", "maxItems": 500, "items": {"type": "string"}},
+        "agent": {"type": "string", "description": "真实助手名称，缺省使用当前MCP客户端名"},
+    })),
+    ("release_work", "把没干完的助手活交回池子，别的助手能接着领。", _schema({
+        "ids": {"type": "array", "minItems": 1, "maxItems": 500, "items": {"type": "string"}},
+        "agent": {"type": "string", "description": "真实助手名称，缺省使用当前MCP客户端名"},
+    }, ["ids"])),
+    ("propose_question_change", "交一份题面改动提案：题面一个字不动，等老师点采纳。已入库的题不要直接改字。", _schema({
+        "publication_id": {"type": "string", "description": "入库题 UUID"},
+        "fields": {
+            "type": "object",
+            "description": "要改的字段。只写要改的那几项。",
+            "properties": {
+                "stem": {"type": "string"},
+                "options": {"type": "object", "additionalProperties": {"type": "string"}},
+                "question_type": {"type": "string", "enum": list(TYPES)},
+                "answer": {"type": "string"},
+                "analysis": {"type": "string"},
+                "origin": {"type": "string"},
+            },
+        },
+        "agent": {"type": "string", "description": "真实助手名称，缺省使用当前MCP客户端名"},
+    }, ["publication_id", "fields"])),
+    ("read_workbench", "读助手工作台：助手交上来了什么待核对、谁在干活、老师此刻在哪。", _schema({})),
+    ("where_is_the_teacher", "问一句老师此刻在哪、你刚提的改动有没有被否决。", _schema({})),
 ]
 
 
@@ -1379,6 +1489,24 @@ def mcp_call(client: Client, name: str, arguments: dict) -> tuple[dict | list, l
         return cmd_enrich_submit(client, _ns(job_id=a.get("job_id"), fingerprint=a.get("fingerprint"),
                                              agent=a.get("agent"), tags=a.get("tags"),
                                              answer=a.get("answer"), analysis=a.get("analysis"))), []
+    if name == "claim_work":
+        return cmd_claim(client, _ns(limit=a.get("limit", 10), kinds=a.get("kinds"),
+                                     ids=a.get("ids"), agent=a.get("agent"))), []
+    if name == "release_work":
+        return cmd_release(client, _ns(job_id=a.get("ids"), agent=a.get("agent"))), []
+    if name == "propose_question_change":
+        fields = a.get("fields") or {}
+        options = fields.get("options") or {}
+        return cmd_propose(client, _ns(
+            publication_id=a.get("publication_id"), agent=a.get("agent"),
+            stem=fields.get("stem"), stem_file=None,
+            option=[f"{key}={value}" for key, value in options.items() if str(value).strip()],
+            type=fields.get("question_type"), answer=fields.get("answer"),
+            analysis=fields.get("analysis"), origin=fields.get("origin"))), []
+    if name == "read_workbench":
+        return cmd_workbench(client, _ns()), []
+    if name == "where_is_the_teacher":
+        return cmd_whereami(client, _ns()), []
     raise CliError(f"没有这个工具：{name}")
 
 
@@ -1466,6 +1594,9 @@ WORKFLOW = """\
   7. tiyouju approve latest --green         绿卡抽查后一起通过
   8. tiyouju publish latest                 入库
 标签/参考答案由当前助手自己完成（不需要豆包API）：按用户需求 features --enable，再 enrich prepare / submit 写回附加内容，仍待核对。
+批量的活先 claim 领一批（每道活带到期时间，助手没了活会自己回到池子里），干不完用 release 交回。
+已经入库的题不要直接 fix：改法用 propose 交成提案，题面一个字不动，等老师点采纳。
+whereami 告诉你老师此刻在哪、你刚提的有没有被否决。
 没有看图读题的密钥：征得使用者同意后 tiyouju config --reader assistant，题卡先用 MinerU 的文字，由你逐题核对。
 每个命令加 --json 输出 JSON（纯 ASCII，中文写成 \\uXXXX，任何终端都不会乱码）。
 退出码：0 成功，1 出错，2 题有据没打开，3 需要使用者处理。"""
@@ -1600,6 +1731,24 @@ def build_parser() -> argparse.ArgumentParser:
     analysis_source.add_argument("--analysis-file", help="UTF-8参考解析文件")
 
     sub.add_parser("mcp", parents=[common], help="作为 MCP 服务器运行（stdio），给支持 MCP 的 AI 用")
+
+    claim = sub.add_parser("claim", parents=[common], help="领一批助手活；助手没了活会自己回到池子里")
+    claim.add_argument("--limit", type=int, default=10, help="一次领几道（最多 50）")
+    claim.add_argument("--kinds", nargs="+", choices=ENRICH_KINDS, default=list(ENRICH_KINDS))
+    claim.add_argument("--ids", nargs="+", help="只领这些入库题 UUID（最多500个）")
+    release = sub.add_parser("release", parents=[common], help="把没干完的助手活交回池子")
+    release.add_argument("--job-id", action="append", help="要交回的任务 UUID（可多次）")
+    propose = sub.add_parser("propose", parents=[common], help="交一份题面改动提案；题面不动，等老师采纳")
+    propose.add_argument("publication_id", help="入库题 UUID")
+    propose.add_argument("--stem", help="新题干；公式用 $...$ 包住的 LaTeX")
+    propose.add_argument("--stem-file", help="从文件读新题干")
+    propose.add_argument("--option", action="append", help="要改的选项：A=内容")
+    propose.add_argument("--type", choices=list(TYPES), help="要改的题型")
+    propose.add_argument("--answer", help="要改的参考答案")
+    propose.add_argument("--analysis", help="要改的参考解析")
+    propose.add_argument("--origin", help="要改的题源")
+    sub.add_parser("workbench", parents=[common], help="读助手工作台：助手交上来了什么、谁在干活")
+    sub.add_parser("whereami", parents=[common], help="老师此刻在哪、我刚提的有没有被否决")
     return parser
 
 
@@ -1609,6 +1758,8 @@ COMMANDS = {
     "unapprove": cmd_unapprove, "reread": cmd_reread, "publish": cmd_publish, "library": cmd_library,
     "assistant-setup": cmd_assistant_setup,
     "features": cmd_features, "enrich": cmd_enrich,
+    "claim": cmd_claim, "release": cmd_release, "propose": cmd_propose,
+    "workbench": cmd_workbench, "whereami": cmd_whereami,
 }
 
 

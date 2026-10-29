@@ -212,6 +212,8 @@ test("the real library parent refreshes the new version while retaining old bask
   const savedDraft = clone(state.draft), basket = clone(state.basket), refreshed = [], loaded = [], basketChecks = [], dialog = { open: true };
   let options, opens = 0;
   const context = { state, node() {}, QB: {}, toast() {}, confirmDialog() {}, $: () => dialog, openQuestion: value => refreshed.push(value), load: value => { loaded.push(value); return Promise.resolve(); },
+    // 1.26.34：老师改题时会给助手报一声「我在这道题上」。这里只关心改题流程本身。
+    reportTeacherActivity: () => {},
     // 1.13.6：题面一改，篮里那道旧版本就作废了。这里只是**重新核一遍**，不是替老师
     // 换题——换了就得 Basket 里那一行如实说「已经有新版本」，再由他点「换新版本」。
     refreshBasket: value => { basketChecks.push(value); return Promise.resolve(); },

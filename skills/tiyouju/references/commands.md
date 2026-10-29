@@ -50,6 +50,11 @@
 | `enrich auto [--tags on\|off] [--answer on\|off]` | 默认只读；`tags` 为兼容参数，当前版本始终不启用入库自动贴标。答案自动排队只在用户明确授权后设置，不开功能、不改 API、不扫旧题 |
 | `enrich prepare 入库UUID [--kinds tags answer] [--out 目录] [--no-images]` | 准备指定任务，返回题面、目录、prompt和指纹；默认下载该题原卷截图与配图，整页原卷返回本机URL |
 | `enrich submit 任务UUID --fingerprint 指纹 --result-file 结果.json` | 一次提交一种结果：旧名称知识点 `tags` 候选，或 `answer` 与可选 `analysis` 初稿；不成为正式标签，不改原卷或人工核对 |
+| `claim [--limit 1–50] [--kinds tags answer] [--ids 入库UUID…]` | 领一批待处理的活。每道活带一个到期时间：助手中途没了（断网、崩了、关掉了），这道活自动回到池子里，别的助手能接着领；别人还占着、租约没到的活不会被抢走 |
+| `release --job-id 任务UUID [--job-id …]` | 把没干完的活交回池子，别的助手能接着领 |
+| `propose 入库UUID [--stem 文字 \| --stem-file 文件] [--option A=内容]… [--type T] [--answer 文字] [--analysis 文字] [--origin 题源]` | 给**已经入库**的题交一份改动提案。题面一个字不动，等使用者在题库页点「采纳」。已入库的题不要直接用 `fix` |
+| `workbench` | 读助手工作台：助手交上来了几条待核对、谁在干活、老师此刻在哪 |
+| `whereami` | 问一句：老师此刻在看哪道题、有没有没保存的改动；你刚提的改动有没有被否决 |
 | `mcp` | 作为 stdio MCP 服务器运行 |
 
 ## 组卷导出（软件界面）
@@ -142,6 +147,28 @@ tiyouju enrich submit <答案任务UUID> --fingerprint <该任务指纹> --resul
 
 独立模型 API 是网页生成使用的途径，明确调用的 CLI/MCP 助手流程仍可独立执行。用户选择 API 后可推荐 DeepSeek，也允许其他服务。实际模型名按服务核实或由用户填写，不虚构“DeepSeek Pro”官方 ID，不自动调用收费测试或 OCR 读题模型。
 
+## 助手和老师一起干活（领活、提案、工作台）
+
+1.26.34 起，助手可以领活、交改法，用户在题库页「助手工作台」里点头。先检查安装版 `tiyouju --help` 里有没有这些命令。
+
+**什么能直接改，什么不能。** 还没入库的题照旧走 `fix` 流程——那本来就是导入流程，用户会逐题核对原卷。**已经入库**的题不能直接改字：直接改会把用户打过的勾弄没，而且看不出是谁改的。已经入库的题要用 `propose` 交提案。
+
+```powershell
+tiyouju claim --limit 20 --kinds tags answer --agent 豆包 --json
+tiyouju release --job-id <任务UUID> --agent 豆包 --json
+tiyouju propose <入库UUID> --stem "新的题干" --agent 豆包 --json
+tiyouju workbench --json
+tiyouju whereami --json
+```
+
+- `claim` 领一批活，每道活带一个到期时间（30 分钟）。助手中途没了（断网、崩了、关掉了），这道活自动回到池子里，别的助手能接着领；别人还占着、租约没到的活不会被抢走。干不完的用 `release` 主动交回。
+- `propose` 给**已经入库**的题交一份题面改动的提案。**题面一个字不动**，等用户在题库页「助手工作台」点「采纳」才真的改。采纳后题卡改成助手提议的样子，卡上留一条提醒，并回到「待核对」；用户对照原卷点「通过」，题库才更新。不采纳也要记下来：同一个助手再提一模一样的改法会被直接拒掉，并带回老师的理由。
+- 题卡后来改过、还没重新入库，或题库里的版本已经变了，这条提案就作废，要按现在的样子重提。
+- `workbench` 读助手工作台：待核对几条（题面改动、标签、答案各多少）、谁在干活、采纳多少次、不采纳多少次、用户此刻在哪。
+- `whereami` 问一句：用户此刻在看哪道题、有没有没保存的改动；你刚提的改动有没有被否决。**用户正在改的题别去领、也别去提改法。**
+
+不给助手开这些权限：删除题卡、撤回入库、改标签目录、无人值守自动通过并入库。助手交上来的东西一律先落到「待核对」，由人点头。
+
 ## MCP 工具
 
 `tiyouju mcp` 提供这些工具：
@@ -158,5 +185,9 @@ tiyouju enrich submit <答案任务UUID> --fingerprint <该任务指纹> --resul
 - `configure_enrichment_auto(tags, answer)`：不传只看现状；当前 tags 保持关闭，标签只主动请求；答案自动排队仅在明确授权后设置，不暗自开功能、改模型或处理旧题。
 - `list_enrichment_tasks(ids, limit≤50)`、`prepare_enrichment(publication_id, kinds, agent)`：准备后当前助手自己看图、选标签或解题
 - `submit_enrichment(job_id, fingerprint, agent, tags | answer, analysis)`：只交一种任务的知识点候选或答案初稿；候选须人工采纳，初稿须核对并保存。
+- `claim_work(limit, kinds, agent, ids)`、`release_work(job_ids, agent)`：领活与交回；每道活带到期时间，别人租约没到的活抢不走
+- `propose_question_change(publication_id, agent, stem, options, type, answer, analysis, origin)`：给**已经入库**的题交一份题面改动提案；题面不动，等人在题库页点采纳
+- `read_workbench()`：读助手工作台（待核对几条、谁在干活、采纳/不采纳各多少次、人此刻在哪）
+- `where_is_the_teacher()`：问人此刻在看哪道题、有没有没保存的改动，以及我提的改动有没有被否决
 
 AI 的名字默认取 MCP 客户端的名字。

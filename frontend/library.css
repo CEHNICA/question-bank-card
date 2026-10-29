@@ -1751,3 +1751,65 @@ body.is-resizing, body.is-resizing * { cursor: ew-resize !important; user-select
 .library-tag-chip.is-dragging { opacity: .35; }
 .library-tag-chip.is-drag-target { outline: 2px dashed var(--accent); outline-offset: 2px; background: color-mix(in srgb, var(--tag-color, var(--accent)) 12%, transparent); }
 .library-tag-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------------------------------------------------------------- 助手工作台（1.26.34）
+   助手交上来的改动都在这一块里，不另开一页。没东西可看时整块藏起来。 */
+.library-assistant-board {
+  margin: 10px 0 4px;
+  border: 1px solid var(--line, #d8dde4);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+}
+.library-assistant-board > summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.library-assistant-board > summary .count { color: var(--muted); font-weight: 400; }
+.library-assistant-board-body { padding: 0 12px 10px; }
+.library-assistant-board-note {
+  margin: 4px 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.library-assistant-item {
+  border-top: 1px solid var(--line, #e4e8ee);
+  padding: 10px 0;
+}
+.library-assistant-item:first-of-type { border-top: 0; }
+.library-assistant-item-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.library-assistant-item-title {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent, #318c79);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.library-assistant-item-meta { color: var(--muted); font-size: 13px; }
+.library-assistant-diff { margin: 6px 0; }
+.library-assistant-diff > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.library-assistant-diff-row { display: flex; gap: 8px; margin-top: 6px; align-items: flex-start; }
+.library-assistant-diff-label {
+  flex: 0 0 3em;
+  color: var(--muted);
+  font-size: 13px;
+  padding-top: 2px;
+}
+.library-assistant-diff-sides { display: flex; gap: 8px; flex: 1; flex-wrap: wrap; }
+.library-assistant-diff {
+  border: 1px solid var(--line, #e4e8ee);
+  border-radius: 8px;
+  padding: 4px 8px;
+  flex: 1 1 220px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.library-assistant-diff-tag { color: var(--muted); font-size: 12px; margin-right: 6px; }
+.library-assistant-diff.after { border-color: var(--accent, #318c79); }
+.library-assistant-item-actions { display: flex; gap: 8px; margin-top: 8px; }

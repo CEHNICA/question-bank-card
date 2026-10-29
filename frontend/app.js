@@ -2417,8 +2417,24 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     openReviewFinder();
   });
 
+  // 1.26.34：报一声「老师此刻在这道题上做什么」，助手据此绕开这道题。
+  // 报不上也不影响什么：它只是让助手少动一道题，不是功能的前提。
+  let teacherActivityTimer = 0;
+  function reportTeacherActivity(questionId, mode) {
+    // 报不上也不影响什么：它只是让助手少动一道题，不是功能的前提。
+    if (typeof window.setTimeout !== "function" || typeof fetch !== "function") return;
+    window.clearTimeout(teacherActivityTimer);
+    teacherActivityTimer = window.setTimeout(() => {
+      void fetch("/api/teacher-presence", {
+        method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" },
+        body: JSON.stringify(questionId ? { question_id: questionId, state: mode || "viewing" } : {}) });
+    }, 400);
+  }
+
   function setCurrent(id, { scroll = false, focus = false, hold = scroll } = {}) {
     state.current = id;
+    // 1.26.34：报一声「老师此刻在看哪道题」，助手据此绕开这道题。
+    reportTeacherActivity(id);
     saveReviewState();
     cardNodes().forEach((card) => card.classList.toggle("is-current", Number(card.dataset.id) === id));
     const card = id !== null ? document.querySelector(`.card[data-id="${id}"]`) : null;
@@ -5998,6 +6014,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function openEditorPanel(card, q, { prefill = null, regionInsert = null } = {}) {
+    // 1.26.34：老师正在改这道题，助手别来动它。
+    reportTeacherActivity(q.id, "editing");
     if (card.querySelector(".editor")) {
       if (prefill || regionInsert) toast("先保存或取消正在改的字，再填入框选识读的结果", "error");
       card.querySelector(".stem-input")?.focus();
@@ -6322,7 +6340,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   // ---------------------------------------------------------------- 框选识读（1.10.2）
-
   // 1.26.33：这一路现在只做一件事 —— 在原卷上框一块，读出来，抄到剪贴板。
   // 快捷键 C：审核页、放大对照页按 C 都到这里；题库页按 C 会带着这道题跳过来。
   function openClipboardRead(q) {

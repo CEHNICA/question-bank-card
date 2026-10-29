@@ -169,6 +169,12 @@
         <div id="activeFilters" class="active-filters" aria-label="当前筛选" hidden></div>
         <div id="libraryLoadError" class="library-load-error" role="alert" hidden></div>
         <div id="assistantTaskNotice" class="library-load-error" role="status" aria-live="polite" hidden></div>
+        <!-- 1.26.34：助手交上来的东西都在这一块里，不另开一页。
+             没东西可看时整块藏起来；有待核对的就展开，别让老师自己找。 -->
+        <details id="assistantWorkbench" class="library-assistant-board" hidden>
+          <summary><span class="library-assistant-board-title">助手工作台</span><span id="assistantWorkbenchCount" class="count"></span></summary>
+          <div id="assistantWorkbenchBody" class="library-assistant-board-body"></div>
+        </details>
         <div id="libraryList" class="library-list"></div>
         <div class="library-more"><button id="moreButton" class="button" type="button" hidden>加载更多</button></div>
       </section>

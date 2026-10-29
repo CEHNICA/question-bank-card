@@ -176,6 +176,53 @@ class TiyoujuCliTests(LiveServerTestCase):
         code, found = run_json("library", "--review", "ai")
         self.assertEqual(found["total"], 3)
 
+    def test_an_assistant_proposes_instead_of_changing_a_published_question(self):
+        run_json("approve", "期中", "1", "--agent", "豆包")
+        run_json("publish", "期中")
+        publication = PublishedQuestion.objects.get(number=1)
+        code, proposed = run_json("propose", str(publication.pk), "--stem", "改过的题干", "--agent", "豆包")
+        self.assertEqual(code, 0, proposed)
+        self.q1.refresh_from_db()
+        self.assertEqual(self.q1.stem, "计算 $1+1$。", "提案不能动题面")
+        code, board = run_json("workbench")
+        self.assertEqual(code, 0)
+        self.assertEqual(board["pending"]["text"], 1)
+        self.assertEqual(board["proposals"][0]["agent"], "豆包")
+        self.assertEqual(board["proposals"][0]["changed"], ["stem"])
+        code, where = run_json("whereami")
+        self.assertEqual(code, 0)
+        self.assertFalse(where["teacher"]["here"])
+
+    def test_claiming_work_leases_it_and_an_expired_lease_comes_back(self):
+        from . import library
+        from .models import LibraryJob
+
+        run_json("approve", "期中", "1", "--agent", "豆包")
+        run_json("publish", "期中")
+        publication = PublishedQuestion.objects.get(number=1)
+        job = LibraryJob.objects.create(
+            publication=publication,
+            kind="answer",
+            executor="assistant",
+            fingerprint=library.generation_fingerprint(publication.content or {}, publication.pk),
+        )
+        code, claimed = run_json("claim", "--limit", "5", "--agent", "豆包")
+        self.assertEqual(code, 0, claimed)
+        self.assertEqual(claimed["count"], 1)
+        self.assertEqual(claimed["claimed"][0]["job_id"], str(job.pk))
+        job.refresh_from_db()
+        self.assertEqual(job.agent, "豆包")
+        self.assertIsNotNone(job.lease_expires_at)
+        code, blocked = run_json("claim", "--limit", "5", "--agent", "另一个助手")
+        self.assertEqual(blocked["count"], 0, "别人还占着的活不能抢")
+        code, released = run_json("release", "--job-id", str(job.pk), "--agent", "豆包")
+        self.assertEqual(code, 0, released)
+        self.assertEqual(released["released"], 1)
+        job.refresh_from_db()
+        self.assertEqual(job.agent, "", "交回之后活回到池子，别的助手能接着领")
+        code, again = run_json("claim", "--limit", "5", "--agent", "另一个助手")
+        self.assertEqual(again["count"], 1)
+
     def test_an_undecided_type_is_chosen_before_approving_and_origin_is_shown(self):
         Question.objects.filter(pk=self.q1.pk).update(question_type="unknown", origin="2025·北京海淀·期中")
         code, cards = run_json("cards", "期中", "--filter", "todo")
