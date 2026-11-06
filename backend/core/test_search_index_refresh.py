@@ -10,6 +10,7 @@
 
 import pathlib
 import tempfile
+from io import StringIO
 
 from django.core.management import call_command
 from django.test import TestCase, override_settings
@@ -58,15 +59,22 @@ class RefreshSearchIndexTests(TestCase):
             tags_text="|三角恒等变换|",
         )
 
+    def run_command(self, *args, **kwargs):
+        # 输出接到内存里，不往真实控制台写 ——
+        # 不接住的话，这条命令变成真身时就会在英文 Windows 上被编码搞到手。
+        out = StringIO()
+        call_command("refresh_search_index", *args, stdout=out, **kwargs)
+        return out.getvalue()
+
     def test_listing_alone_does_not_touch_the_database(self):
         item = self.publication(search_text="入库时算的旧索引")
-        call_command("refresh_search_index")
+        self.run_command()
         item.refresh_from_db()
         self.assertEqual(item.search_text, "入库时算的旧索引", "不加 --apply 就不该写")
 
     def test_apply_rewrites_only_the_search_index(self):
         item = self.publication(search_text="入库时算的旧索引")
-        call_command("refresh_search_index", apply=True)
+        self.run_command(apply=True)
         item.refresh_from_db()
         self.assertNotEqual(item.search_text, "入库时算的旧索引")
         self.assertIn("三角恒等变换", item.search_text, "章节名进了索引，卡面上印着的就搜得到")
@@ -79,14 +87,14 @@ class RefreshSearchIndexTests(TestCase):
         item = self.publication(section="复习题")
         PublishedQuestion.objects.filter(pk=item.pk).update(search_text=library._search_text(item.content, item.extras))
         before = PublishedQuestion.objects.get(pk=item.pk).search_text
-        call_command("refresh_search_index", apply=True)
+        self.run_command(apply=True)
         item.refresh_from_db()
         self.assertEqual(item.search_text, before, "本来就一致的卡不该被动")
 
     def test_only_the_named_paper_is_processed(self):
         mine = self.publication(filename="必修第一册.pdf", search_text="旧")
         other = self.publication(filename="月考试卷.pdf", search_text="旧")
-        call_command("refresh_search_index", apply=True, paper="必修第一册.pdf")
+        self.run_command(apply=True, paper="必修第一册.pdf")
         mine.refresh_from_db()
         other.refresh_from_db()
         self.assertNotEqual(mine.search_text, "旧")
@@ -98,6 +106,6 @@ class RefreshSearchIndexTests(TestCase):
         content.pop("answer", None)
         content.pop("analysis", None)
         PublishedQuestion.objects.filter(pk=item.pk).update(content=content)
-        call_command("refresh_search_index", apply=True)
+        self.run_command(apply=True)
         item.refresh_from_db()
         self.assertIn("三角恒等变换", item.search_text, "缺字段的老卡片也要算出来，不能报错跳过")

@@ -12,6 +12,8 @@
     manage.py refresh_search_index --paper 必修第一册.pdf
 """
 
+import sys
+
 from django.core.management.base import BaseCommand
 
 from core import library
@@ -19,6 +21,24 @@ from core.models import PublishedQuestion
 
 # 老卡片的快照里可能缺字段，补齐再算，免得算一半报错。
 DEFAULTS = {"stem": "", "options": {}, "answer": "", "analysis": ""}
+
+
+def _relax_output_encoding() -> None:
+    """让输出通道写不出中文时也别崩。
+
+    中文 Windows 上没问题；但控制台被重定向到管道、编码变成 cp1252 时，
+    写一句中文提示就会抛 UnicodeEncodeError —— 整条命令跟着崩。
+    这里只放宽「写不出来怎么办」，不改编码：写不出来的字用问号代替，
+    命令照常跑完、结果照样正确。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(errors="replace")
+        except (ValueError, OSError):
+            continue
 
 
 class Command(BaseCommand):
@@ -29,6 +49,7 @@ class Command(BaseCommand):
         parser.add_argument("--paper", default="", help="只处理这一份资料的文件名（逗号分隔，可重复）")
 
     def handle(self, *args, **options):
+        _relax_output_encoding()
         queryset = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
         names = [name.strip() for name in str(options.get("paper") or "").split(",") if name.strip()]
         if names:
