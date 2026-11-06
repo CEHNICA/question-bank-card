@@ -19,6 +19,32 @@ assert.equal(L.sectionLabel("第1节 公式法 · 例题1"), "", "13 字，超�
 assert.equal(L.sectionLabel(""), "");
 assert.equal(L.sectionLabel(null), "");
 
+// ── 教材的小节名：编号 + 中文标题，12 字卡不住的也算 ────────────
+// 1.26.44：真库里有 9 道题的章节名是「5.5.2 简单的三角恒等变换」这类，
+// 以前按 12 字上限整段丢掉，卡面上只剩「第 X 页」，定位不到小节。
+assert.equal(L.sectionLabel("5.5.2 简单的三角恒等变换"), "5.5.2 简单的三角恒等变换", "教材小节名要显示，别被 12 字上限截掉");
+assert.equal(L.sectionLabel("4.5.3 函数模型的应用"), "4.5.3 函数模型的应用");
+assert.equal(L.sectionLabel("2.1 等式性质与不等式性质"), "2.1 等式性质与不等式性质");
+assert.equal(L.sectionLabel("3.1.2 函数的表示法"), "3.1.2 函数的表示法");
+assert.equal(L.sectionLabel("20.1 三角函数的图像与性质"), "20.1 三角函数的图像与性质");
+assert.equal(L.sectionLabel("1.178 097 245."), "", "数字不是章节名");
+assert.equal(L.sectionLabel("1. 观察实际情景，发现和提出问题"), "", "一整句话不是章节名");
+assert.equal(L.sectionLabel("1. 观察实际情景并提出问题"), "", "单级编号不是教材小节名，得多级点号编号");
+assert.equal(L.sectionLabel("2.1 观察实际情景，发现并提出问题"), "", "小节名的标题里带逗号就不算");
+assert.equal(L.sectionLabel("2.1 函数的基本性质。"), "", "标题带句号就不算");
+assert.equal(L.sectionLabel("20.1 这是一个非常非常非常长的教材小节名称"), "", "太长也不显示");
+assert.equal(L.sectionLabel("一、单选题（每题3分，共30分）"), "", "试卷的大题说明不是章节名");
+assert.equal(L.sectionLabel("1.2\n函数的基本性质"), "", "断成两行的不是章节名");
+assert.equal(
+  L.positionOf({ number: 3, page: 12, section: "5.5.2 简单的三角恒等变换" }),
+  "第 12 页 · 5.5.2 简单的三角恒等变换",
+  "小节名上卡面时，页码照旧在前面"
+);
+assert.equal(
+  L.locate({ number: 3, page: 12, section: "5.5.2 简单的三角恒等变换" }),
+  "第 12 页 · 5.5.2 简单的三角恒等变换 · 第 3 题"
+);
+
 // ── 章节名：先认真章节名，其次短章节名，其余一律不算 ────────────
 assert.equal(L.scopeOf({ group_title: "章节01 · 公式法" }), "章节01 · 公式法");
 assert.equal(L.scopeOf({ group: { title: "第2章 函数" } }), "第2章 函数");

@@ -353,7 +353,11 @@ def search_key(value: str) -> str:
 
 
 SECTION_LABEL_MAX = 12
+SECTION_LABEL_MAX_NUMBERED = 20
 SECTION_LABEL_STOP = re.compile(r"[：:，,。;；]")
+SECTION_LABEL_TITLE_STOP = re.compile(r"[：:，,。;；、！!？?…—～~]")
+SECTION_NUMBERED = re.compile(r"^(\d+(?:\.\d+)+)\s*(.*)$")
+SECTION_HAS_HAN = re.compile(r"[\u4e00-\u9fff]")
 
 
 def first_page(regions) -> int | None:
@@ -376,17 +380,36 @@ def first_page(regions) -> int | None:
 def section_label(section) -> str:
     """卡面上真的印出来的那段章节名，空串表示卡面不显示。
 
-    教材的「习题 6.1」「复习题」短到 12 字、也不带冒号逗号，会印在卡面上；
-    试卷的 section 是一整段大题说明（「一、选择题：本大题共8小题，每小题5分…」），
-    那种一个字都不显示，也不该进搜索——它带着「本题共 N 小题」这类套话，
-    进了搜索会把一堆不相干的卷子都搜出来。
-    前端卡面用同一套规则切出章节名（frontend/library.js 的 cardLocator），
+    甲、短标签：教材的「习题 6.1」「复习题」短到 12 字、也不带冒号逗号，印在卡面上。
+    乙、教材的小节名：「5.5.2 简单的三角恒等变换」这种，前面是多级点号编号
+        （4.5.3），后面是中文标题、标题里没有句读。教材的小节名本来就长，
+        只按 12 字卡会把整段丢掉（1.26.44 修的），丢掉就等于没定位。
+    丙、一律不显示：试卷的 section 是一整段大题说明（「一、选择题：本大题共8
+        小题，每小题5分…」）、数字噪音（「1.178 097 245.」）、一整句话
+        （「1. 观察实际情景，发现和提出问题」）。那种一个字都不显示，也不该进
+        搜索——它带着「本题共 N 小题」这类套话，进了搜索会把一堆不相干的卷子
+        都搜出来。
+    前端卡面用同一套规则切出章节名（frontend/question-locator.js 的 sectionLabel），
     两边都拿同一份 fixture 断言，改一边就会红。
     """
     text = str(section or "").strip()
-    if not text or len(text) > SECTION_LABEL_MAX or SECTION_LABEL_STOP.search(text):
+    if not text:
         return ""
-    return text
+    if "\n" in text or "\r" in text:
+        return ""
+    if len(text) <= SECTION_LABEL_MAX and not SECTION_LABEL_STOP.search(text):
+        return text
+    matched = SECTION_NUMBERED.match(text)
+    if matched:
+        title = matched.group(2).strip()
+        if (
+            len(text) <= SECTION_LABEL_MAX_NUMBERED
+            and title
+            and SECTION_HAS_HAN.search(title)
+            and not SECTION_LABEL_TITLE_STOP.search(title)
+        ):
+            return text
+    return ""
 
 
 def _search_text(content: dict, extras: dict | None = None) -> str:

@@ -17,17 +17,44 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
-  // 章节名的两条规矩，跟后端 library.section_label 是同一条（两边拿同一份
-  // fixture 断言）：短到 12 字、不带冒号逗号，才算章节名。
-  // 教材的「习题 6.1」「均值不等式」认；试卷的 section 是一整段大题说明
-  // （「一、选择题：本大题共8小题，每小题5分…」），放上去是噪音。
+  // 章节名的规矩，跟后端 library.section_label 是同一条（两边拿同一份
+  // fixture 断言）。
+  //
+  // 甲、短标签：短到 12 字、不带冒号逗号。教材的「习题 6.1」「均值不等式」认。
+  // 乙、教材的小节名：「5.5.2 简单的三角恒等变换」这种 —— 前面是多级点号编号
+  //     （4.5.3），后面是中文标题，标题里没有句读。教材的小节名本来就长，
+  //     只按 12 字卡会把「5.5.2 简单的三角恒等变换」整段丢掉（1.26.44 修的）。
+  // 丙、一律不显示：试卷的 section 是一整段大题说明（「一、选择题：本大题共8
+  //     小题，每小题5分…」）、数字噪音（「1.178 097 245.」）、一整句话
+  //     （「1. 观察实际情景，发现和提出问题」）。它们放上去是噪音，进了搜索
+  //     还会把不相干的卷子都搜出来。
   const SECTION_LABEL_MAX = 12;
+  const SECTION_LABEL_MAX_NUMBERED = 20;
   const SECTION_LABEL_STOP = /[：:，,。;；]/;
+  const SECTION_LABEL_TITLE_STOP = /[：:，,。;；、！!？?…—～~]/;
+  const SECTION_NUMBERED = /^(\d+(?:\.\d+)+)\s*(.*)$/;
+  const SECTION_HAS_HAN = /[\u4e00-\u9fff]/;
 
   function sectionLabel(section) {
     const text = String(section == null ? "" : section).trim();
-    if (!text || text.length > SECTION_LABEL_MAX || SECTION_LABEL_STOP.test(text)) return "";
-    return text;
+    if (!text) return "";
+    // 断成两行的不是章节名：印在卡面上会断行，进了搜索也不该当标签。
+    if (/[\r\n]/.test(text)) return "";
+    if (text.length <= SECTION_LABEL_MAX && !SECTION_LABEL_STOP.test(text)) return text;
+    // 教材的小节名：编号 + 中文标题，且没有句读。
+    const matched = SECTION_NUMBERED.exec(text);
+    if (matched) {
+      const title = matched[2].trim();
+      if (
+        text.length <= SECTION_LABEL_MAX_NUMBERED &&
+        title &&
+        SECTION_HAS_HAN.test(title) &&
+        !SECTION_LABEL_TITLE_STOP.test(title)
+      ) {
+        return text;
+      }
+    }
+    return "";
   }
 
   // 真章节名：题组标题里带「章」的才算（「章节01 · 公式法」「第2章 函数」）。

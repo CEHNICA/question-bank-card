@@ -132,3 +132,25 @@ class SectionIsSearchableTests(TestCase):
 
         refreshed = library.save_extras(stale, {"tags": ["二次函数"]})
         self.assertIn(refreshed.id, self.found("习题8.6"))
+
+    def test_a_textbook_subsection_name_is_longer_than_twelve_characters(self):
+        # 教材的小节名以前按 12 字上限整段丢掉，卡面上只剩「第 X 页」，定位不到小节。
+        for name in ("5.5.2 简单的三角恒等变换", "4.5.3 函数模型的应用", "2.1 等式性质与不等式性质"):
+            with self.subTest(section=name):
+                self.assertEqual(library.section_label(name), name)
+
+    def test_numbers_sentences_and_exam_intros_are_not_section_names(self):
+        for name in (
+            "1.178 097 245.",
+            "1. 观察实际情景，发现和提出问题",
+            "2.1 函数的基本性质。",
+            "一、单选题（每题3分，共30分）",
+            "三、解答题（共10小题共90分）",
+            "1.2\n函数的基本性质",
+        ):
+            with self.subTest(section=name):
+                self.assertEqual(library.section_label(name), "")
+
+    def test_a_subsection_name_printed_on_the_card_can_be_searched(self):
+        item = self.publication(section="5.5.2 简单的三角恒等变换")
+        self.assertIn(item.id, self.found("三角恒等变换"))
