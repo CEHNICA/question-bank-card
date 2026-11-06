@@ -37,7 +37,12 @@ class LibraryTagMapAssetTests(SimpleTestCase):
         response = self.client.get("/library")
         try:
             self.assertEqual(response.status_code, 200)
-            content = b"".join(response.streaming_content).decode("utf-8")
+            # 1.26.36：页面现在是 _page() 生成的普通响应（要往里塞 ?v= 指纹），
+            # 不再是 FileResponse；两种都读得动。
+            if getattr(response, "streaming", False):
+                content = b"".join(response.streaming_content).decode("utf-8")
+            else:
+                content = response.content.decode("utf-8")
             self.assertIn('href="/library-tag-map.css', content)
             self.assertIn('src="/library-tag-map.js', content)
             self.assertLess(content.index('src="/library-tag-map.js'), content.index('src="/library-tag-manager.js'))

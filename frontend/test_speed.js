@@ -62,4 +62,73 @@ assert.match(select, /cards\.setAttribute\("aria-busy", "true"\)/);
 assert.match(select, /await refreshPaper\(\);[\s\S]*?cards\.classList\.remove\("is-loading"\)/);
 assert.match(css, /\.cards\.is-loading \{[^}]*opacity: \.45;[^}]*pointer-events: none;/);
 
+// 1.26.36: a 762-card book froze the window for eight seconds when it was
+// opened. The cards are drawn in batches now, so the browser can paint and
+// answer clicks between them instead of being blocked for one whole second.
+// Run the real batcher: reading its source cannot tell "drawn in batches" from
+// "drawn in one big batch", which is the very thing that went wrong.
+assert.equal(QB.CARD_BATCH_SIZE, 24, "a batch is small enough for the browser to get a turn");
+{
+  const drawn = [];
+  const waiting = [];
+  const items = Array.from({ length: 100 }, (_, i) => i);
+  let finished = 0;
+  QB.renderInBatches(items, (item) => drawn.push(item), {
+    schedule: (fn) => waiting.push(fn),
+    channel: "speed-batch",
+    onDone: () => { finished += 1; },
+  });
+  assert.equal(drawn.length, QB.CARD_BATCH_SIZE, "one batch is drawn, then the browser is given a turn");
+  assert.equal(waiting.length, 1, "the browser gets a turn between two batches");
+  assert.equal(finished, 0, "the whole list is not finished in one go");
+  while (waiting.length) waiting.shift()();
+  assert.equal(drawn.length, 100, "every card is eventually drawn");
+  assert.equal(finished, 1, "the list is finished exactly once");
+}
+{
+  // A newer render takes over: the older one must stop, or two rounds of
+  // cards fight over the same place on the page.
+  const first = [];
+  const second = [];
+  const firstWait = [];
+  const secondWait = [];
+  const items = Array.from({ length: 100 }, (_, i) => i);
+  QB.renderInBatches(items, (item) => first.push(item), { schedule: (fn) => firstWait.push(fn), channel: "speed-takeover" });
+  QB.renderInBatches(items, (item) => second.push(item), { schedule: (fn) => secondWait.push(fn), channel: "speed-takeover" });
+  firstWait.shift()();
+  assert.equal(first.length, QB.CARD_BATCH_SIZE, "the older render stops as soon as a newer one starts");
+  secondWait.shift()();
+  assert.equal(second.length, QB.CARD_BATCH_SIZE * 2, "the newer render keeps going");
+}
+{
+  // Nothing to draw still has to finish, or the empty state never appears.
+  let finished = 0;
+  QB.renderInBatches([], () => {}, { channel: "speed-empty", onDone: () => { finished += 1; } });
+  assert.equal(finished, 1, "an empty list is finished right away");
+}
+assert.match(render, /R\.renderInBatches\(shown,/, "the card list is drawn through the batcher");
+assert.doesNotMatch(render, /shown\.forEach\(/, "the cards are not drawn in one single pass");
+
+// The button on the question card must take its wording from the one place
+// that owns it (the layout module), or the two surfaces drift apart.
+const hint = js.slice(js.indexOf("function rangeAdjustHint()"), js.indexOf("function counts()"));
+assert.match(hint, /adjustHint\(state\.paper\)/, "the button hint comes from the layout module");
+assert.match(hint, /ADJUST_HINT_READY/, "the button still has a spare wording to fall back on");
+
+// fitOptions must never measure a card the browser has not laid out: forcing
+// that layout is what froze the window (762 cards, 5.8 seconds). The card
+// that is off screen gets the width measured on the cards that are on screen.
+const unrendered = list(0, 4, 12, ["cols-4"]);
+unrendered.checkVisibility = () => false;
+let unrenderedReads = 0;
+Object.defineProperty(unrendered, "clientWidth", { get() { unrenderedReads += 1; return 0; } });
+const onscreen = list(300, 4, 3, ["cols-4"]);
+QB.fitOptions({ querySelectorAll: () => [onscreen, unrendered] });
+assert.equal(unrenderedReads, 0, "a card the browser has not laid out is never measured");
+assert.equal(onscreen.classes.has("cols-4"), true, "the card on screen keeps its columns");
+assert.equal(unrendered.classes.has("cols-4"), false,
+  "the card off screen gets a column count of its own, not the one it happened to carry before");
+assert.ok(unrendered.classes.has("cols-2") || unrendered.classes.has("cols-1"),
+  "the card off screen is still given a column count, so it does not change when it appears");
+
 console.log("speed checks: OK");

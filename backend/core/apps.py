@@ -1,6 +1,9 @@
 import logging
 import shutil
+import sys
+import threading
 import time
+import urllib.request
 from pathlib import Path
 
 from django.apps import AppConfig
@@ -99,6 +102,75 @@ def _newest_mtime(folder: Path) -> float:
     return newest
 
 
+def _tune_sqlite(sender, connection, **kwargs):
+    """把 SQLite 的内存映射和页缓存调大。
+
+    1.26.36（性能）：题库列表一页 100 道、那份 323 页卷子的详情 762 道，
+    都要反复读同一批行。SQLite 默认页缓存只有 2 MB（-2000），这些行一遍遍从磁盘
+    读出来；mmap 让它直接映射文件、页缓存给到 64 MB，翻页和列表查询明显快。
+    """
+    if connection.vendor != "sqlite":
+        return
+    with connection.cursor() as cursor:
+        cursor.execute("PRAGMA mmap_size=268435456")  # 256 MB
+        cursor.execute("PRAGMA cache_size=-65536")  # 64 MB
+        cursor.execute("PRAGMA temp_store=MEMORY")
+
+
+def _server_port() -> str | None:
+    """从命令行里找出 runserver 的端口。
+
+    打包后的桌面版是 `QuestionBankCard.exe --internal-role runserver 127.0.0.1:8768`，
+    源码模式是 `manage.py runserver 127.0.0.1:8768 --noreload` —— 两边都能这么问出来。
+    问不出来（测试、worker）就返回 None，那就别预热。
+    """
+    argv = list(sys.argv)
+    for index, item in enumerate(argv):
+        if item != "runserver":
+            continue
+        for candidate in argv[index + 1 :]:
+            if candidate.startswith("-"):
+                continue
+            if ":" in candidate:
+                return candidate.rsplit(":", 1)[1]
+    return None
+
+
+def _warm_up(port: str) -> None:
+    """后台先把 /api/papers 跑一遍。
+
+    冷启动之后第一次 /api/papers 要 13.5 秒：ORM 第一次编译查询计划、SQLite 页缓存
+    是空的、12 份卷的 structure/processing_plan 第一次序列化。之后只要 0.8 秒。
+    而开窗口第一件事就是拉这个接口 —— 于是每次开软件都得对着空白界面等十几秒。
+
+    这里等服务起来之后自己先跑一遍，等老师真的点开时已经是热的。
+    跑不成也不影响软件用。
+    """
+    url = f"http://127.0.0.1:{port}/api/papers"
+    for _ in range(40):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as response:
+                response.read()
+            logger.info("预热完成：/api/papers")
+            return
+        except Exception:
+            time.sleep(1.5)
+    logger.warning("预热没成功；服务起来之后第一次打开列表可能还是会慢一下。")
+
+
+def _start_background_work() -> None:
+    try:
+        from django.db.backends.signals import connection_created
+
+        connection_created.connect(_tune_sqlite, dispatch_uid="qb_tune_sqlite")
+    except Exception as exc:
+        logger.warning("SQLite 调优没挂上：%s", exc)
+    port = _server_port()
+    if not port:
+        return
+    threading.Thread(target=_warm_up, args=(port,), name="qb-warm-up", daemon=True).start()
+
+
 class CoreConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "core"
@@ -109,3 +181,4 @@ class CoreConfig(AppConfig):
                 sweep()
             except Exception as exc:  # 清理失败绝不能挡住软件启动。
                 logger.warning("启动时清理残留目录未完成：%s", exc)
+        _start_background_work()

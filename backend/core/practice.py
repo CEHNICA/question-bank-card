@@ -33,9 +33,11 @@ def page(request, paper_id):
         _paper(paper_id)
     except ExportError as error:
         return JsonResponse({"error": str(error)}, status=error.status)
-    from .views import _frontend
+    from .views import _page
 
-    return _frontend("practice.html", "text/html; charset=utf-8")(request)
+    # 1.26.36：练习页也走 _page，页面里的脚本样式同样带 ?v=<指纹>，
+    # 升级之后不会拿着上一版的界面。
+    return _page("practice.html")(request)
 
 
 def library_view(request, paper_id):

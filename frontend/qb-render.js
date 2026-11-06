@@ -1236,11 +1236,31 @@
    */
   function fitOptions(root) {
     const lists = root?.querySelectorAll ? [...root.querySelectorAll(".qb-options[data-widest]")] : [];
+    if (!lists.length) return;
     // Measure every list first, then set the classes: measuring after each change
     // made the browser lay out the whole page again for every list (slow on a 600-card book).
-    const sizes = lists.map((list) => [list.clientWidth, parseFloat(getComputedStyle(list).fontSize) || 16]);
+    //
+    // 1.26.36：屏幕上的卡片以外，浏览器根本没排版（content-visibility:auto）。
+    // 硬量它们的宽度，浏览器就得把几百张卡全排一遍 —— 每排一张，后面所有卡片的
+    // 位置都跟着变，整页反复重排。762 道题那本实测量一次要 5.8 秒，页面直接卡死。
+    // 所以只量浏览器已经排好版的那些；没排版的先按同一栏里量到的宽度算，
+    // 等它滚到眼前再精确量一次（app.js 里的观察员会叫我们回来）。
+    const widths = lists.map((list) => {
+      if (typeof list.checkVisibility === "function" && !list.checkVisibility({ contentVisibilityAuto: true })) return 0;
+      return list.clientWidth || 0;
+    });
+    const measured = widths.filter((width) => width > 0);
+    // 同一栏里的选项一样宽：量到几个就用其中最窄的兜底，窄一点顶多多折一行，不会串栏。
+    const fallback = measured.length ? Math.min(...measured) : 0;
+    let fontSize = 0;
+    for (const list of lists) {
+      if (!widths[lists.indexOf(list)]) continue;
+      fontSize = parseFloat(getComputedStyle(list).fontSize) || fontSize;
+      if (fontSize) break;
+    }
+    if (!fontSize) fontSize = parseFloat(getComputedStyle(root || document.body).fontSize) || 16;
     lists.forEach((list, index) => {
-      const [width, fontSize] = sizes[index];
+      const width = widths[index] || fallback;
       if (!width) return;
       const preferred = Number(list.dataset.cols || 1);
       const widest = Number(list.dataset.widest || 0);
@@ -1251,6 +1271,44 @@
       list.classList.remove("cols-1", "cols-2", "cols-4", "cols-5");
       list.classList.add(`cols-${fitted}`);
     });
+  }
+
+  /*
+   * 1.26.36：几百道题的书（一本 762 道题）以前是一口气把卡片全画出来：
+   * 造卡 2.4 秒，浏览器再把整页重排 5.8 秒，主线程被占住八秒多 ——
+   * 老师看到的是「点了试卷没反应」。现在分批画，每画完一批就把主线程还给浏览器，
+   * 让它先把画面画出来、也能响应点击。
+   *
+   * 三件事，缺一件就白改：
+   * 1. 一批不能太大。太大等于没分。
+   * 2. 每批之间必须让出主线程（定时器）。光把活拆开、还在同一个任务里跑完，
+   *    浏览器照样没机会画 —— 那还是一次性卡住。
+   * 3. 每一批开始前都要问一句「这一轮还是最新的吗」。搜索、筛选、换卷都会重画，
+   *    上一轮没画完的批次必须自己停下，不然两轮卡片会打架。
+   */
+  const CARD_BATCH_SIZE = 24;
+  const batchRuns = new Map();
+
+  function renderInBatches(items, renderOne, options = {}) {
+    const { batchSize = CARD_BATCH_SIZE, onDone, schedule, channel = "default" } = options;
+    const list = items || [];
+    const wait = schedule || ((fn) => setTimeout(fn, 0));
+    const run = (batchRuns.get(channel) || 0) + 1;
+    batchRuns.set(channel, run);
+    let index = 0;
+    const step = () => {
+      // 同一路（channel）上已经开始了新一轮 → 这一轮就此收手。
+      if (batchRuns.get(channel) !== run) return;
+      const end = Math.min(index + batchSize, list.length);
+      for (; index < end; index += 1) renderOne(list[index], index);
+      if (index < list.length) {
+        // 把主线程还给浏览器：它要把这一批画出来，也要回应老师点的东西。
+        wait(step);
+        return;
+      }
+      if (onDone) onDone();
+    };
+    step();
   }
 
   function figureElement(figure, resolveUrl, action, ordinal) {
@@ -1471,6 +1529,6 @@
     comparisonUnits, compareTexts, comparisonHunks, stripQuestionNumber,
     detectRuns, runToLatex, explicitToLatex, typesetSegments, colourLatex,
     renderTypeset, renderLiteral, renderQuestion, answerRows, previewSelection, previewTextOffsets, optionColumns, displayWidth, fitScale, fitOptions, findTables, tidyText,
-    tidiedMarks, subQuestionParts
+    tidiedMarks, subQuestionParts, renderInBatches, CARD_BATCH_SIZE
   };
 });

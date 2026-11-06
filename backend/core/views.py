@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import threading
+import time
 import unicodedata
 import uuid
 from collections import OrderedDict
@@ -811,6 +812,71 @@ def _soft_delete_questions(paper: Paper, question_ids: list[int]) -> tuple[Quest
 # ---------------------------------------------------------------- 页面与静态文件
 
 
+_ASSET_SUFFIXES = {".js", ".css", ".png", ".woff2", ".woff", ".ttf"}
+_ASSET_VERSION_TTL = 60.0
+_asset_version_cache: dict[str, tuple[float, str]] = {}
+# 页面里引用静态资源的地方：src="/xxx.js" / href="/xxx.css"
+_ASSET_URL_RE = re.compile(r'((?:src|href)=")(/[A-Za-z0-9._/-]+\.(?:js|css))(\?v=[^"]*)?(")')
+
+
+def _asset_version() -> str:
+    """前端文件指纹：所有脚本样式图片的 mtime+size 揉出来的一个短哈希。
+
+    1.25.40 那句「本地脚本没有版本号，要求每次都向本机服务核对」是为了防升级后
+    窗口里还是上一版的界面（真的撞上过）。代价是每次开窗口重下 1.2 MB ——
+    web.log 里 35 天光静态资源就重传了 12 GB。
+
+    现在页面里引用的每个脚本样式都带 ?v=<指纹>：动过任何前端文件，指纹就变，URL
+    跟着变，浏览器自然重新下载；没动过，指纹不变，浏览器就一直用本地缓存。
+    两边都要。指纹算一次缓存 60 秒，省得每次请求都去 stat 一遍目录。
+    """
+    now = time.monotonic()
+    cached = _asset_version_cache.get("value")
+    if cached is not None and now - cached[0] < _ASSET_VERSION_TTL:
+        return cached[1]
+    digest = hashlib.sha1()
+    try:
+        for path in sorted(FRONTEND.rglob("*")):
+            if path.suffix.lower() not in _ASSET_SUFFIXES or not path.is_file():
+                continue
+            stat = path.stat()
+            relative = path.relative_to(FRONTEND).as_posix()
+            digest.update(f"{relative}:{stat.st_mtime_ns}:{stat.st_size};".encode())
+    except OSError:
+        pass
+    value = digest.hexdigest()[:12]
+    _asset_version_cache["value"] = (now, value)
+    return value
+
+
+def _etag_for(path: Path) -> str:
+    try:
+        stat = path.stat()
+    except OSError:
+        return ""
+    return f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+
+
+def _page(name: str):
+    """HTML 页面：每次都回源核对，并在里面给静态资源带上当前指纹。"""
+
+    def view(request):
+        if request.method != "GET":
+            return HttpResponseNotAllowed(["GET"])
+        version = _asset_version()
+        try:
+            text = (FRONTEND / name).read_text(encoding="utf-8")
+        except OSError:
+            raise Http404 from None
+        text = _ASSET_URL_RE.sub(lambda match: f"{match.group(1)}{match.group(2)}?v={version}{match.group(4)}", text)
+        response = HttpResponse(text, content_type="text/html; charset=utf-8")
+        # 页面本身要每次核对：它带着下面那些 ?v=，不核对就拿不到新指纹。
+        response["Cache-Control"] = "no-cache"
+        return response
+
+    return view
+
+
 def _frontend(name: str, content_type: str):
     def view(request):
         if request.method != "GET":
@@ -818,14 +884,20 @@ def _frontend(name: str, content_type: str):
         response = _file(FRONTEND / name, content_type)
         # 1.25.40：本地脚本没有版本号，浏览器会按启发式缓存旧文件 —— 升级后窗口里
         # 可能还是上一版的界面（真的撞上过）。要求每次都向本机服务核对。
-        response["Cache-Control"] = "no-cache"
+        # 1.26.36：现在页面里引用的这些文件都带 ?v=<指纹>，指纹没变就说明文件没变，
+        # 浏览器可以直接用本地缓存；指纹变了 URL 就变了，浏览器自然会重新下载。
+        # 所以这里从 no-cache 改成一周：升级照样生效，重复下载没了。
+        response["Cache-Control"] = "public, max-age=604800"
+        etag = _etag_for(FRONTEND / name)
+        if etag:
+            response["ETag"] = etag
         return response
 
     return view
 
 
-index_page = _frontend("index.html", "text/html; charset=utf-8")
-library_page = _frontend("library.html", "text/html; charset=utf-8")
+index_page = _page("index.html")
+library_page = _page("library.html")
 app_script = _frontend("app.js", "application/javascript; charset=utf-8")
 render_script = _frontend("qb-render.js", "application/javascript; charset=utf-8")
 library_script = _frontend("library.js", "application/javascript; charset=utf-8")
@@ -863,7 +935,14 @@ def katex_asset(request, asset: str):
         content_type = {"woff2": "font/woff2", "woff": "font/woff", "ttf": "font/ttf"}[asset.rsplit(".", 1)[1]]
     else:
         raise Http404
-    return _file(FRONTEND / "vendor" / "katex" / asset, content_type)
+    response = _file(FRONTEND / "vendor" / "katex" / asset, content_type)
+    # 1.26.36：字体和 katex 自己的样式一样，是不会变的静态资源。katex.min.css
+    # 里按相对路径找字体，所以字体 URL 上没有 ?v=，只能靠这里的缓存头。
+    response["Cache-Control"] = "public, max-age=604800"
+    etag = _etag_for(FRONTEND / "vendor" / "katex" / asset)
+    if etag:
+        response["ETag"] = etag
+    return response
 
 
 # ---------------------------------------------------------------- 状态

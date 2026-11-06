@@ -2418,10 +2418,55 @@ class ApiTests(TestCase):
 
 
 class FrontendCacheTests(TestCase):
-    """1.25.40：升级后浏览器可能还拿着旧脚本，本地页面必须每次核对。"""
+    """1.26.36：页面每次核对，脚本样式带指纹后交给浏览器缓存。
 
-    def test_frontend_files_ask_the_local_service_every_time(self):
-        for path in ("/library", "/library.js", "/library-answer-editor.js", "/library.css"):
+    1.25.40 是给全部前端文件加 no-cache，防升级后窗口里还拿着旧脚本；
+    代价是每次开窗口重下 1.2 MB（35 天下来 web.log 里光静态资源就重传了 12 GB）。
+    现在页面自己带 ?v=<指纹>，静态资源可以放心放长缓存 —— 两边都成立。
+    """
+
+    def test_pages_are_rechecked_and_carry_an_asset_version(self):
+        for path in ("/", "/library"):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 200, path)
             self.assertEqual(response["Cache-Control"], "no-cache", path)
+            self.assertIn("?v=", response.content.decode("utf-8"), path)
+
+    def test_static_assets_are_cached_by_the_browser(self):
+        for path in ("/library.js", "/library-answer-editor.js", "/library.css"):
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200, path)
+            self.assertEqual(response["Cache-Control"], "public, max-age=604800", path)
+            self.assertTrue(response.get("ETag"), path)
+
+    def test_asset_version_is_stable_and_the_pages_use_it(self):
+        from . import views
+
+        views._asset_version_cache.clear()
+        version = views._asset_version()
+        self.assertEqual(version, views._asset_version())
+        body = self.client.get("/").content.decode("utf-8")
+        self.assertIn(f"?v={version}", body)
+
+    def test_matching_etag_gets_a_304(self):
+        response = self.client.get("/library.js")
+        etag = response["ETag"]
+        again = self.client.get("/library.js", headers={"if-none-match": etag})
+        self.assertEqual(again.status_code, 304)
+
+    def test_large_json_responses_are_compressed(self):
+        from django.http import HttpResponse
+        from django.middleware.gzip import GZipMiddleware
+        from django.test import RequestFactory
+
+        payload = json.dumps({"papers": [{"name": "x" * 200} for _ in range(50)]}).encode()
+        request = RequestFactory().get("/api/papers", headers={"accept-encoding": "gzip"})
+        response = GZipMiddleware(lambda req: HttpResponse(payload, content_type="application/json"))(request)
+        self.assertEqual(response.get("Content-Encoding"), "gzip")
+        self.assertLess(len(response.content), len(payload))
+
+    def test_gzip_and_conditional_get_are_enabled(self):
+        from django.conf import settings
+
+        self.assertIn("django.middleware.gzip.GZipMiddleware", settings.MIDDLEWARE)
+        self.assertIn("django.middleware.http.ConditionalGetMiddleware", settings.MIDDLEWARE)

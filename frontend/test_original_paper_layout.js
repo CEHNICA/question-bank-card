@@ -1,5 +1,7 @@
 "use strict";
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const L = require("./original-paper-layout.js");
 const q = (id, number, group, ranges, extra = {}) => ({ id, number, group: { id: group, title: `组${group}` }, question_type: "free_response", regions: ranges, content_revision: id, layout_fingerprint: String(id).padStart(64, "0"), color_index: id % 6, ...extra });
 const r = (page, bbox) => ({ page_idx: page, bbox });
@@ -620,6 +622,44 @@ async function run() {
   assert.equal($("pageLayoutPanel").querySelector("#pageLayoutMergeBegin").disabled, true,
     "cards of different types cannot be merged");
   assert.match($("pageLayoutPanel").querySelector(".layout-warning").textContent, /题型不一样/);
+  controller.close();
+
+  // 1.26.36: the teacher reported that clicking "adjust range" sometimes left
+  // only one usable option ("view this question"). That happens while the
+  // paper is still being processed: the range cannot be changed yet. The
+  // greyed buttons used to say nothing at all, so it read as a broken button.
+  const readyPaper = state.paper;
+  state.paper = { ...readyPaper, status: "reading", status_label: "AI 读题中" };
+  controller.open("regions", state.questions[0]);
+  const blockedPanel = $("pageLayoutPanel");
+  const notice = blockedPanel.querySelector(".layout-blocked");
+  assert.ok(notice, "the panel explains that the range cannot be adjusted right now");
+  assert.match(notice.querySelector("p").textContent, /AI 读题中/, "the teacher is told which step the paper is on");
+  assert.match(notice.querySelector("p").textContent, /处理完才能调整范围/, "and why it cannot be changed yet");
+  const greyedAdd = blockedPanel.querySelector("#pageLayoutAdd");
+  assert.equal(greyedAdd.disabled, true, "the range actions stay disabled while the paper is being processed");
+  assert.match(greyedAdd.title, /AI 读题中/, "a greyed button says why it is grey");
+  assert.equal(L.readOnlyAdvice({ status: "failed" }), L.readOnlyAdvice({ status: "failed" }), "the advice is stable");
+  assert.match(L.readOnlyAdvice({ status: "failed" }), /继续整理/, "a failed paper points at the action that recovers it");
+  assert.match(L.readOnlyAdvice({ status: "ready", archived: true }), /恢复到试卷列表/, "an archived paper points at the action that brings it back");
+  assert.equal(L.readOnlyAdvice({ status: "ready" }), "", "a ready paper can be adjusted");
+
+  // The button on the question card says the same thing in one line.
+  assert.equal(L.adjustHint({ status: "ready" }), L.ADJUST_HINT_READY, "a ready paper: the button says what it does");
+  assert.match(L.adjustHint({ status: "reading", status_label: "AI 读题中" }), /AI 读题中/,
+    "the button names the step the paper is on");
+  assert.match(L.adjustHint({ status: "reading", status_label: "AI 读题中" }), /处理完才能调整/,
+    "the button says when it can be adjusted");
+  assert.match(L.adjustHint({ status: "ready", archived: true }), /恢复到试卷列表/,
+    "an archived paper names the way back");
+  assert.equal(L.adjustHint({ status: "reading", status_label: "AI 读题中" }),
+    L.adjustHint({ status: "reading", status_label: "AI 读题中" }), "the advice is stable");
+  // app.js keeps one spare copy of the ready text for the case where the
+  // layout module is not there; the two must not drift apart.
+  const appSource = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
+  assert.ok(appSource.includes(L.ADJUST_HINT_READY),
+    "app.js 的备用文案必须和面板那份一字不差");
+  state.paper = readyPaper;
   controller.close();
 
   console.log("Original-paper layout: overlap ordering, direct selection, merge bounds, pointer thresholds, clean in-place save, manual-only edits, lost-response recovery, return actions, empty-frame recovery, protected question deletion, page-scoped group choice and the choice-question merge guard: OK");

@@ -1499,8 +1499,24 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     clearTimeout(state.listTimer);
     const busy = state.papers.some((paper) => ACTIVE_STATUS.has(paper.status));
-    state.listTimer = setTimeout(loadPapers, busy ? 3000 : 15000);
+    // 1.26.36（性能）：/api/papers 每次都要把 12 份试卷的结构数据重新拼一遍
+    // （那套 323 页的《高中数学思想方法导引》一家就占 174 KB），服务端是单线程的
+    // dev server，15 秒一轮足以把它占死 —— 页面上任何操作都在排队等它。
+    // 空闲时 60 秒一轮，真有任务在跑时 12 秒一轮，窗口缩到后台时干脆停掉。
+    state.listTimer = setTimeout(loadPapers, listPollDelay(busy));
   }
+
+  function listPollDelay(busy) {
+    if (document.hidden) return 120000;
+    return busy ? 12000 : 60000;
+  }
+
+  // 窗口从后台回到前台，立刻补一次列表刷新，别让用户对着旧数据发呆。
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    clearTimeout(state.listTimer);
+    state.listTimer = setTimeout(loadPapers, 300);
+  });
 
   function renderArchivedPapers() {
     const list = $("archivedPapersList");
@@ -1671,6 +1687,18 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   // AI 助手通过、还等你核对的题数，接在“全部通过”后面说一句。
   function aiNote(c) {
     return c.ai ? `其中 ${c.ai} 题是 AI 通过的，在“AI 通过”里核对。` : "";
+  }
+
+  // 1.26.36：这份资料还没处理完（或已归档）时，题目范围改不了。
+  // 悬停就先把这件事说清楚，别让老师点了以后才发现是灰的。
+  // 说法在 original-paper-layout.js 的 adjustHint 里（面板顶部那块提示也是它那份），
+  // 这里只留一份备用文案 —— 两边必须一模一样，测试会盯着。
+  const ADJUST_HINT_READY = "调整题目的原卷范围和片段顺序，只保存范围，不调用 AI（R）";
+
+  function rangeAdjustHint() {
+    const layout = window.QBOriginalLayout;
+    if (layout?.adjustHint) return layout.adjustHint(state.paper);
+    return ADJUST_HINT_READY;
   }
 
   function counts() {
@@ -2278,6 +2306,36 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     toast("题型没读出来：在题号旁边选一下题型（单选、多选、填空、判断或解答）");
   }
 
+  // 1.26.36：几百道题的书（那本 762 道题的数学书）以前是一口气把卡片全画出来：
+  // 造卡 2.4 秒，浏览器再把整页重排 5.8 秒，主线程被占住 8 秒多 —— 老师看到的是
+  // 「点了试卷没反应」。现在一批一批画：先画头一批，页面马上有东西，后面的分批补，
+  // 每批之间浏览器能把画面画出来，也能响应点击。
+  // 分批的规矩写在 qb-render.js 的 renderInBatches 里（一批多大、每批之间让不让出
+  // 主线程、新的一轮来了旧的怎么收手），那边有行为测试盯着，这里只管画什么。
+
+  // 屏幕外的卡片浏览器根本没排版，量不出选项该排几列（硬量会把整页重排一遍）。
+  // 等卡片滚到眼前、浏览器排好版了再量一次，量出来的才是准的。
+  const cardOptionObserver = typeof IntersectionObserver === "function"
+    ? new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) R.fitOptions(entry.target);
+      }
+    }, { rootMargin: "800px 0px" })
+    : null;
+  const watchedCards = new WeakSet();
+
+  function watchCardOptions(card) {
+    if (!cardOptionObserver || watchedCards.has(card)) return;
+    watchedCards.add(card);
+    cardOptionObserver.observe(card);
+  }
+
+  function stopWatchingCardOptions(card) {
+    if (!cardOptionObserver || !watchedCards.has(card)) return;
+    watchedCards.delete(card);
+    cardOptionObserver.unobserve(card);
+  }
+
   function renderCards() {
     const container = $("cards");
     const shown = state.questions.filter(visible);
@@ -2286,25 +2344,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const existing = new Map();
     [...container.children].forEach((child) => {
       const id = Number(child.dataset.id);
-      if (!keep.has(id) && !state.editing.has(id)) { child.remove(); state.rendered.delete(id); }
-      else if (child.dataset.id && !existing.has(id)) existing.set(id, child);
+      if (!keep.has(id) && !state.editing.has(id)) {
+        child.remove(); state.rendered.delete(id); stopWatchingCardOptions(child);
+      } else if (child.dataset.id && !existing.has(id)) existing.set(id, child);
     });
+    // 有卡片时先收掉「这里还没有题卡」那块，别让它留在新卡片中间。
+    if (shown.length) container.querySelectorAll(".cards-empty").forEach((node) => node.remove());
     let previous = null;
-    shown.forEach((q) => {
-      const signature = JSON.stringify([q, state.expanded.has(q.id), state.paper?.pages_version]);
-      let card = existing.get(q.id) || null;
-      if (!card || (state.rendered.get(q.id) !== signature && !state.editing.has(q.id))) {
-        const fresh = renderCard(q);
-        if (card) card.replaceWith(fresh); else container.append(fresh);
-        card = fresh;
-        state.rendered.set(q.id, signature);
-      }
-      card.classList.toggle("is-current", q.id === state.current);
-      if (previous && previous.nextSibling !== card) previous.after(card);
-      else if (!previous && container.firstChild !== card) container.prepend(card);
-      previous = card;
-    });
-    if (!shown.length) {
+    const finish = () => {
+      if (!shown.length) {
       container.querySelectorAll(".cards-empty").forEach((node) => node.remove());
       const empty = el("div", "cards-empty");
       if (!state.questions.length && state.paper?.pages?.length && !ACTIVE_STATUS.has(state.paper.status)) {
@@ -2320,13 +2368,32 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       } else if (!state.questions.length) empty.append(el("strong", "", "题卡还没生成"), el("span", "", "原卷处理完成后会显示题卡，也可以手工补题。"));
       else if (state.filter === "todo" || state.filter === "green") empty.append(el("strong", "", "没有需要核查的题卡"), el("span", "", "本卷题目已核查完毕。"));
       else empty.append(el("strong", "", "这一栏没有题卡"));
-      container.append(empty);
-    } else container.querySelectorAll(".cards-empty").forEach((node) => node.remove());
-    R.fitOptions(container);
-    const currentShown = state.current !== null && shown.some((q) => q.id === state.current);
-    markReading();
-    // Opening, collapsing or filtering moves cards: pick the card being read again.
-    if (state.focus) requestAnimationFrame(currentShown ? markReading : followReading);
+        container.append(empty);
+      } else container.querySelectorAll(".cards-empty").forEach((node) => node.remove());
+      R.fitOptions(container);
+      const currentShown = state.current !== null && shown.some((q) => q.id === state.current);
+      markReading();
+      // Opening, collapsing or filtering moves cards: pick the card being read again.
+      if (state.focus) requestAnimationFrame(currentShown ? markReading : followReading);
+    };
+    // 分批画：一批画完就把主线程还给浏览器，下一批再接着画。
+    // 分批的规矩（每批多大、每批之间让不让出主线程、新的一轮来了旧的怎么收手）
+    // 在 qb-render.js 的 renderInBatches 里，那边有行为测试盯着。
+    R.renderInBatches(shown, (q) => {
+      const signature = JSON.stringify([q, state.expanded.has(q.id), state.paper?.pages_version]);
+      let card = existing.get(q.id) || null;
+      if (!card || (state.rendered.get(q.id) !== signature && !state.editing.has(q.id))) {
+        const fresh = renderCard(q);
+        if (card) { stopWatchingCardOptions(card); card.replaceWith(fresh); } else container.append(fresh);
+        card = fresh;
+        state.rendered.set(q.id, signature);
+        watchCardOptions(fresh);
+      }
+      card.classList.toggle("is-current", q.id === state.current);
+      if (previous && previous.nextSibling !== card) previous.after(card);
+      else if (!previous && container.firstChild !== card) container.prepend(card);
+      previous = card;
+    }, { channel: "cards", onDone: finish });
   }
 
   // ---------------------------------------------------------------- 当前题卡与键盘
@@ -4019,7 +4086,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     actions.append(
       button("改字", "", () => openEditor(card, q), "修改题干、选项、题型，也可以补答案和解析（E）"),
-      button("调整范围", q.regions.length ? "" : "primary", () => openPageDialog("regions", q), "调整题目的原卷范围和片段顺序，只保存范围，不调用 AI（R）"),
+      button("调整范围", q.regions.length ? "" : "primary", () => openPageDialog("regions", q), rangeAdjustHint()),
       ...(q.body_mode === "source_image" ? [] : [button("配图", "", () => openPageDialog("figures", q), "增删配图，或调整配图的裁剪框（F）", { iconName: "image" })])
     );
     if (q.body_mode === "source_image") {

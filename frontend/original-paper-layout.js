@@ -26,6 +26,35 @@
   // Where a scope starts in the original paper's own question numbering.
   // The number a card shows is counted from one inside every scope, so only
   // this range can say which scope comes later on the page.
+  // 这份资料现在能不能调整题目范围，以及为什么、下一步去哪。
+  // 1.26.36：面板灰掉的时候只留一句「原卷处理期间只能查看题框和保存记录」，
+  // 老师看着像按钮坏了 —— 不知道这份资料卡在哪一步，也不知道自己该去哪儿等。
+  function readOnlyAdvice(paper) {
+    if (!paper) return "";
+    if (paper.archived) {
+      return "这份资料已经归档，题目范围暂时不能改。点上面的「恢复到试卷列表」把它放回列表，之后就能调整范围。";
+    }
+    if (paper.status === "failed") {
+      return "这份资料处理失败，题目范围暂时不能改。先在资料状态那里点「继续整理」，把这份资料处理完，再回来调整范围。";
+    }
+    if (paper.status && paper.status !== "ready") {
+      const label = paper.status_label || "处理中";
+      return `这份资料还在「${label}」，处理完才能调整范围。处理中的题目会被重新排版，现在改了下一步就白改了 —— 等它处理完就能调。`;
+    }
+    return "";
+  }
+  // 题卡上「调整范围」按钮的悬停说明。面板里那块提示和它说的是同一件事，
+  // 只是按钮上放不下那么多字 —— 说法放在一处，免得两边对不上。
+  const ADJUST_HINT_READY = "调整题目的原卷范围和片段顺序，只保存范围，不调用 AI（R）";
+  function adjustHint(paper) {
+    if (!paper) return ADJUST_HINT_READY;
+    if (paper.archived) return "这份资料已经归档，题目范围暂时不能改；点上面的「恢复到试卷列表」放回列表之后才能调整（R）";
+    const status = paper.status;
+    if (status && status !== "ready") {
+      return `这份资料还在「${paper.status_label || "处理中"}」，处理完才能调整题目范围（R）`;
+    }
+    return ADJUST_HINT_READY;
+  }
   function groupSeqStart(group) {
     const start = group?.seq_start;
     return typeof start === "number" ? start : null;
@@ -161,7 +190,8 @@
     });
     const current = () => draft?.targets[draft.active];
     const selectedQuestion = () => state.questions.find((q) => q.id === selectedId);
-    const readOnly = () => Boolean(state.paper?.archived) || Boolean(state.paper?.status && state.paper.status !== "ready");
+    const readOnly = () => Boolean(readOnlyAdvice(state.paper));
+    const readOnlyReason = () => readOnlyAdvice(state.paper);
     const groups = () => state.paper?.question_groups || [];
     const label = (q) => `${q.group?.title || groups().find((g) => g.id === groupId(q))?.title || "未分组"} · 第 ${q.number} 题`;
     // The scope a new question belongs to, decided by the page it sits on.
@@ -417,7 +447,11 @@
         : draft?.kind === "regions" ? `${label(selected || { number: "?" })}${dirty() ? " · 未保存" : ""}`
           : draft ? `${kindNames[draft.kind]} · 未保存` : selected ? label(selected) : "切题与校正";
       panel.append(el("strong", "", titleText));
-      if (readOnly()) panel.append(el("p", "hint", state.paper?.archived ? "原卷已归档，可查看题框和保存记录；恢复资料后才能调整。" : "原卷处理期间只能查看题框和保存记录。"));
+      if (readOnly()) {
+        const notice = el("div", "layout-blocked");
+        notice.append(el("strong", "", "现在还不能调整题目范围"), el("p", "", readOnlyReason()));
+        panel.append(notice);
+      }
       if (draft) renderDraft(); else renderOverview();
       renderHistory();
       configure();
@@ -431,10 +465,11 @@
         removed.append(restoreQuestion); panel.append(removed);
       }
       const actions = el("div", "layout-actions");
-      const add = button("补一题", "small primary", () => begin("add", null, { continuous: true })); add.id = "pageLayoutAdd"; add.disabled = readOnly(); actions.append(add);
+      const blocked = readOnlyReason();
+      const add = button("补一题", "small primary", () => begin("add", null, { continuous: true })); add.id = "pageLayoutAdd"; add.disabled = readOnly(); if (blocked) add.title = blocked; actions.append(add);
       const q = selectedQuestion();
-      const renumber = button("修改题号", "small", () => begin("renumber")); renumber.id = "pageLayoutRenumber"; renumber.disabled = !q || readOnly();
-      const merge = button("合题…", "small", () => renderMergePicker()); merge.id = "pageLayoutMerge"; merge.disabled = !q || readOnly();
+      const renumber = button("修改题号", "small", () => begin("renumber")); renumber.id = "pageLayoutRenumber"; renumber.disabled = !q || readOnly(); if (blocked) renumber.title = blocked;
+      const merge = button("合题…", "small", () => renderMergePicker()); merge.id = "pageLayoutMerge"; merge.disabled = !q || readOnly(); if (blocked) merge.title = blocked;
       if (q) { actions.append(renumber, merge); }
       panel.append(actions);
       if (q) {
@@ -1051,5 +1086,5 @@
     const x = Math.min(1000 - w, Math.max(0, bbox[0] + dx)), y = Math.min(1000 - h, Math.max(0, bbox[1] + dy));
     return [x, y, x + w, y + h].map((v) => Math.round(v * 10) / 10);
   }
-  return { COLORS, groupId, targetOf, colorOf, hitTest, nextNumber, createDraft, validate, payload, movedEnough, moveBox, sourceEvidence, createController, groupPages, groupCoversPage, groupTitle, pickGroupForPages };
+  return { COLORS, groupId, targetOf, colorOf, hitTest, nextNumber, createDraft, validate, payload, movedEnough, moveBox, sourceEvidence, createController, groupPages, groupCoversPage, groupTitle, pickGroupForPages, readOnlyAdvice, adjustHint, ADJUST_HINT_READY };
 });

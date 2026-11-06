@@ -570,6 +570,24 @@ def _start(args: list[str], environment: dict[str, str], log_name: str) -> tuple
         raise
 
 
+def _warm_papers(url: str) -> None:
+    """把第一次 /api/papers 跑完，窗口开出来时列表已经是热的。
+
+    冷启动之后第一次 /api/papers 要 13.5 秒：ORM 第一次编译查询计划、SQLite 页缓存
+    是空的、十几份卷的结构数据第一次序列化。之后只要 0.8 秒。而窗口开出来第一件事
+    就是拉这个接口 —— 不等的话，界面会空着十几秒，什么都点不了。
+    等的这十几秒里启动器停在「正在启动后台服务…」，那是有进度提示的等待，比空白
+    界面好受得多。
+    """
+    for _ in range(6):
+        try:
+            with urllib.request.urlopen(url + "/api/papers", timeout=90) as response:
+                response.read()
+            return
+        except (urllib.error.URLError, TimeoutError, OSError):
+            time.sleep(1.0)
+
+
 def _health(url: str, process: subprocess.Popen) -> None:
     for _ in range(60):
         if process.poll() is not None:
@@ -577,6 +595,7 @@ def _health(url: str, process: subprocess.Popen) -> None:
         try:
             with urllib.request.urlopen(url + "/api/health", timeout=1) as response:
                 if response.status == 200:
+                    _warm_papers(url)
                     return
         except (urllib.error.URLError, TimeoutError):
             pass

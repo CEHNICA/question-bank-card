@@ -6,10 +6,35 @@ import django.db.models.deletion
 from django.db import migrations, models
 
 
+def detach_dead_tag_suggestions(apps, schema_editor):
+    """把指向已经不存在的任务的标签建议跟任务断开。
+
+    1.26.36：老师的题库里躺着 38 条「生成失败」的标签建议，它们指着的任务行
+    早没了（任务跟着入库版本一起被删了，SQLite 这边一直不拦这种坏引用）。
+    这次迁移要给任务表加字段，SQLite 只能把整张表重建一遍，重建收尾 Django
+    会跑一次整库外键校验（PRAGMA foreign_key_check），撞上这 38 条坏引用就
+    直接报错 —— 升级卡死在这一步，软件装不上。
+
+    断开的只是「这条建议当初由哪个任务生成」这根线；建议本身、建议内容、老师
+    看到的「生成失败」记录都留着。断完之后整库校验就干净了。
+    """
+    LibraryJob = apps.get_model("core", "LibraryJob")
+    LibraryTagSuggestion = apps.get_model("core", "LibraryTagSuggestion")
+    live = set(LibraryJob.objects.values_list("id", flat=True))
+    dead = [
+        pk
+        for pk, job_id in LibraryTagSuggestion.objects.exclude(job_id=None).values_list("id", "job_id")
+        if job_id not in live
+    ]
+    if dead:
+        LibraryTagSuggestion.objects.filter(id__in=dead).update(job=None)
+
+
 class Migration(migrations.Migration):
     dependencies = [("core", "0029_realign_untouched_suggestions")]
 
     operations = [
+        migrations.RunPython(detach_dead_tag_suggestions, migrations.RunPython.noop),
         migrations.AddField(model_name="libraryjob", name="attempts", field=models.PositiveIntegerField(default=0)),
         migrations.AddField(
             model_name="libraryjob", name="claimed_at", field=models.DateTimeField(blank=True, null=True)

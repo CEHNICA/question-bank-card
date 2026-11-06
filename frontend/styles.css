@@ -830,6 +830,10 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .layout-confirm, .layout-conflict, .layout-merge-picker { padding: 10px; margin: 10px 0; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-2); }
 .layout-confirm .crop-view { margin: 8px 0 12px; }
 .layout-warning { color: var(--red); line-height: 1.5; }
+/* 1.26.36：暂时不能调整范围时，板上要有一块说人话的地方，而不是只留一句小字。 */
+.layout-blocked { margin: 10px 0; padding: 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-2); }
+.layout-blocked > strong { display: block; margin-bottom: 4px; }
+.layout-blocked > p { margin: 0; line-height: 1.6; }
 .layout-empty-range { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; padding: 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-2); }
 .layout-empty-range > strong, .layout-empty-range > p { flex-basis: 100%; margin: 0; line-height: 1.6; }
 .layout-overlap { position: fixed; z-index: 20; display: grid; gap: 5px; width: 260px; max-height: 310px; overflow: auto; padding: 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); }

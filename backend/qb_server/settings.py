@@ -8,7 +8,18 @@ SECRET_KEY = os.environ.get("QB_DJANGO_SECRET_KEY", "local-only-question-bank-ca
 DEBUG = os.environ.get("QB_DEBUG", "0") == "1"
 ALLOWED_HOSTS = ["127.0.0.1", "localhost", "testserver"]
 INSTALLED_APPS = ["django.contrib.contenttypes", "core"]
-MIDDLEWARE = ["django.middleware.security.SecurityMiddleware", "django.middleware.common.CommonMiddleware"]
+# 1.26.36（性能）：这三行中间件是补上来的，缺了它们这个软件会一直卡。
+# GZip：以前没开，/api/papers/<id> 那 2.7 MB 的试卷详情全是明文传输
+#       （web.log 里记到的响应头一个 Content-Encoding 都没有）。
+# ConditionalGet：配合静态资源的 ETag，浏览器手上已有的文件能变成一次 304，
+#       而不是每次开窗口重下 1.2 MB（app.js 483 KB + katex 266 KB + library.js 430 KB…）。
+# 顺序照 Django 文档：GZip 在 Common 前面，ConditionalGet 在 Common 后面。
+MIDDLEWARE = [
+    "django.middleware.security.SecurityMiddleware",
+    "django.middleware.gzip.GZipMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.http.ConditionalGetMiddleware",
+]
 ROOT_URLCONF = "qb_server.urls"
 TEMPLATES = []
 WSGI_APPLICATION = "qb_server.wsgi.application"
