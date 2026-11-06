@@ -133,6 +133,9 @@ class PdfBrowserLaunchIntegrationTests(SimpleTestCase):
             with (
                 mock.patch.dict(os.environ, {"__COMPAT_LAYER": "DetectorsAppHealth"}),
                 mock.patch.object(pdf, "_browser_path", return_value=executable),
+                # 生产时限 60 秒；CI 机器上多条流水线并行时浏览器起得慢，
+                # 这里放宽测试自己的时限，生产行为不变。
+                mock.patch.object(pdf, "DEADLINE_SECONDS", 300),
                 mock.patch.object(pdf, "_launch_browser", side_effect=launch),
                 mock.patch.object(pdf._logger, "warning", wraps=pdf._logger.warning) as warnings,
             ):
