@@ -2431,6 +2431,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const fragment = document.createDocumentFragment();
     matches.slice(0, 100).forEach((q) => {
       const pages = window.QBQuestionLocator?.pagesOf(q) || [];
+      const firstPage = window.QBQuestionLocator?.pageOf(q);
+      // 标题里已经写了书上第几页，这里只补它之外的页，同一个数字不说两遍。
+      const otherPages = pages.filter((page) => page !== firstPage);
       const row = button("", "review-finder-result", async () => {
         const current = questionById(q.id);
         if (!current) { toast("这道题已被删除或拆合替代，请刷新找题结果。", "warning"); renderReviewFinder(); return; }
@@ -2451,7 +2454,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       row.setAttribute("role", "option");
       row.dataset.questionId = String(q.id);
       row.append(el("span", "review-finder-result-title", window.QBQuestionLocator?.locate(q) || `第 ${q.number} 题`));
-      row.append(el("span", "review-finder-result-meta", pages.length ? `第 ${pages.join("、")} 页` : "原图题"));
+      const meta = otherPages.length ? `另在第 ${otherPages.join("、")} 页` : pages.length ? "" : "原图题";
+      if (meta) row.append(el("span", "review-finder-result-meta", meta));
       row.append(el("span", "review-finder-result-snippet", window.QBReviewFinder?.snippet(q) || "原图题 · 暂无已保存文字"));
       fragment.append(row);
     });
@@ -4615,7 +4619,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       head.append(title, restore);
       const questions = el("ul", "trash-questions");
       (batch.questions || []).forEach((question) => {
-        const prefix = window.QBQuestionLocator?.locateWithPage(question) || `第 ${question.number} 题`;
+        const prefix = window.QBQuestionLocator?.locate(question) || `第 ${question.number} 题`;
         const stem = String(question.stem || "").replace(/\s+/g, " ").trim();
         questions.append(el("li", "", `${prefix}${stem ? ` — ${stem.slice(0, 90)}${stem.length > 90 ? "…" : ""}` : ""}`));
       });

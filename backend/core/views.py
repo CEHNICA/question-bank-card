@@ -727,14 +727,11 @@ _QUESTION_MUTATION_STATUSES = {Paper.Status.READY}
 
 
 def _question_first_page(question) -> int | None:
-    """这道题在原卷的第几页（一基）。没有原图位置就没有页码。"""
-    for region in question.regions or []:
-        if not isinstance(region, dict):
-            continue
-        index = region.get("page_idx")
-        if isinstance(index, int):
-            return index + 1
-    return None
+    """这道题在原卷的第几页（一基）。没有原图位置就没有页码。
+
+    页码只认一条规矩（library.first_page）：书上第一次出现的那一页。
+    """
+    return library.first_page(question.regions)
 
 
 def _question_trash_json(batch: QuestionDeletionBatch) -> dict:

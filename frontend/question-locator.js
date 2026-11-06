@@ -2,10 +2,13 @@
  * 指出一道题。
  *
  * 同一本教材里题号会从小节重新开始，「第 1 题」在书上有上百处，
- * 光报题号等于没报。这里把「章节/小节 + 题号」凑成一句能对回原书的话；
- * 找不到章节名时，用原卷页码顶上。
+ * 光报题号等于没报。所以定位句永远是三样东西：原卷页码 + 章节名 + 题号。
  *
- * 批量通过的结果面板、回收站、找题共用这一套说法，别各写各的。
+ * 页码是唯一的硬锚点：章节名会重号（「练习」「思考」全书几十处），
+ * 题号也会重号，只有「书上第几页」认得出来 —— 所以页码不再只在
+ * 「没有章节名时」才报，有章节名也得报。
+ *
+ * 批量通过的结果面板、题库卡片墙、回收站、找题共用这一套说法，别各写各的。
  */
 (function (root, factory) {
   const value = factory();
@@ -14,48 +17,113 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
-  // 章节名有三种来法：接口给标题对象、给字符串、或者根本没给。
-  function scopeOf(item) {
+  // 章节名的两条规矩，跟后端 library.section_label 是同一条（两边拿同一份
+  // fixture 断言）：短到 12 字、不带冒号逗号，才算章节名。
+  // 教材的「习题 6.1」「均值不等式」认；试卷的 section 是一整段大题说明
+  // （「一、选择题：本大题共8小题，每小题5分…」），放上去是噪音。
+  const SECTION_LABEL_MAX = 12;
+  const SECTION_LABEL_STOP = /[：:，,。;；]/;
+
+  function sectionLabel(section) {
+    const text = String(section == null ? "" : section).trim();
+    if (!text || text.length > SECTION_LABEL_MAX || SECTION_LABEL_STOP.test(text)) return "";
+    return text;
+  }
+
+  // 真章节名：题组标题里带「章」的才算（「章节01 · 公式法」「第2章 函数」）。
+  // 「第 3 组」「第 12 页 · 第 3 组」是位置标签，印出来只会让人以为那是章节。
+  function isChapterName(title) {
+    return String(title == null ? "" : title).includes("章");
+  }
+
+  // 题组名有三种来法：接口给标题字符串、给标题对象、或者放在题库快照里。
+  function groupTitleOf(item) {
     if (!item) return "";
-    const direct = String(item.group_title || "").trim();
+    const direct = String(item.group_title == null ? "" : item.group_title).trim();
     if (direct) return direct;
     const group = item.group;
-    if (group && typeof group === "object") return String(group.title || "").trim();
+    if (group && typeof group === "object") return String(group.title == null ? "" : group.title).trim();
     if (typeof group === "string") return group.trim();
-    return String(item.section || "").trim();
+    const source = item.content && item.content.source_group;
+    if (source && typeof source === "object") return String(source.title == null ? "" : source.title).trim();
+    return "";
+  }
+
+  // 章节名也有两种来法：接口直接给，或放在题库快照的 content.section 里。
+  function sectionOf(item) {
+    if (!item) return "";
+    const direct = String(item.section == null ? "" : item.section).trim();
+    if (direct) return direct;
+    return String((item.content && item.content.section) || "").trim();
+  }
+
+  // 章节名：先认真章节名，其次短章节名，其余一律不算。
+  function scopeOf(item) {
+    if (!item) return "";
+    const given = String(item.scope == null ? "" : item.scope).trim();
+    if (given) return given;
+    const group = groupTitleOf(item);
+    if (isChapterName(group)) return group;
+    return sectionLabel(sectionOf(item));
   }
 
   // 教材里的例题就叫「例 1」，不是「第 1 题」——和题卡顶上写的一样。
+  // 没有印刷题号的栏目题给空串，由调用方决定印「栏目题」还是别的。
   function numberText(item) {
     const number = item && item.number;
-    if (number == null || number === "") return "这道题";
+    if (number == null || number === "") return "";
     return item.source_kind === "example" ? `例 ${number}` : `第 ${number} 题`;
   }
 
-  // 这道题在原卷上的页码。
+  // 这道题在原卷上的所有页码：去重、从小到大。
   function pagesOf(item) {
-    const regions = (item && item.regions) || [];
     const pages = new Set();
-    for (const region of regions) {
-      const index = region && typeof region === "object" ? Number(region.page_idx) : NaN;
-      if (Number.isFinite(index)) pages.add(index + 1);
-    }
+    const collect = (list) => {
+      for (const region of list || []) {
+        const index = region && typeof region === "object" ? Number(region.page_idx) : NaN;
+        if (Number.isFinite(index)) pages.add(index + 1);
+      }
+    };
+    collect(item && item.regions);
+    collect(item && item.content && item.content.sources);
     return Array.from(pages).sort((a, b) => a - b);
   }
 
-  // 主定位：章节/小节 + 题号，和题卡顶上写的对得上，老师一看就知道是哪张卡。
-  function locate(item) {
-    const scope = scopeOf(item);
-    const number = numberText(item);
-    return scope ? `${scope} · ${number}` : number;
+  // 这道题在原卷的第几页：书上第一次出现的那一页。
+  // 接口给了 page 就用它，没给就从原图位置里取最小的那页（和后端同一条规矩）。
+  function pageOf(item) {
+    const direct = Number(item && item.page);
+    if (Number.isFinite(direct) && direct > 0) return direct;
+    const pages = pagesOf(item);
+    return pages.length ? pages[0] : null;
   }
 
-  // 没有章节名时题号会重号，只能靠原卷页码认。
-  function locateWithPage(item) {
-    if (scopeOf(item)) return locate(item);
-    const page = Number(item && item.page);
-    if (Number.isFinite(page) && page > 0) return `第 ${page} 页 · ${numberText(item)}`;
-    return locate(item);
+  // 完整定位句：第 X 页 · 章节名 · 第 N 题。
+  function locate(item) {
+    const parts = [];
+    const page = pageOf(item);
+    if (page) parts.push(`第 ${page} 页`);
+    const scope = scopeOf(item);
+    if (scope) parts.push(scope);
+    const number = numberText(item);
+    if (number) parts.push(number);
+    return parts.join(" · ") || "栏目题";
+  }
+
+  // 身份：这道题是哪一题。题库卡片墙的大标题用这个。
+  function identityOf(item) {
+    return numberText(item) || scopeOf(item) || "栏目题";
+  }
+
+  // 位置：这本书的第几页、哪一节。题库卡片墙的小字用这个。
+  // 没有题号时章节名就是身份了，不在这里再说一遍。
+  function positionOf(item) {
+    const parts = [];
+    const page = pageOf(item);
+    if (page) parts.push(`第 ${page} 页`);
+    const scope = scopeOf(item);
+    if (scope && numberText(item)) parts.push(scope);
+    return parts.join(" · ");
   }
 
   // 题干开头：认题时扫一眼就能对上，多行文字压成一行。
@@ -66,5 +134,15 @@
     return text.length > limit ? `${text.slice(0, limit)}…` : text;
   }
 
-  return { locate, locateWithPage, scopeOf, numberText, pagesOf, snippet };
+  return {
+    locate,
+    identityOf,
+    positionOf,
+    scopeOf,
+    numberText,
+    pageOf,
+    pagesOf,
+    sectionLabel,
+    snippet,
+  };
 });

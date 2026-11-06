@@ -356,6 +356,23 @@ SECTION_LABEL_MAX = 12
 SECTION_LABEL_STOP = re.compile(r"[：:，,。;；]")
 
 
+def first_page(regions) -> int | None:
+    """这道题在原卷上第一次出现的那一页（一基）。
+
+    原图位置可能横跨两页，这道题是从前面那页开始的，所以取最小的那页。
+    全库只认这一条规矩：结果面板、回收站、题库卡片墙报的页码都得一样，
+    不能一处按第一个框、一处按最小值。
+    """
+    pages = []
+    for region in regions or []:
+        if not isinstance(region, dict):
+            continue
+        index = region.get("page_idx")
+        if isinstance(index, int) and index >= 0:
+            pages.append(index + 1)
+    return min(pages) if pages else None
+
+
 def section_label(section) -> str:
     """卡面上真的印出来的那段章节名，空串表示卡面不显示。
 
@@ -790,6 +807,7 @@ def publication_json(publication: PublishedQuestion, *, include_tag_details: boo
             solution = library_solutions.solution_json(library_solutions.selected(publication))
         except library_solutions.SolutionError as error:
             solution_error = str(error)
+    content = _content_with_figure_state(publication)
     data = {
         "id": str(publication.id),
         "draft_id": publication.question_id,
@@ -802,7 +820,8 @@ def publication_json(publication: PublishedQuestion, *, include_tag_details: boo
         "review": {"source": publication.review_source or "human", "agent": publication.review_agent},
         "published_at": publication.published_at.isoformat(),
         "withdrawn_at": publication.withdrawn_at.isoformat() if publication.withdrawn_at else None,
-        "content": _content_with_figure_state(publication),
+        "content": content,
+        "page": first_page(content.get("sources")),
         "origin": str((publication.content or {}).get("origin") or ""),
         "has_answer": bool(str((publication.content or {}).get("answer") or "").strip()),
         "subquestions": qtypes.subquestion_count((publication.content or {}).get("stem")),

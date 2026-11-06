@@ -45,13 +45,17 @@ for (const { sections, index, group_name: groupName } of fixture.cases) {
 assert.match(libraryJs, /node\("h3", "print-section", window\.ExamExport\.sectionHeading\(group, index, name\)\)/,
   "预览的大题标题必须走 ExamExport.sectionHeading —— 屏幕和导出必须是同一个定义");
 
-// ---- 四、短章节名的判定只有一处（卡面和组卷标题共用） ----------------------
-assert.match(libraryJs, /function shortSection\(item\) \{\s*return window\.ExamExport\.shortSectionLabel\(item\?\.content\?\.section\);/,
-  "卡面上的章节名判定也走 ExamExport.shortSectionLabel，别再各写一遍");
-assert.match(examExport.sectionHeading.toString(), /shortSectionLabel\(/,
-  "组卷标题里的章节名判定必须用共享的那一条");
+// ---- 四、短章节名的判定只有一处（卡面、组卷标题、定位面板共用） ------------
+// 1.26.43：这条规矩的东家是定位模块（frontend/question-locator.js）。
+// 卡面、组卷标题、结果面板、回收站都要说同一句话，只写一份，谁都不许再抄一遍。
+const locatorJs = fs.readFileSync(path.join(__dirname, "question-locator.js"), "utf8");
+assert.match(locatorJs, /function sectionLabel\(section\)/, "短章节名的判定住在定位模块里");
+assert.doesNotMatch(libraryJs, /SECTION_LABEL_MAX|SECTION_LABEL_STOP/,
+  "library.js 不许再抄一份「多长算短、哪些符号算噪音」的规矩");
 assert.doesNotMatch(examExport.sectionHeading.toString(), /SECTION_LABEL_MAX|SECTION_LABEL_STOP/,
   "组卷标题不能自己再抄一份「多长算短、哪些符号算噪音」的规矩");
+assert.match(examExport.shortSectionLabel.toString(), /sectionLabel\(/,
+  "组卷标题里的章节名判定必须用共享的那一条");
 
 // ---- 五、题型名的序号：第几组就写「一、二、三…」 --------------------------
 assert.equal(examExport.sectionHeading([{ content: {} }], 0, "选择题"), "一、选择题");

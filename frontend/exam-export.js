@@ -181,14 +181,18 @@
   // 对新卷子依然成立。长章节名按卡面上那条规矩算噪音，不印 ——
   // 判定和后端 library.section_label 是同一条（frontend/testdata/section_labels.json
   // 锁着两边），导出那边用同一个判定（backend/core/library_export.py 的 _section_heading）。
-  const SECTION_LABEL_MAX = 12;
-  const SECTION_LABEL_STOP = /[：:，,。;；]/;
+  // 1.26.43：这条规矩的东家是定位模块（frontend/question-locator.js）。
+  // 卡面、组卷标题、结果面板、回收站都要说同一句话，所以只写一份，
+  // 谁都不许再抄一遍。
   const PAPER_SECTION_NAMES = ["一", "二", "三", "四", "五", "六"];
 
   function shortSectionLabel(section) {
-    const text = String(section || "").trim();
-    if (!text || text.length > SECTION_LABEL_MAX || SECTION_LABEL_STOP.test(text)) return "";
-    return text;
+    const locator = root.QBQuestionLocator
+      || (typeof require === "function" ? require("./question-locator.js") : null);
+    if (!locator || typeof locator.sectionLabel !== "function") {
+      throw new Error("章节名判定没加载出来，请刷新页面重试。");
+    }
+    return locator.sectionLabel(section);
   }
 
   function sectionHeading(group, index, name) {

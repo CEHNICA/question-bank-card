@@ -1,108 +1,118 @@
 "use strict";
 
-// 卡上那句定位是老师回原卷核对时唯一能用的话。
-// 试卷的题号就是原卷先后；教材每一章的习题都从 1 重新编——九年级上册里就有
-// 94 个「第 1 题」，光这句话翻书根本找不到是哪一章。章节名后端已经算好放在
-// content.section。试卷的 section 是一整段大题说明，放上去是噪音，所以只认短标签。
+// 卡上那两句话是老师回原卷核对时唯一能用的话。
 //
-// 后端 library.section_label 认的是同一条规则——它决定哪些章节名进搜索，
-// 这边决定哪些章节名印上卡面。同一段文字一处印了、一处搜不到，老师立刻就发现。
-// 所以两边读同一份 testdata/section_labels.json；取值全部来自真库 112 种 section。
+// 1.26.43 起全库只留一套说法（frontend/question-locator.js）：
+//   大标题说「这是第几题」（identityOf），小字说「在书上哪一页哪一节」（positionOf）。
+// 页码是唯一的硬锚点 —— 同一本教材里章节名（「练习」「思考」）和题号都会重号，
+// 只有「书上第几页」认得出来，所以每一张卡都要带页码。
 //
-// 教材「做一做」「随堂练习」里的题纸面上没有印刷题号，后端给 number=null。
-// 这种卡如果还按「第 N 题」拼，印出来的是「第 0 题」或「第 undefined 题」——
-// 翻书翻不到的一句话比没有更糟。
+// 章节名的判定三处共用一条规矩（后端 library.section_label、导出用的
+// ExamExport.shortSectionLabel、定位模块），都读同一份 testdata/section_labels.json。
+// 「第 N 组」是位置标签，不是章节名，不许印上卡面。
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
+const L = require("./question-locator.js");
 const js = fs.readFileSync(path.join(__dirname, "library.js"), "utf8");
-const start = js.indexOf("  function shortSection(item)");
+
+// 卡面上的话必须由统一模块说出来，library.js 自己不许另拼一句。
+assert.match(js, /window\.QBQuestionLocator\?\.identityOf\(item\)/, "卡头的话由统一模块负责");
+assert.match(js, /window\.QBQuestionLocator\?\.positionOf\(item\)/, "卡上小字的话由统一模块负责");
+
+// 整份 library.js 不得再直接拿题号拼一句「…第 N 题」。
+const direct = [...js.matchAll(/\$\{(?:item|known|question)\.number\} 题/g)];
+assert.equal(
+  direct.length,
+  0,
+  `library.js 里还有直接拼题号的地方：${direct.map((m) => js.slice(Math.max(0, m.index - 60), m.index + 20).replace(/\s+/g, " ")).join(" | ")}`
+);
+
+// 卡上真正显示的，就是模块算出来的那一句。
+const start = js.indexOf("  function sourceLocator(item)");
 const end = js.indexOf("  function card(item)");
-assert.ok(start > 0 && end > start, "shortSection/cardLocator/sourceLocator 必须存在且排在 card() 前面");
-const scope = {};
-// 1.26.25：章节名的判定搬进了 ExamExport（跟组卷的大题标题共用同一条），
-// 所以这里要把那个模块放进作用域，卡面那条规则才算跑的是真代码。
-scope.window = { ExamExport: require("./exam-export.js") };
+assert.ok(start > 0 && end > start, "sourceLocator/cardLocator 必须存在且排在 card() 前面");
+const scope = { window: { QBQuestionLocator: L } };
 vm.runInNewContext(js.slice(start, end), scope);
-assert.equal(typeof scope.shortSection, "function");
 assert.equal(typeof scope.sourceLocator, "function");
+assert.equal(typeof scope.cardLocator, "function");
 
-const fixture = JSON.parse(
-  fs.readFileSync(path.join(__dirname, "testdata", "section_labels.json"), "utf8"));
-assert.ok(fixture.cases.length >= 10, "fixture 至少要覆盖教材短标签、试卷长说明和 12/13 字边界");
+// 卡头：这是第几题。
+assert.equal(scope.sourceLocator({ number: 8 }), "第 8 题");
+assert.equal(scope.sourceLocator({ number: null, content: { section: "做一做" } }), "做一做");
+assert.equal(scope.sourceLocator({}), "栏目题");
 
-for (const { section, label } of fixture.cases) {
-  const number = 8;
-  const expected = label ? `${label} · 原卷第 ${number} 题` : `原卷第 ${number} 题`;
-  assert.equal(
-    scope.cardLocator({ number, content: { section } }), expected,
-    `章节名 ${JSON.stringify(section)} 的卡面定位应当是 ${JSON.stringify(expected)}`);
-}
+// 卡上小字：书上第几页、哪一节。
+assert.equal(scope.cardLocator({ number: 8, page: 42 }), "第 42 页");
+assert.equal(scope.cardLocator({ number: 8, page: 42, content: { section: "习题 6.1" } }), "第 42 页 · 习题 6.1");
+assert.equal(scope.cardLocator({ number: 8 }), "");
 
-// 卡面上真正显示的，必须是这个函数的结果，不能又写死一句。
-assert.match(js, /node\("span", "", cardLocator\(item\)\)/);
-
-// 卡上没给 content 也照样退回「原卷第 N 题」。
-assert.equal(scope.cardLocator({ number: 5 }), "原卷第 5 题");
-
-// ---- 没有印刷题号的教材栏目题 ----
-
-// 栏目标题就是纸面上唯一翻得到的定位，直接用它。
-assert.equal(scope.cardLocator({ number: null, content: { section: "做一做" } }), "做一做");
-assert.equal(scope.cardLocator({ number: null, content: { section: "随堂练习" } }), "随堂练习");
-
-// 0 是切题时给占位用的旧值，也不能印成「第 0 题」。
-assert.equal(scope.cardLocator({ number: 0, content: { section: "做一做" } }), "做一做");
-assert.equal(scope.sourceLocator({ number: 0, content: { section: "做一做" } }), "做一做");
-
-// 连栏目名也没有时也不能出现「0」「null」「undefined」。
-for (const bad of [null, undefined, 0]) {
-  const card = String(scope.cardLocator({ number: bad }));
-  const loc = String(scope.sourceLocator({ number: bad }));
-  assert.ok(!/\b0 题/.test(card) && !card.includes("null") && !card.includes("undefined"),
-    `没有题号时卡面不能出现「第 0 题」这类纸面上不存在的话：${card}`);
-  assert.ok(!/\b0 题/.test(loc) && !loc.includes("null") && !loc.includes("undefined"),
-    `没有题号时定位不能出现「第 0 题」：${loc}`);
-}
-
-// 长说明（大题标题）不该被当成定位标签用，但也不能编出题号。
-const noisy = scope.cardLocator({ number: null, content: { section: "一、选择题：本大题共8小题，每小题5分。" } });
-assert.ok(!noisy.includes("0 题"), noisy);
-
-// 有题号的卡，定位仍是「第 N 题」。
-assert.equal(scope.sourceLocator({ number: 12 }), "第 12 题");
-assert.equal(scope.sourceLocator({ number: 12, content: { section: "习题 6.1" } }), "第 12 题");
-
-// ---- 整份 library.js 不得再直接拿题号拼一句「…第 N 题」 ----
-
-// sourceLocator / cardLocator 内部那两处是唯一允许的：都在
-// `if (item?.number)` 之后，没有题号时根本走不到。先把这两段摘掉再查剩下的。
-const guarded = js.slice(start, end);
-const rest = js.slice(0, start) + js.slice(end);
-const direct = [...rest.matchAll(/\$\{(?:item|known)\.number\} 题/g)];
-assert.equal(direct.length, 0,
-  `library.js 里还有直接拼题号的地方：${direct.map((m) => rest.slice(Math.max(0, m.index - 50), m.index + 20).replace(/\s+/g, " ")).join(" | ")}`);
-assert.match(guarded, /if \(item\?\.number\) return `第 \$\{item\.number\} 题`/,
-  "sourceLocator 必须先判题号再拼，否则无题号的栏目题会印出「第 0 题」");
-
-// ---- 定位句挂在哪儿 ----
-
-// 卡头是三列 grid：18px（复选框）| auto（题号+题型）| minmax(0,1fr)（文件名）。
-// 一句没有类名的定位如果作为卡头的直接子元素，会被自动排进那个 18px 的窄槽，
-// 每个字换一行，竖成一列——实机量到过 18px 宽 × 108px 高。
-// 只在 card() 里查：标签建议那块也有一个叫 meta 的 span，是不相干的东西。
+// 每一张卡都要带页码 —— 老师翻书靠的是页码，不是题号。
 const cardStart = js.indexOf("function card(item)");
 const cardEnd = js.indexOf("\n  function ", cardStart + 10);
 assert.ok(cardStart > 0 && cardEnd > cardStart, "card() 必须能被切出来");
 const cardBody = js.slice(cardStart, cardEnd);
-assert.doesNotMatch(cardBody, /meta\.append\([^)]*node\("span", "", /,
-  "定位句不能作为没有类名的直接子元素挂到卡头上（会被挤成一竖列）");
-assert.match(cardBody, /provenance\.append\(node\("span", "", cardLocator\(item\)\)\)/,
-  "定位句和「录于…」「无答案」排在同一行");
+assert.match(cardBody, /provenance\.append\(node\("span", "", position\)\)/, "卡上要印出书上第几页");
 
-// 试卷卡的标题已经写着「第 N 题」，再补一句「原卷第 N 题」是同一句话说两遍；
-// 教材卡每一章都从 1 重新编（全库 94 张都叫「第 1 题」），只有带章节才认得出。
-assert.match(cardBody, /if \(shortSection\(item\)\) provenance\.append\(/,
-  "定位句只在能补上章节时才显示");
+// 光看代码里有没有那句话不算数 —— 得看它是不是真的挂到卡上了。
+// 把挂定位小字的那几行原样抠出来，在假 DOM 里真跑一遍，读挂上去的节点。
+const mount = cardBody.match(
+  /const position = cardLocator\(item\);[\s\S]*?provenance\.append\(node\("span", "", position\)\);/
+);
+assert.ok(mount, "卡上要真的把定位句挂到 provenance 上");
+const makeNode = (tag, className, text) => ({ tag, className, text: text === undefined || text === null ? "" : String(text) });
+const mounted = [];
+vm.runInNewContext(mount[0], {
+  item: { number: 8, page: 42 },
+  cardLocator: scope.cardLocator,
+  node: makeNode,
+  provenance: { append: (kid) => mounted.push(kid) }
+});
+assert.equal(mounted.length, 1, "卡上要真的印出那一句定位");
+assert.equal(mounted[0].text, "第 42 页", "卡上小字说的是书上第几页");
+
+// 认不出页码时不留空行。
+const emptyMounted = [];
+vm.runInNewContext(mount[0], {
+  item: { number: 8 },
+  cardLocator: scope.cardLocator,
+  node: makeNode,
+  provenance: { append: (kid) => emptyMounted.push(kid) }
+});
+assert.equal(emptyMounted.length, 0, "认不出页码时卡上不留空行");
+assert.doesNotMatch(
+  cardBody,
+  /if \(shortSection\(item\)\) provenance\.append\(/,
+  "定位句不再只在有章节名时才显示 —— 页码每张卡都要有"
+);
+
+// 卡头是三列 grid：18px（复选框）| auto（题号+题型）| minmax(0,1fr)（文件名）。
+// 一句没有类名的定位如果作为卡头的直接子元素，会被自动排进那个 18px 的窄槽，
+// 每个字换一行，竖成一列——实机量到过 18px 宽 × 108px 高。
+assert.doesNotMatch(
+  cardBody,
+  /meta\.append\([^)]*node\("span", "", /,
+  "定位句不能作为没有类名的直接子元素挂到卡头上（会被挤成一竖列）"
+);
+
+// ---- 章节名的判定：三处同一条规矩 ----
+const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "testdata", "section_labels.json"), "utf8"));
+assert.ok(fixture.cases.length >= 10, "fixture 至少要覆盖教材短标签、试卷长说明和 12/13 字边界");
+const ExamExport = require("./exam-export.js");
+for (const { section, label } of fixture.cases) {
+  assert.equal(L.sectionLabel(section), label, `章节名 ${JSON.stringify(section)} 的判定应当是 ${JSON.stringify(label)}`);
+  assert.equal(ExamExport.shortSectionLabel(section), label, "导出那边认的是同一条规矩");
+}
+
+// 「第 N 组」这种位置标签不是章节名，不许印上卡面。
+assert.equal(L.scopeOf({ content: { source_group: { title: "第 3 组" } } }), "");
+assert.equal(L.scopeOf({ content: { source_group: { title: "第 12 页 · 第 3 组" } } }), "");
+assert.equal(L.scopeOf({ content: { source_group: { title: "章节02 · 配方法" } } }), "章节02 · 配方法");
+
+// 没有印刷题号的教材栏目题，定位照样要带页码。
+assert.equal(scope.cardLocator({ number: null, page: 42, content: { section: "做一做" } }), "第 42 页");
+assert.equal(scope.sourceLocator({ number: null, content: { section: "做一做" } }), "做一做");
+
+console.log("library card locator: ok");

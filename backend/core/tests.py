@@ -2078,6 +2078,26 @@ class ApiTests(TestCase):
         self.assertIsNone(row["group"], "没有章节名就不许硬编一个")
         self.assertEqual(row["section"], "")
 
+    def test_first_page_is_the_page_the_question_starts_on(self):
+        """页码只认一条规矩：书上第一次出现的那一页（原图位置里最小的那页）。"""
+        from . import library
+
+        self.assertIsNone(library.first_page([]))
+        self.assertIsNone(library.first_page(None))
+        self.assertIsNone(library.first_page([{"bbox": [10, 20, 30, 40]}]), "没有页码就老实说没有")
+        self.assertEqual(library.first_page([{"page_idx": 0}]), 1)
+        self.assertEqual(library.first_page([{"page_idx": 41}, {"page_idx": 3}]), 4, "取最小的那页")
+
+    def test_library_items_carry_the_page_in_the_book(self):
+        """题库里的题也要能对回原书。光有「第 1 题」在书上有上百处，
+        得把原卷页码一起报出来，卡片墙才认得出是哪一张。"""
+        Question.objects.filter(pk=self.q.pk).update(regions=[{"page_idx": 41, "bbox": [50, 100, 480, 300]}])
+        self.post(f"/api/papers/{self.paper.id}/approve-green")
+        self.post(f"/api/papers/{self.paper.id}/publish")
+        items = self.client.get("/api/library").json()["items"]
+        item = next(entry for entry in items if entry["number"] == 1)
+        self.assertEqual(item["page"], 42, "页码按原卷的一基页码报")
+
     def test_human_no_figure_confirmation_is_traceable_and_allows_approval(self):
         Question.objects.filter(pk=self.q2.pk).update(
             state=Question.State.YELLOW,

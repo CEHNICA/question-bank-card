@@ -1192,30 +1192,20 @@
     return new Set([...names].filter(([, count]) => count > 1).map(([name]) => name));
   }
 
-  // 卡上那句「原卷第 N 题」是老师回原卷核对时要用的定位。
-  // 试卷的题号就是原卷先后，光它就够；教材每一章的习题都从 1 重新编，
-  // 九年级上册里就有 94 个「第 1 题」，光这句话翻书根本找不到是哪一章。
-  // 章节名（习题 6.1、复习题）后端已经算好在 content.section 里，只有短标签
-  // 才显示——试卷的 section 是一整段大题说明（「一、选择题：本大题共8小题…」），
-  // 放上去反而是噪音。
-  // 1.26.25：这条判定搬进 ExamExport（跟组卷的大题标题用的是同一条），
-  // 免得同一句规则在两个文件里各写一遍、改一边就忘了另一边。
-  function shortSection(item) {
-    return window.ExamExport.shortSectionLabel(item?.content?.section);
-  }
-
-  // 教材「做一做」「随堂练习」里的题纸面上没有印刷题号，后端给 null。
-  // 翻书时用得上的定位是栏目标题本身；印一个「第 0 题」只会让人翻不到。
+  // 卡上的话是老师回原卷核对时要用的定位。1.26.43 起全库只留一套说法，
+  // 都写在 QBQuestionLocator 里：
+  //   卡头的大标题说「这是第几题」（identityOf），
+  //   卡上那行小字说「在书上第几页、哪一节」（positionOf）。
+  // 页码是唯一的硬锚点：同一本教材里章节名（「练习」「思考」）和题号都会重号，
+  // 只有「书上第几页」认得出来，所以每一张卡都带页码。
+  // 教材「做一做」「随堂练习」里的题纸面上没有印刷题号，后端给 null，
+  // 这时章节名就是身份，小字里不再重复一遍。
   function sourceLocator(item) {
-    if (item?.number) return `第 ${item.number} 题`;
-    return shortSection(item) || "栏目题";
+    return window.QBQuestionLocator?.identityOf(item) || "栏目题";
   }
 
   function cardLocator(item) {
-    const section = shortSection(item);
-    if (!item?.number) return section || "栏目题";
-    const number = `原卷第 ${item.number} 题`;
-    return section ? `${section} · ${number}` : number;
+    return window.QBQuestionLocator?.positionOf(item) || "";
   }
 
   // 1.25.19：同一张卷连着几十道题，试卷名原来每张卡都写一遍，一屏能出现 17 次。
@@ -1281,13 +1271,11 @@
     sourceName.title = item.source_filename || "试卷";
     const provenance = node("div", "library-card-provenance");
     meta.append(select, heading, sourceName, provenance);
-    // 定位句只在它真能补上信息时才显示：
-    //   试卷卡——标题已经写着「第 N 题」，再补一句「原卷第 N 题」是同一句话说两遍；
-    //   教材卡——每一章的习题都从 1 重新编，全库有 94 张都写着「第 1 题」，
-    //             只有带上章节（习题 6.1 · 原卷第 1 题）才认得出是哪一章。
+    // 书上第几页、哪一节 —— 卡头那个题号认不出是哪一张，只有页码认得出。
     // 放在 provenance 里而不是卡头：卡头是三列 grid（18px 复选框 | 标题 | 文件名），
     // 一句没有类名的定位会被自动排进那个 18px 的窄槽，每个字换一行，竖成一列。
-    if (shortSection(item)) provenance.append(node("span", "", cardLocator(item)));
+    const position = cardLocator(item);
+    if (position) provenance.append(node("span", "", position));
     // 1.12.6：同一份卷被录过两次时，两份来源在题库里同名，只看文件名分不出
     // 哪份是哪份。补上录入时间，撤回一批时才不会撤错那一份。
     if (duplicateSourceNames().has(item.source_filename)) {

@@ -147,9 +147,9 @@ const SKIPPED = [
   // 定位要能对回原书
   const wheres = byClass(container, "approve-result-where").map((node) => node.textContent);
   assert.deepEqual(wheres, [
-    "章节01 · 公式法 · 第 1 题",
-    "章节01 · 公式法 · 第 2 题",
-    "章节02 · 配方法 · 第 3 题",
+    "第 128 页 · 章节01 · 公式法 · 第 1 题",
+    "第 129 页 · 章节01 · 公式法 · 第 2 题",
+    "第 140 页 · 章节02 · 配方法 · 第 3 题",
     "第 151 页 · 第 7 题",
   ]);
 
@@ -260,7 +260,10 @@ function sliceFunction(source, name) {
 
   assert.ok(dialog.open, "结果面板要弹出来");
   assert.ok(container.textContent.includes("还有 4 道没能入库，分成 3 类原因"), "弹出来的真是这个模块画的面板");
-  assert.ok(container.textContent.includes("章节01 · 公式法 · 第 1 题"), "弹出来的面板要带定位");
+  assert.ok(
+    container.textContent.includes("第 128 页 · 章节01 · 公式法 · 第 1 题"),
+    "弹出来的面板要带定位"
+  );
   assert.equal(byClass(container, "approve-result-group").length, 3, "弹出来的面板是分组折叠的");
 }
 

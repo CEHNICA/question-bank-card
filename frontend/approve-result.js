@@ -95,7 +95,7 @@
       const list = makeEl("ul", "approve-result-items");
       group.items.forEach((item) => {
         const row = makeEl("li", "approve-result-item");
-        row.append(makeEl("span", "approve-result-where", locator.locateWithPage(item)));
+        row.append(makeEl("span", "approve-result-where", locator.locate(item)));
         const text = locator.snippet(item.stem, 60);
         if (text) row.append(makeEl("span", "approve-result-stem", text));
         // 分组标题已经说了卡在哪一类，这里只补这道题自己的那一条。
