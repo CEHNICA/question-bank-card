@@ -7291,6 +7291,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     panel.replaceChildren();
     $("pageUndo").disabled = !dialog.history.length;
     $("pageRedo").disabled = !dialog.future.length;
+    // 1.26.37：撤销/重做灰的时候说清为什么灰、能怎么办。
+    $("pageUndo").title = window.QBOriginalLayout.historyHint("undo", dialog.history.length > 0, false, false);
+    $("pageRedo").title = window.QBOriginalLayout.historyHint("redo", dialog.future.length > 0, false, false);
     const preview = $("pageCropPreview");
     preview.hidden = panel.hidden;
     $("pageCropPreviewBody").replaceChildren();
@@ -7333,7 +7336,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const down = button("后移", "small quiet", () => move(1), `第 ${index + 1} 段后移`);
       up.disabled = index === 0;
       down.disabled = index === dialog.boxes.length - 1;
-      row.append(locate, up, down, button("移除", "small quiet", () => removeBox(index), `移除第 ${index + 1} 段`));
+      // 1.26.37：灰的时候也要说清为什么灰、去哪儿能改 —— 跟调整范围面板那边共用同一套话术。
+      // 话术从模块本体取，不从 originalLayout 控制器取：控制器是可选链建的，
+      // 万一没建起来，这里不能跟着崩。
+      up.title = window.QBOriginalLayout.partOrderHint(-1, index, dialog.boxes.length);
+      down.title = window.QBOriginalLayout.partOrderHint(1, index, dialog.boxes.length);
+      const remove = button("移除", "small quiet", () => removeBox(index), `移除第 ${index + 1} 段`);
+      remove.title = window.QBOriginalLayout.partRemoveHint(dialog.boxes.length);
+      row.append(locate, up, down, remove);
       list.append(row);
     });
     panel.append(list);

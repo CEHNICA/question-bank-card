@@ -55,6 +55,38 @@
     }
     return ADJUST_HINT_READY;
   }
+  // 1.26.37：面板里几个灰掉的按钮，从前只有一句「前移」「后移」，鼠标停上去什么都不说 ——
+  // 老师只看到按钮是灰的，不知道是坏了、还是自己操作不对、还是压根没得挪。
+  // 规矩跟 readOnlyAdvice 一样：灰控件必须说清「为什么灰」和「下一步去哪」。
+  // 话术收在这一个地方，别散到各个按钮上，免得两边跑偏。
+  function partOrderHint(offset, index, total) {
+    if (total <= 1) {
+      return "这道题现在只有一段，没有先后可调。先点「再加一块」框出第二段，就能调顺序了。";
+    }
+    if (offset < 0 && index === 0) {
+      return "这段已经是第一段，往前没有位置可挪。要调顺序，先选后面那一段点「前移」。";
+    }
+    if (offset > 0 && index >= total - 1) {
+      return "这段已经是最后一段，往后没有位置可挪。要调顺序，先选前面那一段点「后移」。";
+    }
+    return offset < 0 ? "把这一段往前挪一位，换一下拼接顺序。" : "把这一段往后挪一位，换一下拼接顺序。";
+  }
+  function partRemoveHint(total) {
+    if (total <= 1) {
+      return "移除这一段，这道题就一段不剩了。要整题删掉，用下面的「删除这题」。";
+    }
+    return "把这一段从这道题里去掉，其它段不动。移错了能点「恢复刚删的框」找回来。";
+  }
+  function historyHint(kind, hasSteps, saving, failed) {
+    if (failed) return "刚才没能读到这份资料的最新状态，这里先不让你撤销或重做。关掉重开再试一次。";
+    if (saving) return "正在保存，稍等一下就好。";
+    if (!hasSteps) {
+      return kind === "redo"
+        ? "还没有可以重做的改动。先改点东西（比如挪一下题框），再撤销，这里就能重做回去。"
+        : "还没有可以撤销的改动。先改点东西（比如挪一下题框），这里就能撤销回去。";
+    }
+    return kind === "redo" ? "把刚才撤销掉的那一步再做回来。" : "撤销刚才那一步改动，把范围调回去。";
+  }
   function groupSeqStart(group) {
     const start = group?.seq_start;
     return typeof start === "number" ? start : null;
@@ -243,6 +275,8 @@
       $("pageHistoryControls").hidden = !draft && !lastDeleted;
       $("pageUndo").disabled = !history.length || dialog.saving || lookupFailed;
       $("pageRedo").disabled = !future.length || dialog.saving || lookupFailed;
+      $("pageUndo").title = historyHint("undo", history.length > 0, dialog.saving, lookupFailed);
+      $("pageRedo").title = historyHint("redo", future.length > 0, dialog.saving, lookupFailed);
       if (draft?.kind === "renumber") {
         const control = panel.querySelector("#pageLayoutNumber"); if (control) control.disabled = dialog.saving || lookupFailed;
       }
@@ -544,6 +578,8 @@
             if (tag) tag.textContent = `${t.number || "?"}${t.regions.length > 1 ? ` · ${Number(box.dataset.layoutCoveragePiece) + 1}` : ""}`;
           });
           $("pageUndo").disabled = !history.length; $("pageRedo").disabled = !future.length;
+          $("pageUndo").title = historyHint("undo", history.length > 0, dialog.saving, lookupFailed);
+          $("pageRedo").title = historyHint("redo", future.length > 0, dialog.saving, lookupFailed);
         });
         num.addEventListener("keydown", (event) => {
           if (event.key === "Enter" && !event.isComposing && !event.repeat) { event.preventDefault(); event.stopPropagation(); preview(); }
@@ -598,8 +634,15 @@
           selectedPart = index; dialog.layoutFocus = { questionId: selectedId, index };
           if (r.page_idx !== dialog.page) goToDialogPage(r.page_idx); else redraw();
         }); row.append(locate);
-        for (const offset of [-1, 1]) { const move = button(offset < 0 ? "前移" : "后移", "small quiet", () => change(() => { const n = index + offset; [t.regions[index], t.regions[n]] = [t.regions[n], t.regions[index]]; selectedPart = n; })); move.disabled = index + offset < 0 || index + offset >= t.regions.length; row.append(move); }
-        row.append(button("移除", "small quiet", () => remove(index)));
+        for (const offset of [-1, 1]) {
+          const move = button(offset < 0 ? "前移" : "后移", "small quiet", () => change(() => { const n = index + offset; [t.regions[index], t.regions[n]] = [t.regions[n], t.regions[index]]; selectedPart = n; }));
+          move.disabled = index + offset < 0 || index + offset >= t.regions.length;
+          move.title = partOrderHint(offset, index, t.regions.length);
+          row.append(move);
+        }
+        const removePart = button("移除", "small quiet", () => remove(index));
+        removePart.title = partRemoveHint(t.regions.length);
+        row.append(removePart);
         if (draft.targets.length > 1) {
           const transfer = el("select"); transfer.setAttribute("aria-label", `将第 ${index + 1} 段转给其他结果`); transfer.dataset.layoutTransfer = index;
           const o = el("option", "", "转给其他题…"); o.value = ""; transfer.append(o);
@@ -1086,5 +1129,5 @@
     const x = Math.min(1000 - w, Math.max(0, bbox[0] + dx)), y = Math.min(1000 - h, Math.max(0, bbox[1] + dy));
     return [x, y, x + w, y + h].map((v) => Math.round(v * 10) / 10);
   }
-  return { COLORS, groupId, targetOf, colorOf, hitTest, nextNumber, createDraft, validate, payload, movedEnough, moveBox, sourceEvidence, createController, groupPages, groupCoversPage, groupTitle, pickGroupForPages, readOnlyAdvice, adjustHint, ADJUST_HINT_READY };
+  return { COLORS, groupId, targetOf, colorOf, hitTest, nextNumber, createDraft, validate, payload, movedEnough, moveBox, sourceEvidence, createController, groupPages, groupCoversPage, groupTitle, pickGroupForPages, readOnlyAdvice, adjustHint, ADJUST_HINT_READY, partOrderHint, partRemoveHint, historyHint };
 });

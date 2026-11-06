@@ -602,8 +602,12 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .library-filter-chip > .drop { flex: none; color: var(--muted); }
 /* 1.25.64：标签筛选条按这个标签的色上一道软底；颜色全是这个标签自己设的。
    同一标签：目录、筛选条、详情里的颜色都是同一根。 */
-.library-filter-chip[style*="--tag-color"] { background: color-mix(in srgb, var(--tag-color) 14%, var(--surface)); border-color: color-mix(in srgb, var(--tag-color) 50%, var(--line)); color: var(--tag-color); }
-.library-filter-chip[style*="--tag-color"] > .drop { color: color-mix(in srgb, var(--tag-color) 70%, var(--muted)); }
+/* 1.26.37：字用深色，不再用标签自己的颜色。
+   标签颜色是老师自己设的，可以任意深浅 —— 拿它当字色，深色标签上的字就看不清了。
+   实测（初中章那个蓝 #477a9e）：淡底 + 标签色字 = 3.88:1，达不到 4.5:1 的清晰标准。
+   现在跟题卡、题目详情那几处一样：淡底 + 同色边 + 深字。 */
+.library-filter-chip[style*="--tag-color"] { background: color-mix(in srgb, var(--tag-color) 14%, var(--surface)); border-color: color-mix(in srgb, var(--tag-color) 50%, var(--line)); color: var(--ink-2); }
+.library-filter-chip[style*="--tag-color"] > .drop { color: var(--ink-2); }
 .library-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-ring); }
 .library-card-meta { padding-top: 13px; }
 .library-card.compact .paper { padding-top: 10px; padding-bottom: 8px; }
