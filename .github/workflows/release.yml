@@ -75,10 +75,21 @@ jobs:
           $version = '${{ steps.version.outputs.version }}'
           $notes = "docs/release-notes-v$version.md"
           if (-not (Test-Path $notes)) { throw "找不到单版说明 $notes" }
-          gh release create "v$version" `
-            --repo $env:GITHUB_REPOSITORY `
-            --title "题有据 $version" `
-            --notes-file $notes
+          # 可以重跑：同一个版本再次出包时，如果已经发布过，
+          # 就改一下它的说明和文件，不要再创建一次。
+          $existing = gh release view "v$version" --repo $env:GITHUB_REPOSITORY --json tagName --jq .tagName 2>$null
+          if ($existing) {
+            Write-Host "v$version 已经发布过，改说明和文件"
+            gh release edit "v$version" `
+              --repo $env:GITHUB_REPOSITORY `
+              --title "题有据 $version" `
+              --notes-file $notes
+          } else {
+            gh release create "v$version" `
+              --repo $env:GITHUB_REPOSITORY `
+              --title "题有据 $version" `
+              --notes-file $notes
+          }
 
       - name: Upload the assets
         env:
@@ -88,5 +99,5 @@ jobs:
           $version = '${{ steps.version.outputs.version }}'
           $assets = "packaging/dist/releases/$version-public"
           Get-ChildItem $assets -File | ForEach-Object {
-            gh release upload "v$version" $_.FullName --repo $env:GITHUB_REPOSITORY
+            gh release upload "v$version" $_.FullName --repo $env:GITHUB_REPOSITORY --clobber
           }
