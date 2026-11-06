@@ -25,16 +25,8 @@ class Command(BaseCommand):
     help = "按现在的规则重算题卡的搜索索引（只写索引这一列，题干答案图片不动）"
 
     def add_arguments(self, parser):
-        parser.add_argument(
-            "--apply",
-            action="store_true",
-            help="真的写回数据库；不加就只列出哪些会变",
-        )
-        parser.add_argument(
-            "--paper",
-            default="",
-            help="只处理这一份资料的文件名（逗号分隔，可重复）",
-        )
+        parser.add_argument("--apply", action="store_true", help="真的写回数据库；不加就只列出哪些会变")
+        parser.add_argument("--paper", default="", help="只处理这一份资料的文件名（逗号分隔，可重复）")
 
     def handle(self, *args, **options):
         queryset = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)

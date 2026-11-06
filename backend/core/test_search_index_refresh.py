@@ -77,9 +77,7 @@ class RefreshSearchIndexTests(TestCase):
 
     def test_a_card_already_matching_is_left_alone(self):
         item = self.publication(section="复习题")
-        PublishedQuestion.objects.filter(pk=item.pk).update(
-            search_text=library._search_text(item.content, item.extras)
-        )
+        PublishedQuestion.objects.filter(pk=item.pk).update(search_text=library._search_text(item.content, item.extras))
         before = PublishedQuestion.objects.get(pk=item.pk).search_text
         call_command("refresh_search_index", apply=True)
         item.refresh_from_db()
