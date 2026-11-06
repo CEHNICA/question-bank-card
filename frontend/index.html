@@ -763,7 +763,9 @@
     <footer class="resegment-preview-actions">
       <span id="resegmentPreviewResult" class="settings-save-result" role="status"></span>
       <button class="button" type="button" data-close>取消</button>
-      <button id="resegmentApply" class="button primary" type="button" disabled>确认并应用重新切题</button>
+      <span id="resegmentApplyHint" class="resegment-apply-hint" role="status"></span>
+      <button id="resegmentApply" class="button primary" type="button" disabled
+              title="先看预演结果，勾上确认框后才能应用">确认并应用重新切题</button>
     </footer>
   </dialog>
 
@@ -924,6 +926,7 @@
   <script src="/site-drawer.js" defer></script>
   <script src="/review-finder.js" defer></script>
   <script src="/original-paper-layout.js" defer></script>
+  <script src="/resegment-preview-wording.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

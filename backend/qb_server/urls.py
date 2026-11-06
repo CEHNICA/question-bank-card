@@ -27,6 +27,10 @@ urlpatterns = [
     path(
         "original-paper-layout.js", views._frontend("original-paper-layout.js", "application/javascript; charset=utf-8")
     ),
+    path(
+        "resegment-preview-wording.js",
+        views._frontend("resegment-preview-wording.js", "application/javascript; charset=utf-8"),
+    ),
     path("browser-interactions.js", views.browser_interactions_script),
     path("site-drawer.js", views.site_drawer_script),
     path("qb-render.js", views.render_script),

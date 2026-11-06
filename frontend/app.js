@@ -374,6 +374,12 @@ const QBReviewDiff = (() => {
   return { analyze, mergeRanges };
 })();
 
+// 1.26.38：重新切题预演那颗灰按钮的话术放在独立文件里 —— 
+// 那边能直接被 Node 测，两边也不会各说一套。
+const QBResegmentWording = (typeof window !== "undefined" && window.QBResegmentWording)
+  ? window.QBResegmentWording
+  : (typeof require === "function" ? require("./resegment-preview-wording.js") : null);
+
 const QBResegment = (() => {
   "use strict";
 
@@ -8573,10 +8579,28 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
   }
 
-  const resegmentPreview = { paperId: null, report: null, loading: false, applying: false };
+  const resegmentPreview = { paperId: null, report: null, loading: false, applying: false, blocked: false, acknowledged: false };
 
   function setResegmentClosingDisabled(disabled) {
     $("resegmentPreviewDialog").querySelectorAll("[data-close]").forEach((button) => { button.disabled = disabled; });
+  }
+
+  // 1.26.38：所有让这颗按钮变灰的地方，都顺手把「为什么灰」写上去。
+  // 写两处：按钮的悬停说明，和按钮旁边那行常驻可见的小字 —— 按钮禁用时
+  // 浏览器不发鼠标事件，悬停气泡根本不弹，只写 title 等于什么都没说。
+  function syncResegmentApply() {
+    const report = resegmentPreview.report;
+    const status = {
+      loading: resegmentPreview.loading,
+      applying: resegmentPreview.applying,
+      blocked: resegmentPreview.blocked,
+      report,
+      readOnly: report ? QBResegment.normalizeReport(report).readOnly : false,
+      acknowledged: resegmentPreview.acknowledged,
+    };
+    $("resegmentApply").title = QBResegmentWording.applyHint(status);
+    const visible = $("resegmentApplyHint");
+    if (visible) { visible.textContent = QBResegmentWording.applyHintBrief(status); visible.hidden = !visible.textContent; }
   }
 
   function resetResegmentPreview(paperId) {
@@ -8591,8 +8615,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("resegmentAcknowledgeRow").hidden = true;
     $("resegmentAcknowledge").checked = false;
     $("resegmentAcknowledge").disabled = false;
+    resegmentPreview.blocked = false;
+    resegmentPreview.acknowledged = false;
     $("resegmentApply").disabled = true;
     $("resegmentApply").textContent = "确认并应用重新切题";
+    syncResegmentApply();
     $("resegmentPreviewResult").textContent = "";
     $("resegmentPreviewResult").className = "settings-save-result";
     setResegmentClosingDisabled(false);
@@ -8646,7 +8673,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("resegmentPreviewDetails").replaceChildren(...detailNodes);
     $("resegmentAcknowledgeRow").hidden = !normalized.readOnly;
     $("resegmentAcknowledge").checked = false;
+    resegmentPreview.acknowledged = false;
     $("resegmentApply").disabled = true;
+    syncResegmentApply();
   }
 
   function showResegmentBlocked(error) {
@@ -8658,7 +8687,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("resegmentPreviewSummary").replaceChildren();
     $("resegmentPreviewDetails").replaceChildren();
     $("resegmentAcknowledgeRow").hidden = true;
+    resegmentPreview.blocked = true;
+    resegmentPreview.acknowledged = false;
     $("resegmentApply").disabled = true;
+    syncResegmentApply();
   }
 
   async function resegmentPaper() {
@@ -8679,7 +8711,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   $("resegment").addEventListener("click", resegmentPaper);
   $("resegmentAcknowledge").addEventListener("change", () => {
+    resegmentPreview.acknowledged = Boolean($("resegmentAcknowledge").checked);
     $("resegmentApply").disabled = !resegmentPreview.report || !$("resegmentAcknowledge").checked || resegmentPreview.applying;
+    syncResegmentApply();
   });
   $("resegmentApply").addEventListener("click", async () => {
     if (!resegmentPreview.report || !$("resegmentAcknowledge").checked || resegmentPreview.applying) return;
@@ -8688,6 +8722,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     setResegmentClosingDisabled(true);
     $("resegmentApply").disabled = true;
     $("resegmentApply").textContent = "正在应用……";
+    syncResegmentApply();
     $("resegmentAcknowledge").disabled = true;
     $("resegmentPreviewResult").textContent = "正在请求服务端再次检查并启动重新切题……";
     $("resegmentPreviewResult").className = "settings-save-result";
@@ -8704,6 +8739,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       $("resegmentAcknowledge").disabled = false;
       $("resegmentApply").disabled = !$("resegmentAcknowledge").checked;
       $("resegmentApply").textContent = "确认并应用重新切题";
+      syncResegmentApply();
       $("resegmentPreviewResult").textContent = `未能应用：${error.message}`;
       $("resegmentPreviewResult").className = "settings-save-result error";
     }

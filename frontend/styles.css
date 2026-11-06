@@ -1079,6 +1079,11 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .resegment-preview-actions { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 13px 20px;
   border-top: 1px solid var(--line); background: var(--surface); }
 .resegment-preview-actions .settings-save-result { margin-right: auto; }
+/* 1.26.38：灰掉的「确认并应用重新切题」旁边常驻一行小字，说清差哪一步、去哪做。
+   光靠 title（悬停说明）等于没说 —— 按钮禁用时浏览器不发鼠标事件，气泡根本不弹。 */
+.resegment-apply-hint { color: var(--muted); font-size: 12.5px; line-height: 1.4;
+  max-width: 340px; text-align: right; }
+.resegment-apply-hint:empty { display: none; }
 .resegment-preview-actions .settings-save-result.error { color: var(--red); }
 .rename-dialog { width: min(540px, 92vw); }
 .rename-body { display: grid; gap: 10px; padding: 20px 24px 2px; }
