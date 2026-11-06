@@ -9,6 +9,8 @@ const html = fs.readFileSync(require.resolve("./library.html"), "utf8");
 const js = fs.readFileSync(require.resolve("./library.js"), "utf8");
 const css = fs.readFileSync(require.resolve("./library.css"), "utf8");
 const readingCss = fs.readFileSync(require.resolve("./library-reading.css"), "utf8");
+// 1.26.39：说法搬进话术表了，这里改成对那张表，别再写死一套字。
+const W = require("./control-wording.js");
 
 assert.match(html, /id="questionInspector"/, "the library has a dedicated question details panel");
 assert.match(html, /<button[^>]*id="libraryTagManager"[^>]*>[\s\S]*?<span>标签管理<\/span>[\s\S]*?<\/button>/, "tag management is directly accessible from the library header");
@@ -33,26 +35,31 @@ assert.match(js, /event\.target\.closest\("button, a, input, select, textarea, s
 assert.match(js, /function renderInspector\(item\)[\s\S]*?extrasNode\(item\)/, "tags and pending AI suggestions follow the selected question");
 assert.match(js, /renderInspector\(state\.catalog\.get\(state\.inspectorId\)/, "background refreshes keep the panel in sync with the selected question");
 
-// 「题目详情」这个按钮是个开关，但字面只有四个字的���称：不写现在开着还是收着，也不说
+// 「题目详情」这个按钮是个开关，但字面只有四个字的名称：不写现在开着还是收着，也不说
 // 按了会发生什么。同一个页面上另一个收侧栏的开关就写着「收起筛选栏」。这里跑真的那个
 // 函数，确认「状态」和「说法」是同一个动作一起变的 —— 只改其中一个，正则查不出来。
 const toggleCode = js.slice(js.indexOf("  function markInspectorToggle("), js.indexOf('  function setInspectorOpen('));
 assert.notEqual(toggleCode.indexOf("markInspectorToggle"), -1, "markInspectorToggle was renamed or moved; update this slice");
-const toggleNode = { attrs: {}, title: "", setAttribute(name, value) { this.attrs[name] = String(value); }, getAttribute(name) { return this.attrs[name]; } };
-const sandbox = { ui: { inspectorToggle: toggleNode } };
+const toggleNode = { attrs: {}, title: "", textContent: "", setAttribute(name, value) { this.attrs[name] = String(value); }, getAttribute(name) { return this.attrs[name]; } };
+const sandbox = { ui: { inspectorToggle: toggleNode }, W };
 vm.runInNewContext(toggleCode, sandbox);
 sandbox.markInspectorToggle(true);
 assert.equal(toggleNode.getAttribute("aria-expanded"), "true");
-assert.equal(toggleNode.getAttribute("aria-label"), "收起右侧详情");
-assert.match(toggleNode.title, /标签和待核对建议/, "the hover line says what lives in that panel");
+assert.equal(toggleNode.getAttribute("aria-label"), W.INSPECTOR.expanded.label);
+assert.equal(toggleNode.textContent, W.INSPECTOR.expanded.label,
+  "1.26.39：按钮上写的那两个字要跟话术表一样 —— 面板里那颗也是这么叫的");
+assert.match(toggleNode.title, /点左边的题卡/, "1.26.39：面板开着时，这句要说清收起以后怎么再打开");
 sandbox.markInspectorToggle(false);
 assert.equal(toggleNode.getAttribute("aria-expanded"), "false");
-assert.equal(toggleNode.getAttribute("aria-label"), "展开右侧详情", "a collapsed panel offers to bring it back");
+assert.equal(toggleNode.getAttribute("aria-label"), W.INSPECTOR.collapsed.label, "a collapsed panel offers to bring it back");
+assert.equal(toggleNode.textContent, W.INSPECTOR.collapsed.label);
 assert.match(toggleNode.title, /标签和待核对建议/);
 sandbox.markInspectorToggle(true, { disabled: true });
 assert.equal(toggleNode.getAttribute("aria-expanded"), "false", "a disabled toggle is not reported as open");
+assert.equal(toggleNode.textContent, W.INSPECTOR.disabled.label,
+  "a greyed-out control has to say why on the button itself: a disabled button never fires mouse events");
 assert.match(toggleNode.title, /先在左边点一道题/, "a greyed-out control says why it is grey, not just that it is grey");
-vm.runInNewContext(toggleCode, { ui: { inspectorToggle: null } });
+vm.runInNewContext(toggleCode, { ui: { inspectorToggle: null }, W });
 // 1.25.19：「查看当前题面」删了，面板里只剩「题目信息」这一条折叠行，
 // 单独一条反而要保证手指头点得着。
 assert.match(readingCss, /\.library-page \.question-inspector-info > summary \{[^}]*min-height: 30px;/,

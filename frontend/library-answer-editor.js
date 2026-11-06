@@ -3,6 +3,8 @@
   "use strict";
   function create({ node, QB, notify, confirm, onSaved }) {
     const S = root.LibrarySolutions;
+    // 1.26.39：控件话术集中在一处。
+    const W = root.QBControlWording || (typeof require === "function" ? require("./control-wording.js") : null);
     let dialog, controls, current = null, items = [], scope = "paper", scopeContext = null, selection = new Set(), drafts = new Map(), singleMode = false;
     let token = 0, epoch = 0, loading = false, saving = false, uploading = false, queueing = false, cancelling = false, polling = false, closing = false;
     let pollTimer = null, previewTimer = null, pollAgain = false, jobs = new Map(), returnFocus, requestedIds = new Set(), watchedSince = 0, queueNote = "";
@@ -168,7 +170,9 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
       const cropBar = node("div", "answer-image-tools");
       const pages = node("select"); pages.setAttribute("aria-label", "解析图来源页"); pages.addEventListener("change", showCropPage);
       const cropSave = node("button", "button button-primary button-small", "加入解析图"); cropSave.type = "button"; cropSave.disabled = true; cropSave.addEventListener("click", saveCrop);
-      const cropClose = node("button", "button button-quiet button-small", "收起"); cropClose.type = "button"; cropClose.addEventListener("click", () => { crop.hidden = true; clearCrop(); });
+      const cropClose = node("button", "button button-quiet button-small", W.CROP.label); cropClose.type = "button";
+      cropClose.title = W.CROP.hint;
+      cropClose.addEventListener("click", () => { crop.hidden = true; clearCrop(); });
       cropBar.append(pages, cropSave, cropClose);
       const cropHint = node("div", "answer-crop-guidance");
       cropHint.append(node("span", "", "点第一角 → 移动鼠标 → 点第二角固定。Esc 取消，Ctrl＋滚轮缩放。"));

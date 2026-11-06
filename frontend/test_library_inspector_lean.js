@@ -10,6 +10,7 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 
 const js = fs.readFileSync(require.resolve("./library.js"), "utf8");
+const wordingJs = fs.readFileSync(require.resolve("./control-wording.js"), "utf8");
 const css = fs.readFileSync(require.resolve("./library.css"), "utf8");
 const readingCss = fs.readFileSync(require.resolve("./library-reading.css"), "utf8");
 
@@ -42,10 +43,14 @@ assert.match(panel, /node\("details", "question-inspector-info"\)/, "折叠的�
 assert.match(panel, /inspectorFact\(facts, "核对"/, "核对状态得留着");
 
 // 面板空了的时候那行提示不能再承诺已经不存在的「来源」。
-assert.match(js, /先在左边点一道题，这里才有它的标签和待核对建议/,
+// 1.26.39：这句话搬进话术表了（控件话术只留一处），所以查话术表，
+// 顺便查表里也不许再承诺面板里已经没有的「来源」。
+assert.match(wordingJs, /先在左边点一道题，这里才有它的标签和待核对建议/,
   "空面板的提示不许再提「来源」—— 面板里已经没有这一项了");
 assert.doesNotMatch(js, /当前题目的来源、标签和待核对建议/,
   "开关的悬停说明也不许再承诺面板里有来源");
+assert.doesNotMatch(wordingJs, /当前题目的来源、标签和待核对建议/,
+  "话术表里也不许再承诺面板里有来源");
 
 // ── 二、删掉的样式要跟着走干净 ──
 // 留着就是骗下一个人：他会以为面板上还有那块。

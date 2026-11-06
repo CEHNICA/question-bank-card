@@ -380,6 +380,11 @@ const QBResegmentWording = (typeof window !== "undefined" && window.QBResegmentW
   ? window.QBResegmentWording
   : (typeof require === "function" ? require("./resegment-preview-wording.js") : null);
 
+// 1.26.39：控件话术集中在一处，「更多」的悬停说明按菜单里实际有的项生成。
+const QBControlWording = (typeof window !== "undefined" && window.QBControlWording)
+  ? window.QBControlWording
+  : (typeof require === "function" ? require("./control-wording.js") : null);
+
 const QBResegment = (() => {
   "use strict";
 
@@ -4131,6 +4136,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         "重读这道题的全部片段并替换现有文字（改过的地方会先问你）；只想读一小块，按 C 在原卷上框一块，读到的字直接进剪贴板"));
     }
     menu.append(button("删除这张卡", "quiet small danger", () => { more.open = false; deleteQuestion(q); }));
+    // 1.26.39：「更多」这两个字看不出里面有什么。悬停说明按菜单里实际有的项生成，
+    // 不写菜单里没有的东西（承诺了界面上没有的入口，比不说更糟）。
+    summary.title = QBControlWording.menuSummaryTitle(Array.from(menu.querySelectorAll("button, a")).map((entry) => entry.textContent.trim()));
     more.append(menu);
     // 点外面收起在这个文件末尾已经统一处理了（details.more[open]），这里只补一条：
     // 原生 details 各开各的，开一个就把别的收起来。

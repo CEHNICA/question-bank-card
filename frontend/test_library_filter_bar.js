@@ -15,7 +15,7 @@ const libraryJs = fs.readFileSync(path.join(__dirname, "library.js"), "utf8");
 // ── 一、「题目详情」在宽屏上不该出现 ──
 assert.match(markup, /id="inspectorToggle"[^>]*>题目详情</, "这个按钮还在标记里 —— 窄屏上要靠它打开浮层");
 const closeTag = markup.match(/<button[^>]*id="closeInspector"[^>]*>/)[0];
-assert.ok(markup.includes(`${closeTag}收起</button>`), "面板里那个「收起」必须留着：宽屏上收完就只剩这一个入口");
+assert.ok(markup.includes(`${closeTag}收起详情</button>`), "面板里那个「收起详情」必须留着：宽屏上收完就只剩这一个入口");
 // 只查「有没有这个按钮」不够 —— 藏起来了一样是关不掉。漏过一条变异才发现。
 assert.doesNotMatch(closeTag, /\shidden\b/, "「收起」不能藏起来，宽屏上那个按钮已经没了，只剩它能关");
 

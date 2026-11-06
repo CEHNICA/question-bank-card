@@ -186,7 +186,8 @@
                面板顶部每道题都在，不挑题。 -->
           <button id="locateQuestion" class="button button-quiet button-small inspector-locate" type="button" hidden
                   title="左边列表滚回这道题的位置；看不到这道题时才需要">定位题目</button>
-          <button id="closeInspector" class="button button-quiet button-small inspector-close" type="button">收起</button>
+          <button id="closeInspector" class="button button-quiet button-small inspector-close" type="button"
+                  title="收起右边的题目详情；想再看，点左边的题卡就能打开。">收起详情</button>
         </header>
         <div id="questionInspectorContent" class="question-inspector-content" aria-live="polite"></div>
       </aside>
@@ -244,13 +245,16 @@
       </div>
     </div>
     <div class="source-controls" aria-label="原卷显示方式">
-      <button id="sourceQuestion" class="button button-small" type="button" aria-pressed="true">只看本题</button>
-      <button id="sourceWholePage" class="button button-small" type="button" aria-pressed="false">整页位置</button>
+      <button id="sourceQuestion" class="button button-small" type="button" aria-pressed="true"
+                  title="只看这一道题，原卷上别的题先藏起来。">只看本题</button>
+      <button id="sourceWholePage" class="button button-small" type="button" aria-pressed="false"
+                  title="显示整页原卷，看这道题在页面里的位置。">整页位置</button>
       <span class="source-control-spacer"></span>
       <button id="sourceZoomOut" class="button button-small" type="button" aria-label="缩小原卷">−</button>
       <output id="sourceZoom" aria-live="polite">100%</output>
       <button id="sourceZoomIn" class="button button-small" type="button" aria-label="放大原卷">＋</button>
-      <button id="sourceFit" class="button button-small" type="button">适合窗口</button>
+      <button id="sourceFit" class="button button-small" type="button"
+                  title="把整页原卷缩到刚好放进窗口，看全页的样子。">适合窗口</button>
     </div>
     <p id="sourceGestureHint" class="source-gesture-hint">Ctrl + 滚轮缩放 · 按住鼠标左键拖动原卷</p>
     <details id="sourceRelated" class="related-sources" hidden></details>
@@ -353,6 +357,7 @@
   <script src="/library-workspace.js" defer></script>
   <script src="/library-toc.js" defer></script>
   <script src="/library-solutions.js" defer></script>
+  <script src="/control-wording.js" defer></script>
   <script src="/library-answer-editor.js" defer></script>
   <script src="/library-question-editor.js" defer></script>
   <script src="/static/library-ai-settings.js" defer></script>

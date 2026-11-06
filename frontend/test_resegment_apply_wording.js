@@ -107,8 +107,8 @@ assert.match(css, /\.resegment-apply-hint:empty\s*\{[^}]*display:\s*none/,
   "没话说的时候这行字不能占地方");
 assert.match(html, /<script src="\/resegment-preview-wording\.js" defer><\/script>/,
   "页面要先加载话术模块再加载 app.js");
-assert.match(html, /<script src="\/resegment-preview-wording\.js" defer><\/script>\s*<script src="\/app\.js"/,
-  "话术模块必须在 app.js 之前加载");
+assert.match(html, /<script src="\/resegment-preview-wording\.js" defer><\/script>[\s\S]*?<script src="\/app\.js"/,
+  "话术模块必须在 app.js 之前加载（中间夹别的脚本没关系，defer 按书写顺序执行）");
 assert.match(wordingJs, /root\.QBResegmentWording = value/, "话术模块要挂到 window 上");
 
 console.log("resegment apply grey-button wording: OK");

@@ -5,6 +5,10 @@
   const workspace = window.LibraryWorkspace;
   const solutions = window.LibrarySolutions;
   const $ = (id) => document.getElementById(id);
+  // 1.26.39：控件话术集中在一处，页面只接线，两边不会各说一套。
+  const W = (typeof window !== "undefined" && window.QBControlWording)
+    ? window.QBControlWording
+    : (typeof require === "function" ? require("./control-wording.js") : null);
   const ui = {
     search: $("searchInput"), source: $("sourceSelect"), types: $("typeFilters"),
     status: $("libraryStatus"), list: $("libraryList"), more: $("moreButton"),
@@ -1359,7 +1363,8 @@
       replacement.querySelector('[aria-expanded]')?.focus({ preventScroll: true });
     });
     const more = node("details", "library-card-more");
-    more.append(node("summary", "", "更多"));
+    const moreSummary = node("summary", "", "更多");
+    more.append(moreSummary);
     const menu = node("div", "library-card-menu");
     const closeMenu = () => { more.open = false; };
     const review = iconButton("a", "button button-quiet button-small", "回到题卡", "back");
@@ -1382,6 +1387,9 @@
     const editQuestion = node("button", "button button-quiet button-small", "修改题目");
     editQuestion.type = "button"; editQuestion.addEventListener("click", () => { selectInspectorQuestion(item, article); closeMenu(); openQuestionEditor(item); });
     menu.append(editQuestion, editAnswer, review, withdraw, ...jobButtons(item));
+    // 1.26.39：「更多」这两个字看不出里面有什么。悬停说明按菜单里实际有的项生成，
+    // 不写菜单里没有的东西（承诺了界面上没有的入口，比不说更糟）。
+    moreSummary.title = W.menuSummaryTitle(Array.from(menu.querySelectorAll("button, a")).map((entry) => entry.textContent.trim()));
     more.append(menu);
     // 原生 details 各开各的。开一个就把别的收起来，页面上不会同时挂好几个小窗口。
     more.addEventListener("toggle", () => { if (more.open) closeOtherCardMenus(more); });
@@ -1579,12 +1587,14 @@
     if (!toggle) return;
     const on = Boolean(open) && !disabled;
     toggle.setAttribute("aria-expanded", String(on));
-    const label = disabled ? "先选中一道题" : (on ? "收起右侧详情" : "展开右侧详情");
-    // 1.25.19：面板不再显示来源（试卷名只在题卡上出现一次），这里也跟着改。
-    // 承诺了面板里没有的东西，比不说更糟 —— 老师会去找那道「来源」。
-    toggle.title = disabled ? "先在左边点一道题，这里才有它的标签和待核对建议"
-      : `${label}：当前题目的标签和待核对建议都写在这一栏`;
-    toggle.setAttribute("aria-label", label);
+    // 1.26.39：说法从话术表里取 —— 面板里那颗按钮和顶栏这颗开关叫同一个名字，
+    // 不再一个叫「收起」、一个叫「收起右侧详情」。
+    // 灰掉时把「为什么灰、下一步去哪」写进按钮本身：按钮禁用时浏览器不发鼠标
+    // 事件，悬停气泡根本不弹，光写 title 等于没说。
+    const wording = disabled ? W.INSPECTOR.disabled : (on ? W.INSPECTOR.expanded : W.INSPECTOR.collapsed);
+    toggle.textContent = wording.label;
+    toggle.title = wording.hint;
+    toggle.setAttribute("aria-label", wording.label);
   }
 
   function setInspectorOpen(open) {
@@ -6352,6 +6362,12 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
   $("inspectorToggle").addEventListener("click", () => setInspectorOpen(window.matchMedia("(max-width: 979px)").matches
     ? !document.body.classList.contains("library-inspector-open") : document.body.classList.contains("library-inspector-collapsed")));
   $("closeInspector").addEventListener("click", () => setInspectorOpen(false));
+  // 1.26.39：面板里那颗按钮的说法从话术表里取，页面上的字和悬停说明不会各说一套。
+  const closeInspectorButton = $("closeInspector");
+  if (closeInspectorButton) {
+    closeInspectorButton.textContent = W.INSPECTOR.expanded.label;
+    closeInspectorButton.title = W.INSPECTOR.expanded.hint;
+  }
   initLocateQuestion();
   $("inspectorScrim").addEventListener("click", () => setInspectorOpen(false));
   window.matchMedia("(max-width: 979px)").addEventListener("change", () => {
@@ -6691,7 +6707,8 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     panel.replaceChildren();
     const head = node("div", "library-directory-head");
     head.append(node("strong", "", "教材目录"));
-    const close = node("button", "button button-small button-quiet", "收起"); close.type = "button";
+    const close = node("button", "button button-small button-quiet", W.DIRECTORY.label); close.type = "button";
+    close.title = W.DIRECTORY.hint;
     close.addEventListener("click", () => void directoryToggle(false));
     head.append(close);
     // 1.26.6：入口就摆在目录标题下面 —— 之前目录只能改标签、模板只能整套导入，

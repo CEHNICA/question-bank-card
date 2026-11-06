@@ -31,7 +31,7 @@ class ControlledDate extends Date { static now() { return clock; } }
 let jobResult = null, failSave = false, revision = null, saveGate = null, readGate = null, pollGate = null, paperGate = null, jobNumber = 0, figureFixture = null, aiFixture = null, aiStale = false, originFixture = null, jobMode = "done", apiConfigured = true, settingsGate = null, historyFixture = [];
 const paintFrames = [];
 const handoffText = '仅处理本批任务：job_id=job-wait, publication_id=pub-1, kind=answer, solution_scope=true。使用后端给出的真实本机CLI领取题面并逐题回写结果，不开启全局功能。检查初稿并保存后才用于出卷。';
-const root = { LibrarySolutions: require("./library-solutions.js"), localStorage: { getItem: () => null, setItem() {} }, setTimeout: (callback, delay) => { timers.push({ callback, delay }); return setTimeout(callback, delay); }, clearTimeout,
+const root = { LibrarySolutions: require("./library-solutions.js"), QBControlWording: require("./control-wording.js"), localStorage: { getItem: () => null, setItem() {} }, setTimeout: (callback, delay) => { timers.push({ callback, delay }); return setTimeout(callback, delay); }, clearTimeout,
   requestAnimationFrame: callback => { paintFrames.push(callback); },
   navigator: { clipboard: { writeText: async value => clipboardWrites.push(value) } },
   fetch: async (url, opts = {}) => {
@@ -322,7 +322,10 @@ const settle = async () => { for (let index = 0; index < 10; index++) await Prom
   await editor.open([cropItem]); await settle(); await byText("从原卷裁图").emit("click");
   const cropImage = descend(document.body).find(element => element.alt === "原卷解析图来源页"), cropSurface = descend(document.body).find(element => element.className === "answer-crop-surface");
   cropImage.naturalWidth = 100; await cropImage.emit("load"); assert.equal(cropImage.dataset.ready, "true");
-  await byText("收起").emit("click"); let releasePaper;
+  const cropCloseButton = byText("收起裁剪条");
+  assert.equal(cropCloseButton.title, root.QBControlWording.CROP.hint,
+    "1.26.39：裁剪条那颗要说清收起之后怎么再打开");
+  await cropCloseButton.emit("click"); let releasePaper;
   paperGate = new Promise(resolve => { releasePaper = resolve; }); const reopenCrop = byText("从原卷裁图").emit("click"); await settle();
   assert.equal(cropImage.dataset.ready, "false", "Reopening immediately invalidates the previous page image before the slow page list returns");
   await cropSurface.emit("click", { button: 0, clientX: 10, clientY: 10 }); await cropSurface.emit("click", { button: 0, clientX: 50, clientY: 50 });
