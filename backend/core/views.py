@@ -726,6 +726,17 @@ def question_json(question: Question, table_blocks: list[dict] | None = None) ->
 _QUESTION_MUTATION_STATUSES = {Paper.Status.READY}
 
 
+def _question_first_page(question) -> int | None:
+    """这道题在原卷的第几页（一基）。没有原图位置就没有页码。"""
+    for region in question.regions or []:
+        if not isinstance(region, dict):
+            continue
+        index = region.get("page_idx")
+        if isinstance(index, int):
+            return index + 1
+    return None
+
+
 def _question_trash_json(batch: QuestionDeletionBatch) -> dict:
     rows = list(
         Question.all_objects.filter(paper_id=batch.paper_id, deletion_batch=batch, deleted_at__isnull=False)
@@ -753,6 +764,8 @@ def _question_trash_json(batch: QuestionDeletionBatch) -> dict:
                     else None
                 ),
                 "section": question.section,
+                "source_kind": question.source_kind,
+                "page": _question_first_page(question),
                 "stem": question.stem[:160],
                 "deleted_at": question.deleted_at.isoformat(),
             }
@@ -2430,14 +2443,7 @@ def _skip_locate(question) -> dict:
     """
     group = question.group
     stem = " ".join((question.stem or "").split())
-    page = None
-    for region in question.regions or []:
-        if not isinstance(region, dict):
-            continue
-        index = region.get("page_idx")
-        if isinstance(index, int):
-            page = index + 1
-            break
+    page = _question_first_page(question)
     return {
         "number": question.number,
         "source_kind": question.source_kind,

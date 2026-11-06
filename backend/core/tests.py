@@ -2057,6 +2057,27 @@ class ApiTests(TestCase):
         self.assertEqual(item["page"], 6, "页码按原卷的一基页码报")
         self.assertEqual(item["category"], "题型没读出来，请在题卡上选一下题型", data["skipped"])
 
+    def test_trash_rows_can_be_located_back_in_the_book(self):
+        """回收站里的旧题既没章节名也没小节，光写「第 1 题」在书上有上百处都对不上，
+        得把原卷页码一起报出来，才能跟结果面板说同一套话。"""
+        from .models import QuestionDeletionBatch
+
+        batch = QuestionDeletionBatch.objects.create(paper=self.paper, question_ids=[self.q2.pk], reason="旧误建卡")
+        Question.objects.filter(pk=self.q2.pk).update(
+            group=None,
+            section="",
+            deleted_at=timezone.now(),
+            deletion_batch=batch,
+            regions=[{"page_idx": 166, "bbox": [10, 20, 100, 60]}],
+        )
+        response = self.client.get(f"/api/papers/{self.paper.id}/question-trash")
+        self.assertEqual(response.status_code, 200, response.content)
+        batches = response.json()["batches"]
+        row = next(entry for item in batches for entry in item["questions"] if entry["id"] == self.q2.pk)
+        self.assertEqual(row["page"], 167, "页码按原卷的一基页码报")
+        self.assertIsNone(row["group"], "没有章节名就不许硬编一个")
+        self.assertEqual(row["section"], "")
+
     def test_human_no_figure_confirmation_is_traceable_and_allows_approval(self):
         Question.objects.filter(pk=self.q2.pk).update(
             state=Question.State.YELLOW,

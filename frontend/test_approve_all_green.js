@@ -56,7 +56,7 @@ assert.ok(resultScript < appScript, "结果面板模块要在 app.js 之前");
 
 // 找题和回收站说的是同一道题，就得用同一套说法。
 assert.match(js, /window\.QBQuestionLocator\?\.locate\(q\)/, "找题用统一说法");
-assert.match(js, /window\.QBQuestionLocator\?\.locate\(question\)/, "回收站用统一说法");
+assert.match(js, /window\.QBQuestionLocator\?\.locateWithPage\(question\)/, "回收站用统一说法（没章节名时报页码）");
 assert.ok(!js.includes("typeof q.group === \"object\" ? q.group?.title : q.section"), "定位别再各写各的");
 
 console.log("approve all green checks: OK");

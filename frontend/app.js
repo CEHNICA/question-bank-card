@@ -4615,7 +4615,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       head.append(title, restore);
       const questions = el("ul", "trash-questions");
       (batch.questions || []).forEach((question) => {
-        const prefix = window.QBQuestionLocator?.locate(question) || `第 ${question.number} 题`;
+        const prefix = window.QBQuestionLocator?.locateWithPage(question) || `第 ${question.number} 题`;
         const stem = String(question.stem || "").replace(/\s+/g, " ").trim();
         questions.append(el("li", "", `${prefix}${stem ? ` — ${stem.slice(0, 90)}${stem.length > 90 ? "…" : ""}` : ""}`));
       });
