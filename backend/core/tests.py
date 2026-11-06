@@ -417,6 +417,14 @@ class StaticAssetTests(TestCase):
         self.assertEqual(response["Content-Type"], "image/png")
         self.assertTrue(b"".join(response.streaming_content).startswith(b"\x89PNG\r\n\x1a\n"))
 
+    def test_new_frontend_modules_are_served(self):
+        """1.26.41 新增的两个脚本要能被页面取到。"""
+        for name in ("question-locator.js", "approve-result.js"):
+            response = self.client.get(f"/{name}")
+            self.assertEqual(response.status_code, 200, name)
+            self.assertIn("javascript", response["Content-Type"], name)
+            self.assertTrue(b"".join(response.streaming_content).strip(), name)
+
 
 class ParallelogramSymbolTests(TestCase):
     def test_square_before_vertex_letters_becomes_parallelogram(self):
@@ -1987,10 +1995,67 @@ class ApiTests(TestCase):
         self.assertIn("题型还没定", reasons[q3.number], data["skipped"])
         # 能过的照过，已入库的那道不算"过不去"。
         self.assertEqual(data["approved"], 1, data["skipped"])
+
         self.q.refresh_from_db()
         self.assertTrue(self.q.approved_content_hash)
         # 已经入库的题不该被列为待处理项。
         self.assertNotIn(self.q.number, reasons)
+
+    def test_approve_green_says_which_card_each_skip_is(self):
+        """过不去的题要说清「是哪一道」。
+
+        同一本教材里题号会从小节重新开始，光说「第 1 题」在书上一百多处都对不上，
+        所以每条跳过都要带上章节、小节、原卷页码、题干开头，还要说清属于哪一类。
+        """
+        from .models import QuestionGroup
+
+        group = QuestionGroup.objects.create(
+            paper=self.paper, title="章节01 · 公式法", kind=QuestionGroup.Kind.CHAPTER, sequence=0
+        )
+        Question.objects.filter(pk=self.q2.pk).update(
+            group=group,
+            section="第1节 公式法 · 例题2",
+            flags=["按章节结构重新提取，请对照新原图范围核对", "原审核记录保留在旧版本中"],
+            regions=[{"page_idx": 3, "bbox": [10, 20, 100, 60]}],
+        )
+        data = self.post(f"/api/papers/{self.paper.id}/approve-green").json()
+        item = next(entry for entry in data["skipped"] if entry["number"] == self.q2.number)
+        self.assertEqual(item["group_title"], "章节01 · 公式法", data["skipped"])
+        self.assertEqual(item["section"], "第1节 公式法 · 例题2", data["skipped"])
+        self.assertEqual(item["page"], 4, "页码按原卷的一基页码报")
+        self.assertEqual(item["stem"], "求证", data["skipped"])
+        self.assertEqual(item["category"], "按章节结构重新提取，请对照新原图范围核对", data["skipped"])
+        self.assertIn(
+            "原审核记录保留在旧版本中", item["detail"], "分组标题说了卡在哪一类，这一条还要说清自己多出来的那条提醒"
+        )
+
+    def test_approve_green_skip_detail_says_what_to_do(self):
+        """分组标题说了卡在哪一类，每一条还要说清自己该做什么。"""
+        Question.objects.filter(pk=self.q2.pk).update(
+            state=Question.State.GREEN,
+            stem="   ",
+            question_type="free_response",
+            figure_review={"status": figure_policy.CONFIRMED_NO_FIGURE, "source": "human"},
+        )
+        data = self.post(f"/api/papers/{self.paper.id}/approve-green").json()
+        item = next(entry for entry in data["skipped"] if entry["number"] == self.q2.number)
+        self.assertEqual(item["category"], "还没读出题干", data["skipped"])
+        self.assertEqual(item["detail"], "请先改字或重新识读", data["skipped"])
+
+    def test_approve_green_skip_without_a_group_still_gives_a_page(self):
+        """没有章节名的旧题，题号在书里重号，只能靠原卷页码认。"""
+        Question.objects.filter(pk=self.q2.pk).update(
+            group=None,
+            section="",
+            flags=["题型没读出来，请在题卡上选一下题型"],
+            regions=[{"page_idx": 5, "bbox": [10, 20, 100, 60]}],
+        )
+        data = self.post(f"/api/papers/{self.paper.id}/approve-green").json()
+        item = next(entry for entry in data["skipped"] if entry["number"] == self.q2.number)
+        self.assertEqual(item["group_title"], "", data["skipped"])
+        self.assertEqual(item["section"], "", data["skipped"])
+        self.assertEqual(item["page"], 6, "页码按原卷的一基页码报")
+        self.assertEqual(item["category"], "题型没读出来，请在题卡上选一下题型", data["skipped"])
 
     def test_human_no_figure_confirmation_is_traceable_and_allows_approval(self):
         Question.objects.filter(pk=self.q2.pk).update(

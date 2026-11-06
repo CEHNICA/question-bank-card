@@ -762,6 +762,20 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .approve-result-head strong { color: var(--accent); font-size: 16px; }
 .approve-result-sub { color: var(--red); }
 .approve-result-ok { color: var(--muted); font-size: 13.5px; }
+.approve-result-summary { margin: 10px 0 4px; color: var(--ink-2); font-size: 13.5px; }
+.approve-result-lead { margin: 0 0 8px; padding: 9px 12px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg-sunken); color: var(--ink-2); font-size: 13.5px; line-height: 1.55; }
+.approve-result-group { margin: 8px 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-sunken); }
+.approve-result-group-head { cursor: pointer; padding: 9px 12px; color: var(--ink); font-size: 13.5px; line-height: 1.55; }
+.approve-result-items { margin: 0; padding: 0 12px 10px; list-style: none; display: grid; gap: 7px; }
+.approve-result-item { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 2px 10px;
+  align-items: baseline; font-size: 13px; color: var(--ink-2); }
+.approve-result-where { color: var(--ink); font-weight: 600; }
+.approve-result-stem { color: var(--muted); overflow-wrap: anywhere; }
+.approve-result-detail { grid-column: 1 / -1; color: var(--muted); font-size: 12.5px; }
+.approve-result-problems { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.approve-result-problem { padding: 9px 12px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg-sunken); color: var(--ink-2); font-size: 13px; line-height: 1.55; }
 .approve-result-skip { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 9px 12px; border: 1px solid var(--line);
   border-radius: var(--radius); background: var(--bg-sunken); color: var(--ink-2); font-size: 13px; line-height: 1.55; }
 .trash-empty strong { color: var(--ink); font-size: 15px; }

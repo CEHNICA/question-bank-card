@@ -259,7 +259,7 @@
                   <button id="questionTrash" class="link-button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg><span id="questionTrashLabel">题卡回收站</span></button>
                   <hr class="menu-divider">
                   <p class="menu-note">批量审核</p>
-                  <p class="menu-note">先看处理结果，再确认通过；不能通过的题会说明原因。</p>
+                  <p class="menu-note">能通过的题直接入库；不能通过的会按原因归类说明。</p>
                   <button id="approveAllGreen" class="link-button" type="button" hidden>批量通过可入库题目…</button>
                   <details class="paper-notes">
                     <summary>处理记录（<span id="paperNotesCount">0</span>）</summary>
@@ -783,8 +783,8 @@
   <dialog id="approveResultDialog" class="trash-dialog approve-result-dialog" aria-labelledby="approveResultTitle">
     <div class="dialog-head">
       <div>
-        <h3 id="approveResultTitle">一键通过的结果</h3>
-        <p class="hint">能通过的题已经入库；下面逐条列出过不去的题和原因。</p>
+        <h3 id="approveResultTitle">批量通过的结果</h3>
+        <p class="hint">能通过的题已经入库；过不去的题按原因归了类，展开一类就能看到是哪几道。</p>
       </div>
       <button class="button" type="button" data-close>关闭</button>
     </div>
@@ -928,6 +928,8 @@
   <script src="/original-paper-layout.js" defer></script>
   <script src="/resegment-preview-wording.js" defer></script>
   <script src="/control-wording.js" defer></script>
+  <script src="/question-locator.js" defer></script>
+  <script src="/approve-result.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

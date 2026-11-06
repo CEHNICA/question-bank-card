@@ -2422,6 +2422,33 @@ def paper_resegment(request, paper_id):
     return JsonResponse({"paper": paper_json(paper)})
 
 
+def _skip_locate(question) -> dict:
+    """过不去的题也要说清「是哪一道」。
+
+    同一本教材里题号会从小节重新开始，「第 1 题」在书上有一百多处；
+    页码和题干开头才是唯一能对上的两样东西。
+    """
+    group = question.group
+    stem = " ".join((question.stem or "").split())
+    page = None
+    for region in question.regions or []:
+        if not isinstance(region, dict):
+            continue
+        index = region.get("page_idx")
+        if isinstance(index, int):
+            page = index + 1
+            break
+    return {
+        "number": question.number,
+        "source_kind": question.source_kind,
+        "group_title": (group.title or "").strip() if group is not None else "",
+        "section": (question.section or "").strip(),
+        "stem": stem[:60],
+        "page": page,
+        "flags": [str(flag) for flag in (question.flags or [])][:3],
+    }
+
+
 @csrf_exempt
 def approve_green(request, paper_id):
     if request.method != "POST":
@@ -2446,7 +2473,7 @@ def approve_green(request, paper_id):
         # yellow.  Such cards were shown as green and left out here (1.10.4).
         questions = list(
             paper.questions.select_for_update()
-            .select_related("paper")
+            .select_related("paper", "group")
             .filter(state__in=[Question.State.GREEN, Question.State.YELLOW])
         )
         # Approving changes nothing the figure review reads, so each card's is worked out once.
@@ -2461,7 +2488,11 @@ def approve_green(request, paper_id):
                     pending = [str(flag) for flag in (question.flags or [])][:3]
                     skipped.append(
                         {
-                            "number": question.number,
+                            **_skip_locate(question),
+                            "category": pending[0] if pending else "还有待核查的提醒",
+                            "detail": "；".join(pending[1:])
+                            if len(pending) > 1
+                            else ("请先处理" if not pending else ""),
                             "reason": ("还有待核查的提醒：" + "；".join(pending))
                             if pending
                             else "这道题还有待核查的提醒，请先处理",
@@ -2469,13 +2500,34 @@ def approve_green(request, paper_id):
                     )
                     continue
                 if not question.stem.strip():
-                    skipped.append({"number": question.number, "reason": "还没读出题干，请先改字或重新识读"})
+                    skipped.append(
+                        {
+                            **_skip_locate(question),
+                            "category": "还没读出题干",
+                            "detail": "请先改字或重新识读",
+                            "reason": "还没读出题干，请先改字或重新识读",
+                        }
+                    )
                     continue
                 if blocks_approval(review):
-                    skipped.append({"number": question.number, "reason": blocking_message(review)})
+                    skipped.append(
+                        {
+                            **_skip_locate(question),
+                            "category": "配图状态还没确认",
+                            "detail": blocking_message(review),
+                            "reason": blocking_message(review),
+                        }
+                    )
                     continue
                 if library.type_blocks_approval(question):
-                    skipped.append({"number": question.number, "reason": "题型还没定，请先在题号旁边选一下题型"})
+                    skipped.append(
+                        {
+                            **_skip_locate(question),
+                            "category": "题型还没定",
+                            "detail": "请先在题号旁边选一下题型",
+                            "reason": "题型还没定，请先在题号旁边选一下题型",
+                        }
+                    )
                     continue
                 # Already passed by the same kind of reviewer (or by a person): nothing to do.
                 if library.approval_is_current(question) and library.approval_source(question) in {
@@ -2484,7 +2536,14 @@ def approve_green(request, paper_id):
                 }:
                     continue
                 if not library.approve(question, now=now, source=approver[0], agent=approver[1]):
-                    skipped.append({"number": question.number, "reason": "这道题的通过状态没能更新，请重试"})
+                    skipped.append(
+                        {
+                            **_skip_locate(question),
+                            "category": "通过状态没能更新",
+                            "detail": "请重试",
+                            "reason": "这道题的通过状态没能更新，请重试",
+                        }
+                    )
                     continue
                 question.updated_at = now
                 changed.append(question)

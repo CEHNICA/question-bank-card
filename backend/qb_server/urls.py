@@ -32,6 +32,8 @@ urlpatterns = [
         views._frontend("resegment-preview-wording.js", "application/javascript; charset=utf-8"),
     ),
     path("control-wording.js", views._frontend("control-wording.js", "application/javascript; charset=utf-8")),
+    path("question-locator.js", views._frontend("question-locator.js", "application/javascript; charset=utf-8")),
+    path("approve-result.js", views._frontend("approve-result.js", "application/javascript; charset=utf-8")),
     path("browser-interactions.js", views.browser_interactions_script),
     path("site-drawer.js", views.site_drawer_script),
     path("qb-render.js", views.render_script),

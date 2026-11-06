@@ -67,7 +67,7 @@ assert.match(libraryHtml, /<script src="\/control-wording\.js" defer><\/script>\
   "话术文件必须排在用它的人前面（defer 按书写顺序执行）");
 assert.match(libraryHtml, /<script src="\/control-wording\.js" defer><\/script>[\s\S]*?<script src="\/library\.js"/,
   "话术文件必须排在题库主脚本前面");
-assert.match(indexHtml, /<script src="\/control-wording\.js" defer><\/script>\s*<script src="\/app\.js"/,
+assert.match(indexHtml, /<script src="\/control-wording\.js" defer><\/script>[\s\S]*?<script src="\/app\.js"/,
   "话术文件必须排在核对页主脚本前面");
 
 // ── 四、后端得真发得出这个文件 ────────────────────────────

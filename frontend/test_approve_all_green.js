@@ -32,13 +32,31 @@ assert.match(handler, /\$\("paperMenu"\)\.open = false;/);
 // 结果面板：入库几道 + 逐条原因，两个都不能少。
 assert.match(handler, /showApproveResult\(\{/);
 const result = js.slice(js.indexOf("  function showApproveResult("), js.indexOf("  async function approveAllGreen("));
-assert.match(result, /已入库 \$\{approved\} 道/);
-assert.match(result, /approve-result-skip/);
-assert.match(result, /第 \$\{item\.number\} 题：\$\{item\.reason\}/);
+// 1.26.41：画面板的事交给统一模块，这里不再自己拼「第 N 题」——
+// 同一本教材里题号会重号，光报题号在书上一百多处都对不上。
+assert.match(result, /window\.QBApproveResult\?\.render/);
+assert.match(result, /render\(list, \{ approved, problems, skipped \}\)/);
+assert.doesNotMatch(result, /第 \$\{item\.number\} 题/, "定位改由统一模块负责，不再自己拼题号");
+// 模块没加载出来时要说实话，不装作一切正常。
+assert.match(result, /没加载出来/);
 assert.match(html, /id="approveResultDialog"/);
 assert.match(html, /id="approveResultList"/);
 // 不谎称全做完：过不去的题永远跟着结果一起报。
 assert.match(js, /skipped: data\.skipped \|\| \[\]/);
 assert.ok(!js.includes("已通过所有题目"), "不许用「已通过所有题目」这种说法");
+
+// 两个新模块要在 app.js 之前加载（app.js 一上来就要用）。
+const locatorScript = html.indexOf('src="/question-locator.js"');
+const resultScript = html.indexOf('src="/approve-result.js"');
+const appScript = html.indexOf('src="/app.js"');
+assert.notEqual(locatorScript, -1, "页面要加载定位模块");
+assert.notEqual(resultScript, -1, "页面要加载结果面板模块");
+assert.ok(locatorScript < appScript, "定位模块要在 app.js 之前");
+assert.ok(resultScript < appScript, "结果面板模块要在 app.js 之前");
+
+// 找题和回收站说的是同一道题，就得用同一套说法。
+assert.match(js, /window\.QBQuestionLocator\?\.locate\(q\)/, "找题用统一说法");
+assert.match(js, /window\.QBQuestionLocator\?\.locate\(question\)/, "回收站用统一说法");
+assert.ok(!js.includes("typeof q.group === \"object\" ? q.group?.title : q.section"), "定位别再各写各的");
 
 console.log("approve all green checks: OK");

@@ -2430,8 +2430,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     const fragment = document.createDocumentFragment();
     matches.slice(0, 100).forEach((q) => {
-      const group = typeof q.group === "object" ? q.group?.title : q.section;
-      const pages = [...new Set((q.regions || []).map((r) => Number(r.page_idx) + 1))].sort((a, b) => a - b);
+      const pages = window.QBQuestionLocator?.pagesOf(q) || [];
       const row = button("", "review-finder-result", async () => {
         const current = questionById(q.id);
         if (!current) { toast("这道题已被删除或拆合替代，请刷新找题结果。", "warning"); renderReviewFinder(); return; }
@@ -2451,7 +2450,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       });
       row.setAttribute("role", "option");
       row.dataset.questionId = String(q.id);
-      row.append(el("span", "review-finder-result-title", `${group ? `${group} · ` : ""}第 ${q.number} 题`));
+      row.append(el("span", "review-finder-result-title", window.QBQuestionLocator?.locate(q) || `第 ${q.number} 题`));
       row.append(el("span", "review-finder-result-meta", pages.length ? `第 ${pages.join("、")} 页` : "原图题"));
       row.append(el("span", "review-finder-result-snippet", window.QBReviewFinder?.snippet(q) || "原图题 · 暂无已保存文字"));
       fragment.append(row);
@@ -4388,21 +4387,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   // 1.12.5：试卷操作里的批量审核。只把符合条件的题入库，
-  // 过不了的逐条说明原因"——不静默跳过，也不谎称全做完。
+  // 过不了的按原因归类说明"——不静默跳过，也不谎称全做完。
   function showApproveResult({ approved, problems, skipped }) {
     const list = $("approveResultList");
-    list.replaceChildren();
-    const head = el("p", "approve-result-head");
-    head.append(el("strong", "", `已入库 ${approved} 道`));
-    if (problems.length) head.append(el("span", "approve-result-sub", `另有 ${problems.length} 道保存未完成，请重试`));
-    list.append(head);
-    if (!skipped.length && !problems.length) {
-      list.append(el("p", "approve-result-ok", "这一卷剩下的题都已经入库了。"));
+    const render = window.QBApproveResult?.render;
+    if (!render) {
+      // 结果面板的模块没加载出来，就说没加载出来，不装作一切正常。
+      list.replaceChildren(el("p", "approve-result-skip", "结果面板没加载出来，请刷新页面再试一次。"));
+    } else {
+      render(list, { approved, problems, skipped });
     }
-    for (const item of skipped) {
-      list.append(el("p", "approve-result-skip", `第 ${item.number} 题：${item.reason}`));
-    }
-    for (const text of problems) list.append(el("p", "approve-result-skip", text));
     if (!$("approveResultDialog").open) $("approveResultDialog").showModal();
   }
 
@@ -4413,7 +4407,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!waiting) { toast("这一卷没有待通过的题", "error"); return; }
     if (!(await confirmDialog({
       title: "批量审核这份试卷？",
-      text: `把这一卷里能通过的题一次入库，还有 ${waiting} 题待核对。过不了的题不会被硬标通过，会在结果里逐条说明原因。`,
+      text: `把这一卷里能通过的题一次入库，还有 ${waiting} 题待核对。过不了的题不会被硬标通过，会在结果里按原因归类说明。`,
       ok: "通过能通过的题"
     }))) return;
     $("paperMenu").open = false;
@@ -4569,7 +4563,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       $("approveAllGreen").hidden = !state.paper;
       $("approveAllGreen").disabled = !ready || !waiting || state.approveAllBusy;
       $("approveAllGreen").title = ready
-        ? (waiting ? `把这一卷里能通过的题一次入库（还有 ${waiting} 题待核对）；过不了的会逐条说明原因` : "这一卷没有待通过的题")
+        ? (waiting ? `把这一卷里能通过的题一次入库（还有 ${waiting} 题待核对）；过不了的会按原因归类说明` : "这一卷没有待通过的题")
         : "任务处理完成后才能标记通过";
     }
     if ($("questionTrash")) {
@@ -4621,8 +4615,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       head.append(title, restore);
       const questions = el("ul", "trash-questions");
       (batch.questions || []).forEach((question) => {
-        const group = typeof question.group === "object" ? question.group?.title : question.section;
-        const prefix = [group, `第 ${question.number} 题`].filter(Boolean).join(" · ");
+        const prefix = window.QBQuestionLocator?.locate(question) || `第 ${question.number} 题`;
         const stem = String(question.stem || "").replace(/\s+/g, " ").trim();
         questions.append(el("li", "", `${prefix}${stem ? ` — ${stem.slice(0, 90)}${stem.length > 90 ? "…" : ""}` : ""}`));
       });
