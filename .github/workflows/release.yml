@@ -43,6 +43,11 @@ jobs:
       - name: Run the full check suite
         shell: pwsh
         run: |
+          # 门禁必须是硬的：任何一条命令失败就立刻停手，
+          # 以前这个步骤一路跑到底，只看最后一条命令的成败，
+          # 排版不过也会照样出包。
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           python -m pip install -r backend/requirements.lock.txt
           python -m pip install -r backend/requirements-dev.txt
           npm ci --no-audit --no-fund
@@ -51,7 +56,7 @@ jobs:
           npm run lint
           python -m mypy --config-file pyproject.toml backend/core
           python -m unittest test_launcher test_backup test_app_window test_credential_dialog test_packaging test_assistant_setup test_create_shortcut test_dev_script
-          Push-Location backend; try { python manage.py test core } finally { Pop-Location }
+          Push-Location backend; try { $env:QB_EXPORT_BROWSER_TEST = '1'; python manage.py test core } finally { Pop-Location }
           node --test frontend/test_*.js
 
       - name: Build the installer and the portable folder
