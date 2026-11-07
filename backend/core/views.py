@@ -934,6 +934,11 @@ api_redesign_styles = _frontend("api-redesign.css", "text/css; charset=utf-8")
 library_styles = _frontend("library.css", "text/css; charset=utf-8")
 library_reading_styles = _frontend("library-reading.css", "text/css; charset=utf-8")
 favicon = _frontend("favicon.png", "image/png")
+# 1.26.50：打开软件时试卷列表还在准备，这一行说明现在是什么状态。
+# 这两个文件**必须在这里登记** —— 前端文件不是一个目录一起发的，
+# 而是一个一个登记路径。漏登记就是 404，功能等于没做。
+startup_hint_script = _frontend("startup-hint.js", "application/javascript; charset=utf-8")
+startup_hint_styles = _frontend("startup-hint.css", "text/css; charset=utf-8")
 
 
 def katex_asset(request, asset: str):

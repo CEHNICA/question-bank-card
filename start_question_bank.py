@@ -570,36 +570,24 @@ def _start(args: list[str], environment: dict[str, str], log_name: str) -> tuple
         raise
 
 
-def _warm_papers(url: str) -> None:
-    """把第一次 /api/papers 跑完，窗口开出来时列表已经是热的。
-
-    冷启动之后第一次 /api/papers 要 13.5 秒：ORM 第一次编译查询计划、SQLite 页缓存
-    是空的、十几份卷的结构数据第一次序列化。之后只要 0.8 秒。而窗口开出来第一件事
-    就是拉这个接口 —— 不等的话，界面会空着十几秒，什么都点不了。
-    等的这十几秒里启动器停在「正在启动后台服务…」，那是有进度提示的等待，比空白
-    界面好受得多。
-    """
-    for _ in range(6):
-        try:
-            with urllib.request.urlopen(url + "/api/papers", timeout=90) as response:
-                response.read()
-            return
-        except (urllib.error.URLError, TimeoutError, OSError):
-            time.sleep(1.0)
-
-
 def _health(url: str, process: subprocess.Popen) -> None:
-    for _ in range(60):
+    """等后台服务起来 —— 这里只等到「能应答」，不再等试卷列表。
+
+    1.26.50：原来这里还会先把 /api/papers 整个跑一遍，窗口才开出来。
+    那一次要 13 秒（几千道题的 JSON 字段第一次解析），老师只能对着启动画面干等。
+    现在改成：服务一就绪就开窗口，列表在窗口里慢慢加载。
+    判定结果会落盘复用（core/verdict_cache.py），第二次打开几乎不用等。
+    """
+    for _ in range(200):
         if process.poll() is not None:
             raise RuntimeError("网页服务提前退出，请查看 backend/runtime/web.log")
         try:
             with urllib.request.urlopen(url + "/api/health", timeout=1) as response:
                 if response.status == 200:
-                    _warm_papers(url)
                     return
         except (urllib.error.URLError, TimeoutError):
             pass
-        time.sleep(0.5)
+        time.sleep(0.15)
     raise RuntimeError("网页服务未能在 30 秒内就绪，请查看 backend/runtime/web.log")
 
 

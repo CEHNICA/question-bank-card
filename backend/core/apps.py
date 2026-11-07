@@ -1,13 +1,12 @@
 import logging
 import shutil
-import sys
-import threading
 import time
-import urllib.request
 from pathlib import Path
 
 from django.apps import AppConfig
 from django.conf import settings
+
+from core import verdict_cache
 
 logger = logging.getLogger(__name__)
 
@@ -117,47 +116,6 @@ def _tune_sqlite(sender, connection, **kwargs):
         cursor.execute("PRAGMA temp_store=MEMORY")
 
 
-def _server_port() -> str | None:
-    """从命令行里找出 runserver 的端口。
-
-    打包后的桌面版是 `QuestionBankCard.exe --internal-role runserver 127.0.0.1:8768`，
-    源码模式是 `manage.py runserver 127.0.0.1:8768 --noreload` —— 两边都能这么问出来。
-    问不出来（测试、worker）就返回 None，那就别预热。
-    """
-    argv = list(sys.argv)
-    for index, item in enumerate(argv):
-        if item != "runserver":
-            continue
-        for candidate in argv[index + 1 :]:
-            if candidate.startswith("-"):
-                continue
-            if ":" in candidate:
-                return candidate.rsplit(":", 1)[1]
-    return None
-
-
-def _warm_up(port: str) -> None:
-    """后台先把 /api/papers 跑一遍。
-
-    冷启动之后第一次 /api/papers 要 13.5 秒：ORM 第一次编译查询计划、SQLite 页缓存
-    是空的、12 份卷的 structure/processing_plan 第一次序列化。之后只要 0.8 秒。
-    而开窗口第一件事就是拉这个接口 —— 于是每次开软件都得对着空白界面等十几秒。
-
-    这里等服务起来之后自己先跑一遍，等老师真的点开时已经是热的。
-    跑不成也不影响软件用。
-    """
-    url = f"http://127.0.0.1:{port}/api/papers"
-    for _ in range(40):
-        try:
-            with urllib.request.urlopen(url, timeout=60) as response:
-                response.read()
-            logger.info("预热完成：/api/papers")
-            return
-        except Exception:
-            time.sleep(1.5)
-    logger.warning("预热没成功；服务起来之后第一次打开列表可能还是会慢一下。")
-
-
 def _start_background_work() -> None:
     try:
         from django.db.backends.signals import connection_created
@@ -165,10 +123,9 @@ def _start_background_work() -> None:
         connection_created.connect(_tune_sqlite, dispatch_uid="qb_tune_sqlite")
     except Exception as exc:
         logger.warning("SQLite 调优没挂上：%s", exc)
-    port = _server_port()
-    if not port:
-        return
-    threading.Thread(target=_warm_up, args=(port,), name="qb-warm-up", daemon=True).start()
+    # 1.26.50：这里原来会后台先把 /api/papers 跑一遍。现在不跑了 ——
+    # 老师打开软件时页面本来就要拉这个接口，两边各算一遍反而更慢；
+    # 而且判定结果现在会落盘复用（core/verdict_cache.py），第二次打开本来就快。
 
 
 class CoreConfig(AppConfig):
@@ -176,6 +133,9 @@ class CoreConfig(AppConfig):
     name = "core"
 
     def ready(self):
+        # 1.26.50：判定结果存到磁盘复用 —— 第二次打开软件不用再解析几千道题
+        # 的 JSON 字段（冷启动那一遍要 3.9 秒）。接不上也不影响软件能用。
+        verdict_cache.install()
         for sweep in (discard_interrupted_uploads, discard_interrupted_deletes):
             try:
                 sweep()

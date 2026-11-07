@@ -1,0 +1,8 @@
+/* 1.26.50：打开软件时试卷列表还在准备，这一行说明现在是什么状态。
+   写在列表那一栏里，就放在老师看的地方，不弹到屏幕中央挡视线。 */
+.startup-hint {
+  color: var(--ink-soft, #6b7280);
+  font-size: 0.9rem;
+  line-height: 1.6;
+  padding: 6px 2px;
+}

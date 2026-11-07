@@ -59,6 +59,8 @@ urlpatterns = [
     path("library.css", views.library_styles),
     path("library-reading.css", views.library_reading_styles),
     path("favicon.png", views.favicon),
+    path("startup-hint.js", views.startup_hint_script),
+    path("startup-hint.css", views.startup_hint_styles),
     path("vendor/katex/<path:asset>", views.katex_asset),
     path("api/health", views.health),
     path("api/status", views.status),

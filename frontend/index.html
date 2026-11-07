@@ -8,6 +8,8 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="stylesheet" href="/vendor/katex/katex.min.css">
   <link rel="stylesheet" href="/styles.css">
+<!-- 1.26.50：打开软件时试卷列表还在准备，这一行说明现在是什么状态。 -->
+<link rel="stylesheet" href="/startup-hint.css">
 <!-- 1.26.15：API 配置这一页的重新排版，单独一个文件，方便整页回退。 -->
 <link rel="stylesheet" href="/api-redesign.css?v=3">
 </head>
@@ -930,6 +932,8 @@
   <script src="/control-wording.js" defer></script>
   <script src="/question-locator.js" defer></script>
   <script src="/approve-result.js" defer></script>
+  <!-- 1.26.50：列表还在准备时，在那一栏里说清楚，别让老师对着空白。 -->
+  <script src="/startup-hint.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>
