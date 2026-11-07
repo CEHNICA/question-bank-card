@@ -97,10 +97,11 @@ class DiskVerdictCache(OrderedDict):
     def __init__(self, *args: Any, path: Path | str | None = None, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._dirty = False
+        self._path: Path | None = None
         if path is not None:
             self._path = Path(path)
-        else:
-            self._path = cache_path() if _enabled() else None
+        elif _enabled():
+            self._path = cache_path()
         self._load()
 
     # ---- 读 -------------------------------------------------------
