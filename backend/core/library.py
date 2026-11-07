@@ -863,6 +863,20 @@ def publication_json(publication: PublishedQuestion, *, include_tag_details: boo
     return library_tagging.attach_to_publication_json(publication, data)
 
 
+def publications_json(publications) -> list[dict]:
+    """一页题一次查完标签关联和建议，别一道题一道题地查。
+
+    1.26.47：题库页一次要出四十道题。原来每道题都要单独查自己的标签关联、
+    AI 建议、退役标签名和上下级关系 —— 一百多次查库，页面得多等半秒。
+    出来的内容跟一道题一道题查完全一样。
+    """
+    from . import library_tagging
+
+    publications = list(publications)
+    rows = [publication_json(item, include_tag_details=False) for item in publications]
+    return library_tagging.attach_batch_to_publications(publications, rows)
+
+
 HISTORY_FIELDS = (
     ("body_mode", "正文形式"),
     ("question_images", "原图正文"),

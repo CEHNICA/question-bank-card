@@ -32,29 +32,37 @@ assert.equal(typeof todoPanelPlacement, "function", "位置函数没跑出来");
 
 const MARGIN = 16;
 
-// 1) 宽屏：照旧贴住按钮右缘（面板往左铺），不改变原来的观感。
-assert.equal(todoPanelPlacement(687, 560, 1442, MARGIN).left, 127,
-  "宽屏时面板仍贴住按钮右缘");
-assert.equal(todoPanelPlacement(1069, 560, 1442, MARGIN).left, 509,
+// 1.26.47 改了摆法：面板落在按钮**下方**，横向压着按钮没妨，所以左缘对齐按钮左缘。
+//    老规矩（贴按钮右缘往左铺、放不下就甩到屏幕右边）在宽屏上会把面板甩到屏幕
+//    另一头 —— 老师报的「它那个出来的那个界面会在最右边」就是这个毛病。
+//    现在这一段的参数是**按钮左缘**，不是右缘。
+//
+// 1) 宽屏：面板左缘对齐按钮左缘，就压在按钮正下方。
+assert.equal(todoPanelPlacement(33, 560, 1600, MARGIN).left, 33,
+  "宽屏时面板左缘对齐按钮左缘");
+assert.equal(todoPanelPlacement(400, 560, 1600, MARGIN).left, 400,
   "按钮在别处时，面板跟着按钮走");
 
-// 2) 窄屏：贴按钮右缘会跑出屏幕左缘（实测落在 -141），这时改贴屏幕右缘 ——
-//    这就是老师要的「在右边展示」。
-assert.equal(todoPanelPlacement(419, 560, 1000, MARGIN).left, 1000 - MARGIN - 560,
-  "放不下就贴屏幕右缘");
-assert.equal(todoPanelPlacement(35, 560, 900, MARGIN).left, 900 - MARGIN - 560,
-  "更窄的窗口也一样贴右边");
+// 2) 按钮靠右：面板跟着靠右，但绝不顶出屏幕右缘。
+assert.equal(todoPanelPlacement(1400, 560, 1600, MARGIN).left, 1600 - MARGIN - 560,
+  "按钮靠右时面板靠右，但不顶出屏幕");
 
-// 3) 视口比面板本身还窄：面板按视口收窄，只剩贴左缘这一条路。
+// 3) 窄屏：面板同样贴着按钮左缘，不再被甩到屏幕另一边。
+assert.equal(todoPanelPlacement(33, 394, 789, MARGIN).left, 33,
+  "窄屏时面板仍贴着按钮左缘");
+assert.equal(todoPanelPlacement(35, 560, 900, MARGIN).left, 35,
+  "更窄的窗口也贴着按钮左缘");
+
+// 4) 视口比面板本身还窄：面板按视口收窄，只剩贴左缘这一条路。
 const narrow = todoPanelPlacement(380, 560, 400, MARGIN);
 assert.equal(narrow.left, MARGIN, "视口比面板还窄时贴屏幕左缘");
 assert.equal(narrow.width, 400 - MARGIN * 2, "面板按视口收窄，不顶出屏幕");
 
-// 4) 按钮本身贴着屏幕右缘时，面板也不能顶出右缘。
+// 5) 按钮本身贴着屏幕右缘时，面板也不能顶出右缘。
 assert.equal(todoPanelPlacement(1442, 560, 1442, MARGIN).left, 1442 - MARGIN - 560,
   "按钮贴右缘时，面板不顶出屏幕");
 
-// 5) 性质：不管视口多窄、按钮在哪儿，面板整个都得落在屏幕里。
+// 6) 性质：不管视口多窄、按钮在哪儿，面板整个都得落在屏幕里。
 //    这是老师那张截图的根本要求，必须写成性质，不能只挑几个例子。
 //    宽度用被测代码给的（place.width），不能自己另算一遍 —— 另算的话，
 //    被测代码改了宽度公式，这条断言还在按老公式判，就白测了。
@@ -62,11 +70,60 @@ for (let viewport = 320; viewport <= 2000; viewport += 7) {
   for (let anchor = 0; anchor <= viewport; anchor += 23) {
     const place = todoPanelPlacement(anchor, 560, viewport, MARGIN);
     assert.ok(place.left >= MARGIN,
-      `面板左缘跑出屏幕了：视口 ${viewport}、按钮右缘 ${anchor}、left ${place.left}`);
+      `面板左缘跑出屏幕了：视口 ${viewport}、按钮左缘 ${anchor}、left ${place.left}`);
     assert.ok(place.left + place.width <= viewport - MARGIN + 0.5,
-      `面板右缘跑出屏幕了：视口 ${viewport}、按钮右缘 ${anchor}、left ${place.left}、宽 ${place.width}`);
+      `面板右缘跑出屏幕了：视口 ${viewport}、按钮左缘 ${anchor}、left ${place.left}、宽 ${place.width}`);
   }
 }
+
+// 7) 性质：屏幕装得下时，面板必须待在按钮正下方 —— 也就是左缘跟按钮左缘一样。
+//    这条正是老师报的毛病：面板曾经跑到屏幕另一头，跟按钮脱节。
+//    旧规矩在这里会失败（它给的是按钮右缘减面板宽），所以这条能挡住改回去。
+for (let viewport = 900; viewport <= 2000; viewport += 11) {
+  for (let anchor = MARGIN; anchor + 560 + MARGIN <= viewport - MARGIN; anchor += 17) {
+    const place = todoPanelPlacement(anchor, 560, viewport, MARGIN);
+    assert.equal(place.left, anchor,
+      `面板没待在按钮正下方：视口 ${viewport}、按钮左缘 ${anchor}、left ${place.left}`);
+  }
+}
+
+// ── 一之二、真跑一遍摆位置的那段 ──
+// 只测那个纯函数不够：纯函数对了、调用处把「按钮右缘」当成「按钮左缘」传进去，
+// 测试照样绿，可面板就跑到屏幕另一头去了 —— 老师报的正是这个。
+// 所以这里把 placeTodoPanel 拿起来真跑一遍，看它最后把面板摆在哪。
+const placerStart = js.indexOf("  function placeTodoPanel() {");
+const placerEnd = js.indexOf("  // 窗口大小变了、页面滚了", placerStart);
+assert.notEqual(placerStart, -1, "placeTodoPanel 不见了；改版时 update this slice");
+assert.notEqual(placerEnd, -1, "placeTodoPanel 后面的注释不见了；改版时 update this slice");
+const placerCode = js.slice(placerStart, placerEnd);
+
+// 造一个假页面：按钮在左边（左边 33、右边 434），屏幕宽 1600。
+const placed = [];
+const fakeBody = {
+  hidden: false, offsetWidth: 560, offsetHeight: 200,
+  style: { set left(value) { placed.push(["left", value]); }, set top(value) { placed.push(["top", value]); } }
+};
+const fakeMenu = {
+  open: true,
+  getBoundingClientRect() { return { left: 33, right: 434, top: 300, bottom: 327 }; }
+};
+const placerSandbox = {
+  Math, JSON,
+  ui: { todos: { querySelector() { return fakeMenu; } } },
+  document: {
+    querySelector() { return fakeBody; },
+    documentElement: { clientWidth: 1600 }
+  },
+  window: { innerHeight: 900, addEventListener() {} },
+  bindTodoPanel() {}
+};
+placerSandbox.todoPanelPlacement = todoPanelPlacement;
+vm.createContext(placerSandbox);
+vm.runInContext(placerCode, placerSandbox);
+placerSandbox.placeTodoPanel();
+const placedLeft = placed.find(pair => pair[0] === "left");
+assert.ok(placedLeft, "摆完位置得有左边这一项");
+assert.equal(placedLeft[1], "33px", "面板要压在按钮正下方，不能甩到屏幕另一头");
 
 // ── 二、层级：面板得浮在「更多筛选」和详情面板之上 ──
 const bodyRule = css.match(/\.library-todo-body \{[^}]*\}/);

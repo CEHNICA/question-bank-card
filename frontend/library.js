@@ -626,19 +626,21 @@
   }
 
   // 1.25.96：「还有活没干」这块面板摆在哪儿。抽成纯函数，好单测。
-  // 返回两样：左边落在哪、面板实际多宽 —— 光看左边不够，面板还得整个在屏幕里。
-  // 规矩只有三条：
-  //   ① 贴住「还有没干」按钮的右缘（面板从这里往左铺）；
-  //   ② 这样摆会跑出屏幕左缘时，改贴屏幕右缘 —— 老师要的就是「在右边展示」；
-  //   ③ 视口比面板本身还窄时，只剩贴着屏幕左缘这一条路。
-  function todoPanelPlacement(anchorRight, panelWidth, viewportWidth, margin = 16) {
+  // 1.26.47 改了摆法：面板是落在按钮**下方**的，横向跟按钮重叠不碍事，
+  // 所以不再「贴按钮右缘往左铺」。老规矩在宽屏上会把面板甩到屏幕另一头，
+  // 离按钮老远 —— 老师报的「它那个出来的那个界面会在最右边」就是这个毛病。
+  // 现在的规矩只有两条：
+  //   ① 左缘对齐按钮左缘，面板整个压在按钮正下方；
+  //   ② 面板整个不许跑出屏幕：左缘不小于 margin，右缘不大于视口右缘减 margin。
+  // 视口比面板本身还窄时，面板按视口收窄，贴着屏幕左缘放。
+  function todoPanelPlacement(anchorLeft, panelWidth, viewportWidth, margin = 16) {
     const width = Math.min(panelWidth, Math.max(0, viewportWidth - margin * 2));
     // maxLeft 天然不小于 margin（视口比面板还窄时就是 margin 本身），
     // 所以左缘永远不小于 margin —— 不用再单独兜一次。
     const maxLeft = Math.max(margin, viewportWidth - margin - width);
-    let left = anchorRight - width;
-    if (left < margin) left = maxLeft;
-    if (left > maxLeft) left = maxLeft;
+    // 先把左缘夹在 [margin, maxLeft] 里，再跟按钮左缘取近 —— 按钮靠右时面板跟着靠右，
+    // 但绝不顶出屏幕。
+    const left = Math.min(Math.max(anchorLeft, margin), maxLeft);
     return { left: Math.round(left), width };
   }
 
@@ -660,7 +662,7 @@
     if (anchor.bottom < 0 || anchor.top > viewportH) { body.hidden = true; return; }
     body.hidden = false;
     const width = body.offsetWidth || Math.min(560, viewportW - margin * 2);
-    const place = todoPanelPlacement(anchor.right, width, viewportW, margin);
+    const place = todoPanelPlacement(anchor.left, width, viewportW, margin);
     let top = anchor.bottom + 8;
     const maxTop = viewportH - margin - body.offsetHeight;
     if (top > maxTop) top = Math.max(margin, maxTop);

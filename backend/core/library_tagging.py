@@ -21,6 +21,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from . import library
+from .json_response import json_response
 from .models import (
     LibraryJob,
     LibraryTag,
@@ -358,6 +359,11 @@ def _retired_match_index(entries) -> dict:
     """
     names = {normalized(str(entry.get("new_name") or entry.get("name") or "")) for entry in entries}
     names.discard("")
+    return _retired_match_index_for_names(names)
+
+
+def _retired_match_index_for_names(names) -> dict:
+    """按名字集查退役标签 —— 名字多、条目多时也只查一次库。"""
     index = {}
     if not names:
         return index
@@ -371,10 +377,11 @@ def _retired_match_index(entries) -> dict:
     return index
 
 
-def suggestion_json(row: LibraryTagSuggestion) -> dict:
+def suggestion_json(row: LibraryTagSuggestion, *, retired_index=None, include_snapshot=True) -> dict:
     fresh = row.publication.status == PublishedQuestion.Status.PUBLISHED
     entries = copy.deepcopy(row.suggestions or [])
-    retired = _retired_match_index(entries)
+    # 1.26.47：退役标签名整页一次查好传进来 —— 一页四十道题能省下几十次查库。
+    retired = _retired_match_index(entries) if retired_index is None else retired_index
     for entry in entries:
         if entry.get("tag_id"):
             continue
@@ -388,7 +395,12 @@ def suggestion_json(row: LibraryTagSuggestion) -> dict:
         "status": "stale" if not fresh else row.status,
         "message": row.message,
         "suggestions": entries,
-        "catalogue_snapshot": copy.deepcopy(row.catalogue_snapshot or {}),
+        # 1.26.47：这份快照是「AI 生成建议时，标签目录长什么样」，
+        # 一份有八千多字节。列表这一屏四十道题各捎带一份，响应体一下子胖了
+        # 三十多万字节（实测 46 万 → 11 万），而且每次都要整个复制一遍 ——
+        # 列表里并不用它，只有「AI 标签记录」那个窗口要。所以列表不捎带，
+        # 那个窗口照旧（它走的是另一个接口）。
+        "catalogue_snapshot": copy.deepcopy(row.catalogue_snapshot or {}) if include_snapshot else None,
         "prompt_version": row.prompt_version,
         "generation_source": row.generation_source,
         "created_at": row.created_at.isoformat(),
@@ -396,15 +408,38 @@ def suggestion_json(row: LibraryTagSuggestion) -> dict:
     }
 
 
-def attach_to_publication_json(publication: PublishedQuestion, data: dict) -> dict:
-    assignments = list(
-        LibraryTagAssignment.objects.filter(publication=publication).select_related("tag").order_by("created_at", "id")
-    )
+_NOT_GIVEN = object()
+
+
+def attach_to_publication_json(
+    publication: PublishedQuestion,
+    data: dict,
+    *,
+    assignments=None,
+    suggestion=_NOT_GIVEN,
+    context=None,
+    retired_index=None,
+) -> dict:
+    """给一道题补上标签关联和 AI 建议。
+
+    1.26.47：这几样东西都可以由外面一次查好传进来 —— 一页四十道题就只查四次，
+    而不是一个题一个题地查。外面不传时行为跟以前一模一样。
+    """
+    if assignments is None:
+        assignments = list(
+            LibraryTagAssignment.objects.filter(publication=publication)
+            .select_related("tag")
+            .order_by("created_at", "id")
+        )
+    # 上下级关系只在真有标签关联时才要查 —— 这一道题一个标签都没贴的话，
+    # 查了也是白查（查询次数是这道题的验收指标之一）。
+    if assignments and context is None:
+        context = relation_context()
     data["tags"] = [row.tag.name for row in assignments if not row.needs_review]
     data["tag_revision"] = publication.tag_revision
     data["tag_assignments"] = [
         {
-            "tag": tag_json(row.tag),
+            "tag": tag_json(row.tag, context=context),
             "scope": row.scope,
             "source": row.source,
             "generation_source": row.generation_source,
@@ -414,9 +449,59 @@ def attach_to_publication_json(publication: PublishedQuestion, data: dict) -> di
         }
         for row in assignments
     ]
-    candidate = LibraryTagSuggestion.objects.filter(publication=publication).order_by("-created_at", "-id").first()
-    data["tag_suggestion"] = suggestion_json(candidate) if candidate else None
+    if suggestion is _NOT_GIVEN:
+        candidate = LibraryTagSuggestion.objects.filter(publication=publication).order_by("-created_at", "-id").first()
+        suggestion = suggestion_json(candidate, retired_index=retired_index) if candidate else None
+    data["tag_suggestion"] = suggestion
     return data
+
+
+def attach_batch_to_publications(publications, rows) -> list[dict]:
+    """给一页题一次查完标签关联和建议。
+
+    1.26.47：一页四十道题原来要查一百多次库 —— 每道题各查自己的标签关联、
+    AI 建议、退役标签名、上下级关系。整页一次查完以后只查四次。
+    出来的内容跟一道题一道题查完全一样。
+    """
+    publications = list(publications)
+    if not publications:
+        return rows
+    ids = [item.id for item in publications]
+    assignments = {}
+    for row in (
+        LibraryTagAssignment.objects.filter(publication_id__in=ids).select_related("tag").order_by("created_at", "id")
+    ):
+        assignments.setdefault(row.publication_id, []).append(row)
+    suggestions = {}
+    for row in (
+        LibraryTagSuggestion.objects.filter(publication_id__in=ids)
+        .select_related("publication")
+        .order_by("-created_at", "-id")
+    ):
+        # 排序跟「每道题各查一次、只取最新那条」一样，取到的就是最新那条。
+        suggestions.setdefault(row.publication_id, row)
+    retired_index = _retired_match_index_for_names(
+        {
+            normalized(str(entry.get("new_name") or entry.get("name") or ""))
+            for row in suggestions.values()
+            for entry in (row.suggestions or [])
+        }
+        - {""}
+    )
+    # 一页题一个标签都没贴时，关系表也不用查。
+    context = relation_context() if assignments else None
+    for publication, data in zip(publications, rows):
+        candidate = suggestions.get(publication.id)
+        attach_to_publication_json(
+            publication,
+            data,
+            assignments=assignments.get(publication.id, []),
+            suggestion=(
+                suggestion_json(candidate, retired_index=retired_index, include_snapshot=False) if candidate else None
+            ),
+            context=context,
+        )
+    return rows
 
 
 def _sync_projection(publication_id):
@@ -843,7 +928,7 @@ def catalogue_view(request):
         rejected = _guard(request, json_body=False)
         if rejected:
             return rejected
-        return JsonResponse(_catalogue_rows())
+        return json_response(_catalogue_rows())
     rejected = _guard(request)
     if rejected:
         return rejected

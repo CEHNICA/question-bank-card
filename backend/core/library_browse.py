@@ -6,10 +6,11 @@ import uuid
 
 from django.db import models
 from django.db.models import Count, F
-from django.http import HttpResponseNotAllowed, JsonResponse
+from django.http import HttpResponseNotAllowed
 from django.views.decorators.csrf import csrf_exempt
 
 from . import features, library, library_ai_settings, library_jobs, qtypes
+from .json_response import json_response
 from .models import LibraryJob, LibraryTagAssignment, PublishedQuestion
 
 MAX_BATCH_IDS = 500
@@ -195,13 +196,13 @@ def serialize_items(publications) -> list[dict]:
         details.setdefault(str(row["publication_id"]), []).append(
             {key: row[key] for key in ("kind", "executor", "status")}
         )
-    items = []
-    for item in publications:
-        data = library.publication_json(item)
+    # 1.26.47：标签关联、建议、退役标签名、上下级关系，整页一次查完。
+    # 以前是一道题查一轮（一页 40 道题要查一百多次），页面得多等半秒。
+    items = library.publications_json(publications)
+    for item, data in zip(publications, items):
         data["jobs"] = waiting.get(str(item.id), [])
         data["job_errors"] = failed.get(str(item.id), {})
         data["job_details"] = details.get(str(item.id), [])
-        items.append(data)
     return items
 
 
@@ -248,6 +249,92 @@ def resolve_ids(ids: list[str], *, include_items: bool = True) -> dict:
     if include_items:
         result["items"] = serialize_items(live)
     return result
+
+
+def _json_truthy(kind, value, length) -> bool:
+    """JSON 值在 Python 里算不算「有东西」。
+
+    Python 把 0、""、False、空列表、空字典都算「没有」；JSON 里这些都长得不一样，
+    所以光看抽出来的值会算错（空数组抽出来是 "[]"，看着像有内容，其实没有）。
+    这里照 Python 的规矩复原一遍。
+    """
+    if kind is None or kind == "null":
+        return False
+    if kind == "true":
+        return True
+    if kind == "false":
+        return False
+    if kind in ("array", "object"):
+        return bool(length)
+    if kind in ("integer", "real"):
+        return value != 0
+    return bool(value)
+
+
+def _answer_present(kind, value, length) -> bool:
+    """答案算不算「有」。
+
+    原来的口径是 str(答案 or "").strip() —— 空串、空白、0 都算「没有」，
+    其余算「有」。这里照搬，一处不差。
+    """
+    if not _json_truthy(kind, value, length):
+        return False
+    if kind == "text":
+        return bool(str(value).strip())
+    return True
+
+
+def answer_inventory(status) -> tuple[int, int]:
+    """数一数：多少道题没入库答案、多少道题只有 AI 初稿。
+
+    1.26.47：以前是把全库题面 JSON 整个读进内存里数一遍（实测 24 毫秒）。
+    现在让数据库自己抽出答案那一段，只把结果拿回来（实测 6 毫秒）。
+    口径一个字符没变 —— 空答案、空白答案、答案写成 0，都算「没有」。
+    数据库不支持这个抽法时，老老实实退回原来那种数法。
+    """
+    from django.db import connection
+
+    table = PublishedQuestion._meta.db_table
+    # 空数组、空对象在 Python 里都算「没有」，非空的就算「有」——
+    # 所以数组和对象要把长度也一起问出来，只看抽出来的值会判反。
+    sql = (
+        "SELECT json_extract(content, '$.answer'), json_type(content, '$.answer'), "
+        "CASE json_type(content, '$.answer') "
+        "WHEN 'array' THEN json_array_length(content, '$.answer') "
+        "WHEN 'object' THEN (SELECT count(*) FROM json_each(content, '$.answer')) "
+        "ELSE NULL END, "
+        "json_extract(extras, '$.ai_answer'), json_type(extras, '$.ai_answer'), "
+        "CASE json_type(extras, '$.ai_answer') "
+        "WHEN 'array' THEN json_array_length(extras, '$.ai_answer') "
+        "WHEN 'object' THEN (SELECT count(*) FROM json_each(extras, '$.ai_answer')) "
+        "ELSE NULL END "
+        f"FROM {table} WHERE status = %s"
+    )
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(sql, [status])
+            rows = cursor.fetchall()
+    except Exception:  # noqa: BLE001 —— 数据库没有这个抽法，就用老办法数
+        rows = None
+    if rows is not None:
+        missing = draft = 0
+        for answer, answer_kind, answer_length, ai_answer, ai_kind, ai_length in rows:
+            if _answer_present(answer_kind, answer, answer_length):
+                continue
+            if _json_truthy(ai_kind, ai_answer, ai_length):
+                draft += 1
+            else:
+                missing += 1
+        return missing, draft
+    missing = draft = 0
+    for content, extras in PublishedQuestion.objects.filter(status=status).values_list("content", "extras"):
+        if str((content or {}).get("answer") or "").strip():
+            continue
+        if (extras or {}).get("ai_answer"):
+            draft += 1
+        else:
+            missing += 1
+    return missing, draft
 
 
 def tag_work_counts() -> dict:
@@ -298,15 +385,9 @@ def tag_work_counts() -> dict:
     ).values("publication_id")
     # 「没入库答案」和「连 AI 初稿都没有」是两个数，差值是「已经有 AI 初稿」的那些。
     # 三个数都按全库算：拿筛选后的数去减全库的数会减出负数（原来「-37 题」就是这么来的）。
-    missing_answers = 0
-    ai_draft_answers = 0
-    for content, extras in live.values_list("content", "extras"):
-        if str((content or {}).get("answer") or "").strip():
-            continue
-        if (extras or {}).get("ai_answer"):
-            ai_draft_answers += 1
-        else:
-            missing_answers += 1
+    # 1.26.47：改成让数据库自己从题面里抽出答案那一段，别把八百多行题面 JSON
+    # 整个读进内存里数一遍（口径一个字符没变，见 answer_inventory）。
+    missing_answers, ai_draft_answers = answer_inventory(published)
     processing = LibraryJob.objects.filter(executor=LibraryJob.Executor.API, status__in=library_jobs.ACTIVE).aggregate(
         tags=Count("pk", filter=models.Q(kind=LibraryJob.Kind.TAGS)),
         answers=Count("pk", filter=models.Q(kind=LibraryJob.Kind.ANSWER)),
@@ -387,10 +468,10 @@ def library_list(request):
         limit = min(100, max(1, int(request.GET.get("limit", str(DEFAULT_LIMIT)))))
         offset = max(0, int(request.GET.get("offset", "0")))
     except ValueError:
-        return JsonResponse({"error": "limit 与 offset 必须是整数"}, status=400)
+        return json_response({"error": "limit 与 offset 必须是整数"}, status=400)
     sort = request.GET.get("sort", "recent")
     if sort not in SORTS:
-        return JsonResponse({"error": "sort 只能是 recent、source 或 number"}, status=400)
+        return json_response({"error": "sort 只能是 recent、source 或 number"}, status=400)
     rows = library_rows(request.GET).order_by(*SORTS[sort])
     # 1.25.31：只取指定的几道题。后台刷新任务进度时用它，只读有任务的那几行，
     # 不再把屏上几百道题整屏重读一遍。编号先校验，非法值直接 400，不交给 ORM。
@@ -399,18 +480,18 @@ def library_list(request):
         try:
             wanted = normalize_ids([part for part in wanted_param.split(",") if part])
         except BrowseError as error:
-            return JsonResponse({"error": str(error)}, status=400)
+            return json_response({"error": str(error)}, status=400)
         rows = rows.filter(id__in=wanted)
     if request.GET.get("ids_only") == "1":
         # 「选中当前筛选的全部」：只回编号，不受分页限制。
         ids = [str(pk) for pk in rows.values_list("id", flat=True)]
-        return JsonResponse({"total": len(ids), "ids": ids})
+        return json_response({"total": len(ids), "ids": ids})
     total = rows.count()
     items = serialize_items(rows[offset : offset + limit])
     next_offset = offset + len(items)
     if wanted_param:
         # 只为刷新而读：不带全库统计、排队数量这些重活，前端也只合并这几行。
-        return JsonResponse(
+        return json_response(
             {
                 "total": total,
                 "items": items,
@@ -423,7 +504,7 @@ def library_list(request):
         )
     ai_status = library_ai_settings.public_status()
     tag_work = tag_work_counts()
-    return JsonResponse(
+    return json_response(
         {
             "total": total,
             "items": items,
@@ -470,11 +551,11 @@ def library_batch(request):
         return rejected
     payload = _body(request)
     if payload is None or "ids" not in payload or set(payload) - {"ids", "filters"}:
-        return JsonResponse({"error": "请提供 ids 题目编号列表和可选的 filters"}, status=400)
+        return json_response({"error": "请提供 ids 题目编号列表和可选的 filters"}, status=400)
     try:
         ids = normalize_ids(payload["ids"])
     except BrowseError as error:
-        return JsonResponse({"error": str(error)}, status=400)
+        return json_response({"error": str(error)}, status=400)
     result = resolve_ids(ids)
     if "filters" in payload:
         filters = payload["filters"]
@@ -501,7 +582,7 @@ def library_batch(request):
                 for key, value in filters.items()
             )
         ):
-            return JsonResponse({"error": "筛选条件格式不正确"}, status=400)
+            return json_response({"error": "筛选条件格式不正确"}, status=400)
         rows = library_rows(filters)
         matching = set(map(str, rows.filter(pk__in=ids).values_list("id", flat=True)))
         result.update(
@@ -510,4 +591,4 @@ def library_batch(request):
             facets=facet_counts(filters),
             tag_work=tag_work_counts(),
         )
-    return JsonResponse(result)
+    return json_response(result)
