@@ -79,6 +79,27 @@
     token: 0,
     basket: loadBasket()
   };
+  // 1.26.46：「待核对」这一栏里其实有两种东西 —— AI 建议，和从旧标签留底里接回来的
+  // 旧标签。数目不一样，处理方式也不一样。合用一个数、写成一句「AI 建议待核对」，
+  // 旧标签一批接回来之后就成了假话（AI 建议其实一条不剩）。
+  // 底下两笔分开报，界面照实说。
+  function tagReviewCounts() {
+    const total = Number(state.tagWork?.pending_review) || 0;
+    // 旧版服务端没有这两笔（1.26.46 才拆开）。那时候「待核对」就等于 AI 建议，
+    // 所以字段不在的时候按老口径走，别把提示整条弄没。
+    const split = state.tagWork?.pending_suggestions !== undefined
+      || state.tagWork?.pending_legacy !== undefined;
+    const legacy = split ? Number(state.tagWork?.pending_legacy) || 0 : 0;
+    const suggestions = split ? Number(state.tagWork?.pending_suggestions) || 0 : total;
+    return { total, legacy, suggestions };
+  }
+
+  function tagReviewLabel(counts) {
+    if (counts.suggestions && counts.legacy) return "待核对";
+    if (counts.legacy) return "旧标签待核对";
+    return "AI 建议待核对";
+  }
+
   // 筛选刷新会重建这个区域，但展开状态应在当前浏览过程中保留。
   let todoMenuOpen = false;
 
@@ -676,7 +697,10 @@
     const answerCount = Number(state.tagWork?.missing_answer) || 0;
     const queuedTags = Number(state.tagWork?.queued_tags) || 0;
     const queuedAnswers = Number(state.tagWork?.queued_answers) || 0;
-    const pendingCount = Number(state.tagWork?.pending_review) || 0;
+    const reviewCounts = tagReviewCounts();
+    const pendingCount = reviewCounts.total;
+    const legacyCount = reviewCounts.legacy;
+    const suggestionCount = reviewCounts.suggestions;
     const actionableCount = Number(state.tagWork?.pending_actionable) || 0;
     const outdatedCount = Number(state.tagWork?.outdated_suggestions) || 0;
     const apiReady = state.ai.mode === "api" && state.ai.api_ready === true;
@@ -694,13 +718,21 @@
     // 图标去掉，改成和题型同一套文字筛选；字号小一点、数字淡一点，别抢题面。
     if (pendingCount || state.tagReview) {
       const pending = iconButton("button", `button button-quiet button-small library-tool-action${state.tagReview ? " active" : ""}`,
-        `AI 建议待核对 · ${pendingCount} 题`);
+        `${tagReviewLabel(reviewCounts)} · ${pendingCount} 题`);
       // 这个数字原来把「现在就能采纳」和「旧版遗留、对不上现在的标签库」混在一起，
       // 看上去是一堆待办，点进去却几乎一步都走不了。分开说清楚，数目才不作假。
-      pending.title = outdatedCount
-        ? `这 ${pendingCount} 道题有 AI 建议，其中 ${actionableCount} 道现在就能采纳。`
-          + `另外 ${outdatedCount} 道对不上现在的标签库，或者题目后来改过标签，需要重新生成才能采纳。`
-        : `这 ${pendingCount} 道题有 AI 建议等你核对，采纳之后才会真的贴到题目上。`;
+      // 1.26.46：旧标签从留底接回来以后，这一栏里多了一种「旧标签待核对」——
+      // 它不是 AI 建议，处理办法也不同（确认，不是采纳），所以名字和说明都要分开说。
+      pending.title = suggestionCount && legacyCount
+        ? `这 ${pendingCount} 道题在等你核对：${suggestionCount} 道有 AI 建议要采纳，`
+          + `${legacyCount} 道是旧标签待确认。`
+        : legacyCount
+          ? `这 ${legacyCount} 道题的旧标签等你确认 —— 以前 AI 打过、后来锁起来的，`
+            + `确认之后才算正式标签，才会进筛选结果。这一步不调用 AI，也不消耗额度。`
+          : outdatedCount
+            ? `这 ${pendingCount} 道题有 AI 建议，其中 ${actionableCount} 道现在就能采纳。`
+              + `另外 ${outdatedCount} 道对不上现在的标签库，或者题目后来改过标签，需要重新生成才能采纳。`
+            : `这 ${pendingCount} 道题有 AI 建议等你核对，采纳之后才会真的贴到题目上。`;
       pending.setAttribute("aria-pressed", String(state.tagReview));
       pending.addEventListener("click", () => { state.tagReview = !state.tagReview; syncUrl(); load(); });
       quickActions.push(pending);
@@ -822,8 +854,13 @@
     // 就包含在 804 里，并排写出来像 1783 件事。现在只说两个数，把「其中多少有建议」
     // 放在括号里，一眼看出是同一批活。
     const bits = [];
-    if (missingCount) bits.push(pendingCount
-      ? `${missingCount} 题没知识点（${pendingCount} 题有 AI 建议）`
+    // 1.26.46：括号里原来写「N 题有 AI 建议」，用的却是一个把旧标签也算进去的数。
+    // 现在分开报，括号里就照实写：有 AI 建议的说建议，有旧标签的说旧标签。
+    const reviewParts = [];
+    if (suggestionCount) reviewParts.push(`${suggestionCount} 题有 AI 建议`);
+    if (legacyCount) reviewParts.push(`${legacyCount} 题旧标签待核对`);
+    if (missingCount) bits.push(reviewParts.length
+      ? `${missingCount} 题没知识点（${reviewParts.join("、")}）`
       : `${missingCount} 题没知识点`);
     // 1.25.26：没开「AI 参考答案」时，面板里根本没有处理答案的入口。折叠条上先把
     // 「1 题没答案」写出来，点开却找不到任何能处理它的地方 —— 等于把老师引到死路。
@@ -4022,7 +4059,7 @@
       ["type", state.type ? `题型：${QB.TYPE_NAMES[state.type] || state.type}` : ""],
       ["review", state.review ? (state.review === "ai" ? "AI 审核" : "人工核对") : ""],
       ["answer", state.answer ? (state.answer === "yes" ? "有原卷答案" : "无原卷答案") : ""],
-      ["tag", state.tag ? `知识点：${state.tag}` : (state.tagAny && state.selectedTagNames?.[state.tagAny]) ? `标签：${state.selectedTagNames[state.tagAny]}` : (state.tagAll || state.tagAny || state.tagNot) ? "标签筛选已启用" : state.untaggedKnowledge ? "未标知识点" : state.tagReview ? "AI 建议待核对" : ""]];
+      ["tag", state.tag ? `知识点：${state.tag}` : (state.tagAny && state.selectedTagNames?.[state.tagAny]) ? `标签：${state.selectedTagNames[state.tagAny]}` : (state.tagAll || state.tagAny || state.tagNot) ? "标签筛选已启用" : state.untaggedKnowledge ? "未标知识点" : state.tagReview ? tagReviewLabel(tagReviewCounts()) : ""]];
     box.hidden = state.view === "selected" || !labels.some(([, label]) => label);
     if (box.hidden) return;
     labels.forEach(([key, label]) => {

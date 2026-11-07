@@ -410,22 +410,48 @@
       const tagged = Number(data.tagged_questions) || 0;
       const pending = Number(data.questions_pending_review) || 0;
       const actionable = Number(data.questions_pending_actionable) || 0;
+      // 1.26.46：待核对有两种 —— AI 建议，和从旧标签留底接回来的旧标签。
+      // 旧标签那批不靠「采纳」，靠「确认」；数目也不能混着说。
+      // 旧版服务端没有这两笔（1.26.46 才拆开）：那时候「待核对」就等于 AI 建议，
+      // 字段不在就按老口径走，别把说明整条弄没。
+      const split = data.questions_pending_suggestions !== undefined
+        || data.questions_pending_legacy !== undefined;
+      const suggestions = split ? Number(data.questions_pending_suggestions) || 0 : pending;
+      const legacy = split ? Number(data.questions_pending_legacy) || 0 : 0;
       // 标签都贴完了，或者题库里还没有题，这句话没有内容可说 —— 别摆一条空框。
       if (!published || published - tagged <= 0) return null;
       const lead = `题库 ${published} 道题里只有 ${tagged} 道贴了标签，所以下面几乎都是「0 题」。`;
-      if (pending) {
+      if (suggestions && legacy) {
+        return {
+          text: lead + `另有 ${suggestions} 道题有 AI 标签建议等你核对，采纳后直接贴上，不用花钱；`
+            + `另有 ${legacy} 道题的旧标签等你确认。`,
+          button: `回题库核对这 ${pending} 道题`,
+          title: "回到题库，按「待核对」筛选，逐题看过再处理。"
+            + "AI 建议是采纳，旧标签是确认；这两步都不再调用 AI，也不消耗额度。"
+        };
+      }
+      if (legacy) {
+        return {
+          text: lead + `另有 ${legacy} 道题的旧标签等你确认 —— 以前 AI 打过、后来锁起来的，`
+            + `确认之后才算正式标签。`,
+          button: `回题库核对这 ${legacy} 道题的旧标签`,
+          title: "回到题库，按「旧标签待核对」筛选，逐题看过再确认。"
+            + "旧标签是以前 AI 打过、后来被锁起来的那批；确认这一步不再调用 AI，也不消耗额度。"
+        };
+      }
+      if (suggestions) {
         // 1.25.13：这里数的是「有多少道题等你核对」，和题库页那个「AI 建议待核对」筛
         // 选是同一个数、同一套算法。上一版这里数的是建议条数（一道题可能挂两条），
         // 两个数字摆在两个页面上，人来回一看只会以为有一个算错了。
-        const unreachable = pending - actionable;
+        const unreachable = suggestions - actionable;
         return {
-          text: lead + `另有 ${pending} 道题有 AI 标签建议等你核对，采纳后直接贴上，不用花钱。`,
-          button: `回题库核对这 ${pending} 道题的 AI 标签建议`,
+          text: lead + `另有 ${suggestions} 道题有 AI 标签建议等你核对，采纳后直接贴上，不用花钱。`,
+          button: `回题库核对这 ${suggestions} 道题的 AI 标签建议`,
           title: "回到题库，按「AI 建议待核对」筛选，逐题看过再采纳。"
             + "建议是 AI 已经拟好的，采纳这一步不再调用 AI，也不消耗额度。"
             + (unreachable > 0
               ? `其中 ${actionable} 道现在就能采纳，另外 ${unreachable} 道对不上现在的标签库，需要重新生成。`
-              : `这 ${pending} 道题现在都能采纳。`)
+              : `这 ${suggestions} 道题现在都能采纳。`)
         };
       }
       return {

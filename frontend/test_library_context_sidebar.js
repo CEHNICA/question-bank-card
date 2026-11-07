@@ -180,8 +180,14 @@ assert.match(js, /function renderTodos\(\)[\s\S]*?const menu = node\("details", 
   "the pending-work filters and the AI jobs share one container");
 // 1.25.44：440 本来就在 804 里，并排写像 1783 件事。现在合成一句：
 // 「804 题没知识点（440 题有 AI 建议）」。
-assert.match(js, /`\$\{missingCount\} 题没知识点（\$\{pendingCount\} 题有 AI 建议）`/,
-  "the entry counts how many questions have no knowledge tag yet and how many of them already have suggestions");
+// 1.26.46：「待核对」拆成 AI 建议和旧标签两笔以后，括号里不能再用一个混着的数
+// 说「有 AI 建议」—— 那批旧标签根本不是 AI 建议。两笔各说各的。
+assert.match(js, /if \(suggestionCount\) reviewParts\.push\(`\$\{suggestionCount\} 题有 AI 建议`\);/,
+  "the entry says how many of them have AI suggestions");
+assert.match(js, /if \(legacyCount\) reviewParts\.push\(`\$\{legacyCount\} 题旧标签待核对`\);/,
+  "the entry says how many of them are old tags waiting to be confirmed");
+assert.match(js, /`\$\{missingCount\} 题没知识点（\$\{reviewParts\.join\("、"\)\}）`/,
+  "the entry counts how many questions have no knowledge tag yet and breaks down what is already waiting");
 assert.doesNotMatch(js, /`\$\{pendingCount\} 题等你核对`/,
   "AI suggestions are a subset of the untagged questions, not a separate pile");
 // 1.25.21：第三样原来是「AI 能补 N 项」，说的是下面有几颗按钮，不是有多少活干。
@@ -192,7 +198,10 @@ assert.match(js, /`\$\{answerCount\} 题没答案`/,
 assert.match(js, /node\("span", "library-todo-lead", working \? "AI 正在处理" : "还有活没干"\)/,
   "the entry says what it is, in the teacher's words");
 // 折叠条上的话和展开后按钮上的话必须一致：同一件事不能隔着 30 像素叫两个名字。
-assert.match(js, /AI 建议待核对 · \$\{pendingCount\} 题/, "the button says 你核对, like the summary does");
+assert.match(js, /\$\{tagReviewLabel\(reviewCounts\)\} · \$\{pendingCount\} 题/,
+  "the button names what is waiting, like the summary does");
+assert.match(js, /function tagReviewLabel\(counts\)[\s\S]*?if \(counts\.legacy\) return "旧标签待核对";/,
+  "old tags are never called AI suggestions");
 assert.match(js, /未标知识点 · \$\{missingCount\} 题/, "the button says 知识点, like the summary does");
 // 「要花额度」原来占着入口的名字的一半。它是警告不是动作，挤在名字里只会让人
 // 认不出这个入口是干什么的 —— 现在挪进展开后的第一行和每颗按钮的悬停说明。

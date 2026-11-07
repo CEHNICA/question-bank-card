@@ -1135,6 +1135,39 @@ class FormalLibraryTaggingTests(TestCase):
         self.assertEqual(work["pending_actionable"], 0)
         self.assertEqual(work["outdated_suggestions"], 2)
 
+    def test_the_two_kinds_of_pending_review_are_counted_apart(self):
+        # 1.26.46：AI 建议和旧标签是两种待办，处理方式不一样（一个是采纳，一个是确认）。
+        # 旧标签从留底接回来以后，AI 建议其实一条都不剩 —— 要是还合成一个数，
+        # 界面就会把这批旧标签说成「AI 建议待核对」，那是假话。
+        tag = self.tag("分开计数的知识点", "knowledge")
+        self.suggestion(self.publication(), [{"kind": "knowledge", "tag_id": str(tag.pk), "name": tag.name}])
+
+        work = library_browse.tag_work_counts()
+        self.assertEqual(work["pending_suggestions"], 1, "AI 建议自己算一笔")
+        self.assertEqual(work["pending_legacy"], 0, "旧标签自己算一笔")
+        self.assertEqual(work["pending_review"], 1, "总数还是两种的并集")
+
+        other = self.publication()
+        LibraryTagAssignment.objects.create(
+            publication=other, tag=tag, scope={"whole": True}, source="legacy_unknown", needs_review=True
+        )
+        work = library_browse.tag_work_counts()
+        self.assertEqual(work["pending_legacy"], 1, "旧标签自己算一笔")
+        self.assertEqual(work["pending_suggestions"], 1, "AI 建议自己算一笔")
+        self.assertEqual(work["pending_review"], 2, "总数是两种的并集")
+
+        # 同一道题既有建议又有旧标签，也只算一道题 —— 不能把同一道题数两次。
+        self.suggestion(other, [{"kind": "knowledge", "tag_id": str(tag.pk), "name": tag.name}])
+        work = library_browse.tag_work_counts()
+        self.assertEqual(work["pending_suggestions"], 2, "两道题各有 AI 建议")
+        self.assertEqual(work["pending_legacy"], 1, "其中一道还多一笔旧标签")
+        self.assertEqual(work["pending_review"], 2, "同一道题不能数两次")
+
+        # 标签管理页也要拿到这两笔，否则那句话没法照实说。
+        payload = library_tagging._catalogue_rows()
+        self.assertEqual(payload["questions_pending_suggestions"], work["pending_suggestions"])
+        self.assertEqual(payload["questions_pending_legacy"], work["pending_legacy"])
+
     def test_accepting_a_proposal_naming_a_retired_label_reinstates_it_and_undo_puts_it_back(self):
         retired = self.tag("旧目录里的椭圆", "legacy")
         retired.active = False

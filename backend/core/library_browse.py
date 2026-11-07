@@ -319,7 +319,13 @@ def tag_work_counts() -> dict:
         "ai_draft_answers": ai_draft_answers,
         "queued_tags": processing["tags"],
         "queued_answers": processing["answers"],
+        # 1.26.46：「待核对」这批货其实是两种 —— AI 建议，和从旧标签留底里接回来的
+        # 旧标签。两者的数目、处理方式都不同，合在一起报一个数，界面就没法把话说明白：
+        # 旧标签一批接回来之后，AI 建议其实一条都不剩，芯片却还写着「AI 建议待核对」。
+        # 分开报，界面才能照实说。
         "pending_review": len(waiting | flagged),
+        "pending_suggestions": len(waiting),
+        "pending_legacy": len(flagged),
         "pending_actionable": len(reachable),
         "outdated_suggestions": len(waiting - reachable),
     }

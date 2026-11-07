@@ -786,6 +786,9 @@ def _catalogue_rows():
         "tagged_questions": tagged_questions,
         "questions_pending_review": tag_work["pending_review"],
         "questions_pending_actionable": tag_work["pending_actionable"],
+        # 1.26.46：分成「AI 建议」和「旧标签」两笔，标签管理页那句话才能照实说。
+        "questions_pending_suggestions": tag_work["pending_suggestions"],
+        "questions_pending_legacy": tag_work["pending_legacy"],
     }
 
 
