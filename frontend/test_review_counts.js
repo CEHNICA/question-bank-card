@@ -98,7 +98,10 @@ assert.match(js, /case "c": if \(q\) \{ event\.preventDefault\(\); openClipboard
   "the narrower read is now the C shortcut");
 
 // The photo-paper path keeps its prominent, fully explained button.
-const photoRead = callText('button(q.ocr_pending ? "AI 识读中……"');
+// 1.26.47: the button moved into cutReadingAction() (it now also has to say
+// why it is grey), so the anchor changed — the guarantee did not: the call
+// still carries the hover text.
+const photoRead = callText('button(label, "primary", () => rereadQuestion(q)');
 assert.ok(argCount(photoRead) >= 4, "the photo-paper re-read button keeps its hover text");
 assert.match(photoRead, /识读文字会显示在原图旁供你审核/, "and it still says where the result shows up");
 

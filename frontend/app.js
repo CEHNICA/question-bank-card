@@ -946,11 +946,19 @@ const QBCutReading = (() => {
       && !suggestion.error && String(suggestion.stem || "").trim());
   }
 
+  // 1.26.47：这道题还能不能让 AI 识读 —— 后端给的判定，页面照着做。
+  // 撤回过的入库记录、已经有字的题，前端自己看不出来，只能听后端的。
+  function cutReadingGuard(q) {
+    const guard = q && q.cut_reading_guard ? q.cut_reading_guard : {};
+    return { blocked: Boolean(guard.blocked), reason: String(guard.reason || "") };
+  }
+
   function cutReadingSummary(questions = []) {
     const saved = questions.filter((q) => q.body_mode === "source_image" && q.regions?.length);
     const pending = questions.filter((q) => q.ocr_pending
       && (q.body_mode === "source_image" || (q.body_mode === "text" && q.processing_mode === "manual")));
-    const eligible = saved.filter((q) => !q.ocr_pending && !q.approved && !q.publication && !hasCurrentReading(q));
+    const eligible = saved.filter((q) => !q.ocr_pending && !q.approved && !q.publication
+      && !hasCurrentReading(q) && !cutReadingGuard(q).blocked);
     return { saved: saved.length, pending: pending.length,
       eligibleIds: eligible.map((q) => q.id),
       revisions: Object.fromEntries(eligible.map((q) => [String(q.id), q.content_revision])),
@@ -968,7 +976,7 @@ const QBCutReading = (() => {
     return Boolean(paper && !paper.demo && ["ready", "failed", "reading"].includes(paper.status)
       && (summary.saved || summary.pending || ["manual", "native"].includes(paper.parse_mode)));
   }
-  return { hasCurrentReading, cutReadingSummary, cutReadingRequest, showCutReadingStage };
+  return { hasCurrentReading, cutReadingGuard, cutReadingSummary, cutReadingRequest, showCutReadingStage };
 })();
 
 if (typeof module !== "undefined" && module.exports) {
@@ -3987,6 +3995,36 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return toggle;
   }
 
+  // 1.26.47：「AI 识读这题」按钮和它旁边那行常驻说明。
+  //
+  // 灰掉的按钮要把「为什么灰、下一步去哪」写出来 —— 按钮禁用时浏览器不发鼠标
+  // 事件，悬停气泡根本不弹，只写 title 等于什么都没说。所以这里写三处：
+  // 按钮本身（label）、悬停说明（title）、按钮旁边那行常驻可见的小字（brief）。
+  //
+  // 判据来自后端（cut_reading_guard）：已审核、已入库（含撤回和被替代）、
+  // 已有人工或助手改过的文字 —— 这三种后端都会直接拒绝，页面就该事前说清。
+  function cutReadingAction(q) {
+    const guard = QBCutReading.cutReadingGuard(q);
+    const wording = guard.blocked ? QBControlWording.cutReadingGuardText(guard.reason) : null;
+    const label = wording ? wording.label
+      : q.ocr_pending ? "AI 识读中……"
+      : QBCutReading.hasCurrentReading(q) ? "重新 AI 识读"
+      : "AI 识读这题";
+    const read = button(label, "primary", () => rereadQuestion(q),
+      wording ? wording.title : "直接读取这道题已保存的全部片段，无需重新框选；识读文字会显示在原图旁供你审核");
+    // A missing key is certain before the click, so the button says so instead
+    // of accepting the request and reporting the same sentence twice.
+    const notReady = readerUnavailable();
+    read.disabled = Boolean(guard.blocked
+      || q.ocr_pending || questionReadingRequests.has(q.id) || cutReadingRequests.has(state.paperId) || cutReadingStops.has(state.paperId)
+      || q.approved || q.publication || !q.regions.length || state.paper.demo || state.paper.status !== "ready") || Boolean(notReady);
+    if (wording) read.title = wording.title;
+    else if (notReady) read.title = `“${notReady.label || "看图读题服务"}”还没有 API Key，请先在“设置 → API 配置”里填好；原图和已切好的题目都保留着。`;
+    else if (state.paper.status !== "ready") read.title = "请先继续手工整理或重试恢复这份资料，再开始 AI 识读。";
+    const hint = wording ? el("span", "hint cut-reading-guard", wording.brief) : null;
+    return { read, hint };
+  }
+
   function renderCard(q) {
     const approved = isApproved(q);
     // AI 通过的题还等人核对，不收起。
@@ -4104,15 +4142,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       ...(q.body_mode === "source_image" ? [] : [button("配图", "", () => openPageDialog("figures", q), "增删配图，或调整配图的裁剪框（F）", { iconName: "image" })])
     );
     if (q.body_mode === "source_image") {
-      const read = button(q.ocr_pending ? "AI 识读中……" : QBCutReading.hasCurrentReading(q) ? "重新 AI 识读" : "AI 识读这题", "primary", () => rereadQuestion(q), "直接读取这道题已保存的全部片段，无需重新框选；识读文字会显示在原图旁供你审核");
-      // A missing key is certain before the click, so the button says so instead
-      // of accepting the request and reporting the same sentence twice.
-      const notReady = readerUnavailable();
-      read.disabled = Boolean(q.ocr_pending || questionReadingRequests.has(q.id) || cutReadingRequests.has(state.paperId) || cutReadingStops.has(state.paperId)
-        || q.approved || q.publication || !q.regions.length || state.paper.demo || state.paper.status !== "ready") || Boolean(notReady);
-      if (notReady) read.title = `“${notReady.label || "看图读题服务"}”还没有 API Key，请先在“设置 → API 配置”里填好；原图和已切好的题目都保留着。`;
-      else if (state.paper.status !== "ready") read.title = "请先继续手工整理或重试恢复这份资料，再开始 AI 识读。";
-      actions.append(read);
+      const cut = cutReadingAction(q);
+      actions.append(cut.read);
+      if (cut.hint) actions.append(cut.hint);
     }
     // 1.25.43：入库以后要能一键去题库里找到这道题。题库那边有路回到核对页，
     // 核对页原来没有路过去 —— 老师只能自己在几百道题里翻。
@@ -4441,7 +4473,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   async function rereadQuestion(q) {
     if (state.paper?.demo || q.ocr_pending || questionReadingRequests.has(q.id) || cutReadingRequests.has(state.paperId) || cutReadingStops.has(state.paperId)) return;
-    if (q.body_mode === "source_image" && (q.approved || q.publication || !q.regions.length || state.paper?.status !== "ready")) return;
+    if (q.body_mode === "source_image" && (QBCutReading.cutReadingGuard(q).blocked || q.approved || q.publication || !q.regions.length || state.paper?.status !== "ready")) return;
     if (q.body_mode !== "source_image" && q.edited && !(await confirmDialog({ title: "让 AI 重读这道题？", text: "这道题的文字改过。重读会用 AI 的新读法替换你改的文字。", ok: "重读", danger: true }))) return;
     const paperId = state.paperId;
     questionReadingRequests.add(q.id);

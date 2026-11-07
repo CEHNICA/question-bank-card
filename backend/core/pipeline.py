@@ -25,6 +25,7 @@ from django.utils import timezone
 from PIL import Image
 
 from . import (
+    cut_guard,
     cuts,
     demo,
     features,
@@ -5413,11 +5414,8 @@ def _usable_cut_reading(fields: dict) -> bool:
 
 
 def _cut_content_protected(question: Question) -> bool:
-    return bool(
-        question.approved
-        or question.publications.exists()
-        or (question.edited and (question.stem.strip() or question.options))
-    )
+    # 1.26.47：判据只有一处 —— 后端接口、落库保护、页面判灰共用 cut_guard。
+    return cut_guard.is_protected(question)
 
 
 def _cut_source_current(question: Question) -> bool:

@@ -29,6 +29,7 @@ from PIL import Image
 from . import (
     continue_ai_cut,
     credential_settings,
+    cut_guard,
     demo,
     features,
     imaging,
@@ -604,7 +605,7 @@ def _reading(value: dict) -> dict:
     }
 
 
-def question_json(question: Question, table_blocks: list[dict] | None = None) -> dict:
+def question_json(question: Question, table_blocks: list[dict] | None = None, guard_reason: str | None = None) -> dict:
     # Figure-policy upgrades deliberately adjust this instance for display
     # without persisting it. The mutation precondition must name saved evidence
     # before those derived state/flag/review changes occur.
@@ -720,6 +721,9 @@ def question_json(question: Question, table_blocks: list[dict] | None = None) ->
         # 1.10.2: 框选识读 — the last region a person asked to read on its own.
         "region_read": region_reads.latest_json(question),
         "publication": library.publication_state(question),
+        # 1.26.47：这道题还能不能让 AI 识读。页面照着做，事前就把话说清楚，
+        # 不用等点了之后弹一条红条说不行。
+        "cut_reading_guard": cut_guard.guard_json(question, guard_reason),
     }
 
 
@@ -1894,7 +1898,8 @@ def paper_detail(request, paper_id):
     # A textbook has 600+ cards: each card's figure review is derived once for
     # the card, its approval, its publication and the counts (1.10.3).
     with reusing_reviews():
-        questions = [question_json(q, paper_tables) for q in rows]
+        guards = cut_guard.reasons_for(rows)
+        questions = [question_json(q, paper_tables, guards.get(q.pk)) for q in rows]
         data = paper_json(paper, rows=rows)
     return JsonResponse({"paper": data, "questions": questions})
 
@@ -1979,16 +1984,19 @@ def question_deletion_restore(request, paper_id, batch_id):
             batch.save(update_fields=["restored_at"])
             _sync_paper_question_counts(paper)
     batch.refresh_from_db()
+    restored_rows = list(
+        Question.objects.filter(pk__in=batch.question_ids)
+        .select_related("group")
+        .order_by("group__sequence", "number", "id")
+    )
+    restored_guards = cut_guard.reasons_for(restored_rows)
     return JsonResponse(
         {
             "restored": restored,
             "already_restored": restored == 0,
             "undo_batch": _question_trash_json(batch),
             "questions": [
-                question_json(question)
-                for question in Question.objects.filter(pk__in=batch.question_ids)
-                .select_related("group")
-                .order_by("group__sequence", "number", "id")
+                question_json(question, None, restored_guards.get(question.pk)) for question in restored_rows
             ],
             "paper": paper_json(Paper.objects.get(pk=paper_id)),
         }
@@ -2708,9 +2716,10 @@ def _layout_response(paper_id, operation=None, **extra):
     questions = list(paper.questions.select_related("paper", "group").order_by("group__sequence", "number", "id"))
     question_layout.prepare_fingerprints(questions)
     latest = question_layout._latest(paper)
+    guards = cut_guard.reasons_for(questions)
     return {
         "paper": paper_json(paper),
-        "questions": [question_json(row) for row in questions],
+        "questions": [question_json(row, None, guards.get(row.pk)) for row in questions],
         "layout_revision": paper.layout_revision,
         "operation": question_layout.operation_json(operation, paper) if operation else None,
         "latest_operation": question_layout.operation_json(latest, paper, snapshots=False) if latest else None,
@@ -3152,11 +3161,9 @@ def question_action(request, question_id, action: str):
                 question.paper.archived or question.paper.status != Paper.Status.READY
             ):
                 return _error("请先完成原卷处理、继续手工或重试，再识读已切题目。", 409)
-            if source_images.is_image(question) and (
-                question.approved
-                or question.publications.exists()
-                or (question.edited and (question.stem.strip() or question.options))
-            ):
+            # 1.26.47：这条保护只有一处口径 —— 和页面判灰用的是同一条规则
+            # （cut_guard），别再各写一份，免得页面放行、这里才拒绝。
+            if source_images.is_image(question) and cut_guard.is_protected(question):
                 return _error("这道原图题已有审核、入库或人工文字，已保留；请对照原卷手动修改。", 409)
             if (
                 not source_images.is_image(question)

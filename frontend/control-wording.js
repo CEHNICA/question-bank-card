@@ -61,5 +61,37 @@
     return names.length ? `更多操作：${names.join("、")}` : "更多操作";
   }
 
-  return { INSPECTOR, DIRECTORY, CROP, SOURCE, menuSummaryTitle };
+  // 1.26.47：「AI 识读这题」灰掉时说的话。
+  // 后端对原图题有三条硬保护（已审核、已入库、已有人工文字），页面照着做 ——
+  // 事前就把「为什么灰、下一步去哪」写出来，不用等点了之后弹一条红条说不行。
+  // label 写进按钮本身（按钮禁用时浏览器不发鼠标事件，悬停气泡根本不弹）；
+  // title 是悬停说明；brief 是按钮旁边那行常驻可见的小字。
+  const CUT_READING = {
+    approved: {
+      label: "已审核，不再识读",
+      title: "这道题已经审核过，AI 识读不会改动它；要重新识读请先撤销通过，要改字请对照原卷用「改字」。",
+      brief: "已审核过，AI 识读不会改动它；要重新识读请先撤销通过。"
+    },
+    published: {
+      label: "已入库，不再识读",
+      title: "这道题现在在题库里，AI 识读不会改动它；要改请到题库里改，或对照原卷用「改字」。",
+      brief: "这道题现在在题库里，AI 识读不会改动它；要改请到题库里改。"
+    },
+    manual_text: {
+      label: "已有人工文字，不再识读",
+      title: "这道题已经有你或助手改过的文字，AI 识读会盖掉它；请对照原卷用「改字」修改。",
+      brief: "已有你或助手改过的文字，AI 识读会盖掉它；请对照原卷用「改字」修改。"
+    },
+    unknown: {
+      label: "不再识读",
+      title: "这道题已经有审核、入库或人工文字，AI 识读不会改动它；要改请对照原卷用「改字」。",
+      brief: "已有审核、入库或人工文字，AI 识读不会改动它；要改请对照原卷用「改字」。"
+    }
+  };
+
+  function cutReadingGuardText(reason) {
+    return CUT_READING[reason] || CUT_READING.unknown;
+  }
+
+  return { INSPECTOR, DIRECTORY, CROP, SOURCE, menuSummaryTitle, CUT_READING, cutReadingGuardText };
 });

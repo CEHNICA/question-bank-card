@@ -616,6 +616,8 @@ body.drawer-open { overflow: hidden; }
   box-shadow: 0 -10px 12px -12px rgba(22, 44, 39, .35); }
 .card-actions .button { padding-inline: 12px; }
 .card-actions .button.primary { min-width: 104px; padding-inline: 14px; }
+/* 1.26.47：灰掉的「AI 识读这题」旁边那行常驻说明，单独占一行，别挤在按钮边上。 */
+.card-actions .cut-reading-guard { flex: 1 1 100%; margin-top: 0; }
 .more { position: relative; }
 .more > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 2px; min-height: 34px; padding: 6px 8px;
   border-radius: 9px; color: var(--ink-2); font-size: 13px; }
