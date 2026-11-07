@@ -153,6 +153,7 @@ function runLibraryMenu(jobButtons) {
     selectInspectorQuestion() {}, openSource() {}, openQuestionViewer() {},
     openAnswerEditor() {}, openQuestionEditor() {}, withdrawItem() {},
     saveBasket() {}, render() {}, toast() {},
+    copyQuestionImage() {},
   };
   vm.runInNewContext(`${helpers}\n${block}\nglobalThis.__out = { moreSummary, menu };`, sandbox);
   return sandbox.__out;
@@ -161,7 +162,7 @@ function runLibraryMenu(jobButtons) {
 {
   const { moreSummary, menu } = runLibraryMenu(() => []);
   const labels = menu.querySelectorAll("button, a").map((entry) => entry.textContent);
-  assert.deepEqual(labels, ["修改题目", "编辑答案解析", "回到题卡", "撤回"],
+  assert.deepEqual(labels, ["修改题目", "编辑答案解析", "回到题卡", "复制题目图片", "撤回"],
     "题卡菜单里实际就是这几项");
   assert.equal(moreSummary.title, W.menuSummaryTitle(labels),
     "「更多」的悬停说明要跟菜单里实际有的项对得上");

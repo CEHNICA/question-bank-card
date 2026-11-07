@@ -1271,6 +1271,30 @@
     return widest <= OPTION_PREVIEW_LIMIT ? options : {};
   }
 
+  // 1.26.48：把一道题做成图片放进剪贴板。
+  // 后端排一次版再写剪贴板，要一两秒；这段时间按钮写「正在生成…」，
+  // 不然点下去没反应会以为坏了。
+  async function copyQuestionImage(item, button) {
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = "正在生成…";
+    try {
+      const response = await fetch("/api/library/copy-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-QB-Request": "1" },
+        body: JSON.stringify({ publication_id: item.id })
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "题目图片没有生成，请重试");
+      toast(body.message || "已复制题目图片。", "success");
+    } catch (error) {
+      toast(error.message || "题目图片没有生成，请重试", "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = original;
+    }
+  }
+
   function card(item) {
     const article = node("article", `library-card${state.basket.includes(item.id) ? " in-basket" : ""}${state.inspectorId === item.id ? " inspector-active" : ""}`);
     article.id = `q-${item.id}`;
@@ -1413,7 +1437,13 @@
     editAnswer.addEventListener("click", () => { selectInspectorQuestion(item, article); closeMenu(); openAnswerEditor([item], { scope: "library" }); });
     const editQuestion = node("button", "button button-quiet button-small", "修改题目");
     editQuestion.type = "button"; editQuestion.addEventListener("click", () => { selectInspectorQuestion(item, article); closeMenu(); openQuestionEditor(item); });
-    menu.append(editQuestion, editAnswer, review, withdraw, ...jobButtons(item));
+    // 1.26.48：把这道题做成图片放进剪贴板。带配图的题，题目一张、配图另外一张，
+    // 粘到 OneNote 里能分别拖位置。出图要排一次版，按下后按钮先说「正在生成…」。
+    const copyImage = node("button", "button button-quiet button-small", "复制题目图片");
+    copyImage.type = "button";
+    copyImage.title = "把这道题做成图片放进剪贴板。题里带的配图另外单独一张，粘到 OneNote 里能分开拖动位置。";
+    copyImage.addEventListener("click", () => { closeMenu(); copyQuestionImage(item, copyImage); });
+    menu.append(editQuestion, editAnswer, review, copyImage, withdraw, ...jobButtons(item));
     // 1.26.39：「更多」这两个字看不出里面有什么。悬停说明按菜单里实际有的项生成，
     // 不写菜单里没有的东西（承诺了界面上没有的入口，比不说更糟）。
     moreSummary.title = W.menuSummaryTitle(Array.from(menu.querySelectorAll("button, a")).map((entry) => entry.textContent.trim()));
