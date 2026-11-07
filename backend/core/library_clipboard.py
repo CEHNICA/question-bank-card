@@ -272,7 +272,16 @@ def _crop_to_content(raw, box):
 
 
 def _dib_bytes(data):
-    """PNG -> CF_DIB（BITMAPINFOHEADER + BGR 像素，行距 4 字节对齐）。"""
+    """PNG -> CF_DIB（BITMAPINFOHEADER + BGR 像素，行距 4 字节对齐）。
+
+    **行序按 DIB 规范来：正 biHeight = 像素自下而上排。**
+    这是老师报「粘出来上下颠倒」的根因：原来写的是「正 biHeight + 自上而下」，
+    一种自相矛盾的组合 —— 任何按规范读的程序都会把图翻过来。
+
+    事实基准是 Word 自己：它写进剪贴板的 CF_DIB 同样是正 biHeight + 自下而上
+    （32bpp BI_BITFIELDS；24bpp 同样合法）。实测把行序改成自下而上后，
+    直接读 CF_DIB 的程序和 Windows 合成出来的 CF_BITMAP 两边朝向都正确。
+    """
     from PIL import Image
 
     with Image.open(io.BytesIO(data)) as image:
@@ -280,7 +289,13 @@ def _dib_bytes(data):
         width, height = rgb.size
         raw = rgb.tobytes("raw", "BGR")
     stride = (width * 3 + 3) // 4 * 4
-    padded = raw + b"\x00" * (stride * height - len(raw))
+    # 补白要【逐行】补，不能加在整块缓冲末尾 —— 加在末尾的话行边界就全错了。
+    rows = []
+    for index in range(height):
+        row = raw[index * width * 3 : (index + 1) * width * 3]
+        rows.append(row + b"\x00" * (stride - len(row)))
+    # 再按 DIB 规范把行倒过来：正 biHeight = 像素自下而上排。
+    padded = b"".join(reversed(rows))
     header = (
         (40).to_bytes(4, "little")
         + width.to_bytes(4, "little")

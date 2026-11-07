@@ -235,6 +235,37 @@ class ClipboardFigureTests(TestCase):
         # 像素是 BGR 顺序：蓝、绿、红。
         self.assertEqual(tuple(dib[40:43]), (30, 20, 10))
 
+    def test_dib_rows_are_stored_bottom_up(self):
+        """CF_DIB 的行序必须合规范：正 biHeight = 自下而上。
+
+        老师报的是「粘出来上下颠倒」。根因就在这里：DIB 规范里 biHeight 为正
+        表示像素自下而上排，而我们写的是「正高度 + 自上而下」这种自相矛盾的组合。
+        任何按规范读的程序（GDI 的 CreateDIBitmap/SetDIBits、直接解析 CF_DIB 的
+        消费者）都会把图上下颠倒。
+
+        事实基准是 Word 自己：它写出的 CF_DIB 同样是正 biHeight + 自下而上。
+        """
+        from PIL import Image
+
+        image = Image.new("RGB", (2, 2), (0, 0, 0))
+        image.putpixel((0, 0), (255, 0, 0))  # 顶行：红
+        image.putpixel((1, 0), (255, 0, 0))
+        image.putpixel((0, 1), (0, 0, 255))  # 底行：蓝
+        image.putpixel((1, 1), (0, 0, 255))
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        dib = library_clipboard._dib_bytes(buffer.getvalue())
+        height = int.from_bytes(dib[8:12], "little", signed=True)
+        self.assertGreater(height, 0, "正 biHeight 表示自下而上；改用负高度就要改判据")
+
+        stride = (2 * 3 + 3) // 4 * 4
+        first_row = dib[40 : 40 + stride]
+        last_row = dib[40 + stride : 40 + 2 * stride]
+        # DIB 的第一行 = 图片的底行（蓝），最后一行 = 图片的顶行（红）。
+        self.assertEqual(tuple(first_row[0:3]), (255, 0, 0), "DIB 首行应是图片底行的蓝")
+        self.assertEqual(tuple(last_row[0:3]), (0, 0, 255), "DIB 末行应是图片顶行的红")
+
 
 class ClipboardViewTests(TestCase):
     """接口本身。"""
