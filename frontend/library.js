@@ -1278,6 +1278,9 @@
     const original = button.textContent;
     button.disabled = true;
     button.textContent = "正在生成…";
+    // 光靠按钮上那行字不够 —— 菜单可能被别处点掉、或者老师在看别的地方。
+    // 再给一条提示条，明说在做什么、大概要等多久。
+    toast("正在生成题目图片，要排一次版，约 3 秒…");
     try {
       const response = await fetch("/api/library/copy-image", {
         method: "POST",
@@ -1442,7 +1445,9 @@
     const copyImage = node("button", "button button-quiet button-small", "复制题目图片");
     copyImage.type = "button";
     copyImage.title = "把这道题做成图片放进剪贴板。题里带的配图另外单独一张，粘到 OneNote 里能分开拖动位置。";
-    copyImage.addEventListener("click", () => { closeMenu(); copyQuestionImage(item, copyImage); });
+    // 1.26.49：点了**不关菜单** —— 菜单一关，按钮上那行「正在生成…」老师就看不见了，
+    // 点了跟没点一样。现在菜单留着，按钮原地变成「正在生成…」，看得见才踏实。
+    copyImage.addEventListener("click", () => { copyQuestionImage(item, copyImage); });
     menu.append(editQuestion, editAnswer, review, copyImage, withdraw, ...jobButtons(item));
     // 1.26.39：「更多」这两个字看不出里面有什么。悬停说明按菜单里实际有的项生成，
     // 不写菜单里没有的东西（承诺了界面上没有的入口，比不说更糟）。

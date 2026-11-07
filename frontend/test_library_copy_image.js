@@ -21,8 +21,10 @@ assert.match(js, /const copyImage = node\("button", "button button-quiet button-
   "题卡上要有「复制题目图片」这个按钮");
 assert.match(js, /menu\.append\(editQuestion, editAnswer, review, copyImage, withdraw, \.\.\.jobButtons\(item\)\);/,
   "按钮要挂在题卡的「更多」菜单里");
-assert.match(js, /copyImage\.addEventListener\("click", \(\) => \{ closeMenu\(\); copyQuestionImage\(item, copyImage\); \}\);/,
+assert.match(js, /copyImage\.addEventListener\("click", \(\) => \{ copyQuestionImage\(item, copyImage\); \}\);/,
   "按钮点了要调 copyQuestionImage");
+assert.doesNotMatch(js, /closeMenu\(\); copyQuestionImage\(/,
+  "点了不能把菜单关掉 —— 菜单一关，按钮上那行「正在生成…」就看不见了");
 
 // 悬停说明要说清复制的是什么、能干什么。
 assert.match(js, /copyImage\.title = "把这道题做成图片放进剪贴板。/,
@@ -56,15 +58,21 @@ vm.runInContext(body, sandbox);
   await sandbox.copyQuestionImage({ id: "abc-123" }, button);
 
   assert.equal(calls.length, 1, "点一次只该发一次请求");
+  // 先说「正在生成」，成了再说「已复制」—— 两条提示都要有。
+  assert.ok(toasts.length >= 2, "要有「正在生成」和「已复制」两条提示");
+  assert.match(toasts[0].message, /正在生成/);
+  assert.match(toasts[toasts.length - 1].message, /已复制/);
   assert.equal(calls[0].url, "/api/library/copy-image");
   assert.equal(calls[0].options.method, "POST");
   assert.equal(calls[0].options.headers["Content-Type"], "application/json");
   assert.equal(calls[0].options.headers["X-QB-Request"], "1");
   assert.deepEqual(JSON.parse(calls[0].options.body), { publication_id: "abc-123" });
 
-  assert.equal(toasts.length, 1, "成功后要给一句话");
-  assert.match(toasts[0].message, /题目 1 张/);
-  assert.equal(toasts[0].kind, "success");
+  // 「正在生成」一条，「已复制」一条。
+  assert.equal(toasts.length, 2, "出图期间一条提示，成了再一条");
+  assert.match(toasts[0].message, /正在生成/);
+  assert.match(toasts[1].message, /题目 1 张/);
+  assert.equal(toasts[1].kind, "success");
 
   assert.equal(button.disabled, false, "按钮要恢复可点");
   assert.equal(button.textContent, "复制题目图片", "按钮的字要恢复原样");
@@ -79,9 +87,9 @@ vm.runInContext(body, sandbox);
   });
   const failing = { disabled: false, textContent: "复制题目图片" };
   await sandbox.copyQuestionImage({ id: "abc-123" }, failing);
-  assert.equal(toasts.length, 1, "失败也要给一句话");
-  assert.match(toasts[0].message, /另一道题正在出图/);
-  assert.equal(toasts[0].kind, "error");
+  assert.ok(toasts.length >= 2, "失败也要给一句话");
+  assert.match(toasts[toasts.length - 1].message, /另一道题正在出图/);
+  assert.equal(toasts[toasts.length - 1].kind, "error");
   assert.equal(failing.disabled, false, "失败后按钮也要恢复可点");
   assert.equal(failing.textContent, "复制题目图片");
 
@@ -98,6 +106,11 @@ vm.runInContext(body, sandbox);
   assert.ok(seen, "请求发出去了");
   assert.equal(seen.disabled, true, "出图期间按钮不能重复点");
   assert.equal(seen.text, "正在生成…", "出图期间按钮要说明在做什么");
+  // 光靠按钮上的字不够：菜单可能被点掉、老师可能在看别处。
+  // 必须另有一条提示条，明说在做什么。
+  assert.ok(toasts.length >= 1, "出图期间要有提示条");
+  assert.match(toasts[0].message, /正在生成/);
+  assert.match(toasts[0].message, /秒/, "提示条要说个大概多久");
 
   console.log("test_library_copy_image: 全部通过");
 })();
