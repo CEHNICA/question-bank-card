@@ -102,7 +102,15 @@ window.__qbShotStatus = {ready:false};
 _FIXED_CSS = (
     "html,body{margin:0;background:#fff;padding:0}"
     "#shotSource{position:static;left:auto;top:auto;visibility:visible;"
-    "display:block;width:__WIDTH__px;max-width:none;padding:24px;background:#fff;box-sizing:content-box}"
+    "display:block;width:__WIDTH__px;max-width:none;padding:24px;background:#fff;box-sizing:content-box;"
+    "font-size:13.5pt;line-height:1.65;color:#111}"
+    "#shotSource .qb-stem{font-size:13.5pt;line-height:1.65}"
+    "#shotSource .qb-options{font-size:13.5pt;line-height:1.65;margin-top:10px}"
+    "#shotSource .qb-figures{display:flex;justify-content:flex-start;align-items:flex-start;margin:12px 0 6px;gap:16px}"
+    "#shotSource .qb-figure{margin:0;display:inline-block}"
+    "#shotSource .qb-figure img{display:block;max-width:240px!important;max-height:180px!important;width:auto!important;height:auto!important;object-fit:contain;mix-blend-mode:multiply}"
+    "#shotSource .qb-option .qb-figure img{max-width:140px!important;max-height:105px!important}"
+    "#shotSource .qb-question-image img{max-width:100%!important;max-height:none!important;height:auto!important}"
 )
 
 
@@ -432,7 +440,7 @@ def _cache_path(publication, mode="separated") -> Path:
     cache_dir = Path(settings.DATA_ROOT) / "cache" / "clipboard"
     cache_dir.mkdir(parents=True, exist_ok=True)
     updated_str = publication.updated_at.isoformat() if getattr(publication, "updated_at", None) else ""
-    raw_key = f"{publication.id}:{updated_str}:{mode}:{RENDER_WIDTH}:{RENDER_SCALE}:pad20"
+    raw_key = f"{publication.id}:{updated_str}:{mode}:{RENDER_WIDTH}:{RENDER_SCALE}:v2_prop240"
     digest = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
     return cache_dir / f"{digest}.png"
 
