@@ -20,7 +20,7 @@ from django.conf import settings
 from django.db import models, transaction
 from django.db.models import Prefetch, Q
 from django.db.models.functions import Cast
-from django.http import FileResponse, Http404, HttpResponse, HttpResponseNotAllowed, JsonResponse
+from django.http import FileResponse, Http404, HttpResponse, HttpResponseNotAllowed, HttpResponseNotModified, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -1712,6 +1712,17 @@ def paper_restore(request, paper_id):
     return JsonResponse({"paper": paper_json(paper), "archived": False, "restored": restored})
 
 
+_PAPER_DETAIL_CACHE: dict[str, tuple[str, bytes]] = {}
+
+
+def invalidate_paper_detail_cache(paper_id: str | uuid.UUID | None = None) -> None:
+    """清理试卷详情快照缓存。"""
+    if paper_id is None:
+        _PAPER_DETAIL_CACHE.clear()
+    else:
+        _PAPER_DETAIL_CACHE.pop(str(paper_id), None)
+
+
 @csrf_exempt
 def paper_detail(request, paper_id):
     paper = get_object_or_404(Paper, pk=paper_id)
@@ -1724,6 +1735,7 @@ def paper_detail(request, paper_id):
         if name is None:
             return _error("任务名需为 1–255 个字符，且不能包含换行或控制字符")
         paper, changed = library.rename_paper(paper, name)
+        invalidate_paper_detail_cache(paper_id)
         return JsonResponse({"paper": paper_json(paper), "changed": changed})
     if request.method == "DELETE":
         rejected = _guard(request, json_body=False)
@@ -1782,9 +1794,36 @@ def paper_detail(request, paper_id):
                 shutil.rmtree(staged)
             except OSError:
                 warning = "任务已删除，但有残留文件暂时被占用；关闭程序并重新启动后会继续清理"
+        invalidate_paper_detail_cache(paper_id)
         return JsonResponse({"deleted": paper_id_text, "warning": warning})
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET", "PATCH", "DELETE"])
+
+    # NOTE: 针对大试卷（如 500+ 题）的毫秒级响应快照与 ETag 协商机制
+    summary_tuples = list(
+        paper.questions.values_list("id", "state", "approved", "content_revision", "edited", "question_type")
+    )
+    raw_sig = (
+        str(paper.id),
+        str(paper.updated_at.isoformat() if paper.updated_at else ""),
+        str(paper.status),
+        str(paper.layout_revision),
+        len(summary_tuples),
+        summary_tuples,
+    )
+    fingerprint = hashlib.sha1(repr(raw_sig).encode("utf-8")).hexdigest()
+    etag = f'"{fingerprint}"'
+
+    if_none_match = request.headers.get("If-None-Match")
+    if if_none_match == etag:
+        return HttpResponseNotModified()
+
+    cached = _PAPER_DETAIL_CACHE.get(str(paper.id))
+    if cached is not None and cached[0] == etag:
+        response = HttpResponse(cached[1], content_type="application/json")
+        response["ETag"] = etag
+        return response
+
     paper_tables = tables.table_blocks(paper)
     rows = list(
         paper.questions.select_related("group")
@@ -1798,7 +1837,13 @@ def paper_detail(request, paper_id):
         guards = cut_guard.reasons_for(rows)
         questions = [question_json(q, paper_tables, guards.get(q.pk)) for q in rows]
         data = paper_json(paper, rows=rows)
-    return JsonResponse({"paper": data, "questions": questions})
+
+    payload = {"paper": data, "questions": questions}
+    payload_bytes = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    _PAPER_DETAIL_CACHE[str(paper.id)] = (etag, payload_bytes)
+    response = HttpResponse(payload_bytes, content_type="application/json")
+    response["ETag"] = etag
+    return response
 
 
 @csrf_exempt

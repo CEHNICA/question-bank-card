@@ -1721,18 +1721,22 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function counts() {
+    // NOTE: 大教辅（500+题）下单次单循环统计，避免 8 轮 filter 数组分配与遍历
     const qs = state.questions;
-    return {
-      all: qs.length,
-      todo: qs.filter(needsReview).length,
-      attention: qs.filter(needsCheck).length,
-      green: qs.filter(needsGeneralReview).length,
-      approved: qs.filter(isDone).length,
-      ai: qs.filter(isAiApproved).length,
-      waiting: qs.filter((q) => state.cropDraftAttention.get(q.id)?.waiting ?? (q.state === "waiting" || q.state === "reading")).length,
-      red: qs.filter((q) => state.cropDraftAttention.get(q.id)?.red ?? (!isApproved(q) && q.state === "red")).length,
-      unpublished: qs.filter((q) => state.cropDraftAttention.get(q.id)?.unpublished ?? (isApproved(q) && !(q.publication && q.publication.up_to_date))).length
-    };
+    let todo = 0, attention = 0, green = 0, approved = 0, ai = 0, waiting = 0, red = 0, unpublished = 0;
+    for (let i = 0; i < qs.length; i++) {
+      const q = qs[i];
+      if (needsReview(q)) todo++;
+      if (needsCheck(q)) attention++;
+      if (needsGeneralReview(q)) green++;
+      if (isDone(q)) approved++;
+      if (isAiApproved(q)) ai++;
+      const draft = state.cropDraftAttention.get(q.id);
+      if (draft?.waiting ?? (q.state === "waiting" || q.state === "reading")) waiting++;
+      if (draft?.red ?? (!isApproved(q) && q.state === "red")) red++;
+      if (draft?.unpublished ?? (isApproved(q) && !(q.publication && q.publication.up_to_date))) unpublished++;
+    }
+    return { all: qs.length, todo, attention, green, approved, ai, waiting, red, unpublished };
   }
 
   // 这份资料是不是已经全部处理完。进度条、绿色完成条、卷名下面那句话以前各算各的，
@@ -2525,14 +2529,19 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // 1.26.34：报一声「老师此刻在看哪道题」，助手据此绕开这道题。
     reportTeacherActivity(id);
     saveReviewState();
-    cardNodes().forEach((card) => card.classList.toggle("is-current", Number(card.dataset.id) === id));
-    const card = id !== null ? document.querySelector(`.card[data-id="${id}"]`) : null;
+    // NOTE: 大卷（如 500+ 题）下精确操作新旧两张卡片，避免全量遍历 500+ 个 DOM 节点触发 classList.toggle
+    const container = typeof $ === "function" ? $("cards") : null;
+    const query = (sel) => (container?.querySelector ? container.querySelector(sel) : document?.querySelector?.(sel));
+    const prev = query(".card.is-current");
+    const card = id !== null ? query(`.card[data-id="${id}"]`) : null;
+    if (prev && prev !== card) prev.classList?.remove?.("is-current");
+    if (card && card !== prev) card.classList?.add?.("is-current");
     // A card the reader jumped to (J/K, N, 通过后下一张, 键盘 Tab 进来) stays lit
     // until they scroll themselves. hold 默认跟着 scroll，老调用点行为不变。
     if (card && hold) state.followHold = true;
     markReading();
-    if (card && scroll) card.scrollIntoView({ behavior: "smooth", block: "start" });
-    if (card && focus) card.focus({ preventScroll: true });
+    if (card && scroll) card.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    if (card && focus) card.focus?.({ preventScroll: true });
   }
 
   // ---------------------------------------------------------------- 专注

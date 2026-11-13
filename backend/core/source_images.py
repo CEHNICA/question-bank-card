@@ -89,6 +89,9 @@ def source_identity(paper) -> tuple[Path, str, str]:
 _ASSETS: OrderedDict[tuple, tuple[tuple[tuple[str, int, int], ...], list[dict]]] = OrderedDict()
 _ASSETS_LIMIT = 4_000
 _ASSETS_LOCK = threading.Lock()
+# NOTE: 文件级切片元数据缓存，避免反复打开 PNG 解码与反复对整图计算 SHA256。
+# 键为 target.name，值为 (st_size, st_mtime_ns, width, height, image_hash)。
+_CROP_META_CACHE: dict[str, tuple[int, int, int, int, str]] = {}
 
 
 def _stamp(path: Path) -> tuple[str, int, int] | None:
@@ -131,13 +134,20 @@ def assets(question) -> list[dict]:
                 temporary.replace(target)
             finally:
                 temporary.unlink(missing_ok=True)
-        with Image.open(target) as image:
-            image.load()  # A readable PNG header does not prove intact pixels.
-            width, height = image.size
-        image_hash = hashlib.sha256(target.read_bytes()).hexdigest()
         stamp = _stamp(target)
         if stamp is not None:
             stamps.append(stamp)
+        meta = _CROP_META_CACHE.get(target.name) if stamp is not None else None
+        if meta is not None and meta[0] == stamp[1] and meta[1] == stamp[2]:
+            _, _, width, height, image_hash = meta
+        else:
+            # NOTE: 只读取 PNG Header 的 IHDR 获取宽高，绝不调用 image.load()
+            # 509 道题如果每道题都解码整图像素，会导致数秒的 CPU 卡顿。
+            with Image.open(target) as image:
+                width, height = image.size
+            image_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+            if stamp is not None:
+                _CROP_META_CACHE[target.name] = (stamp[1], stamp[2], width, height, image_hash)
         result.append(
             {
                 "page_idx": region["page_idx"],
