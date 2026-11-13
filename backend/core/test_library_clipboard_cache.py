@@ -41,6 +41,7 @@ class ClipboardEnhancementTests(TestCase):
         )
         # 写一张测试配图到题库目录
         from django.conf import settings
+
         folder = Path(settings.DATA_ROOT) / "library" / str(self.pub.id)
         folder.mkdir(parents=True, exist_ok=True)
         img = Image.new("RGB", (20, 20), (100, 150, 200))

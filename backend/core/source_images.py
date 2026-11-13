@@ -138,7 +138,7 @@ def assets(question) -> list[dict]:
         if stamp is not None:
             stamps.append(stamp)
         meta = _CROP_META_CACHE.get(target.name) if stamp is not None else None
-        if meta is not None and meta[0] == stamp[1] and meta[1] == stamp[2]:
+        if stamp is not None and meta is not None and meta[0] == stamp[1] and meta[1] == stamp[2]:
             _, _, width, height, image_hash = meta
         else:
             # NOTE: 只读取 PNG Header 的 IHDR 获取宽高，绝不调用 image.load()
@@ -182,7 +182,16 @@ def body_valid(question) -> bool:
     if not is_image(question):
         return bool(question.stem.strip())
     try:
-        return bool(assets(question))
+        items = assets(question)
+        if not items:
+            return False
+        # 校验每个切片图像素数据是否完整（防止因断电、磁盘满或写一半导致的损坏/截断文件）
+        folder = Path(settings.DATA_ROOT) / str(question.paper_id) / "question-images"
+        for item in items:
+            target = folder / item["file"]
+            with Image.open(target) as image:
+                image.load()
+        return True
     except (OSError, ValueError, IndexError, RuntimeError):
         return False
 

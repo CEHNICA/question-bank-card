@@ -9,10 +9,11 @@
 
 import json
 from unittest import mock
-from django.test import TestCase, RequestFactory
 
+from django.test import RequestFactory, TestCase
+
+from core import source_images, views
 from core.models import Paper, Question
-from core import views, source_images
 
 
 class PaperDetailPerfTests(TestCase):
@@ -22,16 +23,13 @@ class PaperDetailPerfTests(TestCase):
         views.invalidate_paper_detail_cache()
         source_images._CROP_META_CACHE.clear()
         self.paper = Paper.objects.create(
-            filename="test_paper.pdf",
-            task_name="性能测试试卷",
-            kind="pdf",
-            status=Paper.Status.READY,
+            filename="test_paper.pdf", task_name="性能测试试卷", kind="pdf", status=Paper.Status.READY
         )
         for i in range(5):
             Question.objects.create(
                 paper=self.paper,
                 number=i + 1,
-                stem=f"这是第 {i+1} 道测试题目的题干",
+                stem=f"这是第 {i + 1} 道测试题目的题干",
                 state=Question.State.YELLOW,
                 content_revision=1,
             )
@@ -89,3 +87,40 @@ class PaperDetailPerfTests(TestCase):
         resp3 = views.paper_detail(request3, self.paper.id)
         self.assertEqual(resp3.status_code, 200)
         self.assertEqual(resp3.headers["ETag"], new_etag)
+
+    def test_renumber_invalidates_etag(self):
+        """测试题号变更后，指纹与 ETag 自动更新。"""
+        request1 = self.factory.get(f"/api/papers/{self.paper.id}")
+        resp1 = views.paper_detail(request1, self.paper.id)
+        old_etag = resp1.headers["ETag"]
+
+        first_q = self.paper.questions.first()
+        first_q.number = 99
+        first_q.save()
+
+        request2 = self.factory.get(f"/api/papers/{self.paper.id}")
+        resp2 = views.paper_detail(request2, self.paper.id)
+        self.assertNotEqual(old_etag, resp2.headers["ETag"])
+
+    def test_processing_paper_bypasses_cache(self):
+        """测试解析/处理中的试卷不走静态快照缓存。"""
+        self.paper.status = Paper.Status.PARSING
+        self.paper.save()
+
+        request = self.factory.get(f"/api/papers/{self.paper.id}")
+        resp = views.paper_detail(request, self.paper.id)
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn("ETag", resp.headers)
+        self.assertNotIn(str(self.paper.id), views._PAPER_DETAIL_CACHE)
+
+    def test_paper_detail_cache_capacity_bound(self):
+        """测试详情快照缓存具备容量上限（最多 32 份），防止内存无限膨胀。"""
+        views.invalidate_paper_detail_cache()
+        for i in range(35):
+            p = Paper.objects.create(
+                filename=f"paper_{i}.pdf", task_name=f"试卷 {i}", kind="pdf", status=Paper.Status.READY
+            )
+            req = self.factory.get(f"/api/papers/{p.id}")
+            views.paper_detail(req, p.id)
+
+        self.assertLessEqual(len(views._PAPER_DETAIL_CACHE), 32)

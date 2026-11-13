@@ -1,5 +1,6 @@
 import logging
 import shutil
+import tempfile
 import time
 from pathlib import Path
 
@@ -15,6 +16,9 @@ UPLOAD_STAGING_MIN_AGE_SECONDS = 600
 # 删除任务时先把卷子目录改名成这个，再删数据库记录、最后删文件。
 DELETE_STAGING_PREFIX = ".deleting-"
 DELETE_STAGING_MIN_AGE_SECONDS = 600
+# 复制题目图片和排版截图留下的系统临时目录前缀与过期时间
+CLIPBOARD_TEMP_PREFIXES = ("tiyouju-clip-", "tiyouju-shot-")
+CLIPBOARD_TEMP_MIN_AGE_SECONDS = 3600
 
 
 def discard_interrupted_uploads() -> list[str]:
@@ -90,6 +94,35 @@ def discard_interrupted_deletes() -> list[str]:
     return removed
 
 
+def discard_stale_clipboard_temps() -> list[str]:
+    """清理遗留的剪贴板与出图临时文件目录。
+
+    老师每次点「复制题目图片」或导出 PDF 截图时，系统会在系统临时目录下
+    创建 ``tiyouju-clip-*`` 与 ``tiyouju-shot-*`` 目录。
+    Office 等外部程序需要通过 ``file:///`` 路径读取剪贴板图片，因此新目录需保留一段时间；
+    超过 1 小时未变动的历史临时目录在启动时安全清理，防止长时间运行填满系统临时盘。
+    """
+    removed: list[str] = []
+    temp_dir = Path(tempfile.gettempdir())
+    if not temp_dir.is_dir():
+        return removed
+    now = time.time()
+    for entry in temp_dir.iterdir():
+        if not any(entry.name.startswith(p) for p in CLIPBOARD_TEMP_PREFIXES) or not entry.is_dir():
+            continue
+        try:
+            if now - _newest_mtime(entry) < CLIPBOARD_TEMP_MIN_AGE_SECONDS:
+                continue
+            shutil.rmtree(entry)
+        except OSError as exc:
+            logger.warning("清理残留的剪贴板临时目录 %s 失败：%s", entry, exc)
+            continue
+        removed.append(entry.name)
+    if removed:
+        logger.info("已清理 %d 个残留的剪贴板出图临时目录：%s", len(removed), "、".join(removed))
+    return removed
+
+
 def _newest_mtime(folder: Path) -> float:
     """目录里最新的一个时间戳；空目录就是它自己的时间。"""
     newest = folder.stat().st_mtime
@@ -115,7 +148,6 @@ def _tune_sqlite(sender, connection, **kwargs):
         try:
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA synchronous=NORMAL")
-            cursor.execute("PRAGMA busy_timeout=5000")
         except Exception:
             pass
         cursor.execute("PRAGMA mmap_size=268435456")  # 256 MB
@@ -143,7 +175,7 @@ class CoreConfig(AppConfig):
         # 1.26.50：判定结果存到磁盘复用 —— 第二次打开软件不用再解析几千道题
         # 的 JSON 字段（冷启动那一遍要 3.9 秒）。接不上也不影响软件能用。
         verdict_cache.install()
-        for sweep in (discard_interrupted_uploads, discard_interrupted_deletes):
+        for sweep in (discard_interrupted_uploads, discard_interrupted_deletes, discard_stale_clipboard_temps):
             try:
                 sweep()
             except Exception as exc:  # 清理失败绝不能挡住软件启动。

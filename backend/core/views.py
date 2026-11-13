@@ -8,7 +8,6 @@ import os
 import re
 import shutil
 import threading
-import time
 import unicodedata
 import uuid
 from collections import OrderedDict
@@ -20,7 +19,14 @@ from django.conf import settings
 from django.db import models, transaction
 from django.db.models import Prefetch, Q
 from django.db.models.functions import Cast
-from django.http import FileResponse, Http404, HttpResponse, HttpResponseNotAllowed, HttpResponseNotModified, JsonResponse
+from django.http import (
+    FileResponse,
+    Http404,
+    HttpResponse,
+    HttpResponseNotAllowed,
+    HttpResponseNotModified,
+    JsonResponse,
+)
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -824,46 +830,46 @@ def _soft_delete_questions(paper: Paper, question_ids: list[int]) -> tuple[Quest
 
 
 # ---------------------------------------------------------------- 页面与静态文件（迁至 system_views.py）
-from .system_views import (
+from .system_views import (  # noqa: F401
+    _asset_version,
+    _asset_version_cache,
+    _etag_for,
     _file,
     _frontend,
     _page,
-    _asset_version,
-    _etag_for,
-    index_page,
-    library_page,
+    api_redesign_styles,
     app_script,
-    render_script,
+    browser_interactions_script,
+    exam_export_script,
+    exam_layout_script,
+    export_settings_script,
+    favicon,
+    health,
+    index_page,
+    katex_asset,
+    library_ai_script,
+    library_answer_editor_script,
+    library_diff_script,
+    library_page,
+    library_question_editor_script,
+    library_question_viewer_script,
+    library_reading_styles,
     library_script,
+    library_solutions_script,
+    library_styles,
     library_tag_manager_script,
     library_tag_manager_styles,
     library_tag_map_script,
     library_tag_map_styles,
-    library_diff_script,
-    library_workspace_script,
     library_toc_script,
-    library_solutions_script,
-    library_question_editor_script,
-    library_answer_editor_script,
-    library_ai_script,
-    export_settings_script,
     library_transfer_script,
-    library_question_viewer_script,
-    browser_interactions_script,
+    library_workspace_script,
+    render_script,
     site_drawer_script,
-    exam_export_script,
-    exam_layout_script,
-    styles,
-    api_redesign_styles,
-    library_styles,
-    library_reading_styles,
-    favicon,
     startup_hint_script,
     startup_hint_styles,
-    katex_asset,
-    health,
+    styles,
 )
-
 
 # ---------------------------------------------------------------- 状态
 
@@ -1799,30 +1805,34 @@ def paper_detail(request, paper_id):
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET", "PATCH", "DELETE"])
 
-    # NOTE: 针对大试卷（如 500+ 题）的毫秒级响应快照与 ETag 协商机制
-    summary_tuples = list(
-        paper.questions.values_list("id", "state", "approved", "content_revision", "edited", "question_type")
-    )
-    raw_sig = (
-        str(paper.id),
-        str(paper.updated_at.isoformat() if paper.updated_at else ""),
-        str(paper.status),
-        str(paper.layout_revision),
-        len(summary_tuples),
-        summary_tuples,
-    )
-    fingerprint = hashlib.sha1(repr(raw_sig).encode("utf-8")).hexdigest()
-    etag = f'"{fingerprint}"'
+    # NOTE: 针对大试卷（如 500+ 题）已就绪试卷的毫秒级响应快照与 ETag 协商机制。
+    # 处理中（parsing/segmenting）的试卷进度与状态动态变化，不走静态快照缓存。
+    etag = None
+    if paper.status == Paper.Status.READY:
+        summary_tuples = list(
+            paper.questions.values_list(
+                "id", "number", "group_id", "state", "approved", "content_revision", "edited", "question_type"
+            )
+        )
+        raw_sig = (
+            str(paper.id),
+            str(paper.updated_at.isoformat() if paper.updated_at else ""),
+            str(paper.layout_revision),
+            len(summary_tuples),
+            summary_tuples,
+        )
+        fingerprint = hashlib.sha1(repr(raw_sig).encode("utf-8")).hexdigest()
+        etag = f'"{fingerprint}"'
 
-    if_none_match = request.headers.get("If-None-Match")
-    if if_none_match == etag:
-        return HttpResponseNotModified()
+        if_none_match = request.headers.get("If-None-Match")
+        if if_none_match == etag:
+            return HttpResponseNotModified()
 
-    cached = _PAPER_DETAIL_CACHE.get(str(paper.id))
-    if cached is not None and cached[0] == etag:
-        response = HttpResponse(cached[1], content_type="application/json")
-        response["ETag"] = etag
-        return response
+        cached = _PAPER_DETAIL_CACHE.get(str(paper.id))
+        if cached is not None and cached[0] == etag:
+            response = HttpResponse(cached[1], content_type="application/json")
+            response["ETag"] = etag
+            return response
 
     paper_tables = tables.table_blocks(paper)
     rows = list(
@@ -1839,11 +1849,16 @@ def paper_detail(request, paper_id):
         data = paper_json(paper, rows=rows)
 
     payload = {"paper": data, "questions": questions}
-    payload_bytes = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    _PAPER_DETAIL_CACHE[str(paper.id)] = (etag, payload_bytes)
-    response = HttpResponse(payload_bytes, content_type="application/json")
-    response["ETag"] = etag
-    return response
+    if paper.status == Paper.Status.READY and etag is not None:
+        payload_bytes = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        _PAPER_DETAIL_CACHE[str(paper.id)] = (etag, payload_bytes)
+        while len(_PAPER_DETAIL_CACHE) > 32:
+            _PAPER_DETAIL_CACHE.pop(next(iter(_PAPER_DETAIL_CACHE)), None)
+        response = HttpResponse(payload_bytes, content_type="application/json")
+        response["ETag"] = etag
+        return response
+
+    return JsonResponse(payload)
 
 
 @csrf_exempt
@@ -4140,15 +4155,15 @@ def library_jobs_cancel(request):
 
 
 # ---------------------------------------------------------------- 助手工作台与协同视图（迁至 workbench_views.py）
-from .workbench_views import (
-    library_assistant_tasks,
-    library_assistant_prepare,
-    library_assistant_complete,
-    library_assistant_workbench,
-    library_assistant_propose,
+from .workbench_views import (  # noqa: F401
     library_assistant_claim,
-    library_assistant_release,
-    library_assistant_whereami,
+    library_assistant_complete,
+    library_assistant_prepare,
     library_assistant_proposal_decide,
+    library_assistant_propose,
+    library_assistant_release,
+    library_assistant_tasks,
+    library_assistant_whereami,
+    library_assistant_workbench,
     teacher_presence,
 )

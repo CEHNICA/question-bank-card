@@ -3854,7 +3854,7 @@
     const old = node("div", "library-assistant-diff before");
     const now = node("div", "library-assistant-diff after");
 
-    const diffEngine = typeof TiyoujuDiff !== "undefined" ? TiyoujuDiff : (typeof window !== "undefined" ? window.TiyoujuDiff : null);
+    const diffEngine = (typeof window !== "undefined" && window.TiyoujuDiff) || (typeof globalThis !== "undefined" && globalThis.TiyoujuDiff) || null;
     if (!diffEngine || field === "question_type" || !oldText || !newText || oldText === "（空）" || newText === "（空）" ||
         (typeof document !== "undefined" && typeof document.createElement !== "function")) {
       old.append(node("span", "library-assistant-diff-tag", "原来"), node("span", "", oldText));

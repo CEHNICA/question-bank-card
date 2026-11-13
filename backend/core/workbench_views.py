@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+
 from django.http import HttpResponseNotAllowed, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
