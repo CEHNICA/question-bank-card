@@ -823,152 +823,48 @@ def _soft_delete_questions(paper: Paper, question_ids: list[int]) -> tuple[Quest
     return batch, len(rows)
 
 
-# ---------------------------------------------------------------- 页面与静态文件
-
-
-_ASSET_SUFFIXES = {".js", ".css", ".png", ".woff2", ".woff", ".ttf"}
-_ASSET_VERSION_TTL = 60.0
-_asset_version_cache: dict[str, tuple[float, str]] = {}
-# 页面里引用静态资源的地方：src="/xxx.js" / href="/xxx.css"
-_ASSET_URL_RE = re.compile(r'((?:src|href)=")(/[A-Za-z0-9._/-]+\.(?:js|css))(\?v=[^"]*)?(")')
-
-
-def _asset_version() -> str:
-    """前端文件指纹：所有脚本样式图片的 mtime+size 揉出来的一个短哈希。
-
-    1.25.40 那句「本地脚本没有版本号，要求每次都向本机服务核对」是为了防升级后
-    窗口里还是上一版的界面（真的撞上过）。代价是每次开窗口重下 1.2 MB ——
-    web.log 里 35 天光静态资源就重传了 12 GB。
-
-    现在页面里引用的每个脚本样式都带 ?v=<指纹>：动过任何前端文件，指纹就变，URL
-    跟着变，浏览器自然重新下载；没动过，指纹不变，浏览器就一直用本地缓存。
-    两边都要。指纹算一次缓存 60 秒，省得每次请求都去 stat 一遍目录。
-    """
-    now = time.monotonic()
-    cached = _asset_version_cache.get("value")
-    if cached is not None and now - cached[0] < _ASSET_VERSION_TTL:
-        return cached[1]
-    digest = hashlib.sha1()
-    try:
-        for path in sorted(FRONTEND.rglob("*")):
-            if path.suffix.lower() not in _ASSET_SUFFIXES or not path.is_file():
-                continue
-            stat = path.stat()
-            relative = path.relative_to(FRONTEND).as_posix()
-            digest.update(f"{relative}:{stat.st_mtime_ns}:{stat.st_size};".encode())
-    except OSError:
-        pass
-    value = digest.hexdigest()[:12]
-    _asset_version_cache["value"] = (now, value)
-    return value
-
-
-def _etag_for(path: Path) -> str:
-    try:
-        stat = path.stat()
-    except OSError:
-        return ""
-    return f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
-
-
-def _page(name: str):
-    """HTML 页面：每次都回源核对，并在里面给静态资源带上当前指纹。"""
-
-    def view(request):
-        if request.method != "GET":
-            return HttpResponseNotAllowed(["GET"])
-        version = _asset_version()
-        try:
-            text = (FRONTEND / name).read_text(encoding="utf-8")
-        except OSError:
-            raise Http404 from None
-        text = _ASSET_URL_RE.sub(lambda match: f"{match.group(1)}{match.group(2)}?v={version}{match.group(4)}", text)
-        response = HttpResponse(text, content_type="text/html; charset=utf-8")
-        # 页面本身要每次核对：它带着下面那些 ?v=，不核对就拿不到新指纹。
-        response["Cache-Control"] = "no-cache"
-        return response
-
-    return view
-
-
-def _frontend(name: str, content_type: str):
-    def view(request):
-        if request.method != "GET":
-            return HttpResponseNotAllowed(["GET"])
-        response = _file(FRONTEND / name, content_type)
-        # 1.25.40：本地脚本没有版本号，浏览器会按启发式缓存旧文件 —— 升级后窗口里
-        # 可能还是上一版的界面（真的撞上过）。要求每次都向本机服务核对。
-        # 1.26.36：现在页面里引用的这些文件都带 ?v=<指纹>，指纹没变就说明文件没变，
-        # 浏览器可以直接用本地缓存；指纹变了 URL 就变了，浏览器自然会重新下载。
-        # 所以这里从 no-cache 改成一周：升级照样生效，重复下载没了。
-        response["Cache-Control"] = "public, max-age=604800"
-        etag = _etag_for(FRONTEND / name)
-        if etag:
-            response["ETag"] = etag
-        return response
-
-    return view
-
-
-index_page = _page("index.html")
-library_page = _page("library.html")
-app_script = _frontend("app.js", "application/javascript; charset=utf-8")
-render_script = _frontend("qb-render.js", "application/javascript; charset=utf-8")
-library_script = _frontend("library.js", "application/javascript; charset=utf-8")
-library_tag_manager_script = _frontend("library-tag-manager.js", "application/javascript; charset=utf-8")
-library_tag_manager_styles = _frontend("library-tag-manager.css", "text/css; charset=utf-8")
-library_tag_map_script = _frontend("library-tag-map.js", "application/javascript; charset=utf-8")
-library_tag_map_styles = _frontend("library-tag-map.css", "text/css; charset=utf-8")
-library_workspace_script = _frontend("library-workspace.js", "application/javascript; charset=utf-8")
-library_toc_script = _frontend("library-toc.js", "application/javascript; charset=utf-8")
-library_solutions_script = _frontend("library-solutions.js", "application/javascript; charset=utf-8")
-library_question_editor_script = _frontend("library-question-editor.js", "application/javascript; charset=utf-8")
-library_answer_editor_script = _frontend("library-answer-editor.js", "application/javascript; charset=utf-8")
-library_ai_script = _frontend("library-ai-settings.js", "application/javascript; charset=utf-8")
-export_settings_script = _frontend("export-settings.js", "application/javascript; charset=utf-8")
-library_transfer_script = _frontend("library-transfer.js", "application/javascript; charset=utf-8")
-library_question_viewer_script = _frontend("library-question-viewer.js", "application/javascript; charset=utf-8")
-browser_interactions_script = _frontend("browser-interactions.js", "application/javascript; charset=utf-8")
-site_drawer_script = _frontend("site-drawer.js", "application/javascript; charset=utf-8")
-exam_export_script = _frontend("exam-export.js", "application/javascript; charset=utf-8")
-exam_layout_script = _frontend("exam-layout.js", "application/javascript; charset=utf-8")
-styles = _frontend("styles.css", "text/css; charset=utf-8")
-# 1.26.15：API 配置这一页的重新排版，单独一个文件，整页回退只要删掉这一行。
-api_redesign_styles = _frontend("api-redesign.css", "text/css; charset=utf-8")
-library_styles = _frontend("library.css", "text/css; charset=utf-8")
-library_reading_styles = _frontend("library-reading.css", "text/css; charset=utf-8")
-favicon = _frontend("favicon.png", "image/png")
-# 1.26.50：打开软件时试卷列表还在准备，这一行说明现在是什么状态。
-# 这两个文件**必须在这里登记** —— 前端文件不是一个目录一起发的，
-# 而是一个一个登记路径。漏登记就是 404，功能等于没做。
-startup_hint_script = _frontend("startup-hint.js", "application/javascript; charset=utf-8")
-startup_hint_styles = _frontend("startup-hint.css", "text/css; charset=utf-8")
-
-
-def katex_asset(request, asset: str):
-    if asset in {"katex.min.js", "contrib/auto-render.min.js"}:
-        content_type = "application/javascript; charset=utf-8"
-    elif asset == "katex.min.css":
-        content_type = "text/css; charset=utf-8"
-    elif re.fullmatch(r"fonts/KaTeX_[A-Za-z0-9_-]+\.(?:woff2?|ttf)", asset):
-        content_type = {"woff2": "font/woff2", "woff": "font/woff", "ttf": "font/ttf"}[asset.rsplit(".", 1)[1]]
-    else:
-        raise Http404
-    response = _file(FRONTEND / "vendor" / "katex" / asset, content_type)
-    # 1.26.36：字体和 katex 自己的样式一样，是不会变的静态资源。katex.min.css
-    # 里按相对路径找字体，所以字体 URL 上没有 ?v=，只能靠这里的缓存头。
-    response["Cache-Control"] = "public, max-age=604800"
-    etag = _etag_for(FRONTEND / "vendor" / "katex" / asset)
-    if etag:
-        response["ETag"] = etag
-    return response
+# ---------------------------------------------------------------- 页面与静态文件（迁至 system_views.py）
+from .system_views import (
+    _file,
+    _frontend,
+    _page,
+    _asset_version,
+    _etag_for,
+    index_page,
+    library_page,
+    app_script,
+    render_script,
+    library_script,
+    library_tag_manager_script,
+    library_tag_manager_styles,
+    library_tag_map_script,
+    library_tag_map_styles,
+    library_workspace_script,
+    library_toc_script,
+    library_solutions_script,
+    library_question_editor_script,
+    library_answer_editor_script,
+    library_ai_script,
+    export_settings_script,
+    library_transfer_script,
+    library_question_viewer_script,
+    browser_interactions_script,
+    site_drawer_script,
+    exam_export_script,
+    exam_layout_script,
+    styles,
+    api_redesign_styles,
+    library_styles,
+    library_reading_styles,
+    favicon,
+    startup_hint_script,
+    startup_hint_styles,
+    katex_asset,
+    health,
+)
 
 
 # ---------------------------------------------------------------- 状态
-
-
-def health(request):
-    return JsonResponse({"ok": True, "app": "question-bank-card"})
 
 
 def status(request):
@@ -4197,164 +4093,16 @@ def library_jobs_cancel(request):
         return _error(str(error), error.status)
 
 
-@csrf_exempt
-def library_assistant_tasks(request):
-    """Read the local assistant inbox without starting any cloud generation."""
-    from . import library_assistant
-    from .library_browse import BrowseError, normalize_ids
-
-    if request.method != "GET":
-        return HttpResponseNotAllowed(["GET"])
-    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
-        return _error("助手待处理任务只能在本机读取", 403)
-    try:
-        limit = int(request.GET.get("limit", "50"))
-        if not 1 <= limit <= 50:
-            return _error("limit 应为 1–50")
-        raw_ids = request.GET.get("ids")
-        ids = normalize_ids(raw_ids.split(",")) if raw_ids is not None else None
-        return JsonResponse(library_assistant.list_tasks(ids=ids, limit=limit))
-    except (BrowseError, library_assistant.AssistantError) as error:
-        return _error(str(error), getattr(error, "status", 400))
-    except (ValueError, TypeError):
-        return _error("待处理任务查询格式不正确")
-
-
-@csrf_exempt
-def library_assistant_prepare(request):
-    return _library_assistant_action(request, "prepare")
-
-
-@csrf_exempt
-def library_assistant_complete(request):
-    return _library_assistant_action(request, "complete")
-
-
-# ---------------------------------------------------------------- 助手工作台（1.26.34）
-
-
-@csrf_exempt
-def library_assistant_workbench(request):
-    """题库页里那块「助手工作台」读的东西：一屏看完助手交上来了什么。"""
-    from . import assistant_workbench
-
-    if request.method != "GET":
-        return HttpResponseNotAllowed(["GET"])
-    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
-        return _error("助手工作台只能在本机查看", 403)
-    try:
-        limit = int(request.GET.get("limit", "50"))
-        return JsonResponse(assistant_workbench.workbench(limit=limit))
-    except assistant_workbench.WorkbenchError as error:
-        return _error(str(error), getattr(error, "status", 400))
-    except (ValueError, TypeError):
-        return _error("助手工作台读取格式不正确")
-
-
-@csrf_exempt
-def library_assistant_propose(request):
-    """助手交一份题面改动。题面不动，等人点采纳。"""
-    return _assistant_workbench_action(request, "propose")
-
-
-@csrf_exempt
-def library_assistant_claim(request):
-    """助手领一批活；每道活带到期时间，助手没了活会自己回来。"""
-    return _assistant_workbench_action(request, "claim")
-
-
-@csrf_exempt
-def library_assistant_release(request):
-    """助手把活交回池子。"""
-    return _assistant_workbench_action(request, "release")
-
-
-@csrf_exempt
-def library_assistant_whereami(request):
-    """助手问一句：老师此刻在哪、我刚提的有没有被否决。"""
-    from . import assistant_workbench
-
-    if request.method != "GET":
-        return HttpResponseNotAllowed(["GET"])
-    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
-        return _error("助手只能在本机查看老师的位置", 403)
-    return JsonResponse(assistant_workbench.whereami())
-
-
-@csrf_exempt
-def library_assistant_proposal_decide(request, proposal_id):
-    """人点采纳或不采纳。采纳前题面一个字不动。"""
-    from . import assistant_workbench
-
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    rejected = _guard(request)
-    if rejected is not None:
-        return rejected
-    payload = _body(request)
-    if payload is None:
-        return _error("处理提案的请求必须是 JSON 对象")
-    payload = {**payload, "proposal_id": str(proposal_id)}
-    try:
-        return JsonResponse(assistant_workbench.decide(payload))
-    except assistant_workbench.WorkbenchError as error:
-        return _error(str(error), getattr(error, "status", 409))
-
-
-@csrf_exempt
-def teacher_presence(request):
-    """题库页/审核页报一声：老师此刻在这道题上做什么。助手据此绕开。"""
-    from . import assistant_workbench
-
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
-        return _error("在场信息只能在本机记录", 403)
-    rejected = _guard(request)
-    if rejected is not None:
-        return rejected
-    payload = _body(request)
-    if payload is None:
-        return _error("在场信息请求必须是 JSON 对象")
-    try:
-        return JsonResponse(assistant_workbench.set_presence(payload))
-    except assistant_workbench.WorkbenchError as error:
-        return _error(str(error), getattr(error, "status", 400))
-
-
-def _assistant_workbench_action(request, action):
-    from . import assistant_workbench
-
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
-        return _error("助手操作只能在本机使用", 403)
-    rejected = _guard(request)
-    if rejected is not None:
-        return rejected
-    payload = _body(request)
-    if payload is None:
-        return _error("助手请求必须是 JSON 对象")
-    try:
-        return JsonResponse(getattr(assistant_workbench, action)(payload))
-    except assistant_workbench.WorkbenchError as error:
-        return _error(str(error), getattr(error, "status", 409))
-
-
-def _library_assistant_action(request, action):
-    from . import library_assistant
-
-    if request.method != "POST":
-        return HttpResponseNotAllowed(["POST"])
-    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
-        return _error("助手生成和写回只能在本机使用", 403)
-    rejected = _guard(request)
-    if rejected is not None:
-        return rejected
-    payload = _body(request)
-    if payload is None:
-        return _error("助手任务请求必须是 JSON 对象")
-    try:
-        return JsonResponse(getattr(library_assistant, action)(payload))
-    except library_assistant.AssistantError as error:
-        return _error(str(error), getattr(error, "status", 409))
+# ---------------------------------------------------------------- 助手工作台与协同视图（迁至 workbench_views.py）
+from .workbench_views import (
+    library_assistant_tasks,
+    library_assistant_prepare,
+    library_assistant_complete,
+    library_assistant_workbench,
+    library_assistant_propose,
+    library_assistant_claim,
+    library_assistant_release,
+    library_assistant_whereami,
+    library_assistant_proposal_decide,
+    teacher_presence,
+)
