@@ -1792,3 +1792,279 @@ mark.qb-mark.region-location { background: var(--accent-soft); outline: 2px soli
 .answer-editor-dialog > .source-dialog-head .shortcut-hint-panel .shortcut-expand-label { color: var(--accent); }
 .page-shortcut-reference { margin-top: 8px; }
 @media (max-width: 600px) { .shortcut-help-body { padding: 16px; } .shortcut-main th, .shortcut-main td { padding: 8px 6px; } }
+
+
+/* ==========================================================================
+   题有据 · 全局设计系统与视觉质感现代化增强层 (Global Design System Enhancement)
+   覆盖范围：
+   1. 全局字体渲染、冷白极简底色体系、平滑极细滚动条；
+   2. 现代按钮体系 (.button)、弹窗体系 (dialog::backdrop)、卡片浮动阴影；
+   3. 核对题目工作台：左侧试卷列表与上传区 (.drop-zone)、核对题卡 (.card)、勾选框 (.card-tick)；
+   4. 审核工具栏与交互组件视觉升维。
+   ========================================================================== */
+
+/* ---------------------------------------------------------------- 全局基底与极简现代滚动条 */
+:root {
+  --bg: #f8fafc;
+  --bg-sunken: #f1f5f9;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --line: #e2e8f0;
+  --line-strong: #cbd5e1;
+  --ink: #0f172a;
+  --ink-2: #334155;
+  --muted: #64748b;
+  --faint: #94a3b8;
+  --accent: #059669;
+  --accent-hover: #047857;
+  --accent-soft: #ecfdf5;
+  --accent-ring: rgba(16, 185, 129, 0.2);
+  --accent-dark: #065f46;
+  --green: #059669;
+  --green-soft: #ecfdf5;
+  --green-bar: #6ee7b7;
+  --amber: #d97706;
+  --amber-soft: #fffbeb;
+  --amber-line: #fde68a;
+  --amber-bar: #f59e0b;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.04), 0 2px 4px -2px rgba(0, 0, 0, 0.04);
+  --shadow-pop: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+}
+
+/* 现代极简微细滚动条 */
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ---------------------------------------------------------------- 全局按钮设计系统 (.button) */
+.button {
+  border-radius: 8px;
+  font-weight: 500;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.button.primary,
+.button-primary {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
+  box-shadow: 0 1px 3px rgba(5, 150, 105, 0.25), 0 1px 2px rgba(5, 150, 105, 0.15);
+}
+
+.button.primary:hover:not(:disabled),
+.button-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.button.quiet,
+.button-quiet {
+  box-shadow: none;
+}
+
+.button.quiet:hover:not(:disabled),
+.button-quiet:hover:not(:disabled) {
+  background: var(--bg-sunken);
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------- 全局弹窗体系 (Dialog & Backdrop) */
+dialog {
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+dialog::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(8px) saturate(140%);
+}
+
+.dialog-head,
+.source-dialog-head {
+  background: #f8fafc;
+  border-bottom: 1px solid #f1f5f9;
+  padding: 14px 20px;
+}
+
+.dialog-head h3,
+.source-dialog-head h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+/* ---------------------------------------------------------------- 核对主页：试卷侧栏 (.sidebar) 与上传区 (.drop-zone) */
+.sidebar {
+  background: #ffffff;
+  border-right: 1px solid var(--line);
+  padding: 14px 12px;
+}
+
+.drop-zone {
+  border-radius: 12px;
+  border: 1.5px dashed var(--line-strong);
+  background: #f8fafc;
+  padding: 14px 12px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+}
+
+.drop-zone:hover,
+.drop-zone.over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+.drop-zone .drop-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  box-shadow: var(--shadow-sm);
+}
+
+/* 试卷列表项 (.paper-list) */
+.paper-list li {
+  border-radius: 8px;
+  margin: 2px 0;
+  transition: all 0.15s ease;
+}
+
+.paper-list .paper-link {
+  border-radius: 8px;
+  padding: 8px 10px;
+  transition: all 0.15s ease;
+}
+
+.paper-list .paper-link:hover {
+  background: #f1f5f9;
+}
+
+.paper-list li.current .paper-link,
+.paper-list li.active .paper-link {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* ---------------------------------------------------------------- 逐题核对卡片 (.card) 与通过勾选框 (.card-tick) */
+.card {
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.card:hover {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow);
+}
+
+.card.is-current {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring), var(--shadow);
+}
+
+.card-head {
+  background: #f8fafc;
+  border-bottom: 1px solid #f1f5f9;
+  padding: 10px 18px;
+  border-top-left-radius: 13px;
+  border-top-right-radius: 13px;
+}
+
+.card-head .qnum {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* 题号左侧的通过勾选框 */
+.card-tick {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1.5px solid var(--line-strong);
+  background: #ffffff;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.card-tick:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  transform: scale(1.05);
+}
+
+.card-tick[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+  box-shadow: 0 2px 4px rgba(5, 150, 105, 0.25);
+}
+
+/* 题面文本区排版 */
+.card-body .paper,
+.card-body .qb-stem-body {
+  line-height: 1.68;
+  font-size: 14.5px;
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------- 审核工具栏与状态条 (#toolbar) */
+.toolbar {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(8px);
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  padding: 6px 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.toggle-pill {
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 10px;
+  transition: all 0.15s ease;
+}
+
+.toggle-pill:hover {
+  background: var(--bg-sunken);
+}
+
+.toggle-pill[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-dark);
+  border-color: rgba(5, 150, 105, 0.2);
+  font-weight: 600;
+}
