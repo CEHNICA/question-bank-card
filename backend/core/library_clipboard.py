@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import logging
@@ -238,7 +239,7 @@ def _render_question_png(payload):
 
 
 def _crop_to_content(raw, box):
-    """按测出来的位置裁出题面，再裁掉四周白边。"""
+    """按测出来的位置裁出题面，裁掉多余空白并在四周留出适量呼吸感（Padding）。"""
     from PIL import Image, ImageChops
 
     try:
@@ -254,13 +255,20 @@ def _crop_to_content(raw, box):
     if right <= left or bottom <= top:
         _fail("题目图片没有生成，请重试", 422)
     region = rgb.crop((left, top, right, bottom))
-    # 裁掉白边：题面本身是白底，边缘不该留一圈空白。
+    # 裁掉多余白边：题面本身是白底
     background = Image.new("RGB", region.size, (255, 255, 255))
     bounds = ImageChops.difference(region, background).getbbox()
     if bounds:
         region = region.crop(bounds)
     if region.width < 1 or region.height < 1:
         _fail("题目图片没有生成，请重试", 422)
+    # 四周增加适量内边距（Padding），消除文字公式紧贴边缘的窒息感
+    padding = 20
+    padded_size = (region.width + padding * 2, region.height + padding * 2)
+    padded_image = Image.new("RGB", padded_size, (255, 255, 255))
+    padded_image.paste(region, (padding, padding))
+    region = padded_image
+
     buffer = io.BytesIO()
     region.save(buffer, format="PNG")
     return buffer.getvalue()
@@ -419,10 +427,21 @@ def _write_clipboard(images, paths=None):
 # ---------------------------------------------------------------------------
 
 
-def _collect(publication):
+def _cache_path(publication, mode="separated") -> Path:
+    """计算题目排版截图的缓存路径。"""
+    cache_dir = Path(settings.DATA_ROOT) / "cache" / "clipboard"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    updated_str = publication.updated_at.isoformat() if getattr(publication, "updated_at", None) else ""
+    raw_key = f"{publication.id}:{updated_str}:{mode}:{RENDER_WIDTH}:{RENDER_SCALE}:pad20"
+    digest = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+    return cache_dir / f"{digest}.png"
+
+
+def _collect(publication, mode="separated"):
     """把入库版拆成「题面要渲染成什么」和「配图原图是哪几张」。
 
-    按老师选的 A 方案：题面图里不放配图，配图原图另外单独给。
+    - separated（兼容默认）：按老师选的 A 方案：题面图里不放配图，配图原图另外单独给一张（供 OneNote 拖动）。
+    - combined：题面与配图合并为一张完整图，发微信、QQ、PPT 绝不漏图。
     原图题例外 —— 它的题干本身就是截图，没有独立的配图可分，
     截图要照原样画进题面图里。
     """
@@ -461,6 +480,24 @@ def _collect(publication):
         }
         return payload, []
 
+    if mode == "combined" and images:
+        figures_payload = [
+            {
+                "file": "data:image/png;base64," + base64.b64encode(image["bytes"]).decode("ascii"),
+                "width": image["size"][0],
+                "height": image["size"][1],
+                "slot": image.get("slot", "stem"),
+            }
+            for image in images
+        ]
+        payload = {
+            "stem": content.get("stem") or "",
+            "options": {key: str(value) for key, value in options.items()},
+            "origin": content.get("origin") or "",
+            "figures": figures_payload,
+        }
+        return payload, []
+
     payload = {
         "stem": content.get("stem") or "",
         "options": {key: str(value) for key, value in options.items()},
@@ -470,16 +507,35 @@ def _collect(publication):
     return payload, [image["bytes"] for image in images]
 
 
-def copy_question(publication):
+def copy_question(publication, mode="separated"):
     """把一道题做成图片放进剪贴板。返回给界面的一句话说明。"""
-    payload, figures = _collect(publication)
+    cache_file = _cache_path(publication, mode=mode)
+    question_png = None
+    is_cached = False
+    if cache_file.is_file() and cache_file.stat().st_size > 0:
+        try:
+            question_png = cache_file.read_bytes()
+            is_cached = True
+        except OSError:
+            question_png = None
 
-    if not _render_lock.acquire(blocking=False):
-        _fail("另一道题正在出图，请稍等一下再试", 409)
-    try:
-        question_png = _render_question_png(payload)
-    finally:
-        _render_lock.release()
+    if question_png is None:
+        payload, figures = _collect(publication, mode=mode)
+        if not _render_lock.acquire(blocking=False):
+            _fail("另一道题正在出图，请稍等一下再试", 409)
+        try:
+            question_png = _render_question_png(payload)
+        finally:
+            _render_lock.release()
+        try:
+            cache_file.write_bytes(question_png)
+        except OSError:
+            pass
+    else:
+        if mode == "separated":
+            _, figures = _collect(publication, mode=mode)
+        else:
+            figures = []
 
     images = [question_png] + figures
     total = sum(len(image) for image in images)
@@ -496,9 +552,17 @@ def copy_question(publication):
     if figures:
         return {
             "images": len(images),
+            "cached": is_cached,
             "message": "已复制：题目 1 张、配图 %d 张，粘到 OneNote 里能分开拖动。" % len(figures),
         }
-    return {"images": 1, "message": "已复制：题目 1 张，粘到 OneNote 里就能用。"}
+    if mode == "combined":
+        cached_note = "（已秒级复用）" if is_cached else ""
+        return {
+            "images": 1,
+            "cached": is_cached,
+            "message": f"已复制：题目 1 张{cached_note}（完整带图，适合发微信/做课件）。",
+        }
+    return {"images": 1, "cached": is_cached, "message": "已复制：题目 1 张，粘到 OneNote 里就能用。"}
 
 
 @csrf_exempt
@@ -520,13 +584,16 @@ def copy_question_view(request):
     publication_id = payload.get("publication_id")
     if not isinstance(publication_id, str) or not re.fullmatch(r"[0-9a-fA-F-]{36}", publication_id):
         return JsonResponse({"error": "这道题的编号无法识别，请刷新题库后重试"}, status=400)
+    mode = payload.get("mode", "combined")
+    if mode not in {"combined", "separated"}:
+        mode = "combined"
     try:
         publication = PublishedQuestion.objects.filter(pk=publication_id).first()
         if publication is None:
             _fail("这道题已经不在题库里了，请刷新题库", 409)
         if publication.status != PublishedQuestion.Status.PUBLISHED:
             _fail("这道题已撤回或被替代，无法出图", 409)
-        result = copy_question(publication)
+        result = copy_question(publication, mode=mode)
     except RequestDataTooBig:
         return JsonResponse({"error": "请求内容太大，请重试"}, status=413)
     except ClipboardError as error:

@@ -1275,9 +1275,11 @@
   // 后端排一次版再写剪贴板，要一两秒；这段时间按钮写「正在生成…」，
   // 不然点下去没反应会以为坏了。
   async function copyQuestionImage(item, button) {
-    const original = button.textContent;
-    button.disabled = true;
-    button.textContent = "正在生成…";
+    const original = button ? button.textContent : "";
+    if (button) {
+      button.disabled = true;
+      button.textContent = "正在生成…";
+    }
     // 光靠按钮上那行字不够 —— 菜单可能被别处点掉、或者老师在看别的地方。
     // 再给一条提示条，明说在做什么、大概要等多久。
     toast("正在生成题目图片，要排一次版，约 3 秒…");
@@ -1293,8 +1295,10 @@
     } catch (error) {
       toast(error.message || "题目图片没有生成，请重试", "error");
     } finally {
-      button.disabled = false;
-      button.textContent = original;
+      if (button) {
+        button.disabled = false;
+        button.textContent = original;
+      }
     }
   }
 
@@ -1310,7 +1314,13 @@
       selectInspectorQuestion(item, article);
     });
     article.addEventListener("keydown", (event) => {
-      if (event.isComposing || event.keyCode === 229 || event.target !== article || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.isComposing || event.keyCode === 229 || event.target !== article) return;
+      if (event.ctrlKey && event.shiftKey && (event.key === "C" || event.key === "c")) {
+        event.preventDefault();
+        copyQuestionImage(item, article.querySelector(".library-copy-image-btn"));
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
       if (event.key === "Enter") { event.preventDefault(); selectInspectorQuestion(item, article); setInspectorOpen(true); }
       if (["ArrowDown", "ArrowUp"].includes(event.key)) {
         const cards = Array.from(document.querySelectorAll(".library-card")), index = cards.indexOf(article);
@@ -1445,6 +1455,7 @@
     const copyImage = node("button", "button button-quiet button-small", "复制题目图片");
     copyImage.type = "button";
     copyImage.title = "把这道题做成图片放进剪贴板。题里带的配图另外单独一张，粘到 OneNote 里能分开拖动位置。";
+    if (copyImage.classList?.add) copyImage.classList.add("library-copy-image-btn");
     // 1.26.49：点了**不关菜单** —— 菜单一关，按钮上那行「正在生成…」老师就看不见了，
     // 点了跟没点一样。现在菜单留着，按钮原地变成「正在生成…」，看得见才踏实。
     copyImage.addEventListener("click", () => { copyQuestionImage(item, copyImage); });
