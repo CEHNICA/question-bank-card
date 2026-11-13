@@ -2068,3 +2068,48 @@ dialog::backdrop {
   border-color: rgba(5, 150, 105, 0.2);
   font-weight: 600;
 }
+
+
+/* ---------------------------------------------------------------- 客户端桌面软件触感增强 (Native Desktop App Experience)
+   消除网页感特征：
+   1. 界面外壳、导航条、侧边栏、工具条与按钮禁止鼠标拖拽选中文本 (user-select: none)；
+   2. 题干、解析、公式与输入框保留自由选中与复制；
+   3. 图片禁止出现网页式拖拽幽灵阴影 (-webkit-user-drag: none)；
+   4. 消除点击时突兀的网页外轮廓。
+   ---------------------------------------------------------------- */
+
+.topbar,
+.sidebar,
+.toolbar,
+.library-directory,
+.library-bulk,
+.card-head,
+.library-card-meta,
+.library-card-actions,
+.question-inspector-head,
+.button,
+.toggle-pill,
+.drop-zone,
+.paper-list {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+/* 核心题目内容区保留完美复制体验 */
+.paper,
+.card-body,
+.qb-stem-body,
+.qb-analysis,
+.qb-option-body,
+.katex,
+input,
+textarea {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* 禁止图片在界面上被随意拖拽扯出幽灵虚影 */
+img {
+  -webkit-user-drag: none;
+  user-drag: none;
+}
