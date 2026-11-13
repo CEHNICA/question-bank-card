@@ -95,5 +95,5 @@ class ClipboardEnhancementTests(TestCase):
         cropped_bytes = library_clipboard._crop_to_content(raw_bytes, box)
 
         with Image.open(io.BytesIO(cropped_bytes)) as cropped:
-            # 黑色区域尺寸为 20x20，四周加 padding=20，因此总尺寸应为 (20 + 40, 20 + 40) = (60, 60)
-            self.assertEqual(cropped.size, (60, 60), "加上四周 20px padding 后总尺寸应为 60x60")
+            # 黑色区域尺寸为 20x20，左右加 padding_x=56，上下加 padding_y=42，因此总尺寸应为 (132, 104)
+            self.assertEqual(cropped.size, (132, 104), "加上舒展页边距后总尺寸应为 132x104")

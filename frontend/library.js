@@ -1282,7 +1282,7 @@
     }
     // 光靠按钮上那行字不够 —— 菜单可能被别处点掉、或者老师在看别的地方。
     // 再给一条提示条，明说在做什么、大概要等多久。
-    toast("正在生成题目图片，要排一次版，约 3 秒…");
+    toast("正在生成并复制题目图片，稍候数秒即好…");
     try {
       const response = await fetch("/api/library/copy-image", {
         method: "POST",

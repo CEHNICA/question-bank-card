@@ -270,11 +270,12 @@ def _crop_to_content(raw, box):
         region = region.crop(bounds)
     if region.width < 1 or region.height < 1:
         _fail("题目图片没有生成，请重试", 422)
-    # 四周增加适量内边距（Padding），消除文字公式紧贴边缘的窒息感
-    padding = 20
-    padded_size = (region.width + padding * 2, region.height + padding * 2)
+    # 左右给 56px，上下给 42px（2x 缩放下约等于 28px 和 21px CSS 像素），四周留出舒展大方的页边距
+    padding_x = 56
+    padding_y = 42
+    padded_size = (region.width + padding_x * 2, region.height + padding_y * 2)
     padded_image = Image.new("RGB", padded_size, (255, 255, 255))
-    padded_image.paste(region, (padding, padding))
+    padded_image.paste(region, (padding_x, padding_y))
     region = padded_image
 
     buffer = io.BytesIO()
@@ -440,7 +441,7 @@ def _cache_path(publication, mode="separated") -> Path:
     cache_dir = Path(settings.DATA_ROOT) / "cache" / "clipboard"
     cache_dir.mkdir(parents=True, exist_ok=True)
     updated_str = publication.updated_at.isoformat() if getattr(publication, "updated_at", None) else ""
-    raw_key = f"{publication.id}:{updated_str}:{mode}:{RENDER_WIDTH}:{RENDER_SCALE}:v2_prop240"
+    raw_key = f"{publication.id}:{updated_str}:{mode}:{RENDER_WIDTH}:{RENDER_SCALE}:v3_pad56"
     digest = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
     return cache_dir / f"{digest}.png"
 
