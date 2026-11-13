@@ -656,12 +656,55 @@ def show_wait(result: dict) -> str:
             f"绿卡 {result['green']} 道，仍须对照原卷。下一步：`tiyouju cards {short(paper['id'])} --filter todo`。")
 
 
+def summarize_cards(cards: list[dict]) -> dict:
+    """统计试卷题卡的状态大盘与疑点分类。"""
+    from collections import Counter
+
+    total = len(cards)
+    human_approved = sum(1 for c in cards if c.get("approved_by") == "human")
+    ai_approved = sum(1 for c in cards if c.get("approved_by") == "ai")
+    approved = human_approved + ai_approved
+    todo = sum(1 for c in cards if c.get("needs_check"))
+    green = sum(1 for c in cards if not c.get("approved_by") and c.get("state") == "green" and not c.get("needs_check"))
+    published = sum(1 for c in cards if c.get("published"))
+
+    type_blocked_cnt = sum(1 for c in cards if c.get("type_blocked"))
+    figure_issues_cnt = sum(1 for c in cards if c.get("figure_status") in FIGURE_BLOCKS or any("图" in str(iss) for iss in c.get("issues", [])))
+    source_image_cnt = sum(1 for c in cards if c.get("body_mode") == "source_image")
+
+    issue_counter: Counter[str] = Counter()
+    for c in cards:
+        for iss in c.get("issues", []):
+            issue_counter[str(iss)] += 1
+
+    return {
+        "total": total,
+        "approved": approved,
+        "human_approved": human_approved,
+        "ai_approved": ai_approved,
+        "todo": todo,
+        "green": green,
+        "published": published,
+        "type_blocked": type_blocked_cnt,
+        "figure_issues": figure_issues_cnt,
+        "source_image_mode": source_image_cnt,
+        "top_issues": issue_counter.most_common(5),
+    }
+
+
 def cmd_cards(client: Client, args) -> dict:
     paper = find_paper(client, args.paper)
     detail = paper_detail(client, paper)
-    cards = [card_summary(question) for question in detail.get("questions", [])
-             if matches_filter(question, args.filter)]
-    return {"paper": paper_summary(detail["paper"]), "filter": args.filter, "cards": cards}
+    all_cards = [card_summary(question) for question in detail.get("questions", [])
+                 if matches_filter(question, args.filter)]
+    summary = summarize_cards(all_cards)
+    only_summary = getattr(args, "summary", False)
+    return {
+        "paper": paper_summary(detail["paper"]),
+        "filter": args.filter,
+        "summary": summary,
+        "cards": [] if only_summary else all_cards,
+    }
 
 
 def approval_label(card: dict) -> str:
@@ -674,8 +717,26 @@ def approval_label(card: dict) -> str:
 
 def show_cards(result: dict) -> str:
     paper = result["paper"]
-    lines = [f"{short(paper['id'])} {paper['name']}：{len(result['cards'])} 道（筛选：{result['filter']}）"]
-    for card in result["cards"]:
+    summary = result.get("summary")
+    count_str = f"{summary['total']} 道" if summary else f"{len(result['cards'])} 道"
+    lines = [f"{short(paper['id'])} {paper['name']}：{count_str}（筛选：{result['filter']}）"]
+    if summary:
+        lines.append(f"  审核状态：已通过 {summary['approved']}（人工 {summary['human_approved']} / AI {summary['ai_approved']}），"
+                     f"待核对 {summary['todo']}，就绪绿卡 {summary['green']}，已入库 {summary['published']}")
+        blocks = []
+        if summary.get("type_blocked"):
+            blocks.append(f"题型未定 {summary['type_blocked']} 道")
+        if summary.get("figure_issues"):
+            blocks.append(f"配图待确认 {summary['figure_issues']} 道")
+        if summary.get("source_image_mode"):
+            blocks.append(f"原图题 {summary['source_image_mode']} 道")
+        if blocks:
+            lines.append("  拦截疑点：" + "，".join(blocks))
+        if summary.get("top_issues"):
+            lines.append("  高频疑点：")
+            for issue, count in summary["top_issues"][:5]:
+                lines.append(f"    - {issue} ({count} 道)")
+    for card in result.get("cards", []):
         state = approval_label(card) or STATES.get(card["state"], card["state"])
         group = f"[{card['group']}] " if card["group"] else ""
         caption = "原卷图片题" if card.get("body_mode") == "source_image" else first_line(card["stem"], 46)
@@ -1665,6 +1726,8 @@ def build_parser() -> argparse.ArgumentParser:
     cards.add_argument("paper")
     cards.add_argument("--filter", choices=FILTERS, default="all",
                        help="todo 需逐题核对；green 识读完成未通过；approved；ai；human；all")
+    cards.add_argument("--summary", action="store_true",
+                       help="只输出状态与疑点类型汇总统计，不逐题列出详细题卡")
 
     show = sub.add_parser("show", parents=[common], help="看一道题：文字、疑点，并把原卷截图和配图存成图片")
     show.add_argument("paper")

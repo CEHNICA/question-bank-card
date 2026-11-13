@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 
+const Diff = require("./library-diff.js");
 const js = fs.readFileSync(require.resolve("./library.js"), "utf8");
 
 // 从 library.js 中切出 diff 相关逻辑
@@ -29,19 +30,20 @@ const context = {
   document: { createElement: () => {} }, // 模拟真实浏览器环境（包含 createElement）
   ASSISTANT_FIELD_LABELS: { stem: "题干", answer: "答案", options: "选项" },
   QB: { TYPE_NAMES: {} },
+  TiyoujuDiff: Diff,
 };
 
 vm.runInNewContext(js.slice(start, end), context);
 
 // 1. 分词测试
-const tokens = context.tokenizeText("若区间 [0, 1) 内，\\alpha = 2");
+const tokens = Diff.tokenizeText("若区间 [0, 1) 内，\\alpha = 2");
 assert.ok(tokens.includes("["));
 assert.ok(tokens.includes(")"));
 assert.ok(tokens.includes("\\alpha"));
 assert.ok(tokens.includes("2"));
 
 // 2. 差异算法测试：区间从 [0, 1) 改成 (0, 1)
-const diff = context.computeTokensDiff("区间 [0, 1) 内", "区间 (0, 1) 内");
+const diff = Diff.computeTokensDiff("区间 [0, 1) 内", "区间 (0, 1) 内");
 const dels = diff.filter((t) => t.type === "del");
 const adds = diff.filter((t) => t.type === "add");
 const sames = diff.filter((t) => t.type === "same");

@@ -43,6 +43,7 @@ urlpatterns = [
     path("library-tag-manager.css", views.library_tag_manager_styles),
     path("library-tag-map.js", views.library_tag_map_script),
     path("library-tag-map.css", views.library_tag_map_styles),
+    path("library-diff.js", views.library_diff_script),
     path("library-workspace.js", views.library_workspace_script),
     path("library-toc.js", views.library_toc_script),
     path("library-solutions.js", views.library_solutions_script),

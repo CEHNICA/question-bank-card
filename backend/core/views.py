@@ -839,6 +839,7 @@ from .system_views import (
     library_tag_manager_styles,
     library_tag_map_script,
     library_tag_map_styles,
+    library_diff_script,
     library_workspace_script,
     library_toc_script,
     library_solutions_script,

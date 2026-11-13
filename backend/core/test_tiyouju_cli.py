@@ -128,6 +128,23 @@ class TiyoujuCliTests(LiveServerTestCase):
         self.assertEqual(code, 1)
         self.assertIn("找不到试卷", missing["error"])
 
+    def test_cards_summary_option(self):
+        code, cards = run_json("cards", "期中", "--summary")
+        self.assertEqual(code, 0)
+        self.assertEqual(cards["cards"], [])
+        self.assertIn("summary", cards)
+        summary = cards["summary"]
+        self.assertEqual(summary["total"], 3)
+        self.assertEqual(summary["approved"], 0)
+        self.assertEqual(summary["todo"], 1)
+        self.assertEqual(summary["green"], 2)
+        code, text, _err = run("cards", "期中", "--summary")
+        self.assertEqual(code, 0)
+        self.assertIn("审核状态：已通过 0", text)
+        self.assertIn("待核对 1", text)
+        self.assertIn("就绪绿卡 2", text)
+        self.assertNotIn("第 2 题", text)
+
     def test_show_saves_the_crop_and_numbered_candidates(self):
         out = self.temp / "images"
         code, card = run_json("show", "期中", "2", "--out", str(out))
