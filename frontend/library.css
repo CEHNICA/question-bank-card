@@ -1816,4 +1816,19 @@ body.is-resizing, body.is-resizing * { cursor: ew-resize !important; user-select
 }
 .library-assistant-diff-tag { color: var(--muted); font-size: 12px; margin-right: 6px; }
 .library-assistant-diff.after { border-color: var(--accent, #318c79); }
+.library-assistant-diff del, .library-assistant-diff .diff-del {
+  background-color: #ffebe9;
+  color: #cf222e;
+  text-decoration: line-through;
+  padding: 1px 3px;
+  border-radius: 3px;
+}
+.library-assistant-diff ins, .library-assistant-diff .diff-add {
+  background-color: #e6ffec;
+  color: #1a7f37;
+  text-decoration: none;
+  font-weight: 600;
+  padding: 1px 3px;
+  border-radius: 3px;
+}
 .library-assistant-item-actions { display: flex; gap: 8px; margin-top: 8px; }

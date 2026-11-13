@@ -91,13 +91,14 @@ def verify(root: Path) -> None:
     _database_check(root / "db.sqlite3")
 
 
-def create_backup() -> Path:
+def create_backup(dest_dir: Path | None = None) -> Path:
     if _service_is_running():
         raise RuntimeError("题库仍在运行。请先关闭启动窗口，确认服务停止后再备份。")
     if not DATABASE.is_file() or not DATA.is_dir():
         raise RuntimeError("没有找到完整的 backend\\db.sqlite3 与 backend\\data")
-    BACKUPS.mkdir(parents=True, exist_ok=True)
-    target = BACKUPS / f"manual-{time.strftime('%Y%m%d-%H%M%S')}"
+    base_dir = dest_dir.resolve() if dest_dir else BACKUPS
+    base_dir.mkdir(parents=True, exist_ok=True)
+    target = base_dir / f"manual-{time.strftime('%Y%m%d-%H%M%S')}"
     if target.exists():
         raise RuntimeError("同名备份已存在，请稍后再试")
     target.mkdir()
@@ -120,13 +121,14 @@ def create_backup() -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser(description="题有据备份与校验")
     parser.add_argument("--verify", metavar="BACKUP_DIR", type=Path, help="只校验指定备份")
+    parser.add_argument("--dest", metavar="DIR", type=Path, help="指定备份输出目录（如移动硬盘或同步网盘）")
     args = parser.parse_args()
     try:
         if args.verify:
             verify(args.verify.resolve())
             print(f"备份校验通过：{args.verify.resolve()}")
         else:
-            target = create_backup()
+            target = create_backup(dest_dir=args.dest)
             print(f"备份完成并校验通过：{target}")
             print("备份含原卷和可能的手写内容，请按私密资料保管。")
         return 0

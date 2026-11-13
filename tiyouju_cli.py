@@ -1283,11 +1283,30 @@ def cmd_whereami(client: Client, args) -> dict:
     return client.get("/api/library/assistant/whereami")
 
 
+def cmd_backup(client: Client, args) -> dict:
+    """备份题库（支持在线打包并指定导出目录）。"""
+    dest = getattr(args, "dest", None)
+    if dest:
+        dest_path = Path(dest).resolve()
+        if not dest_path.is_dir():
+            raise CliError(f"指定的目录不存在：{dest}")
+        return client.post("/api/backup/export", {"directory": str(dest_path)})
+    return client.post("/api/backup/auto", {})
+
+
+def show_backup(result: dict) -> str:
+    name = result.get("name") or result.get("file") or "题库备份包"
+    size = result.get("size")
+    size_str = f" ({size / (1024 * 1024):.2f} MB)" if isinstance(size, (int, float)) else ""
+    return f"备份完成：{name}{size_str}"
+
+
 SHOWERS = {
     "status": show_status, "config": show_config, "papers": show_papers, "upload": show_upload, "wait": show_wait, "cards": show_cards,
     "show": show_card, "fix": show_fix, "figures": show_figures, "approve": show_approve, "publish": show_publish,
     "unapprove": show_unapprove, "reread": show_reread,
     "library": show_library,
+    "backup": show_backup,
 }
 
 
@@ -1749,6 +1768,8 @@ def build_parser() -> argparse.ArgumentParser:
     propose.add_argument("--origin", help="要改的题源")
     sub.add_parser("workbench", parents=[common], help="读助手工作台：助手交上来了什么、谁在干活")
     sub.add_parser("whereami", parents=[common], help="老师此刻在哪、我刚提的有没有被否决")
+    backup = sub.add_parser("backup", parents=[common], help="备份题库（支持在线打包并指定导出目录）")
+    backup.add_argument("--dest", metavar="DIR", help="备份包保存到的文件夹（如外部移动硬盘或网盘路径）")
     return parser
 
 
@@ -1760,6 +1781,7 @@ COMMANDS = {
     "features": cmd_features, "enrich": cmd_enrich,
     "claim": cmd_claim, "release": cmd_release, "propose": cmd_propose,
     "workbench": cmd_workbench, "whereami": cmd_whereami,
+    "backup": cmd_backup,
 }
 
 

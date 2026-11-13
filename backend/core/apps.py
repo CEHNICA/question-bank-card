@@ -102,15 +102,22 @@ def _newest_mtime(folder: Path) -> float:
 
 
 def _tune_sqlite(sender, connection, **kwargs):
-    """把 SQLite 的内存映射和页缓存调大。
+    """把 SQLite 的内存映射和页缓存调大，并开启 WAL 并发模式。
 
     1.26.36（性能）：题库列表一页 100 道、那份 323 页卷子的详情 762 道，
     都要反复读同一批行。SQLite 默认页缓存只有 2 MB（-2000），这些行一遍遍从磁盘
     读出来；mmap 让它直接映射文件、页缓存给到 64 MB，翻页和列表查询明显快。
+    开启 WAL 模式与 NORMAL 同步：读写互不阻塞，外部助手写提案不卡前端看题。
     """
     if connection.vendor != "sqlite":
         return
     with connection.cursor() as cursor:
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+        except Exception:
+            pass
         cursor.execute("PRAGMA mmap_size=268435456")  # 256 MB
         cursor.execute("PRAGMA cache_size=-65536")  # 64 MB
         cursor.execute("PRAGMA temp_store=MEMORY")
