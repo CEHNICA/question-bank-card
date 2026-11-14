@@ -3,6 +3,20 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 1.26.54
+
+**修复题卡「更多」下拉菜单截断、全界面深度统一现代 Clean UI**
+
+- **修复题卡「更多」下拉菜单无响应与被截断**：定位并排查题目卡片在改版后父容器 `overflow: hidden` 将绝对定位的 `.library-card-menu` 底部操作面板直接裁剪裁切的问题。修正为 `overflow: visible`，在卡片头部与底栏独立保留圆角，并引入 `:has(.library-card-more[open])` 动态提升 `z-index`，彻底消除卡片下拉菜单无法弹出以及被下方题目卡片遮挡层级的缺陷。
+- **全软件全界面现代 Clean UI 深度统一**：将高质量的现代 Clean 视觉语言从题库检索页全面铺设到整个客户端：
+  - **全局顶部导航条 (`.topbar`)**：统一为高透磨砂玻璃白（`backdrop-filter: blur(12px) saturate(160%)`），圆角胶囊导航标签，与题库页完全无缝衔接。
+  - **核对题目工作台 (`index.html`)**：试卷左侧栏（`.sidebar`）、试卷列表项（`.paper-link`）、审核进度指示条（`.review-meter`）、工具栏（`.toolbar`）、核对题卡（`.card`）及卡片「更多」菜单（`.more-menu`，提升 `z-index: 50` 并支持向上弹出与防遮挡）。
+  - **系统设置界面 (`/settings`)**：分区导航（`.settings-nav`）重构为现代 Segmented Control 分段控制器；各设置分区（`.settings-section`）重构为统一的现代冷白卡片，优化开关（`.settings-switch`）、帮助与路径向导卡片（`.help-path`）。
+  - **新手练习界面 (`practice.html`)**：步骤条（`.practice-steps`）、练习卡片列表及预览浮层。
+  - **全局弹窗（Dialogs）**：原卷出处（`.source-dialog`）、快捷键（`.keys-dialog`）、全屏看题、草稿箱等统一磨砂背板与圆角阴影。
+- **新增回归防劣化测试套件**：新增 `frontend/test_dropdown_and_clean_ui.js`，163 项前端测试全部通过，保证「更多」菜单的 `overflow`、`z-index`、浮层可见性及全界面 Clean UI 选择器严格无误。
+
+
 ## 1.26.53
 
 **助手工作台字符级 Diff、SQLite WAL 并发无锁、CLI 题卡体检与教辅黄金语料集**
