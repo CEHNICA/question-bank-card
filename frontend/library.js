@@ -131,6 +131,7 @@
   // 提示条放进浏览器顶层（popover），对话框打开时也能看见。
   let toastTimer = null;
   function toast(message, kind = "") {
+    window.toast = toast;
     const box = $("toast");
     if (!box) return;
     box.replaceChildren(node("span", "toast-text", message));
@@ -451,6 +452,7 @@
     // 一点都点不动。
     for (const control of document.querySelectorAll(".library-todo-look button")) control.disabled = selectedView;
     applyBatchButtonState();
+    window.EagleFilterBarInstance?.syncUI();
   }
 
   // 「AI 批量处理」里每个按钮能不能点、排队时显示什么，都只由这一处说了算。
@@ -4153,6 +4155,16 @@
     clear.type = "button";
     clear.addEventListener("click", clearFilters);
     box.append(clear);
+    const saveFolderBtn = node("button", "button button-quiet button-small eagle-save-folder-action", "★ 保存为智能文件夹");
+    saveFolderBtn.type = "button";
+    saveFolderBtn.title = "将当前的全部组合条件（题型、标签、来源、关键词等）保存为智能文件夹";
+    saveFolderBtn.addEventListener("click", () => {
+      window.EagleFilterBarInstance?._renderSmartFolderDropdown();
+      if (window.EagleFilterBarInstance) {
+        window.EagleFilterBarInstance.toggleDropdown("smartFolder", window.EagleFilterBarInstance.smartFolderCapsule.btn, window.EagleFilterBarInstance.smartFolderCapsule.panel);
+      }
+    });
+    box.append(saveFolderBtn);
     // 1.25.78：在筛选行尾部加一颗"处理完自动跳下一条"开关。
     // 放在 activeFilters 而不是 libraryTodos 里，老师不用展开"还有活没干"的下拉就能看见。
     if (state.tagReview) {
@@ -7344,4 +7356,18 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
   // 上一次关掉后 localStorage 是 "0"，init 不会调 directoryToggle，监听也就没绑上 —
   // 再点「目录」没反应。放在初始化末尾、测试片段会忽略的位置里。
   $("libraryDirectoryToggle")?.addEventListener("click", () => void directoryToggle());
+  if (window.EagleFilterBarInstance) {
+    window.EagleFilterBarInstance.mount($("libraryFilterBar"), {
+      state,
+      tagCatalogue,
+      directory,
+      onApplyFilter: () => {
+        if (ui.source) ui.source.value = state.document;
+        if ($("sortSelect")) $("sortSelect").value = state.sort;
+        const mode = $("tagMatchMode"); if (mode) mode.value = state.tagMode;
+        syncUrl();
+        void load();
+      }
+    });
+  }
 })();

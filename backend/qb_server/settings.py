@@ -15,6 +15,7 @@ INSTALLED_APPS = ["django.contrib.contenttypes", "core"]
 #       而不是每次开窗口重下 1.2 MB（app.js 483 KB + katex 266 KB + library.js 430 KB…）。
 # 顺序照 Django 文档：GZip 在 Common 前面，ConditionalGet 在 Common 后面。
 MIDDLEWARE = [
+    "qb_server.cors.LocalCorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.gzip.GZipMiddleware",
     "django.middleware.common.CommonMiddleware",

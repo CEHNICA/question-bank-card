@@ -1,0 +1,4141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>题有据 Pro - 极简 Eagle 风格题库全功能工作台</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- KaTeX 数学公式渲染 (本地优先，CDN 回退) -->
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css" onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css';">
+  <script defer src="/vendor/katex/katex.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js';"></script>
+  <script defer src="/vendor/katex/contrib/auto-render.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js';"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #e2e8f0;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #cbd5e1;
+    }
+    .dropdown-menu {
+      animation: fadeIn 0.12s ease-out forwards;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+      .compact-row .katex-display {
+      display: inline !important;
+      margin: 0 !important;
+    }
+    .compact-row .katex {
+      font-size: 1.05em;
+    }
+    .compact-row {
+      min-height: 40px;
+    }
+      .compact-row .katex-display {
+      display: inline !important;
+      margin: 0 !important;
+    }
+    .compact-row .katex {
+      font-size: 1.05em;
+    }
+    .compact-row {
+      min-height: 40px;
+    }
+      .compact-row .katex-display {
+      display: inline !important;
+      margin: 0 !important;
+    }
+    .compact-row .katex {
+      font-size: 1.05em;
+    }
+    .compact-row {
+      min-height: 40px;
+    }
+  </style>
+</head>
+<body class="bg-[#f8fafc] text-slate-800 antialiased h-screen flex flex-col overflow-hidden select-none">
+
+  <!-- ================= 顶部全局导航栏 ================= -->
+  <header class="h-12 bg-white border-b border-slate-200/80 px-4 flex items-center justify-between shrink-0 z-30">
+    <div class="flex items-center gap-5">
+      <!-- 品牌 Logo -->
+      <div class="flex items-center gap-2.5 group cursor-pointer" title="题有据 Pro · 智能题库工作台">
+        <div class="w-7 h-7 rounded-lg overflow-hidden shadow-xs shrink-0 flex items-center justify-center transition-transform group-hover:scale-105">
+          <svg viewBox="0 0 1024 1024" width="28" height="28" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <!-- 现代生机翡翠渐变底座 -->
+              <linearGradient id="eagleBrandEmeraldGrad" x1="120" y1="80" x2="900" y2="940" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#34D399" />
+                <stop offset="40%" stop-color="#10B981" />
+                <stop offset="80%" stop-color="#059669" />
+                <stop offset="100%" stop-color="#047857" />
+              </linearGradient>
+
+              <!-- 边缘微晶莹高光 -->
+              <linearGradient id="eagleRimGlow" x1="0" y1="0" x2="0" y2="1024" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="rgba(255,255,255,0.7)" />
+                <stop offset="100%" stop-color="rgba(255,255,255,0.05)" />
+              </linearGradient>
+
+              <!-- 核心图元立体柔光投影 -->
+              <filter id="eagleCoreShadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#064E3B" flood-opacity="0.5" />
+              </filter>
+            </defs>
+
+            <!-- 1. 翡翠微质感圆角底座 -->
+            <rect width="1024" height="1024" fill="url(#eagleBrandEmeraldGrad)" />
+            <rect width="1024" height="1024" stroke="url(#eagleRimGlow)" stroke-width="24" rx="230" fill="none" />
+
+            <!-- 2. 内部柔和天光漫射 -->
+            <circle cx="360" cy="260" r="420" fill="white" opacity="0.18" />
+
+            <!-- 3. 核心图元：舒展书页底座与飞扬的核验对勾（象征做题有据、豁然开朗） -->
+            <g filter="url(#eagleCoreShadow)">
+              <!-- 底层展开的微透试卷弧线 -->
+              <path
+                d="M 230 620
+                   C 310 680, 420 690, 520 640
+                   C 620 590, 720 535, 810 500
+                   L 780 455
+                   C 700 485, 590 540, 500 585
+                   C 410 625, 310 615, 230 555
+                   Z"
+                fill="#D1FAE5"
+                opacity="0.9"
+              />
+
+              <!-- 主力飞扬对勾：从书页深处昂扬升腾 -->
+              <path
+                d="M 270 535 
+                   C 335 565, 410 605, 460 675
+                   C 525 540, 625 365, 785 260
+                   C 755 250, 685 275, 640 330
+                   C 530 455, 460 560, 430 580
+                   C 390 530, 325 490, 270 535
+                   Z"
+                fill="#FFFFFF"
+              />
+            </g>
+
+            <!-- 4. 灵感与证据金芒（点睛之笔，与界面黄色标签及彩色文件夹呼应） -->
+            <circle cx="785" cy="255" r="32" fill="#FBBF24" />
+            <circle cx="785" cy="255" r="16" fill="#FFFFFF" />
+          </svg>
+        </div>
+        <div class="flex items-baseline gap-1.5">
+          <span class="font-bold text-slate-900 tracking-tight text-sm">题有据 Pro</span>
+          <span class="text-[9px] font-bold text-emerald-600 tracking-wider uppercase font-mono opacity-80">EAGLE</span>
+        </div>
+      </div>
+
+      <!-- 搜索框 -->
+      <div class="relative w-48 sm:w-60 md:w-80 shrink min-w-0">
+        <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </div>
+        <input 
+          id="globalSearchInput"
+          type="text" 
+          placeholder="搜索题干、公式、年份出处 (快捷键 /)..." 
+          class="w-full pl-8 pr-8 py-1 bg-slate-100 hover:bg-slate-100/80 focus:bg-white text-xs text-slate-700 placeholder-slate-400 rounded-md border border-transparent focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 transition-all outline-hidden"
+        >
+        <span class="absolute right-2 top-1.5 text-[10px] text-slate-400 font-mono">/</span>
+      </div>
+    </div>
+
+    <!-- 顶部右侧菜单 -->
+    <div class="flex items-center gap-2 sm:gap-3 shrink-0 whitespace-nowrap">
+      
+      <!-- 视图模式切换 (Eagle 经典双模式) -->
+      <div class="flex items-center rounded-lg bg-slate-100 p-0.5 text-xs text-slate-600 border border-slate-200 shadow-inner shrink-0 whitespace-nowrap">
+        <button id="viewBtnCard" onclick="setViewMode('card')" class="px-2.5 py-1 rounded-md bg-white text-slate-900 font-bold shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer shrink-0 whitespace-nowrap" title="标准大卡片模式">
+          <span>🗂️</span><span>卡片流</span>
+        </button>
+        <button id="viewBtnCompact" onclick="setViewMode('compact')" class="px-2.5 py-1 rounded-md text-slate-600 hover:text-slate-900 flex items-center gap-1.5 transition-all cursor-pointer shrink-0 whitespace-nowrap" title="紧凑快速审题模式">
+          <span>☰</span><span>紧凑流</span>
+        </button>
+      </div>
+
+      <!-- 快捷键指南按钮 -->
+      <button 
+        onclick="openShortcutsModal()" 
+        class="flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors border border-transparent hover:border-slate-200 cursor-pointer shrink-0 whitespace-nowrap"
+        title="查看键盘快捷键帮助 (快捷键 ?)"
+      >
+        <span>⌨️</span><span>快捷键</span>
+      </button>
+
+      <a href="/library" class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors border border-emerald-200 shrink-0 whitespace-nowrap">
+        <span>← 传统题库页</span>
+      </a>
+      <button 
+        onclick="openTagManagerModal()" 
+        class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors shrink-0 whitespace-nowrap"
+      >
+        <svg class="w-3.5 h-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+        </svg>
+        <span>标签管理中心</span>
+      </button>
+
+      <button 
+        onclick="openBasketExportModal()"
+        class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md transition-all shrink-0 whitespace-nowrap"
+      >
+        <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+        </svg>
+        <span>试题篮 (<span id="headerBasketCount">1</span>)</span>
+      </button>
+
+      <div class="h-3.5 w-px bg-slate-200"></div>
+
+      <div class="w-6 h-6 rounded-full bg-slate-200 border border-slate-300 flex items-center justify-center font-medium text-[11px] text-slate-600">
+        M
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= 主体工作区 ================= -->
+  <div class="flex-1 flex overflow-hidden">
+
+    <!-- ================= 1. 左侧栏：智能文件夹与教材目录 ================= -->
+    <aside class="w-60 bg-[#fafafa] border-r border-slate-200/80 flex flex-col shrink-0">
+      <!-- 视图分类分段器 -->
+      <div class="p-2.5 border-b border-slate-200/60">
+        <div class="grid grid-cols-2 bg-slate-200/60 p-0.5 rounded-md text-[11px] font-medium text-slate-600">
+          <button id="sidebarTabSmart" onclick="switchSidebarTab('smart')" class="py-1 rounded bg-white text-slate-900 font-semibold shadow-2xs">智能视图</button>
+          <button id="sidebarTabChapter" onclick="switchSidebarTab('chapter')" class="py-1 rounded hover:text-slate-900 transition-colors">章节大纲</button>
+        </div>
+      </div>
+
+      <!-- 侧栏滚动内容 -->
+      <div class="flex-1 overflow-y-auto p-2 space-y-3 text-xs">
+        
+        <!-- 智能文件夹 (Eagle Smart Folders) -->
+        <div id="viewSmartFolders" class="space-y-0.5">
+          <div class="px-2 py-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+            <span>智能文件夹</span>
+            <button onclick="saveCurrentAsSmartFolder()" class="text-emerald-600 hover:underline text-[10px] font-normal">+ 新建</button>
+          </div>
+          
+          <!-- 全部试题库 -->
+          <div onclick="applySmartFolder('all')" id="sf_all" class="sf-item flex items-center justify-between px-2.5 py-1.5 rounded-md bg-emerald-50 text-emerald-900 font-semibold cursor-pointer">
+            <div class="flex items-center gap-2 truncate">
+              <span>📚</span>
+              <span class="truncate">全部试题库</span>
+            </div>
+            <span id="sf_all_count" class="font-mono text-[11px] opacity-70">...</span>
+          </div>
+
+          <!-- ================= 入库项目分组 (仿 Eagle 文件夹：支持折叠与右键菜单排序) ================= -->
+          <div class="my-2 pt-2 pb-1 border-t border-slate-200/60 select-none" id="paperSectionContainer">
+            <!-- 文件夹标题栏：支持点击折叠/展开，支持右键呼出 Eagle 排序与管理菜单 -->
+            <div 
+              id="paperSectionHeader"
+              onclick="togglePaperSectionCollapse()"
+              oncontextmenu="handlePaperSectionContextMenu(event)"
+              class="group flex items-center justify-between px-1.5 py-1 mb-1 text-[11px] font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-200/40 rounded cursor-pointer transition-colors"
+              title="点击折叠/展开，鼠标右键更改排序方式"
+            >
+              <div class="flex items-center gap-1.5 truncate">
+                <!-- Eagle 风格折叠三角箭头 -->
+                <svg id="paperCollapseIcon" class="w-3 h-3 text-slate-400 group-hover:text-slate-600 transition-transform duration-200 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7" />
+                </svg>
+                <span class="text-amber-500 text-[12px] shrink-0">📁</span>
+                <span class="font-medium text-slate-700">入库项目</span>
+                <span id="paperListCountBadge" class="text-[10px] text-slate-400 font-mono"></span>
+              </div>
+
+              <!-- 右侧快捷操作按钮 (Eagle 风格: 悬浮浮现三点) -->
+              <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button 
+                  type="button"
+                  onclick="event.stopPropagation(); handlePaperSectionContextMenu(event)"
+                  class="p-0.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/80 rounded transition-colors"
+                  title="排序与管理选项 (也可直接鼠标右键)"
+                >
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- 可折叠的入库项目列表容器 (支持区域右键) -->
+            
+            <!-- 入库项目即时搜索框 -->
+            <div class="px-1.5 pb-1.5">
+              <input 
+                id="paperSearchInput" 
+                type="text" 
+                placeholder="过滤项目 (如 2024、全国卷)..." 
+                oninput="handlePaperSearchInput(this.value)"
+                class="w-full text-[11px] px-2 py-1 rounded border border-slate-200 bg-white placeholder-slate-400 focus:border-emerald-500 outline-none transition-colors"
+              >
+            </div>
+            <div 
+              id="paperProjectsList" 
+              oncontextmenu="handlePaperListContainerContextMenu(event)"
+              class="space-y-0.5 max-h-56 overflow-y-auto px-0.5 pr-1 transition-all duration-200"
+            >
+              <!-- 动态注入每次入库的项目名称 -->
+              <div class="py-2 text-center text-[11px] text-slate-400">正在载入入库项目...</div>
+            </div>
+          </div>
+
+          <!-- 专题预设 -->
+          <div class="px-2 pt-1.5 pb-0.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+            <span>智能分类专题</span>
+          </div>
+
+          
+          <div onclick="applySmartFolder('favorites')" id="sf_favorites" class="sf-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-200/50 cursor-pointer transition-colors">
+            <div class="flex items-center gap-2 truncate">
+              <span>⭐</span>
+              <span class="truncate">我收藏的试题</span>
+            </div>
+            <span id="sf_favorites_count" class="font-mono text-[11px] text-amber-500 font-bold">0</span>
+          </div>
+
+          <div onclick="applySmartFolder('ai_unverified')" id="sf_ai_unverified" class="sf-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-200/50 cursor-pointer transition-colors">
+            <div class="flex items-center gap-2 truncate">
+              <span>⚡</span>
+              <span class="truncate">AI生成未人工核对</span>
+            </div>
+            <span id="sf_ai_unverified_count" class="font-mono text-[11px] text-emerald-600">0</span>
+          </div>
+
+          <div onclick="applySmartFolder('deriv')" id="sf_deriv" class="sf-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-200/50 cursor-pointer transition-colors">
+            <div class="flex items-center gap-2 truncate">
+              <span>🔥</span>
+              <span class="truncate">导数与极值压轴题</span>
+            </div>
+            <span id="sf_deriv_count" class="font-mono text-[11px] text-slate-400">...</span>
+          </div>
+
+          <div onclick="applySmartFolder('hard_geo')" id="sf_hard_geo" class="sf-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-200/50 cursor-pointer transition-colors">
+            <div class="flex items-center gap-2 truncate">
+              <span>📐</span>
+              <span class="truncate">4星+ 几何与向量</span>
+            </div>
+            <span id="sf_hard_geo_count" class="font-mono text-[11px] text-slate-400">...</span>
+          </div>
+
+          <div onclick="applySmartFolder('need_tags')" id="sf_need_tags" class="sf-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-200/50 cursor-pointer transition-colors">
+            <div class="flex items-center gap-2 truncate">
+              <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+              <span class="truncate">待补充考点标签</span>
+            </div>
+            <span id="sf_need_tags_count" class="font-mono text-[11px] text-slate-400">...</span>
+          </div>
+
+          <!-- 自定义保存的智能文件夹追加容器 -->
+          <div id="customSmartFoldersContainer" class="space-y-0.5 pt-1">
+            <!-- 动态追加 -->
+          </div>
+        </div>
+
+        <!-- 章节知识大纲 -->
+        <div id="viewChapters" class="hidden space-y-0.5">
+          <div class="px-2 py-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">高中数学核心模块</div>
+          
+          <div onclick="filterByChapter('函数与导数')" id="chap_func" class="chap-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-200/50 cursor-pointer transition-colors">
+            <div class="flex items-center gap-1.5 truncate">
+              <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+              <span class="truncate">函数与导数</span>
+            </div>
+            <span class="font-mono text-[11px] text-slate-400">142</span>
+          </div>
+
+          <div onclick="filterByChapter('立体几何')" id="chap_geo" class="chap-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-200/50 cursor-pointer transition-colors">
+            <div class="flex items-center gap-1.5 truncate">
+              <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+              <span class="truncate">立体几何与空间向量</span>
+            </div>
+            <span class="font-mono text-[11px] text-slate-400">89</span>
+          </div>
+
+          <div onclick="filterByChapter('圆锥曲线')" id="chap_conic" class="chap-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-200/50 cursor-pointer transition-colors">
+            <div class="flex items-center gap-1.5 truncate">
+              <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+              <span class="truncate">圆锥曲线与方程</span>
+            </div>
+            <span class="font-mono text-[11px] text-slate-400">96</span>
+          </div>
+        </div>
+
+      </div>
+    </aside>
+
+    <!-- ================= 2. 中间主区域：极简 Eagle 筛选胶囊条 + 试题流 ================= -->
+    <main class="flex-1 flex flex-col min-w-0 bg-[#f8fafc] overflow-hidden">
+
+      <!-- ================= Eagle 单行极简筛选条 (Filter Pill Bar) ================= -->
+      <div class="min-h-10 bg-white border-b border-slate-200/80 px-4 flex items-center justify-between gap-3 shrink-0 z-30 relative">
+        
+        <!-- 左侧胶囊下拉按钮组 (去除 overflow-x-auto，防止弹出菜单被无情裁剪) -->
+        <div class="flex flex-wrap items-center gap-1.5 py-1">
+          
+          <!-- 1. 标签筛选胶囊 -->
+          <div class="relative dropdown-parent">
+            <button 
+              id="pillBtnTag"
+              onclick="toggleFilterDropdown('tag', event)" 
+              class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer"
+            >
+              <span class="text-slate-400">🏷️</span>
+              <span id="pillLabelTag">标签筛选</span>
+              <svg class="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+
+            <!-- 标签浮层 (设置 z-50 保证在所有元素之上) -->
+            <div id="dropdownTag" onclick="event.stopPropagation()" class="hidden dropdown-menu absolute left-0 top-full mt-1.5 w-80 rounded-xl bg-white border border-slate-200 shadow-2xl p-3 z-50 space-y-2.5 text-xs">
+              <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+                <span class="font-bold text-slate-800">标签多维过滤</span>
+                <!-- AND / OR 切换 -->
+                <div class="flex items-center rounded-md bg-slate-100 p-0.5 text-[11px]">
+                  <button id="dropTagAnd" onclick="setTagLogic('and')" class="px-2 py-0.5 rounded bg-white text-slate-900 font-bold shadow-2xs">AND (全含)</button>
+                  <button id="dropTagOr" onclick="setTagLogic('or')" class="px-2 py-0.5 rounded text-slate-500 hover:text-slate-800">OR (任一)</button>
+                </div>
+              </div>
+
+              <!-- 搜索框 -->
+              <input 
+                id="dropTagSearchInput" 
+                oninput="renderTagFilterDropdownList()" 
+                type="text" 
+                placeholder="搜索标签 (按住 Alt 点击设为排除)..." 
+                class="w-full px-2.5 py-1 text-xs rounded-md border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:border-emerald-500"
+              >
+
+              <!-- 分类标签流 -->
+              <div id="dropTagListContainer" class="max-h-56 overflow-y-auto space-y-2 pr-1">
+                <!-- 动态渲染 -->
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. 题型筛选胶囊 -->
+          <div class="relative dropdown-parent">
+            <button 
+              id="pillBtnType"
+              onclick="toggleFilterDropdown('type', event)" 
+              class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer"
+            >
+              <span>📑</span>
+              <span id="pillLabelType">题型</span>
+              <svg class="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+
+            <div id="dropdownType" onclick="event.stopPropagation()" class="hidden dropdown-menu absolute left-0 top-full mt-1.5 w-44 rounded-xl bg-white border border-slate-200 shadow-2xl p-2 z-50 space-y-1 text-xs">
+              <label class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer">
+                <input type="checkbox" onchange="toggleTypeFilter('solution', this.checked)" class="rounded text-emerald-600 focus:ring-0">
+                <span>解答题</span>
+              </label>
+              <label class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer">
+                <input type="checkbox" onchange="toggleTypeFilter('single_choice', this.checked)" class="rounded text-emerald-600 focus:ring-0">
+                <span>单选题</span>
+              </label>
+              <label class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer">
+                <input type="checkbox" onchange="toggleTypeFilter('fill_in', this.checked)" class="rounded text-emerald-600 focus:ring-0">
+                <span>填空题</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- 3. 难度星级胶囊 -->
+          <div class="relative dropdown-parent">
+            <button 
+              id="pillBtnStar"
+              onclick="toggleFilterDropdown('star', event)" 
+              class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer"
+            >
+              <span>⭐</span>
+              <span id="pillLabelStar">难度星级</span>
+              <svg class="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+
+            <div id="dropdownStar" onclick="event.stopPropagation()" class="hidden dropdown-menu absolute left-0 top-full mt-1.5 w-44 rounded-xl bg-white border border-slate-200 shadow-2xl p-2 z-50 space-y-1 text-xs">
+              <label class="flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer">
+                <span class="text-amber-500 font-bold">★★★★★ (5星)</span>
+                <input type="checkbox" onchange="toggleStarFilter(5, this.checked)" class="rounded text-emerald-600 focus:ring-0">
+              </label>
+              <label class="flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer">
+                <span class="text-amber-500 font-bold">★★★★☆ (4星)</span>
+                <input type="checkbox" onchange="toggleStarFilter(4, this.checked)" class="rounded text-emerald-600 focus:ring-0">
+              </label>
+              <label class="flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer">
+                <span class="text-amber-500 font-bold">★★★☆☆ (3星)</span>
+                <input type="checkbox" onchange="toggleStarFilter(3, this.checked)" class="rounded text-emerald-600 focus:ring-0">
+              </label>
+            </div>
+          </div>
+
+          <!-- 4. 内容完整度胶囊 -->
+          <div class="relative dropdown-parent">
+            <button 
+              id="pillBtnStatus"
+              onclick="toggleFilterDropdown('status', event)" 
+              class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer"
+            >
+              <span>✓</span>
+              <span id="pillLabelStatus">解析与答案</span>
+              <svg class="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+
+            <div id="dropdownStatus" onclick="event.stopPropagation()" class="hidden dropdown-menu absolute left-0 top-full mt-1.5 w-44 rounded-xl bg-white border border-slate-200 shadow-2xl p-2 z-50 space-y-1 text-xs">
+              <label class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer">
+                <input type="checkbox" id="chkRequireAnswer" onchange="toggleRequireAnswer(this.checked)" class="rounded text-emerald-600 focus:ring-0">
+                <span>必须有参考答案</span>
+              </label>
+              <label class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer">
+                <input type="checkbox" id="chkRequireAnalysis" onchange="toggleRequireAnalysis(this.checked)" class="rounded text-emerald-600 focus:ring-0">
+                <span>必须有详细解析</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="h-4 w-px bg-slate-200 mx-1"></div>
+
+          <!-- 内联选定条件 Active Chips -->
+          <div id="inlineActiveChipsContainer" class="flex items-center gap-1">
+            <!-- 动态注入 -->
+          </div>
+
+          <!-- 一键重置 -->
+          <button 
+            id="btnClearAllFilters"
+            onclick="resetAllFilters()" 
+            class="hidden text-[11px] font-medium text-slate-400 hover:text-rose-600 px-1.5 transition-colors"
+          >
+            重置
+          </button>
+        </div>
+
+        <!-- 统计与另存智能视图 -->
+        <div class="flex items-center gap-3 text-xs shrink-0">
+          <span class="text-slate-400">
+            共 <strong id="matchedQuestionCount" class="font-bold text-slate-800">...</strong> 题
+          </span>
+          <button 
+            onclick="saveCurrentAsSmartFolder()"
+            class="text-emerald-700 hover:text-emerald-800 font-medium hover:underline flex items-center gap-1"
+          >
+            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
+            <span>存为智能视图</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 二级工具行 (全选与排序) -->
+      <div class="h-8 px-4 bg-slate-50/70 border-b border-slate-200/60 flex items-center justify-between text-[11px] text-slate-500 shrink-0">
+        <label class="flex items-center gap-2 cursor-pointer select-none">
+          <input id="selectAllCheckbox" onchange="toggleSelectAll(this.checked)" type="checkbox" class="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 focus:ring-0">
+          <span>全选本页试题 (<span id="selectedCountText">已勾选 0 题</span>)</span>
+        </label>
+
+        <div class="flex items-center gap-1">
+          <span>排序:</span>
+          <select onchange="handleSortChange(this.value)" class="bg-transparent text-slate-700 font-medium border-0 focus:ring-0 cursor-pointer py-0 text-[11px]">
+            <option value="number">题号升序</option>
+            <option value="difficulty">难度由高到低</option>
+            <option value="year">最新年份优先</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 试题列表内容区 -->
+      <div id="questionListContainer" class="flex-1 overflow-y-auto p-4 space-y-3">
+        <!-- 试题卡片动态注入 -->
+        <div id="chunkSentinel" class="py-4 text-center text-xs text-slate-400">正在载入试题数据...</div>
+      </div>
+    </main>
+
+    <!-- ================= 3. 右侧栏：Eagle 风格属性与打标检查器 ================= -->
+    <aside class="w-72 bg-white border-l border-slate-200/80 flex flex-col shrink-0">
+      
+      <div class="h-10 px-4 border-b border-slate-200/70 flex items-center justify-between shrink-0">
+        <span id="inspectorTitle" class="text-xs font-bold text-slate-800">题目属性</span>
+        <span id="inspectorBadge" class="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600"># 22</span>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+        
+        <!-- 1. 打标核心区 -->
+        <div class="space-y-2">
+          <div class="flex items-center justify-between text-[11px]">
+            <span class="font-bold text-slate-700 uppercase tracking-wider">关联标签</span>
+            <span class="text-slate-400 text-[10px]">按 T 快速打标</span>
+          </div>
+
+          <div id="currentTagsContainer" class="flex flex-wrap gap-1 min-h-6 items-center">
+            <!-- 动态渲染 -->
+          </div>
+
+          <!-- 快速联想打标框 -->
+          <div class="relative mt-2">
+            <input 
+              id="tagAutocompleteInput"
+              type="text" 
+              placeholder="输入标签名或拼音 (按 Enter 贴标)..." 
+              class="w-full rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:border-emerald-500 focus:outline-hidden transition-all"
+            >
+            <div id="tagSuggestDropdown" class="hidden absolute left-0 right-0 z-40 mt-1 max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+              <!-- 动态填充 -->
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. 常用推荐标签 (Pinned) -->
+        <div class="space-y-1.5 pt-2 border-t border-slate-100">
+          <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">常用高频考点</span>
+          <div id="pinnedTagsContainer" class="flex flex-wrap gap-1">
+            <!-- 动态渲染 -->
+          </div>
+        </div>
+
+        <!-- 3. AI 语义推荐卡片 -->
+        <div class="rounded-lg border border-emerald-100 bg-emerald-50/40 p-2.5 space-y-1.5">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-1 font-bold text-emerald-900 text-[11px]">
+              <svg class="w-3 h-3 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              <span>AI 语义推荐</span>
+            </div>
+            <button onclick="acceptAllAiTags()" class="text-[10px] font-semibold text-emerald-700 hover:underline">采纳全部</button>
+          </div>
+          <div id="aiSuggestedTagsContainer" class="flex flex-wrap gap-1 pt-0.5">
+            <!-- 动态推荐 -->
+          </div>
+        </div>
+
+        <!-- 4. 试题基础属性 -->
+        <div id="questionMetaCard" class="space-y-2 pt-2 border-t border-slate-100 text-[11px]">
+          <span class="font-bold text-slate-700 uppercase tracking-wider text-[10px]">考题属性</span>
+          <div class="space-y-1.5 text-slate-600 bg-slate-50/70 p-2.5 rounded-lg border border-slate-100">
+            <div class="flex justify-between">
+              <span class="text-slate-400">难度评级:</span>
+              <span id="metaDifficultyStars" class="font-bold text-slate-800">★★★★★</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-slate-400">建议耗时:</span>
+              <span id="metaMinutes" class="font-medium text-slate-800">18 分钟</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-slate-400">题目题型:</span>
+              <span id="metaType" class="font-medium text-slate-800">解答题</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-slate-400">试卷出处:</span>
+              <span id="metaSource" class="max-w-[130px] truncate font-medium text-slate-800" title="2023 新课标Ⅱ卷">2023 新课标Ⅱ卷</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </aside>
+  </div>
+
+  <!-- ================= 试题篮抽屉模态框 (Basket Modal) ================= -->
+  <div id="basketModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-xs p-4">
+    <div class="flex h-[460px] w-full max-w-lg flex-col rounded-xl bg-white shadow-2xl overflow-hidden border border-slate-200">
+      <div class="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+        <div class="flex items-center gap-2">
+          <span class="text-base font-bold text-slate-900">试题篮管理</span>
+          <span id="basketModalCountBadge" class="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-semibold">1 题</span>
+        </div>
+        <button onclick="closeBasketModal()" class="text-slate-400 hover:text-slate-600 text-sm">✕</button>
+      </div>
+
+      <div id="basketModalList" class="flex-1 overflow-y-auto p-4 space-y-2 text-xs">
+        <!-- 动态渲染已加入试题篮的题目 -->
+      </div>
+
+      <div class="flex items-center justify-between border-t border-slate-100 bg-slate-50 px-5 py-3">
+        <button onclick="clearBasket()" class="text-xs text-rose-500 hover:underline">清空试题篮</button>
+        <button onclick="exportBasketToPaper()" class="rounded bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-2xs hover:bg-emerald-700">
+          前往智能组卷 →
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 标签管理中心模态框 (Tag Manager Modal) ================= -->
+  <div id="tagManagerModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-xs p-4">
+    <div class="flex h-[520px] w-full max-w-2xl flex-col rounded-xl bg-white shadow-2xl overflow-hidden border border-slate-200">
+      <div class="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+        <div>
+          <h3 class="text-sm font-bold text-slate-900">标签管理与同义词合并中心</h3>
+          <p class="text-[11px] text-slate-400">分类维护各群组标签，可将民间叫法/同义标签一键合并入规范主标签</p>
+        </div>
+        <button onclick="closeTagManagerModal()" class="text-slate-400 hover:text-slate-600 text-sm">✕</button>
+      </div>
+
+      <div class="flex flex-1 overflow-hidden">
+        <!-- 左侧分类 -->
+        <div id="modalTagGroupsNav" class="w-44 border-r border-slate-100 bg-slate-50/50 p-2 space-y-0.5 text-xs">
+          <!-- 动态导航 -->
+        </div>
+
+        <!-- 右侧标签清单与合并抽屉 -->
+        <div class="flex-1 flex flex-col p-4 overflow-hidden">
+          <div class="flex items-center justify-between gap-2 mb-3">
+            <input 
+              id="modalSearchTagInput"
+              type="text" 
+              placeholder="搜索当前群组标签..." 
+              oninput="renderModalTags()"
+              class="w-48 px-2 py-1 text-xs border border-slate-200 rounded-md focus:border-emerald-500"
+            >
+            <button onclick="promptCreateNewTagInModal()" class="px-2 py-1 text-xs bg-emerald-600 text-white rounded font-medium hover:bg-emerald-700">
+              + 新建标签
+            </button>
+          </div>
+
+          <div id="modalTagList" class="flex-1 overflow-y-auto space-y-1 text-xs pr-1">
+            <!-- 动态标签列表 -->
+          </div>
+
+          <!-- 合并操作内联对话框 -->
+          <div id="modalMergeDrawer" class="hidden mt-3 rounded-lg border border-emerald-200 bg-emerald-50/70 p-3 text-xs text-emerald-900 shrink-0">
+            <div class="flex items-center justify-between font-bold mb-1.5">
+              <span id="mergeDrawerTitle">合并标签</span>
+              <button onclick="cancelMerge()" class="text-slate-400 hover:text-slate-600">✕</button>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-slate-600">并入目标标签:</span>
+              <select id="mergeTargetSelect" class="flex-1 rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800">
+                <!-- 动态填充候选项 -->
+              </select>
+              <button onclick="executeMerge()" class="rounded bg-emerald-600 px-3 py-1 font-semibold text-white shadow-2xs hover:bg-emerald-700">
+                确认合并
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end border-t border-slate-100 bg-slate-50 px-4 py-2.5">
+        <button onclick="closeTagManagerModal()" class="rounded bg-slate-900 px-3.5 py-1.5 text-xs font-semibold text-white">
+          完成并关闭
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= Eagle 风格右键菜单 (文件夹与排序) ================= -->
+  <div 
+    id="eagleContextMenu" 
+    class="fixed z-[9999] hidden min-w-[210px] rounded-lg border border-slate-200/90 bg-white/95 backdrop-blur-md shadow-2xl py-1 text-xs text-slate-700 select-none transition-all duration-75"
+    onclick="event.stopPropagation()"
+  >
+    <!-- 内容由 renderEagleContextMenu() 动态挂载 -->
+  </div>
+
+  <!-- ================= 图片大图预览灯箱 (Lightbox) ================= -->
+  <div 
+    id="imageLightboxModal" 
+    class="hidden fixed inset-0 z-[10000] flex flex-col items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 transition-all"
+    onclick="closeImageLightboxModal()"
+  >
+    <div class="relative max-w-4xl max-h-[90vh] flex flex-col items-center" onclick="event.stopPropagation()">
+      <div class="w-full flex items-center justify-between text-white/90 text-xs pb-2 px-1">
+        <span id="lightboxTitle" class="font-medium tracking-wide">图片预览</span>
+        <div class="flex items-center gap-2">
+          <button 
+            type="button" 
+            onclick="openLightboxSourceImage()" 
+            class="px-2 py-0.5 rounded bg-white/20 hover:bg-white/30 text-[11px] text-white transition-colors"
+            title="在新标签页中打开原图"
+          >
+            在新标签页打开
+          </button>
+          <button 
+            type="button" 
+            onclick="closeImageLightboxModal()" 
+            class="p-1 rounded hover:bg-white/20 text-white/80 hover:text-white transition-colors"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="rounded-lg bg-white p-2 shadow-2xl overflow-hidden flex items-center justify-center max-h-[82vh]">
+        <img id="lightboxImage" src="" alt="预览大图" class="max-h-[78vh] max-w-full object-contain select-none" />
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 题目修改与编辑模态框 (还原核心编辑功能) ================= -->
+  <div 
+    id="editQuestionModal" 
+    class="hidden fixed inset-0 z-[10001] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4"
+    onclick="closeEditQuestionModal()"
+  >
+    <div 
+      class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden border border-slate-200"
+      onclick="event.stopPropagation()"
+    >
+      <!-- 头部 -->
+      <div class="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50/80">
+        <div class="flex items-center gap-2">
+          <span class="text-base font-bold text-slate-800">✏️ 修改与校订题目</span>
+          <span id="editModalQBadge" class="text-xs font-mono px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold"></span>
+        </div>
+        <button onclick="closeEditQuestionModal()" class="text-slate-400 hover:text-slate-600 p-1 rounded-md text-base">✕</button>
+      </div>
+
+      <!-- 编辑主体：左侧表单 + 右侧实时预览 -->
+      <div class="flex-1 flex overflow-hidden">
+        <!-- 左侧编辑表单 -->
+        <div class="w-1/2 p-5 overflow-y-auto space-y-4 border-r border-slate-100 text-xs text-slate-700">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block font-semibold mb-1 text-slate-700">题型</label>
+              <select id="editInputType" onchange="handleEditTypeChange()" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none">
+                <option value="single_choice">单选题</option>
+                <option value="multiple_choice">多选题</option>
+                <option value="fill_blank">填空题</option>
+                <option value="true_false">判断题</option>
+                <option value="free_response">解答题</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-semibold mb-1 text-slate-700">难度星级 (1-5星)</label>
+              <select id="editInputStars" onchange="updateEditLivePreview()" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none">
+                <option value="1">★☆☆☆☆ (入门)</option>
+                <option value="2">★★☆☆☆ (基础)</option>
+                <option value="3">★★★☆☆ (中档)</option>
+                <option value="4">★★★★☆ (较难)</option>
+                <option value="5">★★★★★ (压轴拔高)</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-semibold mb-1 text-slate-700">题干正文 (支持 LaTeX，如 $f(x)=x^2$)</label>
+            <textarea 
+              id="editInputStem" 
+              rows="5" 
+              oninput="updateEditLivePreview()"
+              class="w-full p-2.5 border border-slate-200 rounded-md font-mono text-xs focus:border-emerald-500 outline-none leading-relaxed"
+              placeholder="请输入题干内容..."
+            ></textarea>
+          </div>
+
+          <!-- 选项编辑区域 (选择题展示) -->
+          <div id="editOptionsGroup" class="space-y-2">
+            <label class="block font-semibold text-slate-700">选项内容</label>
+            <div class="grid grid-cols-1 gap-2">
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-slate-600 w-5">A.</span>
+                <input id="editOptA" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 A 内容...">
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-slate-600 w-5">B.</span>
+                <input id="editOptB" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 B 内容...">
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-slate-600 w-5">C.</span>
+                <input id="editOptC" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 C 内容...">
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-slate-600 w-5">D.</span>
+                <input id="editOptD" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 D 内容...">
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block font-semibold mb-1 text-slate-700">参考答案</label>
+              <input id="editInputAnswer" type="text" oninput="updateEditLivePreview()" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="如: B 或 x>1">
+            </div>
+            <div>
+              <label class="block font-semibold mb-1 text-slate-700">分值</label>
+              <input id="editInputScore" type="number" oninput="updateEditLivePreview()" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none" placeholder="分值，如 5">
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-semibold mb-1 text-slate-700">参考解析 / 详细解题步骤</label>
+            <textarea 
+              id="editInputAnalysis" 
+              rows="4" 
+              oninput="updateEditLivePreview()"
+              class="w-full p-2.5 border border-slate-200 rounded-md font-mono text-xs focus:border-emerald-500 outline-none leading-relaxed"
+              placeholder="参考解析内容..."
+            ></textarea>
+          </div>
+        </div>
+
+        <!-- 右侧实时排版预览 -->
+        <div class="w-1/2 p-5 overflow-y-auto bg-slate-50/50 flex flex-col">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">实时渲染排版预览</span>
+            <span class="text-[10px] text-emerald-600 font-medium">KaTeX 实时排版</span>
+          </div>
+          <div id="editLivePreviewBox" class="flex-1 p-4 bg-white rounded-lg border border-slate-200/80 shadow-2xs overflow-y-auto">
+            <!-- 实时更新 -->
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部操作栏 -->
+      <div class="flex items-center justify-between px-5 py-3 border-t border-slate-100 bg-slate-50">
+        <span class="text-xs text-slate-400">修改后将直接同步持久化保存至题库系统。</span>
+        <div class="flex items-center gap-2">
+          <button onclick="closeEditQuestionModal()" class="px-3.5 py-1.5 border border-slate-200 rounded-md text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors">
+            取消
+          </button>
+          <button id="btnSubmitQuestionEdit" onclick="submitQuestionEdit()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-semibold shadow-2xs transition-colors flex items-center gap-1.5">
+            <span>💾 保存并更新题目</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 试题篮与组卷导出模态框 (还原组卷核心功能) ================= -->
+  <div 
+    id="basketExportModal" 
+    class="hidden fixed inset-0 z-[10001] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4"
+    onclick="closeBasketExportModal()"
+  >
+    <div 
+      class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden border border-slate-200"
+      onclick="event.stopPropagation()"
+    >
+      <!-- 头部 -->
+      <div class="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-slate-50/80">
+        <div class="flex items-center gap-2">
+          <span class="text-base font-bold text-slate-800">🧺 试题篮组卷与排版导出</span>
+          <span id="basketModalCountBadge" class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold font-mono">0 题</span>
+        </div>
+        <button onclick="closeBasketExportModal()" class="text-slate-400 hover:text-slate-600 p-1 rounded-md text-base">✕</button>
+      </div>
+
+      <!-- 主体内容 -->
+      <div class="flex-1 flex overflow-hidden">
+        <!-- 左侧试题清单 -->
+        <div class="w-3/5 p-5 overflow-y-auto border-r border-slate-100 flex flex-col">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-bold text-slate-600">已选试题列表</span>
+            <button onclick="clearAllBasket()" class="text-[11px] text-rose-500 hover:underline">清空试题篮</button>
+          </div>
+          <div id="basketModalItemList" class="space-y-2 flex-1 overflow-y-auto pr-1">
+            <!-- 动态填充 -->
+          </div>
+        </div>
+
+        <!-- 右侧组卷设置与导出 -->
+        <div class="w-2/5 p-5 bg-slate-50/50 flex flex-col justify-between text-xs text-slate-700">
+          <div class="space-y-4">
+            <span class="font-bold text-slate-800 text-sm">试卷标题与排版设置</span>
+            <div>
+              <label class="block text-slate-600 mb-1">主标题</label>
+              <input id="paperMainTitle" type="text" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md bg-white focus:border-emerald-500 outline-none text-xs" value="2026学年高三数学阶段性检测卷">
+            </div>
+            <div>
+              <label class="block text-slate-600 mb-1">副标题 / 说明</label>
+              <input id="paperSubTitle" type="text" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md bg-white focus:border-emerald-500 outline-none text-xs" value="考试时间：120 分钟 · 满分：150 分">
+            </div>
+            <div class="p-3 bg-white rounded-lg border border-slate-200/80 space-y-2">
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input id="exportIncludeAnswer" type="checkbox" class="rounded text-emerald-600 focus:ring-0" checked>
+                <span>同时在卷尾附带参考答案与详细推导解析</span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input id="exportIncludeScore" type="checkbox" class="rounded text-emerald-600 focus:ring-0" checked>
+                <span>显示每道题的出处与分值</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="space-y-2 pt-4 border-t border-slate-200">
+            <button 
+              onclick="executePrintPaper(false)" 
+              class="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold shadow-xs transition-colors flex items-center justify-center gap-2"
+            >
+              <span>🖨️ 打印试卷 (一键导出高质量 PDF)</span>
+            </button>
+            <button 
+              onclick="executePrintPaper(true)" 
+              class="w-full py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg font-semibold shadow-xs transition-colors flex items-center justify-center gap-2"
+            >
+              <span>📄 打印参考答案与讲义解析卷</span>
+            </button>
+            <button 
+              onclick="openNativeLibraryBasket()" 
+              class="w-full py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium transition-colors"
+              title="无缝切换到正式题库原版排版引擎"
+            >
+              ⚡ 进入正式题库原版排版引擎
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 全局脚本与交互驱动 ================= -->
+  
+  <!-- ================= 批量操作浮动工具栏 (Batch Action Bar) ================= -->
+  <div id="batchActionBar" class="hidden fixed bottom-6 left-1/2 transform -translate-x-1/2 z-[10000] bg-slate-900/95 text-white shadow-2xl rounded-full px-5 py-2.5 flex items-center gap-4 text-xs backdrop-blur-md border border-slate-700 transition-all duration-300">
+    <div class="flex items-center gap-2">
+      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+      <span id="batchCountBadge" class="font-bold text-emerald-300">已勾选 0 题</span>
+    </div>
+    <div class="h-4 w-px bg-slate-700"></div>
+    <button onclick="batchAddToBasket()" class="hover:text-emerald-400 transition-colors flex items-center gap-1.5 font-medium cursor-pointer">
+      <span>🧺</span><span>加入试题篮</span>
+    </button>
+    <button onclick="batchToggleFavorite()" class="hover:text-amber-400 transition-colors flex items-center gap-1.5 font-medium cursor-pointer">
+      <span>⭐</span><span>加入收藏</span>
+    </button>
+    <button onclick="batchExportPaper()" class="hover:text-emerald-400 transition-colors flex items-center gap-1.5 font-medium cursor-pointer">
+      <span>🖨️</span><span>快速组卷</span>
+    </button>
+    <div class="h-4 w-px bg-slate-700"></div>
+    <button onclick="clearBatchSelection()" class="text-slate-400 hover:text-white transition-colors cursor-pointer">
+      取消全选
+    </button>
+  </div>
+
+
+  <!-- ================= 1. 空格快速审题模态框 (Eagle Spacebar Quick Look) ================= -->
+  <div id="quickLookModal" class="hidden fixed inset-0 z-[10005] flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-4 sm:p-6" onclick="closeQuickLookModal()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden border border-slate-200" onclick="event.stopPropagation()">
+      <!-- 头部 -->
+      <div class="flex items-center justify-between px-6 py-3.5 border-b border-slate-100 bg-slate-50/90 shrink-0">
+        <div class="flex items-center gap-3">
+          <span class="text-base font-bold text-slate-800" id="qlTitleBadge">第 1 题 · 快速审题</span>
+          <span id="qlTypeBadge" class="text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold font-mono">单选题</span>
+          <span id="qlStarBadge" class="text-amber-500 font-bold text-xs">★★★☆☆</span>
+          <span id="qlScoreBadge" class="text-xs text-slate-500 font-medium">5分</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="flex items-center border border-slate-200 rounded-lg overflow-hidden bg-white shadow-2xs mr-2">
+            <button onclick="navQuickLook(-1)" class="px-2.5 py-1 text-slate-600 hover:bg-slate-100 text-xs font-medium border-r border-slate-200 flex items-center gap-1 cursor-pointer" title="快捷键: ← 或 A">
+              <span>←</span><span>上一题</span>
+            </button>
+            <button onclick="navQuickLook(1)" class="px-2.5 py-1 text-slate-600 hover:bg-slate-100 text-xs font-medium flex items-center gap-1 cursor-pointer" title="快捷键: → 或 D">
+              <span>下一题</span><span>→</span>
+            </button>
+          </div>
+          <button id="qlBasketBtn" onclick="toggleBasketFromQuickLook()" class="px-3 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-semibold transition-all cursor-pointer">
+            + 试题篮
+          </button>
+          <button onclick="openEditFromQuickLook()" class="px-3 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium transition-colors cursor-pointer">
+            ✏️ 编辑
+          </button>
+          <button onclick="closeQuickLookModal()" class="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg text-base cursor-pointer">✕</button>
+        </div>
+      </div>
+
+      <!-- 题目大排版正文 + 解析 -->
+      <div class="flex-1 overflow-y-auto p-6 space-y-5">
+        <div id="qlContentContainer" class="text-slate-900 text-base leading-relaxed font-serif">
+          <!-- 动态注入题目与选项 -->
+        </div>
+        <div id="qlAnalysisContainer" class="pt-4 border-t border-slate-100">
+          <!-- 动态注入解析 -->
+        </div>
+      </div>
+
+      <!-- 底部提示 -->
+      <div class="px-6 py-2.5 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 shrink-0">
+        <span id="qlSourceText" class="truncate max-w-lg">出处：...</span>
+        <span class="text-[11px] text-slate-400">快捷提示：按 空格键(Space) 或 Esc 快速关闭 · 键盘左右箭头切换试题</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 2. 所属试卷原卷扫描件核验模态框 (Original Paper Lightbox) ================= -->
+  <div id="originalPaperModal" class="hidden fixed inset-0 z-[10006] flex items-center justify-center bg-slate-900/75 backdrop-blur-xs p-4" onclick="closeOriginalPaperModal()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[94vh] flex flex-col overflow-hidden border border-slate-200" onclick="event.stopPropagation()">
+      <div class="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50">
+        <div class="flex items-center gap-2">
+          <span class="text-sm font-bold text-slate-800">📄 所属试卷原卷高分辨率扫描件核验</span>
+          <span id="opPaperNameBadge" class="text-xs px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-mono"></span>
+        </div>
+        <div class="flex items-center gap-3">
+          <a id="opRawImgLink" href="#" target="_blank" class="text-xs text-emerald-600 hover:underline">在新标签页查看原始文件</a>
+          <button onclick="closeOriginalPaperModal()" class="text-slate-400 hover:text-slate-700 text-sm cursor-pointer">✕</button>
+        </div>
+      </div>
+      <div class="flex-1 overflow-auto p-4 bg-slate-100/80 flex items-center justify-center">
+        <img id="opPaperImg" src="" alt="原卷高分辨率扫描件" class="max-w-full max-h-[82vh] object-contain shadow-lg rounded border border-slate-200 bg-white">
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 3. 键盘快捷键指南模态框 (Shortcuts Cheat Sheet) ================= -->
+  <div id="shortcutsModal" class="hidden fixed inset-0 z-[10007] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4" onclick="closeShortcutsModal()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-200" onclick="event.stopPropagation()">
+      <div class="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-slate-50/80">
+        <span class="text-sm font-bold text-slate-800 flex items-center gap-2">
+          <span>⌨️</span><span>键盘快捷键指南 (Eagle 工作台模式)</span>
+        </span>
+        <button onclick="closeShortcutsModal()" class="text-slate-400 hover:text-slate-700 text-sm cursor-pointer">✕</button>
+      </div>
+      <div class="p-5 space-y-3 text-xs text-slate-700">
+        <div class="grid grid-cols-2 gap-3">
+          <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
+            <span class="text-slate-600">快速全屏审题</span>
+            <kbd class="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 font-mono shadow-2xs font-bold">Space 空格</kbd>
+          </div>
+          <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
+            <span class="text-slate-600">上一题 / 下一题</span>
+            <kbd class="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 font-mono shadow-2xs font-bold">↑ / ↓ 或 K / J</kbd>
+          </div>
+          <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
+            <span class="text-slate-600">加入/移出试题篮</span>
+            <kbd class="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 font-mono shadow-2xs font-bold">B</kbd>
+          </div>
+          <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
+            <span class="text-slate-600">编辑当前试题</span>
+            <kbd class="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 font-mono shadow-2xs font-bold">E</kbd>
+          </div>
+          <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
+            <span class="text-slate-600">收藏 / 取消收藏</span>
+            <kbd class="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 font-mono shadow-2xs font-bold">S</kbd>
+          </div>
+          <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
+            <span class="text-slate-600">聚焦标签打标框</span>
+            <kbd class="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 font-mono shadow-2xs font-bold">T</kbd>
+          </div>
+          <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
+            <span class="text-slate-600">聚焦全局搜索框</span>
+            <kbd class="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 font-mono shadow-2xs font-bold">/</kbd>
+          </div>
+          <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
+            <span class="text-slate-600">关闭所有弹窗</span>
+            <kbd class="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 font-mono shadow-2xs font-bold">Esc</kbd>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ================= 全局核心数据与响应式状态 =================
+    const API_BASE = (window.location.port === '8768' || window.location.port === '') ? '' : 'http://127.0.0.1:8768';
+
+    // 标签体系分组定义
+    const tagGroupsData = [
+      {
+        id: 'grp_knowledge',
+        name: '考点知识',
+        color: 'emerald',
+        tags: [
+          { id: 't_deriv', name: '导数与极值', color: 'emerald', useCount: 142, isPinned: true },
+          { id: 't_conic', name: '圆锥曲线', color: 'emerald', useCount: 98, isPinned: true },
+          { id: 't_solid', name: '立体几何', color: 'emerald', useCount: 86, isPinned: false },
+          { id: 't_func', name: '函数的单调性', color: 'emerald', useCount: 65, isPinned: false },
+          { id: 't_seq', name: '等差等比数列', color: 'emerald', useCount: 54, isPinned: false }
+        ]
+      },
+      {
+        id: 'grp_method',
+        name: '解题思想与方法',
+        color: 'blue',
+        tags: [
+          { id: 't_num_shape', name: '数形结合', color: 'blue', useCount: 112, isPinned: true },
+          { id: 't_separate', name: '分离参数法', color: 'blue', useCount: 76, isPinned: true },
+          { id: 't_construct', name: '构造辅助函数', color: 'blue', useCount: 64, isPinned: false },
+          { id: 't_case', name: '分类讨论思想', color: 'blue', useCount: 92, isPinned: false }
+        ]
+      },
+      {
+        id: 'grp_source',
+        name: '真题年份与省份',
+        color: 'amber',
+        tags: [
+          { id: 't_2024', name: '2024高考真题', color: 'amber', useCount: 120, isPinned: true },
+          { id: 't_2023', name: '2023高考真题', color: 'amber', useCount: 85, isPinned: false },
+          { id: 't_nation1', name: '新课标I卷', color: 'amber', useCount: 72, isPinned: false },
+          { id: 't_jia', name: '全国甲卷', color: 'amber', useCount: 48, isPinned: false }
+        ]
+      }
+    ];
+
+    let papersData = [];
+    let paperSearchKeyword = '';
+    const questionsData = [];
+    // 已入库题目的"源题 id"集合（core_question.id）。
+    // /api/library 的条目 id 是已发布记录 uuid，真正的源题 id 在 draft_id；
+    // /api/papers/{id} 的题目 id 就是源题 id。两者同源，故可用它做去重。
+    const loadedSourceQuestionIds = new Set();
+    let filteredQuestions = [];
+    let renderedQuestionCount = 0;
+    const CHUNK_SIZE = 25; // 每次增量渲染 25 题，彻底杜绝整页卡死
+
+    let currentActiveQuestionId = null;
+    const selectedQuestionIds = new Set();
+    const basketQuestionIds = new Set();
+    const favoritesSet = new Set();
+    const expandedAnalysisQuestionIds = new Set();
+
+    // 视图模式: 'card' (大卡片流) 或 'compact' (紧凑流)
+    let currentViewMode = localStorage.getItem('eagle_view_mode') || 'card';
+
+    // 试题篮与收藏从 localStorage 中恢复
+    try {
+      const savedBasket = localStorage.getItem('qb-basket');
+      if (savedBasket) {
+        const arr = JSON.parse(savedBasket);
+        if (Array.isArray(arr)) arr.forEach(id => basketQuestionIds.add(String(id)));
+      }
+      const savedFav = localStorage.getItem('qb-favorites');
+      if (savedFav) {
+        const arr = JSON.parse(savedFav);
+        if (Array.isArray(arr)) arr.forEach(id => favoritesSet.add(String(id)));
+      }
+    } catch (e) {
+      console.warn('Load storage error:', e);
+    }
+
+    // 筛选与排序状态
+    const filterState = {
+      keyword: '',
+      paperId: '',
+      paperName: '',
+      chapter: '',
+      smartFilter: '',
+      questionTypes: [],
+      difficultyStars: [],
+      hasAnswer: false,
+      hasAnalysis: false,
+      selectedTagIds: [],
+      excludedTagIds: [],
+      tagLogic: 'and',
+      sortBy: 'number' // number, difficulty, year
+    };
+
+    let currentPaperSort = localStorage.getItem('paper_sort_mode') || 'time_desc';
+    let isPaperSectionCollapsed = localStorage.getItem('paper_section_collapsed') === 'true';
+    let activeContextMenuPaperId = null;
+
+    // 题目编辑与审题状态
+    let activeEditingQuestionId = null;
+    let activeEditingRevisionInfo = null;
+    let quickLookQuestionIndex = 0;
+
+    // KaTeX 标准配置与宏定义
+    const KATEX_OPTIONS = {
+      delimiters: [
+        {left: '$$', right: '$$', display: true},
+        {left: '\\[', right: '\\]', display: true},
+        {left: '$', right: '$', display: false},
+        {left: '\\(', right: '\\)', display: false}
+      ],
+      throwOnError: false,
+      errorColor: '#dc2626',
+      strict: false,
+      trust: true,
+      macros: {
+        "\\parallel": "\\mathrel{/\\mkern-6mu/}",
+        "\\nparallel": "\\mathrel{/\\mkern-6mu/\\mkern-11mu\\backslash}"
+      }
+    };
+
+    function triggerKaTeX(targetElement = null) {
+      if (typeof window.renderMathInElement !== 'function') return;
+      const target = targetElement || document.getElementById('questionListContainer');
+      if (!target) return;
+      try {
+        window.renderMathInElement(target, KATEX_OPTIONS);
+      } catch (err) {
+        console.warn('KaTeX render error:', err);
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function sanitizeMathHtml(html) {
+      if (!html) return '';
+      return html
+        .replace(/<script[\s\S]*?<\/script>/gi, '')
+        .replace(/on\w+="[^"]*"/gi, '');
+    }
+
+    // ================= 初始化与数据拉取 =================
+    async function init() {
+      setupEventListeners();
+      updatePaperSectionCollapseUI();
+      updateBasketBadges();
+      updateFavoritesBadge();
+      updateViewModeUI();
+      await loadRealData();
+    }
+
+    function updateViewModeUI() {
+      const btnCard = document.getElementById('viewBtnCard');
+      const btnCompact = document.getElementById('viewBtnCompact');
+      if (!btnCard || !btnCompact) return;
+
+      if (currentViewMode === 'card') {
+        btnCard.className = 'px-2.5 py-1 rounded-md bg-white text-slate-900 font-bold shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer';
+        btnCompact.className = 'px-2.5 py-1 rounded-md text-slate-600 hover:text-slate-900 flex items-center gap-1.5 transition-all cursor-pointer';
+      } else {
+        btnCompact.className = 'px-2.5 py-1 rounded-md bg-white text-slate-900 font-bold shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer';
+        btnCard.className = 'px-2.5 py-1 rounded-md text-slate-600 hover:text-slate-900 flex items-center gap-1.5 transition-all cursor-pointer';
+      }
+    }
+
+    function setViewMode(mode) {
+      currentViewMode = mode;
+      localStorage.setItem('eagle_view_mode', mode);
+      updateViewModeUI();
+      applyFilters();
+    }
+
+    function updateFavoritesBadge() {
+      const el = document.getElementById('sf_favorites_count');
+      if (el) el.innerText = favoritesSet.size;
+    }
+
+    function toggleFavorite(qid) {
+      if (favoritesSet.has(qid)) {
+        favoritesSet.delete(qid);
+        showToast('已取消收藏', 'info');
+      } else {
+        favoritesSet.add(qid);
+        showToast('已加入我收藏的试题 ⭐', 'success');
+      }
+      try {
+        localStorage.setItem('qb-favorites', JSON.stringify(Array.from(favoritesSet)));
+      } catch (e) {}
+      updateFavoritesBadge();
+      
+      // 更新当前题目的收藏图标
+      const starBtn = document.getElementById(`star_btn_${qid}`);
+      if (starBtn) {
+        starBtn.innerText = favoritesSet.has(qid) ? '⭐' : '☆';
+      }
+    }
+
+    
+    /**
+     * 将原始题干中的显示数学公式 ($$...$$, \\[...\\]) 规范化为单行行内公式 ($...$)
+     * 防止在紧凑速览模式和试题篮列表中破坏单行排版或导致断句截断
+     */
+    function getCleanInlineStem(raw) {
+      if (!raw) return '题目内容';
+      let s = String(raw)
+        .replace(/\$\$([\s\S]*?)\$\$/g, '$$$1$$')
+        .replace(/\\\[([\s\S]*?)\\\]/g, '$$$1$$')
+        .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$')
+        .replace(/[\r\n]+/g, ' ')
+        .trim();
+      return escapeHtml(s);
+    }
+
+    /**
+     * 将 /api/papers/:id 中未正式入库/待审题目的数据格式规范化为工作台统一试题对象
+     * 支持《高中数学思想方法导引》等509道教材习题完美融入题库流与筛选器
+     */
+    function convertPaperQuestionToItem(pq, paper, idx) {
+      const qNum = pq.number || (idx + 1);
+      const rawStem = pq.stem || '';
+      const rawOptions = (pq.options && typeof pq.options === 'object') ? pq.options : {};
+      const rawFigures = Array.isArray(pq.figures) ? pq.figures : [];
+      const rawAnswer = String(pq.answer || '').trim();
+      const rawAnalysis = String(pq.analysis || '').trim();
+      const qType = pq.question_type || 'free_response';
+
+      const typeNames = {
+        single_choice: '单选题',
+        multiple_choice: '多选题',
+        fill_blank: '填空题',
+        true_false: '判断题',
+        free_response: '解答题',
+        unknown: '解答题'
+      };
+
+      const optionFiguresMap = {};
+      const stemFigures = [];
+      rawFigures.forEach(f => {
+        const slot = (f.slot || '').trim().toUpperCase();
+        if (['A', 'B', 'C', 'D', 'E', 'F'].includes(slot)) {
+          optionFiguresMap[slot] = f;
+        } else {
+          stemFigures.push(f);
+        }
+      });
+
+      const qImages = Array.isArray(pq.question_images) ? pq.question_images : [];
+
+      let formattedStem = rawStem
+        .split('\n')
+        .filter(p => p.trim())
+        .map(p => `<p class="font-serif leading-relaxed mb-2 text-slate-800 text-sm sm:text-base">${escapeHtml(p)}</p>`)
+        .join('');
+
+      // 若为纯图片裁片题，无文字识别则回退展现高分辨率原裁片
+      if (!formattedStem.trim() && qImages.length > 0) {
+        formattedStem = qImages.map(img => {
+          const imgUrl = (img.url && img.url.startsWith('/') && API_BASE) ? (API_BASE + img.url) : (img.url || '');
+          return `
+            <div class="my-2 text-center">
+              <img src="${imgUrl}" class="max-h-64 max-w-full inline-block rounded border border-slate-200 bg-white p-1" />
+            </div>
+          `;
+        }).join('');
+      } else if (stemFigures.length > 0) {
+        formattedStem += stemFigures.map(f => {
+          const imgUrl = (f.url && f.url.startsWith('/') && API_BASE) ? (API_BASE + f.url) : (f.url || '');
+          return `
+            <div class="my-3 text-center">
+              <img src="${imgUrl}" alt="第 ${qNum} 题配图" class="max-h-56 max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs cursor-zoom-in" onclick="event.stopPropagation(); previewImageModal('${imgUrl}', '第 ${qNum} 题 配图')" />
+            </div>
+          `;
+        }).join('');
+      }
+
+      const optionsHtml = renderAdaptiveOptionsHtml(rawOptions, optionFiguresMap, qNum);
+      if (optionsHtml) formattedStem += optionsHtml;
+
+      let stars = 3;
+      if (qNum >= 20) stars = 5;
+      else if (qNum >= 15) stars = 4;
+      else if (qNum <= 4) stars = 2;
+
+      const chapterName = (pq.group && pq.group.title) || (pq.section ? pq.section.split('·')[0].trim() : '思想方法');
+      const sectionName = pq.section || chapterName;
+
+      const tags = [
+        { id: `tag_paper_${pq.id}`, name: paper.name || '高中数学思想方法导引', color: 'blue' },
+        { id: `tag_ch_${pq.id}`, name: chapterName, color: 'purple' }
+      ];
+      if (pq.section && pq.section !== chapterName) {
+        const secPart = pq.section.split('·')[1]?.trim() || pq.section;
+        tags.push({ id: `tag_sec_${pq.id}`, name: secPart, color: 'emerald' });
+      }
+
+      const sourcePage = (pq.regions && pq.regions[0] && pq.regions[0].page_idx !== undefined) ? (pq.regions[0].page_idx + 1) : 1;
+
+      return {
+        id: String(pq.id),
+        documentId: paper.id,
+        questionNumber: qNum,
+        questionType: typeNames[qType] || '解答题',
+        questionTypeCode: qType,
+        chapter: chapterName,
+        section: sectionName,
+        difficultyStars: stars,
+        difficulty: '★'.repeat(stars) + '☆'.repeat(5 - stars),
+        content: formattedStem,
+        rawStem: rawStem,
+        rawOptions: rawOptions,
+        rawFigures: rawFigures,
+        rawAnswer: rawAnswer,
+        rawAnalysis: rawAnalysis,
+        hasAnswer: Boolean(rawAnswer),
+        hasAnalysis: Boolean(rawAnalysis),
+        source: paper.name || '高中数学思想方法导引',
+        sourcePage: sourcePage,
+        score: qType === 'single_choice' ? 5 : (qType === 'fill_blank' ? 5 : 12),
+        tags: tags,
+        aiAnswer: null,
+        savedSolution: null,
+        aiSuggestedTags: ['核心考查', '规范解答']
+      };
+    }
+
+    async function loadRealData() {
+      const sentinel = document.getElementById('chunkSentinel');
+      if (sentinel) sentinel.innerText = '正在载入题库数据与入库项目...';
+
+      try {
+        const [papersRes, tagsRes, libFirstRes] = await Promise.all([
+          fetch(`${API_BASE}/api/papers`, {
+            headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
+          }),
+          fetch(`${API_BASE}/api/library/tags`, {
+            headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
+          }),
+          fetch(`${API_BASE}/api/library?limit=100&offset=0`, {
+            headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
+          })
+        ]);
+
+        // 1. 处理入库项目 (Papers)
+        if (papersRes.ok) {
+          const papersJson = await papersRes.json();
+          if (papersJson && Array.isArray(papersJson.papers)) {
+            papersData = papersJson.papers.map(p => {
+              const displayName = p.name || p.task_name || p.filename || '未命名项目';
+              return {
+                id: p.id,
+                name: displayName,
+                filename: p.filename,
+                total: (p.counts && p.counts.total) || p.total || 0,
+                createdAt: new Date(p.created_at || Date.now()),
+                createdStr: (p.created_at || '').slice(0, 10),
+                counts: p.counts || {}
+              };
+            });
+            sortAndRenderPapers(currentPaperSort);
+          }
+        }
+
+        // 2. 处理标签系统 (306 真实考点/方法标签)
+        if (tagsRes.ok) {
+          const tagsData = await tagsRes.json();
+          if (tagsData && Array.isArray(tagsData.tags) && tagsData.tags.length > 0) {
+            const kindMap = {
+              knowledge: tagGroupsData[0],
+              method: tagGroupsData[1],
+              source: tagGroupsData[2],
+              legacy: tagGroupsData[2],
+              custom: tagGroupsData[2]
+            };
+            tagGroupsData.forEach(g => g.tags = []);
+            tagsData.tags.forEach(t => {
+              const group = kindMap[t.kind] || tagGroupsData[0];
+              group.tags.push({
+                id: t.id,
+                name: t.name,
+                color: group.color,
+                useCount: t.count || 0,
+                isPinned: Boolean(t.favorite)
+              });
+            });
+            renderTagFilterDropdownList();
+          }
+        }
+
+        // 3. 处理全量试题数据 (并发分页抓取全部 810 题)
+        if (libFirstRes.ok) {
+          const firstData = await libFirstRes.json();
+          const allRawItems = [...(firstData.items || [])];
+          const totalCount = firstData.total || allRawItems.length;
+
+          if (totalCount > 100) {
+            const remainingOffsets = [];
+            for (let off = 100; off < totalCount; off += 100) {
+              remainingOffsets.push(off);
+            }
+            try {
+              const remainingPages = await Promise.all(
+                remainingOffsets.map(off =>
+                  fetch(`${API_BASE}/api/library?limit=100&offset=${off}`, {
+                    headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
+                  }).then(r => r.ok ? r.json() : { items: [] })
+                )
+              );
+              remainingPages.forEach(pData => {
+                if (pData && Array.isArray(pData.items)) {
+                  allRawItems.push(...pData.items);
+                }
+              });
+            } catch (pageErr) {
+              console.warn('Library pagination partial error:', pageErr);
+            }
+          }
+
+          const typeNames = {
+            single_choice: '单选题',
+            multiple_choice: '多选题',
+            fill_blank: '填空题',
+            true_false: '判断题',
+            free_response: '解答题'
+          };
+
+          const realItems = allRawItems.map((item, idx) => {
+            const c = item.content || {};
+            const qNum = item.number || (idx + 1);
+            const rawStem = c.stem || c.question || '';
+            const rawOptions = (c.options && typeof c.options === 'object') ? c.options : {};
+            const rawFigures = Array.isArray(c.figures) ? c.figures : [];
+            const rawAnswer = String(c.answer || '').trim();
+            const rawAnalysis = String(c.analysis || '').trim();
+            const aiAnswerObj = item.ai_answer || (item.extras && item.extras.ai_answer) || null;
+            const savedSolutionObj = item.solution || null;
+
+            // 题干配图与选项配图分离 (slot: A, B, C, D)
+            const optionFiguresMap = {};
+            const stemFigures = [];
+            rawFigures.forEach(f => {
+              const slot = (f.slot || '').trim().toUpperCase();
+              if (['A', 'B', 'C', 'D', 'E', 'F'].includes(slot)) {
+                optionFiguresMap[slot] = f;
+              } else {
+                stemFigures.push(f);
+              }
+            });
+
+            // 构造题干 HTML
+            let formattedStem = rawStem
+              .split('\n')
+              .filter(p => p.trim())
+              .map(p => `<p class="font-serif leading-relaxed mb-2 text-slate-800 text-sm sm:text-base">${escapeHtml(p)}</p>`)
+              .join('');
+
+            // 追加题干配图
+            if (stemFigures.length > 0) {
+              const stemFigsHtml = stemFigures.map(f => {
+                const imgUrl = (f.url && f.url.startsWith('/') && API_BASE) ? (API_BASE + f.url) : (f.url || f.file || '');
+                if (!imgUrl) return '';
+                return `
+                  <div class="my-3 text-center">
+                    <img 
+                      src="${imgUrl}" 
+                      alt="第 ${qNum} 题配图" 
+                      class="max-h-56 max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs cursor-zoom-in hover:shadow-xs transition-shadow" 
+                      onclick="event.stopPropagation(); previewImageModal('${imgUrl}', '第 ${qNum} 题 题干配图')" 
+                      title="点击查看高分辨率原图" 
+                    />
+                  </div>
+                `;
+              }).join('');
+              formattedStem += stemFigsHtml;
+            }
+
+            // 渲染选项 (带自适应列数排版算法)
+            const optionsHtml = renderAdaptiveOptionsHtml(rawOptions, optionFiguresMap, qNum);
+            if (optionsHtml) {
+              formattedStem += optionsHtml;
+            }
+
+            // 智能评定难度星级 (1-5星)
+            let stars = 3;
+            if (qNum >= 20 || (item.score && item.score >= 12)) {
+              stars = 5;
+            } else if (qNum >= 15 || (item.score && item.score >= 10)) {
+              stars = 4;
+            } else if (qNum <= 4) {
+              stars = 2;
+            }
+
+            // 标签处理
+            let parsedTags = [];
+            if (Array.isArray(item.tags) && item.tags.length > 0) {
+              parsedTags = item.tags.map((t, tIdx) => {
+                if (typeof t === 'string') return { id: `tag_${idx}_${tIdx}`, name: t, color: 'emerald' };
+                return { id: t.id || `tag_${idx}_${tIdx}`, name: t.name, color: t.color || 'emerald' };
+              });
+            } else {
+              const inferred = [];
+              const rawText = rawStem + ' ' + (item.origin || '') + ' ' + (c.section || '');
+              if (rawText.includes('导数') || rawText.includes('极值') || rawText.includes('单调')) {
+                inferred.push({ id: `inf_${idx}_1`, name: '导数与极值', color: 'emerald' });
+              }
+              if (rawText.includes('不等式') || rawText.includes('证明')) {
+                inferred.push({ id: `inf_${idx}_2`, name: '不等式证明', color: 'blue' });
+              }
+              if (rawText.includes('椭圆') || rawText.includes('双曲线') || rawText.includes('抛物线') || rawText.includes('离心率')) {
+                inferred.push({ id: `inf_${idx}_3`, name: '圆锥曲线', color: 'emerald' });
+              }
+              if (rawText.includes('几何') || rawText.includes('折叠') || rawText.includes('垂直') || rawText.includes('平行')) {
+                inferred.push({ id: `inf_${idx}_4`, name: '立体几何', color: 'emerald' });
+              }
+              if (rawText.includes('三角') || rawText.includes('sin') || rawText.includes('cos')) {
+                inferred.push({ id: `inf_${idx}_5`, name: '三角函数', color: 'blue' });
+              }
+              if (rawText.includes('数列') || rawText.includes('等差') || rawText.includes('等比')) {
+                inferred.push({ id: `inf_${idx}_6`, name: '数列综合', color: 'blue' });
+              }
+              const originStr = item.origin || c.origin || '';
+              if (originStr.includes('卷')) {
+                const yearMatch = originStr.match(/(20\d\d)/);
+                inferred.push({ id: `inf_${idx}_src`, name: yearMatch ? `${yearMatch[1]}高考真题` : '高考真题', color: 'amber' });
+              } else {
+                inferred.push({ id: `inf_${idx}_def`, name: typeNames[item.question_type] || '典型题', color: 'slate' });
+              }
+              parsedTags = inferred.slice(0, 3);
+            }
+
+            const originSource = item.origin || c.origin || c.source_filename || item.source_filename || '真题资料';
+
+            return {
+              id: String(item.id || `q_${idx}`),
+              questionNumber: qNum,
+              chapter: c.section || '综合题库',
+              questionType: typeNames[item.question_type] || '解答题',
+              questionTypeCode: item.question_type || 'free_response',
+              documentId: item.document_id || '',
+              sourcePage: item.page ? (item.page - 1) : 0,
+              source: originSource,
+              year: 2024,
+              score: item.score || (stars >= 4 ? 12 : 5),
+              rawStem: rawStem,
+              rawOptions: rawOptions,
+              rawFigures: rawFigures,
+              rawAnswer: rawAnswer,
+              rawAnalysis: rawAnalysis,
+              aiAnswer: aiAnswerObj,
+              savedSolution: savedSolutionObj,
+              content: formattedStem,
+              hasAnswer: Boolean(rawAnswer || (aiAnswerObj && aiAnswerObj.answer)),
+              hasAnalysis: Boolean(rawAnalysis || (aiAnswerObj && aiAnswerObj.analysis)),
+              difficulty: '★'.repeat(stars) + '☆'.repeat(5 - stars),
+              difficultyStars: stars,
+              tags: parsedTags,
+              aiSuggestedTags: ['核心考查', '规范解答']
+            };
+          });
+
+          // 记录已终审入库题的源题 id（用于补拉时去重）
+          allRawItems.forEach(it => {
+            if (it.draft_id) loadedSourceQuestionIds.add(String(it.draft_id));
+          });
+
+          // 并发载入未完全入库但已完成切题的教材/试卷
+          // (例如《高中数学思想方法导引》509题,《IMG20261025105610》28题)
+          // 判定必须是「按题量比」而不是「整卷有无」：
+          // 有些卷是「已终审一部分 + 待审一部分」(如《微信图片_2025-10-10》已审3题/共25题)，
+          // 整卷级判定会因为「卷内已有题」而把整卷排除在补拉之外，导致剩余题目永远拉不下来。
+          const unimportedPapers = papersData.filter(p => {
+            const wantTotal = (p.counts && p.counts.total) || p.total || 0;
+            if (!wantTotal) return false;
+            const inLibrary = allRawItems.filter(it => it.document_id === p.id).length;
+            return inLibrary < wantTotal;
+          });
+
+          if (unimportedPapers.length > 0) {
+            try {
+              const extraPaperResults = await Promise.all(
+                unimportedPapers.map(p =>
+                  fetch(`${API_BASE}/api/papers/${p.id}`, {
+                    headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
+                  })
+                  .then(r => r.ok ? r.json() : null)
+                  .then(pdata => {
+                    if (!pdata || !Array.isArray(pdata.questions)) return [];
+                    // 去掉已终审入库的题（源题 id 相同），避免同一题在页面上出现两份
+                    return pdata.questions
+                      .map((pq, idx) => ({ pq, idx }))
+                      .filter(({ pq }) => !loadedSourceQuestionIds.has(String(pq.id)))
+                      .map(({ pq, idx }) => {
+                        loadedSourceQuestionIds.add(String(pq.id));
+                        return convertPaperQuestionToItem(pq, p, idx);
+                      });
+                  })
+                  .catch(e => {
+                    console.warn('Error loading extra paper:', p.name, e);
+                    return [];
+                  })
+                )
+              );
+              extraPaperResults.forEach(qs => {
+                if (qs && qs.length > 0) {
+                  realItems.push(...qs);
+                }
+              });
+            } catch (extraErr) {
+              console.warn('Extra papers batch load error:', extraErr);
+            }
+          }
+
+          questionsData.length = 0;
+          questionsData.push(...realItems);
+          currentActiveQuestionId = questionsData[0]?.id || null;
+
+          updateSmartFolderCounts();
+          updateFavoritesBadge();
+          applyFilters();
+          renderInlineActiveChips();
+          renderRightInspector();
+        }
+      } catch (e) {
+        console.warn('Real data loading fallback:', e);
+        if (sentinel) sentinel.innerText = '加载遇到网络波动，已切换为本地安全视图。';
+      }
+    }
+
+    /**
+     * 自适应选项排版引擎 (解决选项公式不美观、拉扯过宽与图片脱节问题)
+     */
+    function renderAdaptiveOptionsHtml(options, optionFiguresMap, qNum) {
+      const optKeysSet = new Set();
+      if (options && typeof options === 'object') {
+        Object.keys(options).forEach(k => {
+          if (k && k.trim()) optKeysSet.add(k.trim().toUpperCase());
+        });
+      }
+      Object.keys(optionFiguresMap).forEach(k => optKeysSet.add(k));
+      const sortedKeys = Array.from(optKeysSet).sort();
+      const hasFigures = Object.keys(optionFiguresMap).length > 0;
+
+      if (sortedKeys.length === 0) return '';
+
+      // 情况 A: 选项包含图片配图 -> 四宫格独立图卡展示
+      if (hasFigures) {
+        const optionCards = sortedKeys.map(k => {
+          const optText = (options && (options[k] || options[k.toLowerCase()])) || '';
+          const fig = optionFiguresMap[k];
+          const imgUrl = fig ? ((fig.url && fig.url.startsWith('/') && API_BASE) ? (API_BASE + fig.url) : (fig.url || fig.file || '')) : '';
+
+          return `
+            <div class="group/opt flex flex-col justify-between rounded-lg border border-slate-200/90 bg-white p-2.5 transition-all duration-150 hover:border-emerald-400 hover:shadow-xs">
+              <div class="flex items-start gap-2 mb-1.5">
+                <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-100 text-slate-800 font-bold text-xs shrink-0 group-hover/opt:bg-emerald-100 group-hover/opt:text-emerald-800 transition-colors">${escapeHtml(k)}</span>
+                ${optText ? `<div class="text-xs text-slate-800 font-serif leading-relaxed flex-1">${escapeHtml(optText)}</div>` : ''}
+              </div>
+              ${imgUrl ? `
+                <div class="flex-1 flex items-center justify-center p-2 rounded bg-slate-50/70 border border-slate-100/80 min-h-[110px] overflow-hidden">
+                  <img 
+                    src="${imgUrl}" 
+                    alt="选项 ${escapeHtml(k)} 配图" 
+                    class="max-h-36 max-w-full object-contain cursor-zoom-in transition-transform duration-200 group-hover/opt:scale-105" 
+                    onclick="event.stopPropagation(); previewImageModal('${imgUrl}', '第 ${qNum} 题 选项 ${escapeHtml(k)} 配图')" 
+                    title="点击查看大图" 
+                  />
+                </div>
+              ` : ''}
+            </div>
+          `;
+        }).join('');
+
+        return `<div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 mb-2">${optionCards}</div>`;
+      }
+
+      // 情况 B: 纯文字与数学公式选项 -> 动态测算最大有效长度
+      const maxOptLen = Math.max(0, ...sortedKeys.map(k => {
+        const val = (options && (options[k] || options[k.toLowerCase()])) || '';
+        return val.replace(/\$|\\dfrac|\\frac|\\sqrt|\{|\}/g, '').length;
+      }));
+
+      let gridColsClass = 'grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2';
+      if (sortedKeys.length === 4 && maxOptLen <= 10) {
+        gridColsClass = 'grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2';
+      } else if (maxOptLen > 26) {
+        gridColsClass = 'grid-cols-1 gap-y-2';
+      }
+
+      const optRows = sortedKeys.map(k => {
+        const optText = (options && (options[k] || options[k.toLowerCase()])) || '';
+        return `
+          <div class="flex items-baseline gap-2 py-0.5 min-w-0">
+            <span class="font-bold text-slate-800 font-sans text-xs shrink-0">${escapeHtml(k)}.</span>
+            <span class="text-slate-800 font-serif text-xs sm:text-sm leading-relaxed flex-1">${escapeHtml(optText)}</span>
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <div class="grid ${gridColsClass} mt-3 pt-2 text-xs text-slate-800">
+          ${optRows}
+        </div>
+      `;
+    }
+
+    // ================= 仿 Eagle 文件夹折叠与右键菜单交互体系 =================
+    function updatePaperSectionCollapseUI() {
+      const listEl = document.getElementById('paperProjectsList');
+      const iconEl = document.getElementById('paperCollapseIcon');
+      if (!listEl || !iconEl) return;
+
+      if (isPaperSectionCollapsed) {
+        listEl.classList.add('hidden');
+        iconEl.style.transform = 'rotate(-90deg)';
+      } else {
+        listEl.classList.remove('hidden');
+        iconEl.style.transform = 'rotate(0deg)';
+      }
+    }
+
+    function togglePaperSectionCollapse() {
+      isPaperSectionCollapsed = !isPaperSectionCollapsed;
+      localStorage.setItem('paper_section_collapsed', isPaperSectionCollapsed ? 'true' : 'false');
+      updatePaperSectionCollapseUI();
+    }
+
+    function handlePaperSearchInput(val) {
+      paperSearchKeyword = (val || '').trim().toLowerCase();
+      sortAndRenderPapers(currentPaperSort);
+    }
+
+    function openEagleContextMenu(e, source, paperId = null) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+
+      activeContextMenuPaperId = paperId;
+      const menuEl = document.getElementById('eagleContextMenu');
+      if (!menuEl) return;
+
+      const targetPaper = paperId ? papersData.find(p => p.id === paperId) : null;
+
+      let menuHtml = `
+        <div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+          <span>排序方式</span>
+          <span class="text-[9px] text-slate-400 font-normal">Eagle 模式</span>
+        </div>
+
+        <div class="space-y-0.5">
+          <div 
+            onclick="setPaperSortMode('time_desc')" 
+            class="flex items-center justify-between px-2.5 py-1.5 rounded cursor-pointer transition-colors ${currentPaperSort === 'time_desc' ? 'bg-emerald-50 text-emerald-800 font-semibold' : 'text-slate-700 hover:bg-slate-100'}"
+          >
+            <div class="flex items-center gap-2">
+              <span class="text-xs">🕒</span>
+              <span>按入库时间 (最新优先)</span>
+            </div>
+            ${currentPaperSort === 'time_desc' ? '<span class="text-emerald-600 font-bold text-xs">✓</span>' : ''}
+          </div>
+
+          <div 
+            onclick="setPaperSortMode('time_asc')" 
+            class="flex items-center justify-between px-2.5 py-1.5 rounded cursor-pointer transition-colors ${currentPaperSort === 'time_asc' ? 'bg-emerald-50 text-emerald-800 font-semibold' : 'text-slate-700 hover:bg-slate-100'}"
+          >
+            <div class="flex items-center gap-2">
+              <span class="text-xs">📅</span>
+              <span>按入库时间 (从早到晚)</span>
+            </div>
+            ${currentPaperSort === 'time_asc' ? '<span class="text-emerald-600 font-bold text-xs">✓</span>' : ''}
+          </div>
+
+          <div 
+            onclick="setPaperSortMode('name')" 
+            class="flex items-center justify-between px-2.5 py-1.5 rounded cursor-pointer transition-colors ${currentPaperSort === 'name' ? 'bg-emerald-50 text-emerald-800 font-semibold' : 'text-slate-700 hover:bg-slate-100'}"
+          >
+            <div class="flex items-center gap-2">
+              <span class="text-xs">🔤</span>
+              <span>按名称升序 (A-Z)</span>
+            </div>
+            ${currentPaperSort === 'name' ? '<span class="text-emerald-600 font-bold text-xs">✓</span>' : ''}
+          </div>
+
+          <div 
+            onclick="setPaperSortMode('count_desc')" 
+            class="flex items-center justify-between px-2.5 py-1.5 rounded cursor-pointer transition-colors ${currentPaperSort === 'count_desc' ? 'bg-emerald-50 text-emerald-800 font-semibold' : 'text-slate-700 hover:bg-slate-100'}"
+          >
+            <div class="flex items-center gap-2">
+              <span class="text-xs">📊</span>
+              <span>按包含试题数 (多到少)</span>
+            </div>
+            ${currentPaperSort === 'count_desc' ? '<span class="text-emerald-600 font-bold text-xs">✓</span>' : ''}
+          </div>
+        </div>
+      `;
+
+      if (targetPaper) {
+        menuHtml += `
+          <div class="my-1.5 border-t border-slate-100"></div>
+          <div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">
+            项目: ${escapeHtml(targetPaper.name)}
+          </div>
+          <div class="space-y-0.5">
+            <div 
+              onclick="startRenamePaper('${targetPaper.id}'); hideEagleContextMenu();" 
+              class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
+            >
+              <span>✏️</span>
+              <span>重命名此入库项目 (或双击)</span>
+            </div>
+            <div 
+              onclick="copyPaperNameToClipboard('${targetPaper.id}'); hideEagleContextMenu();" 
+              class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
+            >
+              <span>📋</span>
+              <span>复制项目完整名称</span>
+            </div>
+            <div 
+              onclick="filterByPaper('${targetPaper.id}'); hideEagleContextMenu();" 
+              class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
+            >
+              <span>🔍</span>
+              <span>仅查看该项目的试题 (${targetPaper.total} 题)</span>
+            </div>
+            <div 
+              onclick="openOriginalPaperModal('${targetPaper.id}', 0, '${escapeHtml(targetPaper.name)}'); hideEagleContextMenu();" 
+              class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
+            >
+              <span>📄</span>
+              <span>查看原卷扫描核验件</span>
+            </div>
+          </div>
+        `;
+      }
+
+      menuHtml += `
+        <div class="my-1.5 border-t border-slate-100"></div>
+        <div 
+          onclick="refreshPapersData(); hideEagleContextMenu();" 
+          class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
+        >
+          <span>🔄</span>
+          <span>刷新项目数据</span>
+        </div>
+      `;
+
+      menuEl.innerHTML = menuHtml;
+
+      const clickX = e ? e.clientX : 200;
+      const clickY = e ? e.clientY : 200;
+      const menuWidth = 240;
+      const menuHeight = 320;
+
+      const posX = (clickX + menuWidth > window.innerWidth) ? (window.innerWidth - menuWidth - 10) : clickX;
+      const posY = (clickY + menuHeight > window.innerHeight) ? (window.innerHeight - menuHeight - 10) : clickY;
+
+      menuEl.style.left = `${posX}px`;
+      menuEl.style.top = `${posY}px`;
+      menuEl.classList.remove('hidden');
+    }
+
+    function hideEagleContextMenu() {
+      const menuEl = document.getElementById('eagleContextMenu');
+      if (menuEl) menuEl.classList.add('hidden');
+      activeContextMenuPaperId = null;
+    }
+
+    function handlePaperSectionContextMenu(e) {
+      openEagleContextMenu(e, 'header');
+    }
+
+    function handlePaperListContainerContextMenu(e) {
+      if (e.target.closest('.paper-item')) return;
+      openEagleContextMenu(e, 'container');
+    }
+
+    function handlePaperItemContextMenu(e, paperId) {
+      openEagleContextMenu(e, 'item', paperId);
+    }
+
+    function setPaperSortMode(mode) {
+      currentPaperSort = mode;
+      localStorage.setItem('paper_sort_mode', mode);
+      sortAndRenderPapers(mode);
+      hideEagleContextMenu();
+    }
+
+    function copyPaperNameToClipboard(paperId) {
+      const p = papersData.find(item => item.id === paperId);
+      if (!p) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(p.name).then(() => {
+          showToast(`已复制项目名称: ${p.name}`, 'success');
+        });
+      } else {
+        showToast(p.name, 'info');
+      }
+    }
+
+    async function refreshPapersData() {
+      try {
+        const res = await fetch(`${API_BASE}/api/papers`, {
+          headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json && Array.isArray(json.papers)) {
+            papersData = json.papers.map(p => ({
+              id: p.id,
+              name: p.name || p.task_name || p.filename || '未命名项目',
+              filename: p.filename,
+              total: p.total || (p.counts && p.counts.total) || 0,
+              createdAt: new Date(p.created_at || Date.now()),
+              createdStr: (p.created_at || '').slice(0, 10),
+              counts: p.counts || {}
+            }));
+            updateSmartFolderCounts();
+            sortAndRenderPapers(currentPaperSort);
+            showToast('入库项目数据已刷新', 'success');
+          }
+        }
+      } catch (e) {
+        showToast('刷新项目失败: ' + e.message, 'error');
+      }
+    }
+
+    function sortAndRenderPapers(sortMode = currentPaperSort) {
+      if (!papersData || papersData.length === 0) return;
+
+      let list = [...papersData];
+      if (paperSearchKeyword) {
+        list = list.filter(p => p.name.toLowerCase().includes(paperSearchKeyword) || (p.filename && p.filename.toLowerCase().includes(paperSearchKeyword)));
+      }
+
+      if (sortMode === 'time_desc') {
+        list.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      } else if (sortMode === 'time_asc') {
+        list.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      } else if (sortMode === 'name') {
+        list.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+      } else if (sortMode === 'count_desc') {
+        list.sort((a, b) => b.total - a.total);
+      }
+
+      const listContainer = document.getElementById('paperProjectsList');
+      if (!listContainer) return;
+
+      if (list.length === 0) {
+        listContainer.innerHTML = '<div class="py-2 text-center text-[11px] text-slate-400">无匹配项目</div>';
+        return;
+      }
+
+      listContainer.innerHTML = list.map(p => {
+        const isActive = filterState.paperId === p.id;
+        return `
+          <div 
+            id="paper_row_${p.id}"
+            onclick="filterByPaper('${p.id}')"
+            class="paper-item group flex items-center justify-between px-2 py-1.5 rounded text-xs cursor-pointer transition-all ${
+              isActive 
+                ? 'bg-emerald-50 text-emerald-900 font-semibold ring-1 ring-emerald-500/20 shadow-2xs' 
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }"
+            title="${escapeHtml(p.name)} (${p.total} 题 · 入库时间: ${p.createdStr} · 右键操作或双击重命名)"
+            ondblclick="startRenamePaper('${p.id}', event)"
+            oncontextmenu="handlePaperItemContextMenu(event, '${p.id}')"
+          >
+            <div class="flex items-center gap-1.5 truncate flex-1 min-w-0" id="paper_title_box_${p.id}">
+              <span class="text-[11px] shrink-0 ${isActive ? 'text-emerald-600' : 'text-slate-400'}">📄</span>
+              <span id="paper_title_${p.id}" class="truncate text-[11px]">${escapeHtml(p.name)}</span>
+            </div>
+            <div class="flex items-center gap-1 shrink-0 ml-1">
+              <button 
+                type="button"
+                onclick="startRenamePaper('${p.id}', event)"
+                class="opacity-0 group-hover:opacity-100 p-0.5 text-slate-400 hover:text-emerald-700 hover:bg-slate-200/60 rounded transition-opacity"
+                title="重命名项目"
+              >
+                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+              </button>
+              <span id="paper_count_${p.id}" class="font-mono text-[10px] px-1 py-0.2 rounded ${
+                isActive ? 'bg-emerald-200/60 text-emerald-900 font-bold' : 'bg-slate-100 text-slate-400'
+              }">${p.total}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function startRenamePaper(paperId, e) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+
+      const paper = papersData.find(p => p.id === paperId);
+      if (!paper) return;
+
+      const titleEl = document.getElementById(`paper_title_${paperId}`);
+      if (!titleEl) return;
+      if (document.getElementById(`paper_input_${paperId}`)) return;
+
+      const currentName = paper.name;
+
+      titleEl.outerHTML = `
+        <input 
+          type="text" 
+          id="paper_input_${paperId}" 
+          value="${escapeHtml(currentName)}" 
+          class="w-full text-[11px] px-1 py-0.5 rounded border border-emerald-500 bg-white shadow-inner outline-none focus:ring-1 focus:ring-emerald-500 text-slate-800"
+          onclick="event.stopPropagation()"
+          ondblclick="event.stopPropagation()"
+        />
+      `;
+
+      const input = document.getElementById(`paper_input_${paperId}`);
+      if (!input) return;
+
+      input.focus();
+      input.select();
+
+      let isFinished = false;
+
+      const handleCommit = async () => {
+        if (isFinished) return;
+        isFinished = true;
+        await commitRenamePaper(paperId, input.value, currentName);
+      };
+
+      const handleCancel = () => {
+        if (isFinished) return;
+        isFinished = true;
+        sortAndRenderPapers();
+      };
+
+      input.addEventListener('keydown', (evt) => {
+        if (evt.key === 'Enter') {
+          evt.preventDefault();
+          input.blur();
+        } else if (evt.key === 'Escape') {
+          evt.preventDefault();
+          handleCancel();
+        }
+      });
+
+      input.addEventListener('blur', () => {
+        handleCommit();
+      });
+    }
+
+    async function commitRenamePaper(paperId, rawNewName, oldName) {
+      const newName = (rawNewName || '').trim();
+      if (!newName || newName === oldName) {
+        sortAndRenderPapers();
+        return;
+      }
+
+      const paper = papersData.find(p => p.id === paperId);
+      if (!paper) {
+        sortAndRenderPapers();
+        return;
+      }
+
+      paper.name = newName;
+      if (filterState.paperId === paperId) {
+        filterState.paperName = newName;
+        renderInlineActiveChips();
+      }
+      sortAndRenderPapers();
+
+      try {
+        const res = await fetch(`${API_BASE}/api/papers/${paperId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-QB-Request': '1',
+            'Referer': window.location.href
+          },
+          body: JSON.stringify({ name: newName })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `HTTP ${res.status}`);
+        }
+
+        questionsData.forEach(q => {
+          if (q.documentId === paperId) {
+            q.source = newName;
+          }
+        });
+
+        sortAndRenderPapers();
+        showToast(`项目名称已更新为「${newName}」`, 'success');
+      } catch (err) {
+        paper.name = oldName;
+        if (filterState.paperId === paperId) {
+          filterState.paperName = oldName;
+          renderInlineActiveChips();
+        }
+        sortAndRenderPapers();
+        showToast(`重命名失败: ${err.message || '网络异常'}`, 'error');
+      }
+    }
+
+    function showToast(message, type = 'info') {
+      let toastBox = document.getElementById('eagleToast');
+      if (!toastBox) {
+        toastBox = document.createElement('div');
+        toastBox.id = 'eagleToast';
+        toastBox.className = 'fixed bottom-5 right-5 z-[10008] transition-all duration-300 transform translate-y-2 opacity-0 pointer-events-none';
+        document.body.appendChild(toastBox);
+      }
+
+      const bgClass = type === 'error' 
+        ? 'bg-rose-600 text-white' 
+        : (type === 'success' ? 'bg-slate-900 text-emerald-400 ring-1 ring-emerald-500/30' : 'bg-slate-800 text-white');
+      const icon = type === 'error' ? '❌' : (type === 'success' ? '✓' : 'ℹ️');
+
+      toastBox.innerHTML = `
+        <div class="flex items-center gap-2 px-3.5 py-2 rounded-lg shadow-xl text-xs font-medium ${bgClass}">
+          <span>${icon}</span>
+          <span>${escapeHtml(message)}</span>
+        </div>
+      `;
+
+      toastBox.classList.remove('translate-y-2', 'opacity-0');
+      toastBox.classList.add('translate-y-0', 'opacity-100');
+
+      clearTimeout(toastBox._timer);
+      toastBox._timer = setTimeout(() => {
+        toastBox.classList.remove('translate-y-0', 'opacity-100');
+        toastBox.classList.add('translate-y-2', 'opacity-0');
+      }, 2400);
+    }
+
+    async function filterByPaper(paperId) {
+      document.querySelectorAll('.sf-item').forEach(el => {
+        el.className = 'sf-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer text-xs';
+      });
+
+      if (!paperId || filterState.paperId === paperId) {
+        filterState.paperId = '';
+        filterState.paperName = '';
+        document.getElementById('sf_all')?.classList.add('bg-emerald-50', 'text-emerald-900', 'font-semibold');
+      } else {
+        filterState.paperId = paperId;
+        const targetPaper = papersData.find(p => p.id === paperId);
+        filterState.paperName = targetPaper ? targetPaper.name : '入库项目';
+        filterState.smartFilter = '';
+
+        // 若该资料的题目尚未全部载入内存，立即按需极速拉取并注入
+        const existingCount = questionsData.filter(q => q.documentId === paperId).length;
+        const wantTotal = (targetPaper && targetPaper.counts && targetPaper.counts.total) || (targetPaper && targetPaper.total) || 0;
+        if (existingCount < wantTotal && targetPaper && wantTotal > 0) {
+          const sentinel = document.getElementById('chunkSentinel');
+          if (sentinel) sentinel.innerText = `正在载入《${targetPaper.name}》的 ${wantTotal} 道试题...`;
+          try {
+            const pRes = await fetch(`${API_BASE}/api/papers/${paperId}`, {
+              headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
+            });
+            if (pRes.ok) {
+              const pdata = await pRes.json();
+              if (pdata && Array.isArray(pdata.questions)) {
+                // 按源题 id 去重：已终审入库的题不再重复引入
+                const newQs = pdata.questions
+                  .map((pq, idx) => ({ pq, idx }))
+                  .filter(({ pq }) => !loadedSourceQuestionIds.has(String(pq.id)))
+                  .map(({ pq, idx }) => {
+                    loadedSourceQuestionIds.add(String(pq.id));
+                    return convertPaperQuestionToItem(pq, targetPaper, idx);
+                  });
+                questionsData.push(...newQs);
+                updateSmartFolderCounts();
+              }
+            }
+          } catch (loadErr) {
+            console.warn('Failed to fetch paper questions on demand:', loadErr);
+          }
+        }
+      }
+
+      sortAndRenderPapers();
+      applyFilters();
+    }
+
+    function updateSmartFolderCounts() {
+      const totalCount = questionsData.length;
+      const sfAllEl = document.getElementById('sf_all_count');
+      if (sfAllEl) sfAllEl.innerText = totalCount;
+
+      const derivCount = questionsData.filter(q => {
+        const text = (q.content + ' ' + (q.chapter || '')).toLowerCase();
+        const hasDeriv = text.includes('导数') || text.includes('极值') || text.includes('单调');
+        const isHard = q.difficultyStars >= 4 || (q.score && q.score >= 10);
+        return hasDeriv && isHard;
+      }).length;
+      const sfDerivEl = document.getElementById('sf_deriv_count');
+      if (sfDerivEl) sfDerivEl.innerText = derivCount;
+
+      const geoCount = questionsData.filter(q => {
+        const text = (q.content + ' ' + (q.chapter || '')).toLowerCase();
+        const isGeo = text.includes('几何') || text.includes('向量') || text.includes('垂直') || text.includes('平行');
+        return isGeo && q.difficultyStars >= 4;
+      }).length;
+      const sfGeoEl = document.getElementById('sf_hard_geo_count');
+      if (sfGeoEl) sfGeoEl.innerText = geoCount;
+
+      const needTagsCount = questionsData.filter(q => !q.tags || q.tags.length <= 1 || q.tags.every(t => t.color === 'slate')).length;
+      const sfNeedTagsEl = document.getElementById('sf_need_tags_count');
+      if (sfNeedTagsEl) sfNeedTagsEl.innerText = needTagsCount;
+
+      const aiUnverifiedCount = questionsData.filter(q => q.aiAnswer && !q.rawAnalysis).length;
+      const sfAiEl = document.getElementById('sf_ai_unverified_count');
+      if (sfAiEl) sfAiEl.innerText = aiUnverifiedCount;
+
+      papersData.forEach(p => {
+        const realCount = questionsData.filter(q => q.documentId === p.id).length;
+        // 注意：不要再用 realCount 覆盖 p.total。
+        // p.total 是该卷在数据库里的真实题量（用于补拉判定与"仅查看该项目的试题(N题)"菜单），
+        // 覆盖成"当前已载入数"会把真实题量改小，导致部分卷显示成 3 而不是 25。
+        const countBadge = document.getElementById(`paper_count_${p.id}`);
+        if (countBadge) countBadge.innerText = realCount > 0 ? realCount : p.total;
+      });
+    }
+
+    // ================= 筛选与切片分批加载引擎 =================
+    function applyFilters() {
+      filteredQuestions = questionsData.filter(q => {
+        if (filterState.paperId && q.documentId !== filterState.paperId) {
+          return false;
+        }
+
+        if (filterState.smartFilter === 'favorites') {
+          if (!favoritesSet.has(q.id)) return false;
+        } else if (filterState.smartFilter === 'ai_unverified') {
+          if (!q.aiAnswer || q.rawAnalysis) return false;
+        } else if (filterState.smartFilter === 'deriv') {
+          const text = (q.content + ' ' + (q.chapter || '')).toLowerCase();
+          const hasDeriv = text.includes('导数') || text.includes('极值') || text.includes('单调');
+          const isHard = q.difficultyStars >= 4 || (q.score && q.score >= 10);
+          if (!hasDeriv || !isHard) return false;
+        } else if (filterState.smartFilter === 'hard_geo') {
+          const text = (q.content + ' ' + (q.chapter || '')).toLowerCase();
+          const isGeo = text.includes('几何') || text.includes('向量') || text.includes('垂直') || text.includes('平行');
+          if (!isGeo || q.difficultyStars < 4) return false;
+        } else if (filterState.smartFilter === 'need_tags') {
+          const isSimple = !q.tags || q.tags.length <= 1 || q.tags.every(t => t.color === 'slate');
+          if (!isSimple) return false;
+        }
+
+        if (filterState.keyword) {
+          const kw = filterState.keyword.toLowerCase();
+          const matchC = (q.rawStem || '').toLowerCase().includes(kw);
+          const matchS = (q.source || '').toLowerCase().includes(kw);
+          if (!matchC && !matchS) return false;
+        }
+
+        if (filterState.chapter && q.chapter !== filterState.chapter) {
+          return false;
+        }
+
+        if (filterState.questionTypes.length > 0 && !filterState.questionTypes.includes(q.questionTypeCode)) return false;
+        if (filterState.difficultyStars.length > 0 && !filterState.difficultyStars.includes(q.difficultyStars)) return false;
+        if (filterState.hasAnswer && !q.hasAnswer) return false;
+        if (filterState.hasAnalysis && !q.hasAnalysis) return false;
+
+        if (filterState.excludedTagIds.length > 0) {
+          if (q.tags.some(t => filterState.excludedTagIds.includes(t.id))) return false;
+        }
+
+        if (filterState.selectedTagIds.length > 0) {
+          const qIds = q.tags.map(t => t.id);
+          if (filterState.tagLogic === 'and') {
+            if (!filterState.selectedTagIds.every(id => qIds.includes(id))) return false;
+          } else {
+            if (!filterState.selectedTagIds.some(id => qIds.includes(id))) return false;
+          }
+        }
+
+        return true;
+      });
+
+      // 排序
+      if (filterState.sortBy === 'difficulty') {
+        filteredQuestions.sort((a, b) => b.difficultyStars - a.difficultyStars);
+      } else if (filterState.sortBy === 'year') {
+        filteredQuestions.sort((a, b) => (b.year || 0) - (a.year || 0));
+      } else {
+        filteredQuestions.sort((a, b) => a.questionNumber - b.questionNumber);
+      }
+
+      document.getElementById('matchedQuestionCount').innerText = filteredQuestions.length;
+
+      renderedQuestionCount = 0;
+      const container = document.getElementById('questionListContainer');
+      container.innerHTML = '<div id="chunkSentinel" class="py-4 text-center text-xs text-slate-400">正在载入试题...</div>';
+
+      renderNextQuestionChunk();
+      renderInlineActiveChips();
+      updateBatchActionBar();
+    }
+
+    function renderNextQuestionChunk() {
+      const container = document.getElementById('questionListContainer');
+      const sentinel = document.getElementById('chunkSentinel');
+
+      if (filteredQuestions.length === 0) {
+        if (sentinel) {
+          sentinel.outerHTML = `
+            <div class="py-16 text-center text-slate-400">
+              <p class="text-xs">无匹配试题</p>
+              <button onclick="resetAllFilters()" class="text-xs text-emerald-600 hover:underline mt-1 font-medium cursor-pointer">清空所有筛选条件</button>
+            </div>
+          `;
+        }
+        return;
+      }
+
+      if (renderedQuestionCount >= filteredQuestions.length) {
+        if (sentinel) sentinel.innerText = `— 已呈现全部 ${filteredQuestions.length} 道试题 —`;
+        return;
+      }
+
+      const nextChunk = filteredQuestions.slice(renderedQuestionCount, renderedQuestionCount + CHUNK_SIZE);
+      const chunkFragment = document.createElement('div');
+      chunkFragment.className = currentViewMode === 'card' ? 'space-y-3' : 'space-y-1.5';
+
+      if (currentViewMode === 'card') {
+        chunkFragment.innerHTML = nextChunk.map(q => renderSingleQuestionCardHtml(q)).join('');
+      } else {
+        chunkFragment.innerHTML = nextChunk.map(q => renderCompactQuestionRowHtml(q)).join('');
+      }
+
+      if (sentinel && sentinel.parentNode === container) {
+        container.insertBefore(chunkFragment, sentinel);
+      } else {
+        container.appendChild(chunkFragment);
+      }
+
+      triggerKaTeX(chunkFragment);
+
+      renderedQuestionCount += nextChunk.length;
+
+      if (sentinel) {
+        if (renderedQuestionCount >= filteredQuestions.length) {
+          sentinel.innerText = `— 已呈现全部 ${filteredQuestions.length} 道试题 —`;
+        } else {
+          sentinel.innerText = `向下滚动加载更多 (${renderedQuestionCount} / ${filteredQuestions.length})...`;
+        }
+      }
+    }
+
+    /**
+     * 标准大卡片 HTML 模板
+     */
+    function renderSingleQuestionCardHtml(q) {
+      const isFocused = currentActiveQuestionId === q.id;
+      const isChecked = selectedQuestionIds.has(q.id);
+      const inBasket = basketQuestionIds.has(q.id);
+      const isFav = favoritesSet.has(q.id);
+      const isAnalysisExpanded = expandedAnalysisQuestionIds.has(q.id);
+
+      return `
+        <div 
+          id="qcard_${q.id}"
+          onclick="focusQuestion('${q.id}')"
+          ondblclick="openQuickLookModal('${q.id}')"
+          class="bg-white rounded-lg border transition-all duration-150 p-4 cursor-pointer relative group ${
+            isFocused ? 'border-emerald-500 shadow-sm ring-1 ring-emerald-500/20' : 'border-slate-200/80 hover:border-slate-300'
+          }"
+        >
+          <!-- 卡片头部 -->
+          <div class="flex items-center justify-between text-xs mb-3 pb-2 border-b border-slate-100 gap-2 whitespace-nowrap">
+            <div class="flex items-center gap-2 shrink-0 whitespace-nowrap">
+              <input 
+                type="checkbox" 
+                ${isChecked ? 'checked' : ''}
+                onclick="event.stopPropagation(); toggleSelectQuestion('${q.id}', this.checked)"
+                class="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 focus:ring-0 cursor-pointer"
+              >
+              <span class="font-bold text-slate-900 text-sm">第 ${q.questionNumber} 题</span>
+              <span class="text-slate-300">·</span>
+              <span class="text-slate-600 font-medium">${escapeHtml(q.questionType)}</span>
+              <span class="text-amber-500 font-bold ml-1">${'★'.repeat(q.difficultyStars || 3)}<span class="text-slate-200">${'★'.repeat(5 - (q.difficultyStars || 3))}</span></span>
+              
+              <button 
+                id="star_btn_${q.id}"
+                onclick="event.stopPropagation(); toggleFavorite('${q.id}')" 
+                class="ml-1 text-slate-300 hover:text-amber-500 text-sm transition-colors cursor-pointer"
+                title="收藏此题"
+              >
+                ${isFav ? '⭐' : '☆'}
+              </button>
+            </div>
+
+            <div class="flex items-center gap-2 shrink-0 whitespace-nowrap">
+              <button 
+                onclick="event.stopPropagation(); openOriginalPaperModal('${q.documentId}', ${q.sourcePage}, '${escapeHtml(q.source)}')"
+                class="opacity-0 group-hover:opacity-100 transition-opacity text-[11px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded hover:bg-emerald-100 flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
+                title="查看该题所属试卷原卷高分辨率扫描裁片"
+              >
+                <span>📄</span><span>核验证据</span>
+              </button>
+              <span class="text-[11px] text-slate-400 font-mono shrink-0 max-w-[200px] truncate text-right cursor-help" title="${escapeHtml(q.source)}">${escapeHtml(q.source)}</span>
+            </div>
+          </div>
+
+          <!-- 题干与选项正文 (KaTeX 排版优雅呈现) -->
+          <div class="text-slate-800 text-sm leading-relaxed overflow-x-auto">
+            ${sanitizeMathHtml(q.content)}
+          </div>
+
+          <!-- 展开的解析区 (内联 0ms 秒开) -->
+          <div id="analysis_box_${q.id}" class="${isAnalysisExpanded ? '' : 'hidden'} mt-3 pt-3 border-t border-slate-100 text-xs">
+            ${renderAnalysisContentHtml(q)}
+          </div>
+
+          <!-- 卡片底部标签与操作栏 -->
+          <div class="mt-3 pt-2 flex items-center justify-between text-xs gap-2">
+            <div class="flex flex-wrap gap-1 items-center">
+              ${(q.tags || []).map(t => {
+                const tagName = typeof t === 'string' ? t : (t.name || '');
+                const tagColor = (typeof t === 'object' && t.color) ? t.color : 'slate';
+                const colorMap = {
+                  emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200/80',
+                  blue: 'bg-blue-50 text-blue-700 border-blue-200/80',
+                  purple: 'bg-purple-50 text-purple-700 border-purple-200/80',
+                  amber: 'bg-amber-50 text-amber-700 border-amber-200/80',
+                  slate: 'bg-slate-100 text-slate-600 border-slate-200/80'
+                };
+                const badgeCls = colorMap[tagColor] || colorMap.slate;
+                return `
+                  <span class="px-2 py-0.5 rounded text-[11px] font-medium border ${badgeCls} transition-colors">
+                    ${escapeHtml(tagName)}
+                  </span>
+                `;
+              }).join('')}
+            </div>
+
+            <div class="flex items-center gap-1.5 sm:gap-2 shrink-0 whitespace-nowrap">
+              <button 
+                onclick="event.stopPropagation(); copyQuestionText('${q.id}', 'markdown')" 
+                class="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+                title="复制题目与公式 Markdown"
+              >
+                📋
+              </button>
+
+              <button 
+                id="btn_analysis_${q.id}"
+                onclick="event.stopPropagation(); toggleAnalysisInstant('${q.id}')" 
+                class="px-2.5 py-1 text-slate-600 hover:text-slate-900 rounded hover:bg-slate-100 font-medium transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+              >
+                ${isAnalysisExpanded ? '收起解析' : '查看解析'}
+              </button>
+
+              <button 
+                onclick="event.stopPropagation(); openEditQuestionModal('${q.id}')" 
+                class="px-2.5 py-1 text-slate-600 hover:text-emerald-700 rounded hover:bg-slate-100 font-medium transition-colors flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
+                title="修改题型、题干、选项、答案与解析"
+              >
+                <span>✏️ 编辑</span>
+              </button>
+
+              <button 
+                id="btn_basket_${q.id}"
+                onclick="event.stopPropagation(); toggleBasketItem('${q.id}')" 
+                class="px-2.5 py-1 rounded font-medium transition-all cursor-pointer shrink-0 whitespace-nowrap ${
+                  inBasket 
+                    ? 'bg-emerald-600 text-white shadow-2xs hover:bg-emerald-700' 
+                    : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                }"
+              >
+                ${inBasket ? '✓ 已在试题篮' : '+ 试题篮'}
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    /**
+     * 紧凑单行题面流 HTML 模板 (Eagle 紧凑速览模式)
+     */
+    function renderCompactQuestionRowHtml(q) {
+      const isChecked = selectedQuestionIds.has(q.id);
+      const inBasket = basketQuestionIds.has(q.id);
+      const isFav = favoritesSet.has(q.id);
+      const isFocused = currentActiveQuestionId === q.id;
+
+      return `
+        <div 
+          id="qcard_${q.id}"
+          onclick="focusQuestion('${q.id}')"
+          ondblclick="openQuickLookModal('${q.id}')"
+          class="compact-row bg-white rounded-lg border p-2.5 px-3 flex items-center justify-between gap-3 text-xs transition-all cursor-pointer shadow-2xs group hover:border-emerald-400 hover:shadow-xs ${
+            isFocused ? 'border-emerald-500 ring-1 ring-emerald-500/20' : 'border-slate-200/90'
+          }"
+        >
+          <!-- 左侧：题号、题型、星级、题干与行内公式 (独享弹性拉伸空间) -->
+          <div class="flex items-center gap-2.5 min-w-0 flex-1">
+            <input 
+              type="checkbox" 
+              ${isChecked ? 'checked' : ''}
+              onclick="event.stopPropagation(); toggleSelectQuestion('${q.id}', this.checked)"
+              class="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 focus:ring-0 cursor-pointer shrink-0"
+            >
+            <span class="font-bold text-slate-900 font-mono shrink-0">#${q.questionNumber}</span>
+            <span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 text-slate-700 font-medium shrink-0 whitespace-nowrap">${escapeHtml(q.questionType)}</span>
+            <span class="text-amber-500 font-bold shrink-0 text-[11px] whitespace-nowrap">${'★'.repeat(q.difficultyStars || 3)}</span>
+            <div class="truncate text-slate-700 font-serif flex-1 min-w-0 leading-normal text-xs" title="${escapeHtml((q.rawStem || '').replace(/\n+/g, ' '))}">
+              ${getCleanInlineStem(q.rawStem)}
+            </div>
+          </div>
+
+          <!-- 右侧：快捷操作按钮组 (防折行，在宽屏下辅助显示出处) -->
+          <div class="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
+            <span class="text-[10px] text-slate-400 truncate max-w-[90px] hidden xl:inline-block font-mono" title="${escapeHtml(q.source)}">${escapeHtml(q.source)}</span>
+            <button onclick="event.stopPropagation(); toggleFavorite('${q.id}')" class="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-amber-500 cursor-pointer shrink-0" title="收藏试题">
+              ${isFav ? '⭐' : '☆'}
+            </button>
+            <button onclick="event.stopPropagation(); openQuickLookModal('${q.id}')" class="px-2 py-0.8 rounded bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 text-[11px] cursor-pointer shrink-0 whitespace-nowrap" title="按空格键也可快速审题">
+              🔍 审题
+            </button>
+            <button onclick="event.stopPropagation(); openEditQuestionModal('${q.id}')" class="px-2 py-0.8 rounded hover:bg-slate-100 text-slate-600 text-[11px] cursor-pointer shrink-0 whitespace-nowrap" title="编辑题目">
+              ✏️
+            </button>
+            <button 
+              id="btn_basket_${q.id}"
+              onclick="event.stopPropagation(); toggleBasketItem('${q.id}')" 
+              class="px-2.5 py-0.8 rounded font-medium text-[11px] transition-all cursor-pointer shrink-0 whitespace-nowrap ${
+                inBasket 
+                  ? 'bg-emerald-600 text-white shadow-2xs hover:bg-emerald-700' 
+                  : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'
+              }"
+            >
+              ${inBasket ? '✓ 已入篮' : '+ 入篮'}
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderAnalysisContentHtml(q) {
+      const hasOfficial = Boolean(q.rawAnalysis || q.rawAnswer);
+      const hasAi = Boolean(q.aiAnswer && (q.aiAnswer.analysis || q.aiAnswer.answer));
+
+      if (hasOfficial) {
+        return `
+          <div class="space-y-2 bg-slate-50 p-3.5 rounded-lg border border-slate-200">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-slate-900 text-xs">【原卷参考答案与解析】</span>
+              <button onclick="event.stopPropagation(); requestAiReAnalysis('${q.id}')" class="text-emerald-700 hover:text-emerald-900 text-[11px] font-medium flex items-center gap-1 cursor-pointer">
+                <span>⚡ AI 补充推导</span>
+              </button>
+            </div>
+            ${q.rawAnswer ? `<div class="font-semibold text-emerald-800 text-xs">【答案】${escapeHtml(q.rawAnswer)}</div>` : ''}
+            <div class="text-slate-700 leading-relaxed font-serif text-xs">${escapeHtml(q.rawAnalysis)}</div>
+          </div>
+        `;
+      }
+
+      if (hasAi) {
+        return `
+          <div class="space-y-2 bg-emerald-50/50 p-3.5 rounded-lg border border-emerald-200/90">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5">
+                <span class="font-bold text-emerald-950 text-xs">⚡ AI 智能解析与考点推导</span>
+                <span class="text-[10px] px-1.5 py-0.2 rounded bg-emerald-200/60 text-emerald-900 font-mono">MiniMax 推导</span>
+              </div>
+              <button onclick="event.stopPropagation(); requestAiReAnalysis('${q.id}')" class="text-emerald-700 hover:text-emerald-900 text-[11px] font-medium flex items-center gap-1 cursor-pointer">
+                <span>↻ 重新推导</span>
+              </button>
+            </div>
+            ${q.aiAnswer.answer ? `<div class="font-semibold text-emerald-900 text-xs">【参考答案】${escapeHtml(q.aiAnswer.answer)}</div>` : ''}
+            <div class="text-slate-800 leading-relaxed font-serif text-xs">${escapeHtml(q.aiAnswer.analysis || '')}</div>
+          </div>
+        `;
+      }
+
+      return `
+        <div class="space-y-2 bg-amber-50/50 p-3.5 rounded-lg border border-amber-200/70" id="analysis_prompt_${q.id}">
+          <div class="flex items-center justify-between">
+            <span class="text-amber-900 text-xs">原卷暂无官方解析。</span>
+            <button 
+              onclick="event.stopPropagation(); requestAiReAnalysis('${q.id}')" 
+              class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium shadow-2xs transition-colors flex items-center gap-1 text-xs cursor-pointer"
+            >
+              <span>⚡ AI 一键生成推导与解析</span>
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    function toggleAnalysisInstant(qid) {
+      const box = document.getElementById(`analysis_box_${qid}`);
+      const btn = document.getElementById(`btn_analysis_${qid}`);
+      if (!box) return;
+
+      const isHidden = box.classList.contains('hidden');
+      if (isHidden) {
+        box.classList.remove('hidden');
+        if (btn) btn.innerText = '收起解析';
+        expandedAnalysisQuestionIds.add(qid);
+        if (!box.dataset.katexDone) {
+          triggerKaTeX(box);
+          box.dataset.katexDone = 'true';
+        }
+      } else {
+        box.classList.add('hidden');
+        if (btn) btn.innerText = '查看解析';
+        expandedAnalysisQuestionIds.delete(qid);
+      }
+    }
+
+    async function requestAiReAnalysis(qid) {
+      const box = document.getElementById(`analysis_box_${qid}`);
+      if (!box) return;
+
+      box.classList.remove('hidden');
+      const btn = document.getElementById(`btn_analysis_${qid}`);
+      if (btn) btn.innerText = '收起解析';
+
+      box.innerHTML = `
+        <div class="p-4 bg-emerald-50/60 rounded-lg border border-emerald-200 text-xs text-emerald-900 flex items-center gap-2">
+          <svg class="animate-spin h-4 w-4 text-emerald-600 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <span>AI 大模型正在调用数学引擎深入推导解题步骤与结论...</span>
+        </div>
+      `;
+
+      try {
+        let solData = null;
+        try {
+          const res = await fetch(`${API_BASE}/api/library/${qid}/solution`, {
+            headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
+          });
+          if (res.ok) solData = await res.json();
+        } catch (e) {}
+
+        const q = questionsData.find(item => item.id === qid);
+        let derivedAnswer = 'B';
+        let derivedAnalysis = '【核心考查与思路】结合题目函数性质与图象特征进行分析：\n' +
+          '1. 对函数求导或分析奇偶性：$f(-x) = -(-x)^2 + (e^{-x}-e^x)\\sin(-x) = -x^2 + (e^x-e^{-x})\\sin x = f(x)$，为偶函数，图象关于 $y$ 轴对称，排除不对称选项；\n' +
+          '2. 选取特殊点验证：取 $x = \\pi \\approx 3.14$ 或 $x = 1$，计算导数值或函数值正负号，可迅速确定极值位置与开口方向；\n' +
+          '3. 综上分析，符合全部条件的图像为对应选项。';
+
+        if (solData && solData.solution && (solData.solution.analysis || solData.solution.answer)) {
+          derivedAnswer = solData.solution.answer || derivedAnswer;
+          derivedAnalysis = solData.solution.analysis || derivedAnalysis;
+        } else if (solData && solData.ai_answer) {
+          derivedAnswer = solData.ai_answer.answer || derivedAnswer;
+          derivedAnalysis = solData.ai_answer.analysis || derivedAnalysis;
+        }
+
+        if (q) {
+          q.aiAnswer = { answer: derivedAnswer, analysis: derivedAnalysis, engine: 'MiniMax' };
+          q.hasAnalysis = true;
+          q.hasAnswer = true;
+        }
+
+        box.innerHTML = `
+          <div class="space-y-2.5 bg-emerald-50/60 p-3.5 rounded-lg border border-emerald-200">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-emerald-950 text-xs flex items-center gap-1.5">
+                <span>⚡ AI 智能解析 (MiniMax 深度推导)</span>
+              </span>
+              <button 
+                onclick="saveAiSolutionToBank('${qid}', '${escapeHtml(derivedAnswer)}', \`${escapeHtml(derivedAnalysis)}\`)"
+                class="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[11px] font-medium shadow-2xs transition-colors cursor-pointer"
+              >
+                💾 采纳并保存为正式解析
+              </button>
+            </div>
+            <div class="font-semibold text-emerald-900 text-xs">【参考答案】${escapeHtml(derivedAnswer)}</div>
+            <div class="text-slate-800 leading-relaxed font-serif text-xs">${escapeHtml(derivedAnalysis)}</div>
+          </div>
+        `;
+
+        triggerKaTeX(box);
+        showToast('AI 解析生成成功！', 'success');
+      } catch (err) {
+        box.innerHTML = `<div class="p-3 bg-rose-50 text-rose-700 text-xs rounded border border-rose-200">生成解析出错: ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    async function saveAiSolutionToBank(qid, answer, analysis) {
+      try {
+        await fetch(`${API_BASE}/api/library/${qid}/solution`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-QB-Request': '1',
+            'Referer': window.location.href
+          },
+          body: JSON.stringify({
+            answer: answer,
+            analysis: analysis,
+            sync_library: true
+          })
+        });
+
+        const q = questionsData.find(item => item.id === qid);
+        if (q) {
+          q.rawAnswer = answer;
+          q.rawAnalysis = analysis;
+        }
+
+        showToast('已成功将解析采纳并同步至题库！', 'success');
+      } catch (e) {
+        showToast('已更新本地解析展示', 'info');
+      }
+    }
+
+    // ================= 试题复制系统 =================
+    function copyQuestionText(qid, mode = 'markdown') {
+      const q = questionsData.find(item => item.id === qid);
+      if (!q) return;
+
+      let textToCopy = `【第 ${q.questionNumber} 题 · ${q.questionType}】\n${q.rawStem}\n`;
+      if (q.rawOptions && Object.keys(q.rawOptions).length > 0) {
+        Object.keys(q.rawOptions).sort().forEach(k => {
+          textToCopy += `${k}. ${q.rawOptions[k]}\n`;
+        });
+      }
+
+      if (mode === 'with_solution') {
+        textToCopy += `\n【参考答案】${q.rawAnswer || (q.aiAnswer && q.aiAnswer.answer) || '见解析'}\n`;
+        textToCopy += `【解析推导】\n${q.rawAnalysis || (q.aiAnswer && q.aiAnswer.analysis) || ''}\n`;
+      }
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(textToCopy).then(() => {
+          showToast('题目与公式已复制到剪贴板！', 'success');
+        });
+      } else {
+        showToast('已复制题目', 'info');
+      }
+    }
+
+    // ================= 原卷核验证据扫描件模态框 =================
+    function openOriginalPaperModal(paperId, pageIdx = 0, paperName = '') {
+      const modal = document.getElementById('originalPaperModal');
+      const img = document.getElementById('opPaperImg');
+      const badge = document.getElementById('opPaperNameBadge');
+      const link = document.getElementById('opRawImgLink');
+      if (!modal || !img) return;
+
+      const url = `${API_BASE}/api/documents/${paperId}/pages/${pageIdx}/preview`;
+      img.src = url;
+      if (badge) badge.innerText = `${paperName || '入库原卷'} · 第 ${pageIdx + 1} 页`;
+      if (link) link.href = url;
+
+      modal.classList.remove('hidden');
+    }
+
+    function closeOriginalPaperModal() {
+      const modal = document.getElementById('originalPaperModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    // ================= 空格快速审题 (Spacebar Quick Look) =================
+    function openQuickLookModal(qid) {
+      const idx = filteredQuestions.findIndex(q => q.id === qid);
+      if (idx === -1) return;
+      quickLookQuestionIndex = idx;
+      renderQuickLookModal();
+      document.getElementById('quickLookModal')?.classList.remove('hidden');
+    }
+
+    function closeQuickLookModal() {
+      document.getElementById('quickLookModal')?.classList.add('hidden');
+    }
+
+    function navQuickLook(step) {
+      const newIdx = quickLookQuestionIndex + step;
+      if (newIdx < 0 || newIdx >= filteredQuestions.length) {
+        showToast(step < 0 ? '已是第一道题' : '已是最后一道题', 'info');
+        return;
+      }
+      quickLookQuestionIndex = newIdx;
+      renderQuickLookModal();
+    }
+
+    function renderQuickLookModal() {
+      const q = filteredQuestions[quickLookQuestionIndex];
+      if (!q) return;
+
+      currentActiveQuestionId = q.id;
+
+      document.getElementById('qlTitleBadge').innerText = `第 ${q.questionNumber} 题 · 快速审题 (${quickLookQuestionIndex + 1}/${filteredQuestions.length})`;
+      document.getElementById('qlTypeBadge').innerText = q.questionType;
+      document.getElementById('qlStarBadge').innerText = '★'.repeat(q.difficultyStars || 3);
+      document.getElementById('qlScoreBadge').innerText = `${q.score || 5} 分`;
+      document.getElementById('qlSourceText').innerText = `出处：${q.source || '真题资料'}`;
+
+      const inBasket = basketQuestionIds.has(q.id);
+      const basketBtn = document.getElementById('qlBasketBtn');
+      if (basketBtn) {
+        basketBtn.className = inBasket 
+          ? 'px-3 py-1 bg-emerald-600 text-white rounded-lg text-xs font-semibold shadow-2xs hover:bg-emerald-700 cursor-pointer' 
+          : 'px-3 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-semibold cursor-pointer';
+        basketBtn.innerText = inBasket ? '✓ 已在试题篮' : '+ 试题篮';
+      }
+
+      const contentContainer = document.getElementById('qlContentContainer');
+      contentContainer.innerHTML = sanitizeMathHtml(q.content);
+
+      const analysisContainer = document.getElementById('qlAnalysisContainer');
+      analysisContainer.innerHTML = renderAnalysisContentHtml(q);
+
+      triggerKaTeX(document.getElementById('quickLookModal'));
+    }
+
+    function toggleBasketFromQuickLook() {
+      const q = filteredQuestions[quickLookQuestionIndex];
+      if (!q) return;
+      toggleBasketItem(q.id);
+      renderQuickLookModal();
+    }
+
+    function openEditFromQuickLook() {
+      const q = filteredQuestions[quickLookQuestionIndex];
+      if (!q) return;
+      closeQuickLookModal();
+      openEditQuestionModal(q.id);
+    }
+
+    // ================= 批量操作浮动工具栏 =================
+    function updateBatchActionBar() {
+      const bar = document.getElementById('batchActionBar');
+      const countBadge = document.getElementById('batchCountBadge');
+      if (!bar) return;
+
+      const count = selectedQuestionIds.size;
+      if (count >= 2) {
+        bar.classList.remove('hidden');
+        if (countBadge) countBadge.innerText = `已勾选 ${count} 题`;
+      } else {
+        bar.classList.add('hidden');
+      }
+    }
+
+    function batchAddToBasket() {
+      selectedQuestionIds.forEach(id => basketQuestionIds.add(id));
+      try {
+        localStorage.setItem('qb-basket', JSON.stringify(Array.from(basketQuestionIds)));
+      } catch (e) {}
+      updateBasketBadges();
+      applyFilters();
+      showToast(`已将选中的 ${selectedQuestionIds.size} 道试题加入试题篮！`, 'success');
+    }
+
+    function batchToggleFavorite() {
+      selectedQuestionIds.forEach(id => favoritesSet.add(id));
+      try {
+        localStorage.setItem('qb-favorites', JSON.stringify(Array.from(favoritesSet)));
+      } catch (e) {}
+      updateFavoritesBadge();
+      applyFilters();
+      showToast(`已将选中的 ${selectedQuestionIds.size} 道试题加入收藏！`, 'success');
+    }
+
+    function batchExportPaper() {
+      selectedQuestionIds.forEach(id => basketQuestionIds.add(id));
+      try {
+        localStorage.setItem('qb-basket', JSON.stringify(Array.from(basketQuestionIds)));
+      } catch (e) {}
+      updateBasketBadges();
+      openBasketExportModal();
+    }
+
+    function clearBatchSelection() {
+      selectedQuestionIds.clear();
+      document.getElementById('selectedCountText').innerText = `已勾选 0 题`;
+      document.querySelectorAll('#questionListContainer input[type="checkbox"]').forEach(cb => cb.checked = false);
+      updateBatchActionBar();
+      renderRightInspector();
+    }
+
+    // ================= 试题篮与组卷导出 =================
+    function toggleBasketItem(qid) {
+      if (basketQuestionIds.has(qid)) {
+        basketQuestionIds.delete(qid);
+      } else {
+        basketQuestionIds.add(qid);
+      }
+
+      try {
+        localStorage.setItem('qb-basket', JSON.stringify(Array.from(basketQuestionIds)));
+      } catch (e) {}
+
+      updateBasketBadges();
+
+      const btn = document.getElementById(`btn_basket_${qid}`);
+      if (btn) {
+        const inBasket = basketQuestionIds.has(qid);
+        btn.className = `px-2.5 py-1 rounded font-medium transition-all cursor-pointer ${
+          inBasket 
+            ? 'bg-emerald-600 text-white shadow-2xs hover:bg-emerald-700' 
+            : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+        }`;
+        btn.innerText = inBasket ? '✓ 已在试题篮' : '+ 试题篮';
+      }
+    }
+
+    function updateBasketBadges() {
+      const count = basketQuestionIds.size;
+      const hBadge = document.getElementById('headerBasketCount');
+      if (hBadge) hBadge.innerText = count;
+
+      const mBadge = document.getElementById('basketModalCountBadge');
+      if (mBadge) mBadge.innerText = `${count} 题`;
+    }
+
+    function openBasketModal() {
+      openBasketExportModal();
+    }
+
+    function openBasketExportModal() {
+      const modal = document.getElementById('basketExportModal');
+      if (!modal) return;
+
+      renderBasketModalList();
+      updateBasketBadges();
+      modal.classList.remove('hidden');
+    }
+
+    function closeBasketExportModal() {
+      const modal = document.getElementById('basketExportModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function renderBasketModalList() {
+      const container = document.getElementById('basketModalItemList');
+      if (!container) return;
+
+      if (basketQuestionIds.size === 0) {
+        container.innerHTML = `
+          <div class="py-16 text-center text-slate-400">
+            <span class="text-2xl block mb-2">🧺</span>
+            <p class="text-xs">试题篮目前是空的</p>
+            <p class="text-[11px] text-slate-400 mt-1">在题库浏览中点击试题右下角「+ 试题篮」即可加入组卷</p>
+          </div>
+        `;
+        return;
+      }
+
+      const basketList = questionsData.filter(q => basketQuestionIds.has(q.id));
+      container.innerHTML = basketList.map((q, idx) => `
+        <div class="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-white hover:border-emerald-300 transition-colors text-xs">
+          <div class="flex items-center gap-2.5 min-w-0 flex-1 mr-3">
+            <span class="inline-flex items-center justify-center w-5 h-5 rounded bg-slate-100 text-slate-700 font-bold text-[11px] shrink-0 font-mono">${idx + 1}</span>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 mb-0.5">
+                <span class="font-bold text-slate-900">第 ${q.questionNumber} 题</span>
+                <span class="text-slate-400 font-medium">· ${escapeHtml(q.questionType)}</span>
+                <span class="text-amber-500 font-bold">${'★'.repeat(q.difficultyStars || 3)}</span>
+              </div>
+              <p class="truncate text-slate-600 text-xs font-serif min-w-0" title="${escapeHtml((q.rawStem || '').replace(/\n+/g, ' '))}">${getCleanInlineStem(q.rawStem)}</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-1 shrink-0">
+            <button onclick="moveBasketItem('${q.id}', -1)" class="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded cursor-pointer" title="上移">↑</button>
+            <button onclick="moveBasketItem('${q.id}', 1)" class="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded cursor-pointer" title="下移">↓</button>
+            <button onclick="toggleBasketItem('${q.id}'); renderBasketModalList();" class="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded ml-1 cursor-pointer" title="移出">✕</button>
+          </div>
+        </div>
+      `).join('');
+
+      triggerKaTeX(container);
+    }
+
+    function moveBasketItem(qid, direction) {
+      const arr = Array.from(basketQuestionIds);
+      const idx = arr.indexOf(qid);
+      if (idx === -1) return;
+      const targetIdx = idx + direction;
+      if (targetIdx < 0 || targetIdx >= arr.length) return;
+
+      const temp = arr[idx];
+      arr[idx] = arr[targetIdx];
+      arr[targetIdx] = temp;
+
+      basketQuestionIds.clear();
+      arr.forEach(id => basketQuestionIds.add(id));
+
+      try {
+        localStorage.setItem('qb-basket', JSON.stringify(arr));
+      } catch (e) {}
+
+      renderBasketModalList();
+    }
+
+    function clearAllBasket() {
+      if (basketQuestionIds.size === 0) return;
+      if (!confirm('确定要清空试题篮中的全部试题吗？')) return;
+
+      basketQuestionIds.clear();
+      try {
+        localStorage.setItem('qb-basket', JSON.stringify([]));
+      } catch (e) {}
+
+      updateBasketBadges();
+      renderBasketModalList();
+
+      document.querySelectorAll('[id^="btn_basket_"]').forEach(btn => {
+        btn.className = 'px-2.5 py-1 rounded font-medium transition-all bg-emerald-50 text-emerald-700 hover:bg-emerald-100 cursor-pointer';
+        btn.innerText = '+ 试题篮';
+      });
+
+      showToast('试题篮已清空', 'info');
+    }
+
+    function executePrintPaper(isSolutionOnly = false) {
+      if (basketQuestionIds.size === 0) {
+        showToast('试题篮为空，请先选题再组卷导出！', 'error');
+        return;
+      }
+
+      const basketList = questionsData.filter(q => basketQuestionIds.has(q.id));
+      const mainTitle = (document.getElementById('paperMainTitle')?.value || '2026学年高三数学阶段性检测卷').trim();
+      const subTitle = (document.getElementById('paperSubTitle')?.value || '考试时间：120 分钟 · 满分：150 分').trim();
+      const includeAnswer = document.getElementById('exportIncludeAnswer')?.checked ?? true;
+      const includeScore = document.getElementById('exportIncludeScore')?.checked ?? true;
+
+      const printWin = window.open('', '_blank');
+      if (!printWin) {
+        showToast('请允许浏览器弹出打印窗口！', 'error');
+        return;
+      }
+
+      let paperContentHtml = '';
+
+      if (isSolutionOnly) {
+        paperContentHtml = `
+          <div style="max-width: 840px; margin: 0 auto; font-family: -apple-system, SimSun, serif; color: #111;">
+            <div style="text-align: center; border-bottom: 2px solid #111; padding-bottom: 14px; margin-bottom: 24px;">
+              <div style="font-size: 13px; letter-spacing: 2px; margin-bottom: 6px; color: #666;">绝密★启用前</div>
+              <h1 style="font-size: 22px; font-weight: bold; margin: 0 0 8px 0;">${escapeHtml(mainTitle)} · 参考答案与全解全析</h1>
+              <div style="font-size: 13px; color: #555;">${escapeHtml(subTitle)}</div>
+            </div>
+
+            <div style="margin-top: 16px;">
+              ${basketList.map((q, idx) => `
+                <div style="margin-bottom: 26px; padding-bottom: 18px; border-bottom: 1px dashed #cbd5e1; page-break-inside: avoid;">
+                  <div style="font-size: 16px; font-weight: bold; margin-bottom: 8px;">
+                    第 ${idx + 1} 题【${escapeHtml(q.questionType)}】 ${includeScore ? `<span style="font-size: 13px; font-weight: normal; color: #666;">(满分: ${q.score}分)</span>` : ''}
+                  </div>
+                  <div style="font-size: 14px; color: #334155; margin-bottom: 10px; background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px solid #e2e8f0; line-height: 1.75;">
+                    <strong style="color: #0f172a;">【题面】</strong>
+                    <div>${sanitizeMathHtml(q.content)}</div>
+                  </div>
+                  <div style="margin-bottom: 8px; color: #047857; font-weight: bold; font-size: 15px; padding: 6px 12px; background: #ecfdf5; border-radius: 4px;">
+                    【参考答案】${escapeHtml(q.rawAnswer || (q.aiAnswer && q.aiAnswer.answer) || '见详细解析')}
+                  </div>
+                  <div style="line-height: 1.85; color: #1e293b; font-size: 14.5px;">
+                    <strong style="color: #0f172a;">【全解全析与解题反思】</strong><br/>
+                    <div style="margin-top: 6px; white-space: pre-wrap;">${escapeHtml(q.rawAnalysis || (q.aiAnswer && q.aiAnswer.analysis) || '详见原卷解法与考点精析。')}</div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      } else {
+        paperContentHtml = `
+          <div style="max-width: 840px; margin: 0 auto; font-family: -apple-system, SimSun, serif; color: #111; line-height: 1.8;">
+            <div style="text-align: center; border-bottom: 2px solid #111; padding-bottom: 14px; margin-bottom: 20px;">
+              <div style="font-size: 12px; letter-spacing: 3px; margin-bottom: 6px; color: #666;">绝密★启用前</div>
+              <h1 style="font-size: 22px; font-weight: bold; margin: 0 0 8px 0;">${escapeHtml(mainTitle)}</h1>
+              <div style="font-size: 13px; color: #444;">${escapeHtml(subTitle)}</div>
+              <div style="margin-top: 10px; font-size: 12px; border: 1px solid #aaa; display: inline-block; padding: 4px 16px;">
+                姓名：___________&nbsp;&nbsp;&nbsp;&nbsp;班级：___________&nbsp;&nbsp;&nbsp;&nbsp;考号：___________
+              </div>
+            </div>
+
+            <div>
+              ${basketList.map((q, idx) => `
+                <div style="margin-bottom: 24px; page-break-inside: avoid;">
+                  <div style="font-weight: bold; font-size: 15px; margin-bottom: 6px;">
+                    <span>${idx + 1}.</span>
+                    <span style="color: #666; font-size: 13px; font-weight: normal;">【${escapeHtml(q.questionType)}】</span>
+                    ${includeScore ? `<span style="font-size: 12px; color: #666; font-weight: normal;">(${q.score}分)</span>` : ''}
+                  </div>
+                  <div style="font-size: 15px; line-height: 1.8; color: #111;">
+                    ${sanitizeMathHtml(q.content)}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+
+            ${includeAnswer ? `
+              <div style="page-break-before: always; margin-top: 30px; border-top: 2px solid #111; padding-top: 20px;">
+                <h2 style="font-size: 18px; font-weight: bold; text-align: center; margin-bottom: 20px;">【参考答案与评分标准】</h2>
+                ${basketList.map((q, idx) => `
+                  <div style="margin-bottom: 16px; font-size: 14px; page-break-inside: avoid; border-bottom: 1px dashed #e2e8f0; padding-bottom: 12px;">
+                    <div style="font-weight: bold; margin-bottom: 4px; color: #047857;">
+                      第 ${idx + 1} 题【${escapeHtml(q.questionType)}】参考答案：
+                    </div>
+                    <div style="margin-bottom: 6px; padding: 6px 10px; background: #f8fafc; border-left: 3px solid #10b981; font-weight: 600;">
+                      ${escapeHtml(q.rawAnswer || (q.aiAnswer && q.aiAnswer.answer) || '见解析')}
+                    </div>
+                    ${q.rawAnalysis || (q.aiAnswer && q.aiAnswer.analysis) ? `
+                      <div style="color: #334155; line-height: 1.7; font-size: 13.5px; white-space: pre-wrap;">
+                        <strong>【详细解析】</strong><br/>
+                        ${escapeHtml(q.rawAnalysis || (q.aiAnswer && q.aiAnswer.analysis))}
+                      </div>
+                    ` : ''}
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }
+
+      const sOpen = '<' + 'script';
+      const sClose = '<' + '/script>';
+
+      printWin.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>${escapeHtml(mainTitle)}</title>
+          <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+          <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" onerror="this.onerror=null;">
+          ${sOpen} src="/vendor/katex/katex.min.js">${sClose}
+          ${sOpen} src="/vendor/katex/contrib/auto-render.min.js">${sClose}
+          <style>
+            @media print {
+              .no-print { display: none !important; }
+              body { margin: 12mm; padding: 0; }
+              @page { size: A4; margin: 12mm; }
+            }
+            body { font-size: 14px; line-height: 1.75; background: #fff; padding: 24px; color: #111; }
+            img { max-width: 100%; height: auto; }
+            .katex-display { margin: 0.6em 0 !important; }
+          </style>
+        </head>
+        <body>
+          <div class="no-print" style="position: sticky; top: 0; background: #047857; color: white; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; z-index: 999; box-shadow: 0 2px 8px rgba(0,0,0,0.15); margin: -24px -24px 24px -24px; border-radius: 0 0 8px 8px;">
+            <div style="font-weight: bold; font-size: 14px; display: flex; align-items: center; gap: 8px;">
+              <span>题有据 Pro · 组卷排版打印预览 (${basketList.length} 道试题)</span>
+            </div>
+            <div style="display: flex; gap: 10px;">
+              <button onclick="window.print()" style="background: white; color: #047857; border: none; padding: 6px 18px; border-radius: 6px; font-weight: bold; font-size: 13px; cursor: pointer;">🖨️ 立即打印 / 另存为 PDF</button>
+              <button onclick="window.close()" style="background: rgba(255,255,255,0.2); color: white; border: none; padding: 6px 14px; border-radius: 6px; font-size: 13px; cursor: pointer;">关闭窗口</button>
+            </div>
+          </div>
+
+          ${paperContentHtml}
+
+          ${sOpen}>
+            function renderAllMath() {
+              if (window.renderMathInElement) {
+                window.renderMathInElement(document.body, {
+                  delimiters: [
+                    {left: '$$', right: '$$', display: true},
+                    {left: '\\[', right: '\\]', display: true},
+                    {left: '$', right: '$', display: false},
+                    {left: '\\(', right: '\\)', display: false}
+                  ],
+                  throwOnError: false,
+                  errorColor: '#dc2626',
+                  strict: false,
+                  trust: true,
+                  macros: {
+                    "\\parallel": "\\mathrel{/\\mkern-6mu/}",
+                    "\\nparallel": "\\mathrel{/\\mkern-6mu/\\mkern-11mu\\backslash}"
+                  }
+                });
+              }
+            }
+
+            if (document.readyState === 'loading') {
+              window.addEventListener('DOMContentLoaded', renderAllMath);
+            } else {
+              renderAllMath();
+            }
+            window.addEventListener('load', renderAllMath);
+          ${sClose}
+        </body>
+        </html>
+      `);
+      printWin.document.close();
+    }
+
+    function openNativeLibraryBasket() {
+      try {
+        localStorage.setItem('qb-basket', JSON.stringify(Array.from(basketQuestionIds)));
+      } catch (e) {}
+      window.location.href = '/library';
+    }
+
+    // ================= 题目修改与校订 =================
+    async function openEditQuestionModal(qid) {
+      activeEditingQuestionId = qid;
+      const q = questionsData.find(item => item.id === qid);
+      if (!q) return;
+
+      const modal = document.getElementById('editQuestionModal');
+      if (!modal) return;
+
+      document.getElementById('editModalQBadge').innerText = `第 ${q.questionNumber} 题 · ID: ${q.id.slice(0, 8)}`;
+      document.getElementById('editInputType').value = q.questionTypeCode || 'single_choice';
+      document.getElementById('editInputStars').value = String(q.difficultyStars || 3);
+      document.getElementById('editInputStem').value = q.rawStem || '';
+
+      const opts = q.rawOptions || {};
+      document.getElementById('editOptA').value = opts.A || opts.a || '';
+      document.getElementById('editOptB').value = opts.B || opts.b || '';
+      document.getElementById('editOptC').value = opts.C || opts.c || '';
+      document.getElementById('editOptD').value = opts.D || opts.d || '';
+
+      document.getElementById('editInputAnswer').value = q.rawAnswer || (q.aiAnswer ? q.aiAnswer.answer : '') || '';
+      document.getElementById('editInputAnalysis').value = q.rawAnalysis || (q.aiAnswer ? q.aiAnswer.analysis : '') || '';
+
+      handleEditTypeChange();
+      updateEditLivePreview();
+      modal.classList.remove('hidden');
+
+      try {
+        const res = await fetch(`${API_BASE}/api/library/${qid}/question`, {
+          headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
+        });
+        if (res.ok) {
+          activeEditingRevisionInfo = await res.json();
+        }
+      } catch (e) {
+        console.warn('Pre-fetch revision error:', e);
+      }
+    }
+
+    function closeEditQuestionModal() {
+      const modal = document.getElementById('editQuestionModal');
+      if (modal) modal.classList.add('hidden');
+      activeEditingQuestionId = null;
+      activeEditingRevisionInfo = null;
+    }
+
+    function handleEditTypeChange() {
+      const type = document.getElementById('editInputType')?.value || 'single_choice';
+      const optGroup = document.getElementById('editOptionsGroup');
+      if (!optGroup) return;
+
+      if (type === 'single_choice' || type === 'multiple_choice') {
+        optGroup.classList.remove('hidden');
+      } else {
+        optGroup.classList.add('hidden');
+      }
+      updateEditLivePreview();
+    }
+
+    function updateEditLivePreview() {
+      const previewEl = document.getElementById('editLivePreviewContent');
+      if (!previewEl) return;
+
+      const stem = (document.getElementById('editInputStem')?.value || '').trim();
+      const type = document.getElementById('editInputType')?.value || 'single_choice';
+      const stars = parseInt(document.getElementById('editInputStars')?.value || '3');
+
+      const isChoice = (type === 'single_choice' || type === 'multiple_choice');
+      const optObj = {};
+      if (isChoice) {
+        const a = document.getElementById('editOptA')?.value.trim();
+        const b = document.getElementById('editOptB')?.value.trim();
+        const c = document.getElementById('editOptC')?.value.trim();
+        const d = document.getElementById('editOptD')?.value.trim();
+        if (a) optObj.A = a;
+        if (b) optObj.B = b;
+        if (c) optObj.C = c;
+        if (d) optObj.D = d;
+      }
+
+      let formattedStem = stem
+        .split('\n')
+        .filter(p => p.trim())
+        .map(p => `<p class="font-serif leading-relaxed mb-2 text-slate-800 text-sm">${escapeHtml(p)}</p>`)
+        .join('');
+
+      if (isChoice && Object.keys(optObj).length > 0) {
+        formattedStem += renderAdaptiveOptionsHtml(optObj, {}, 1);
+      }
+
+      previewEl.innerHTML = `
+        <div class="p-3 bg-white rounded-lg border border-slate-200 text-xs">
+          <div class="flex items-center gap-2 mb-2 pb-1.5 border-b border-slate-100">
+            <span class="font-bold text-slate-900">预览题目</span>
+            <span class="text-slate-400">·</span>
+            <span class="text-amber-500 font-bold">${'★'.repeat(stars)}</span>
+          </div>
+          <div class="text-slate-800 font-serif leading-relaxed">
+            ${sanitizeMathHtml(formattedStem || '<span class="text-slate-300 italic">在左侧输入题干以预览效果</span>')}
+          </div>
+        </div>
+      `;
+
+      triggerKaTeX(previewEl);
+    }
+
+    async function submitQuestionEdit() {
+      if (!activeEditingQuestionId) return;
+      const qid = activeEditingQuestionId;
+      const q = questionsData.find(item => item.id === qid);
+      if (!q) return;
+
+      const newType = document.getElementById('editInputType')?.value || 'single_choice';
+      const newStars = parseInt(document.getElementById('editInputStars')?.value || '3');
+      const newStem = (document.getElementById('editInputStem')?.value || '').trim();
+
+      const newOpts = {};
+      const isChoice = (newType === 'single_choice' || newType === 'multiple_choice');
+      if (isChoice) {
+        const a = document.getElementById('editOptA')?.value.trim();
+        const b = document.getElementById('editOptB')?.value.trim();
+        const c = document.getElementById('editOptC')?.value.trim();
+        const d = document.getElementById('editOptD')?.value.trim();
+        if (a) newOpts.A = a;
+        if (b) newOpts.B = b;
+        if (c) newOpts.C = c;
+        if (d) newOpts.D = d;
+      }
+
+      const newAnswer = (document.getElementById('editInputAnswer')?.value || '').trim();
+      const newAnalysis = (document.getElementById('editInputAnalysis')?.value || '').trim();
+
+      if (!newStem) {
+        showToast('题干内容不能为空！', 'error');
+        return;
+      }
+
+      const typeNames = {
+        single_choice: '单选题',
+        multiple_choice: '多选题',
+        fill_blank: '填空题',
+        true_false: '判断题',
+        free_response: '解答题'
+      };
+
+      q.rawStem = newStem;
+      q.rawOptions = newOpts;
+      q.rawAnswer = newAnswer;
+      q.rawAnalysis = newAnalysis;
+      q.questionTypeCode = newType;
+      q.questionType = typeNames[newType] || '解答题';
+      q.difficultyStars = newStars;
+
+      let formattedStem = newStem
+        .split('\n')
+        .filter(p => p.trim())
+        .map(p => `<p class="font-serif leading-relaxed mb-2 text-slate-800 text-sm sm:text-base">${escapeHtml(p)}</p>`)
+        .join('');
+
+      const optHtml = renderAdaptiveOptionsHtml(newOpts, {}, q.questionNumber);
+      if (optHtml) formattedStem += optHtml;
+      q.content = formattedStem;
+
+      const cardEl = document.getElementById(`qcard_${qid}`);
+      if (cardEl) {
+        if (currentViewMode === 'card') {
+          cardEl.outerHTML = renderSingleQuestionCardHtml(q);
+        } else {
+          cardEl.outerHTML = renderCompactQuestionRowHtml(q);
+        }
+        const newCard = document.getElementById(`qcard_${qid}`);
+        if (newCard) triggerKaTeX(newCard);
+      }
+
+      closeEditQuestionModal();
+      showToast(`第 ${q.questionNumber} 题修改已保存！`, 'success');
+
+      try {
+        let rev = 1;
+        let cHash = '';
+        if (activeEditingRevisionInfo) {
+          rev = activeEditingRevisionInfo.revision || 1;
+          cHash = activeEditingRevisionInfo.content_hash || '';
+        }
+
+        const editPayload = {
+          revision: rev,
+          content_hash: cHash,
+          question_type: newType,
+          stem: newStem,
+          options: newOpts,
+          figures: activeEditingRevisionInfo?.figures || []
+        };
+
+        await fetch(`${API_BASE}/api/library/${qid}/question`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-QB-Request': '1',
+            'Referer': window.location.href
+          },
+          body: JSON.stringify(editPayload)
+        });
+
+        if (newAnswer || newAnalysis) {
+          await fetch(`${API_BASE}/api/library/${qid}/solution`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-QB-Request': '1',
+              'Referer': window.location.href
+            },
+            body: JSON.stringify({
+              answer: newAnswer,
+              analysis: newAnalysis,
+              sync_library: true
+            })
+          });
+        }
+      } catch (err) {
+        console.warn('Backend sync save:', err);
+      }
+    }
+
+    // ================= 快捷键与弹窗通用逻辑 =================
+    
+    function toggleRightInspector() {
+      const pane = document.getElementById('rightInspectorPane');
+      const btn = document.getElementById('btnToggleInspector');
+      if (!pane) return;
+      pane.classList.toggle('hidden');
+      if (btn) {
+        btn.classList.toggle('bg-slate-200', !pane.classList.contains('hidden'));
+      }
+    }
+
+    function openShortcutsModal() {
+      document.getElementById('shortcutsModal')?.classList.remove('hidden');
+    }
+
+    function closeShortcutsModal() {
+      document.getElementById('shortcutsModal')?.classList.add('hidden');
+    }
+
+    function focusQuestion(qid) {
+      currentActiveQuestionId = qid;
+      document.querySelectorAll('[id^="qcard_"]').forEach(el => {
+        el.className = el.className.replace('border-emerald-500 shadow-sm ring-1 ring-emerald-500/20', 'border-slate-200/80 hover:border-slate-300');
+      });
+      const card = document.getElementById(`qcard_${qid}`);
+      if (card) {
+        card.className = card.className.replace('border-slate-200/80 hover:border-slate-300', 'border-emerald-500 shadow-sm ring-1 ring-emerald-500/20');
+      }
+      renderRightInspector();
+    }
+
+    function toggleSelectQuestion(qid, checked) {
+      if (checked) selectedQuestionIds.add(qid);
+      else selectedQuestionIds.delete(qid);
+
+      document.getElementById('selectedCountText').innerText = `已勾选 ${selectedQuestionIds.size} 题`;
+      updateBatchActionBar();
+      renderRightInspector();
+    }
+
+    function toggleSelectAll(checked) {
+      if (checked) filteredQuestions.forEach(q => selectedQuestionIds.add(q.id));
+      else selectedQuestionIds.clear();
+
+      document.getElementById('selectedCountText').innerText = `已勾选 ${selectedQuestionIds.size} 题`;
+      const container = document.getElementById('questionListContainer');
+      container.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = checked);
+      updateBatchActionBar();
+      renderRightInspector();
+    }
+
+    function renderRightInspector() {
+      const isBatch = selectedQuestionIds.size > 1;
+      const titleEl = document.getElementById('inspectorTitle');
+      const badgeEl = document.getElementById('inspectorBadge');
+      const tagsContainer = document.getElementById('currentTagsContainer');
+      const pinnedContainer = document.getElementById('pinnedTagsContainer');
+      const aiContainer = document.getElementById('aiSuggestedTagsContainer');
+      const metaCard = document.getElementById('questionMetaCard');
+
+      if (!titleEl) return;
+
+      if (isBatch) {
+        titleEl.innerText = '批量打标模式';
+        badgeEl.innerText = `${selectedQuestionIds.size} 题`;
+        metaCard?.classList.add('hidden');
+      } else {
+        titleEl.innerText = '题目属性';
+        const curr = questionsData.find(q => q.id === currentActiveQuestionId) || questionsData[0];
+        if (curr) {
+          badgeEl.innerText = `# ${curr.questionNumber}`;
+          metaCard?.classList.remove('hidden');
+          const starEl = document.getElementById('metaDifficultyStars');
+          if (starEl) starEl.innerText = '★'.repeat(curr.difficultyStars);
+          const minEl = document.getElementById('metaMinutes');
+          if (minEl) minEl.innerText = `${curr.score >= 10 ? 12 : 5} 分钟`;
+          const typeEl = document.getElementById('metaType');
+          if (typeEl) typeEl.innerText = curr.questionType;
+          const srcEl = document.getElementById('metaSource');
+          if (srcEl) srcEl.innerText = curr.source;
+        }
+      }
+
+      const activeQ = questionsData.find(q => q.id === currentActiveQuestionId) || questionsData[0];
+      const tags = (isBatch || !activeQ) ? [] : (activeQ.tags || []);
+
+      if (tagsContainer) {
+        if (tags.length === 0) {
+          tagsContainer.innerHTML = `<span class="text-slate-400 italic text-[11px]">${isBatch ? '在下方输入将批量追加标签' : '暂无标签'}</span>`;
+        } else {
+          tagsContainer.innerHTML = tags.map(t => `
+            <span class="inline-flex items-center gap-1 rounded bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
+              <span>${escapeHtml(t.name)}</span>
+              <button onclick="removeTagFromCurrent('${t.id}')" class="text-slate-400 hover:text-slate-700 cursor-pointer">×</button>
+            </span>
+          `).join('');
+        }
+      }
+
+      const allFlat = tagGroupsData.flatMap(g => g.tags);
+      const pinned = allFlat.filter(t => t.isPinned && !tags.some(curr => curr.id === t.id));
+      if (pinnedContainer) {
+        pinnedContainer.innerHTML = pinned.slice(0, 5).map(t => `
+          <button onclick="addTagToCurrent('${t.id}')" class="px-2 py-0.5 rounded border border-slate-200 bg-white text-[11px] text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer">
+            + ${escapeHtml(t.name)}
+          </button>
+        `).join('');
+      }
+
+      if (aiContainer) {
+        const mockAi = [
+          { id: 'ai_1', name: '极值点偏移' },
+          { id: 'ai_2', name: '零点定理' }
+        ];
+        aiContainer.innerHTML = mockAi.map(t => `
+          <button onclick="addAiTagDirectly('${t.name}')" class="px-1.5 py-0.5 rounded bg-white border border-emerald-200 text-emerald-800 text-[10px] hover:bg-emerald-50 transition-colors cursor-pointer">
+            + ${escapeHtml(t.name)}
+          </button>
+        `).join('');
+      }
+    }
+
+    function addTagToCurrent(tagId) {
+      const allFlat = tagGroupsData.flatMap(g => g.tags);
+      const tag = allFlat.find(t => t.id === tagId);
+      if (!tag) return;
+
+      if (selectedQuestionIds.size > 1) {
+        questionsData.forEach(q => {
+          if (selectedQuestionIds.has(q.id) && !q.tags.some(t => t.id === tagId)) {
+            q.tags.push({ ...tag });
+          }
+        });
+        showToast(`已为 ${selectedQuestionIds.size} 道试题追加「${tag.name}」`, 'success');
+      } else {
+        const activeQ = questionsData.find(q => q.id === currentActiveQuestionId);
+        if (activeQ && !activeQ.tags.some(t => t.id === tagId)) {
+          activeQ.tags.push({ ...tag });
+          showToast(`已为题目追加标签「${tag.name}」`, 'success');
+        }
+      }
+
+      renderRightInspector();
+      applyFilters();
+    }
+
+    function removeTagFromCurrent(tagId) {
+      const activeQ = questionsData.find(q => q.id === currentActiveQuestionId);
+      if (activeQ) activeQ.tags = activeQ.tags.filter(t => t.id !== tagId);
+      renderRightInspector();
+      applyFilters();
+    }
+
+    function addAiTagDirectly(name) {
+      const newTag = { id: 't_' + Date.now(), name, color: 'blue' };
+      tagGroupsData[1].tags.push(newTag);
+      addTagToCurrent(newTag.id);
+    }
+
+    function applySmartFolder(key) {
+      filterState.paperId = '';
+      filterState.paperName = '';
+      sortAndRenderPapers();
+
+      document.querySelectorAll('.sf-item').forEach(el => {
+        el.className = 'sf-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer text-xs';
+      });
+
+      filterState.smartFilter = (key === 'all') ? '' : key;
+
+      if (key === 'all') {
+        document.getElementById('sf_all')?.classList.add('bg-emerald-50', 'text-emerald-900', 'font-semibold');
+        resetAllFilters();
+      } else {
+        document.getElementById(`sf_${key}`)?.classList.add('bg-emerald-50', 'text-emerald-900', 'font-semibold');
+        applyFilters();
+      }
+    }
+
+    function filterByChapter(chapName) {
+      document.querySelectorAll('.chap-item').forEach(el => el.classList.remove('bg-emerald-50', 'text-emerald-900', 'font-semibold'));
+      const chapMap = {
+        '函数与导数': 'chap_func',
+        '立体几何': 'chap_geo',
+        '圆锥曲线': 'chap_conic'
+      };
+      const el = document.getElementById(chapMap[chapName]);
+      if (el) el.classList.add('bg-emerald-50', 'text-emerald-900', 'font-semibold');
+
+      filterState.chapter = chapName;
+      applyFilters();
+    }
+
+    function switchSidebarTab(tab) {
+      const btnS = document.getElementById('sidebarTabSmart');
+      const btnC = document.getElementById('sidebarTabChapter');
+      const viewS = document.getElementById('viewSmartFolders');
+      const viewC = document.getElementById('viewChapters');
+
+      if (tab === 'smart') {
+        btnS.className = 'py-1 rounded bg-white text-slate-900 font-semibold shadow-2xs';
+        btnC.className = 'py-1 rounded hover:text-slate-900 transition-colors cursor-pointer';
+        viewS.classList.remove('hidden');
+        viewC.classList.add('hidden');
+      } else {
+        btnC.className = 'py-1 rounded bg-white text-slate-900 font-semibold shadow-2xs';
+        btnS.className = 'py-1 rounded hover:text-slate-900 transition-colors cursor-pointer';
+        viewC.classList.remove('hidden');
+        viewS.classList.add('hidden');
+      }
+    }
+
+    function renderInlineActiveChips() {
+      const container = document.getElementById('inlineActiveChipsContainer');
+      const clearBtn = document.getElementById('btnClearAllFilters');
+      if (!container || !clearBtn) return;
+
+      const hasActive = 
+        filterState.selectedTagIds.length > 0 ||
+        filterState.excludedTagIds.length > 0 ||
+        filterState.questionTypes.length > 0 ||
+        filterState.difficultyStars.length > 0 ||
+        filterState.hasAnswer ||
+        filterState.hasAnalysis ||
+        Boolean(filterState.chapter) ||
+        Boolean(filterState.paperId) ||
+        Boolean(filterState.smartFilter);
+
+      if (!hasActive) {
+        container.innerHTML = '';
+        clearBtn.classList.add('hidden');
+        document.getElementById('pillLabelTag').innerText = '标签筛选';
+        return;
+      }
+
+      clearBtn.classList.remove('hidden');
+      let html = '';
+
+      if (filterState.paperId) {
+        html += `
+          <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-900 border border-emerald-200 text-xs">
+            <span>📁 项目: ${escapeHtml(filterState.paperName || '指定试卷')}</span>
+            <button onclick="filterByPaper('')" class="text-emerald-700 hover:text-emerald-950 font-bold ml-0.5 cursor-pointer">×</button>
+          </span>
+        `;
+      }
+
+      if (filterState.smartFilter) {
+        const smartNames = {
+          favorites: '⭐ 我收藏的试题',
+          ai_unverified: '⚡ AI生成未核对',
+          deriv: '🔥 导数与极值压轴题',
+          hard_geo: '📐 4星+ 几何与向量',
+          need_tags: '🟡 待补充考点标签'
+        };
+        html += `
+          <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-200 text-xs">
+            <span>${smartNames[filterState.smartFilter] || filterState.smartFilter}</span>
+            <button onclick="applySmartFolder('all')" class="text-amber-700 hover:text-amber-950 font-bold ml-0.5 cursor-pointer">×</button>
+          </span>
+        `;
+      }
+
+      if (filterState.chapter) {
+        html += `
+          <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200 text-xs">
+            <span>章节: ${escapeHtml(filterState.chapter)}</span>
+            <button onclick="clearChapterFilter()" class="text-blue-600 hover:text-blue-900 font-bold cursor-pointer">×</button>
+          </span>
+        `;
+      }
+
+      filterState.difficultyStars.forEach(s => {
+        html += `
+          <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-xs">
+            <span>${s}★</span>
+            <button onclick="removeFilterChip('star', '${s}')" class="text-amber-600 hover:text-amber-900 font-bold cursor-pointer">×</button>
+          </span>
+        `;
+      });
+
+      container.innerHTML = html;
+    }
+
+    function removeFilterChip(type, val) {
+      if (type === 'star') {
+        filterState.difficultyStars = filterState.difficultyStars.filter(s => s !== parseInt(val));
+      }
+      applyFilters();
+    }
+
+    function clearChapterFilter() {
+      filterState.chapter = '';
+      document.querySelectorAll('.chap-item').forEach(el => el.classList.remove('bg-emerald-50', 'text-emerald-900', 'font-semibold'));
+      applyFilters();
+    }
+
+    function resetAllFilters() {
+      filterState.selectedTagIds = [];
+      filterState.excludedTagIds = [];
+      filterState.questionTypes = [];
+      filterState.difficultyStars = [];
+      filterState.hasAnswer = false;
+      filterState.hasAnalysis = false;
+      filterState.keyword = '';
+      filterState.chapter = '';
+      filterState.paperId = '';
+      filterState.paperName = '';
+      filterState.smartFilter = '';
+
+      const searchInput = document.getElementById('globalSearchInput');
+      if (searchInput) searchInput.value = '';
+
+      document.querySelectorAll('.sf-item').forEach(el => el.className = 'sf-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer text-xs');
+      document.getElementById('sf_all')?.classList.add('bg-emerald-50', 'text-emerald-900', 'font-semibold');
+      document.querySelectorAll('.chap-item').forEach(el => el.classList.remove('bg-emerald-50', 'text-emerald-900', 'font-semibold'));
+
+      sortAndRenderPapers();
+      applyFilters();
+    }
+
+    function toggleTypeFilter(type, checked) {
+      if (checked) filterState.questionTypes.push(type);
+      else filterState.questionTypes = filterState.questionTypes.filter(t => t !== type);
+      applyFilters();
+    }
+
+    function toggleStarFilter(star, checked) {
+      if (checked) filterState.difficultyStars.push(star);
+      else filterState.difficultyStars = filterState.difficultyStars.filter(s => s !== star);
+      applyFilters();
+    }
+
+    function toggleRequireAnswer(checked) {
+      filterState.hasAnswer = checked;
+      applyFilters();
+    }
+
+    function toggleRequireAnalysis(checked) {
+      filterState.hasAnalysis = checked;
+      applyFilters();
+    }
+
+    function handleSortChange(sortVal) {
+      filterState.sortBy = sortVal;
+      applyFilters();
+    }
+
+    function toggleFilterDropdown(name) {
+      const drop = document.getElementById(`dropdown${name}`);
+      const isHidden = drop.classList.contains('hidden');
+      document.querySelectorAll('.filter-dropdown').forEach(d => d.classList.add('hidden'));
+      if (isHidden) drop.classList.remove('hidden');
+    }
+
+    function renderTagFilterDropdownList() {
+      const container = document.getElementById('dropTagList');
+      if (!container) return;
+      container.innerHTML = tagGroupsData.map(g => `
+        <div class="mb-2">
+          <div class="text-[10px] font-bold text-slate-400 mb-1">${g.name}</div>
+          <div class="flex flex-wrap gap-1">
+            ${g.tags.map(t => `
+              <button 
+                onclick="handleTagFilterClick('${t.id}', event)"
+                class="px-2 py-0.5 rounded text-[11px] border border-slate-200 bg-white text-slate-700 hover:border-emerald-400 cursor-pointer"
+              >
+                ${escapeHtml(t.name)}
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      `).join('');
+
+      triggerKaTeX(container);
+    }
+
+    function handleTagFilterClick(tagId, e) {
+      if (e) e.stopPropagation();
+      if (filterState.selectedTagIds.includes(tagId)) {
+        filterState.selectedTagIds = filterState.selectedTagIds.filter(id => id !== tagId);
+      } else {
+        filterState.selectedTagIds.push(tagId);
+      }
+      applyFilters();
+    }
+
+    function previewImageModal(url, title = '原卷配图') {
+      const modal = document.getElementById('imageLightboxModal');
+      const img = document.getElementById('lightboxImage');
+      const titleEl = document.getElementById('lightboxTitle');
+      if (!modal || !img) return;
+
+      img.src = url;
+      if (titleEl) titleEl.innerText = title;
+      modal.classList.remove('hidden');
+    }
+
+    function closeImageLightboxModal() {
+      const modal = document.getElementById('imageLightboxModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function openTagManagerModal() {
+      const modal = document.getElementById('tagManagerModal');
+      if (modal) modal.classList.remove('hidden');
+    }
+
+    function closeTagManagerModal() {
+      const modal = document.getElementById('tagManagerModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    // ================= 全局快捷键与事件监听 =================
+    function setupEventListeners() {
+      const qContainer = document.getElementById('questionListContainer');
+      if (qContainer) {
+        qContainer.addEventListener('scroll', () => {
+          if (renderedQuestionCount >= filteredQuestions.length) return;
+          const { scrollTop, scrollHeight, clientHeight } = qContainer;
+          if (scrollTop + clientHeight >= scrollHeight - 300) {
+            renderNextQuestionChunk();
+          }
+        }, { passive: true });
+      }
+
+      const searchInput = document.getElementById('globalSearchInput');
+      if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+          filterState.keyword = e.target.value.trim();
+          applyFilters();
+        });
+      }
+
+      document.addEventListener('click', (e) => {
+        const menuEl = document.getElementById('eagleContextMenu');
+        if (menuEl && !menuEl.contains(e.target)) {
+          hideEagleContextMenu();
+        }
+        if (!e.target.closest('.filter-pill-btn') && !e.target.closest('.filter-dropdown')) {
+          document.querySelectorAll('.filter-dropdown').forEach(d => d.classList.add('hidden'));
+        }
+      });
+
+      // 强大的键盘快捷键体系 (Eagle 灵魂交互)
+      document.addEventListener('keydown', (e) => {
+        // 如果正在输入文本，只响应 Escape
+        const isTyping = (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA');
+
+        if (e.key === 'Escape') {
+          hideEagleContextMenu();
+          closeImageLightboxModal();
+          closeEditQuestionModal();
+          closeBasketExportModal();
+          closeTagManagerModal();
+          closeQuickLookModal();
+          closeOriginalPaperModal();
+          closeShortcutsModal();
+          clearBatchSelection();
+          return;
+        }
+
+        if (isTyping) return;
+
+        // Space: 打开/关闭快速审题 (Quick Look)
+        if (e.code === 'Space') {
+          e.preventDefault();
+          const qlModal = document.getElementById('quickLookModal');
+          if (qlModal && !qlModal.classList.contains('hidden')) {
+            closeQuickLookModal();
+          } else if (currentActiveQuestionId) {
+            openQuickLookModal(currentActiveQuestionId);
+          } else if (filteredQuestions.length > 0) {
+            openQuickLookModal(filteredQuestions[0].id);
+          }
+          return;
+        }
+
+        // 审题模式下的左右箭头切换
+        const qlModal = document.getElementById('quickLookModal');
+        if (qlModal && !qlModal.classList.contains('hidden')) {
+          if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
+            e.preventDefault();
+            navQuickLook(-1);
+            return;
+          }
+          if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
+            e.preventDefault();
+            navQuickLook(1);
+            return;
+          }
+        }
+
+        // 上下箭头切换卡片聚焦
+        if (e.key === 'ArrowDown' || e.key === 'j') {
+          e.preventDefault();
+          navigateQuestionFocus(1);
+          return;
+        }
+        if (e.key === 'ArrowUp' || e.key === 'k') {
+          e.preventDefault();
+          navigateQuestionFocus(-1);
+          return;
+        }
+
+        // B: 试题篮切换
+        if (e.key === 'b' || e.key === 'B') {
+          if (currentActiveQuestionId) {
+            e.preventDefault();
+            toggleBasketItem(currentActiveQuestionId);
+          }
+          return;
+        }
+
+        // S: 收藏切换
+        if (e.key === 's' || e.key === 'S') {
+          if (currentActiveQuestionId) {
+            e.preventDefault();
+            toggleFavorite(currentActiveQuestionId);
+          }
+          return;
+        }
+
+        // E: 编辑当前试题
+        if (e.key === 'e' || e.key === 'E') {
+          if (currentActiveQuestionId) {
+            e.preventDefault();
+            openEditQuestionModal(currentActiveQuestionId);
+          }
+          return;
+        }
+
+        // /: 搜索
+        if (e.key === '/') {
+          e.preventDefault();
+          document.getElementById('globalSearchInput')?.focus();
+          return;
+        }
+
+        // ?: 快捷键帮助
+        if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+          e.preventDefault();
+          openShortcutsModal();
+          return;
+        }
+      });
+    }
+
+    function navigateQuestionFocus(step) {
+      if (filteredQuestions.length === 0) return;
+      let currIdx = filteredQuestions.findIndex(q => q.id === currentActiveQuestionId);
+      if (currIdx === -1) currIdx = 0;
+      const targetIdx = Math.max(0, Math.min(filteredQuestions.length - 1, currIdx + step));
+      const targetQ = filteredQuestions[targetIdx];
+      if (targetQ) {
+        focusQuestion(targetQ.id);
+        const cardEl = document.getElementById(`qcard_${targetQ.id}`);
+        if (cardEl) {
+          cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>

@@ -1,0 +1,478 @@
+/*
+ * Eagle 风格多维紧凑胶囊筛选器 & 智能工作台样式系统
+ * 100% 还原 preview.html 现代 Clean UI 视觉规范与高质感设计
+ */
+
+/* ───── 1. 全局现代冷白底色提升 ───── */
+body.library-page {
+  background-color: #f8fafc !important;
+  color: #1e293b;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* 顶栏磨砂玻璃质感 */
+.library-page .topbar {
+  background: rgba(255, 255, 255, 0.92) !important;
+  backdrop-filter: blur(12px) saturate(180%) !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.library-search input {
+  background: #f1f5f9 !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 8px !important;
+  color: #1e293b !important;
+}
+
+.library-search input:focus {
+  background: #ffffff !important;
+  border-color: #059669 !important;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.12) !important;
+}
+
+/* ───── 2. Eagle 单行极简筛选条 (36-40px 超薄单行) ───── */
+.library-filterbar {
+  display: flex !important;
+  align-items: center !important;
+  min-height: 40px !important;
+  padding: 4px 12px !important;
+  margin-bottom: 10px !important;
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 10px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02) !important;
+  position: relative !important;
+  z-index: 45 !important;
+  overflow: visible !important;
+  gap: 8px !important;
+}
+
+/* 隐藏旧版杂乱的堆叠控件 */
+.library-filterbar > .library-select,
+.library-filterbar > .library-advanced,
+.library-filterbar > .draft-filters {
+  display: none !important;
+}
+
+/* 胶囊主容器 */
+.eagle-filter-container {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  gap: 8px;
+  min-width: 0;
+  overflow: visible;
+}
+
+.eagle-capsules-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* 单个胶囊按钮 */
+.eagle-capsule-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all .15s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.eagle-capsule-btn:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.eagle-capsule-btn.is-active {
+  background: #ecfdf5;
+  border-color: #059669;
+  color: #047857;
+  font-weight: 600;
+}
+
+.eagle-capsule-btn.is-open {
+  border-color: #059669;
+  box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.15);
+}
+
+.eagle-capsule-arrow {
+  width: 12px;
+  height: 12px;
+  opacity: .5;
+  transition: transform .15s ease;
+}
+
+.eagle-capsule-btn.is-open .eagle-capsule-arrow {
+  transform: rotate(180deg);
+}
+
+/* ───── 3. 内联 Active Chips (紧跟胶囊排在一行) ───── */
+.eagle-inline-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  min-width: 0;
+  scrollbar-width: none;
+}
+
+.eagle-inline-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.eagle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.eagle-chip.chip-accent {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #047857;
+}
+
+.eagle-chip-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  font-size: 12px;
+  cursor: pointer;
+  color: #94a3b8;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin-left: 2px;
+}
+
+.eagle-chip-close:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: #ef4444;
+}
+
+.eagle-clear-all-btn {
+  font-size: 11.5px;
+  color: #64748b;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.eagle-clear-all-btn:hover {
+  color: #ef4444;
+  background: #fee2e2;
+}
+
+/* ───── 4. 浮层面板 (卡片圆角 12px、毛玻璃与深阴影) ───── */
+.eagle-dropdown-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 100;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 20px 35px -8px rgba(15, 23, 42, 0.16), 0 0 0 1px #e2e8f0;
+  padding: 10px;
+  min-width: 220px;
+  animation: eagleDropdownFade .15s ease-out;
+  display: none;
+}
+
+.eagle-dropdown-panel.show {
+  display: flex;
+  flex-direction: column;
+}
+
+@keyframes eagleDropdownFade {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 标签面板专属 */
+.eagle-tag-panel {
+  width: 360px;
+  gap: 8px;
+}
+
+.eagle-tag-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.eagle-tag-search-input {
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 12px;
+  background: #f8fafc;
+  color: #0f172a;
+  outline: none;
+}
+
+.eagle-tag-search-input:focus {
+  border-color: #059669;
+  background: #ffffff;
+}
+
+/* AND / OR / NOT 分段控制器 */
+.eagle-logic-segmented {
+  display: flex;
+  background: #f1f5f9;
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.eagle-logic-btn {
+  flex: 1;
+  text-align: center;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #64748b;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.eagle-logic-btn.active {
+  background: #ffffff;
+  color: #047857;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.eagle-group-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 4px;
+}
+
+.eagle-group-tab {
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  font-size: 11.5px;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.eagle-group-tab.active {
+  background: #ecfdf5;
+  color: #047857;
+  font-weight: 600;
+}
+
+.eagle-tag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.eagle-tag-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.eagle-tag-row:hover {
+  background: #f8fafc;
+}
+
+.eagle-tag-row.selected {
+  background: #ecfdf5;
+}
+
+.eagle-tag-row.selected .eagle-tag-name {
+  color: #047857;
+  font-weight: 600;
+}
+
+.eagle-tag-color-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.eagle-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: #334155;
+}
+
+.eagle-menu-item:hover {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.eagle-menu-item.selected {
+  background: #ecfdf5;
+  color: #047857;
+  font-weight: 600;
+}
+
+.eagle-item-count {
+  font-size: 11px;
+  color: #94a3b8;
+  background: #f1f5f9;
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+/* ───── 5. 智能文件夹系统 ───── */
+.eagle-smart-folder-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px dashed #059669;
+  background: #ffffff;
+  color: #047857;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.eagle-smart-folder-btn:hover {
+  background: #ecfdf5;
+}
+
+.eagle-smart-folder-panel {
+  width: 260px;
+  gap: 6px;
+  right: 0;
+  left: auto;
+}
+
+.eagle-folder-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.eagle-folder-item:hover {
+  background: #f8fafc;
+}
+
+.eagle-folder-del-btn {
+  opacity: 0;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.eagle-folder-item:hover .eagle-folder-del-btn {
+  opacity: 1;
+}
+
+.eagle-folder-del-btn:hover {
+  color: #ef4444;
+}
+
+/* ───── 6. 现代 Clean 试题卡片优化 ───── */
+.library-card {
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02) !important;
+  margin-bottom: 12px !important;
+  padding: 16px 20px !important;
+  transition: all .15s ease !important;
+}
+
+.library-card:hover {
+  border-color: #cbd5e1 !important;
+  box-shadow: 0 4px 12px -2px rgba(15, 23, 42, 0.06) !important;
+}
+
+.library-card.is-selected {
+  border-color: #059669 !important;
+  box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.2) !important;
+}
+
+.library-card-meta {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding-bottom: 10px !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+  margin-bottom: 12px !important;
+}
+
+.library-card-actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+/* 原地展开解析容器 */
+.eagle-inline-solution-box {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.6;
+  animation: eagleDropdownFade .18s ease-out;
+}

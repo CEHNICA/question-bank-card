@@ -73,10 +73,15 @@ def _frontend(name: str, content_type: str):
         if request.method != "GET":
             return HttpResponseNotAllowed(["GET"])
         response = _file(FRONTEND / name, content_type)
-        response["Cache-Control"] = "public, max-age=604800"
-        etag = _etag_for(FRONTEND / name)
-        if etag:
-            response["ETag"] = etag
+        if "html" in content_type:
+            response["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response["Pragma"] = "no-cache"
+            response["Expires"] = "0"
+        else:
+            response["Cache-Control"] = "public, max-age=604800"
+            etag = _etag_for(FRONTEND / name)
+            if etag:
+                response["ETag"] = etag
         return response
 
     return view

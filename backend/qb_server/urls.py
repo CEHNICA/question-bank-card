@@ -19,6 +19,9 @@ from core import (
 urlpatterns = [
     path("", views.index_page),
     path("library", views.library_page),
+    path("eagle", views._frontend("eagle/index.html", "text/html; charset=utf-8")),
+    path("eagle/", views._frontend("eagle/index.html", "text/html; charset=utf-8")),
+    path("preview.html", views._frontend("eagle/index.html", "text/html; charset=utf-8")),
     path("practice/<uuid:paper_id>", practice.page),
     path("practice.js", views._frontend("practice.js", "application/javascript; charset=utf-8")),
     path("shortcut-help.js", views._frontend("shortcut-help.js", "application/javascript; charset=utf-8")),
@@ -58,6 +61,8 @@ urlpatterns = [
     path("styles.css", views.styles),
     path("api-redesign.css", views.api_redesign_styles),
     path("library.css", views.library_styles),
+    path("eagle-filter-bar.css", views._frontend("eagle-filter-bar.css", "text/css; charset=utf-8")),
+    path("eagle-filter-bar.js", views._frontend("eagle-filter-bar.js", "application/javascript; charset=utf-8")),
     path("library-reading.css", views.library_reading_styles),
     path("favicon.png", views.favicon),
     path("startup-hint.js", views.startup_hint_script),
