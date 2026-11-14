@@ -1649,24 +1649,35 @@
           // 把后台跑完的答案任务结果（job.result）回填成 AI 初稿，
           // 这样刷新页面也能看到「⚡ AI 解析」草稿，而不是一片空白。
           try {
-            const jobRes = await fetch(`${API_BASE}/api/library/jobs?ids=${questionsData.map(x => x.id).join(',')}&solution_scope=true`, {
-              headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
-              cache: 'no-store'
-            });
-            if (jobRes.ok) {
+            // 后端一次最多收 500 个 ids（views.py:3945），题库 810 题一次塞满
+            // 直接 400，整条「AI 初稿回填」就静废了 —— 必须分批发。
+            // 还要先滤掉非法 id：后端拿 uuid.UUID() 解析，一个坏 id 能让整批 400。
+            const uuidIds = questionsData
+              .map(x => x.id)
+              .filter(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
+            const JOBS_BATCH = 500;
+            const allJobs = [];
+            for (let i = 0; i < uuidIds.length; i += JOBS_BATCH) {
+              const chunk = uuidIds.slice(i, i + JOBS_BATCH);
+              const jobRes = await fetch(`${API_BASE}/api/library/jobs?ids=${chunk.join(',')}&solution_scope=true`, {
+                headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
+                cache: 'no-store'
+              });
+              if (!jobRes.ok) continue;
               const jobBody = await jobRes.json();
-              const byPub = new Map();
-              (jobBody.jobs || []).forEach(j => {
-                if (!j || !j.publication_id) return;
-                const list = byPub.get(j.publication_id) || [];
-                list.push(j);
-                byPub.set(j.publication_id, list);
-              });
-              questionsData.forEach(q => {
-                const list = byPub.get(q.id);
-                if (list && list.length) applyAnswerJobResult(q, list);
-              });
+              (jobBody.jobs || []).forEach(j => allJobs.push(j));
             }
+            const byPub = new Map();
+            allJobs.forEach(j => {
+              if (!j || !j.publication_id) return;
+              const list = byPub.get(j.publication_id) || [];
+              list.push(j);
+              byPub.set(j.publication_id, list);
+            });
+            questionsData.forEach(q => {
+              const list = byPub.get(q.id);
+              if (list && list.length) applyAnswerJobResult(q, list);
+            });
           } catch (e) { /* 拿不到就算了，不影响主流程 */ }
 
           updateSmartFolderCounts();
