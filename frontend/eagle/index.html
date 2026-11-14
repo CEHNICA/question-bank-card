@@ -196,6 +196,17 @@
       </button>
 
       <button 
+        onclick="openSolutionEditor()" 
+        class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors shrink-0 whitespace-nowrap"
+        title="并排编辑多道题的答案与解析，支持原卷裁图与 AI 初稿对照"
+      >
+        <svg class="w-3.5 h-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+        </svg>
+        <span>答案解析编辑器</span>
+      </button>
+
+      <button 
         onclick="openBasketExportModal()"
         class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md transition-all shrink-0 whitespace-nowrap"
       >
@@ -217,174 +228,61 @@
   <div class="flex-1 flex overflow-hidden">
 
     <!-- ================= 1. 左侧栏：智能文件夹与教材目录 ================= -->
-    <aside class="w-60 bg-[#fafafa] border-r border-slate-200/80 flex flex-col shrink-0">
-      <!-- 视图分类分段器 -->
-      <div class="p-2.5 border-b border-slate-200/60">
-        <div class="grid grid-cols-2 bg-slate-200/60 p-0.5 rounded-md text-[11px] font-medium text-slate-600">
-          <button id="sidebarTabSmart" onclick="switchSidebarTab('smart')" class="py-1 rounded bg-white text-slate-900 font-semibold shadow-2xs">智能视图</button>
-          <button id="sidebarTabChapter" onclick="switchSidebarTab('chapter')" class="py-1 rounded hover:text-slate-900 transition-colors">章节大纲</button>
+    <!-- ================= 1. 左侧栏：Eagle 式统一文件夹树（卷 / 知识点 / 方法同树） ================= -->
+    <aside class="w-64 bg-[#fafafa] border-r border-slate-200/80 flex flex-col shrink-0">
+      <div class="p-2.5 border-b border-slate-200/60 space-y-2 shrink-0">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">题库文件夹</span>
+          <div class="flex items-center gap-2">
+            <select id="treeSortSelect" onchange="setPaperSortMode(this.value)" title="试卷排序" class="text-[10px] px-1 py-0.5 rounded border border-slate-200 bg-white text-slate-600 focus:border-emerald-500 outline-none">
+              <option value="time_desc">最近入库</option>
+              <option value="time_asc">最早入库</option>
+              <option value="name">按名称</option>
+              <option value="count_desc">按题量</option>
+            </select>
+            <button onclick="saveCurrentAsSmartFolder()" class="text-emerald-600 hover:underline text-[10px] font-normal">+ 智能文件夹</button>
+          </div>
         </div>
+        <input
+          id="treeSearchInput"
+          type="text"
+          placeholder="搜索文件夹 / 试卷 / 标签..."
+          oninput="handleTreeSearch(this.value)"
+          class="w-full text-[11px] px-2 py-1 rounded border border-slate-200 bg-white placeholder-slate-400 focus:border-emerald-500 outline-none transition-colors"
+        >
       </div>
 
-      <!-- 侧栏滚动内容 -->
-      <div class="flex-1 overflow-y-auto p-2 space-y-3 text-xs">
-        
-        <!-- 智能文件夹 (Eagle Smart Folders) -->
-        <div id="viewSmartFolders" class="space-y-0.5">
-          <div class="px-2 py-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-            <span>智能文件夹</span>
-            <button onclick="saveCurrentAsSmartFolder()" class="text-emerald-600 hover:underline text-[10px] font-normal">+ 新建</button>
-          </div>
-          
-          <!-- 全部试题库 -->
-          <div onclick="applySmartFolder('all')" id="sf_all" class="sf-item flex items-center justify-between px-2.5 py-1.5 rounded-md bg-emerald-50 text-emerald-900 font-semibold cursor-pointer">
-            <div class="flex items-center gap-2 truncate">
-              <span>📚</span>
-              <span class="truncate">全部试题库</span>
-            </div>
-            <span id="sf_all_count" class="font-mono text-[11px] opacity-70">...</span>
-          </div>
+      <div id="folderTreeContainer" class="flex-1 overflow-y-auto px-1.5 py-2 text-xs">
+        <div class="py-2 text-center text-[11px] text-slate-400">正在载入题库文件夹树...</div>
+      </div>
 
-          <!-- ================= 入库项目分组 (仿 Eagle 文件夹：支持折叠与右键菜单排序) ================= -->
-          <div class="my-2 pt-2 pb-1 border-t border-slate-200/60 select-none" id="paperSectionContainer">
-            <!-- 文件夹标题栏：支持点击折叠/展开，支持右键呼出 Eagle 排序与管理菜单 -->
-            <div 
-              id="paperSectionHeader"
-              onclick="togglePaperSectionCollapse()"
-              oncontextmenu="handlePaperSectionContextMenu(event)"
-              class="group flex items-center justify-between px-1.5 py-1 mb-1 text-[11px] font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-200/40 rounded cursor-pointer transition-colors"
-              title="点击折叠/展开，鼠标右键更改排序方式"
-            >
-              <div class="flex items-center gap-1.5 truncate">
-                <!-- Eagle 风格折叠三角箭头 -->
-                <svg id="paperCollapseIcon" class="w-3 h-3 text-slate-400 group-hover:text-slate-600 transition-transform duration-200 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7" />
-                </svg>
-                <span class="text-amber-500 text-[12px] shrink-0">📁</span>
-                <span class="font-medium text-slate-700">入库项目</span>
-                <span id="paperListCountBadge" class="text-[10px] text-slate-400 font-mono"></span>
-              </div>
-
-              <!-- 右侧快捷操作按钮 (Eagle 风格: 悬浮浮现三点) -->
-              <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button 
-                  type="button"
-                  onclick="event.stopPropagation(); handlePaperSectionContextMenu(event)"
-                  class="p-0.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/80 rounded transition-colors"
-                  title="排序与管理选项 (也可直接鼠标右键)"
-                >
-                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            <!-- 可折叠的入库项目列表容器 (支持区域右键) -->
-            
-            <!-- 入库项目即时搜索框 -->
-            <div class="px-1.5 pb-1.5">
-              <input 
-                id="paperSearchInput" 
-                type="text" 
-                placeholder="过滤项目 (如 2024、全国卷)..." 
-                oninput="handlePaperSearchInput(this.value)"
-                class="w-full text-[11px] px-2 py-1 rounded border border-slate-200 bg-white placeholder-slate-400 focus:border-emerald-500 outline-none transition-colors"
-              >
-            </div>
-            <div 
-              id="paperProjectsList" 
-              oncontextmenu="handlePaperListContainerContextMenu(event)"
-              class="space-y-0.5 max-h-56 overflow-y-auto px-0.5 pr-1 transition-all duration-200"
-            >
-              <!-- 动态注入每次入库的项目名称 -->
-              <div class="py-2 text-center text-[11px] text-slate-400">正在载入入库项目...</div>
-            </div>
-          </div>
-
-          <!-- 专题预设 -->
-          <div class="px-2 pt-1.5 pb-0.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-            <span>智能分类专题</span>
-          </div>
-
-          
-          <div onclick="applySmartFolder('favorites')" id="sf_favorites" class="sf-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-200/50 cursor-pointer transition-colors">
-            <div class="flex items-center gap-2 truncate">
-              <span>⭐</span>
-              <span class="truncate">我收藏的试题</span>
-            </div>
-            <span id="sf_favorites_count" class="font-mono text-[11px] text-amber-500 font-bold">0</span>
-          </div>
-
-          <div onclick="applySmartFolder('ai_unverified')" id="sf_ai_unverified" class="sf-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-200/50 cursor-pointer transition-colors">
-            <div class="flex items-center gap-2 truncate">
-              <span>⚡</span>
-              <span class="truncate">AI生成未人工核对</span>
-            </div>
-            <span id="sf_ai_unverified_count" class="font-mono text-[11px] text-emerald-600">0</span>
-          </div>
-
-          <div onclick="applySmartFolder('deriv')" id="sf_deriv" class="sf-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-200/50 cursor-pointer transition-colors">
-            <div class="flex items-center gap-2 truncate">
-              <span>🔥</span>
-              <span class="truncate">导数与极值压轴题</span>
-            </div>
-            <span id="sf_deriv_count" class="font-mono text-[11px] text-slate-400">...</span>
-          </div>
-
-          <div onclick="applySmartFolder('hard_geo')" id="sf_hard_geo" class="sf-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-200/50 cursor-pointer transition-colors">
-            <div class="flex items-center gap-2 truncate">
-              <span>📐</span>
-              <span class="truncate">4星+ 几何与向量</span>
-            </div>
-            <span id="sf_hard_geo_count" class="font-mono text-[11px] text-slate-400">...</span>
-          </div>
-
-          <div onclick="applySmartFolder('need_tags')" id="sf_need_tags" class="sf-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-200/50 cursor-pointer transition-colors">
-            <div class="flex items-center gap-2 truncate">
-              <span class="w-2 h-2 rounded-full bg-amber-400"></span>
-              <span class="truncate">待补充考点标签</span>
-            </div>
-            <span id="sf_need_tags_count" class="font-mono text-[11px] text-slate-400">...</span>
-          </div>
-
-          <!-- 自定义保存的智能文件夹追加容器 -->
-          <div id="customSmartFoldersContainer" class="space-y-0.5 pt-1">
-            <!-- 动态追加 -->
-          </div>
-        </div>
-
-        <!-- 章节知识大纲 -->
-        <div id="viewChapters" class="hidden space-y-0.5">
-          <div class="px-2 py-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">高中数学核心模块</div>
-          
-          <div onclick="filterByChapter('函数与导数')" id="chap_func" class="chap-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-200/50 cursor-pointer transition-colors">
-            <div class="flex items-center gap-1.5 truncate">
-              <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-              <span class="truncate">函数与导数</span>
-            </div>
-            <span class="font-mono text-[11px] text-slate-400">142</span>
-          </div>
-
-          <div onclick="filterByChapter('立体几何')" id="chap_geo" class="chap-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-200/50 cursor-pointer transition-colors">
-            <div class="flex items-center gap-1.5 truncate">
-              <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-              <span class="truncate">立体几何与空间向量</span>
-            </div>
-            <span class="font-mono text-[11px] text-slate-400">89</span>
-          </div>
-
-          <div onclick="filterByChapter('圆锥曲线')" id="chap_conic" class="chap-item flex items-center justify-between px-2.5 py-1.5 rounded-md text-slate-600 hover:bg-slate-200/50 cursor-pointer transition-colors">
-            <div class="flex items-center gap-1.5 truncate">
-              <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-              <span class="truncate">圆锥曲线与方程</span>
-            </div>
-            <span class="font-mono text-[11px] text-slate-400">96</span>
-          </div>
-        </div>
-
+      <!-- 兼容占位：旧版侧栏元素已并入文件夹树，保留 id 防止旧脚本取不到节点报错 -->
+      <div class="hidden">
+        <div id="viewSmartFolders"></div>
+        <div id="viewChapters"></div>
+        <div id="paperSectionContainer"></div>
+        <div id="paperProjectsList"></div>
+        <div id="customSmartFoldersContainer"></div>
+        <span id="paperListCountBadge"></span>
+        <span id="paperCollapseIcon"></span>
+        <span id="sf_all"></span>
+        <span id="sf_all_count"></span>
+        <span id="sf_favorites"></span>
+        <span id="sf_favorites_count"></span>
+        <span id="sf_ai_unverified"></span>
+        <span id="sf_ai_unverified_count"></span>
+        <span id="sf_deriv"></span>
+        <span id="sf_deriv_count"></span>
+        <span id="sf_hard_geo"></span>
+        <span id="sf_hard_geo_count"></span>
+        <span id="sf_need_tags"></span>
+        <span id="sf_need_tags_count"></span>
+        <span id="chap_func"></span>
+        <span id="chap_geo"></span>
+        <span id="chap_conic"></span>
       </div>
     </aside>
+
 
     <!-- ================= 2. 中间主区域：极简 Eagle 筛选胶囊条 + 试题流 ================= -->
     <main class="flex-1 flex flex-col min-w-0 bg-[#f8fafc] overflow-hidden">
@@ -620,7 +518,7 @@
               <svg class="w-3 h-3 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
               <span>AI 语义推荐</span>
             </div>
-            <button onclick="acceptAllAiTags()" class="text-[10px] font-semibold text-emerald-700 hover:underline">采纳全部</button>
+            <span class="text-[10px] text-emerald-700/80">点标签即采纳</span>
           </div>
           <div id="aiSuggestedTagsContainer" class="flex flex-wrap gap-1 pt-0.5">
             <!-- 动态推荐 -->
@@ -632,7 +530,7 @@
           <span class="font-bold text-slate-700 uppercase tracking-wider text-[10px]">考题属性</span>
           <div class="space-y-1.5 text-slate-600 bg-slate-50/70 p-2.5 rounded-lg border border-slate-100">
             <div class="flex justify-between">
-              <span class="text-slate-400">难度评级:</span>
+              <span class="text-slate-400">难度(估算):</span>
               <span id="metaDifficultyStars" class="font-bold text-slate-800">★★★★★</span>
             </div>
             <div class="flex justify-between">
@@ -654,42 +552,22 @@
     </aside>
   </div>
 
-  <!-- ================= 试题篮抽屉模态框 (Basket Modal) ================= -->
-  <div id="basketModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-xs p-4">
-    <div class="flex h-[460px] w-full max-w-lg flex-col rounded-xl bg-white shadow-2xl overflow-hidden border border-slate-200">
-      <div class="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-        <div class="flex items-center gap-2">
-          <span class="text-base font-bold text-slate-900">试题篮管理</span>
-          <span id="basketModalCountBadge" class="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-semibold">1 题</span>
-        </div>
-        <button onclick="closeBasketModal()" class="text-slate-400 hover:text-slate-600 text-sm">✕</button>
-      </div>
+  <!-- 旧的「试题篮管理」模态框已删除：与 basketExportModal 功能重复，
+       且其中 3 个按钮（closeBasketModal / clearBasket / exportBasketToPaper）全是死按钮。
+       试题篮统一由「试题篮 (组卷导出)」弹窗 basketExportModal 承载。 -->
 
-      <div id="basketModalList" class="flex-1 overflow-y-auto p-4 space-y-2 text-xs">
-        <!-- 动态渲染已加入试题篮的题目 -->
-      </div>
 
-      <div class="flex items-center justify-between border-t border-slate-100 bg-slate-50 px-5 py-3">
-        <button onclick="clearBasket()" class="text-xs text-rose-500 hover:underline">清空试题篮</button>
-        <button onclick="exportBasketToPaper()" class="rounded bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-2xs hover:bg-emerald-700">
-          前往智能组卷 →
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ================= 标签管理中心模态框 (Tag Manager Modal) ================= -->
   <div id="tagManagerModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-xs p-4">
     <div class="flex h-[520px] w-full max-w-2xl flex-col rounded-xl bg-white shadow-2xl overflow-hidden border border-slate-200">
       <div class="flex items-center justify-between border-b border-slate-100 px-5 py-3">
         <div>
-          <h3 class="text-sm font-bold text-slate-900">标签管理与同义词合并中心</h3>
-          <p class="text-[11px] text-slate-400">分类维护各群组标签，可将民间叫法/同义标签一键合并入规范主标签</p>
+          <h3 class="text-sm font-bold text-slate-900">标签管理中心</h3>
+          <p class="text-[11px] text-slate-400">按群组查看真实标签目录，可新建标签、启用/停用；标签归并请走题库设置</p>
         </div>
         <button onclick="closeTagManagerModal()" class="text-slate-400 hover:text-slate-600 text-sm">✕</button>
       </div>
 
-      <div class="flex flex-1 overflow-hidden">
+      <div class="flex flex-1 min-h-0 overflow-hidden">
         <!-- 左侧分类 -->
         <div id="modalTagGroupsNav" class="w-44 border-r border-slate-100 bg-slate-50/50 p-2 space-y-0.5 text-xs">
           <!-- 动态导航 -->
@@ -714,22 +592,6 @@
             <!-- 动态标签列表 -->
           </div>
 
-          <!-- 合并操作内联对话框 -->
-          <div id="modalMergeDrawer" class="hidden mt-3 rounded-lg border border-emerald-200 bg-emerald-50/70 p-3 text-xs text-emerald-900 shrink-0">
-            <div class="flex items-center justify-between font-bold mb-1.5">
-              <span id="mergeDrawerTitle">合并标签</span>
-              <button onclick="cancelMerge()" class="text-slate-400 hover:text-slate-600">✕</button>
-            </div>
-            <div class="flex items-center gap-2">
-              <span class="text-slate-600">并入目标标签:</span>
-              <select id="mergeTargetSelect" class="flex-1 rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-800">
-                <!-- 动态填充候选项 -->
-              </select>
-              <button onclick="executeMerge()" class="rounded bg-emerald-600 px-3 py-1 font-semibold text-white shadow-2xs hover:bg-emerald-700">
-                确认合并
-              </button>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -820,14 +682,11 @@
               </select>
             </div>
             <div>
-              <label class="block font-semibold mb-1 text-slate-700">难度星级 (1-5星)</label>
-              <select id="editInputStars" onchange="updateEditLivePreview()" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none">
-                <option value="1">★☆☆☆☆ (入门)</option>
-                <option value="2">★★☆☆☆ (基础)</option>
-                <option value="3">★★★☆☆ (中档)</option>
-                <option value="4">★★★★☆ (较难)</option>
-                <option value="5">★★★★★ (压轴拔高)</option>
-              </select>
+              <label class="block font-semibold mb-1 text-slate-700">难度星级 (系统估算)</label>
+              <div id="editInputStars" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md bg-slate-50 flex items-center justify-between gap-2">
+                <span id="editInputStarsText" class="text-amber-500 font-bold whitespace-nowrap">★★★☆☆</span>
+                <span class="text-[10px] text-slate-400 text-right">按题型/分值/篇幅自动估算，不可手改</span>
+              </div>
             </div>
           </div>
 
@@ -948,44 +807,104 @@
         </div>
 
         <!-- 右侧组卷设置与导出 -->
-        <div class="w-2/5 p-5 bg-slate-50/50 flex flex-col justify-between text-xs text-slate-700">
-          <div class="space-y-4">
+        <div class="w-2/5 p-5 bg-slate-50/50 flex flex-col justify-between text-xs text-slate-700 overflow-y-auto">
+          <div class="space-y-3">
             <span class="font-bold text-slate-800 text-sm">试卷标题与排版设置</span>
             <div>
-              <label class="block text-slate-600 mb-1">主标题</label>
-              <input id="paperMainTitle" type="text" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md bg-white focus:border-emerald-500 outline-none text-xs" value="2026学年高三数学阶段性检测卷">
+              <label class="block text-slate-600 mb-1">试卷标题</label>
+              <input id="paperMainTitle" type="text" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md bg-white focus:border-emerald-500 outline-none text-xs" value="练习">
             </div>
-            <div>
-              <label class="block text-slate-600 mb-1">副标题 / 说明</label>
-              <input id="paperSubTitle" type="text" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md bg-white focus:border-emerald-500 outline-none text-xs" value="考试时间：120 分钟 · 满分：150 分">
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-slate-600 mb-1">输出内容</label>
+                <select id="exportDocument" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
+                  <option value="questions">题目</option>
+                  <option value="answers">答案与解析</option>
+                  <option value="combined">题目＋答案</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-slate-600 mb-1">答案解析位置</label>
+                <select id="exportAnswerLayout" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
+                  <option value="inline">逐题紧跟</option>
+                  <option value="appendix">卷末集中</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-slate-600 mb-1">分页</label>
+                <select id="exportPagination" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
+                  <option value="compact">连续排版，节省纸张</option>
+                  <option value="keep">尽量保持单题完整</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-slate-600 mb-1">选择题选项</label>
+                <select id="exportOptionLayout" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
+                  <option value="auto">自动排版</option>
+                  <option value="four">一行四个</option>
+                  <option value="two">两行两个</option>
+                  <option value="vertical">四个选项竖排</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-slate-600 mb-1">正文字号</label>
+                <select id="exportFontSize" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
+                  <option value="12">12 磅</option>
+                  <option value="14">14 磅</option>
+                  <option value="16">16 磅</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-slate-600 mb-1">解答题留白</label>
+                <select id="exportAnswerSpace" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
+                  <option value="none">不留白</option>
+                  <option value="small">少量（12 毫米）</option>
+                  <option value="medium">适中（30 毫米）</option>
+                  <option value="large">较多（60 毫米）</option>
+                </select>
+              </div>
             </div>
             <div class="p-3 bg-white rounded-lg border border-slate-200/80 space-y-2">
               <label class="flex items-center gap-2 cursor-pointer">
-                <input id="exportIncludeAnswer" type="checkbox" class="rounded text-emerald-600 focus:ring-0" checked>
-                <span>同时在卷尾附带参考答案与详细推导解析</span>
+                <input id="exportStudentInfo" type="checkbox" class="rounded text-emerald-600 focus:ring-0" checked>
+                <span>姓名、班级与得分栏</span>
               </label>
               <label class="flex items-center gap-2 cursor-pointer">
-                <input id="exportIncludeScore" type="checkbox" class="rounded text-emerald-600 focus:ring-0" checked>
-                <span>显示每道题的出处与分值</span>
+                <input id="exportOrigin" type="checkbox" class="rounded text-emerald-600 focus:ring-0">
+                <span>题号后印上原有题源</span>
+              </label>
+              <label id="exportAiBox" class="flex items-center gap-2 cursor-pointer">
+                <input id="exportAiAnswers" type="checkbox" class="rounded text-emerald-600 focus:ring-0">
+                <span>附 AI 参考（未核对）</span>
               </label>
             </div>
+            <p id="exportStatusLine" class="text-[11px] text-slate-500 leading-relaxed">排版与内容由题库正式排版引擎完成：Word 可继续编辑，PDF 为 A4 分页文件。</p>
           </div>
 
           <div class="space-y-2 pt-4 border-t border-slate-200">
-            <button 
-              onclick="executePrintPaper(false)" 
+            <button
+              id="exportPdfBtn"
+              onclick="runBasketExport('pdf')"
               class="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-semibold shadow-xs transition-colors flex items-center justify-center gap-2"
             >
-              <span>🖨️ 打印试卷 (一键导出高质量 PDF)</span>
+              <span>📄 导出 PDF（A4 分页）</span>
             </button>
-            <button 
-              onclick="executePrintPaper(true)" 
+            <button
+              id="exportWordBtn"
+              onclick="runBasketExport('docx')"
               class="w-full py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg font-semibold shadow-xs transition-colors flex items-center justify-center gap-2"
             >
-              <span>📄 打印参考答案与讲义解析卷</span>
+              <span>📝 导出 Word（可继续编辑）</span>
             </button>
-            <button 
-              onclick="openNativeLibraryBasket()" 
+            <button
+              id="exportSplitBtn"
+              onclick="runBasketExport('split')"
+              class="w-full py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium transition-colors"
+            >
+              📦 分别导出题目卷与答案卷
+            </button>
+            <button
+              onclick="openNativeLibraryBasket()"
               class="w-full py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium transition-colors"
               title="无缝切换到正式题库原版排版引擎"
             >
@@ -1137,47 +1056,30 @@
     </div>
   </div>
 
+  <!-- B4 导出链：复用题库正式排版引擎（题面排版 / 章节名判定 / docx·pdf 导出）。
+       qb-render.js 提供公式与表格分段，question-locator.js 提供章节名判定，
+       exam-export.js 是真正的导出客户端（Word / PDF / 分卷 Word）。 -->
+  <script src="/qb-render.js"></script>
+  <script src="/question-locator.js"></script>
+  <script src="/exam-export.js"></script>
+
   <script>
     // ================= 全局核心数据与响应式状态 =================
-    const API_BASE = (window.location.port === '8768' || window.location.port === '') ? '' : 'http://127.0.0.1:8768';
+    // API 同源：这个页面本来就由题有据后端自己提供，接口跟着当前端口走。
+    // 以前写死 8768，换个端口（比如在副本库上验收）就全打到别的服务上，
+    // 表现成「加载遇到网络波动」——其实是自己打错了门。
+    const API_BASE = '';
 
-    // 标签体系分组定义
+    // 标签体系分组定义（初始为空：真实标签一律由 /api/library/tags 灌入，杜绝假标签）
     const tagGroupsData = [
-      {
-        id: 'grp_knowledge',
-        name: '考点知识',
-        color: 'emerald',
-        tags: [
-          { id: 't_deriv', name: '导数与极值', color: 'emerald', useCount: 142, isPinned: true },
-          { id: 't_conic', name: '圆锥曲线', color: 'emerald', useCount: 98, isPinned: true },
-          { id: 't_solid', name: '立体几何', color: 'emerald', useCount: 86, isPinned: false },
-          { id: 't_func', name: '函数的单调性', color: 'emerald', useCount: 65, isPinned: false },
-          { id: 't_seq', name: '等差等比数列', color: 'emerald', useCount: 54, isPinned: false }
-        ]
-      },
-      {
-        id: 'grp_method',
-        name: '解题思想与方法',
-        color: 'blue',
-        tags: [
-          { id: 't_num_shape', name: '数形结合', color: 'blue', useCount: 112, isPinned: true },
-          { id: 't_separate', name: '分离参数法', color: 'blue', useCount: 76, isPinned: true },
-          { id: 't_construct', name: '构造辅助函数', color: 'blue', useCount: 64, isPinned: false },
-          { id: 't_case', name: '分类讨论思想', color: 'blue', useCount: 92, isPinned: false }
-        ]
-      },
-      {
-        id: 'grp_source',
-        name: '真题年份与省份',
-        color: 'amber',
-        tags: [
-          { id: 't_2024', name: '2024高考真题', color: 'amber', useCount: 120, isPinned: true },
-          { id: 't_2023', name: '2023高考真题', color: 'amber', useCount: 85, isPinned: false },
-          { id: 't_nation1', name: '新课标I卷', color: 'amber', useCount: 72, isPinned: false },
-          { id: 't_jia', name: '全国甲卷', color: 'amber', useCount: 48, isPinned: false }
-        ]
-      }
+      { id: 'grp_knowledge', name: '考点知识', color: 'emerald', tags: [] },
+      { id: 'grp_method',    name: '解题思想与方法', color: 'blue', tags: [] },
+      { id: 'grp_source',    name: '真题年份与省份', color: 'amber', tags: [] }
     ];
+
+    // 全量标签目录（保留父子关系与真实计数），供文件夹树 / 标签管理中心使用
+    let tagCatalogue = [];
+    let tagCatalogueRevision = 0;
 
     let papersData = [];
     let paperSearchKeyword = '';
@@ -1229,7 +1131,11 @@
       selectedTagIds: [],
       excludedTagIds: [],
       tagLogic: 'and',
-      sortBy: 'number' // number, difficulty, year
+      sortBy: 'number', // number, difficulty, year
+      // 文件夹树（B3）：试卷 / 知识点 / 方法 统一成 Eagle 式文件夹
+      folderType: '',      // all | paper | tag | group | smart | custom
+      folderPaperIds: [],  // 选中的试卷子集
+      folderTagIds: []     // 选中的标签子集（含子孙）
     };
 
     let currentPaperSort = localStorage.getItem('paper_sort_mode') || 'time_desc';
@@ -1287,10 +1193,29 @@
         .replace(/on\w+="[^"]*"/gi, '');
     }
 
+    // ---- 难度估算：只用真实信号（题型/分值/题干长度/配图/小问/解析长度） ----
+    function estimateDifficultyStars(ctx) {
+      const typeWeight = { single_choice: 0, multiple_choice: 1, fill_blank: 1, true_false: -1, free_response: 2 };
+      let pts = typeWeight[ctx.questionType] || 0;
+      const score = Number(ctx.score || 0);
+      if (score >= 12) pts += 2; else if (score >= 10) pts += 1;
+      const len = Number(ctx.stemLength || 0);
+      if (len > 220) pts += 2; else if (len > 110) pts += 1;
+      if (Number(ctx.figureCount || 0) > 0) pts += 1;
+      if (Number(ctx.subCount || 0) > 1) pts += 1;
+      if (Number(ctx.analysisLength || 0) > 400) pts += 1;
+      if (pts <= -1) return 1;
+      if (pts <= 0) return 2;
+      if (pts <= 2) return 3;
+      if (pts <= 3) return 4;
+      return 5;
+    }
+
     // ================= 初始化与数据拉取 =================
     async function init() {
       setupEventListeners();
       updatePaperSectionCollapseUI();
+      renderFolderTree();
       updateBasketBadges();
       updateFavoritesBadge();
       updateViewModeUI();
@@ -1467,7 +1392,7 @@
         tags: tags,
         aiAnswer: null,
         savedSolution: null,
-        aiSuggestedTags: ['核心考查', '规范解答']
+        aiSuggestedTags: []
       };
     }
 
@@ -1499,6 +1424,8 @@
                 name: displayName,
                 filename: p.filename,
                 total: (p.counts && p.counts.total) || p.total || 0,
+                // published = 已入库（终审发布）题数：题库只显这部分，未入库仍在核验中
+                published: (p.counts && p.counts.published) || 0,
                 createdAt: new Date(p.created_at || Date.now()),
                 createdStr: (p.created_at || '').slice(0, 10),
                 counts: p.counts || {}
@@ -1520,7 +1447,25 @@
               custom: tagGroupsData[2]
             };
             tagGroupsData.forEach(g => g.tags = []);
-            tagsData.tags.forEach(t => {
+            tagCatalogueRevision = tagsData.revision || 0;
+            tagCatalogue = (tagsData.tags || []).map(t => ({
+              id: t.id,
+              name: t.name,
+              kind: t.kind,
+              description: t.description || '',
+              color: t.color || '',
+              aliases: t.aliases || [],
+              levels: t.levels || [],
+              active: t.active !== false,
+              favorite: Boolean(t.favorite),
+              parent_ids: t.parent_ids || [],
+              child_ids: t.child_ids || [],
+              count: t.count || 0,
+              direct_count: t.direct_count || 0,
+              subtree_count: t.subtree_count || 0,
+              isPinned: Boolean(t.favorite)
+            }));
+            tagCatalogue.forEach(t => {
               const group = kindMap[t.kind] || tagGroupsData[0];
               group.tags.push({
                 id: t.id,
@@ -1627,53 +1572,32 @@
               formattedStem += optionsHtml;
             }
 
-            // 智能评定难度星级 (1-5星)
-            let stars = 3;
-            if (qNum >= 20 || (item.score && item.score >= 12)) {
-              stars = 5;
-            } else if (qNum >= 15 || (item.score && item.score >= 10)) {
-              stars = 4;
-            } else if (qNum <= 4) {
-              stars = 2;
-            }
+            // 难度星级：按真实信号估算（题型/分值/题干长度/配图/小问/解析长度），不再按题号瞎猜
+            const stars = estimateDifficultyStars({
+              questionType: item.question_type || 'free_response',
+              score: item.score || ((item.question_type === 'free_response') ? 12 : 5),
+              stemLength: rawStem.length,
+              figureCount: rawFigures.length,
+              subCount: Array.isArray(item.subquestions) ? item.subquestions.length : 0,
+              analysisLength: rawAnalysis.length
+            });
 
-            // 标签处理
-            let parsedTags = [];
-            if (Array.isArray(item.tags) && item.tags.length > 0) {
-              parsedTags = item.tags.map((t, tIdx) => {
-                if (typeof t === 'string') return { id: `tag_${idx}_${tIdx}`, name: t, color: 'emerald' };
-                return { id: t.id || `tag_${idx}_${tIdx}`, name: t.name, color: t.color || 'emerald' };
-              });
-            } else {
-              const inferred = [];
-              const rawText = rawStem + ' ' + (item.origin || '') + ' ' + (c.section || '');
-              if (rawText.includes('导数') || rawText.includes('极值') || rawText.includes('单调')) {
-                inferred.push({ id: `inf_${idx}_1`, name: '导数与极值', color: 'emerald' });
-              }
-              if (rawText.includes('不等式') || rawText.includes('证明')) {
-                inferred.push({ id: `inf_${idx}_2`, name: '不等式证明', color: 'blue' });
-              }
-              if (rawText.includes('椭圆') || rawText.includes('双曲线') || rawText.includes('抛物线') || rawText.includes('离心率')) {
-                inferred.push({ id: `inf_${idx}_3`, name: '圆锥曲线', color: 'emerald' });
-              }
-              if (rawText.includes('几何') || rawText.includes('折叠') || rawText.includes('垂直') || rawText.includes('平行')) {
-                inferred.push({ id: `inf_${idx}_4`, name: '立体几何', color: 'emerald' });
-              }
-              if (rawText.includes('三角') || rawText.includes('sin') || rawText.includes('cos')) {
-                inferred.push({ id: `inf_${idx}_5`, name: '三角函数', color: 'blue' });
-              }
-              if (rawText.includes('数列') || rawText.includes('等差') || rawText.includes('等比')) {
-                inferred.push({ id: `inf_${idx}_6`, name: '数列综合', color: 'blue' });
-              }
-              const originStr = item.origin || c.origin || '';
-              if (originStr.includes('卷')) {
-                const yearMatch = originStr.match(/(20\d\d)/);
-                inferred.push({ id: `inf_${idx}_src`, name: yearMatch ? `${yearMatch[1]}高考真题` : '高考真题', color: 'amber' });
-              } else {
-                inferred.push({ id: `inf_${idx}_def`, name: typeNames[item.question_type] || '典型题', color: 'slate' });
-              }
-              parsedTags = inferred.slice(0, 3);
-            }
+            // 标签处理：只认后端真实的 tag_assignments，不再用关键词瞎猜假标签
+            const realAssignments = Array.isArray(item.tag_assignments) ? item.tag_assignments : [];
+            const parsedTags = realAssignments
+              .filter(a => a && a.tag && a.tag.id)
+              .map(a => ({
+                id: a.tag.id,
+                name: a.tag.name,
+                kind: a.tag.kind,
+                color: a.tag.color || '',
+                source: a.source || '',
+                needsReview: !!a.needs_review,
+                useCount: 0,
+                isPinned: false
+              }));
+            const tagSuggestion = item.tag_suggestion || null;
+            const tagRevision = (typeof item.tag_revision === 'number') ? item.tag_revision : 0;
 
             const originSource = item.origin || c.origin || c.source_filename || item.source_filename || '真题资料';
 
@@ -1701,7 +1625,10 @@
               difficulty: '★'.repeat(stars) + '☆'.repeat(5 - stars),
               difficultyStars: stars,
               tags: parsedTags,
-              aiSuggestedTags: ['核心考查', '规范解答']
+              tagSuggestion: tagSuggestion,
+              tagRevision: tagRevision,
+              publicationId: String(item.id || ''),
+              aiSuggestedTags: buildPendingTagSuggestions(tagSuggestion)
             };
           });
 
@@ -1710,62 +1637,44 @@
             if (it.draft_id) loadedSourceQuestionIds.add(String(it.draft_id));
           });
 
-          // 并发载入未完全入库但已完成切题的教材/试卷
-          // (例如《高中数学思想方法导引》509题,《IMG20261025105610》28题)
-          // 判定必须是「按题量比」而不是「整卷有无」：
-          // 有些卷是「已终审一部分 + 待审一部分」(如《微信图片_2025-10-10》已审3题/共25题)，
-          // 整卷级判定会因为「卷内已有题」而把整卷排除在补拉之外，导致剩余题目永远拉不下来。
-          const unimportedPapers = papersData.filter(p => {
-            const wantTotal = (p.counts && p.counts.total) || p.total || 0;
-            if (!wantTotal) return false;
-            const inLibrary = allRawItems.filter(it => it.document_id === p.id).length;
-            return inLibrary < wantTotal;
-          });
+          // B2：题库只显示「已入库」（终审发布）的题。
+          // 未入库的 559 题（导引 509 / IMG 28 / 微信卷 22）仍在核验中，
+          // 由「核对题目」页承载，绝不混进题库工作台 —— 用户原话：
+          // 「入库 = 已经成为题库的一部分，没入库还在核验中」。
 
-          if (unimportedPapers.length > 0) {
-            try {
-              const extraPaperResults = await Promise.all(
-                unimportedPapers.map(p =>
-                  fetch(`${API_BASE}/api/papers/${p.id}`, {
-                    headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
-                  })
-                  .then(r => r.ok ? r.json() : null)
-                  .then(pdata => {
-                    if (!pdata || !Array.isArray(pdata.questions)) return [];
-                    // 去掉已终审入库的题（源题 id 相同），避免同一题在页面上出现两份
-                    return pdata.questions
-                      .map((pq, idx) => ({ pq, idx }))
-                      .filter(({ pq }) => !loadedSourceQuestionIds.has(String(pq.id)))
-                      .map(({ pq, idx }) => {
-                        loadedSourceQuestionIds.add(String(pq.id));
-                        return convertPaperQuestionToItem(pq, p, idx);
-                      });
-                  })
-                  .catch(e => {
-                    console.warn('Error loading extra paper:', p.name, e);
-                    return [];
-                  })
-                )
-              );
-              extraPaperResults.forEach(qs => {
-                if (qs && qs.length > 0) {
-                  realItems.push(...qs);
-                }
-              });
-            } catch (extraErr) {
-              console.warn('Extra papers batch load error:', extraErr);
-            }
-          }
 
-          questionsData.length = 0;
           questionsData.push(...realItems);
           currentActiveQuestionId = questionsData[0]?.id || null;
+
+          // 把后台跑完的答案任务结果（job.result）回填成 AI 初稿，
+          // 这样刷新页面也能看到「⚡ AI 解析」草稿，而不是一片空白。
+          try {
+            const jobRes = await fetch(`${API_BASE}/api/library/jobs?ids=${questionsData.map(x => x.id).join(',')}&solution_scope=true`, {
+              headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
+              cache: 'no-store'
+            });
+            if (jobRes.ok) {
+              const jobBody = await jobRes.json();
+              const byPub = new Map();
+              (jobBody.jobs || []).forEach(j => {
+                if (!j || !j.publication_id) return;
+                const list = byPub.get(j.publication_id) || [];
+                list.push(j);
+                byPub.set(j.publication_id, list);
+              });
+              questionsData.forEach(q => {
+                const list = byPub.get(q.id);
+                if (list && list.length) applyAnswerJobResult(q, list);
+              });
+            }
+          } catch (e) { /* 拿不到就算了，不影响主流程 */ }
 
           updateSmartFolderCounts();
           updateFavoritesBadge();
           applyFilters();
           renderInlineActiveChips();
           renderRightInspector();
+          renderFolderTree();
         }
       } catch (e) {
         console.warn('Real data loading fallback:', e);
@@ -2027,6 +1936,16 @@
 
     function setPaperSortMode(mode) {
       currentPaperSort = mode;
+      try { localStorage.setItem('paper_sort_mode', mode); } catch (e) {}
+      sortAndRenderPapers(mode);
+      renderFolderTree();
+      const sel = document.getElementById('treeSortSelect');
+      if (sel) sel.value = mode;
+      if (typeof hideEagleContextMenu === 'function') hideEagleContextMenu();
+    }
+
+    function setPaperSortModeLegacy(mode) {
+      currentPaperSort = mode;
       localStorage.setItem('paper_sort_mode', mode);
       sortAndRenderPapers(mode);
       hideEagleContextMenu();
@@ -2086,7 +2005,7 @@
       } else if (sortMode === 'name') {
         list.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
       } else if (sortMode === 'count_desc') {
-        list.sort((a, b) => b.total - a.total);
+        list.sort((a, b) => (b.published || 0) - (a.published || 0));
       }
 
       const listContainer = document.getElementById('paperProjectsList');
@@ -2129,7 +2048,7 @@
               </button>
               <span id="paper_count_${p.id}" class="font-mono text-[10px] px-1 py-0.2 rounded ${
                 isActive ? 'bg-emerald-200/60 text-emerald-900 font-bold' : 'bg-slate-100 text-slate-400'
-              }">${p.total}</span>
+              }">${p.published || p.total}</span>
             </div>
           </div>
         `;
@@ -2298,9 +2217,11 @@
         filterState.paperName = targetPaper ? targetPaper.name : '入库项目';
         filterState.smartFilter = '';
 
-        // 若该资料的题目尚未全部载入内存，立即按需极速拉取并注入
+        // 若该资料的「已入库」题目尚未全部载入内存，立即按需极速拉取并注入
+        // 口径必须是 published（已入库数）而不是 total（含未入库），
+        // 否则会把还在核验的题拉进题库。
         const existingCount = questionsData.filter(q => q.documentId === paperId).length;
-        const wantTotal = (targetPaper && targetPaper.counts && targetPaper.counts.total) || (targetPaper && targetPaper.total) || 0;
+        const wantTotal = (targetPaper && targetPaper.published) || 0;
         if (existingCount < wantTotal && targetPaper && wantTotal > 0) {
           const sentinel = document.getElementById('chunkSentinel');
           if (sentinel) sentinel.innerText = `正在载入《${targetPaper.name}》的 ${wantTotal} 道试题...`;
@@ -2369,13 +2290,27 @@
         // p.total 是该卷在数据库里的真实题量（用于补拉判定与"仅查看该项目的试题(N题)"菜单），
         // 覆盖成"当前已载入数"会把真实题量改小，导致部分卷显示成 3 而不是 25。
         const countBadge = document.getElementById(`paper_count_${p.id}`);
-        if (countBadge) countBadge.innerText = realCount > 0 ? realCount : p.total;
+        if (countBadge) countBadge.innerText = p.published || realCount;
       });
     }
 
     // ================= 筛选与切片分批加载引擎 =================
+    function folderMatchesQuestion(q) {
+      const fp = filterState.folderPaperIds || [];
+      const ft = filterState.folderTagIds || [];
+      if (!fp.length && !ft.length) return true;
+      if (fp.length && q.documentId && fp.includes(q.documentId)) return true;
+      if (ft.length) {
+        const qIds = (q.tags || []).map(t => t.id);
+        if (ft.some(id => qIds.includes(id))) return true;
+      }
+      return false;
+    }
+
     function applyFilters() {
       filteredQuestions = questionsData.filter(q => {
+        if (!folderMatchesQuestion(q)) return false;
+
         if (filterState.paperId && q.documentId !== filterState.paperId) {
           return false;
         }
@@ -2716,7 +2651,7 @@
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-1.5">
                 <span class="font-bold text-emerald-950 text-xs">⚡ AI 智能解析与考点推导</span>
-                <span class="text-[10px] px-1.5 py-0.2 rounded bg-emerald-200/60 text-emerald-900 font-mono">MiniMax 推导</span>
+                <span class="text-[10px] px-1.5 py-0.2 rounded bg-emerald-200/60 text-emerald-900 font-mono">${escapeHtml((q.aiAnswer && q.aiAnswer.engine) || 'AI')} 推导</span>
               </div>
               <button onclick="event.stopPropagation(); requestAiReAnalysis('${q.id}')" class="text-emerald-700 hover:text-emerald-900 text-[11px] font-medium flex items-center gap-1 cursor-pointer">
                 <span>↻ 重新推导</span>
@@ -2764,80 +2699,281 @@
       }
     }
 
-    async function requestAiReAnalysis(qid) {
-      const box = document.getElementById(`analysis_box_${qid}`);
-      if (!box) return;
+    // ================= 真 AI 生成链路（B1：一次点击 = 排队两个后台任务） =================
+    const AI_POLL_INTERVAL_MS = 2500;
+    const AI_POLL_TIMEOUT_MS = 300000;
 
-      box.classList.remove('hidden');
-      const btn = document.getElementById(`btn_analysis_${qid}`);
-      if (btn) btn.innerText = '收起解析';
-
-      box.innerHTML = `
-        <div class="p-4 bg-emerald-50/60 rounded-lg border border-emerald-200 text-xs text-emerald-900 flex items-center gap-2">
+    function aiBoxSpinner(text) {
+      return `
+        <div class="p-3.5 bg-emerald-50/60 rounded-lg border border-emerald-200 text-xs text-emerald-900 flex items-center gap-2">
           <svg class="animate-spin h-4 w-4 text-emerald-600 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
           </svg>
-          <span>AI 大模型正在调用数学引擎深入推导解题步骤与结论...</span>
+          <span>${escapeHtml(text)}</span>
         </div>
       `;
+    }
 
+    function aiBoxError(text) {
+      return `
+        <div class="p-3.5 bg-rose-50 rounded-lg border border-rose-200 text-xs text-rose-800">
+          <div class="font-semibold mb-1">AI 没有生成成功</div>
+          <div>${escapeHtml(text)}</div>
+        </div>
+      `;
+    }
+
+    async function queueLibraryJob(kind, publicationId, extra) {
+      const payload = Object.assign({ kind: kind, ids: [publicationId] }, extra || {});
+      const res = await fetch(`${API_BASE}/api/library/jobs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-QB-Request': '1',
+          'Referer': window.location.href
+        },
+        body: JSON.stringify(payload)
+      });
+      let body = null;
+      try { body = await res.json(); } catch (e) { body = null; }
+      if (!res.ok) throw new Error((body && body.error) || `排队失败（HTTP ${res.status}）`);
+      return body || {};
+    }
+
+    async function fetchLibraryJobs(publicationId, scope) {
+      const suffix = scope === 'tags' ? '&tag_scope=true' : '&solution_scope=true';
       try {
-        let solData = null;
+        const res = await fetch(`${API_BASE}/api/library/jobs?ids=${encodeURIComponent(publicationId)}${suffix}`, {
+          headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
+          cache: 'no-store'
+        });
+        if (!res.ok) return [];
+        const body = await res.json();
+        return Array.isArray(body.jobs) ? body.jobs : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    // AI 初稿的真正去处。
+    // 后端在 solution_scope=true 时只把 AI 结果写进 job.result，
+    // 不写 publication.extras.ai_answer —— 所以 /api/library/{id}/solution 的
+    // ai_answer 字段是 null，AI 草稿只能从任务结果里取。
+    function applyAnswerJobResult(q, jobs) {
+      if (!q || !Array.isArray(jobs)) return false;
+      const done = jobs.filter(j => j && j.kind === 'answer' && j.status === 'done' && j.result);
+      if (!done.length) return false;
+      // 取最新一条
+      done.sort((a, b) => (String(b.updated_at || b.id)).localeCompare(String(a.updated_at || a.id)));
+      const res = done[0].result;
+      const answer = typeof res.answer === 'string' ? res.answer : '';
+      const analysis = typeof res.analysis === 'string' ? res.analysis : '';
+      if (!answer && !analysis) return false;
+      q.aiAnswer = {
+        answer,
+        analysis,
+        engine: res.engine || res.model || 'AI',
+        fingerprint: res.fingerprint || ''
+      };
+      q.hasAnswer = Boolean(answer) || q.hasAnswer;
+      q.hasAnalysis = Boolean(analysis) || q.hasAnalysis;
+      return true;
+    }
+
+    // 把后端回填的答案/解析/标签建议写回前端题目对象（真值，不造假）
+    function applyAiPayloadToQuestion(q, item) {
+      if (!q || !item) return;
+      const solution = item.solution || null;
+      const ai = item.ai_answer || (item.extras && item.extras.ai_answer) || null;
+      if (ai && (ai.analysis || ai.answer)) {
+        q.aiAnswer = ai;
+        q.hasAnalysis = Boolean(ai.analysis) || q.hasAnalysis;
+        q.hasAnswer = Boolean(ai.answer) || q.hasAnswer;
+      } else if (!q.aiAnswer && solution && (solution.analysis || solution.answer)) {
+        // 正式解析里若没有 AI 标记，只能算「人工/原卷解析」，
+        // 绝不能冒充 AI 初稿 —— 否则「AI 初稿对照」框里显示的是人写的东西。
+        q.aiAnswer = {
+          answer: solution.answer || '',
+          analysis: solution.analysis || '',
+          engine: solution.engine || '人工解析',
+          manual: true
+        };
+        q.hasAnalysis = true;
+        q.hasAnswer = true;
+      }
+      if (item.tag_suggestion) {
+        q.tagSuggestion = item.tag_suggestion;
+        q.aiSuggestedTags = buildPendingTagSuggestions(item.tag_suggestion);
+      }
+      if (typeof item.tag_revision === 'number') q.tagRevision = item.tag_revision;
+    }
+
+    async function refreshQuestionSolution(q) {
+      try {
+        // 后台跑完的答案任务，结果只在 job.result 里，先把它捞回来。
         try {
-          const res = await fetch(`${API_BASE}/api/library/${qid}/solution`, {
-            headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
-          });
-          if (res.ok) solData = await res.json();
-        } catch (e) {}
+          const jobs = await fetchLibraryJobs(q.id, 'answer');
+          applyAnswerJobResult(q, jobs);
+        } catch (e) { /* 拿不到就当没有 */ }
+        const res = await fetch(`${API_BASE}/api/library/${q.id}`, {
+          headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
+          cache: 'no-store'
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        // 单题详情接口的载荷是 {publication:{...}, versions, history, ...}，
+        // 取错字段会让 AI 标签建议整块丢失（右栏永远显示「暂无待采纳建议」）。
+        const item = data.publication || data.item || data;
+        applyAiPayloadToQuestion(q, item);
+        return item;
+      } catch (e) {
+        console.warn('refreshQuestionSolution failed:', e);
+        return null;
+      }
+    }
 
-        const q = questionsData.find(item => item.id === qid);
-        let derivedAnswer = 'B';
-        let derivedAnalysis = '【核心考查与思路】结合题目函数性质与图象特征进行分析：\n' +
-          '1. 对函数求导或分析奇偶性：$f(-x) = -(-x)^2 + (e^{-x}-e^x)\\sin(-x) = -x^2 + (e^x-e^{-x})\\sin x = f(x)$，为偶函数，图象关于 $y$ 轴对称，排除不对称选项；\n' +
-          '2. 选取特殊点验证：取 $x = \\pi \\approx 3.14$ 或 $x = 1$，计算导数值或函数值正负号，可迅速确定极值位置与开口方向；\n' +
-          '3. 综上分析，符合全部条件的图像为对应选项。';
-
-        if (solData && solData.solution && (solData.solution.analysis || solData.solution.answer)) {
-          derivedAnswer = solData.solution.answer || derivedAnswer;
-          derivedAnalysis = solData.solution.analysis || derivedAnalysis;
-        } else if (solData && solData.ai_answer) {
-          derivedAnswer = solData.ai_answer.answer || derivedAnswer;
-          derivedAnalysis = solData.ai_answer.analysis || derivedAnalysis;
-        }
-
-        if (q) {
-          q.aiAnswer = { answer: derivedAnswer, analysis: derivedAnalysis, engine: 'MiniMax' };
-          q.hasAnalysis = true;
-          q.hasAnswer = true;
-        }
-
-        box.innerHTML = `
-          <div class="space-y-2.5 bg-emerald-50/60 p-3.5 rounded-lg border border-emerald-200">
-            <div class="flex items-center justify-between">
-              <span class="font-bold text-emerald-950 text-xs flex items-center gap-1.5">
-                <span>⚡ AI 智能解析 (MiniMax 深度推导)</span>
-              </span>
-              <button 
-                onclick="saveAiSolutionToBank('${qid}', '${escapeHtml(derivedAnswer)}', \`${escapeHtml(derivedAnalysis)}\`)"
-                class="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[11px] font-medium shadow-2xs transition-colors cursor-pointer"
-              >
-                💾 采纳并保存为正式解析
-              </button>
-            </div>
-            <div class="font-semibold text-emerald-900 text-xs">【参考答案】${escapeHtml(derivedAnswer)}</div>
-            <div class="text-slate-800 leading-relaxed font-serif text-xs">${escapeHtml(derivedAnalysis)}</div>
+    function renderAiResultHtml(q, errs) {
+      const a = q.aiAnswer || {};
+      const pendingCount = (q.aiSuggestedTags || []).length;
+      const engine = a.engine || 'AI';
+      return `
+        <div class="space-y-2.5 bg-emerald-50/60 p-3.5 rounded-lg border border-emerald-200">
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-bold text-emerald-950 text-xs flex items-center gap-1.5">
+              <span>⚡ AI 解析（${escapeHtml(engine)}）</span>
+              <span class="text-[10px] px-1.5 py-0.2 rounded bg-emerald-200/60 text-emerald-900 font-mono">未核对</span>
+            </span>
+            <button
+              onclick="saveAiSolutionToBank('${q.id}')"
+              class="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[11px] font-medium shadow-2xs transition-colors cursor-pointer shrink-0"
+            >
+              💾 采纳并保存为正式解析
+            </button>
           </div>
-        `;
+          ${a.answer ? `<div class="font-semibold text-emerald-900 text-xs">【参考答案】${escapeHtml(a.answer)}</div>` : ''}
+          <div class="text-slate-800 leading-relaxed font-serif text-xs">${escapeHtml(a.analysis || '')}</div>
+          ${pendingCount ? `<div class="text-[11px] text-emerald-800">已同时生成 ${pendingCount} 条标签建议，去右侧「AI 建议」点一下即可采纳。</div>` : ''}
+          ${(errs && errs.length) ? `<div class="text-[11px] text-rose-700">${errs.map(e => escapeHtml(e)).join('；')}</div>` : ''}
+        </div>
+      `;
+    }
 
+    async function requestAiReAnalysis(qid) {
+      const box = document.getElementById(`analysis_box_${qid}`);
+      if (!box) return;
+      const q = questionsData.find(item => item.id === qid);
+      if (!q) return;
+
+      box.classList.remove('hidden');
+      const btn = document.getElementById(`btn_analysis_${qid}`);
+      if (btn) btn.innerText = '收起解析';
+      box.innerHTML = aiBoxSpinner('正在排队 AI 任务（答案解析 + 标签建议）…');
+
+      let cfg = null;
+      try {
+        const cfgRes = await fetch(`${API_BASE}/api/settings/library-ai`, {
+          headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
+          cache: 'no-store'
+        });
+        if (cfgRes.ok) cfg = await cfgRes.json();
+      } catch (e) { cfg = null; }
+
+      const features = (cfg && cfg.features) || {};
+      const wantAnswer = features.ai_answer !== false;
+      const wantTags = features.knowledge_tags !== false;
+      if (!wantAnswer && !wantTags) {
+        box.innerHTML = aiBoxError('「AI 参考答案」和「知识点标签」两个开关都没开，请到 设置 → 标签与答案 打开后再生成。');
+        return;
+      }
+      if (cfg && cfg.ready === false) {
+        box.innerHTML = aiBoxError(cfg.message || 'AI 服务尚未就绪，请先在 设置 → 标签与答案 里通过连接测试。');
+        return;
+      }
+
+      const jobIds = [];
+      const problems = [];
+      if (wantAnswer) {
+        try {
+          const res = await queueLibraryJob('answer', qid, { solution_scope: true });
+          (res.jobs || []).forEach(j => jobIds.push(String(j.id)));
+        } catch (e) { problems.push('答案解析：' + e.message); }
+      }
+      if (wantTags) {
+        try {
+          const res = await queueLibraryJob('tags', qid, { retry: true });
+          (res.jobs || []).forEach(j => jobIds.push(String(j.id)));
+        } catch (e) { problems.push('标签建议：' + e.message); }
+      }
+      if (!jobIds.length) {
+        box.innerHTML = aiBoxError('没能排上队：' + (problems.join('；') || '未知错误'));
+        return;
+      }
+      if (problems.length) showToast(problems.join('；'), 'error');
+
+      const deadline = Date.now() + AI_POLL_TIMEOUT_MS;
+      let settled = false;
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, AI_POLL_INTERVAL_MS));
+        const fetched = await Promise.all([fetchLibraryJobs(qid, 'answer'), fetchLibraryJobs(qid, 'tags')]);
+        const mine = fetched.flat().filter(j => jobIds.includes(String(j.id)));
+        if (!mine.length) continue;
+        const active = mine.filter(j => j.status === 'queued' || j.status === 'running');
+        const done = mine.filter(j => j.status === 'done');
+        const failed = mine.filter(j => j.status === 'failed');
+        if (active.length) {
+          box.innerHTML = aiBoxSpinner(`AI 正在处理（已完成 ${done.length}/${mine.length}）…`);
+          continue;
+        }
+        settled = true;
+        await refreshQuestionSolution(q);
+        applyAnswerJobResult(q, mine);
+        renderRightInspector();
+        const errs = failed.map(j => `${j.kind === 'tags' ? '标签建议' : '答案解析'}：${j.error || '失败'}`);
+        const hasAi = q.aiAnswer && (q.aiAnswer.analysis || q.aiAnswer.answer);
+        box.innerHTML = (errs.length && !hasAi) ? aiBoxError(errs.join('；')) : renderAiResultHtml(q, errs);
         triggerKaTeX(box);
-        showToast('AI 解析生成成功！', 'success');
-      } catch (err) {
-        box.innerHTML = `<div class="p-3 bg-rose-50 text-rose-700 text-xs rounded border border-rose-200">生成解析出错: ${escapeHtml(err.message)}</div>`;
+        applyFilters();
+        break;
+      }
+      if (!settled) {
+        box.innerHTML = aiBoxError('AI 还在后台跑（超过 5 分钟没回），过一会儿刷新题库就能看到结果。');
+      }
+    }
+
+    // 只重跑标签建议（右侧「重新生成」入口）
+    async function regenerateTagSuggestions(qid) {
+      const q = questionsData.find(item => item.id === qid);
+      if (!q) return;
+      showToast('正在排队生成标签建议…', 'info');
+      try {
+        const res = await queueLibraryJob('tags', qid, { retry: true });
+        const jobs = (res.jobs || []).map(j => String(j.id));
+        if (!jobs.length) { showToast('没能排上队', 'error'); return; }
+        const deadline = Date.now() + AI_POLL_TIMEOUT_MS;
+        while (Date.now() < deadline) {
+          await new Promise(r => setTimeout(r, AI_POLL_INTERVAL_MS));
+          const list = await fetchLibraryJobs(qid, 'tags');
+          const mine = list.filter(j => jobs.includes(String(j.id)));
+          if (!mine.length) continue;
+          if (mine.some(j => j.status === 'queued' || j.status === 'running')) continue;
+          const failed = mine.filter(j => j.status === 'failed');
+          await refreshQuestionSolution(q);
+          renderRightInspector();
+          if (failed.length) showToast('生成失败：' + (failed[0].error || '未知错误'), 'error');
+          else showToast('标签建议已生成，在下方点一下即可采纳', 'success');
+          return;
+        }
+        showToast('还在后台跑，稍后刷新', 'info');
+      } catch (e) {
+        showToast('生成失败：' + e.message, 'error');
       }
     }
 
     async function saveAiSolutionToBank(qid, answer, analysis) {
+      const q = questionsData.find(item => item.id === qid);
+      if (!answer && q && q.aiAnswer) answer = q.aiAnswer.answer || '';
+      if (!analysis && q && q.aiAnswer) analysis = q.aiAnswer.analysis || '';
       try {
         await fetch(`${API_BASE}/api/library/${qid}/solution`, {
           method: 'POST',
@@ -3066,10 +3202,6 @@
       if (mBadge) mBadge.innerText = `${count} 题`;
     }
 
-    function openBasketModal() {
-      openBasketExportModal();
-    }
-
     function openBasketExportModal() {
       const modal = document.getElementById('basketExportModal');
       if (!modal) return;
@@ -3165,180 +3297,114 @@
       showToast('试题篮已清空', 'info');
     }
 
-    function executePrintPaper(isSolutionOnly = false) {
+    // ================= B4 组卷导出：真链（后端 docx / pdf 排版引擎） =================
+    // 以前这里是自己拼一个 HTML 丢进 window.print()：公式没排版、配图没有、
+    // 没有 A4 分页、也导不出 Word。老子现在直接用题库正式排版引擎
+    // （exam-export.js + 后端 library_export / library_pdf），排版口径和正式题库一致。
+
+    function collectExportPrintOptions() {
+      const documentMode = document.getElementById('exportDocument')?.value || 'questions';
+      const answerLayout = document.getElementById('exportAnswerLayout')?.value || 'inline';
+      const fontSize = parseInt(document.getElementById('exportFontSize')?.value || '12', 10);
+      const answerSpace = document.getElementById('exportAnswerSpace')?.value || 'none';
+      const pagination = document.getElementById('exportPagination')?.value || 'compact';
+      const optionLayout = document.getElementById('exportOptionLayout')?.value || 'auto';
+      const mode = ['questions', 'answers', 'combined'].includes(documentMode) ? documentMode : 'questions';
+      return {
+        answers: mode !== 'questions',
+        origin: Boolean(document.getElementById('exportOrigin')?.checked),
+        ai_answers: Boolean(document.getElementById('exportAiAnswers')?.checked),
+        answer_layout: answerLayout === 'appendix' ? 'appendix' : 'inline',
+        document: mode,
+        font_size: [12, 14, 16].includes(fontSize) ? fontSize : 12,
+        answer_space: ['none', 'small', 'medium', 'large'].includes(answerSpace) ? answerSpace : 'none',
+        student_info: document.getElementById('exportStudentInfo')?.checked !== false,
+        pagination: pagination === 'keep' ? 'keep' : 'compact',
+        option_layout: ['auto', 'four', 'two', 'vertical'].includes(optionLayout) ? optionLayout : 'auto',
+        option_overrides: {},
+        answer_space_overrides: {},
+        figure_overrides: {},
+        question_breaks: []
+      };
+    }
+
+    function setExportStatus(text, tone = '') {
+      const el = document.getElementById('exportStatusLine');
+      if (!el) return;
+      el.innerText = text;
+      el.className = 'text-[11px] leading-relaxed ' + (tone === 'error'
+        ? 'text-rose-600'
+        : tone === 'ok' ? 'text-emerald-700' : 'text-slate-500');
+    }
+
+    function setExportBusy(busy) {
+      ['exportPdfBtn', 'exportWordBtn', 'exportSplitBtn'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) btn.disabled = Boolean(busy);
+      });
+    }
+
+    // 取题目的完整原文（题面 / 选项 / 答案 / 解析 / 配图）。
+    // 列表接口给的是渲染好的 HTML，导出要的是 LaTeX 原文，所以这里重新取一次。
+    async function loadExportItems(ids) {
+      const response = await fetch(`${API_BASE}/api/library/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
+        body: JSON.stringify({ ids })
+      });
+      let body = null;
+      try { body = await response.json(); } catch (e) { /* 保持 null */ }
+      if (!response.ok) throw new Error((body && body.error) || '读取题目失败');
+      const items = Array.isArray(body?.items) ? body.items : [];
+      const missing = Array.isArray(body?.missing) ? body.missing : [];
+      if (missing.length) {
+        const reasons = missing.map(entry => entry.message || '这道题当前不能使用');
+        throw new Error(`有 ${missing.length} 道题不能导出：${reasons.slice(0, 3).join('；')}`);
+      }
+      if (!items.length) throw new Error('题篮里的题都没能读出来，请重新选题');
+      return items;
+    }
+
+    async function runBasketExport(format) {
       if (basketQuestionIds.size === 0) {
         showToast('试题篮为空，请先选题再组卷导出！', 'error');
         return;
       }
-
-      const basketList = questionsData.filter(q => basketQuestionIds.has(q.id));
-      const mainTitle = (document.getElementById('paperMainTitle')?.value || '2026学年高三数学阶段性检测卷').trim();
-      const subTitle = (document.getElementById('paperSubTitle')?.value || '考试时间：120 分钟 · 满分：150 分').trim();
-      const includeAnswer = document.getElementById('exportIncludeAnswer')?.checked ?? true;
-      const includeScore = document.getElementById('exportIncludeScore')?.checked ?? true;
-
-      const printWin = window.open('', '_blank');
-      if (!printWin) {
-        showToast('请允许浏览器弹出打印窗口！', 'error');
+      if (!window.ExamExport || typeof window.ExamExport.download !== 'function') {
+        setExportStatus('导出组件没载入（exam-export.js），请刷新页面后重试。', 'error');
+        showToast('导出组件未载入，请刷新页面后重试', 'error');
         return;
       }
-
-      let paperContentHtml = '';
-
-      if (isSolutionOnly) {
-        paperContentHtml = `
-          <div style="max-width: 840px; margin: 0 auto; font-family: -apple-system, SimSun, serif; color: #111;">
-            <div style="text-align: center; border-bottom: 2px solid #111; padding-bottom: 14px; margin-bottom: 24px;">
-              <div style="font-size: 13px; letter-spacing: 2px; margin-bottom: 6px; color: #666;">绝密★启用前</div>
-              <h1 style="font-size: 22px; font-weight: bold; margin: 0 0 8px 0;">${escapeHtml(mainTitle)} · 参考答案与全解全析</h1>
-              <div style="font-size: 13px; color: #555;">${escapeHtml(subTitle)}</div>
-            </div>
-
-            <div style="margin-top: 16px;">
-              ${basketList.map((q, idx) => `
-                <div style="margin-bottom: 26px; padding-bottom: 18px; border-bottom: 1px dashed #cbd5e1; page-break-inside: avoid;">
-                  <div style="font-size: 16px; font-weight: bold; margin-bottom: 8px;">
-                    第 ${idx + 1} 题【${escapeHtml(q.questionType)}】 ${includeScore ? `<span style="font-size: 13px; font-weight: normal; color: #666;">(满分: ${q.score}分)</span>` : ''}
-                  </div>
-                  <div style="font-size: 14px; color: #334155; margin-bottom: 10px; background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px solid #e2e8f0; line-height: 1.75;">
-                    <strong style="color: #0f172a;">【题面】</strong>
-                    <div>${sanitizeMathHtml(q.content)}</div>
-                  </div>
-                  <div style="margin-bottom: 8px; color: #047857; font-weight: bold; font-size: 15px; padding: 6px 12px; background: #ecfdf5; border-radius: 4px;">
-                    【参考答案】${escapeHtml(q.rawAnswer || (q.aiAnswer && q.aiAnswer.answer) || '见详细解析')}
-                  </div>
-                  <div style="line-height: 1.85; color: #1e293b; font-size: 14.5px;">
-                    <strong style="color: #0f172a;">【全解全析与解题反思】</strong><br/>
-                    <div style="margin-top: 6px; white-space: pre-wrap;">${escapeHtml(q.rawAnalysis || (q.aiAnswer && q.aiAnswer.analysis) || '详见原卷解法与考点精析。')}</div>
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-        `;
-      } else {
-        paperContentHtml = `
-          <div style="max-width: 840px; margin: 0 auto; font-family: -apple-system, SimSun, serif; color: #111; line-height: 1.8;">
-            <div style="text-align: center; border-bottom: 2px solid #111; padding-bottom: 14px; margin-bottom: 20px;">
-              <div style="font-size: 12px; letter-spacing: 3px; margin-bottom: 6px; color: #666;">绝密★启用前</div>
-              <h1 style="font-size: 22px; font-weight: bold; margin: 0 0 8px 0;">${escapeHtml(mainTitle)}</h1>
-              <div style="font-size: 13px; color: #444;">${escapeHtml(subTitle)}</div>
-              <div style="margin-top: 10px; font-size: 12px; border: 1px solid #aaa; display: inline-block; padding: 4px 16px;">
-                姓名：___________&nbsp;&nbsp;&nbsp;&nbsp;班级：___________&nbsp;&nbsp;&nbsp;&nbsp;考号：___________
-              </div>
-            </div>
-
-            <div>
-              ${basketList.map((q, idx) => `
-                <div style="margin-bottom: 24px; page-break-inside: avoid;">
-                  <div style="font-weight: bold; font-size: 15px; margin-bottom: 6px;">
-                    <span>${idx + 1}.</span>
-                    <span style="color: #666; font-size: 13px; font-weight: normal;">【${escapeHtml(q.questionType)}】</span>
-                    ${includeScore ? `<span style="font-size: 12px; color: #666; font-weight: normal;">(${q.score}分)</span>` : ''}
-                  </div>
-                  <div style="font-size: 15px; line-height: 1.8; color: #111;">
-                    ${sanitizeMathHtml(q.content)}
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-
-            ${includeAnswer ? `
-              <div style="page-break-before: always; margin-top: 30px; border-top: 2px solid #111; padding-top: 20px;">
-                <h2 style="font-size: 18px; font-weight: bold; text-align: center; margin-bottom: 20px;">【参考答案与评分标准】</h2>
-                ${basketList.map((q, idx) => `
-                  <div style="margin-bottom: 16px; font-size: 14px; page-break-inside: avoid; border-bottom: 1px dashed #e2e8f0; padding-bottom: 12px;">
-                    <div style="font-weight: bold; margin-bottom: 4px; color: #047857;">
-                      第 ${idx + 1} 题【${escapeHtml(q.questionType)}】参考答案：
-                    </div>
-                    <div style="margin-bottom: 6px; padding: 6px 10px; background: #f8fafc; border-left: 3px solid #10b981; font-weight: 600;">
-                      ${escapeHtml(q.rawAnswer || (q.aiAnswer && q.aiAnswer.answer) || '见解析')}
-                    </div>
-                    ${q.rawAnalysis || (q.aiAnswer && q.aiAnswer.analysis) ? `
-                      <div style="color: #334155; line-height: 1.7; font-size: 13.5px; white-space: pre-wrap;">
-                        <strong>【详细解析】</strong><br/>
-                        ${escapeHtml(q.rawAnalysis || (q.aiAnswer && q.aiAnswer.analysis))}
-                      </div>
-                    ` : ''}
-                  </div>
-                `).join('')}
-              </div>
-            ` : ''}
-          </div>
-        `;
+      const title = (document.getElementById('paperMainTitle')?.value || '练习').trim() || '练习';
+      const ids = Array.from(basketQuestionIds);
+      setExportBusy(true);
+      setExportStatus('正在读取题目原文并排版，请稍等…');
+      try {
+        const items = await loadExportItems(ids);
+        setExportStatus(`正在排版 ${items.length} 道题…`);
+        const result = await window.ExamExport.download(items, {
+          title,
+          print_options: collectExportPrintOptions(),
+          solutions: {},
+          format
+        });
+        const count = result.question_count || items.length;
+        const suffix = result.warning ? `（${result.warning}）` : '';
+        if (result.saved) {
+          setExportStatus(`已导出 ${count} 道题${suffix}，文件在 ${result.path}`, 'ok');
+        } else {
+          setExportStatus(`已导出 ${count} 道题${suffix}：${result.filename}`, 'ok');
+        }
+        showToast(`${format === 'pdf' ? 'PDF' : format === 'split' ? '题目卷+答案卷' : 'Word'} 导出完成`, 'success');
+      } catch (error) {
+        const message = error && error.message ? error.message : '导出失败，请重试';
+        setExportStatus(message, 'error');
+        showToast(message, 'error');
+      } finally {
+        setExportBusy(false);
       }
-
-      const sOpen = '<' + 'script';
-      const sClose = '<' + '/script>';
-
-      printWin.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <title>${escapeHtml(mainTitle)}</title>
-          <link rel="stylesheet" href="/vendor/katex/katex.min.css">
-          <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" onerror="this.onerror=null;">
-          ${sOpen} src="/vendor/katex/katex.min.js">${sClose}
-          ${sOpen} src="/vendor/katex/contrib/auto-render.min.js">${sClose}
-          <style>
-            @media print {
-              .no-print { display: none !important; }
-              body { margin: 12mm; padding: 0; }
-              @page { size: A4; margin: 12mm; }
-            }
-            body { font-size: 14px; line-height: 1.75; background: #fff; padding: 24px; color: #111; }
-            img { max-width: 100%; height: auto; }
-            .katex-display { margin: 0.6em 0 !important; }
-          </style>
-        </head>
-        <body>
-          <div class="no-print" style="position: sticky; top: 0; background: #047857; color: white; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; z-index: 999; box-shadow: 0 2px 8px rgba(0,0,0,0.15); margin: -24px -24px 24px -24px; border-radius: 0 0 8px 8px;">
-            <div style="font-weight: bold; font-size: 14px; display: flex; align-items: center; gap: 8px;">
-              <span>题有据 Pro · 组卷排版打印预览 (${basketList.length} 道试题)</span>
-            </div>
-            <div style="display: flex; gap: 10px;">
-              <button onclick="window.print()" style="background: white; color: #047857; border: none; padding: 6px 18px; border-radius: 6px; font-weight: bold; font-size: 13px; cursor: pointer;">🖨️ 立即打印 / 另存为 PDF</button>
-              <button onclick="window.close()" style="background: rgba(255,255,255,0.2); color: white; border: none; padding: 6px 14px; border-radius: 6px; font-size: 13px; cursor: pointer;">关闭窗口</button>
-            </div>
-          </div>
-
-          ${paperContentHtml}
-
-          ${sOpen}>
-            function renderAllMath() {
-              if (window.renderMathInElement) {
-                window.renderMathInElement(document.body, {
-                  delimiters: [
-                    {left: '$$', right: '$$', display: true},
-                    {left: '\\[', right: '\\]', display: true},
-                    {left: '$', right: '$', display: false},
-                    {left: '\\(', right: '\\)', display: false}
-                  ],
-                  throwOnError: false,
-                  errorColor: '#dc2626',
-                  strict: false,
-                  trust: true,
-                  macros: {
-                    "\\parallel": "\\mathrel{/\\mkern-6mu/}",
-                    "\\nparallel": "\\mathrel{/\\mkern-6mu/\\mkern-11mu\\backslash}"
-                  }
-                });
-              }
-            }
-
-            if (document.readyState === 'loading') {
-              window.addEventListener('DOMContentLoaded', renderAllMath);
-            } else {
-              renderAllMath();
-            }
-            window.addEventListener('load', renderAllMath);
-          ${sClose}
-        </body>
-        </html>
-      `);
-      printWin.document.close();
     }
+
 
     function openNativeLibraryBasket() {
       try {
@@ -3358,7 +3424,7 @@
 
       document.getElementById('editModalQBadge').innerText = `第 ${q.questionNumber} 题 · ID: ${q.id.slice(0, 8)}`;
       document.getElementById('editInputType').value = q.questionTypeCode || 'single_choice';
-      document.getElementById('editInputStars').value = String(q.difficultyStars || 3);
+      setEditStarsDisplay(q.difficultyStars || 3);
       document.getElementById('editInputStem').value = q.rawStem || '';
 
       const opts = q.rawOptions || {};
@@ -3406,13 +3472,23 @@
       updateEditLivePreview();
     }
 
+    let activeEditingStars = 3;
+
+    function setEditStarsDisplay(stars) {
+      const n = Math.min(5, Math.max(1, parseInt(stars || '3', 10) || 3));
+      activeEditingStars = n;
+      const el = document.getElementById('editInputStarsText');
+      if (el) el.textContent = '★'.repeat(n) + '☆'.repeat(5 - n);
+      return n;
+    }
+
     function updateEditLivePreview() {
       const previewEl = document.getElementById('editLivePreviewContent');
       if (!previewEl) return;
 
       const stem = (document.getElementById('editInputStem')?.value || '').trim();
       const type = document.getElementById('editInputType')?.value || 'single_choice';
-      const stars = parseInt(document.getElementById('editInputStars')?.value || '3');
+      const stars = activeEditingStars || 3;
 
       const isChoice = (type === 'single_choice' || type === 'multiple_choice');
       const optObj = {};
@@ -3460,7 +3536,7 @@
       if (!q) return;
 
       const newType = document.getElementById('editInputType')?.value || 'single_choice';
-      const newStars = parseInt(document.getElementById('editInputStars')?.value || '3');
+      const newStars = activeEditingStars || 3;
       const newStem = (document.getElementById('editInputStem')?.value || '').trim();
 
       const newOpts = {};
@@ -3521,8 +3597,8 @@
         if (newCard) triggerKaTeX(newCard);
       }
 
-      closeEditQuestionModal();
-      showToast(`第 ${q.questionNumber} 题修改已保存！`, 'success');
+      let savedOk = true;
+      let saveDetail = '';
 
       try {
         let rev = 1;
@@ -3541,7 +3617,7 @@
           figures: activeEditingRevisionInfo?.figures || []
         };
 
-        await fetch(`${API_BASE}/api/library/${qid}/question`, {
+        const resQuestion = await fetch(`${API_BASE}/api/library/${qid}/question`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -3550,9 +3626,13 @@
           },
           body: JSON.stringify(editPayload)
         });
+        if (!resQuestion.ok) {
+          savedOk = false;
+          saveDetail = `题干保存失败 (HTTP ${resQuestion.status})`;
+        }
 
-        if (newAnswer || newAnalysis) {
-          await fetch(`${API_BASE}/api/library/${qid}/solution`, {
+        if (savedOk && (newAnswer || newAnalysis)) {
+          const resSolution = await fetch(`${API_BASE}/api/library/${qid}/solution`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -3565,9 +3645,22 @@
               sync_library: true
             })
           });
+          if (!resSolution.ok) {
+            savedOk = false;
+            saveDetail = `答案解析保存失败 (HTTP ${resSolution.status})`;
+          }
         }
       } catch (err) {
+        savedOk = false;
+        saveDetail = '后端请求失败';
         console.warn('Backend sync save:', err);
+      }
+
+      closeEditQuestionModal();
+      if (savedOk) {
+        showToast(`第 ${q.questionNumber} 题修改已保存！`, 'success');
+      } else {
+        showToast(`修改未入库：${saveDetail}（页面已暂时更新，请刷新核对）`, 'error');
       }
     }
 
@@ -3663,9 +3756,9 @@
           tagsContainer.innerHTML = `<span class="text-slate-400 italic text-[11px]">${isBatch ? '在下方输入将批量追加标签' : '暂无标签'}</span>`;
         } else {
           tagsContainer.innerHTML = tags.map(t => `
-            <span class="inline-flex items-center gap-1 rounded bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium">
+            <span class="inline-flex items-center gap-1 rounded bg-emerald-50 text-emerald-800 px-2 py-0.5 text-[11px] font-medium" title="${escapeHtml(t.name)}">
               <span>${escapeHtml(t.name)}</span>
-              <button onclick="removeTagFromCurrent('${t.id}')" class="text-slate-400 hover:text-slate-700 cursor-pointer">×</button>
+              <button onclick="removeTagFromCurrent('${t.id}')" class="text-emerald-400 hover:text-emerald-800 cursor-pointer" title="移除该标签">×</button>
             </span>
           `).join('');
         }
@@ -3682,53 +3775,205 @@
       }
 
       if (aiContainer) {
-        const mockAi = [
-          { id: 'ai_1', name: '极值点偏移' },
-          { id: 'ai_2', name: '零点定理' }
-        ];
-        aiContainer.innerHTML = mockAi.map(t => `
-          <button onclick="addAiTagDirectly('${t.name}')" class="px-1.5 py-0.5 rounded bg-white border border-emerald-200 text-emerald-800 text-[10px] hover:bg-emerald-50 transition-colors cursor-pointer">
-            + ${escapeHtml(t.name)}
-          </button>
-        `).join('');
-      }
-    }
-
-    function addTagToCurrent(tagId) {
-      const allFlat = tagGroupsData.flatMap(g => g.tags);
-      const tag = allFlat.find(t => t.id === tagId);
-      if (!tag) return;
-
-      if (selectedQuestionIds.size > 1) {
-        questionsData.forEach(q => {
-          if (selectedQuestionIds.has(q.id) && !q.tags.some(t => t.id === tagId)) {
-            q.tags.push({ ...tag });
-          }
-        });
-        showToast(`已为 ${selectedQuestionIds.size} 道试题追加「${tag.name}」`, 'success');
-      } else {
-        const activeQ = questionsData.find(q => q.id === currentActiveQuestionId);
-        if (activeQ && !activeQ.tags.some(t => t.id === tagId)) {
-          activeQ.tags.push({ ...tag });
-          showToast(`已为题目追加标签「${tag.name}」`, 'success');
+        const pending = (activeQ && Array.isArray(activeQ.aiSuggestedTags)) ? activeQ.aiSuggestedTags : [];
+        const suggestion = activeQ ? activeQ.tagSuggestion : null;
+        const failedSuggestion = Boolean(suggestion && suggestion.status === 'failed');
+        const parts = [];
+        if (pending.length) {
+          parts.push(pending.map((sg) => `
+            <button onclick="acceptAiTagSuggestion(${sg._index})" class="px-1.5 py-0.5 rounded bg-white border border-emerald-200 text-emerald-800 text-[10px] hover:bg-emerald-50 transition-colors cursor-pointer" title="${escapeHtml(sg.rationale || 'AI 建议')}\n${escapeHtml(sg.evidence || '')}">
+              ✓ ${escapeHtml(sg.name)}
+            </button>
+          `).join(''));
+        } else if (failedSuggestion) {
+          parts.push(`<span class="text-[10px] text-rose-700/80" title="${escapeHtml(suggestion.message || '')}">上次生成没成功</span>`);
+        } else if (suggestion && suggestion.status === 'accepted') {
+          parts.push(`<span class="text-[10px] text-emerald-700/70">这批建议已全部处理完</span>`);
+        } else if (suggestion && suggestion.status === 'rejected') {
+          parts.push(`<span class="text-[10px] text-slate-500/80">这批建议已被拒绝</span>`);
+        } else {
+          parts.push(`<span class="text-[10px] text-emerald-700/70">暂无待采纳建议 · 点「⚡ AI 一键生成」静默生成</span>`);
         }
+        if (activeQ && !isBatch) {
+          parts.push(`<button onclick="regenerateTagSuggestions('${activeQ.id}')" class="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-600 text-[10px] hover:bg-slate-50 transition-colors cursor-pointer">↻ 重新生成建议</button>`);
+        }
+        aiContainer.innerHTML = parts.join('');
+      }
+    }
+
+    // ---- 真实落库：POST /api/library/{publication_id}/tags/assign ----
+    async function assignTagsToQuestion(q, addIds, removeIds) {
+      if (!q || !q.id) return false;
+      const payload = {
+        publication_ids: [q.id],
+        add: addIds || [],
+        remove: removeIds || [],
+        scopes: {},
+        expected_revisions: { [q.id]: q.tagRevision || 0 },
+        request_id: makeRequestId('eagle-assign')
+      };
+      try {
+        const res = await fetch(`${API_BASE}/api/library/${q.id}/tags/assign`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-QB-Request': '1',
+            'Referer': window.location.href
+          },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+          const txt = await res.text();
+          showToast(`标签落库失败(${res.status})：${txt.slice(0, 140)}`, 'error');
+          return false;
+        }
+        await refreshQuestionFromServer(q);
+        renderRightInspector();
+        applyFilters();
+        renderFolderTree();
+        return true;
+      } catch (e) {
+        showToast('标签落库失败：' + e.message, 'error');
+        return false;
+      }
+    }
+
+    // 从后端拉取该题的权威标签状态（真值回填）
+    async function refreshQuestionFromServer(q) {
+      try {
+        const res = await fetch(`${API_BASE}/api/library/${q.id}`, {
+          headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        // 同上：详情接口的真身是 data.publication。
+        const item = data.publication || data.item || data;
+        if (!item) return;
+        const assignments = Array.isArray(item.tag_assignments) ? item.tag_assignments : [];
+        q.tags = assignments.filter(a => a && a.tag && a.tag.id).map(a => ({
+          id: a.tag.id,
+          name: a.tag.name,
+          kind: a.tag.kind,
+          color: a.tag.color || '',
+          source: a.source || '',
+          needsReview: !!a.needs_review,
+          useCount: 0,
+          isPinned: false
+        }));
+        q.tagRevision = (typeof item.tag_revision === 'number') ? item.tag_revision : (q.tagRevision || 0);
+        if (item.tag_suggestion) {
+          q.tagSuggestion = item.tag_suggestion;
+          q.aiSuggestedTags = buildPendingTagSuggestions(item.tag_suggestion);
+        }
+      } catch (e) {
+        console.warn('refreshQuestionFromServer failed:', e);
+      }
+    }
+
+    // 后端把 request_id 当 UUID 解析（uuid.UUID(...)），
+    // 传 "eagle-123-abc" 这种自定义串一律 400「缺少有效的操作编号」。
+    function makeRequestId(prefix) {
+      const tag = prefix || 'eagle';
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+      }
+      const rnd = (typeof crypto !== 'undefined' && crypto.getRandomValues)
+        ? Array.from(crypto.getRandomValues(new Uint8Array(16)))
+        : Array.from({ length: 16 }, () => Math.floor(Math.random() * 256));
+      rnd[6] = (rnd[6] & 0x0f) | 0x40;
+      rnd[8] = (rnd[8] & 0x3f) | 0x80;
+      const hex = rnd.map(b => b.toString(16).padStart(2, '0')).join('');
+      return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    }
+
+    // 待采纳的 AI 标签建议。
+    // 关键：resolve 接口的 indices 指的是「建议批次原始数组」的下标，
+    // 前端过滤掉已采纳项后下标会错位，所以这里把原始下标一起带出来。
+    function buildPendingTagSuggestions(suggestion) {
+      if (!suggestion || !Array.isArray(suggestion.suggestions)) return [];
+      const out = [];
+      suggestion.suggestions.forEach((sg, idx) => {
+        if (!sg) return;
+        if (sg.decision) return;              // 已采纳 / 已拒绝的不再提示
+        if (!sg.tag_id && !sg.name) return;   // 既没有现成标签也没有名字的没法落库
+        out.push(Object.assign({}, sg, { _index: idx }));
+      });
+      return out;
+    }
+
+    // 点一下采纳一条 AI 建议（用户规则：单条采纳，不批量）
+    // 走 POST /api/library/tag-suggestions/{id}/resolve —— 这才会把建议批次标记为
+    // accepted/rejected；直接贴 tags/assign 会绕过建议状态，建议会一直挂在右栏。
+    async function acceptAiTagSuggestion(originalIndex) {
+      const q = questionsData.find(x => x.id === currentActiveQuestionId);
+      if (!q) { showToast('请先选中一道题', 'error'); return; }
+      const suggestion = q.tagSuggestion;
+      if (!suggestion || !suggestion.id) { showToast('没有可用的建议批次，请先重新生成', 'error'); return; }
+      const raw = Array.isArray(suggestion.suggestions) ? suggestion.suggestions : [];
+      const sg = raw[originalIndex];
+      if (!sg) { showToast('该建议已变化，请刷新后重试', 'error'); return; }
+      if (sg.decision) { showToast('这条建议已经处理过了', 'info'); return; }
+
+      const payload = {
+        action: 'accept',
+        indices: [originalIndex],
+        expected_revision: (typeof q.tagRevision === 'number') ? q.tagRevision : 0,
+        new_tags: {},
+        request_id: makeRequestId('eagle-accept')
+      };
+      // 建议里没有现成标签（AI 造了新标签）时，后端要拿到标签名才能建目录
+      if (!sg.tag_id && sg.name) {
+        payload.new_tags[String(originalIndex)] = {
+          name: String(sg.name).slice(0, 60),
+          kind: sg.kind === 'method' ? 'method' : 'knowledge',
+          description: String(sg.description || '').slice(0, 300)
+        };
       }
 
-      renderRightInspector();
-      applyFilters();
+      try {
+        const res = await fetch(`${API_BASE}/api/library/tag-suggestions/${suggestion.id}/resolve`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-QB-Request': '1',
+            'Referer': window.location.href
+          },
+          body: JSON.stringify(payload)
+        });
+        let body = null;
+        try { body = await res.json(); } catch (e) { body = null; }
+        if (!res.ok) {
+          const msg = (body && body.error) || `HTTP ${res.status}`;
+          showToast(`采纳失败：${msg}`, 'error');
+          await refreshQuestionFromServer(q);
+          renderRightInspector();
+          return;
+        }
+        await refreshQuestionFromServer(q);
+        renderRightInspector();
+        applyFilters();
+        renderFolderTree();
+        showToast(`已采纳标签「${sg.name || '未命名'}」`, 'success');
+      } catch (e) {
+        showToast('采纳失败：' + e.message, 'error');
+      }
     }
 
-    function removeTagFromCurrent(tagId) {
+    async function addTagToCurrent(tagId) {
+      const tag = tagCatalogue.find(t => t.id === tagId) || tagGroupsData.flatMap(g => g.tags).find(t => t.id === tagId);
+      if (!tag) { showToast('标签不存在', 'error'); return; }
       const activeQ = questionsData.find(q => q.id === currentActiveQuestionId);
-      if (activeQ) activeQ.tags = activeQ.tags.filter(t => t.id !== tagId);
-      renderRightInspector();
-      applyFilters();
+      if (!activeQ) { showToast('请先在中间列表选中一道题', 'error'); return; }
+      if (activeQ.tags.some(t => t.id === tagId)) { showToast('该题已有此标签', 'info'); return; }
+      const ok = await assignTagsToQuestion(activeQ, [tagId], []);
+      if (ok) showToast(`已为题目追加标签「${tag.name}」`, 'success');
     }
 
-    function addAiTagDirectly(name) {
-      const newTag = { id: 't_' + Date.now(), name, color: 'blue' };
-      tagGroupsData[1].tags.push(newTag);
-      addTagToCurrent(newTag.id);
+    async function removeTagFromCurrent(tagId) {
+      const activeQ = questionsData.find(q => q.id === currentActiveQuestionId);
+      if (!activeQ) return;
+      const ok = await assignTagsToQuestion(activeQ, [], [tagId]);
+      if (ok) showToast('已移除标签', 'success');
     }
 
     function applySmartFolder(key) {
@@ -3765,6 +4010,313 @@
       applyFilters();
     }
 
+    // ================= Eagle 式统一文件夹树（B3） =================
+    const folderTreeState = {
+      expanded: new Set(['all']),
+      activeId: 'all',
+      search: ''
+    };
+    const folderNodeRegistry = new Map();
+
+    function buildTagTreeNodes(kind) {
+      const pool = tagCatalogue.filter(t => t.kind === kind);
+      if (!pool.length) return [];
+      const byId = new Map(pool.map(t => [t.id, t]));
+      const childMap = new Map();
+      pool.forEach(t => {
+        const parents = (t.parent_ids || []).filter(pid => byId.has(pid));
+        if (!parents.length) {
+          if (!childMap.has('__root__')) childMap.set('__root__', []);
+          childMap.get('__root__').push(t);
+        } else {
+          parents.forEach(pid => {
+            if (!childMap.has(pid)) childMap.set(pid, []);
+            childMap.get(pid).push(t);
+          });
+        }
+      });
+      const build = (t) => {
+        const kids = (childMap.get(t.id) || []).map(build).filter(Boolean);
+        const kidsCount = kids.reduce((s, k) => s + k.count, 0);
+        const count = Math.max(t.subtree_count || 0, kidsCount);
+        if (!count) return null;               // 空节点不渲染
+        return {
+          id: 'tag:' + t.id,
+          type: 'tag',
+          label: t.name,
+          icon: kind === 'method' ? '\u{1F9E9}' : '\u{1F3F7}',
+          tagId: t.id,
+          count,
+          children: kids
+        };
+      };
+      const roots = (childMap.get('__root__') || []).map(build).filter(Boolean);
+      roots.sort((a, b) => b.count - a.count || String(a.label).localeCompare(String(b.label), 'zh-CN'));
+      return roots;
+    }
+
+    function buildPaperTreeNodes() {
+      const list = papersData.filter(p => (p.published || 0) > 0);
+      const mode = currentPaperSort;
+      if (mode === 'time_desc') list.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      else if (mode === 'time_asc') list.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      else if (mode === 'name') list.sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh-CN'));
+      else if (mode === 'count_desc') list.sort((a, b) => (b.published || 0) - (a.published || 0));
+      return list.map(p => ({
+        id: 'paper:' + p.id,
+        type: 'paper',
+        label: p.name,
+        icon: '\u{1F4C4}',
+        paperId: p.id,
+        count: p.published || 0,
+        children: []
+      }));
+    }
+
+    function readCustomSmartFolders() {
+      try {
+        const raw = localStorage.getItem('eagle_custom_smart_folders');
+        const arr = raw ? JSON.parse(raw) : [];
+        return Array.isArray(arr) ? arr : [];
+      } catch (e) { return []; }
+    }
+
+    function writeCustomSmartFolders(list) {
+      try { localStorage.setItem('eagle_custom_smart_folders', JSON.stringify(list)); } catch (e) {}
+    }
+
+    function snapshotCurrentFilter() {
+      return {
+        keyword: filterState.keyword,
+        paperIds: filterState.folderPaperIds.slice(),
+        tagIds: filterState.folderTagIds.slice(),
+        smartFilter: filterState.smartFilter,
+        questionTypes: filterState.questionTypes.slice(),
+        difficultyStars: filterState.difficultyStars.slice(),
+        hasAnswer: filterState.hasAnswer,
+        hasAnalysis: filterState.hasAnalysis,
+        selectedTagIds: filterState.selectedTagIds.slice(),
+        excludedTagIds: filterState.excludedTagIds.slice(),
+        tagLogic: filterState.tagLogic,
+        sortBy: filterState.sortBy
+      };
+    }
+
+    function describeCurrentFilter() {
+      if (filterState.folderPaperIds.length === 1) {
+        const p = papersData.find(x => x.id === filterState.folderPaperIds[0]);
+        if (p) return p.name;
+      }
+      if (filterState.folderTagIds.length === 1) {
+        const t = tagCatalogue.find(x => x.id === filterState.folderTagIds[0]);
+        if (t) return t.name;
+      }
+      if (filterState.keyword) return '关键词「' + filterState.keyword + '」';
+      return '我的筛选';
+    }
+
+    function saveCurrentAsSmartFolder() {
+      const name = window.prompt('给当前筛选起个名字（保存为智能文件夹）：', describeCurrentFilter());
+      if (!name || !name.trim()) return;
+      const list = readCustomSmartFolders();
+      list.push({
+        id: 'csf_' + Date.now(),
+        name: name.trim(),
+        filter: snapshotCurrentFilter(),
+        createdAt: Date.now()
+      });
+      writeCustomSmartFolders(list);
+      renderFolderTree();
+      showToast('已保存智能文件夹「' + name.trim() + '」', 'success');
+    }
+
+    function applyCustomSmartFolder(id) {
+      const item = readCustomSmartFolders().find(x => x.id === id);
+      if (!item) return;
+      const f = item.filter || {};
+      filterState.keyword = f.keyword || '';
+      filterState.folderPaperIds = (f.paperIds || []).slice();
+      filterState.folderTagIds = (f.tagIds || []).slice();
+      filterState.smartFilter = f.smartFilter || '';
+      filterState.questionTypes = (f.questionTypes || []).slice();
+      filterState.difficultyStars = (f.difficultyStars || []).slice();
+      filterState.hasAnswer = !!f.hasAnswer;
+      filterState.hasAnalysis = !!f.hasAnalysis;
+      filterState.selectedTagIds = (f.selectedTagIds || []).slice();
+      filterState.excludedTagIds = (f.excludedTagIds || []).slice();
+      filterState.tagLogic = f.tagLogic || 'and';
+      filterState.sortBy = f.sortBy || 'number';
+      filterState.folderType = 'custom';
+      folderTreeState.activeId = 'custom:' + id;
+      renderFolderTree();
+      renderInlineActiveChips();
+      applyFilters();
+    }
+
+    function getFolderTreeRoots() {
+      const roots = [];
+      roots.push({ id: 'all', type: 'all', label: '全部题库', icon: '\u{1F4DA}', count: questionsData.length, children: [] });
+
+      const papers = buildPaperTreeNodes();
+      if (papers.length) {
+        roots.push({
+          id: 'group:papers', type: 'group', label: '试卷', icon: '\u{1F5C2}',
+          count: papers.reduce((s, p) => s + p.count, 0), children: papers
+        });
+      }
+
+      const know = buildTagTreeNodes('knowledge');
+      if (know.length) {
+        roots.push({
+          id: 'group:knowledge', type: 'group', label: '知识点', icon: '\u{1F3F7}',
+          count: know.reduce((s, p) => s + p.count, 0), children: know
+        });
+      }
+
+      const meth = buildTagTreeNodes('method');
+      if (meth.length) {
+        roots.push({
+          id: 'group:method', type: 'group', label: '解题方法', icon: '\u{1F9E9}',
+          count: meth.reduce((s, p) => s + p.count, 0), children: meth
+        });
+      }
+
+      const smarts = [
+        { id: 'smart:favorites', type: 'smart', smartKey: 'favorites', label: '我收藏的试题', icon: '\u{2B50}', count: favoritesSet.size },
+        { id: 'smart:ai_unverified', type: 'smart', smartKey: 'ai_unverified', label: 'AI生成未人工核对', icon: '\u{26A1}', count: questionsData.filter(q => q.aiAnswer && !q.rawAnalysis).length },
+        { id: 'smart:need_tags', type: 'smart', smartKey: 'need_tags', label: '待补充考点标签', icon: '\u{25CF}', count: questionsData.filter(q => !q.tags || q.tags.length === 0).length }
+      ];
+      smarts.forEach(s => { if (s.count > 0) roots.push(s); });
+
+      readCustomSmartFolders().forEach(c => {
+        roots.push({ id: 'custom:' + c.id, type: 'custom', customId: c.id, label: c.name, icon: '\u{2B50}', count: 0, children: [] });
+      });
+      return roots;
+    }
+
+    function collectTagIds(node) {
+      const out = [];
+      const walk = (n) => {
+        if (n.type === 'tag' && n.tagId) out.push(n.tagId);
+        (n.children || []).forEach(walk);
+      };
+      walk(node);
+      return out;
+    }
+
+    function renderFolderTreeNode(node, depth) {
+      folderNodeRegistry.set(node.id, node);
+      const hasKids = !!(node.children && node.children.length);
+      const isExpanded = folderTreeState.expanded.has(node.id);
+      const isActive = folderTreeState.activeId === node.id;
+      const kw = folderTreeState.search;
+
+      let selfMatch = !kw || String(node.label).toLowerCase().includes(kw);
+      let kidsHtml = '';
+      if (hasKids) {
+        const kidHtmls = [];
+        node.children.forEach(c => {
+          const h = renderFolderTreeNode(c, depth + 1);
+          if (h) { kidHtmls.push(h); selfMatch = true; }
+        });
+        if (isExpanded || kw) {
+          kidsHtml = '<div class="ml-2.5 border-l border-slate-200 pl-1 space-y-0.5">' + kidHtmls.join('') + '</div>';
+        }
+      }
+      if (!selfMatch) return '';
+
+      const arrow = hasKids
+        ? '<span onclick="event.stopPropagation(); toggleFolderNode(\'' + node.id + '\')" class="w-3 h-3 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 cursor-pointer select-none shrink-0">' + (isExpanded ? '▾' : '▸') + '</span>'
+        : '<span class="w-3 inline-block shrink-0"></span>';
+
+      return '<div class="flex items-center justify-between rounded-md px-1.5 py-1 ' +
+        (isActive ? 'bg-emerald-50 text-emerald-900 font-semibold' : 'text-slate-600 hover:bg-slate-100') +
+        '" style="padding-left:' + (4 + depth * 11) + 'px">' +
+        '<div class="flex items-center gap-1 min-w-0 cursor-pointer" onclick="applyFolderNode(\'' + node.id + '\')">' +
+        arrow +
+        '<span class="text-[11px] shrink-0">' + node.icon + '</span>' +
+        '<span class="truncate text-[11px]">' + escapeHtml(node.label) + '</span>' +
+        '</div>' +
+        '<span class="font-mono text-[10px] shrink-0 ml-1 ' + (isActive ? 'text-emerald-700' : 'text-slate-400') + '">' + node.count + '</span>' +
+        '</div>' + kidsHtml;
+    }
+
+    function renderFolderTree() {
+      const container = document.getElementById('folderTreeContainer');
+      if (!container) return;
+      folderNodeRegistry.clear();
+      const roots = getFolderTreeRoots();
+      const html = roots.map(r => renderFolderTreeNode(r, 0)).filter(Boolean).join('');
+      container.innerHTML = html || '<div class="py-2 text-center text-[11px] text-slate-400">没有匹配的文件夹</div>';
+      const sel = document.getElementById('treeSortSelect');
+      if (sel && sel.value !== currentPaperSort) sel.value = currentPaperSort;
+    }
+
+    function toggleFolderNode(nodeId) {
+      if (folderTreeState.expanded.has(nodeId)) folderTreeState.expanded.delete(nodeId);
+      else folderTreeState.expanded.add(nodeId);
+      renderFolderTree();
+    }
+
+    function handleTreeSearch(val) {
+      folderTreeState.search = (val || '').trim().toLowerCase();
+      renderFolderTree();
+    }
+
+    function applyFolderNode(nodeId) {
+      const node = folderNodeRegistry.get(nodeId);
+      if (!node) return;
+      folderTreeState.activeId = nodeId;
+
+      filterState.smartFilter = '';
+      filterState.paperId = '';
+      filterState.paperName = '';
+      filterState.folderType = node.type;
+      filterState.folderPaperIds = [];
+      filterState.folderTagIds = [];
+
+      if (node.type === 'all') {
+        filterState.folderType = 'all';
+      } else if (node.type === 'paper') {
+        filterState.folderPaperIds = [node.paperId];
+        filterState.paperId = node.paperId;
+        filterState.paperName = node.label;
+        folderTreeState.expanded.add(nodeId);
+      } else if (node.type === 'tag') {
+        filterState.folderTagIds = collectTagIds(node);
+        folderTreeState.expanded.add(nodeId);
+      } else if (node.type === 'group') {
+        (node.children || []).forEach(c => {
+          if (c.type === 'paper') filterState.folderPaperIds.push(c.paperId);
+          if (c.type === 'tag') filterState.folderTagIds.push.apply(filterState.folderTagIds, collectTagIds(c));
+        });
+        folderTreeState.expanded.add(nodeId);
+      } else if (node.type === 'smart') {
+        filterState.smartFilter = node.smartKey;
+        filterState.folderType = 'smart';
+      } else if (node.type === 'custom') {
+        applyCustomSmartFolder(node.customId);
+        return;
+      }
+
+      renderFolderTree();
+      renderInlineActiveChips();
+      applyFilters();
+    }
+
+    // ---- 死按钮修复：标签 AND / OR 逻辑切换 ----
+    function setTagLogic(logic) {
+      filterState.tagLogic = (logic === 'or') ? 'or' : 'and';
+      const andBtn = document.getElementById('dropTagAnd');
+      const orBtn = document.getElementById('dropTagOr');
+      const activeCls = 'px-2 py-0.5 rounded bg-white text-slate-900 font-bold shadow-2xs';
+      const idleCls = 'px-2 py-0.5 rounded text-slate-500 hover:text-slate-800';
+      if (andBtn) andBtn.className = filterState.tagLogic === 'and' ? activeCls : idleCls;
+      if (orBtn) orBtn.className = filterState.tagLogic === 'or' ? activeCls : idleCls;
+      renderInlineActiveChips();
+      applyFilters();
+    }
+
     function switchSidebarTab(tab) {
       const btnS = document.getElementById('sidebarTabSmart');
       const btnC = document.getElementById('sidebarTabChapter');
@@ -3798,7 +4350,9 @@
         filterState.hasAnalysis ||
         Boolean(filterState.chapter) ||
         Boolean(filterState.paperId) ||
-        Boolean(filterState.smartFilter);
+        Boolean(filterState.smartFilter) ||
+        Boolean(filterState.folderTagIds && filterState.folderTagIds.length) ||
+        (filterState.folderType === 'all' && folderTreeState.activeId !== 'all');
 
       if (!hasActive) {
         container.innerHTML = '';
@@ -3815,6 +4369,16 @@
           <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-900 border border-emerald-200 text-xs">
             <span>📁 项目: ${escapeHtml(filterState.paperName || '指定试卷')}</span>
             <button onclick="filterByPaper('')" class="text-emerald-700 hover:text-emerald-950 font-bold ml-0.5 cursor-pointer">×</button>
+          </span>
+        `;
+      }
+
+      const folderNode = folderNodeRegistry.get(folderTreeState.activeId);
+      if (folderNode && folderTreeState.activeId !== 'all') {
+        html += `
+          <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-900 border border-indigo-200 text-xs">
+            <span>🗂 文件夹: ${escapeHtml(folderNode.label)}</span>
+            <button onclick="applyFolderNode('all')" class="text-indigo-700 hover:text-indigo-950 font-bold ml-0.5 cursor-pointer">×</button>
           </span>
         `;
       }
@@ -3881,6 +4445,9 @@
       filterState.paperId = '';
       filterState.paperName = '';
       filterState.smartFilter = '';
+      filterState.folderType = 'all';
+      filterState.folderPaperIds = [];
+      filterState.folderTagIds = [];
 
       const searchInput = document.getElementById('globalSearchInput');
       if (searchInput) searchInput.value = '';
@@ -3959,10 +4526,18 @@
       applyFilters();
     }
 
+    function openLightboxSourceImage() {
+      const img = document.getElementById('lightboxImage');
+      const url = (window.__lightboxImageUrl) || (img && img.getAttribute('src')) || '';
+      if (!url) { showToast('没有可打开的原图', 'error'); return; }
+      window.open(url, '_blank', 'noopener');
+    }
+
     function previewImageModal(url, title = '原卷配图') {
       const modal = document.getElementById('imageLightboxModal');
       const img = document.getElementById('lightboxImage');
       const titleEl = document.getElementById('lightboxTitle');
+      window.__lightboxImageUrl = url;
       if (!modal || !img) return;
 
       img.src = url;
@@ -3971,13 +4546,148 @@
     }
 
     function closeImageLightboxModal() {
+      window.__lightboxImageUrl = '';
       const modal = document.getElementById('imageLightboxModal');
       if (modal) modal.classList.add('hidden');
     }
 
+    // ---- 标签管理中心：真实目录 ----
+    let modalTagGroupKind = 'knowledge';
+
+    function setModalTagGroup(kind) {
+      modalTagGroupKind = kind;
+      renderModalTags();
+    }
+
+    function renderModalTags() {
+      const navEl = document.getElementById('modalTagGroupsNav');
+      const listEl = document.getElementById('modalTagList');
+      if (!navEl || !listEl) return;
+
+      const kinds = [
+        { kind: 'knowledge', label: '考点知识' },
+        { kind: 'method', label: '解题方法' },
+        { kind: 'custom', label: '自定义' },
+        { kind: 'legacy', label: '历史遗留' }
+      ];
+      navEl.innerHTML = kinds.map(k => {
+        const n = tagCatalogue.filter(t => t.kind === k.kind).length;
+        const active = modalTagGroupKind === k.kind;
+        return `<div onclick="setModalTagGroup('${k.kind}')" class="flex items-center justify-between px-2 py-1.5 rounded cursor-pointer transition-colors ${active ? 'bg-emerald-50 text-emerald-900 font-semibold' : 'text-slate-600 hover:bg-slate-100'}">
+          <span>${k.label}</span><span class="font-mono text-[10px] opacity-60">${n}</span>
+        </div>`;
+      }).join('');
+
+      const searchEl = document.getElementById('modalSearchTagInput');
+      const kw = ((searchEl && searchEl.value) || '').trim().toLowerCase();
+      const list = tagCatalogue.filter(t => t.kind === modalTagGroupKind && (!kw || String(t.name).toLowerCase().includes(kw)));
+      if (!list.length) {
+        listEl.innerHTML = '<div class="py-8 text-center text-slate-400">没有匹配的标签</div>';
+        return;
+      }
+      listEl.innerHTML = list.map(t => `
+        <div class="flex items-center justify-between px-2 py-1.5 rounded hover:bg-slate-50 border-b border-slate-50">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="truncate text-slate-700">${escapeHtml(t.name)}</span>
+            ${t.active ? '' : '<span class="text-[9px] px-1 rounded bg-slate-200 text-slate-500">已停用</span>'}
+            <span class="font-mono text-[10px] text-slate-400 shrink-0">${t.count || 0} 题</span>
+          </div>
+          <button onclick="toggleTagActive('${t.id}')" class="text-[10px] shrink-0 ${t.active ? 'text-rose-500 hover:underline' : 'text-emerald-600 hover:underline'}">${t.active ? '停用' : '启用'}</button>
+        </div>
+      `).join('');
+    }
+
+    async function mutateCatalogue(payload) {
+      const body = Object.assign({ revision: tagCatalogueRevision }, payload);
+      try {
+        const res = await fetch(`${API_BASE}/api/library/tags`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-QB-Request': '1',
+            'Referer': window.location.href
+          },
+          body: JSON.stringify(body)
+        });
+        if (!res.ok) {
+          const txt = await res.text();
+          showToast(`操作失败(${res.status})：${txt.slice(0, 140)}`, 'error');
+          return false;
+        }
+        const data = await res.json().catch(() => ({}));
+        if (typeof data.revision === 'number') tagCatalogueRevision = data.revision;
+        await reloadTagCatalogue();
+        renderModalTags();
+        renderFolderTree();
+        return true;
+      } catch (e) {
+        showToast('操作失败：' + e.message, 'error');
+        return false;
+      }
+    }
+
+    async function reloadTagCatalogue() {
+      try {
+        const res = await fetch(`${API_BASE}/api/library/tags`, {
+          headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!Array.isArray(data.tags)) return;
+        tagCatalogueRevision = data.revision || tagCatalogueRevision;
+        tagCatalogue = data.tags.map(t => ({
+          id: t.id, name: t.name, kind: t.kind, description: t.description || '',
+          color: t.color || '', aliases: t.aliases || [], levels: t.levels || [],
+          active: t.active !== false, favorite: !!t.favorite,
+          parent_ids: t.parent_ids || [], child_ids: t.child_ids || [],
+          count: t.count || 0, direct_count: t.direct_count || 0,
+          subtree_count: t.subtree_count || 0, isPinned: !!t.favorite
+        }));
+        tagGroupsData.forEach(g => g.tags = []);
+        tagCatalogue.forEach(t => {
+          const group = t.kind === 'method' ? tagGroupsData[1] : (t.kind === 'knowledge' ? tagGroupsData[0] : tagGroupsData[2]);
+          group.tags.push({ id: t.id, name: t.name, color: group.color, useCount: t.count || 0, isPinned: !!t.favorite });
+        });
+        renderTagFilterDropdownList();
+      } catch (e) {
+        console.warn('reloadTagCatalogue failed:', e);
+      }
+    }
+
+    async function toggleTagActive(tagId) {
+      const tag = tagCatalogue.find(t => t.id === tagId);
+      if (!tag) return;
+      const action = tag.active ? 'deactivate_tag' : 'activate_tag';
+      const ok = await mutateCatalogue({ action, tag_id: tagId });
+      if (ok) showToast(tag.active ? '已停用标签' : '已启用标签', 'success');
+    }
+
+    function promptCreateNewTagInModal() {
+      const name = window.prompt('新标签名称：', '');
+      if (!name || !name.trim()) return;
+      const kind = (modalTagGroupKind === 'knowledge' || modalTagGroupKind === 'method') ? modalTagGroupKind : 'custom';
+      const levelInput = window.prompt('适用学段：初中 / 高中（直接回车 = 高中）', '高中');
+      const level = (levelInput || '').trim() === '初中' ? '初中' : '高中';
+      mutateCatalogue({
+        action: 'create_tag',
+        name: name.trim(),
+        kind,
+        levels: [level],
+        description: '',
+        color: '',
+        aliases: [],
+        parent_ids: [],
+        related_method_ids: []
+      }).then(ok => {
+        if (ok) showToast(`已新建标签「${name.trim()}」`, 'success');
+      });
+    }
+
     function openTagManagerModal() {
       const modal = document.getElementById('tagManagerModal');
-      if (modal) modal.classList.remove('hidden');
+      if (!modal) return;
+      modal.classList.remove('hidden');
+      renderModalTags();
     }
 
     function closeTagManagerModal() {
@@ -4137,5 +4847,51 @@
 
     window.addEventListener('DOMContentLoaded', init);
   </script>
+  <!-- ================= B5：答案解析编辑器（多题并排 / 原卷裁图 / AI 初稿对照） ================= -->
+  <div id="solutionEditorModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-3">
+    <div class="flex h-[88vh] w-full max-w-[1480px] flex-col rounded-xl bg-white shadow-2xl overflow-hidden border border-slate-200">
+      <div class="flex items-center justify-between border-b border-slate-100 px-4 py-2.5 shrink-0">
+        <div class="flex items-center gap-2">
+          <span class="text-sm font-bold text-slate-900">✎ 答案解析编辑器</span>
+          <span class="text-[11px] text-slate-400">多题并排 · 原卷裁图 · AI 初稿对照 · 逐题保存</span>
+        </div>
+        <div class="flex items-center gap-3">
+          <span id="solutionEditorStatus" class="text-[11px] text-slate-500"></span>
+          <button onclick="closeSolutionEditor()" class="text-slate-400 hover:text-slate-700 text-sm px-2" title="关闭">✕</button>
+        </div>
+      </div>
+
+      <div class="flex flex-1 overflow-hidden">
+        <!-- 左侧选题：多选后并排打开（最多 6 道） -->
+        <div class="w-64 border-r border-slate-100 bg-slate-50/60 flex flex-col shrink-0 min-h-0">
+          <div class="p-2 space-y-1.5 border-b border-slate-100 shrink-0">
+            <input id="solutionEditorSearchInput" type="text" placeholder="搜题号 / 出处 / 题干..."
+                   oninput="solutionEditorSearch(this.value)"
+                   class="w-full px-2 py-1 text-xs border border-slate-200 rounded-md focus:border-emerald-500 focus:outline-none">
+            <div class="flex flex-wrap gap-1">
+              <button onclick="solutionEditorPickBasket()" class="px-1.5 py-0.5 rounded border border-slate-200 bg-white text-[10px] text-slate-600 hover:bg-slate-100">试题篮</button>
+              <button onclick="solutionEditorPickFiltered()" class="px-1.5 py-0.5 rounded border border-slate-200 bg-white text-[10px] text-slate-600 hover:bg-slate-100">当前筛选</button>
+              <button onclick="solutionEditorPickMissing()" class="px-1.5 py-0.5 rounded border border-slate-200 bg-white text-[10px] text-slate-600 hover:bg-slate-100">缺解析</button>
+            </div>
+          </div>
+          <div id="solutionEditorList" class="flex-1 min-h-0 overflow-y-auto p-1.5 space-y-1"></div>
+        </div>
+
+        <!-- 右侧：多题并排编辑列 -->
+        <div id="solutionEditorColumns" class="flex-1 min-h-0 overflow-x-auto overflow-y-hidden bg-slate-50/40 p-3 flex gap-3"></div>
+      </div>
+
+      <div class="border-t border-slate-100 px-4 py-2 flex items-center justify-between text-[11px] shrink-0">
+        <span class="text-slate-400">保存会写回题库正式解析（原卷答案只在「原卷答案」里留作只读参考）</span>
+        <div class="flex gap-2">
+          <button onclick="saveAllSolutionColumns()" class="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold">保存全部</button>
+          <button onclick="closeSolutionEditor()" class="px-3 py-1.5 rounded-md border border-slate-200 text-xs text-slate-600 hover:bg-slate-50">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- B5：答案解析编辑器本体（多题并排 / 原卷裁图 / AI 初稿对照） -->
+  <script src="/eagle-solution-editor.js?v=b5-20261114g"></script>
 </body>
 </html>

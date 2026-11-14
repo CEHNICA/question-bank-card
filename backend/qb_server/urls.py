@@ -63,6 +63,10 @@ urlpatterns = [
     path("library.css", views.library_styles),
     path("eagle-filter-bar.css", views._frontend("eagle-filter-bar.css", "text/css; charset=utf-8")),
     path("eagle-filter-bar.js", views._frontend("eagle-filter-bar.js", "application/javascript; charset=utf-8")),
+    path(
+        "eagle-solution-editor.js",
+        views._frontend("eagle-solution-editor.js", "application/javascript; charset=utf-8"),
+    ),
     path("library-reading.css", views.library_reading_styles),
     path("favicon.png", views.favicon),
     path("startup-hint.js", views.startup_hint_script),
