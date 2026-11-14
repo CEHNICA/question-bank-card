@@ -298,7 +298,7 @@
             <button 
               id="pillBtnTag"
               onclick="toggleFilterDropdown('tag', event)" 
-              class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer"
+              class="relative z-[60] flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer"
             >
               <span class="text-slate-400">🏷️</span>
               <span id="pillLabelTag">标签筛选</span>
@@ -337,7 +337,7 @@
             <button 
               id="pillBtnType"
               onclick="toggleFilterDropdown('type', event)" 
-              class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer"
+              class="relative z-[60] flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer"
             >
               <span>📑</span>
               <span id="pillLabelType">题型</span>
@@ -365,7 +365,7 @@
             <button 
               id="pillBtnStar"
               onclick="toggleFilterDropdown('star', event)" 
-              class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer"
+              class="relative z-[60] flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer"
             >
               <span>⭐</span>
               <span id="pillLabelStar">难度星级</span>
@@ -393,7 +393,7 @@
             <button 
               id="pillBtnStatus"
               onclick="toggleFilterDropdown('status', event)" 
-              class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer"
+              class="relative z-[60] flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer"
             >
               <span>✓</span>
               <span id="pillLabelStatus">解析与答案</span>
@@ -3494,7 +3494,7 @@
     }
 
     function updateEditLivePreview() {
-      const previewEl = document.getElementById('editLivePreviewContent');
+      const previewEl = document.getElementById('editLivePreviewBox');
       if (!previewEl) return;
 
       const stem = (document.getElementById('editInputStem')?.value || '').trim();
@@ -4333,6 +4333,8 @@
       const btnC = document.getElementById('sidebarTabChapter');
       const viewS = document.getElementById('viewSmartFolders');
       const viewC = document.getElementById('viewChapters');
+      // B3 把左栏改成统一文件夹树后，这两个 tab 的 DOM 已经没有了。
+      if (!btnS || !btnC || !viewS || !viewC) return;
 
       if (tab === 'smart') {
         btnS.className = 'py-1 rounded bg-white text-slate-900 font-semibold shadow-2xs';
@@ -4499,14 +4501,20 @@
     }
 
     function toggleFilterDropdown(name) {
-      const drop = document.getElementById(`dropdown${name}`);
+      // DOM 里的浮层 id 是驼峰（dropdownTag / dropdownType / dropdownStar /
+      // dropdownStatus），这里收到的是小写关键字。直接拼会得到 'dropdowntag'，
+      // getElementById 返回 null，下一行 classList 直接抛 TypeError —— 四个筛选
+      // 胶囊就全是哑的，点了毫无反应。这里必须驼峰化。
+      const drop = document.getElementById(`dropdown${name.charAt(0).toUpperCase()}${name.slice(1)}`);
+      if (!drop) return;
       const isHidden = drop.classList.contains('hidden');
-      document.querySelectorAll('.filter-dropdown').forEach(d => d.classList.add('hidden'));
+      // 浮层在 DOM 里的 class 是 dropdown-menu，不是 filter-dropdown。
+      document.querySelectorAll('.dropdown-menu').forEach(d => d.classList.add('hidden'));
       if (isHidden) drop.classList.remove('hidden');
     }
 
     function renderTagFilterDropdownList() {
-      const container = document.getElementById('dropTagList');
+      const container = document.getElementById('dropTagListContainer');
       if (!container) return;
       container.innerHTML = tagGroupsData.map(g => `
         <div class="mb-2">
@@ -4732,8 +4740,11 @@
         if (menuEl && !menuEl.contains(e.target)) {
           hideEagleContextMenu();
         }
-        if (!e.target.closest('.filter-pill-btn') && !e.target.closest('.filter-dropdown')) {
-          document.querySelectorAll('.filter-dropdown').forEach(d => d.classList.add('hidden'));
+        // 浮层的 class 是 dropdown-menu；胶囊按钮没有 .filter-pill-btn 这个类，
+        // 用 id 前缀（pillBtnTag/pillBtnType/pillBtnStar/pillBtnStatus）来判。
+        // 两个判断都错的话，点一下胶囊就会把刚打开的浮层又关掉。
+        if (!e.target.closest('.dropdown-menu') && !e.target.closest('[id^="pillBtn"]')) {
+          document.querySelectorAll('.dropdown-menu').forEach(d => d.classList.add('hidden'));
         }
       });
 
