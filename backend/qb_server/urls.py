@@ -24,10 +24,7 @@ urlpatterns = [
     path("eagle/", views._frontend("eagle/index.html", "text/html; charset=utf-8")),
     path("preview.html", views._frontend("eagle/index.html", "text/html; charset=utf-8")),
     # 试题篮的 A4 预览页：独立文档 + iframe 隔离（library.css 带 body 级全局样式）
-    path(
-        "eagle-print-preview.html",
-        views._frontend("eagle/eagle-print-preview.html", "text/html; charset=utf-8"),
-    ),
+    path("eagle-print-preview.html", views._frontend("eagle/eagle-print-preview.html", "text/html; charset=utf-8")),
     path(
         "eagle-print-preview.js",
         views._frontend("eagle/eagle-print-preview.js", "application/javascript; charset=utf-8"),
@@ -74,8 +71,7 @@ urlpatterns = [
     path("eagle-filter-bar.css", views._frontend("eagle-filter-bar.css", "text/css; charset=utf-8")),
     path("eagle-filter-bar.js", views._frontend("eagle-filter-bar.js", "application/javascript; charset=utf-8")),
     path(
-        "eagle-solution-editor.js",
-        views._frontend("eagle-solution-editor.js", "application/javascript; charset=utf-8"),
+        "eagle-solution-editor.js", views._frontend("eagle-solution-editor.js", "application/javascript; charset=utf-8")
     ),
     path("library-reading.css", views.library_reading_styles),
     path("favicon.png", views.favicon),

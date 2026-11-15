@@ -165,9 +165,8 @@ def _launch_server_process() -> bool:
     launcher = PROJECT_ROOT / "start_question_bank.py"
     creationflags = 0
     if sys.platform == "win32":
-        creationflags = (
-            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-            | getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200) | getattr(
+            subprocess, "DETACHED_PROCESS", 0x00000008
         )
 
     if launcher.is_file():

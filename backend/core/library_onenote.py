@@ -444,10 +444,7 @@ def backlink_url(publication: PublishedQuestion) -> str:
 def _span(text: str, *, size: str = "11.0pt", color: str = "#1E293B", bold: bool = False) -> str:
     """OneNote 文本节点里实际生效的是这一小段 HTML。"""
     weight = "font-weight:bold;" if bold else ""
-    return (
-        f'<span style="font-family:微软雅黑;font-size:{size};color:{color};{weight}">'
-        f"{html.escape(text)}</span>"
-    )
+    return f'<span style="font-family:微软雅黑;font-size:{size};color:{color};{weight}">{html.escape(text)}</span>'
 
 
 def build_page_xml(publication: PublishedQuestion, title: str, png: bytes | None) -> str:
@@ -457,9 +454,7 @@ def build_page_xml(publication: PublishedQuestion, title: str, png: bytes | None
     """
     content = publication.content or {}
     link = html.escape(backlink_url(publication), quote=True)
-    rows = [
-        _text_oe(f'<a href="{link}">{_span("在题有据中打开此题", size="10.0pt", color="#4B5563")}</a>'),
-    ]
+    rows = [_text_oe(f'<a href="{link}">{_span("在题有据中打开此题", size="10.0pt", color="#4B5563")}</a>')]
     if png:
         rows.append(_image_oe(png))
     else:

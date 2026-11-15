@@ -181,11 +181,7 @@ class OneNoteLinkTests(TestCase):
     def test_unbind_api(self):
         """测试解除关联 API（手动绑定接口已按需求下线）。"""
         self.item.extras = {
-            "onenote": {
-                "url": "onenote:https://example.com/page",
-                "page_id": "{page-1}",
-                "title": "手工笔记",
-            }
+            "onenote": {"url": "onenote:https://example.com/page", "page_id": "{page-1}", "title": "手工笔记"}
         }
         self.item.save(update_fields=["extras"])
 
@@ -200,9 +196,7 @@ class OneNoteLinkTests(TestCase):
         """手动绑定接口已下线，请求应返回 404。"""
         bind_url = f"/api/library/{self.item.id}/onenote/bind"
         resp = self.client.post(
-            bind_url,
-            data=json.dumps({"url": "onenote:https://example.com/page"}),
-            content_type="application/json",
+            bind_url, data=json.dumps({"url": "onenote:https://example.com/page"}), content_type="application/json"
         )
         self.assertEqual(resp.status_code, 404)
 

@@ -26,6 +26,8 @@ class LocalCorsMiddleware:
         if origin and ("localhost" in origin or "127.0.0.1" in origin):
             response["Access-Control-Allow-Origin"] = origin
             response["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-            response["Access-Control-Allow-Headers"] = "Content-Type, X-QB-Request, Referer, Authorization, X-Requested-With"
+            response["Access-Control-Allow-Headers"] = (
+                "Content-Type, X-QB-Request, Referer, Authorization, X-Requested-With"
+            )
             response["Access-Control-Allow-Credentials"] = "true"
         return response
