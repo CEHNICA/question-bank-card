@@ -22,6 +22,15 @@ urlpatterns = [
     path("eagle", views._frontend("eagle/index.html", "text/html; charset=utf-8")),
     path("eagle/", views._frontend("eagle/index.html", "text/html; charset=utf-8")),
     path("preview.html", views._frontend("eagle/index.html", "text/html; charset=utf-8")),
+    # 试题篮的 A4 预览页：独立文档 + iframe 隔离（library.css 带 body 级全局样式）
+    path(
+        "eagle-print-preview.html",
+        views._frontend("eagle/eagle-print-preview.html", "text/html; charset=utf-8"),
+    ),
+    path(
+        "eagle-print-preview.js",
+        views._frontend("eagle/eagle-print-preview.js", "application/javascript; charset=utf-8"),
+    ),
     path("practice/<uuid:paper_id>", practice.page),
     path("practice.js", views._frontend("practice.js", "application/javascript; charset=utf-8")),
     path("shortcut-help.js", views._frontend("shortcut-help.js", "application/javascript; charset=utf-8")),

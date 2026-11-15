@@ -1,0 +1,339 @@
+"use strict";
+/*
+ * 题有据 · Eagle 题库工作台 —— 试题篮「A4 预览」页
+ *
+ * 这个页面被 iframe 加载，专门做一件事：把试题篮里的题按正式排版引擎
+ * （qb-render.js 渲染题面 / exam-layout.js 分页 / exam-export.js 分组）
+ * 铺成一张张 A4 纸。
+ *
+ * 为什么单独一个页面而不是直接塞进 Eagle 主界面：
+ *   library.css 是旧版正式题库的排版样式，里面带 body 级全局样式，直接
+ *   <link> 进 Eagle 页面会把主界面整片污染。放进 iframe 里，两者各是一份
+ *   文档，互不干扰 —— 这也是旧版预览的做法。
+ *
+ * 口径必须和导出完全一致：
+ *   预览用 exam-layout.js 排版，导出（PDF）用后端同一套规则，Word 用
+ *   exam-export.js 的分组口径。分组顺序只有 ExamExport.paperGroups 一份
+ *   定义 —— 两边各写一份的话，屏幕上看到的「第 N 题」和纸上的对不上。
+ */
+(function () {
+  const QB = window.QBRender;
+  const Solutions = window.LibrarySolutions;
+  const CHANNEL_READY = "qbc:eagle-print-preview-ready";
+  const CHANNEL_PAYLOAD = "qbc:eagle-print-preview";
+  const CHANNEL_RESULT = "qbc:eagle-print-preview-result";
+  const CHANNEL_OVERRIDES = "qbc:eagle-print-preview-overrides";
+  const CHANNEL_OPEN_SOLUTION = "qbc:eagle-print-preview-open-solution";
+
+  function node(tag, className, text) {
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    if (text !== undefined) element.textContent = text;
+    return element;
+  }
+
+  const state = {
+    items: [],
+    options: {},
+    title: "练习",
+    token: 0,
+    // 预览里逐题调整的结果。父页面是权威持有者，这里先改先看，再回传。
+    overrides: { option_overrides: {}, answer_space_overrides: {}, question_breaks: [] }
+  };
+
+  function post(message) {
+    try { window.parent.postMessage(message, "*"); } catch (error) { /* 脱离父页面时忽略 */ }
+  }
+
+  function report(text, tone) {
+    const bar = document.getElementById("previewStatus");
+    if (!bar) return;
+    bar.textContent = text;
+    bar.dataset.tone = tone || "";
+  }
+
+  function normalizeOverrides(options) {
+    const overrides = options || {};
+    return {
+      option_overrides: Object.assign({}, overrides.option_overrides || {}),
+      answer_space_overrides: Object.assign({}, overrides.answer_space_overrides || {}),
+      question_breaks: Array.isArray(overrides.question_breaks) ? overrides.question_breaks.slice() : []
+    };
+  }
+
+  // 预览用的最终选项 = 父页面给的全局设置 + 预览里逐题调整过的。
+  function currentOptions() {
+    const base = state.options || {};
+    const mine = state.overrides;
+    return Object.assign({}, base, {
+      option_overrides: Object.assign({}, base.option_overrides || {}, mine.option_overrides),
+      answer_space_overrides: Object.assign({}, base.answer_space_overrides || {}, mine.answer_space_overrides),
+      question_breaks: Array.from(new Set([...(base.question_breaks || []), ...mine.question_breaks]))
+    });
+  }
+
+  function answerContent(item) {
+    if (!Solutions || typeof Solutions.selected !== "function") return null;
+    return Solutions.selected(item, { ai_answers: Boolean((state.options || {}).ai_answers) });
+  }
+
+  function answerRow(number, item, inline) {
+    const row = node("div", "print-answer-row" + (inline ? " print-answer-inline" : ""));
+    row.dataset.questionId = item.id;
+    row.append(node("strong", "", inline ? "" : `${number}.`));
+    const body = node("div");
+    const selected = answerContent(item);
+    Solutions.render(body, selected && selected.content, { node, QB, empty: "（原卷未提供答案解析）" });
+    if (selected && selected.ai) body.prepend(node("span", "print-ai-note", "（AI 参考，未核对）"));
+    row.append(body);
+    return row;
+  }
+
+  // 逐题调整：选项排版 / 解答留白 / 另起一页。
+  // 改动只落在这一次组卷，不动题库原题 —— 和旧版预览里的「调整」一个口径。
+  function questionTools(item, number, options) {
+    const tools = node("details", "print-question-tools no-print");
+    const toggle = node("summary", "", "调整");
+    toggle.setAttribute("aria-label", `第 ${number} 题排版操作`);
+    tools.append(toggle);
+
+    const actions = node("div", "print-question-actions");
+    actions.setAttribute("role", "group");
+    actions.setAttribute("aria-label", `第 ${number} 题排版调整`);
+
+    const layout = node("select", "print-single-layout");
+    layout.setAttribute("aria-label", `第 ${number} 题选项排版`);
+    [["", "跟随全卷"], ["auto", "自动排版"], ["four", "一行四个"], ["two", "两行两个"], ["vertical", "四个选项竖排"]]
+      .forEach(([value, label]) => { const choice = node("option", "", label); choice.value = value; layout.append(choice); });
+    layout.value = options.option_overrides[item.id] || "";
+    const figures = Array.isArray(item.content && item.content.figures) ? item.content.figures : [];
+    const hasOptions = Object.keys((item.content && item.content.options) || {}).length > 0;
+    const hasSlotFigures = figures.some(figure => /^[A-E]$/.test(figure.slot));
+    layout.hidden = (item.content && item.content.body_mode) === "source_image" || (!hasOptions && !hasSlotFigures);
+    layout.addEventListener("change", () => {
+      if (layout.value) state.overrides.option_overrides[item.id] = layout.value;
+      else delete state.overrides.option_overrides[item.id];
+      pushOverrides();
+      render();
+    });
+
+    const space = node("select", "print-single-space");
+    space.setAttribute("aria-label", `第 ${number} 题解答留白`);
+    [["", "留白跟随全卷"], ["none", "不留白"], ["small", "少量（12 毫米）"], ["medium", "适中（30 毫米）"], ["large", "较多（60 毫米）"]]
+      .forEach(([value, label]) => { const choice = node("option", "", label); choice.value = value; space.append(choice); });
+    space.value = options.answer_space_overrides[item.id] || "";
+    space.hidden = item.question_type !== "free_response";
+    space.disabled = options.document === "answers" || (options.document === "combined" && options.answer_layout === "inline");
+    space.addEventListener("change", () => {
+      if (space.value) state.overrides.answer_space_overrides[item.id] = space.value;
+      else delete state.overrides.answer_space_overrides[item.id];
+      pushOverrides();
+      render();
+    });
+
+    const pageBreak = node("button", "", state.overrides.question_breaks.includes(item.id) ? "取消另起页" : "另起一页");
+    pageBreak.type = "button";
+    pageBreak.setAttribute("aria-label", `第 ${number} 题另起一页`);
+    pageBreak.setAttribute("aria-pressed", String(state.overrides.question_breaks.includes(item.id)));
+    pageBreak.addEventListener("click", () => {
+      state.overrides.question_breaks = state.overrides.question_breaks.includes(item.id)
+        ? state.overrides.question_breaks.filter(id => id !== item.id)
+        : state.overrides.question_breaks.concat([item.id]);
+      pushOverrides();
+      render();
+    });
+
+    // 答案解析：预览页自己开不了编辑器（它在父页面里），让父页面开。
+    const editAnswer = node("button", "", "答案解析");
+    editAnswer.type = "button";
+    editAnswer.setAttribute("aria-label", `第 ${number} 题编辑答案解析`);
+    editAnswer.addEventListener("click", () => {
+      post({ type: CHANNEL_OPEN_SOLUTION, id: item.id });
+    });
+
+    actions.append(layout, space, pageBreak, editAnswer);
+    tools.append(actions);
+    return tools;
+  }
+
+  function pushOverrides() {
+    post({
+      type: CHANNEL_OVERRIDES,
+      option_overrides: state.overrides.option_overrides,
+      answer_space_overrides: state.overrides.answer_space_overrides,
+      question_breaks: state.overrides.question_breaks
+    });
+  }
+
+  // 排版前先等字体和配图。配图没载完就量高度，量出来的是半张纸。
+  async function waitForAssets(paper) {
+    let timer;
+    try {
+      const ready = Promise.all([
+        document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve(),
+        ...Array.from(paper.querySelectorAll("img")).map(async image => {
+          image.loading = "eager";
+          if (typeof image.decode === "function") await image.decode();
+          else if (!image.complete) await new Promise((resolve, reject) => {
+            image.addEventListener("load", resolve, { once: true });
+            image.addEventListener("error", () => reject(new Error("试卷配图未能载入，请重试")), { once: true });
+          });
+          if (!image.naturalWidth) throw new Error("试卷配图未能载入，请重试");
+        })
+      ]);
+      await Promise.race([
+        ready,
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("字体或配图仍未载入，请稍后重试")), 15000); })
+      ]);
+    } catch (error) {
+      throw new Error(error && error.message && error.message.includes("字体") ? error.message : "试卷配图未能载入，请重试");
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function render() {
+    const token = ++state.token;
+    const paper = document.getElementById("previewPaper");
+    if (!paper) return;
+    const options = currentOptions();
+    const items = state.items || [];
+
+    report(items.length ? "正在排版…" : "试题篮是空的。", items.length ? "" : "warn");
+    paper.replaceChildren();
+    paper.style.setProperty("--exam-font-size", `${options.font_size || 12}pt`);
+    paper.dataset.answerSpace = options.answer_space || "none";
+    paper.dataset.document = options.document || "questions";
+
+    paper.append(node("h2", "print-title", state.title || "练习"));
+    if (options.student_info !== false && options.document !== "answers") {
+      paper.append(node("p", "print-info", "姓名 ____________　班级 ____________　得分 ________"));
+    }
+    if (!items.length) {
+      post({ type: CHANNEL_RESULT, page_count: 0, warnings: [], error: "" });
+      return;
+    }
+
+    const available = items.filter(item => answerContent(item)).length;
+    const showAnswers = options.answers !== false && available > 0;
+
+    // 分组顺序只有一份定义（导出那边也用同一份）。
+    const grouped = window.ExamExport && typeof window.ExamExport.paperGroups === "function"
+      ? window.ExamExport.paperGroups(items)
+      : items.map(value => ["全部", [value]]);
+
+    let number = 0;
+    const answers = [];
+    const toolMap = new Map();
+    grouped.forEach(([name, group], index) => {
+      if (options.document !== "answers") {
+        const heading = window.ExamExport && typeof window.ExamExport.sectionHeading === "function"
+          ? window.ExamExport.sectionHeading(group, index, name)
+          : name;
+        paper.append(node("h3", "print-section", heading));
+      }
+      group.forEach(item => {
+        number += 1;
+        if (options.document !== "answers") {
+          const block = node("div", "print-question");
+          QB.renderQuestion(block, item.content, { number, showAnswer: "none" });
+          const origin = item.origin || (item.content && item.content.origin);
+          if (options.origin && origin) {
+            // 原图题只建 .qb-stem，没有 .qb-stem-body。插入点必须一样，
+            // 否则这类题在屏幕上没题源、导出的卷子上有。
+            const stem = block.querySelector(".qb-stem-body") || block.querySelector(".qb-stem");
+            if (stem) stem.prepend(node("span", "print-origin", `（${origin}）`));
+          }
+          block.dataset.questionId = item.id;
+          block.dataset.questionType = item.question_type;
+          const space = window.ExamLayout.answerSpace(item.question_type, item.id, options);
+          if (space !== "none") {
+            const blank = node("div", "print-answer-space");
+            blank.dataset.answerSpace = space;
+            block.append(blank);
+          }
+          paper.append(block);
+          toolMap.set(item.id, { item, number });
+          if (options.document === "combined" && options.answer_layout === "inline" && showAnswers && answerContent(item)) {
+            paper.append(answerRow(number, item, true));
+          }
+        }
+        answers.push([number, item]);
+      });
+    });
+
+    if (options.document !== "questions" && showAnswers
+      && !(options.document === "combined" && options.answer_layout === "inline")) {
+      const key = node("section", "print-answers");
+      if (options.document === "answers") key.classList.add("print-answers-only");
+      key.append(node("h3", "print-section", "参考答案与解析"));
+      answers.forEach(([index, item]) => key.append(answerRow(index, item, false)));
+      paper.append(key);
+    }
+    if (options.document === "answers" && !available) {
+      paper.append(node("p", "helper", "这些题没有答案或解析，请改选题目卷。"));
+    }
+    paper.append(node("p", "print-footer", `共 ${number} 题`));
+    paper.querySelectorAll("img").forEach(image => { image.loading = "eager"; });
+
+    // 分页：源 → 测量 → 一页页的 .exam-page。
+    const flow = node("div", "print-flow exam-source");
+    flow.style.setProperty("--exam-font-size", `${options.font_size || 12}pt`);
+    flow.dataset.answerSpace = options.answer_space || "none";
+    flow.dataset.document = options.document || "questions";
+    flow.append(...Array.from(paper.childNodes));
+    paper.append(flow);
+
+    try {
+      await waitForAssets(paper);
+      if (token !== state.token) return;
+      if (!window.ExamLayout || typeof window.ExamLayout.paginate !== "function") {
+        throw new Error("分页组件未载入，请刷新页面后重试");
+      }
+      const host = node("div", "print-paper");
+      const result = await window.ExamLayout.paginate(flow, Object.assign({ host }, options));
+      if (token !== state.token) return;
+      paper.replaceChildren(...result.pages);
+      paper.dataset.pageCount = String(result.page_count);
+      window.ExamLayout.scale(paper);
+
+      // 分页时「调整」面板被剥掉了（它是 no-print，不参与量高），
+      // 排完版再挂回每一道题上。
+      const seen = new Set();
+      paper.querySelectorAll(".print-question").forEach(question => {
+        const id = question.dataset.questionId;
+        if (seen.has(id)) return;
+        seen.add(id);
+        const entry = toolMap.get(id);
+        if (!entry) return;
+        question.append(questionTools(entry.item, entry.number, options));
+      });
+
+      const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+      const summary = `A4 · 共 ${result.page_count} 页 · ${items.length} 题`;
+      report(warnings.length ? `${summary} · ${warnings.join(" ")}` : summary, warnings.length ? "warn" : "ok");
+      post({ type: CHANNEL_RESULT, page_count: result.page_count, warnings, error: "" });
+    } catch (error) {
+      if (token !== state.token) return;
+      const message = (error && error.message) || "排版失败，请重试";
+      report(message, "error");
+      post({ type: CHANNEL_RESULT, page_count: 0, warnings: [], error: message });
+    }
+  }
+
+  window.addEventListener("message", event => {
+    const data = event.data;
+    if (!data || typeof data !== "object") return;
+    if (data.type !== CHANNEL_PAYLOAD) return;
+    state.items = Array.isArray(data.items) ? data.items : [];
+    state.options = data.options || {};
+    state.title = data.title || "练习";
+    // 父页面是权威：它带来的逐题调整覆盖本地的旧值。
+    state.overrides = normalizeOverrides(state.options);
+    render();
+  });
+
+  window.addEventListener("load", () => {
+    post({ type: CHANNEL_READY });
+  });
+})();

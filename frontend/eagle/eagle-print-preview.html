@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>试题篮 A4 预览</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/library.css">
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+  <style>
+    /* 这个页面活在 iframe 里，专门给「试题篮 → A4 预览」用。
+       library.css 里带 body 级的全局样式，在 iframe 里被隔离，不会污染 Eagle 主界面；
+       这里只补预览自己需要的底色、居中和滚动。 */
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #eef1f5;
+      color: #111;
+      font-family: var(--content-font);
+    }
+    body {
+      min-height: 100vh;
+      overflow: auto;
+    }
+    .eagle-preview-bar {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      font-size: 12px;
+      background: #fff;
+      border-bottom: 1px solid #e2e8f0;
+      color: #475569;
+    }
+    .eagle-preview-bar[data-tone="error"] { color: #e11d48; }
+    .eagle-preview-bar[data-tone="warn"] { color: #b45309; }
+    .eagle-preview-bar[data-tone="ok"] { color: #047857; }
+    .eagle-preview-stage {
+      padding: 16px 64px 32px;
+    }
+    .eagle-preview-stage .print-paper {
+      max-width: 210mm;
+      margin: 0 auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="eagle-preview-bar" id="previewStatus" data-tone="">正在准备预览…</div>
+  <div class="eagle-preview-stage">
+    <div class="print-paper" id="previewPaper"></div>
+  </div>
+
+  <script src="/vendor/katex/katex.min.js" defer></script>
+  <script src="/qb-render.js"></script>
+  <script src="/exam-layout.js"></script>
+  <script src="/exam-export.js"></script>
+  <script src="/library-solutions.js"></script>
+  <script src="/eagle-print-preview.js"></script>
+</body>
+</html>

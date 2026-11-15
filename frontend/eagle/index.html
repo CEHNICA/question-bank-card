@@ -81,6 +81,43 @@
     .compact-row {
       min-height: 40px;
     }
+
+    /* ---- 既有题库 Devin 规范：光标与选区预览定位与公式高亮 ---- */
+    .qb-preview-position { position: absolute; pointer-events: none; z-index: 10; }
+    .qb-preview-caret { border-left: 3px solid #006b50; box-shadow: 0 0 0 2px rgba(0, 107, 80, .2); }
+    .qb-preview-caret::before, .qb-preview-caret::after { content: ""; position: absolute; left: -5px; width: 8px; height: 2px; border-radius: 1px; background: #006b50; }
+    .qb-preview-caret::before { top: -2px; }
+    .qb-preview-caret::after { bottom: -2px; }
+    .qb-preview-selection { background: rgba(31, 107, 95, .3); box-shadow: inset 0 0 0 1.5px #006b50; border-radius: 2px; }
+    .qb-preview-active-formula { outline: 2.5px solid #086bb8; outline-offset: 2px; background: rgba(8, 107, 184, .12); border-radius: 3px; }
+    .qb-preview-active-symbol .katex-html [style*="rgb(31, 107, 95)"],
+    .qb-preview-active-symbol .katex-html [style*="#1f6b5f"] { background: #fff2a8; outline: 2px solid #006b50; outline-offset: 1px; box-shadow: 0 0 0 2px #fff2a8; border-radius: 2px; }
+    .qb-preview-active-region { outline: 2.5px solid #006b50; outline-offset: 2px; background: rgba(31, 107, 95, .12); }
+    .qb-preview-empty-field { margin: 8px 0 0; color: #94a3b8; font-style: italic; }
+
+    /* ---- 既有排版渲染语义样式（适配 #editLivePreviewBox） ---- */
+    .qb-question { font-size: 14px; line-height: 1.8; color: #1e293b; }
+    .qb-stem { display: flex; gap: 0.35em; margin-bottom: 0.75rem; }
+    .qb-number { flex: none; font-weight: 700; }
+    .qb-stem-body { white-space: pre-wrap; min-width: 0; overflow-wrap: anywhere; }
+    .qb-options { list-style: none; margin: 0.5rem 0 0; padding: 0; display: grid; column-gap: 1.5rem; row-gap: 0.35rem; }
+    .qb-options.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .qb-options.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .qb-options.cols-1 { grid-template-columns: 1fr; }
+    .qb-option { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 0.4em; align-items: baseline; }
+    .qb-option-label { font-weight: 700; color: #475569; }
+    .qb-option-body { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .qb-answer { margin-top: 1rem; border-top: 1px solid #f1f5f9; padding-top: 0.75rem; font-size: 13px; }
+    .qb-answer summary { cursor: pointer; font-weight: 600; color: #059669; }
+    .qb-answer-row { margin-top: 0.5rem; }
+
+    /* ---- 既有题库 Devin 规范：原卷出处高亮框 ---- */
+    .source-box { position: absolute; border: 2.5px solid; border-radius: 3px; pointer-events: none; z-index: 10; transition: border-color .15s ease; box-sizing: border-box; }
+    .source-box.text { border-color: #c47f1c; background: rgba(255, 196, 68, .2); box-shadow: 0 0 0 1px rgba(196, 127, 28, .25); }
+    .source-box.figure { border-color: #16936b; background: rgba(29, 170, 117, .18); box-shadow: 0 0 0 1px rgba(22, 147, 107, .25); }
+    .source-box-badge { position: absolute; top: -22px; left: -2px; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 3px 3px 0 0; color: #ffffff; pointer-events: none; white-space: nowrap; line-height: 18px; }
+    .source-box.text .source-box-badge { background: #c47f1c; }
+    .source-box.figure .source-box-badge { background: #16936b; }
   </style>
 </head>
 <body class="bg-[#f8fafc] text-slate-800 antialiased h-screen flex flex-col overflow-hidden select-none">
@@ -231,12 +268,6 @@
         </svg>
         <span>试题篮 (<span id="headerBasketCount">1</span>)</span>
       </button>
-
-      <div class="h-3.5 w-px bg-slate-200"></div>
-
-      <div class="w-6 h-6 rounded-full bg-slate-200 border border-slate-300 flex items-center justify-center font-medium text-[11px] text-slate-600">
-        M
-      </div>
     </div>
   </header>
 
@@ -757,7 +788,11 @@
             <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">实时渲染排版预览</span>
             <span class="text-[10px] text-emerald-600 font-medium">KaTeX 实时排版</span>
           </div>
-          <div id="editLivePreviewBox" class="flex-1 p-4 bg-white rounded-lg border border-slate-200/80 shadow-2xs overflow-y-auto">
+          <!-- 既有题库 Devin 规范：光标与公式联动状态提示 -->
+          <div id="editLivePreviewHint" class="mb-2 px-2.5 py-1 text-[11px] bg-slate-100/90 text-slate-600 rounded border border-slate-200/60 truncate flex items-center gap-1.5 shrink-0">
+            <span>💡</span><span>输入或移动光标时，右侧预览将实时投射竖杠位置并高亮对应公式。</span>
+          </div>
+          <div id="editLivePreviewBox" class="flex-1 p-4 bg-white rounded-lg border border-slate-200/80 shadow-2xs overflow-y-auto relative">
             <!-- 实时更新 -->
           </div>
         </div>
@@ -816,12 +851,12 @@
             <span class="font-bold text-slate-800 text-sm">试卷标题与排版设置</span>
             <div>
               <label class="block text-slate-600 mb-1">试卷标题</label>
-              <input id="paperMainTitle" type="text" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md bg-white focus:border-emerald-500 outline-none text-xs" value="练习">
+              <input id="paperMainTitle" type="text" onchange="onExportOptionsChanged()" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md bg-white focus:border-emerald-500 outline-none text-xs" value="练习">
             </div>
             <div class="grid grid-cols-2 gap-2">
               <div>
                 <label class="block text-slate-600 mb-1">输出内容</label>
-                <select id="exportDocument" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
+                <select id="exportDocument" onchange="onExportOptionsChanged()" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
                   <option value="questions">题目</option>
                   <option value="answers">答案与解析</option>
                   <option value="combined">题目＋答案</option>
@@ -829,21 +864,21 @@
               </div>
               <div>
                 <label class="block text-slate-600 mb-1">答案解析位置</label>
-                <select id="exportAnswerLayout" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
+                <select id="exportAnswerLayout" onchange="onExportOptionsChanged()" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
                   <option value="inline">逐题紧跟</option>
                   <option value="appendix">卷末集中</option>
                 </select>
               </div>
               <div>
                 <label class="block text-slate-600 mb-1">分页</label>
-                <select id="exportPagination" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
+                <select id="exportPagination" onchange="onExportOptionsChanged()" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
                   <option value="compact">连续排版，节省纸张</option>
                   <option value="keep">尽量保持单题完整</option>
                 </select>
               </div>
               <div>
                 <label class="block text-slate-600 mb-1">选择题选项</label>
-                <select id="exportOptionLayout" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
+                <select id="exportOptionLayout" onchange="onExportOptionsChanged()" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
                   <option value="auto">自动排版</option>
                   <option value="four">一行四个</option>
                   <option value="two">两行两个</option>
@@ -852,7 +887,7 @@
               </div>
               <div>
                 <label class="block text-slate-600 mb-1">正文字号</label>
-                <select id="exportFontSize" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
+                <select id="exportFontSize" onchange="onExportOptionsChanged()" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
                   <option value="12">12 磅</option>
                   <option value="14">14 磅</option>
                   <option value="16">16 磅</option>
@@ -860,7 +895,7 @@
               </div>
               <div>
                 <label class="block text-slate-600 mb-1">解答题留白</label>
-                <select id="exportAnswerSpace" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
+                <select id="exportAnswerSpace" onchange="onExportOptionsChanged()" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
                   <option value="none">不留白</option>
                   <option value="small">少量（12 毫米）</option>
                   <option value="medium">适中（30 毫米）</option>
@@ -870,15 +905,15 @@
             </div>
             <div class="p-3 bg-white rounded-lg border border-slate-200/80 space-y-2">
               <label class="flex items-center gap-2 cursor-pointer">
-                <input id="exportStudentInfo" type="checkbox" class="rounded text-emerald-600 focus:ring-0" checked>
+                <input id="exportStudentInfo" onchange="onExportOptionsChanged()" type="checkbox" class="rounded text-emerald-600 focus:ring-0" checked>
                 <span>姓名、班级与得分栏</span>
               </label>
               <label class="flex items-center gap-2 cursor-pointer">
-                <input id="exportOrigin" type="checkbox" class="rounded text-emerald-600 focus:ring-0">
+                <input id="exportOrigin" onchange="onExportOptionsChanged()" type="checkbox" class="rounded text-emerald-600 focus:ring-0">
                 <span>题号后印上原有题源</span>
               </label>
               <label id="exportAiBox" class="flex items-center gap-2 cursor-pointer">
-                <input id="exportAiAnswers" type="checkbox" class="rounded text-emerald-600 focus:ring-0">
+                <input id="exportAiAnswers" onchange="onExportOptionsChanged()" type="checkbox" class="rounded text-emerald-600 focus:ring-0">
                 <span>附 AI 参考（未核对）</span>
               </label>
             </div>
@@ -886,6 +921,14 @@
           </div>
 
           <div class="space-y-2 pt-4 border-t border-slate-200">
+            <button
+              id="exportPreviewBtn"
+              onclick="openBasketPreview()"
+              class="w-full py-2 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
+              title="按下面这套排版设置铺成一张张 A4 纸：预览里看到的分页就是导出的分页"
+            >
+              <span>👁 预览 A4 试卷</span>
+            </button>
             <button
               id="exportPdfBtn"
               onclick="runBasketExport('pdf')"
@@ -916,6 +959,58 @@
             </button>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= A4 试卷预览模态框（试题篮 → 组卷预览） ================= -->
+  <!--
+    预览跑在独立的 iframe 里（/eagle-print-preview.html），用的就是正式排版引擎：
+    qb-render 渲染题面、exam-layout 分页、exam-export 分组。屏幕上的分页 = 导出的分页。
+    之所以不直接嵌进主界面：旧版排版样式 library.css 带 body 级全局样式，
+    直接链进来会把 Eagle 主界面整片污染；iframe 里各是一份文档，互不干扰。
+  -->
+  <div
+    id="basketPreviewModal"
+    class="hidden fixed inset-0 z-[10002] flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-4"
+    onclick="closeBasketPreviewModal()"
+  >
+    <div
+      class="bg-white rounded-xl shadow-2xl w-full max-w-6xl h-[92vh] flex flex-col overflow-hidden border border-slate-200"
+      onclick="event.stopPropagation()"
+    >
+      <div class="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50/80 gap-3">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="text-sm font-bold text-slate-800 shrink-0">👁 A4 试卷预览</span>
+          <span id="previewStatusBadge" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-mono truncate">准备中…</span>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <button
+            onclick="refreshBasketPreview()"
+            class="px-2.5 py-1 text-[11px] border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100 transition-colors"
+            title="按当前的排版设置重新排一次"
+          >↻ 重新排版</button>
+          <button onclick="closeBasketPreviewModal()" class="text-slate-400 hover:text-slate-600 p-1 rounded-md text-base">✕</button>
+        </div>
+      </div>
+
+      <div class="flex-1 min-h-0 overflow-hidden bg-slate-100">
+        <iframe
+          id="eaglePreviewFrame"
+          src="/eagle-print-preview.html"
+          title="A4 试卷预览"
+          class="w-full h-full border-0 bg-white"
+        ></iframe>
+      </div>
+
+      <div class="px-5 py-2.5 border-t border-slate-100 bg-slate-50/80 flex items-center justify-between gap-3">
+        <span id="previewStatusLine" class="text-[11px] text-slate-500 leading-relaxed">
+          预览与导出共用同一套排版引擎：这里看到的分页就是导出的分页。每道题下的「调整」只影响这一次组卷。
+        </span>
+        <button
+          onclick="closeBasketPreviewModal()"
+          class="px-3 py-1 bg-slate-800 hover:bg-slate-900 text-white rounded-md text-[11px] font-medium shrink-0"
+        >关闭</button>
       </div>
     </div>
   </div>
@@ -994,20 +1089,58 @@
   </div>
 
   <!-- ================= 2. 所属试卷原卷扫描件核验模态框 (Original Paper Lightbox) ================= -->
-  <div id="originalPaperModal" class="hidden fixed inset-0 z-[10006] flex items-center justify-center bg-slate-900/75 backdrop-blur-xs p-4" onclick="closeOriginalPaperModal()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[94vh] flex flex-col overflow-hidden border border-slate-200" onclick="event.stopPropagation()">
-      <div class="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50">
-        <div class="flex items-center gap-2">
+  <div id="originalPaperModal" class="hidden fixed inset-0 z-[10006] flex items-center justify-center bg-slate-900/75 backdrop-blur-xs p-4 select-none" onclick="closeOriginalPaperModal()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[92vh] flex flex-col overflow-hidden border border-slate-200" onclick="event.stopPropagation()">
+      <!-- 弹窗顶栏 -->
+      <div class="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50 shrink-0">
+        <div class="flex items-center gap-2.5">
           <span class="text-sm font-bold text-slate-800">📄 所属试卷原卷高分辨率扫描件核验</span>
-          <span id="opPaperNameBadge" class="text-xs px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-mono"></span>
+          <span id="opPaperNameBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-slate-200 text-slate-700 font-medium"></span>
+          <span id="opQuestionBadge" class="hidden text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold font-mono"></span>
         </div>
         <div class="flex items-center gap-3">
-          <a id="opRawImgLink" href="#" target="_blank" class="text-xs text-emerald-600 hover:underline">在新标签页查看原始文件</a>
-          <button onclick="closeOriginalPaperModal()" class="text-slate-400 hover:text-slate-700 text-sm cursor-pointer">✕</button>
+          <a id="opRawImgLink" href="#" target="_blank" class="text-xs text-emerald-600 hover:underline">在新标签页查看大图</a>
+          <button onclick="closeOriginalPaperModal()" class="text-slate-400 hover:text-slate-700 text-base cursor-pointer px-1.5 py-0.5 rounded hover:bg-slate-200/60" title="关闭 (Esc)">✕</button>
         </div>
       </div>
-      <div class="flex-1 overflow-auto p-4 bg-slate-100/80 flex items-center justify-center">
-        <img id="opPaperImg" src="" alt="原卷高分辨率扫描件" class="max-w-full max-h-[82vh] object-contain shadow-lg rounded border border-slate-200 bg-white">
+
+      <!-- 工具栏：模式切换、缩放控制、手势说明 -->
+      <div class="flex items-center justify-between px-5 py-2 border-b border-slate-100 bg-white text-xs shrink-0 gap-3">
+        <div class="flex items-center gap-1.5">
+          <span class="text-slate-500 font-medium mr-1">显示方式:</span>
+          <button id="btnOpModePage" onclick="setOpMode('page')" class="px-2.5 py-1 rounded border border-emerald-600 text-xs font-semibold bg-emerald-600 text-white shadow-2xs cursor-pointer" title="显示整页原卷，并在原卷上高亮框出题目位置">
+            整页位置
+          </button>
+          <button id="btnOpModeQuestion" onclick="setOpMode('question')" class="px-2.5 py-1 rounded border border-slate-200 text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 cursor-pointer" title="自动裁切聚焦到当前题目选框">
+            只看本题
+          </button>
+          <span class="text-slate-300 mx-1">|</span>
+          <span class="text-[11px] text-slate-500 flex items-center gap-2.5">
+            <span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-xs bg-[#c47f1c]"></span>橙色框: 题干文字</span>
+            <span class="inline-flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-xs bg-[#16936b]"></span>绿色框: 题目配图</span>
+          </span>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <span class="text-[11px] text-slate-400 hidden sm:inline">Ctrl + 滚轮缩放 · 鼠标拖拽平移</span>
+          <div class="flex items-center border border-slate-200 rounded-md bg-slate-50 overflow-hidden shadow-2xs">
+            <button onclick="changeOpZoom(-0.25)" class="px-2 py-1 hover:bg-slate-200 text-slate-700 font-bold cursor-pointer" title="缩小原卷">−</button>
+            <span id="opZoomPercentBadge" class="px-2.5 py-1 text-slate-800 font-mono text-xs border-x border-slate-200 min-w-[50px] text-center font-semibold">100%</span>
+            <button onclick="changeOpZoom(0.25)" class="px-2 py-1 hover:bg-slate-200 text-slate-700 font-bold cursor-pointer" title="放大原卷">＋</button>
+          </div>
+          <button onclick="fitOpWindow()" class="px-2.5 py-1 rounded border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 text-xs font-medium shadow-2xs cursor-pointer" title="把整页原卷缩到刚好放进窗口 (快捷键 0)">
+            适合窗口
+          </button>
+        </div>
+      </div>
+
+      <!-- 画布视口区域 -->
+      <div id="opViewport" class="flex-1 overflow-auto bg-slate-100/90 relative p-6 flex justify-center items-start cursor-grab select-none">
+        <div id="opCanvasContent" class="relative inline-block transition-transform duration-75 origin-top shadow-lg rounded border border-slate-200/80 bg-white" style="width: 100%; max-width: 1000px;">
+          <img id="opPaperImg" src="" alt="原卷高分辨率扫描件" class="w-full h-auto block select-none pointer-events-none rounded" draggable="false">
+          <!-- 题目坐标高亮框图层 -->
+          <div id="opBoxLayer" class="absolute inset-0 pointer-events-none"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -1374,7 +1507,10 @@
         tags.push({ id: `tag_sec_${pq.id}`, name: secPart, color: 'emerald' });
       }
 
-      const sourcePage = (pq.regions && pq.regions[0] && pq.regions[0].page_idx !== undefined) ? (pq.regions[0].page_idx + 1) : 1;
+      const sourcePageIdx = (pq.regions && pq.regions[0] && Number.isInteger(pq.regions[0].page_idx))
+        ? pq.regions[0].page_idx
+        : 0;
+      const sourcePage = sourcePageIdx + 1;
 
       return {
         id: String(pq.id),
@@ -1396,6 +1532,9 @@
         hasAnalysis: Boolean(rawAnalysis),
         source: paper.name || '高中数学思想方法导引',
         sourcePage: sourcePage,
+        sourcePageIdx: sourcePageIdx,
+        regions: Array.isArray(pq.regions) ? pq.regions : [],
+        figures: Array.isArray(pq.figures) ? pq.figures : rawFigures,
         score: qType === 'single_choice' ? 5 : (qType === 'fill_blank' ? 5 : 12),
         tags: tags,
         aiAnswer: null,
@@ -1611,6 +1750,10 @@
             const tagRevision = (typeof item.tag_revision === 'number') ? item.tag_revision : 0;
 
             const originSource = item.origin || c.origin || c.source_filename || item.source_filename || '真题资料';
+            const sourcePageIdx = (Array.isArray(c.sources) && c.sources[0] && Number.isInteger(c.sources[0].page_idx))
+              ? c.sources[0].page_idx
+              : (item.page ? (item.page - 1) : 0);
+            const sourcePage = sourcePageIdx + 1;
 
             return {
               id: String(item.id || `q_${idx}`),
@@ -1622,7 +1765,8 @@
               questionType: typeNames[item.question_type] || '解答题',
               questionTypeCode: item.question_type || 'free_response',
               documentId: item.document_id || '',
-              sourcePage: item.page ? (item.page - 1) : 0,
+              sourcePage: sourcePage,
+              sourcePageIdx: sourcePageIdx,
               paperPage: (item.page && item.page > 0) ? item.page : 0,   // 1 基原页码，用于教材分章
               source: originSource,
               year: 2024,
@@ -1635,6 +1779,8 @@
               aiAnswer: aiAnswerObj,
               savedSolution: savedSolutionObj,
               content: formattedStem,
+              regions: Array.isArray(c.sources) ? c.sources : (Array.isArray(item.regions) ? item.regions : []),
+              figures: rawFigures,
               hasAnswer: Boolean(rawAnswer || (aiAnswerObj && aiAnswerObj.answer)),
               hasAnalysis: Boolean(rawAnalysis || (aiAnswerObj && aiAnswerObj.analysis)),
               difficulty: '★'.repeat(stars) + '☆'.repeat(5 - stars),
@@ -2713,9 +2859,9 @@
 
             <div class="flex items-center gap-2 shrink-0 whitespace-nowrap">
               <button 
-                onclick="event.stopPropagation(); openOriginalPaperModal('${q.documentId}', ${q.sourcePage}, '${escapeHtml(q.source)}')"
+                onclick="event.stopPropagation(); openOriginalPaperModal('${q.documentId}', ${q.sourcePageIdx ?? (q.sourcePage ? q.sourcePage - 1 : 0)}, '${escapeHtml(q.source)}', '${q.id}')"
                 class="opacity-0 group-hover:opacity-100 transition-opacity text-[11px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded hover:bg-emerald-100 flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
-                title="查看该题所属试卷原卷高分辨率扫描裁片"
+                title="查看该题所属试卷原卷高分辨率扫描裁片与定位选框"
               >
                 <span>📄</span><span>核验证据</span>
               </button>
@@ -2781,6 +2927,14 @@
               </button>
 
               <button 
+                onclick="event.stopPropagation(); openSolutionEditor(['${q.id}'])" 
+                class="px-2.5 py-1 text-slate-600 hover:text-emerald-700 rounded hover:bg-slate-100 font-medium transition-colors flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
+                title="打开答案解析编辑器（可多题并排对照）"
+              >
+                <span>🧠 答案解析</span>
+              </button>
+
+              <button 
                 id="btn_basket_${q.id}"
                 onclick="event.stopPropagation(); toggleBasketItem('${q.id}')" 
                 class="px-2.5 py-1 rounded font-medium transition-all cursor-pointer shrink-0 whitespace-nowrap ${
@@ -2842,6 +2996,9 @@
             </button>
             <button onclick="event.stopPropagation(); openEditQuestionModal('${q.id}')" class="px-2 py-0.8 rounded hover:bg-slate-100 text-slate-600 text-[11px] cursor-pointer shrink-0 whitespace-nowrap" title="编辑题目">
               ✏️
+            </button>
+            <button onclick="event.stopPropagation(); openSolutionEditor(['${q.id}'])" class="px-2 py-0.8 rounded hover:bg-slate-100 text-slate-600 text-[11px] cursor-pointer shrink-0 whitespace-nowrap" title="答案解析编辑器（可多题并排）">
+              🧠
             </button>
             <button 
               id="btn_basket_${q.id}"
@@ -3260,25 +3417,346 @@
       }
     }
 
-    // ================= 原卷核验证据扫描件模态框 =================
-    function openOriginalPaperModal(paperId, pageIdx = 0, paperName = '') {
+    // ================= 原卷核验证据扫描件模态框（Devin 规范原卷交互） =================
+    const opState = {
+      paperId: '',
+      pageIdx: 0,
+      paperName: '',
+      questionId: null,
+      question: null,
+      mode: 'page', // 'page' (整页位置) 或 'question' (只看本题)
+      zoom: 1.0,
+      isPanning: false,
+      panStartX: 0,
+      panStartY: 0,
+      scrollStartX: 0,
+      scrollStartY: 0,
+      pointerId: null
+    };
+
+    function extractQuestionRegions(q, pageIdx) {
+      if (!q) return [];
+      const content = q.content || {};
+      const rawText = Array.isArray(q.regions) ? q.regions : (Array.isArray(content.sources) ? content.sources : []);
+      const rawFigures = Array.isArray(q.figures) ? q.figures : (Array.isArray(q.rawFigures) ? q.rawFigures : (Array.isArray(content.figures) ? content.figures : []));
+
+      const texts = rawText
+        .filter(r => r && r.type !== 'image' && (pageIdx === undefined || r.page_idx === pageIdx))
+        .map(r => ({ ...r, kind: 'text' }));
+
+      const figures = rawFigures
+        .flatMap(f => [f, ...(Array.isArray(f.parts) ? f.parts : [])])
+        .filter(f => f && (pageIdx === undefined || f.page_idx === pageIdx))
+        .map(f => ({ ...f, kind: 'figure' }));
+
+      return [...texts, ...figures].filter(r => 
+        Number.isInteger(r.page_idx) && r.page_idx >= 0 &&
+        Array.isArray(r.bbox) && r.bbox.length === 4 &&
+        r.bbox.every(Number.isFinite) &&
+        r.bbox[0] >= 0 && r.bbox[1] >= 0 && r.bbox[2] <= 1000 && r.bbox[3] <= 1000 &&
+        r.bbox[2] > r.bbox[0] && r.bbox[3] > r.bbox[1]
+      );
+    }
+
+    function createSourceBoxElement(bbox, kind) {
+      const el = document.createElement('div');
+      el.className = `source-box ${kind}`;
+      el.style.left = `${bbox[0] / 10}%`;
+      el.style.top = `${bbox[1] / 10}%`;
+      el.style.width = `${(bbox[2] - bbox[0]) / 10}%`;
+      el.style.height = `${(bbox[3] - bbox[1]) / 10}%`;
+
+      const badge = document.createElement('span');
+      badge.className = 'source-box-badge';
+      badge.textContent = kind === 'text' ? '题干文字' : '题目配图';
+      el.appendChild(badge);
+      return el;
+    }
+
+    function renderOriginalPaperBoxes() {
+      const boxLayer = document.getElementById('opBoxLayer');
+      const img = document.getElementById('opPaperImg');
+      const canvas = document.getElementById('opCanvasContent');
+      if (!boxLayer || !canvas) return;
+
+      boxLayer.innerHTML = '';
+      const q = opState.question;
+      if (!q) {
+        canvas.classList.remove('overflow-hidden');
+        canvas.style.aspectRatio = '';
+        if (img) {
+          img.style.position = '';
+          img.style.width = '100%';
+          img.style.maxWidth = '';
+          img.style.left = '';
+          img.style.top = '';
+        }
+        return;
+      }
+
+      const regions = extractQuestionRegions(q, opState.pageIdx);
+      if (!regions.length) {
+        canvas.classList.remove('overflow-hidden');
+        canvas.style.aspectRatio = '';
+        if (img) {
+          img.style.position = '';
+          img.style.width = '100%';
+          img.style.maxWidth = '';
+          img.style.left = '';
+          img.style.top = '';
+        }
+        return;
+      }
+
+      if (opState.mode === 'question') {
+        const bboxes = regions.map(r => r.bbox);
+        const x0 = Math.max(0, Math.min(...bboxes.map(b => b[0])) - 10);
+        const y0 = Math.max(0, Math.min(...bboxes.map(b => b[1])) - 10);
+        const x1 = Math.min(1000, Math.max(...bboxes.map(b => b[2])) + 10);
+        const y1 = Math.min(1000, Math.max(...bboxes.map(b => b[3])) + 10);
+        const rw = Math.max(1, x1 - x0);
+        const rh = Math.max(1, y1 - y0);
+
+        canvas.classList.add('overflow-hidden');
+        if (img && img.naturalWidth > 0) {
+          canvas.style.aspectRatio = `${(rw * img.naturalWidth)} / ${(rh * img.naturalHeight)}`;
+        }
+        if (img) {
+          img.style.position = 'absolute';
+          img.style.width = `${100000 / rw}%`;
+          img.style.maxWidth = 'none';
+          img.style.left = `${-100 * x0 / rw}%`;
+          img.style.top = `${-100 * y0 / rh}%`;
+        }
+
+        regions.forEach(region => {
+          const adjBbox = [
+            (region.bbox[0] - x0) * 1000 / rw,
+            (region.bbox[1] - y0) * 1000 / rh,
+            (region.bbox[2] - x0) * 1000 / rw,
+            (region.bbox[3] - y0) * 1000 / rh
+          ];
+          boxLayer.appendChild(createSourceBoxElement(adjBbox, region.kind));
+        });
+      } else {
+        canvas.classList.remove('overflow-hidden');
+        canvas.style.aspectRatio = '';
+        if (img) {
+          img.style.position = '';
+          img.style.width = '100%';
+          img.style.maxWidth = '';
+          img.style.left = '';
+          img.style.top = '';
+        }
+
+        regions.forEach(region => {
+          boxLayer.appendChild(createSourceBoxElement(region.bbox, region.kind));
+        });
+      }
+    }
+
+    function setOpMode(mode) {
+      opState.mode = mode;
+      const btnPage = document.getElementById('btnOpModePage');
+      const btnQuestion = document.getElementById('btnOpModeQuestion');
+      if (btnPage && btnQuestion) {
+        if (mode === 'page') {
+          btnPage.className = 'px-2.5 py-1 rounded border border-emerald-600 text-xs font-semibold bg-emerald-600 text-white shadow-2xs cursor-pointer';
+          btnQuestion.className = 'px-2.5 py-1 rounded border border-slate-200 text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 cursor-pointer';
+        } else {
+          btnPage.className = 'px-2.5 py-1 rounded border border-slate-200 text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 cursor-pointer';
+          btnQuestion.className = 'px-2.5 py-1 rounded border border-emerald-600 text-xs font-semibold bg-emerald-600 text-white shadow-2xs cursor-pointer';
+        }
+      }
+      renderOriginalPaperBoxes();
+      applyOpZoom();
+      if (mode === 'page') {
+        setTimeout(() => {
+          const firstBox = document.querySelector('#opBoxLayer .source-box');
+          if (firstBox) firstBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 60);
+      }
+    }
+
+    function openOriginalPaperModal(paperId, pageIdx = 0, paperName = '', questionId = null) {
       const modal = document.getElementById('originalPaperModal');
       const img = document.getElementById('opPaperImg');
-      const badge = document.getElementById('opPaperNameBadge');
-      const link = document.getElementById('opRawImgLink');
+      const paperBadge = document.getElementById('opPaperNameBadge');
+      const qBadge = document.getElementById('opQuestionBadge');
+      const rawLink = document.getElementById('opRawImgLink');
       if (!modal || !img) return;
 
-      const url = `${API_BASE}/api/documents/${paperId}/pages/${pageIdx}/preview`;
-      img.src = url;
-      if (badge) badge.innerText = `${paperName || '入库原卷'} · 第 ${pageIdx + 1} 页`;
-      if (link) link.href = url;
+      let q = null;
+      if (questionId) {
+        q = questionsData.find(item => item.id === String(questionId)) || null;
+      }
 
+      const effectivePaperId = paperId || (q && q.documentId) || '';
+      let effectivePageIdx = Number.isInteger(pageIdx) ? pageIdx : 0;
+      if (q) {
+        if (Number.isInteger(q.sourcePageIdx)) {
+          effectivePageIdx = q.sourcePageIdx;
+        } else if (q.sourcePage && q.sourcePage > 0) {
+          effectivePageIdx = q.sourcePage - 1;
+        }
+      }
+      const effectivePaperName = paperName || (q && q.source) || '所属试卷';
+
+      opState.paperId = effectivePaperId;
+      opState.pageIdx = effectivePageIdx;
+      opState.paperName = effectivePaperName;
+      opState.questionId = questionId;
+      opState.question = q;
+      opState.mode = 'page';
+      opState.zoom = 1.0;
+
+      if (paperBadge) paperBadge.innerText = `${effectivePaperName} · 第 ${effectivePageIdx + 1} 页`;
+      if (qBadge) {
+        if (q) {
+          qBadge.classList.remove('hidden');
+          qBadge.innerText = `第 ${q.questionNumber} 题`;
+        } else {
+          qBadge.classList.add('hidden');
+        }
+      }
+
+      const previewUrl = effectivePaperId
+        ? `${API_BASE}/api/documents/${encodeURIComponent(effectivePaperId)}/pages/${effectivePageIdx}/preview`
+        : '';
+      if (rawLink) rawLink.href = previewUrl || '#';
+
+      setOpMode('page');
+      initOpGestures();
+
+      const boxLayer = document.getElementById('opBoxLayer');
+      if (boxLayer) boxLayer.innerHTML = '';
+      applyOpZoom();
+
+      img.onload = () => {
+        renderOriginalPaperBoxes();
+        applyOpZoom();
+        setTimeout(() => {
+          const firstBox = document.querySelector('#opBoxLayer .source-box');
+          if (firstBox) {
+            firstBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 100);
+      };
+
+      img.src = previewUrl;
       modal.classList.remove('hidden');
     }
 
     function closeOriginalPaperModal() {
+      stopOpPan();
       const modal = document.getElementById('originalPaperModal');
       if (modal) modal.classList.add('hidden');
+    }
+
+    function initOpGestures() {
+      const viewport = document.getElementById('opViewport');
+      if (!viewport || viewport.dataset.gesturesBound === 'true') return;
+      viewport.dataset.gesturesBound = 'true';
+
+      viewport.addEventListener('wheel', (e) => {
+        if (!e.ctrlKey) return;
+        e.preventDefault();
+        if (!e.deltaY) return;
+        const delta = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? viewport.clientHeight : 1);
+        const factor = Math.exp(-Math.max(-240, Math.min(240, delta)) * 0.002);
+        zoomOp(opState.zoom * factor, e.clientX, e.clientY);
+      }, { passive: false });
+
+      viewport.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0 || e.pointerType !== 'mouse' || e.altKey) return;
+        if (e.target.closest('a, button, input, textarea, select')) return;
+        e.preventDefault();
+        stopOpPan();
+        opState.isPanning = true;
+        opState.pointerId = e.pointerId;
+        opState.panStartX = e.clientX;
+        opState.panStartY = e.clientY;
+        opState.scrollStartX = viewport.scrollLeft;
+        opState.scrollStartY = viewport.scrollTop;
+        try { viewport.setPointerCapture(e.pointerId); } catch (_) {}
+        viewport.style.cursor = 'grabbing';
+      });
+
+      viewport.addEventListener('pointermove', (e) => {
+        if (!opState.isPanning || e.pointerId !== opState.pointerId) return;
+        if (!(e.buttons & 1)) { stopOpPan(); return; }
+        viewport.scrollLeft = opState.scrollStartX - (e.clientX - opState.panStartX);
+        viewport.scrollTop = opState.scrollStartY - (e.clientY - opState.panStartY);
+      });
+
+      ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(type => {
+        viewport.addEventListener(type, stopOpPan);
+      });
+      viewport.addEventListener('dragstart', (e) => e.preventDefault());
+      window.addEventListener('blur', stopOpPan);
+    }
+
+    function stopOpPan() {
+      const viewport = document.getElementById('opViewport');
+      if (opState.isPanning && opState.pointerId !== null && viewport) {
+        if (viewport.hasPointerCapture(opState.pointerId)) {
+          try { viewport.releasePointerCapture(opState.pointerId); } catch (_) {}
+        }
+      }
+      opState.isPanning = false;
+      opState.pointerId = null;
+      if (viewport) viewport.style.cursor = 'grab';
+    }
+
+    function zoomOp(value, clientX, clientY) {
+      const viewport = document.getElementById('opViewport');
+      const canvas = document.getElementById('opCanvasContent');
+      if (!viewport || !canvas) return;
+
+      const next = Math.min(4.0, Math.max(0.25, Math.round(value * 100) / 100));
+      if (next === opState.zoom) return;
+      stopOpPan();
+
+      const rect = viewport.getBoundingClientRect();
+      const x = clientX ?? (rect.left + viewport.clientWidth / 2);
+      const y = clientY ?? (rect.top + viewport.clientHeight / 2);
+
+      const canvasRect = canvas.getBoundingClientRect();
+      const relX = canvasRect.width ? (x - canvasRect.left) / canvasRect.width : 0.5;
+      const relY = canvasRect.height ? (y - canvasRect.top) / canvasRect.height : 0.5;
+
+      opState.zoom = next;
+      applyOpZoom();
+
+      const newCanvasRect = canvas.getBoundingClientRect();
+      viewport.scrollLeft += (newCanvasRect.left + relX * newCanvasRect.width - x);
+      viewport.scrollTop += (newCanvasRect.top + relY * newCanvasRect.height - y);
+    }
+
+    function changeOpZoom(delta) {
+      zoomOp(opState.zoom + delta);
+    }
+
+    function applyOpZoom() {
+      const canvas = document.getElementById('opCanvasContent');
+      const badge = document.getElementById('opZoomPercentBadge');
+      if (badge) badge.textContent = `${Math.round(opState.zoom * 100)}%`;
+      if (canvas) {
+        canvas.style.width = `${Math.round(opState.zoom * 1000)}px`;
+        canvas.style.maxWidth = 'none';
+      }
+    }
+
+    function fitOpWindow() {
+      const viewport = document.getElementById('opViewport');
+      const img = document.getElementById('opPaperImg');
+      if (!viewport || !img || !img.naturalWidth) return;
+      const vw = viewport.clientWidth - 48;
+      const vh = viewport.clientHeight - 48;
+      const ratio = Math.min(vw / 1000, vh / ((img.naturalHeight / img.naturalWidth) * 1000 || 1400));
+      const fitZoom = Math.min(1.0, Math.max(0.25, Math.floor(ratio * 100) / 100));
+      zoomOp(fitZoom);
+      viewport.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
     }
 
     // ================= 空格快速审题 (Spacebar Quick Look) =================
@@ -3449,6 +3927,109 @@
       if (modal) modal.classList.add('hidden');
     }
 
+    // ================= B7 组卷预览：真 A4 预览（与导出同一套引擎） =================
+    // 旧版试题篮的主按钮叫「组卷预览」，弹窗里是货真价实的 A4 卷面 ——
+    // 老师得先看见排好的样子，才敢印。这一版把它补回来：独立页面 + iframe，
+    // 排版走 qb-render / exam-layout / exam-export，跟导出共用同一份分组定义。
+
+    const previewState = { ready: false, items: [] };
+
+    function setPreviewStatus(text, tone) {
+      const badge = document.getElementById('previewStatusBadge');
+      const line = document.getElementById('previewStatusLine');
+      if (badge) {
+        badge.textContent = text;
+        badge.className = 'text-[11px] px-2 py-0.5 rounded-full font-mono truncate ' + (tone === 'error'
+          ? 'bg-rose-100 text-rose-700'
+          : tone === 'ok' ? 'bg-emerald-100 text-emerald-700'
+          : tone === 'warn' ? 'bg-amber-100 text-amber-800'
+          : 'bg-slate-100 text-slate-600');
+      }
+      if (line && tone === 'error') line.textContent = text;
+    }
+
+    function postPreviewPayload() {
+      const frame = document.getElementById('eaglePreviewFrame');
+      if (!frame || !frame.contentWindow || !previewState.ready) return;
+      const title = (document.getElementById('paperMainTitle')?.value || '练习').trim() || '练习';
+      frame.contentWindow.postMessage({
+        type: 'qbc:eagle-print-preview',
+        items: previewState.items,
+        options: collectExportPrintOptions(),
+        title
+      }, '*');
+    }
+
+    async function openBasketPreview() {
+      if (basketQuestionIds.size === 0) {
+        showToast('试题篮为空，请先选题再预览！', 'error');
+        return;
+      }
+      const modal = document.getElementById('basketPreviewModal');
+      if (!modal) return;
+      modal.classList.remove('hidden');
+      setPreviewStatus('正在读取题目原文…', '');
+      try {
+        const items = await loadExportItems(Array.from(basketQuestionIds));
+        previewState.items = items;
+        setPreviewStatus(`正在排版 ${items.length} 道题…`, '');
+        postPreviewPayload();
+      } catch (error) {
+        const message = error && error.message ? error.message : '读取题目失败';
+        setPreviewStatus(message, 'error');
+        showToast(message, 'error');
+      }
+    }
+
+    function closeBasketPreviewModal() {
+      const modal = document.getElementById('basketPreviewModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function refreshBasketPreview() {
+      setPreviewStatus('正在重新排版…', '');
+      postPreviewPayload();
+    }
+
+    // 排版设置改了，预览跟着改 —— 预览和设置栏得同时看得到才对得上。
+    function onExportOptionsChanged() {
+      const modal = document.getElementById('basketPreviewModal');
+      if (!modal || modal.classList.contains('hidden')) return;
+      setPreviewStatus('正在按新设置排版…', '');
+      postPreviewPayload();
+    }
+
+    window.addEventListener('message', (event) => {
+      const data = event.data;
+      if (!data || typeof data !== 'object') return;
+      const frame = document.getElementById('eaglePreviewFrame');
+      // 只认自己那个预览框的消息，别把别的 iframe 的当成自己的。
+      if (frame && event.source && frame.contentWindow && event.source !== frame.contentWindow) return;
+      if (data.type === 'qbc:eagle-print-preview-ready') {
+        previewState.ready = true;
+        postPreviewPayload();
+        return;
+      }
+      if (data.type === 'qbc:eagle-print-preview-result') {
+        if (data.error) { setPreviewStatus(data.error, 'error'); return; }
+        const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+        setPreviewStatus(
+          warnings.length ? `A4 · ${data.page_count} 页 · ${warnings.length} 处提醒` : `A4 · 共 ${data.page_count} 页`,
+          warnings.length ? 'warn' : 'ok'
+        );
+        return;
+      }
+      if (data.type === 'qbc:eagle-print-preview-overrides') {
+        exportPreviewOverrides.option_overrides = Object.assign({}, data.option_overrides || {});
+        exportPreviewOverrides.answer_space_overrides = Object.assign({}, data.answer_space_overrides || {});
+        exportPreviewOverrides.question_breaks = Array.isArray(data.question_breaks) ? data.question_breaks.slice() : [];
+        return;
+      }
+      if (data.type === 'qbc:eagle-print-preview-open-solution') {
+        if (data.id && typeof window.openSolutionEditor === 'function') window.openSolutionEditor([data.id]);
+      }
+    });
+
     function renderBasketModalList() {
       const container = document.getElementById('basketModalItemList');
       if (!container) return;
@@ -3535,6 +4116,14 @@
     // 没有 A4 分页、也导不出 Word。老子现在直接用题库正式排版引擎
     // （exam-export.js + 后端 library_export / library_pdf），排版口径和正式题库一致。
 
+    // 预览里逐题调整的结果。权威持有者是这里 —— 预览页改完回传，
+    // 导出时直接吃这份设置，「预览看到的」和「导出的」才是同一份。
+    const exportPreviewOverrides = {
+      option_overrides: {},
+      answer_space_overrides: {},
+      question_breaks: []
+    };
+
     function collectExportPrintOptions() {
       const documentMode = document.getElementById('exportDocument')?.value || 'questions';
       const answerLayout = document.getElementById('exportAnswerLayout')?.value || 'inline';
@@ -3554,10 +4143,10 @@
         student_info: document.getElementById('exportStudentInfo')?.checked !== false,
         pagination: pagination === 'keep' ? 'keep' : 'compact',
         option_layout: ['auto', 'four', 'two', 'vertical'].includes(optionLayout) ? optionLayout : 'auto',
-        option_overrides: {},
-        answer_space_overrides: {},
+        option_overrides: Object.assign({}, exportPreviewOverrides.option_overrides),
+        answer_space_overrides: Object.assign({}, exportPreviewOverrides.answer_space_overrides),
         figure_overrides: {},
-        question_breaks: []
+        question_breaks: exportPreviewOverrides.question_breaks.slice()
       };
     }
 
@@ -3646,7 +4235,91 @@
       window.location.href = '/library';
     }
 
-    // ================= 题目修改与校订 =================
+    // ================= 题目修改与校订（含 LaTeX 竖杠与公式光标实时联动） =================
+    const EDIT_INPUT_FIELDS = {
+      'editInputStem': 'stem',
+      'editOptA': 'A',
+      'editOptB': 'B',
+      'editOptC': 'C',
+      'editOptD': 'D',
+      'editInputAnswer': 'answer',
+      'editInputAnalysis': 'analysis'
+    };
+
+    const EDIT_FIELD_LABELS = {
+      'stem': '题干正文',
+      'A': '选项 A',
+      'B': '选项 B',
+      'C': '选项 C',
+      'D': '选项 D',
+      'answer': '参考答案',
+      'analysis': '参考解析'
+    };
+
+    let lastActiveEditInput = null;
+
+    function initEditPreviewInputs() {
+      Object.keys(EDIT_INPUT_FIELDS).forEach(id => {
+        const input = document.getElementById(id);
+        if (!input || input.dataset.previewTracked === 'true') return;
+        input.dataset.previewTracked = 'true';
+
+        const onCursor = () => {
+          lastActiveEditInput = input;
+          syncPreviewCursorPosition(input);
+        };
+
+        input.addEventListener('focus', onCursor);
+        input.addEventListener('click', onCursor);
+        input.addEventListener('keyup', onCursor);
+        input.addEventListener('select', onCursor);
+        input.addEventListener('input', () => {
+          lastActiveEditInput = input;
+          updateEditLivePreview();
+        });
+      });
+    }
+
+    function syncPreviewCursorPosition(targetInput) {
+      const previewEl = document.getElementById('editLivePreviewBox');
+      const hintEl = document.getElementById('editLivePreviewHint');
+      if (!previewEl || !window.QB || typeof QB.previewSelection !== 'function') return;
+
+      const input = targetInput || lastActiveEditInput || (
+        document.activeElement && EDIT_INPUT_FIELDS[document.activeElement.id]
+          ? document.activeElement
+          : document.getElementById('editInputStem')
+      );
+      if (!input || !EDIT_INPUT_FIELDS[input.id]) return;
+
+      const field = EDIT_INPUT_FIELDS[input.id];
+      const start = Number.isInteger(input.selectionStart) ? input.selectionStart : 0;
+      const end = Number.isInteger(input.selectionEnd) ? input.selectionEnd : start;
+
+      const result = QB.previewSelection(previewEl, { field, start, end });
+
+      if (hintEl) {
+        const label = EDIT_FIELD_LABELS[field] || field;
+        if (result) {
+          if (result.kind === 'math') {
+            hintEl.innerHTML = `<span>🧮</span><span>公式编辑高亮 · <b>${label}</b> · ${result.exact ? '精确字符聚焦' : '公式段落聚焦'} (位置 ${start})</span>`;
+          } else if (result.kind === 'text') {
+            hintEl.innerHTML = `<span>📍</span><span>光标实时联动 · <b>${label}</b> · 第 ${start + 1} 字符处</span>`;
+          } else {
+            hintEl.innerHTML = `<span>📍</span><span>预览联动 · <b>${label}</b></span>`;
+          }
+        } else {
+          hintEl.innerHTML = `<span>💡</span><span>输入或移动光标时，右侧预览将实时投射竖杠位置并高亮对应公式。</span>`;
+        }
+      }
+
+      // 平滑滚动预览容器，保持当前光标或高亮公式始终可见
+      const marker = previewEl.querySelector('.qb-preview-position') || previewEl.querySelector('.qb-preview-active-formula, .qb-preview-active-region');
+      if (marker) {
+        marker.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+
     async function openEditQuestionModal(qid) {
       activeEditingQuestionId = qid;
       const q = questionsData.find(item => item.id === qid);
@@ -3669,9 +4342,19 @@
       document.getElementById('editInputAnswer').value = q.rawAnswer || (q.aiAnswer ? q.aiAnswer.answer : '') || '';
       document.getElementById('editInputAnalysis').value = q.rawAnalysis || (q.aiAnswer ? q.aiAnswer.analysis : '') || '';
 
+      initEditPreviewInputs();
       handleEditTypeChange();
       updateEditLivePreview();
       modal.classList.remove('hidden');
+
+      const stemInput = document.getElementById('editInputStem');
+      if (stemInput) {
+        lastActiveEditInput = stemInput;
+        setTimeout(() => {
+          stemInput.focus();
+          syncPreviewCursorPosition(stemInput);
+        }, 60);
+      }
 
       try {
         const res = await fetch(`${API_BASE}/api/library/${qid}/question`, {
@@ -3690,6 +4373,7 @@
       if (modal) modal.classList.add('hidden');
       activeEditingQuestionId = null;
       activeEditingRevisionInfo = null;
+      lastActiveEditInput = null;
     }
 
     function handleEditTypeChange() {
@@ -3719,47 +4403,65 @@
       const previewEl = document.getElementById('editLivePreviewBox');
       if (!previewEl) return;
 
-      const stem = (document.getElementById('editInputStem')?.value || '').trim();
+      const stem = document.getElementById('editInputStem')?.value || '';
       const type = document.getElementById('editInputType')?.value || 'single_choice';
-      const stars = activeEditingStars || 3;
-
       const isChoice = (type === 'single_choice' || type === 'multiple_choice');
-      const optObj = {};
+
+      const options = {};
       if (isChoice) {
-        const a = document.getElementById('editOptA')?.value.trim();
-        const b = document.getElementById('editOptB')?.value.trim();
-        const c = document.getElementById('editOptC')?.value.trim();
-        const d = document.getElementById('editOptD')?.value.trim();
-        if (a) optObj.A = a;
-        if (b) optObj.B = b;
-        if (c) optObj.C = c;
-        if (d) optObj.D = d;
+        const a = document.getElementById('editOptA')?.value;
+        const b = document.getElementById('editOptB')?.value;
+        const c = document.getElementById('editOptC')?.value;
+        const d = document.getElementById('editOptD')?.value;
+        if (a !== undefined) options.A = a;
+        if (b !== undefined) options.B = b;
+        if (c !== undefined) options.C = c;
+        if (d !== undefined) options.D = d;
       }
 
-      let formattedStem = stem
-        .split('\n')
-        .filter(p => p.trim())
-        .map(p => `<p class="font-serif leading-relaxed mb-2 text-slate-800 text-sm">${escapeHtml(p)}</p>`)
-        .join('');
+      const answer = document.getElementById('editInputAnswer')?.value || '';
+      const analysis = document.getElementById('editInputAnalysis')?.value || '';
 
-      if (isChoice && Object.keys(optObj).length > 0) {
-        formattedStem += renderAdaptiveOptionsHtml(optObj, {}, 1);
+      const q = questionsData.find(item => item.id === activeEditingQuestionId);
+      const figures = (q && (q.figures || q.rawFigures)) || [];
+
+      const content = {
+        stem: stem,
+        options: options,
+        answer: answer,
+        analysis: analysis,
+        figures: figures
+      };
+
+      if (window.QB && typeof QB.renderQuestion === 'function') {
+        QB.renderQuestion(previewEl, content, {
+          showNumber: false,
+          showAnswer: 'open',
+          showEmptyAnswer: true,
+          trackSource: true
+        });
+      } else {
+        let formattedStem = stem
+          .split('\n')
+          .filter(p => p.trim())
+          .map(p => `<p class="font-serif leading-relaxed mb-2 text-slate-800 text-sm">${escapeHtml(p)}</p>`)
+          .join('');
+
+        if (isChoice && Object.keys(options).length > 0) {
+          formattedStem += renderAdaptiveOptionsHtml(options, {}, 1);
+        }
+
+        previewEl.innerHTML = `
+          <div class="p-3 bg-white rounded-lg border border-slate-200 text-xs">
+            <div class="text-slate-800 font-serif leading-relaxed">
+              ${sanitizeMathHtml(formattedStem || '<span class="text-slate-300 italic">在左侧输入题干以预览效果</span>')}
+            </div>
+          </div>
+        `;
+        triggerKaTeX(previewEl);
       }
 
-      previewEl.innerHTML = `
-        <div class="p-3 bg-white rounded-lg border border-slate-200 text-xs">
-          <div class="flex items-center gap-2 mb-2 pb-1.5 border-b border-slate-100">
-            <span class="font-bold text-slate-900">预览题目</span>
-            <span class="text-slate-400">·</span>
-            <span class="text-amber-500 font-bold">${'★'.repeat(stars)}</span>
-          </div>
-          <div class="text-slate-800 font-serif leading-relaxed">
-            ${sanitizeMathHtml(formattedStem || '<span class="text-slate-300 italic">在左侧输入题干以预览效果</span>')}
-          </div>
-        </div>
-      `;
-
-      triggerKaTeX(previewEl);
+      syncPreviewCursorPosition();
     }
 
     async function submitQuestionEdit() {
@@ -5465,6 +6167,13 @@
         }
       });
 
+      document.addEventListener('contextmenu', (e) => {
+        const menuEl = document.getElementById('eagleContextMenu');
+        if (menuEl && !menuEl.contains(e.target)) {
+          hideEagleContextMenu();
+        }
+      });
+
       // 强大的键盘快捷键体系 (Eagle 灵魂交互)
       document.addEventListener('keydown', (e) => {
         // 如果正在输入文本，只响应 Escape
@@ -5632,5 +6341,7 @@
 
   <!-- B5：答案解析编辑器本体（多题并排 / 原卷裁图 / AI 初稿对照） -->
   <script src="/eagle-solution-editor.js?v=b5-20261114g"></script>
+  <!-- 禁用非输入区域的浏览器原生上下文菜单，保留文本框的复制粘贴功能 -->
+  <script src="/browser-interactions.js" defer></script>
 </body>
 </html>
