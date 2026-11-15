@@ -20,10 +20,10 @@ test("Eagle 工作台：题卡编辑 LaTeX 光标联动 DOM 与样式规范", ()
   assert.ok(eagleHtml.includes('id="editLivePreviewBox"'), "包含实时排版预览容器");
   assert.match(eagleHtml, /id="editLivePreviewBox"[^>]*class="[^"]*relative/, "预览容器必须具备 relative 定位以容纳绝对定位光标");
 
-  // 3. JS 逻辑：调用 QB.renderQuestion 与 trackSource
-  assert.ok(eagleHtml.includes("QB.renderQuestion"), "必须使用既有排版引擎 QB.renderQuestion 渲染");
+  // 3. JS 逻辑：调用 QBRender / QB.renderQuestion 与 trackSource
+  assert.ok(eagleHtml.includes("renderQuestion"), "必须使用既有排版引擎 renderQuestion 渲染");
   assert.ok(eagleHtml.includes("trackSource: true"), "必须启用 trackSource 追踪源码字符偏移");
-  assert.ok(eagleHtml.includes("QB.previewSelection"), "必须调用 QB.previewSelection 同步竖杠光标与公式激活");
+  assert.ok(eagleHtml.includes("previewSelection"), "必须调用 previewSelection 同步竖杠光标与公式激活");
   assert.ok(eagleHtml.includes("syncPreviewCursorPosition"), "包含光标同步派发函数");
 });
 

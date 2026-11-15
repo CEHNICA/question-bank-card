@@ -1201,6 +1201,10 @@
   <script src="/exam-export.js"></script>
 
   <script>
+    // 对齐既有题库 Devin 规范：引入公共排版与比对引擎
+    const QB = window.QBRender || window.QB || {};
+    window.QB = QB;
+
     // ================= 全局核心数据与响应式状态 =================
     // API 同源：这个页面本来就由题有据后端自己提供，接口跟着当前端口走。
     // 以前写死 8768，换个端口（比如在副本库上验收）就全打到别的服务上，
@@ -4283,7 +4287,8 @@
     function syncPreviewCursorPosition(targetInput) {
       const previewEl = document.getElementById('editLivePreviewBox');
       const hintEl = document.getElementById('editLivePreviewHint');
-      if (!previewEl || !window.QB || typeof QB.previewSelection !== 'function') return;
+      const qb = window.QBRender || window.QB;
+      if (!previewEl || !qb || typeof qb.previewSelection !== 'function') return;
 
       const input = targetInput || lastActiveEditInput || (
         document.activeElement && EDIT_INPUT_FIELDS[document.activeElement.id]
@@ -4296,7 +4301,7 @@
       const start = Number.isInteger(input.selectionStart) ? input.selectionStart : 0;
       const end = Number.isInteger(input.selectionEnd) ? input.selectionEnd : start;
 
-      const result = QB.previewSelection(previewEl, { field, start, end });
+      const result = qb.previewSelection(previewEl, { field, start, end });
 
       if (hintEl) {
         const label = EDIT_FIELD_LABELS[field] || field;
@@ -4309,7 +4314,7 @@
             hintEl.innerHTML = `<span>📍</span><span>预览联动 · <b>${label}</b></span>`;
           }
         } else {
-          hintEl.innerHTML = `<span>💡</span><span>输入或移动光标时，右侧预览将实时投射竖杠位置并高亮对应公式。</span>`;
+          hintEl.innerHTML = `<span>📍</span><span>光标联动 · <b>${label}</b> (第 ${start + 1} 字符)</span>`;
         }
       }
 
@@ -4433,8 +4438,9 @@
         figures: figures
       };
 
-      if (window.QB && typeof QB.renderQuestion === 'function') {
-        QB.renderQuestion(previewEl, content, {
+      const qb = window.QBRender || window.QB;
+      if (qb && typeof qb.renderQuestion === 'function') {
+        qb.renderQuestion(previewEl, content, {
           showNumber: false,
           showAnswer: 'open',
           showEmptyAnswer: true,
