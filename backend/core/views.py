@@ -838,6 +838,7 @@ from .system_views import (  # noqa: F401
     _frontend,
     _page,
     api_redesign_styles,
+    app_icon_256,
     app_script,
     browser_interactions_script,
     exam_export_script,

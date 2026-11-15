@@ -901,3 +901,32 @@ class BrowserCacheTests(unittest.TestCase):
 
             fake_user32.ShowWindow.assert_called_with(4242, app_window._SW_RESTORE)
             fake_user32.SetForegroundWindow.assert_called_with(4242)
+
+    def test_watch_window_applies_tug_taskbar_icon(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            alive_sequence = iter([True] * 2 + [False])
+            fake_user32 = Mock()
+            fake_user32.IsIconic.return_value = False
+            fake_user32.IsWindow.side_effect = lambda hwnd: next(alive_sequence, False)
+            applied = []
+            found = []
+            clock = itertools.count(0, 1)
+
+            def fake_app_window(user32, profile, **_options):
+                found.append(1)
+                return 5150 if len(found) == 1 else 0
+
+            with patch.object(app_window.launcher, "DATA_ROOT", root), \
+                 patch.object(app_window, "_user32", return_value=fake_user32), \
+                 patch.object(app_window, "_app_window", side_effect=fake_app_window), \
+                 patch.object(app_window, "apply_window_icon", side_effect=lambda u, h: applied.append(h)), \
+                 patch.object(app_window.time, "sleep"), \
+                 patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)):
+                app_window.watch_window(root)
+            self.assertIn(5150, applied)
+
+    def test_window_icon_path_prefers_assets_app_ico(self):
+        ico = app_window.ASSETS / "app.ico"
+        self.assertTrue(ico.is_file(), "仓库 assets/app.ico 必须存在，打包后任务栏才有 TUG")
+        self.assertEqual(app_window._window_icon_path(), ico)

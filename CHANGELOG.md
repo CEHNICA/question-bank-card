@@ -3,6 +3,14 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 1.26.58
+
+**任务栏图标改回 TUG**
+
+- **Eagle 补 favicon**：启动默认进 `/eagle`，原先没挂图标链接，Edge `--app` 任务栏掉成浏览器默认图标。
+- **Win32 再刷一次**：窗口句柄出现后用 `assets/app.ico` 发 `WM_SETICON`，页面加载后再刷一遍，避免被浏览器改回去。
+
+
 ## 1.26.57
 
 **修好 OneNote：关联、打开、回跳**

@@ -417,6 +417,19 @@ class StaticAssetTests(TestCase):
         self.assertEqual(response["Content-Type"], "image/png")
         self.assertTrue(b"".join(response.streaming_content).startswith(b"\x89PNG\r\n\x1a\n"))
 
+    def test_app_icon_256_is_served_as_png(self):
+        response = self.client.get("/app-icon-256.png")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/png")
+        self.assertTrue(b"".join(response.streaming_content).startswith(b"\x89PNG\r\n\x1a\n"))
+
+    def test_eagle_page_declares_tug_favicon(self):
+        response = self.client.get("/eagle")
+        self.assertEqual(response.status_code, 200)
+        body = b"".join(response.streaming_content).decode("utf-8", errors="replace")
+        self.assertIn('rel="icon"', body)
+        self.assertIn("/favicon.png", body)
+
     def test_new_frontend_modules_are_served(self):
         """1.26.41 新增的两个脚本要能被页面取到。"""
         for name in ("question-locator.js", "approve-result.js"):

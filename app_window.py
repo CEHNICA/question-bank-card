@@ -470,6 +470,7 @@ def watch_window(profile: Path, interval: float = 0.5) -> None:
             # 1.25.52：上一次运行留下的窗口可能还是最小化状态（浏览器复用了
             # 旧窗口）。启动后要把它恢复出来，否则老师点桌面图标只看到任务栏。
             if hwnd:
+                apply_window_icon(user32, hwnd)
                 try:
                     if getattr(user32, "IsIconic", None) and user32.IsIconic(hwnd):
                         user32.ShowWindow(hwnd, _SW_RESTORE)
@@ -488,6 +489,8 @@ def watch_window(profile: Path, interval: float = 0.5) -> None:
             continue
         if startup_check and time.monotonic() >= startup_check:
             startup_check = 0.0
+            # 页面加载后浏览器可能又把图标改回默认，再刷一次 TUG。
+            apply_window_icon(user32, hwnd)
             try:
                 if getattr(user32, "IsIconic", None) and user32.IsIconic(hwnd):
                     user32.ShowWindow(hwnd, _SW_RESTORE)
@@ -495,6 +498,58 @@ def watch_window(profile: Path, interval: float = 0.5) -> None:
             except Exception:  # noqa: BLE001
                 pass
         time.sleep(interval)
+
+
+def _window_icon_path() -> Path | None:
+    """任务栏图标：优先打包进 _internal/assets 的 app.ico，源码版用仓库 assets。"""
+    for candidate in (ASSETS / "app.ico", ROOT / "assets" / "app.ico"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def apply_window_icon(user32, hwnd: int) -> None:
+    """把 Edge/Chrome --app 窗口的任务栏图标换成题有据 TUG，而不是浏览器默认图标。"""
+    if not hwnd or user32 is None:
+        return
+    ico = _window_icon_path()
+    if ico is None:
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        # 单独拿一份 DLL 绑定，别改共享 user32 上 EnumWindows 等原型。
+        dll = ctypes.WinDLL("user32", use_last_error=True)
+        IMAGE_ICON = 1
+        LR_LOADFROMFILE = 0x0010
+        LR_DEFAULTSIZE = 0x0040
+        WM_SETICON = 0x0080
+        ICON_SMALL = 0
+        ICON_BIG = 1
+        dll.LoadImageW.argtypes = [
+            wintypes.HINSTANCE,
+            wintypes.LPCWSTR,
+            wintypes.UINT,
+            ctypes.c_int,
+            ctypes.c_int,
+            wintypes.UINT,
+        ]
+        dll.LoadImageW.restype = wintypes.HANDLE
+        dll.SendMessageW.argtypes = [
+            wintypes.HWND,
+            wintypes.UINT,
+            wintypes.WPARAM,
+            wintypes.LPARAM,
+        ]
+        dll.SendMessageW.restype = ctypes.c_ssize_t
+        handle = dll.LoadImageW(None, str(ico), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE)
+        if not handle:
+            return
+        dll.SendMessageW(hwnd, WM_SETICON, ICON_BIG, handle)
+        dll.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, handle)
+    except Exception:  # noqa: BLE001 - 图标失败不能挡窗口
+        pass
 
 
 def open_window(url: str) -> subprocess.Popen | None:
@@ -520,6 +575,7 @@ def focus_existing_window() -> bool:
     hwnd = _app_window(user32, window_profile())
     if not hwnd:
         return False
+    apply_window_icon(user32, hwnd)
     user32.ShowWindow(hwnd, _SW_RESTORE)
     user32.SetForegroundWindow(hwnd)
     return True
@@ -558,6 +614,7 @@ def _wait_until_window_closed(web: subprocess.Popen, profile: Path, user32) -> s
                                require_title=time.monotonic() < strict_until)
             next_lookup = time.monotonic() + _WINDOW_LOOKUP_BACKOFF
         if hwnd:
+            apply_window_icon(user32, hwnd)
             break
         if time.monotonic() > deadline:
             return "no-window"

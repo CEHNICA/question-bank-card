@@ -115,6 +115,7 @@ api_redesign_styles = _frontend("api-redesign.css", "text/css; charset=utf-8")
 library_styles = _frontend("library.css", "text/css; charset=utf-8")
 library_reading_styles = _frontend("library-reading.css", "text/css; charset=utf-8")
 favicon = _frontend("favicon.png", "image/png")
+app_icon_256 = _frontend("app-icon-256.png", "image/png")
 startup_hint_script = _frontend("startup-hint.js", "application/javascript; charset=utf-8")
 startup_hint_styles = _frontend("startup-hint.css", "text/css; charset=utf-8")
 
