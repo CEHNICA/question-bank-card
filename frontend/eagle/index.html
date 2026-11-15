@@ -35,6 +35,22 @@
       from { opacity: 0; transform: translateY(-4px); }
       to { opacity: 1; transform: translateY(0); }
     }
+    /* ---- 右侧「题目属性」面板：可收起（B3 之后 toggleRightInspector 的 id 丢了，
+           面板永远收不起来，窄窗口把中栏挤成一条缝）---- */
+    #rightInspectorPane { transition: width .15s ease; }
+    #rightInspectorPane.collapsed { width: 3rem; }
+    #rightInspectorPane.collapsed #inspectorBody,
+    #rightInspectorPane.collapsed #inspectorHead { display: none; }
+    @media (max-width: 1100px) {
+      #rightInspectorPane { width: 3rem; }
+      #rightInspectorPane #inspectorBody,
+      #rightInspectorPane #inspectorHead { display: none; }
+    }
+    @media (max-width: 1100px) {
+      #rightInspectorPane.force-open { width: 18rem; }
+      #rightInspectorPane.force-open #inspectorBody { display: block; }
+      #rightInspectorPane.force-open #inspectorHead { display: flex; }
+    }
       .compact-row .katex-display {
       display: inline !important;
       margin: 0 !important;
@@ -452,14 +468,19 @@
     </main>
 
     <!-- ================= 3. 右侧栏：Eagle 风格属性与打标检查器 ================= -->
-    <aside class="w-72 bg-white border-l border-slate-200/80 flex flex-col shrink-0">
+    <aside id="rightInspectorPane" class="w-72 bg-white border-l border-slate-200/80 flex flex-col shrink-0">
       
-      <div class="h-10 px-4 border-b border-slate-200/70 flex items-center justify-between shrink-0">
-        <span id="inspectorTitle" class="text-xs font-bold text-slate-800">题目属性</span>
-        <span id="inspectorBadge" class="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600"># 22</span>
+      <div class="h-10 px-3 border-b border-slate-200/70 flex items-center gap-1.5 justify-between shrink-0">
+        <div id="inspectorHead" class="flex items-center gap-2 min-w-0 flex-1">
+          <span id="inspectorTitle" class="text-xs font-bold text-slate-800 truncate">题目属性</span>
+          <span id="inspectorBadge" class="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 shrink-0"># 22</span>
+        </div>
+        <button type="button" id="btnToggleInspector" onclick="toggleRightInspector()"
+          title="收起题目属性面板" aria-label="收起题目属性面板"
+          class="shrink-0 w-5 h-5 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 text-sm leading-none cursor-pointer">›</button>
       </div>
 
-      <div class="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+      <div id="inspectorBody" class="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
         
         <!-- 1. 打标核心区 -->
         <div class="space-y-2">
@@ -1117,9 +1138,12 @@
       difficultyMinStar: null,   // N★及以上；与 difficultyStars（精确匹配）互斥
       sortBy: 'number', // number, difficulty, year
       // 文件夹树（B3）：试卷 / 知识点 / 方法 统一成 Eagle 式文件夹
-      folderType: '',      // all | paper | tag | group | smart | custom
+      folderType: '',      // all | paper | tag | group | smart | custom | book | bookchapter | booksection
       folderPaperIds: [],  // 选中的试卷子集
-      folderTagIds: []     // 选中的标签子集（含子孙）
+      folderTagIds: [],    // 选中的标签子集（含子孙）
+      // 教材版本树选中的「章 / 小节」：[{paperId, kind:'chapter'|'section', value}]
+      // 这是并集语义（同一个文件夹内任一小节命中即算命中），跟 folderTagIds 的并集一致
+      folderSections: []
     };
 
     let currentPaperSort = localStorage.getItem('paper_sort_mode') || 'time_desc';
@@ -1410,6 +1434,8 @@
                 total: (p.counts && p.counts.total) || p.total || 0,
                 // published = 已入库（终审发布）题数：题库只显这部分，未入库仍在核验中
                 published: (p.counts && p.counts.published) || 0,
+                // material_type: exam（试卷/照片）| book（教材教辅）—— 教材版本树靠它分流
+                materialType: p.material_type || 'exam',
                 createdAt: new Date(p.created_at || Date.now()),
                 createdStr: (p.created_at || '').slice(0, 10),
                 counts: p.counts || {}
@@ -1590,10 +1616,14 @@
               id: String(item.id || `q_${idx}`),
               questionNumber: qNum,
               chapter: c.section || '综合题库',
+              // section = OCR 出来的小节名（习题3.4 / 5.5.2 简单的三角恒等变换 / 第9节 比较法 · 例题1）
+              // 教材版本树的「章 → 小节」两层就是靠它聚合出来的
+              section: (c && c.section) || '',
               questionType: typeNames[item.question_type] || '解答题',
               questionTypeCode: item.question_type || 'free_response',
               documentId: item.document_id || '',
               sourcePage: item.page ? (item.page - 1) : 0,
+              paperPage: (item.page && item.page > 0) ? item.page : 0,   // 1 基原页码，用于教材分章
               source: originSource,
               year: 2024,
               score: item.score || (stars >= 4 ? 12 : 5),
@@ -2049,8 +2079,8 @@
       const node = folderNodeRegistry.get(nodeId);
       if (!node) return;
 
-      // 试卷节点直接复用现成菜单（重命名/仅看该项目/看原卷/排序全都有）
-      if (node.type === 'paper') {
+      // 试卷 / 教材节点直接复用现成菜单（重命名/仅看该项目/看原卷/排序全都有）
+      if (node.type === 'paper' || node.type === 'book') {
         openEagleContextMenu(e, 'tree', node.paperId);
         return;
       }
@@ -2154,6 +2184,7 @@
               name: p.name || p.task_name || p.filename || '未命名项目',
               filename: p.filename,
               total: p.total || (p.counts && p.counts.total) || 0,
+              materialType: p.material_type || 'exam',
               createdAt: new Date(p.created_at || Date.now()),
               createdStr: (p.created_at || '').slice(0, 10),
               counts: p.counts || {}
@@ -2476,11 +2507,34 @@
     function folderMatchesQuestion(q) {
       const fp = filterState.folderPaperIds || [];
       const ft = filterState.folderTagIds || [];
-      if (!fp.length && !ft.length) return true;
+      const fs = filterState.folderSections || [];
+      if (!fp.length && !ft.length && !fs.length) return true;
       if (fp.length && q.documentId && fp.includes(q.documentId)) return true;
       if (ft.length) {
         const qIds = (q.tags || []).map(t => t.id);
         if (ft.some(id => qIds.includes(id))) return true;
+      }
+      if (fs.length && folderSectionMatches(q)) return true;
+      return false;
+    }
+
+    // 教材版本树的「章 / 小节」命中判定：并集语义（同一文件夹内任一小节命中即算命中）
+    function folderSectionMatches(q) {
+      const list = filterState.folderSections || [];
+      if (!list.length) return false;
+      const sec = String(q.section || '').trim();
+      for (const item of list) {
+        if (item.paperId && q.documentId && item.paperId !== q.documentId) continue;
+        if (item.kind === 'chapter') {
+          if (chapterOfQuestion(q) === item.value) return true;
+        } else {
+          if (sec !== item.value) continue;
+          // 同一个小节名可能跨章（「1. 选择题」第4章第5章都有），必须连章号一起比
+          if (item.chapterNo !== null && item.chapterNo !== undefined) {
+            if (chapterOfQuestion(q) !== item.chapterNo) continue;
+          }
+          return true;
+        }
       }
       return false;
     }
@@ -3845,13 +3899,33 @@
 
     // ================= 快捷键与弹窗通用逻辑 =================
     
+    // 窄窗（<1100px）默认把右栏收成窄条，否则中栏被挤成一条缝；
+    // 窄窗下第一次点按钮 = 强制展开，第二次点 = 收回。
+    const INSPECTOR_COLLAPSE_BREAKPOINT = 1100;
     function toggleRightInspector() {
       const pane = document.getElementById('rightInspectorPane');
-      const btn = document.getElementById('btnToggleInspector');
       if (!pane) return;
-      pane.classList.toggle('hidden');
+      const btn = document.getElementById('btnToggleInspector');
+      const narrow = window.innerWidth < INSPECTOR_COLLAPSE_BREAKPOINT;
+      if (narrow) {
+        if (pane.classList.contains('force-open')) {
+          pane.classList.remove('force-open');
+          pane.classList.add('collapsed');
+        } else {
+          pane.classList.remove('collapsed');
+          pane.classList.add('force-open');
+        }
+      } else {
+        pane.classList.remove('force-open');
+        pane.classList.toggle('collapsed');
+      }
+      const open = pane.classList.contains('force-open')
+        ? true
+        : !pane.classList.contains('collapsed');
       if (btn) {
-        btn.classList.toggle('bg-slate-200', !pane.classList.contains('hidden'));
+        btn.textContent = open ? '\u203A' : '\u2039';
+        btn.title = open ? '收起题目属性面板' : '展开题目属性面板';
+        btn.setAttribute('aria-label', btn.title);
       }
     }
 
@@ -4269,6 +4343,7 @@
         keyword: filterState.keyword,
         paperIds: filterState.folderPaperIds.slice(),
         tagIds: filterState.folderTagIds.slice(),
+        sections: filterState.folderSections.slice(),
         smartFilter: filterState.smartFilter,
         questionTypes: filterState.questionTypes.slice(),
         difficultyStars: filterState.difficultyStars.slice(),
@@ -4317,6 +4392,7 @@
       filterState.keyword = f.keyword || '';
       filterState.folderPaperIds = (f.paperIds || []).slice();
       filterState.folderTagIds = (f.tagIds || []).slice();
+      filterState.folderSections = (f.sections || []).slice();
       filterState.smartFilter = f.smartFilter || '';
       filterState.questionTypes = (f.questionTypes || []).slice();
       filterState.difficultyStars = (f.difficultyStars || []).slice();
@@ -4334,6 +4410,162 @@
       applyFilters();
     }
 
+    // ===== 教材版本虚拟文件夹树（教材 -> 章 -> 小节）=====
+    // 章节名不是新造的：直接来自题目 OCR 出来的 content.section，
+    // 章号从小节名里按固定规律抽（习题3.4 / 3.4 函数的应用 / 1.3 集合的基本运算 / 二、回顾与思考 / 探究3）。
+    const CN_CHAPTER_NUM = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
+
+    // 只有书自己的编号（习题N.M / 复习参考题N）能当章锚点。
+    // 「N. 选择题」「二、回顾与思考」这些的 N 不可信：实测「7. 选择题」的 7 是卷内块序号，
+    // 它那 7 道题在 p183，明明落在第 5 章区间里。
+    function strongChapterAnchor(section) {
+      const s = String(section || '').trim();
+      let m;
+      if ((m = s.match(/^习题\s*(\d+)/))) return parseInt(m[1], 10);
+      if ((m = s.match(/^复习参考题\s*(\d+)/))) return parseInt(m[1], 10);
+      return null;
+    }
+
+    // 题目 -> 所属章号（null = 归不進任何章）
+    const textbookChapterOf = new Map();
+
+    function chapterOfQuestion(q) {
+      if (textbookChapterOf.has(q.id)) return textbookChapterOf.get(q.id);
+      return null;
+    }
+
+    // 按页码区间把每道题落到章里：锚点章节区间互不重叠，区间外的归「其他小节」。
+    function assignTextbookChapters() {
+      textbookChapterOf.clear();
+      papersData.filter(p => (p.materialType || 'exam') === 'book').forEach(p => {
+        const qs = questionsData.filter(q => q.documentId === p.id && (p.published || 0) > 0);
+        if (!qs.length) return;
+        const pages = qs.map(q => q.paperPage || 0).filter(n => n > 0);
+        if (!pages.length) return;
+        const minPage = Math.min.apply(null, pages);
+        const maxPage = Math.max.apply(null, pages);
+
+        const anchors = new Map();
+        qs.forEach(q => {
+          const c = strongChapterAnchor(q.section);
+          const pg = q.paperPage || 0;
+          if (c === null || !pg) return;
+          const a = anchors.get(c) || { lo: Infinity, hi: -1 };
+          a.lo = Math.min(a.lo, pg);
+          a.hi = Math.max(a.hi, pg);
+          anchors.set(c, a);
+        });
+        const chs = Array.from(anchors.keys()).sort((a, b) => a - b);
+        if (!chs.length) return;
+
+        const ranges = [];
+        chs.forEach((c, i) => {
+          const lo = (i === 0) ? minPage : anchors.get(c).lo;
+          const hi = (i + 1 < chs.length) ? anchors.get(chs[i + 1]).lo - 1 : maxPage;
+          ranges.push({ c: c, lo: lo, hi: hi });
+        });
+
+        qs.forEach(q => {
+          const pg = q.paperPage || 0;
+          let ch = null;
+          for (const r of ranges) {
+            if (pg >= r.lo && pg <= r.hi) { ch = r.c; break; }
+          }
+          textbookChapterOf.set(q.id, ch);
+        });
+      });
+    }
+
+    // 从资料名里拆出版本 / 册次。拆不出来的就保留原名，不替用户编出版本。
+    function parseTextbookTitle(rawName) {
+      const raw = String(rawName || '').replace(/\.[a-z0-9]{2,4}$/i, '').trim();
+      let edition = '';
+      let m = raw.match(/[（(]\s*([AB])\s*版\s*[)）]/i);
+      if (m) edition = m[1].toUpperCase() + '版';
+      else if ((m = raw.match(/[（(]\s*([^（()）]{2,8}?版)\s*[)）]/))) edition = m[1];
+      else if ((m = raw.match(/([一-龥]{2,6}版)/))) edition = m[1];
+
+      let volume = '';
+      if ((m = raw.match(/(选择性必修|必修)\s*第?\s*([一二三四五六七八九十\d]+)\s*册?/))) {
+        // 原样保留：中文数字就写「必修第一册」，阿拉伯数字就写「必修第1册」
+        volume = m[1] + '第' + m[2] + '册';
+      }
+      const parts = [];
+      if (edition) parts.push(edition);
+      if (volume) parts.push(volume);
+      return { label: parts.length ? parts.join(' · ') : raw, raw: raw };
+    }
+
+    function buildTextbookTreeNodes() {
+      assignTextbookChapters();
+      const books = papersData.filter(p => (p.published || 0) > 0 && (p.materialType || 'exam') === 'book');
+      const nodes = [];
+      books.forEach(p => {
+        const qs = questionsData.filter(q => q.documentId === p.id);
+        if (!qs.length) return;
+        const title = parseTextbookTitle(p.name || p.filename);
+
+        // 章 -> 小节 -> 题数（章归属按页码锚定算，不是按小节名里的数字）
+        const chapMap = new Map();
+        qs.forEach(q => {
+          const sec = String(q.section || '').trim();
+          const ch = chapterOfQuestion(q);
+          const ck = (ch === null || ch === undefined) ? 'none' : String(ch);
+          if (!chapMap.has(ck)) chapMap.set(ck, new Map());
+          const sm = chapMap.get(ck);
+          sm.set(sec, (sm.get(sec) || 0) + 1);
+        });
+
+        const chapNodes = [];
+        Array.from(chapMap.keys())
+          .sort((a, b) => (a === 'none' ? 1 : b === 'none' ? -1 : Number(a) - Number(b)))
+          .forEach(ck => {
+            const sm = chapMap.get(ck);
+            const ch = (ck === 'none') ? null : Number(ck);
+            const chapCount = Array.from(sm.values()).reduce((s, n) => s + n, 0);
+            if (!chapCount) return;          // 0 题的章不渲染：点进去是死路
+            const chapLabel = ch === null ? '其他小节' : ('第' + ch + '章');
+            const secNodes = Array.from(sm.entries())
+              .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0]), 'zh-CN'))
+              .map(([sec, n], idx) => ({
+                id: 'booksec:' + p.id + ':' + ck + ':' + idx,
+                type: 'booksection',
+                label: sec || '（未标注小节）',
+                pathLabel: title.label + ' › ' + chapLabel + ' › ' + (sec || '（未标注小节）'),
+                icon: '\u{1F4C4}',
+                paperId: p.id,
+                chapterNo: ch,
+                sectionName: sec,
+                count: n,
+                children: []
+              }));
+            chapNodes.push({
+              id: 'bookchap:' + p.id + ':' + ck,
+              type: 'bookchapter',
+              label: chapLabel,
+              pathLabel: title.label + ' › ' + chapLabel,
+              icon: '\u{1F4D6}',
+              paperId: p.id,
+              chapterNo: ch,
+              count: chapCount,
+              children: secNodes
+            });
+          });
+
+        nodes.push({
+          id: 'book:' + p.id,
+          type: 'book',
+          label: title.label,
+          pathLabel: title.label,
+          icon: '\u{1F4DA}',
+          paperId: p.id,
+          count: p.published || qs.length,
+          children: chapNodes
+        });
+      });
+      return nodes;
+    }
+
     function getFolderTreeRoots() {
       const roots = [];
       roots.push({ id: 'all', type: 'all', label: '全部题库', icon: '\u{1F4DA}', count: questionsData.length, children: [] });
@@ -4343,6 +4575,14 @@
         roots.push({
           id: 'group:papers', type: 'group', label: '试卷', icon: '\u{1F5C2}',
           count: papers.reduce((s, p) => s + p.count, 0), children: papers
+        });
+      }
+
+      const books = buildTextbookTreeNodes();
+      if (books.length) {
+        roots.push({
+          id: 'group:books', type: 'group', label: '教材版本', icon: '\u{1F4D7}',
+          count: books.reduce((s, b) => s + b.count, 0), children: books
         });
       }
 
@@ -4456,6 +4696,7 @@
       filterState.folderType = node.type;
       filterState.folderPaperIds = [];
       filterState.folderTagIds = [];
+      filterState.folderSections = [];
 
       if (node.type === 'all') {
         filterState.folderType = 'all';
@@ -4467,9 +4708,30 @@
       } else if (node.type === 'tag') {
         filterState.folderTagIds = collectTagIds(node);
         folderTreeState.expanded.add(nodeId);
+      } else if (node.type === 'book') {
+        filterState.folderPaperIds = [node.paperId];
+        filterState.paperId = node.paperId;
+        filterState.paperName = node.label;
+        folderTreeState.expanded.add(nodeId);
+      } else if (node.type === 'bookchapter') {
+        // 章：用「章号 + 小节名」两条件筛，不能只挂 paperId（那会把整本教材都放出来）
+        filterState.folderSections = [{
+          paperId: node.paperId,
+          kind: 'chapter',
+          value: node.chapterNo
+        }];
+        folderTreeState.expanded.add(nodeId);
+      } else if (node.type === 'booksection') {
+        filterState.folderSections = [{
+          paperId: node.paperId,
+          kind: 'section',
+          chapterNo: node.chapterNo,
+          value: node.sectionName
+        }];
       } else if (node.type === 'group') {
         (node.children || []).forEach(c => {
           if (c.type === 'paper') filterState.folderPaperIds.push(c.paperId);
+          if (c.type === 'book') filterState.folderPaperIds.push(c.paperId);
           if (c.type === 'tag') filterState.folderTagIds.push.apply(filterState.folderTagIds, collectTagIds(c));
         });
         folderTreeState.expanded.add(nodeId);
@@ -4615,6 +4877,7 @@
         Boolean(filterState.paperId) ||
         Boolean(filterState.smartFilter) ||
         Boolean(filterState.folderTagIds && filterState.folderTagIds.length) ||
+        Boolean(filterState.folderSections && filterState.folderSections.length) ||
         (filterState.folderType === 'all' && folderTreeState.activeId !== 'all');
 
       updateFilterPillBadges();
@@ -4642,7 +4905,7 @@
       if (folderNode && folderTreeState.activeId !== 'all') {
         html += `
           <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-900 border border-indigo-200 text-xs">
-            <span>🗂 文件夹: ${escapeHtml(folderNode.label)}</span>
+            <span>🗂 文件夹: ${escapeHtml(folderNode.pathLabel || folderNode.label)}</span>
             <button onclick="applyFolderNode('all')" class="text-indigo-700 hover:text-indigo-950 font-bold ml-0.5 cursor-pointer">×</button>
           </span>
         `;
@@ -4787,6 +5050,7 @@
       filterState.folderType = 'all';
       filterState.folderPaperIds = [];
       filterState.folderTagIds = [];
+      filterState.folderSections = [];
 
       const searchInput = document.getElementById('globalSearchInput');
       if (searchInput) searchInput.value = '';
