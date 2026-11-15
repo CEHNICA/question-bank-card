@@ -38,9 +38,11 @@
     title: "练习",
     token: 0,
     // 预览里逐题调整的结果。父页面是权威持有者，这里先改先看，再回传。
-    overrides: { option_overrides: {}, answer_space_overrides: {}, question_breaks: [] },
-    // 展开着的「调整」面板：重排版后要还开着，不然改一个数面板就自己合上了。
+    overrides: { option_overrides: {}, answer_space_overrides: {}, figure_overrides: {}, question_breaks: [] },
+    // 展开着的「调整」面板：仅在用户主动展开且未执行调整操作时保留。
     openTools: new Set(),
+    // 最近一次执行调整操作的试题 ID，用于排版完成后精准平滑滚动定位。
+    lastAdjustedQuestionId: null,
     // 被系统夹过的提示（解答题留白下限），跨重排版保留。
     notes: {}
   };
@@ -61,6 +63,7 @@
     return {
       option_overrides: Object.assign({}, overrides.option_overrides || {}),
       answer_space_overrides: Object.assign({}, overrides.answer_space_overrides || {}),
+      figure_overrides: Object.assign({}, overrides.figure_overrides || {}),
       question_breaks: Array.isArray(overrides.question_breaks) ? overrides.question_breaks.slice() : []
     };
   }
@@ -72,6 +75,7 @@
     return Object.assign({}, base, {
       option_overrides: Object.assign({}, base.option_overrides || {}, mine.option_overrides),
       answer_space_overrides: Object.assign({}, base.answer_space_overrides || {}, mine.answer_space_overrides),
+      figure_overrides: Object.assign({}, base.figure_overrides || {}, mine.figure_overrides),
       question_breaks: Array.from(new Set([...(base.question_breaks || []), ...mine.question_breaks]))
     });
   }
@@ -94,7 +98,7 @@
   }
 
   // 留白以毫米为单位。每一道题都能调（不再只有解答题）；解答题有硬下限。
-  function spaceControl(item, number, options) {
+  function spaceControl(item, number, options, onAction) {
     const Layout = window.ExamLayout || {};
     const isFree = item.question_type === "free_response";
     const floor = isFree ? (Layout.FREE_RESPONSE_MIN || 8) : 0;
@@ -141,6 +145,11 @@
         delete state.notes[item.id];
       }
       state.overrides.answer_space_overrides[item.id] = value;
+      if (typeof onAction === "function") onAction();
+      else {
+        state.openTools.delete(item.id);
+        state.lastAdjustedQuestionId = item.id;
+      }
       pushOverrides();
       render();
     }
@@ -148,6 +157,11 @@
       if (disabled) return;
       delete state.overrides.answer_space_overrides[item.id];
       delete state.notes[item.id];
+      if (typeof onAction === "function") onAction();
+      else {
+        state.openTools.delete(item.id);
+        state.lastAdjustedQuestionId = item.id;
+      }
       pushOverrides();
       render();
     }
@@ -205,6 +219,12 @@
     toggle.setAttribute("aria-label", `第 ${number} 题排版操作`);
     tools.append(toggle);
 
+    function finishAction() {
+      state.openTools.delete(item.id);
+      state.lastAdjustedQuestionId = item.id;
+      tools.open = false;
+    }
+
     const actions = node("div", "print-question-actions");
     actions.setAttribute("role", "group");
     actions.setAttribute("aria-label", `第 ${number} 题排版调整`);
@@ -221,11 +241,12 @@
     layout.addEventListener("change", () => {
       if (layout.value) state.overrides.option_overrides[item.id] = layout.value;
       else delete state.overrides.option_overrides[item.id];
+      finishAction();
       pushOverrides();
       render();
     });
 
-    const space = spaceControl(item, number, options);
+    const space = spaceControl(item, number, options, finishAction);
 
     const pageBreak = node("button", "print-full", state.overrides.question_breaks.includes(item.id) ? "取消另起页" : "另起一页");
     pageBreak.type = "button";
@@ -235,13 +256,13 @@
       state.overrides.question_breaks = state.overrides.question_breaks.includes(item.id)
         ? state.overrides.question_breaks.filter(id => id !== item.id)
         : state.overrides.question_breaks.concat([item.id]);
+      finishAction();
       pushOverrides();
       render();
     });
 
     actions.append(layout, space, pageBreak);
     tools.append(actions);
-    // 改完重排版，面板别自己合上。
     if (state.openTools.has(item.id)) tools.open = true;
     tools.addEventListener("toggle", () => {
       if (tools.open) state.openTools.add(item.id);
@@ -255,17 +276,18 @@
       type: CHANNEL_OVERRIDES,
       option_overrides: state.overrides.option_overrides,
       answer_space_overrides: state.overrides.answer_space_overrides,
+      figure_overrides: state.overrides.figure_overrides,
       question_breaks: state.overrides.question_breaks
     });
   }
 
   // 排版前先等字体和配图。配图没载完就量高度，量出来的是半张纸。
-  async function waitForAssets(paper) {
+  async function waitForAssets(container) {
     let timer;
     try {
       const ready = Promise.all([
         document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve(),
-        ...Array.from(paper.querySelectorAll("img")).map(async image => {
+        ...Array.from(container.querySelectorAll("img")).map(async image => {
           image.loading = "eager";
           if (typeof image.decode === "function") await image.decode();
           else if (!image.complete) await new Promise((resolve, reject) => {
@@ -294,19 +316,15 @@
     const items = state.items || [];
 
     report(items.length ? "正在排版…" : "试题篮是空的。", items.length ? "" : "warn");
-    paper.replaceChildren();
-    paper.style.setProperty("--exam-font-size", `${options.font_size || 12}pt`);
-    paper.dataset.answerSpace = options.answer_space || "none";
-    paper.dataset.document = options.document || "questions";
-
-    paper.append(node("h2", "print-title", state.title || "练习"));
-    if (options.student_info !== false && options.document !== "answers") {
-      paper.append(node("p", "print-info", "姓名 ____________　班级 ____________　得分 ________"));
-    }
     if (!items.length) {
+      paper.replaceChildren();
       post({ type: CHANNEL_RESULT, page_count: 0, warnings: [], error: "" });
       return;
     }
+
+    paper.style.setProperty("--exam-font-size", `${options.font_size || 12}pt`);
+    paper.dataset.answerSpace = options.answer_space || "none";
+    paper.dataset.document = options.document || "questions";
 
     const available = items.filter(item => answerContent(item)).length;
     const showAnswers = options.answers !== false && available > 0;
@@ -319,12 +337,26 @@
     let number = 0;
     const answers = [];
     const toolMap = new Map();
+
+    // 分页：源 → 测量 → 一页页的 .exam-page。
+    // 采用离屏 flow 进行测量排版，在测量期间保持现有 paper 页面不坍塌，
+    // 避免视口滚动条被浏览器强制重置为 0。
+    const flow = node("div", "print-flow exam-source");
+    flow.style.setProperty("--exam-font-size", `${options.font_size || 12}pt`);
+    flow.dataset.answerSpace = options.answer_space || "none";
+    flow.dataset.document = options.document || "questions";
+
+    flow.append(node("h2", "print-title", state.title || "练习"));
+    if (options.student_info !== false && options.document !== "answers") {
+      flow.append(node("p", "print-info", "姓名：____________    班级：____________    得分：____________"));
+    }
+
     grouped.forEach(([name, group], index) => {
       if (options.document !== "answers") {
         const heading = window.ExamExport && typeof window.ExamExport.sectionHeading === "function"
           ? window.ExamExport.sectionHeading(group, index, name)
           : name;
-        paper.append(node("h3", "print-section", heading));
+        flow.append(node("h3", "print-section", heading));
       }
       group.forEach(item => {
         number += 1;
@@ -347,10 +379,10 @@
             blank.style.height = `${space}mm`;
             block.append(blank);
           }
-          paper.append(block);
+          flow.append(block);
           toolMap.set(item.id, { item, number });
           if (options.document === "combined" && options.answer_layout === "inline" && showAnswers && answerContent(item)) {
-            paper.append(answerRow(number, item, true));
+            flow.append(answerRow(number, item, true));
           }
         }
         answers.push([number, item]);
@@ -363,31 +395,27 @@
       if (options.document === "answers") key.classList.add("print-answers-only");
       key.append(node("h3", "print-section", "参考答案与解析"));
       answers.forEach(([index, item]) => key.append(answerRow(index, item, false)));
-      paper.append(key);
+      flow.append(key);
     }
     if (options.document === "answers" && !available) {
-      paper.append(node("p", "helper", "这些题没有答案或解析，请改选题目卷。"));
+      flow.append(node("p", "helper", "这些题没有答案或解析，请改选题目卷。"));
     }
-    paper.append(node("p", "print-footer", `共 ${number} 题`));
-    paper.querySelectorAll("img").forEach(image => { image.loading = "eager"; });
+    flow.append(node("p", "print-footer", `共 ${number} 题`));
+    flow.querySelectorAll("img").forEach(image => { image.loading = "eager"; });
 
-    // 分页：源 → 测量 → 一页页的 .exam-page。
-    const flow = node("div", "print-flow exam-source");
-    flow.style.setProperty("--exam-font-size", `${options.font_size || 12}pt`);
-    flow.dataset.answerSpace = options.answer_space || "none";
-    flow.dataset.document = options.document || "questions";
-    flow.append(...Array.from(paper.childNodes));
-    paper.append(flow);
+    document.body.append(flow);
 
     try {
-      await waitForAssets(paper);
-      if (token !== state.token) return;
+      await waitForAssets(flow);
+      if (token !== state.token) { flow.remove(); return; }
       if (!window.ExamLayout || typeof window.ExamLayout.paginate !== "function") {
         throw new Error("分页组件未载入，请刷新页面后重试");
       }
       const host = node("div", "print-paper");
       const result = await window.ExamLayout.paginate(flow, Object.assign({ host }, options));
+      flow.remove();
       if (token !== state.token) return;
+
       paper.replaceChildren(...result.pages);
       paper.dataset.pageCount = String(result.page_count);
       window.ExamLayout.scale(paper);
@@ -404,11 +432,26 @@
         question.append(questionTools(entry.item, entry.number, options));
       });
 
+      // 视口精确平滑滚动到刚才调整的这道题位置
+      const targetId = state.lastAdjustedQuestionId;
+      state.lastAdjustedQuestionId = null;
+      if (targetId) {
+        const target = paper.querySelector(`.print-question[data-question-id="${targetId}"]`);
+        if (target) {
+          requestAnimationFrame(() => {
+            target.scrollIntoView({ behavior: "smooth", block: "center" });
+            target.classList.add("locate-flash");
+            setTimeout(() => target.classList.remove("locate-flash"), 1200);
+          });
+        }
+      }
+
       const warnings = Array.isArray(result.warnings) ? result.warnings : [];
       const summary = `A4 · 共 ${result.page_count} 页 · ${items.length} 题`;
       report(warnings.length ? `${summary} · ${warnings.join(" ")}` : summary, warnings.length ? "warn" : "ok");
       post({ type: CHANNEL_RESULT, page_count: result.page_count, warnings, error: "" });
     } catch (error) {
+      flow.remove();
       if (token !== state.token) return;
       const message = (error && error.message) || "排版失败，请重试";
       report(message, "error");

@@ -45,12 +45,10 @@ const Upload = require("./app.js");
 
   const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
   const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
-  const library = fs.readFileSync(path.join(__dirname, "library.js"), "utf8");
   assert.doesNotMatch(html, /id="parseMode"/);
   assert.doesNotMatch(js, /\$\("parseMode"\)|selectedParseMode|renderIntakeMode/);
   assert.doesNotMatch(js, /automatic_parse_ready\s*\?\?\s*state\.status\?\.upload_enabled/);
   assert.match(js, /QBUpload\.appendUploadPolicy\(form, photoUpload\.policy\)/);
-  assert.match(library, /upload\.href = "\/#dropZone"/);
   assert.match(js, /window\.location\.hash === "#dropZone"/);
   assert.match(js, /button\("继续整理", "small primary", \(\) => switchToManual\(\)\)/);
   assert.match(js, /crop-missing", "[^"\n]*点“调整范围”[^"\n]*保存范围不会自动识读/);

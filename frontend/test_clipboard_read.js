@@ -10,7 +10,6 @@ const path = require("node:path");
 const app = require("./app.js");
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
-const library = fs.readFileSync(path.join(__dirname, "library.js"), "utf8");
 const help = fs.readFileSync(path.join(__dirname, "shortcut-help.js"), "utf8");
 
 // ---- 「更多」菜单：两个撤了，两个留着
@@ -27,8 +26,6 @@ assert.match(js, /case "c": if \(q\) \{ event\.preventDefault\(\); openClipboard
   "审核页按 C 打开框选识读");
 assert.match(js, /key\.toLowerCase\(\) === "c"[\s\S]{0,400}openClipboardRead\(q\)/,
   "放大对照页按 C 打开框选识读");
-assert.match(library, /event\.key\.toLowerCase\(\) === "c"/, "题库页认 C");
-assert.match(library, /draftLink\(current, "&read=clipboard"\)/, "题库页按 C 带着这道题跳到原卷");
 assert.match(js, /params\.get\("read"\) === "clipboard"/, "从题库跳过来会直接打开框选识读");
 assert.match(help, /"框选识读到剪贴板", "C"/, "快捷键说明里查得到这一条");
 

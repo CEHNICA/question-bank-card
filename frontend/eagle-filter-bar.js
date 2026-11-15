@@ -449,9 +449,14 @@
       const filtered = allTags.filter(tag => {
         if (this.tagGroupFilter !== "all" && tag.kind !== this.tagGroupFilter) return false;
         if (this.tagSearchQuery) {
-          const name = (tag.name || "").toLowerCase();
-          const pinyin = (tag.pinyin || "").toLowerCase();
-          if (!name.includes(this.tagSearchQuery) && !pinyin.includes(this.tagSearchQuery)) return false;
+          // 1.26.53：以前这里只比 name 和 pinyin，而后端从来没写过 pinyin，
+          // 所以「按拼音搜标签」一直是死的。现在后端会带 pinyin / initials /
+          // search_keys，这里一并用上：中文名、别名、全拼、首字母都能搜到。
+          const keys = Array.isArray(tag.search_keys) && tag.search_keys.length
+            ? tag.search_keys
+            : [tag.name, tag.pinyin, tag.initials].filter(Boolean);
+          const hit = keys.some(key => String(key || "").toLowerCase().includes(this.tagSearchQuery));
+          if (!hit) return false;
         }
         return true;
       });

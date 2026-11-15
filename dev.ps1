@@ -131,8 +131,15 @@ switch ($Task) {
 
   "run" {
     $python = Get-Python
-    Say "起本地开发实例（数据放在 backend\data，不碰真数据）"
-    & $python (Join-Path $Repo "backend\manage.py") runserver 127.0.0.1:8768
+    Say "起本地开发实例（Web + 后台 Worker 作为整体启动）"
+    $worker = Start-Process -FilePath $python -ArgumentList @((Join-Path $Repo "backend\manage.py"), "run_worker") -WorkingDirectory (Join-Path $Repo "backend") -NoNewWindow -PassThru
+    try {
+      & $python (Join-Path $Repo "backend\manage.py") runserver 127.0.0.1:8768
+    } finally {
+      if ($worker -and -not $worker.HasExited) {
+        Stop-Process -Id $worker.Id -Force -ErrorAction SilentlyContinue
+      }
+    }
   }
 
   "build" {

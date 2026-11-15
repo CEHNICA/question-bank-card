@@ -47,6 +47,21 @@ datas = []
 docx_root = Path(get_package_paths("docx")[1])
 datas.append((str(docx_root / "templates" / "default.docx"), "docx/templates"))
 
+# pypinyin ships its own PyInstaller hook (pypinyin/__pyinstaller/
+# hook-pypinyin.py) which calls collect_data_files('pypinyin'), so the two
+# pronunciation dictionaries (phrases_dict.json, pinyin_dict.json) already
+# follow the package into the bundle.  Verified by freezing a probe: the
+# frozen exe resolves them under _MEIxxxx/pypinyin/ and computes pinyin.
+#
+# Collecting them a second time here would only duplicate them in the output.
+# The explicit hiddenimports below still matter: they keep the submodules
+# (constants, phrases_dict, pinyin_dict, ...) in the module graph even if
+# pypinyin's internal import style ever changes.
+#
+# pypinyin is an optional runtime dependency (see backend/core/tag_pinyin.py:
+# the app degrades to "Chinese names and aliases only" when it is absent), so
+# its absence must not break the build itself.
+
 # Browser UI: use an allow-list of file extensions and explicitly omit tests.
 for source in sorted(FRONTEND_ROOT.rglob("*")):
     if not source.is_file():
@@ -127,6 +142,16 @@ hiddenimports = [
 
 # Django discovers contenttypes and its migrations at runtime.
 hiddenimports += collect_submodules("django.contrib.contenttypes")
+
+# pypinyin reads its dictionaries through `from pypinyin import phrases_dict`
+# style imports inside constants.py, which the static analysis does follow.
+# Listing the submodules explicitly keeps the frozen build honest even if
+# that internal import style ever changes.  Missing pypinyin must not break
+# the build: the application degrades to Chinese-name-only tag search.
+try:
+    hiddenimports += collect_submodules("pypinyin")
+except Exception:
+    pass
 
 version_file = BUILD_ROOT / "version_info.txt"
 

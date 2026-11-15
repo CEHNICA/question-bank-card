@@ -366,7 +366,7 @@
         // writes the whole thing. Below this, leave the sliver at the page foot
         // and move the whole block down instead: 20 mm is about five text lines,
         // so the abandoned strip costs less than the unusable fragment saves.
-        const MIN_WRITABLE = 76;
+        const MIN_WRITABLE = 64;
         let remaining = height(blank.cloneNode(true));
         while (remaining > .01) {
           let owner = body.lastElementChild;
@@ -388,6 +388,8 @@
           if (existing) used += nextHeight - previousHeight;
           else add(owner, nextHeight);
           remaining -= allocated;
+          // 已在当前页放完绝大部分留白时，不足一行的余数不再新起一页生出孤立「答题区（续）」。
+          if (remaining < MIN_WRITABLE) remaining = 0;
           if (remaining > .01) newPage();
         }
       }
@@ -401,8 +403,9 @@
         }
         const h = height(node.cloneNode(true));
         const pendingHeight = pending.reduce((sum, heading) => sum + height(heading.cloneNode(true)), 0);
-        const full = !node.matches(".print-answer-row") && keepWhole(h, BODY_HEIGHT - pendingHeight, options.pagination);
-        const minimum = full ? h : Math.min(h, 62);
+        // 紧凑模式下仍尽量避免把“如图……”等短题+配图从页底劈成两半；超长综合大题保持可流式分页。
+        const full = !node.matches(".print-answer-row") && (keepWhole(h, BODY_HEIGHT - pendingHeight, options.pagination) || h <= 320);
+        const minimum = full ? h : Math.min(h, 48);
         if (used && (forceBreak || used + pendingHeight + minimum > BODY_HEIGHT + .5)) newPage();
         pending.forEach(heading => atomic(heading)); pending = [];
         if (h <= BODY_HEIGHT - used + .5) { add(node, h); return; }

@@ -4,13 +4,9 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const html = fs.readFileSync(path.join(__dirname, "library.html"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "eagle-filter-bar.css"), "utf8");
 const js = fs.readFileSync(path.join(__dirname, "eagle-filter-bar.js"), "utf8");
 
-// ── 一、HTML 引入完整性验证 ──
-assert.match(html, /<link rel="stylesheet" href="\/eagle-filter-bar\.css">/, "HTML 引入了 Eagle 胶囊样式");
-assert.match(html, /<script src="\/eagle-filter-bar\.js" defer><\/script>/, "HTML 引入了 Eagle 胶囊脚本");
 
 // ── 二、CSS 规范与视觉验证 ──
 assert.match(css, /\.eagle-filter-container\s*\{/, "存在胶囊主容器样式");

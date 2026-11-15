@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>题有据 Pro - 极简 Eagle 风格题库全功能工作台</title>
+  <title>题有据 - 题库工作台</title>
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- KaTeX 数学公式渲染 (本地优先，CDN 回退) -->
@@ -208,7 +208,7 @@
   <header class="h-12 bg-white border-b border-slate-200/80 px-4 flex items-center justify-between shrink-0 z-30">
     <div class="flex items-center gap-5">
       <!-- 品牌 Logo -->
-      <div class="flex items-center gap-2.5 group cursor-pointer" title="题有据 Pro · 智能题库工作台">
+      <div class="flex items-center gap-2.5 group cursor-pointer" title="题有据 · 题库工作台">
         <div class="w-7 h-7 rounded-lg overflow-hidden shadow-xs shrink-0 flex items-center justify-center transition-transform group-hover:scale-105">
           <svg viewBox="0 0 1024 1024" width="28" height="28" fill="none" xmlns="http://www.w3.org/2000/svg">
             <defs>
@@ -272,10 +272,7 @@
             <circle cx="785" cy="255" r="16" fill="#FFFFFF" />
           </svg>
         </div>
-        <div class="flex items-baseline gap-1.5">
-          <span class="font-bold text-slate-900 tracking-tight text-sm">题有据 Pro</span>
-          <span class="text-[9px] font-bold text-emerald-600 tracking-wider uppercase font-mono opacity-80">EAGLE</span>
-        </div>
+        <span class="font-bold text-slate-900 tracking-tight text-sm">题有据</span>
       </div>
 
       <!-- 页面导航：核对题目与设置仍是独立页面，这里只给入口（旧的「正式题库」页已下线，题库工作台就是本页面） -->
@@ -294,7 +291,7 @@
         <input 
           id="globalSearchInput"
           type="text" 
-          placeholder="搜索题干、公式、年份出处 (快捷键 /)..." 
+          placeholder="搜索题干、出处、标签 (快捷键 /)..." 
           class="w-full pl-8 pr-8 py-1 bg-slate-100 hover:bg-slate-100/80 focus:bg-white text-xs text-slate-700 placeholder-slate-400 rounded-md border border-transparent focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 transition-all outline-hidden"
         >
         <span class="absolute right-2 top-1.5 text-[10px] text-slate-400 font-mono">/</span>
@@ -437,10 +434,11 @@
                 <span class="font-bold text-slate-800">标签多维过滤</span>
                 <!-- AND / OR 切换 -->
                 <div class="flex items-center rounded-md bg-slate-100 p-0.5 text-[11px]">
-                  <button id="dropTagAnd" onclick="setTagLogic('and')" class="px-2 py-0.5 rounded bg-white text-slate-900 font-bold shadow-2xs">AND (全含)</button>
-                  <button id="dropTagOr" onclick="setTagLogic('or')" class="px-2 py-0.5 rounded text-slate-500 hover:text-slate-800">OR (任一)</button>
+                  <button id="dropTagAnd" onclick="setTagLogic('and')" class="px-2 py-0.5 rounded bg-white text-slate-900 font-bold shadow-2xs">全含</button>
+                  <button id="dropTagOr" onclick="setTagLogic('or')" class="px-2 py-0.5 rounded text-slate-500 hover:text-slate-800">任一</button>
                 </div>
               </div>
+              <p id="dropTagLogicHint" class="text-[11px] text-slate-500">当前是「全含」：题目要同时带上勾选的每个标签。</p>
 
               <!-- 搜索框 -->
               <input 
@@ -495,6 +493,7 @@
                 <div id="dropStarMinRow" class="grid grid-cols-5 gap-1"></div>
               </div>
               <div class="text-[10px] font-bold text-slate-400 px-2 pt-0.5 pb-0.5">精确评分（只看恰好该星级）</div>
+              <div class="text-[10px] text-slate-400 px-2 pb-1">未打分的题不在 1～5 星里。</div>
               <div id="dropStarList"></div>
             </div>
           </div>
@@ -527,7 +526,9 @@
           <span class="text-slate-400">
             共 <strong id="matchedQuestionCount" class="font-bold text-slate-800">...</strong> 题
           </span>
+          <button id="emptyFilterHint" type="button" class="hidden max-w-[16rem] truncate text-left text-[11px] font-medium text-amber-700 hover:underline"></button>
           <button 
+            id="btnSaveSmartView"
             onclick="saveCurrentAsSmartFolder()"
             class="text-emerald-700 hover:text-emerald-800 font-medium hover:underline flex items-center gap-1"
           >
@@ -557,13 +558,13 @@
           <input id="selectAllCheckbox" onchange="toggleSelectAll(this.checked)" type="checkbox" class="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 focus:ring-0">
           <span>全选本页试题 (<span id="selectedCountText">已勾选 0 题</span>)</span>
         </label>
+        <button id="btnSelectAllFiltered" type="button" onclick="selectAllFilteredQuestions()" class="hidden text-[11px] font-medium text-emerald-700 hover:underline">全选筛选结果</button>
 
         <div class="flex items-center gap-1">
           <span>排序:</span>
           <select onchange="handleSortChange(this.value)" class="bg-transparent text-slate-700 font-medium border-0 focus:ring-0 cursor-pointer py-0 text-[11px]">
             <option value="number">题号升序</option>
             <option value="difficulty">评分由高到低</option>
-            <option value="year">最新年份优先</option>
           </select>
         </div>
       </div>
@@ -852,10 +853,6 @@
     <a href="/" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left">
       <span>📄 切题与核对工作台</span>
       <span class="text-[10px] text-slate-400">↗</span>
-    </a>
-    <a href="/library" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left text-emerald-700">
-      <span>← 传统题库页</span>
-      <span class="text-[10px] text-emerald-500">↗</span>
     </a>
     <button type="button" onclick="openSolutionEditor(); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
       <span>✎ 答案解析编辑器</span>
@@ -1543,6 +1540,11 @@
     let filteredQuestions = [];
     let renderedQuestionCount = 0;
     const CHUNK_SIZE = 25; // 每次增量渲染 25 题，彻底杜绝整页卡死
+    // 首屏只画第一页；其余 offset 后台补拉。补齐前筛选/全选可能不全。
+    let libraryLoadIncomplete = false;
+    let libraryExpectedTotal = 0;
+    let _libraryRefreshTimer = null;
+    const LIBRARY_LIST_QS = 'view=eagle_list&limit=100';
 
     let currentActiveQuestionId = null;
     const selectedQuestionIds = new Set();
@@ -2047,6 +2049,282 @@
       };
     }
 
+    const LIBRARY_TYPE_NAMES = {
+      single_choice: '单选题',
+      multiple_choice: '多选题',
+      fill_blank: '填空题',
+      true_false: '判断题',
+      free_response: '解答题'
+    };
+
+    /** 把 /api/library 一条记录映射成 Eagle 题卡；不在这里拼 HTML。 */
+    function mapLibraryApiItem(item, idx) {
+      const c = item.content || {};
+      const qNum = item.number || (idx + 1);
+      const rawStem = c.stem || c.question || '';
+      const rawOptions = (c.options && typeof c.options === 'object') ? c.options : {};
+      const rawFigures = Array.isArray(c.figures) ? c.figures : [];
+      const rawAnswer = String(c.answer || '').trim();
+      const rawAnalysis = String(c.analysis || '').trim();
+      const aiAnswerObj = item.ai_answer || (item.extras && item.extras.ai_answer) || null;
+      const savedSolutionObj = item.solution || null;
+      const diffOverrides = (typeof getDifficultyOverrides === 'function') ? getDifficultyOverrides() : {};
+      const qidKey = String(item.id || `q_${idx}`);
+      const savedStar = parseInt(diffOverrides[qidKey], 10);
+      const stars = (savedStar >= 1 && savedStar <= 5) ? savedStar : 0;
+      const realAssignments = Array.isArray(item.tag_assignments) ? item.tag_assignments : [];
+      const parsedTags = realAssignments
+        .filter(a => a && a.tag && a.tag.id)
+        .map(a => ({
+          id: a.tag.id,
+          name: a.tag.name,
+          kind: a.tag.kind,
+          color: a.tag.color || '',
+          source: a.source || '',
+          needsReview: !!a.needs_review,
+          useCount: 0,
+          isPinned: false
+        }));
+      const tagSuggestion = item.tag_suggestion || null;
+      const tagRevision = (typeof item.tag_revision === 'number') ? item.tag_revision : 0;
+      const originSource = item.origin || c.origin || c.source_filename || item.source_filename || '真题资料';
+      const sourcePageIdx = (Array.isArray(c.sources) && c.sources[0] && Number.isInteger(c.sources[0].page_idx))
+        ? c.sources[0].page_idx
+        : (item.page ? (item.page - 1) : 0);
+      return {
+        id: String(item.id || `q_${idx}`),
+        questionNumber: qNum,
+        chapter: c.section || '综合题库',
+        section: (c && c.section) || '',
+        questionType: LIBRARY_TYPE_NAMES[item.question_type] || '解答题',
+        questionTypeCode: item.question_type || 'free_response',
+        documentId: item.document_id || '',
+        sourcePage: sourcePageIdx + 1,
+        sourcePageIdx: sourcePageIdx,
+        paperPage: (item.page && item.page > 0) ? item.page : 0,
+        source: originSource,
+        year: 2024,
+        score: item.score || ((item.question_type === 'free_response') ? 12 : 5),
+        rawStem: rawStem,
+        rawOptions: rawOptions,
+        rawFigures: rawFigures,
+        rawAnswer: rawAnswer,
+        rawAnalysis: rawAnalysis,
+        aiAnswer: aiAnswerObj,
+        savedSolution: savedSolutionObj,
+        content: null,
+        regions: Array.isArray(c.sources) ? c.sources : (Array.isArray(item.regions) ? item.regions : []),
+        figures: rawFigures,
+        hasAnswer: Boolean(rawAnswer || (aiAnswerObj && aiAnswerObj.answer)),
+        hasAnalysis: Boolean(rawAnalysis || (aiAnswerObj && aiAnswerObj.analysis)),
+        difficulty: stars > 0 ? '★'.repeat(stars) : '',
+        difficultyStars: stars,
+        tags: parsedTags,
+        tagSuggestion: tagSuggestion,
+        tagRevision: tagRevision,
+        publicationId: String(item.id || ''),
+        aiSuggestedTags: buildPendingTagSuggestions(tagSuggestion, parsedTags),
+        onenote: item.onenote || (item.extras && item.extras.onenote) || null
+      };
+    }
+
+    /** CHUNK / 快览 / 编辑保存时再拼题干 HTML，避免整库一次性字符串拼接。 */
+    function ensureQuestionContentHtml(q) {
+      if (!q) return '';
+      if (typeof q.content === 'string' && q.content.length) return q.content;
+      const qNum = q.questionNumber || '';
+      const rawStem = q.rawStem || '';
+      const rawOptions = q.rawOptions || {};
+      const rawFigures = Array.isArray(q.rawFigures) ? q.rawFigures : (Array.isArray(q.figures) ? q.figures : []);
+      const optionFiguresMap = {};
+      const stemFigures = [];
+      rawFigures.forEach(f => {
+        const slot = ((f && f.slot) || '').trim().toUpperCase();
+        if (['A', 'B', 'C', 'D', 'E', 'F'].includes(slot)) optionFiguresMap[slot] = f;
+        else stemFigures.push(f);
+      });
+      let formattedStem = rawStem
+        .split('\n')
+        .filter(p => p.trim())
+        .map(p => `<p class="font-serif leading-relaxed mb-2 text-slate-800 text-sm sm:text-base">${escapeHtml(p)}</p>`)
+        .join('');
+      if (stemFigures.length > 0) {
+        formattedStem += stemFigures.map(f => {
+          const imgUrl = (f.url && f.url.startsWith('/') && API_BASE) ? (API_BASE + f.url) : (f.url || f.file || '');
+          if (!imgUrl) return '';
+          return `
+                  <div class="my-3 text-center">
+                    <img
+                      loading="lazy"
+                      src="${imgUrl}"
+                      alt="第 ${qNum} 题配图"
+                      class="max-h-56 max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs cursor-zoom-in hover:shadow-xs transition-shadow"
+                      onclick="event.stopPropagation(); previewImageModal('${imgUrl}', '第 ${qNum} 题 题干配图')"
+                      title="点击查看高分辨率原图"
+                    />
+                  </div>
+                `;
+        }).join('');
+      }
+      const optionsHtml = renderAdaptiveOptionsHtml(rawOptions, optionFiguresMap, qNum);
+      if (optionsHtml) formattedStem += optionsHtml;
+      q.content = formattedStem;
+      return formattedStem;
+    }
+
+    function questionSearchText(q) {
+      return `${q.rawStem || ''} ${q.chapter || ''}`.toLowerCase();
+    }
+
+    /** 顶部关键词：题干 / 出处 / 题名备注 / 本题已贴标签（含别名拼音）。 */
+    function questionMatchesKeyword(q, keyword) {
+      const kw = String(keyword || '').trim().toLowerCase();
+      if (!kw) return true;
+      if ((q.rawStem || '').toLowerCase().includes(kw)) return true;
+      if ((q.source || '').toLowerCase().includes(kw)) return true;
+      const ann = (typeof getQuestionAnnotation === 'function')
+        ? getQuestionAnnotation(q.id)
+        : { name: '', note: '', url: '' };
+      if ((ann.name || '').toLowerCase().includes(kw)) return true;
+      if ((ann.note || '').toLowerCase().includes(kw)) return true;
+      if ((ann.url || '').toLowerCase().includes(kw)) return true;
+
+      const catalogueById = new Map();
+      if (Array.isArray(tagCatalogue)) {
+        tagCatalogue.forEach(t => {
+          if (t && t.id) catalogueById.set(String(t.id), t);
+        });
+      }
+      for (const tag of (q.tags || [])) {
+        if (!tag) continue;
+        const name = String(tag.name || '').toLowerCase();
+        if (name && name.includes(kw)) return true;
+        const full = catalogueById.get(String(tag.id)) || tag;
+        if (typeof matchTagByQuery === 'function') {
+          if (matchTagByQuery(full, kw)) return true;
+        } else {
+          const keys = [full.name, ...(full.aliases || []), full.pinyin, full.initials]
+            .concat(Array.isArray(full.search_keys) ? full.search_keys : []);
+          if (keys.some(key => String(key || '').toLowerCase().includes(kw))) return true;
+        }
+      }
+      return false;
+    }
+
+    function scheduleLibraryUiRefresh() {
+      if (_libraryRefreshTimer) clearTimeout(_libraryRefreshTimer);
+      _libraryRefreshTimer = setTimeout(() => {
+        _libraryRefreshTimer = null;
+        updateSmartFolderCounts();
+        updateFavoritesBadge();
+        applyFilters();
+        renderInlineActiveChips();
+        syncFilterDropdownStates();
+        renderFolderTree();
+        const sentinel = document.getElementById('chunkSentinel');
+        if (sentinel && libraryLoadIncomplete) {
+          sentinel.innerText = `已显示 ${questionsData.length} / ${libraryExpectedTotal || '?'} 题，正在补拉其余…`;
+        }
+      }, 120);
+    }
+
+    function markLibrarySourceIds(rawItems) {
+      (rawItems || []).forEach(it => {
+        if (it && it.draft_id) loadedSourceQuestionIds.add(String(it.draft_id));
+      });
+    }
+
+    async function backfillAnswerJobsForQuestions(items) {
+      try {
+        const uuidIds = (items || [])
+          .map(x => x.id)
+          .filter(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
+        const JOBS_BATCH = 500;
+        const allJobs = [];
+        for (let i = 0; i < uuidIds.length; i += JOBS_BATCH) {
+          const chunk = uuidIds.slice(i, i + JOBS_BATCH);
+          const jobRes = await fetch(`${API_BASE}/api/library/jobs?ids=${chunk.join(',')}&solution_scope=true`, {
+            headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
+            cache: 'no-store'
+          });
+          if (!jobRes.ok) continue;
+          const jobBody = await jobRes.json();
+          (jobBody.jobs || []).forEach(j => allJobs.push(j));
+        }
+        const byPub = new Map();
+        allJobs.forEach(j => {
+          if (!j || !j.publication_id) return;
+          const list = byPub.get(j.publication_id) || [];
+          list.push(j);
+          byPub.set(j.publication_id, list);
+        });
+        (items || []).forEach(q => {
+          const list = byPub.get(q.id);
+          if (list && list.length) applyAnswerJobResult(q, list);
+        });
+      } catch (e) { /* 拿不到就算了，不影响主流程 */ }
+    }
+
+    async function pruneArchivedPaperQuestions() {
+      await refreshLibraryTrash();
+      const archivedPaperIds = new Set((libraryTrashCache.archivedPapers || []).map(p => p.id));
+      if (archivedPaperIds.size === 0) return;
+      for (let i = questionsData.length - 1; i >= 0; i--) {
+        if (archivedPaperIds.has(questionsData[i].documentId)) {
+          questionsData.splice(i, 1);
+        }
+      }
+    }
+
+    async function fetchRemainingLibraryPages(totalCount) {
+      const remainingOffsets = [];
+      for (let off = 100; off < totalCount; off += 100) remainingOffsets.push(off);
+      if (!remainingOffsets.length) {
+        libraryLoadIncomplete = false;
+        return;
+      }
+      try {
+        const pages = await Promise.all(
+          remainingOffsets.map(off =>
+            fetch(`${API_BASE}/api/library?${LIBRARY_LIST_QS}&offset=${off}`, {
+              headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
+            }).then(r => r.ok ? r.json() : { items: [] })
+          )
+        );
+        const seen = new Set(questionsData.map(q => q.id));
+        const batch = [];
+        pages.forEach(pData => {
+          const items = (pData && Array.isArray(pData.items)) ? pData.items : [];
+          markLibrarySourceIds(items);
+          items.forEach((item) => {
+            const mapped = mapLibraryApiItem(item, questionsData.length + batch.length);
+            if (seen.has(mapped.id)) return;
+            seen.add(mapped.id);
+            batch.push(mapped);
+          });
+        });
+        if (batch.length) {
+          questionsData.push(...batch);
+          scheduleLibraryUiRefresh();
+          backfillAnswerJobsForQuestions(batch);
+        }
+      } catch (pageErr) {
+        console.warn('Library pagination partial error:', pageErr);
+      } finally {
+        libraryLoadIncomplete = false;
+        updateSmartFolderCounts();
+        updateFavoritesBadge();
+        applyFilters();
+        renderInlineActiveChips();
+        syncFilterDropdownStates();
+        renderFolderTree();
+        const sentinel = document.getElementById('chunkSentinel');
+        if (sentinel && renderedQuestionCount >= filteredQuestions.length && filteredQuestions.length > 0) {
+          sentinel.innerText = `— 已呈现全部 ${filteredQuestions.length} 道试题 —`;
+        }
+      }
+    }
+
     async function loadRealData() {
       const sentinel = document.getElementById('chunkSentinel');
       if (sentinel) sentinel.innerText = '正在载入题库数据与入库项目...';
@@ -2059,12 +2337,11 @@
           fetch(`${API_BASE}/api/library/tags`, {
             headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
           }),
-          fetch(`${API_BASE}/api/library?limit=100&offset=0`, {
+          fetch(`${API_BASE}/api/library?${LIBRARY_LIST_QS}&offset=0`, {
             headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
           })
         ]);
 
-        // 1. 处理入库项目 (Papers)
         if (papersRes.ok) {
           const papersJson = await papersRes.json();
           if (papersJson && Array.isArray(papersJson.papers)) {
@@ -2075,9 +2352,7 @@
                 name: displayName,
                 filename: p.filename,
                 total: (p.counts && p.counts.total) || p.total || 0,
-                // published = 已入库（终审发布）题数：题库只显这部分，未入库仍在核验中
                 published: (p.counts && p.counts.published) || 0,
-                // material_type: exam（试卷/照片）| book（教材教辅）—— 教材版本树靠它分流
                 materialType: p.material_type || 'exam',
                 createdAt: new Date(p.created_at || Date.now()),
                 createdStr: (p.created_at || '').slice(0, 10),
@@ -2088,7 +2363,6 @@
           }
         }
 
-        // 2. 处理标签系统 (306 真实考点/方法标签)
         if (tagsRes.ok) {
           const tagsData = await tagsRes.json();
           if (tagsData && Array.isArray(tagsData.tags) && tagsData.tags.length > 0) {
@@ -2117,8 +2391,6 @@
               count: t.count || 0,
               direct_count: t.direct_count || 0,
               subtree_count: t.subtree_count || 0,
-              // 1.26.53：拼音搜索靠这三个字段。以前前端只读 tag.pinyin，
-              // 后端从来没写过 → 拼音匹配永远命中不了。
               pinyin: t.pinyin || '',
               initials: t.initials || '',
               search_keys: t.search_keys || [],
@@ -2138,234 +2410,48 @@
           }
         }
 
-        // 3. 处理全量试题数据 (并发分页抓取全部 810 题)
         if (libFirstRes.ok) {
           const firstData = await libFirstRes.json();
-          const allRawItems = [...(firstData.items || [])];
-          const totalCount = firstData.total || allRawItems.length;
+          const firstItems = firstData.items || [];
+          libraryExpectedTotal = firstData.total || firstItems.length;
+          libraryLoadIncomplete = libraryExpectedTotal > firstItems.length;
 
-          if (totalCount > 100) {
-            const remainingOffsets = [];
-            for (let off = 100; off < totalCount; off += 100) {
-              remainingOffsets.push(off);
-            }
-            try {
-              const remainingPages = await Promise.all(
-                remainingOffsets.map(off =>
-                  fetch(`${API_BASE}/api/library?limit=100&offset=${off}`, {
-                    headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
-                  }).then(r => r.ok ? r.json() : { items: [] })
-                )
-              );
-              remainingPages.forEach(pData => {
-                if (pData && Array.isArray(pData.items)) {
-                  allRawItems.push(...pData.items);
-                }
-              });
-            } catch (pageErr) {
-              console.warn('Library pagination partial error:', pageErr);
-            }
-          }
-
-          const typeNames = {
-            single_choice: '单选题',
-            multiple_choice: '多选题',
-            fill_blank: '填空题',
-            true_false: '判断题',
-            free_response: '解答题'
-          };
-
-          const realItems = allRawItems.map((item, idx) => {
-            const c = item.content || {};
-            const qNum = item.number || (idx + 1);
-            const rawStem = c.stem || c.question || '';
-            const rawOptions = (c.options && typeof c.options === 'object') ? c.options : {};
-            const rawFigures = Array.isArray(c.figures) ? c.figures : [];
-            const rawAnswer = String(c.answer || '').trim();
-            const rawAnalysis = String(c.analysis || '').trim();
-            const aiAnswerObj = item.ai_answer || (item.extras && item.extras.ai_answer) || null;
-            const savedSolutionObj = item.solution || null;
-
-            // 题干配图与选项配图分离 (slot: A, B, C, D)
-            const optionFiguresMap = {};
-            const stemFigures = [];
-            rawFigures.forEach(f => {
-              const slot = (f.slot || '').trim().toUpperCase();
-              if (['A', 'B', 'C', 'D', 'E', 'F'].includes(slot)) {
-                optionFiguresMap[slot] = f;
-              } else {
-                stemFigures.push(f);
-              }
-            });
-
-            // 构造题干 HTML
-            let formattedStem = rawStem
-              .split('\n')
-              .filter(p => p.trim())
-              .map(p => `<p class="font-serif leading-relaxed mb-2 text-slate-800 text-sm sm:text-base">${escapeHtml(p)}</p>`)
-              .join('');
-
-            // 追加题干配图
-            if (stemFigures.length > 0) {
-              const stemFigsHtml = stemFigures.map(f => {
-                const imgUrl = (f.url && f.url.startsWith('/') && API_BASE) ? (API_BASE + f.url) : (f.url || f.file || '');
-                if (!imgUrl) return '';
-                return `
-                  <div class="my-3 text-center">
-                    <img 
-                      src="${imgUrl}" 
-                      alt="第 ${qNum} 题配图" 
-                      class="max-h-56 max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs cursor-zoom-in hover:shadow-xs transition-shadow" 
-                      onclick="event.stopPropagation(); previewImageModal('${imgUrl}', '第 ${qNum} 题 题干配图')" 
-                      title="点击查看高分辨率原图" 
-                    />
-                  </div>
-                `;
-              }).join('');
-              formattedStem += stemFigsHtml;
-            }
-
-            // 渲染选项 (带自适应列数排版算法)
-            const optionsHtml = renderAdaptiveOptionsHtml(rawOptions, optionFiguresMap, qNum);
-            if (optionsHtml) {
-              formattedStem += optionsHtml;
-            }
-
-            // Eagle 风格评分：默认未评分（0 星），仅在用户手动打分（1~5 星）时展示与存储
-            const diffOverrides = (typeof getDifficultyOverrides === 'function') ? getDifficultyOverrides() : {};
-            const qidKey = String(item.id || `q_${idx}`);
-            const savedStar = parseInt(diffOverrides[qidKey], 10);
-            const stars = (savedStar >= 1 && savedStar <= 5) ? savedStar : 0;
-
-            // 标签处理：只认后端真实的 tag_assignments，不再用关键词瞎猜假标签
-            const realAssignments = Array.isArray(item.tag_assignments) ? item.tag_assignments : [];
-            const parsedTags = realAssignments
-              .filter(a => a && a.tag && a.tag.id)
-              .map(a => ({
-                id: a.tag.id,
-                name: a.tag.name,
-                kind: a.tag.kind,
-                color: a.tag.color || '',
-                source: a.source || '',
-                needsReview: !!a.needs_review,
-                useCount: 0,
-                isPinned: false
-              }));
-            const tagSuggestion = item.tag_suggestion || null;
-            const tagRevision = (typeof item.tag_revision === 'number') ? item.tag_revision : 0;
-
-            const originSource = item.origin || c.origin || c.source_filename || item.source_filename || '真题资料';
-            const sourcePageIdx = (Array.isArray(c.sources) && c.sources[0] && Number.isInteger(c.sources[0].page_idx))
-              ? c.sources[0].page_idx
-              : (item.page ? (item.page - 1) : 0);
-            const sourcePage = sourcePageIdx + 1;
-
-            return {
-              id: String(item.id || `q_${idx}`),
-              questionNumber: qNum,
-              chapter: c.section || '综合题库',
-              // section = OCR 出来的小节名（习题3.4 / 5.5.2 简单的三角恒等变换 / 第9节 比较法 · 例题1）
-              // 教材版本树的「章 → 小节」两层就是靠它聚合出来的
-              section: (c && c.section) || '',
-              questionType: typeNames[item.question_type] || '解答题',
-              questionTypeCode: item.question_type || 'free_response',
-              documentId: item.document_id || '',
-              sourcePage: sourcePage,
-              sourcePageIdx: sourcePageIdx,
-              paperPage: (item.page && item.page > 0) ? item.page : 0,   // 1 基原页码，用于教材分章
-              source: originSource,
-              year: 2024,
-              score: item.score || ((item.question_type === 'free_response') ? 12 : 5),
-              rawStem: rawStem,
-              rawOptions: rawOptions,
-              rawFigures: rawFigures,
-              rawAnswer: rawAnswer,
-              rawAnalysis: rawAnalysis,
-              aiAnswer: aiAnswerObj,
-              savedSolution: savedSolutionObj,
-              content: formattedStem,
-              regions: Array.isArray(c.sources) ? c.sources : (Array.isArray(item.regions) ? item.regions : []),
-              figures: rawFigures,
-              hasAnswer: Boolean(rawAnswer || (aiAnswerObj && aiAnswerObj.answer)),
-              hasAnalysis: Boolean(rawAnalysis || (aiAnswerObj && aiAnswerObj.analysis)),
-              difficulty: stars > 0 ? '★'.repeat(stars) : '',
-              difficultyStars: stars,
-              tags: parsedTags,
-              tagSuggestion: tagSuggestion,
-              tagRevision: tagRevision,
-              publicationId: String(item.id || ''),
-              aiSuggestedTags: buildPendingTagSuggestions(tagSuggestion, parsedTags),
-              onenote: item.onenote || (item.extras && item.extras.onenote) || null
-            };
-          });
-
-          // 记录已终审入库题的源题 id（用于补拉时去重）
-          allRawItems.forEach(it => {
-            if (it.draft_id) loadedSourceQuestionIds.add(String(it.draft_id));
-          });
-
-          // B2：题库只显示「已入库」（终审发布）的题。
-          // 未入库的 559 题（导引 509 / IMG 28 / 微信卷 22）仍在核验中，
-          // 由「核对题目」页承载，绝不混进题库工作台 —— 用户原话：
-          // 「入库 = 已经成为题库的一部分，没入库还在核验中」。
-
-
+          markLibrarySourceIds(firstItems);
+          const realItems = firstItems.map((item, idx) => mapLibraryApiItem(item, idx));
           questionsData.push(...realItems);
           currentActiveQuestionId = questionsData[0]?.id || null;
 
-          // 把后台跑完的答案任务结果（job.result）回填成 AI 初稿，
-          // 这样刷新页面也能看到「⚡ AI 解析」草稿，而不是一片空白。
-          try {
-            // 后端一次最多收 500 个 ids（views.py:3945），题库 810 题一次塞满
-            // 直接 400，整条「AI 初稿回填」就静废了 —— 必须分批发。
-            // 还要先滤掉非法 id：后端拿 uuid.UUID() 解析，一个坏 id 能让整批 400。
-            const uuidIds = questionsData
-              .map(x => x.id)
-              .filter(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
-            const JOBS_BATCH = 500;
-            const allJobs = [];
-            for (let i = 0; i < uuidIds.length; i += JOBS_BATCH) {
-              const chunk = uuidIds.slice(i, i + JOBS_BATCH);
-              const jobRes = await fetch(`${API_BASE}/api/library/jobs?ids=${chunk.join(',')}&solution_scope=true`, {
-                headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
-                cache: 'no-store'
-              });
-              if (!jobRes.ok) continue;
-              const jobBody = await jobRes.json();
-              (jobBody.jobs || []).forEach(j => allJobs.push(j));
-            }
-            const byPub = new Map();
-            allJobs.forEach(j => {
-              if (!j || !j.publication_id) return;
-              const list = byPub.get(j.publication_id) || [];
-              list.push(j);
-              byPub.set(j.publication_id, list);
-            });
-            questionsData.forEach(q => {
-              const list = byPub.get(q.id);
-              if (list && list.length) applyAnswerJobResult(q, list);
-            });
-          } catch (e) { /* 拿不到就算了，不影响主流程 */ }
-
           updateSmartFolderCounts();
           updateFavoritesBadge();
-          await refreshLibraryTrash();
-          const archivedPaperIds = new Set((libraryTrashCache.archivedPapers || []).map(p => p.id));
-          if (archivedPaperIds.size > 0) {
-            for (let i = questionsData.length - 1; i >= 0; i--) {
-              if (archivedPaperIds.has(questionsData[i].documentId)) {
-                questionsData.splice(i, 1);
-              }
-            }
-          }
           applyFilters();
           renderInlineActiveChips();
           syncFilterDropdownStates();
           renderRightInspector();
           renderFolderTree();
+          if (sentinel && libraryLoadIncomplete) {
+            sentinel.innerText = `已显示前 ${questionsData.length} 题，正在补拉其余…`;
+          }
+
+          const afterFirstPaint = async () => {
+            await pruneArchivedPaperQuestions();
+            applyFilters();
+            renderFolderTree();
+            backfillAnswerJobsForQuestions(questionsData.slice());
+            if (libraryLoadIncomplete) {
+              fetchRemainingLibraryPages(libraryExpectedTotal);
+            } else {
+              libraryLoadIncomplete = false;
+            }
+          };
+          if (typeof requestIdleCallback === 'function') {
+            requestIdleCallback(() => { afterFirstPaint(); }, { timeout: 800 });
+          } else {
+            setTimeout(() => { afterFirstPaint(); }, 0);
+          }
         }
       } catch (e) {
         console.warn('Real data loading fallback:', e);
+        libraryLoadIncomplete = false;
         if (sentinel) sentinel.innerText = '加载遇到网络波动，已切换为本地安全视图。';
       }
     }
@@ -2401,12 +2487,13 @@
               </div>
               ${imgUrl ? `
                 <div class="flex-1 flex items-center justify-center p-2 rounded bg-slate-50/70 border border-slate-100/80 min-h-[110px] overflow-hidden">
-                  <img 
-                    src="${imgUrl}" 
-                    alt="选项 ${escapeHtml(k)} 配图" 
-                    class="max-h-36 max-w-full object-contain cursor-zoom-in transition-transform duration-200 group-hover/opt:scale-105" 
-                    onclick="event.stopPropagation(); previewImageModal('${imgUrl}', '第 ${qNum} 题 选项 ${escapeHtml(k)} 配图')" 
-                    title="点击查看大图" 
+                  <img
+                    loading="lazy"
+                    src="${imgUrl}"
+                    alt="选项 ${escapeHtml(k)} 配图"
+                    class="max-h-36 max-w-full object-contain cursor-zoom-in transition-transform duration-200 group-hover/opt:scale-105"
+                    onclick="event.stopPropagation(); previewImageModal('${imgUrl}', '第 ${qNum} 题 选项 ${escapeHtml(k)} 配图')"
+                    title="点击查看大图"
                   />
                 </div>
               ` : ''}
@@ -4153,7 +4240,7 @@
       if (sfAllEl) sfAllEl.innerText = totalCount;
 
       const derivCount = questionsData.filter(q => {
-        const text = (q.content + ' ' + (q.chapter || '')).toLowerCase();
+        const text = questionSearchText(q);
         const hasDeriv = text.includes('导数') || text.includes('极值') || text.includes('单调');
         const isHard = q.difficultyStars >= 4 || (q.score && q.score >= 10);
         return hasDeriv && isHard;
@@ -4162,7 +4249,7 @@
       if (sfDerivEl) sfDerivEl.innerText = derivCount;
 
       const geoCount = questionsData.filter(q => {
-        const text = (q.content + ' ' + (q.chapter || '')).toLowerCase();
+        const text = questionSearchText(q);
         const isGeo = text.includes('几何') || text.includes('向量') || text.includes('垂直') || text.includes('平行');
         return isGeo && q.difficultyStars >= 4;
       }).length;
@@ -4290,12 +4377,12 @@
       } else if (s.smartFilter === 'ai_unverified') {
         if (!q.aiAnswer || q.rawAnalysis) return false;
       } else if (s.smartFilter === 'deriv') {
-        const text = ((q.content || '') + ' ' + (q.chapter || '')).toLowerCase();
+        const text = questionSearchText(q);
         const hasDeriv = text.includes('导数') || text.includes('极值') || text.includes('单调');
         const isHard = q.difficultyStars >= 4 || (q.score && q.score >= 10);
         if (!hasDeriv || !isHard) return false;
       } else if (s.smartFilter === 'hard_geo') {
-        const text = ((q.content || '') + ' ' + (q.chapter || '')).toLowerCase();
+        const text = questionSearchText(q);
         const isGeo = text.includes('几何') || text.includes('向量') || text.includes('垂直') || text.includes('平行');
         if (!isGeo || q.difficultyStars < 4) return false;
       } else if (s.smartFilter === 'need_tags') {
@@ -4307,16 +4394,7 @@
         // 随机模式保留全部符合其他筛选条件的试题并打乱顺序
       }
 
-      if (s.keyword) {
-        const kw = String(s.keyword).toLowerCase();
-        const matchC = (q.rawStem || '').toLowerCase().includes(kw);
-        const matchS = (q.source || '').toLowerCase().includes(kw);
-        const ann = (typeof getQuestionAnnotation === 'function') ? getQuestionAnnotation(q.id) : { name: '', note: '', url: '' };
-        const matchName = (ann.name || '').toLowerCase().includes(kw);
-        const matchNote = (ann.note || '').toLowerCase().includes(kw);
-        const matchUrl = (ann.url || '').toLowerCase().includes(kw);
-        if (!matchC && !matchS && !matchName && !matchNote && !matchUrl) return false;
-      }
+      if (s.keyword && !questionMatchesKeyword(q, s.keyword)) return false;
 
       if (s.chapter && q.chapter !== s.chapter) {
         return false;
@@ -4380,17 +4458,30 @@
         filteredQuestions.sort((a, b) => hashOf(String(a.id)) - hashOf(String(b.id)));
       } else if (filterState.sortBy === 'difficulty') {
         filteredQuestions.sort((a, b) => b.difficultyStars - a.difficultyStars);
-      } else if (filterState.sortBy === 'year') {
-        filteredQuestions.sort((a, b) => (b.year || 0) - (a.year || 0));
       } else {
+        if (filterState.sortBy === 'year') filterState.sortBy = 'number';
         filteredQuestions.sort((a, b) => a.questionNumber - b.questionNumber);
       }
 
-      document.getElementById('matchedQuestionCount').innerText = filteredQuestions.length;
+      const countEl = document.getElementById('matchedQuestionCount');
+      if (countEl) {
+        countEl.innerText = libraryLoadIncomplete
+          ? `${filteredQuestions.length}+`
+          : String(filteredQuestions.length);
+        countEl.title = libraryLoadIncomplete
+          ? `题库仍在加载（已到 ${questionsData.length}/${libraryExpectedTotal || '?'}），筛选结果可能不全`
+          : '';
+      }
+      updateEmptyFilterHint();
+      const saveSmartBtn = document.getElementById('btnSaveSmartView');
+      if (saveSmartBtn) saveSmartBtn.classList.toggle('hidden', filteredQuestions.length === 0);
 
       renderedQuestionCount = 0;
       const container = document.getElementById('questionListContainer');
-      container.innerHTML = '<div id="chunkSentinel" class="py-4 text-center text-xs text-slate-400">正在载入试题...</div>';
+      const loadingNote = libraryLoadIncomplete
+        ? `已显示 ${questionsData.length}/${libraryExpectedTotal || '?'} 题，正在补拉其余…`
+        : '正在载入试题...';
+      container.innerHTML = `<div id="chunkSentinel" class="py-4 text-center text-xs text-slate-400">${loadingNote}</div>`;
 
       renderNextQuestionChunk();
       renderInlineActiveChips();
@@ -4418,10 +4509,12 @@
           ` : `
             <div class="py-16 text-center text-slate-400">
               <p class="text-xs">无匹配试题</p>
+              ${libraryLoadIncomplete ? '<p class="text-[11px] text-amber-700 mt-1">题库仍在加载，结果可能不全</p>' : ''}
               <button onclick="resetAllFilters()" class="text-xs text-emerald-600 hover:underline mt-1 font-medium cursor-pointer">清空所有筛选条件</button>
             </div>
           `;
         }
+        syncPageSelectCheckbox();
         return;
       }
 
@@ -4449,6 +4542,7 @@
       triggerKaTeX(chunkFragment);
 
       renderedQuestionCount += nextChunk.length;
+      syncPageSelectCheckbox();
 
       if (sentinel) {
         if (renderedQuestionCount >= filteredQuestions.length) {
@@ -4532,7 +4626,7 @@
 
           <!-- 题干与选项正文 (KaTeX 排版优雅呈现) -->
           <div class="text-slate-800 text-sm leading-relaxed overflow-x-auto">
-            ${sanitizeMathHtml(q.content)}
+            ${sanitizeMathHtml(ensureQuestionContentHtml(q))}
           </div>
 
           <!-- 展开的解析区 (内联 0ms 秒开) -->
@@ -5471,7 +5565,8 @@
 
     function extractQuestionRegions(q, pageIdx) {
       if (!q) return [];
-      const content = q.content || {};
+      // q.content 在列表里可能是拼好的 HTML 字符串；原卷框只认 regions / rawFigures。
+      const content = (q.content && typeof q.content === 'object') ? q.content : {};
       const rawText = Array.isArray(q.regions) ? q.regions : (Array.isArray(content.sources) ? content.sources : []);
       const rawFigures = Array.isArray(q.figures) ? q.figures : (Array.isArray(q.rawFigures) ? q.rawFigures : (Array.isArray(content.figures) ? content.figures : []));
 
@@ -5875,7 +5970,7 @@
       }
 
       const contentContainer = document.getElementById('qlContentContainer');
-      contentContainer.innerHTML = sanitizeMathHtml(q.content);
+      contentContainer.innerHTML = sanitizeMathHtml(ensureQuestionContentHtml(q));
 
       const analysisContainer = document.getElementById('qlAnalysisContainer');
       analysisContainer.innerHTML = renderAnalysisContentHtml(q);
@@ -6965,13 +7060,41 @@
       renderRightInspector();
     }
 
-    function toggleSelectAll(checked) {
-      if (checked) filteredQuestions.forEach(q => selectedQuestionIds.add(q.id));
-      else selectedQuestionIds.clear();
+    function renderedQuestionSlice() {
+      return filteredQuestions.slice(0, renderedQuestionCount);
+    }
 
-      document.getElementById('selectedCountText').innerText = `已勾选 ${selectedQuestionIds.size} 题`;
+    function syncPageSelectCheckbox() {
+      const box = document.getElementById('selectAllCheckbox');
+      const page = renderedQuestionSlice();
+      if (box) box.checked = page.length > 0 && page.every(q => selectedQuestionIds.has(q.id));
+      const allBtn = document.getElementById('btnSelectAllFiltered');
+      if (allBtn) {
+        const more = filteredQuestions.length > renderedQuestionCount && filteredQuestions.length > 0;
+        allBtn.classList.toggle('hidden', !more);
+        allBtn.textContent = more ? `全选筛选结果 (${filteredQuestions.length})` : '全选筛选结果';
+      }
+      const countEl = document.getElementById('selectedCountText');
+      if (countEl) countEl.innerText = `已勾选 ${selectedQuestionIds.size} 题`;
+    }
+
+    function toggleSelectAll(checked) {
+      const page = renderedQuestionSlice();
+      page.forEach(q => {
+        if (checked) selectedQuestionIds.add(q.id);
+        else selectedQuestionIds.delete(q.id);
+      });
       const container = document.getElementById('questionListContainer');
-      container.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = checked);
+      container?.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = checked; });
+      syncPageSelectCheckbox();
+      updateBatchActionBar();
+      renderRightInspector();
+    }
+
+    function selectAllFilteredQuestions() {
+      filteredQuestions.forEach(q => selectedQuestionIds.add(q.id));
+      document.querySelectorAll('#questionListContainer input[type="checkbox"]').forEach(cb => { cb.checked = true; });
+      syncPageSelectCheckbox();
       updateBatchActionBar();
       renderRightInspector();
     }
@@ -8266,12 +8389,21 @@
       return false;
     }
 
+    /** 试卷/教材/分组/章小节只当挂载点，不占用自建文件夹层级配额。 */
+    function isFolderDepthSystemAnchor(id) {
+      const pid = String(id || '');
+      return pid === 'group:papers' || pid === 'group:books'
+        || pid.startsWith('paper:') || pid.startsWith('book:')
+        || pid.startsWith('bookchap:') || pid.startsWith('booksec:');
+    }
+
     /**
-     * 计算指定节点在文件夹树中的所在层级（0 表示顶层分段根，1..4 对应第 1..4 层）
-     * @param {string|null} parentId 父节点 ID 或前缀树节点 ID
+     * 计算自建文件夹深度（只数用户/智能文件夹层数，不含系统挂载点）。
+     * 根或系统节点为 0；挂在试卷下的第 1 个自建夹为 1，其子夹为 2…最多 MAX_FOLDER_DEPTH。
+     * @param {string|null} parentId 父节点 ID 或文件夹自身 ID
      * @param {Array} [list] 可选文件夹数组
      * @param {boolean} [isCustom=false] 是否为智能文件夹树
-     * @returns {number} 当前节点所在层数（0..4+）
+     * @returns {number} 自建层数（0..4+）
      */
     function getFolderParentDepth(parentId, list, isCustom = false) {
       if (!parentId || parentId === '__root__' || parentId === 'section:folders' || parentId === 'section:custom') {
@@ -8281,11 +8413,8 @@
       if (rawId.startsWith('userfolder:')) rawId = rawId.slice('userfolder:'.length);
       else if (rawId.startsWith('custom:')) rawId = rawId.slice('custom:'.length);
 
-      if (!isCustom) {
-        if (rawId === 'group:papers' || rawId === 'group:books') return 1;
-        if (rawId.startsWith('paper:') || rawId.startsWith('book:')) return 2;
-        if (rawId.startsWith('bookchap:')) return 3;
-        if (rawId.startsWith('booksec:')) return 4;
+      if (!isCustom && isFolderDepthSystemAnchor(rawId)) {
+        return 0;
       }
 
       const items = list || (isCustom ? readCustomSmartFolders() : readUserFolders());
@@ -8295,11 +8424,8 @@
       const visited = new Set();
       while (curId && !visited.has(curId)) {
         visited.add(curId);
-        if (!isCustom) {
-          if (curId === 'group:papers' || curId === 'group:books') return depth + 1;
-          if (curId.startsWith('paper:') || curId.startsWith('book:')) return depth + 2;
-          if (curId.startsWith('bookchap:')) return depth + 3;
-          if (curId.startsWith('booksec:')) return depth + 4;
+        if (!isCustom && isFolderDepthSystemAnchor(curId)) {
+          return depth;
         }
         const item = byId.get(curId);
         if (!item) break;
@@ -8338,12 +8464,13 @@
     }
 
     /**
-     * 判断新建或移动后的文件夹树深度是否仍在 MAX_FOLDER_DEPTH (4 层) 以内
+     * 判断新建或移动后的自建文件夹深度是否仍在 MAX_FOLDER_DEPTH (4 层) 以内。
+     * 试卷/教材等系统节点不计入 parentDepth。
      * @param {Array} list 文件夹数组
      * @param {string|null} folderId 待移动文件夹 ID；为 null 时按新建 1 个子夹计算
      * @param {string|null} targetParentId 目标父节点 ID
      * @param {boolean} [isCustom=false] 是否为智能文件夹
-     * @returns {boolean} 是否符合 4 层上限
+     * @returns {boolean} 是否符合 4 层自建上限
      */
     function canPlaceFolderUnderParent(list, folderId, targetParentId, isCustom = false) {
       const parentDepth = getFolderParentDepth(targetParentId, list, isCustom);
@@ -10645,6 +10772,12 @@
       const idleCls = 'px-2 py-0.5 rounded text-slate-500 hover:text-slate-800';
       if (andBtn) andBtn.className = filterState.tagLogic === 'and' ? activeCls : idleCls;
       if (orBtn) orBtn.className = filterState.tagLogic === 'or' ? activeCls : idleCls;
+      const hint = document.getElementById('dropTagLogicHint');
+      if (hint) {
+        hint.textContent = filterState.tagLogic === 'and'
+          ? '当前是「全含」：题目要同时带上勾选的每个标签。'
+          : '当前是「任一」：带上其中一个标签即可。';
+      }
       renderInlineActiveChips();
       applyFilters();
     }
@@ -10749,6 +10882,177 @@
       renderInlineActiveChips();
     }
 
+    function shortFilterLabel(text, max) {
+      const value = String(text || '').trim();
+      const limit = max || 22;
+      if (value.length <= limit) return value;
+      return value.slice(0, limit - 1) + '…';
+    }
+
+    function folderCoversPaperChip(folderNode) {
+      if (!folderNode || !filterState.paperId || folderTreeState.activeId === 'all') return false;
+      if ((folderNode.type === 'paper' || folderNode.type === 'book') && String(folderNode.paperId) === String(filterState.paperId)) return true;
+      const ids = filterState.folderPaperIds || [];
+      return ids.length === 1 && String(ids[0]) === String(filterState.paperId);
+    }
+
+    function cloneFilterState(state) {
+      return {
+        ...state,
+        selectedTagIds: (state.selectedTagIds || []).slice(),
+        excludedTagIds: (state.excludedTagIds || []).slice(),
+        questionTypes: (state.questionTypes || []).slice(),
+        difficultyStars: (state.difficultyStars || []).slice(),
+        folderPaperIds: (state.folderPaperIds || []).slice(),
+        folderTagIds: (state.folderTagIds || []).slice(),
+        folderSections: (state.folderSections || []).slice()
+      };
+    }
+
+    function clearActiveFolderScope() {
+      const folderNode = folderNodeRegistry.get(folderTreeState.activeId);
+      const covers = folderCoversPaperChip(folderNode);
+      folderTreeState.activeId = 'all';
+      filterState.folderType = 'all';
+      filterState.userFolderId = '';
+      filterState.folderPaperIds = [];
+      filterState.folderTagIds = [];
+      filterState.folderSections = [];
+      if (covers) {
+        filterState.paperId = '';
+        filterState.paperName = '';
+      }
+      renderFolderTree();
+      applyFilters();
+    }
+
+    function applyEmptyFilterRelief(kind, val) {
+      if (kind === 'keyword') {
+        filterState.keyword = '';
+        const input = document.getElementById('globalSearchInput');
+        if (input) input.value = '';
+        applyFilters();
+        return;
+      }
+      if (kind === 'folder') {
+        clearActiveFolderScope();
+        return;
+      }
+      if (kind === 'paper') {
+        filterByPaper('');
+        return;
+      }
+      if (kind === 'smart') {
+        applySmartFolder('all');
+        return;
+      }
+      if (kind === 'chapter') {
+        clearChapterFilter();
+        return;
+      }
+      removeFilterChip(kind, val);
+    }
+
+    function explainEmptyFilter() {
+      if (!filteredQuestions || filteredQuestions.length > 0) return null;
+      const folderNode = folderNodeRegistry.get(folderTreeState.activeId);
+      const showFolder = !!(folderNode && folderTreeState.activeId !== 'all' && folderNode.type !== 'smart');
+      const showPaper = !!filterState.paperId && !folderCoversPaperChip(folderNode);
+      const trials = [];
+      const add = (label, kind, val, mutate) => {
+        const spec = cloneFilterState(filterState);
+        mutate(spec);
+        const count = countQuestionsForFilterSpec(spec);
+        if (count > 0) trials.push({ label, kind, val, count });
+      };
+      if (filterState.keyword) {
+        add('搜索「' + filterState.keyword + '」', 'keyword', '', spec => { spec.keyword = ''; });
+      }
+      (filterState.difficultyStars || []).forEach(star => {
+        add('恰好' + star + '★', 'star', String(star), spec => {
+          spec.difficultyStars = spec.difficultyStars.filter(item => item !== star);
+        });
+      });
+      if (filterState.difficultyMinStar) {
+        const star = filterState.difficultyMinStar;
+        add(star + '★及以上', 'minstar', '', spec => { spec.difficultyMinStar = null; });
+      }
+      (filterState.questionTypes || []).forEach(code => {
+        const opt = FILTER_TYPE_OPTIONS.find(item => item.code === code);
+        add(opt ? opt.label : code, 'type', code, spec => {
+          spec.questionTypes = spec.questionTypes.filter(item => item !== code);
+        });
+      });
+      (filterState.selectedTagIds || []).forEach(id => {
+        add(filterTagName(id), 'tag', id, spec => {
+          spec.selectedTagIds = spec.selectedTagIds.filter(item => item !== id);
+        });
+      });
+      (filterState.excludedTagIds || []).forEach(id => {
+        add('排除' + filterTagName(id), 'excltag', id, spec => {
+          spec.excludedTagIds = spec.excludedTagIds.filter(item => item !== id);
+        });
+      });
+      if (filterState.hasAnswer) add('有答案', 'answer', '', spec => { spec.hasAnswer = false; });
+      if (filterState.hasAnalysis) add('有解析', 'analysis', '', spec => { spec.hasAnalysis = false; });
+      if (filterState.hasOneNote) add('OneNote有笔记', 'onenote', '', spec => { spec.hasOneNote = false; });
+      if (showPaper) add('项目', 'paper', '', spec => { spec.paperId = ''; spec.paperName = ''; });
+      if (showFolder) {
+        add('文件夹', 'folder', '', spec => {
+          spec.userFolderId = '';
+          spec.folderPaperIds = [];
+          spec.folderTagIds = [];
+          spec.folderSections = [];
+          if (folderCoversPaperChip(folderNode)) {
+            spec.paperId = '';
+            spec.paperName = '';
+          }
+        });
+      }
+      if (filterState.smartFilter) add('快捷筛选', 'smart', '', spec => { spec.smartFilter = ''; });
+      if (filterState.chapter) add('章节', 'chapter', '', spec => { spec.chapter = ''; });
+      if (!trials.length) {
+        const blocked = !!(
+          filterState.keyword || showPaper || showFolder || filterState.smartFilter || filterState.chapter ||
+          (filterState.questionTypes || []).length || (filterState.difficultyStars || []).length ||
+          filterState.difficultyMinStar || (filterState.selectedTagIds || []).length ||
+          (filterState.excludedTagIds || []).length || filterState.hasAnswer || filterState.hasAnalysis || filterState.hasOneNote
+        );
+        return blocked ? { blocked: true } : null;
+      }
+      trials.sort((a, b) => b.count - a.count);
+      return trials[0];
+    }
+
+    function updateEmptyFilterHint() {
+      const hint = document.getElementById('emptyFilterHint');
+      if (!hint) return;
+      if (libraryLoadIncomplete && filteredQuestions.length === 0) {
+        hint.classList.remove('hidden');
+        hint.textContent = '题库仍在加载，结果可能不全';
+        hint.title = `已加载 ${questionsData.length}/${libraryExpectedTotal || '?'} 题`;
+        hint.onclick = null;
+        return;
+      }
+      const found = explainEmptyFilter();
+      if (!found) {
+        hint.classList.add('hidden');
+        hint.textContent = '';
+        hint.onclick = null;
+        return;
+      }
+      hint.classList.remove('hidden');
+      hint.onclick = null;
+      if (found.blocked) {
+        hint.textContent = '这些条件没有单独拿掉就能出结果的一项';
+        hint.title = hint.textContent;
+        return;
+      }
+      hint.textContent = `去掉「${found.label}」后有 ${found.count} 题`;
+      hint.title = hint.textContent;
+      hint.onclick = () => applyEmptyFilterRelief(found.kind, found.val);
+    }
+
     function renderInlineActiveChips() {
       const container = document.getElementById('inlineActiveChipsContainer');
       const clearBtn = document.getElementById('btnClearAllFilters');
@@ -10763,6 +11067,7 @@
         filterState.hasAnswer ||
         filterState.hasAnalysis ||
         filterState.hasOneNote ||
+        Boolean(filterState.keyword) ||
         Boolean(filterState.chapter) ||
         Boolean(filterState.paperId) ||
         Boolean(filterState.smartFilter) ||
@@ -10783,21 +11088,34 @@
       clearBtn.classList.remove('hidden');
       let html = '';
 
-      if (filterState.paperId) {
+      const folderNode = folderNodeRegistry.get(folderTreeState.activeId);
+      const paperCoveredByFolder = folderCoversPaperChip(folderNode);
+      if (filterState.paperId && !paperCoveredByFolder) {
+        const paperFull = filterState.paperName || '指定试卷';
         html += `
-          <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-900 border border-emerald-200 text-xs">
-            <span>📁 项目: ${escapeHtml(filterState.paperName || '指定试卷')}</span>
+          <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-900 border border-emerald-200 text-xs" title="${escapeHtml(paperFull)}">
+            <span>项目: ${escapeHtml(shortFilterLabel(paperFull))}</span>
             <button onclick="filterByPaper('')" class="text-emerald-700 hover:text-emerald-950 font-bold ml-0.5 cursor-pointer">×</button>
           </span>
         `;
       }
 
-      const folderNode = folderNodeRegistry.get(folderTreeState.activeId);
-      if (folderNode && folderTreeState.activeId !== 'all') {
+      if (folderNode && folderTreeState.activeId !== 'all' && folderNode.type !== 'smart') {
+        const folderFull = folderNode.pathLabel || folderNode.label || '文件夹';
         html += `
-          <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-900 border border-indigo-200 text-xs">
-            <span>🗂 文件夹: ${escapeHtml(folderNode.pathLabel || folderNode.label)}</span>
-            <button onclick="applyFolderNode('all')" class="text-indigo-700 hover:text-indigo-950 font-bold ml-0.5 cursor-pointer">×</button>
+          <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-900 border border-indigo-200 text-xs" title="${escapeHtml(folderFull)}">
+            <span>文件夹: ${escapeHtml(shortFilterLabel(folderFull))}</span>
+            <button onclick="clearActiveFolderScope()" class="text-indigo-700 hover:text-indigo-950 font-bold ml-0.5 cursor-pointer">×</button>
+          </span>
+        `;
+      }
+
+      if (filterState.keyword) {
+        const keywordFull = '搜索「' + filterState.keyword + '」';
+        html += `
+          <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-50 text-slate-700 border border-slate-200 text-xs" title="${escapeHtml(keywordFull)}">
+            <span>${escapeHtml(shortFilterLabel(keywordFull, 28))}</span>
+            <button onclick="applyEmptyFilterRelief('keyword', '')" class="font-bold cursor-pointer opacity-60 hover:opacity-100">×</button>
           </span>
         `;
       }
@@ -10847,8 +11165,10 @@
         tagChips.push(renderFilterChip('tagx', '🏷 −' + escapeHtml(filterTagName(id)), "removeFilterChip('excltag', '" + id + "')"));
       });
       if (tagChips.length) {
-        const logicLabel = filterState.tagLogic === 'and' ? '全含' : '任一';
-        html += renderFilterGroupHead('🏷 标签·' + logicLabel, 'tag', 'bg-emerald-100 text-emerald-900 border-emerald-200');
+        if (tagChips.length > 1) {
+          const logicLabel = filterState.tagLogic === 'and' ? '全含' : '任一';
+          html += renderFilterGroupHead('标签·' + logicLabel, 'tag', 'bg-emerald-100 text-emerald-900 border-emerald-200');
+        }
         html += renderFilterGroupChips('tag', tagChips);
       }
 
@@ -10858,7 +11178,7 @@
         return renderFilterChip('type', '📑 ' + (opt ? opt.label : t), "removeFilterChip('type', '" + t + "')");
       });
       if (typeChips.length) {
-        html += renderFilterGroupHead('📑 题型', 'type', 'bg-sky-100 text-sky-900 border-sky-200');
+        if (typeChips.length > 1) html += renderFilterGroupHead('题型', 'type', 'bg-sky-100 text-sky-900 border-sky-200');
         html += renderFilterGroupChips('type', typeChips);
       }
 
@@ -10871,7 +11191,7 @@
         starChips.push(renderFilterChip('star', '⭐ ' + filterState.difficultyMinStar + '★及以上', "removeFilterChip('minstar', '')"));
       }
       if (starChips.length) {
-        html += renderFilterGroupHead('⭐ 评分', 'star', 'bg-amber-100 text-amber-900 border-amber-200');
+        if (starChips.length > 1) html += renderFilterGroupHead('评分', 'star', 'bg-amber-100 text-amber-900 border-amber-200');
         html += renderFilterGroupChips('star', starChips);
       }
 
@@ -10881,7 +11201,7 @@
       if (filterState.hasAnalysis) statusChips.push(renderFilterChip('status', '✓ 有解析', "removeFilterChip('analysis', '')"));
       if (filterState.hasOneNote) statusChips.push(renderFilterChip('status', '📝 OneNote有笔记', "removeFilterChip('onenote', '')"));
       if (statusChips.length) {
-        html += renderFilterGroupHead('✓ 完整度与笔记', 'status', 'bg-teal-100 text-teal-900 border-teal-200');
+        if (statusChips.length > 1) html += renderFilterGroupHead('完整度与笔记', 'status', 'bg-teal-100 text-teal-900 border-teal-200');
         html += renderFilterGroupChips('status', statusChips);
       }
 
@@ -10913,6 +11233,13 @@
           break;
         case 'onenote':
           filterState.hasOneNote = false;
+          break;
+        case 'keyword':
+          filterState.keyword = '';
+          {
+            const input = document.getElementById('globalSearchInput');
+            if (input) input.value = '';
+          }
           break;
         case 'group':
           if (val === 'tag') {
@@ -11058,11 +11385,21 @@
     function renderTagFilterDropdownList() {
       const container = document.getElementById('dropTagListContainer');
       if (!container) return;
-      container.innerHTML = tagGroupsData.map(g => `
+      // 搜索框的 oninput 一直在调这个函数，但以前这里不读输入框，
+      // 打「空间」列表照样把全部标签倒出来。分组对象只留了 id/name，
+      // 拼音和别名在目录上，所以命中要回目录查。
+      const searchEl = document.getElementById('dropTagSearchInput');
+      const query = searchEl ? String(searchEl.value || '') : '';
+      const catalogueById = new Map((tagCatalogue || []).map(t => [t.id, t]));
+      const sections = [];
+      tagGroupsData.forEach(g => {
+        const tags = (g.tags || []).filter(t => matchTagByQuery(catalogueById.get(t.id) || t, query));
+        if (!tags.length) return;
+        sections.push(`
         <div class="mb-2">
-          <div class="text-[10px] font-bold text-slate-400 mb-1">${g.name}</div>
+          <div class="text-[10px] font-bold text-slate-400 mb-1">${escapeHtml(g.name)}</div>
           <div class="flex flex-wrap gap-1">
-            ${g.tags.map(t => {
+            ${tags.map(t => {
               const picked = filterState.selectedTagIds.includes(t.id);
               const banned = filterState.excludedTagIds.includes(t.id);
               const cls = picked
@@ -11082,8 +11419,16 @@
               </button>`;
             }).join('')}
           </div>
-        </div>
-      `).join('');
+        </div>`);
+      });
+      if (!sections.length) {
+        const q = query.trim();
+        container.innerHTML = q
+          ? `<div class="py-6 text-center text-[11px] text-slate-400">没有匹配「${escapeHtml(q)}」的标签</div>`
+          : `<div class="py-6 text-center text-[11px] text-slate-400">还没有标签</div>`;
+        return;
+      }
+      container.innerHTML = sections.join('');
 
       triggerKaTeX(container);
     }
@@ -11110,9 +11455,11 @@
     }
 
     const FILTER_TYPE_OPTIONS = [
-      { code: 'solution', label: '解答题' },
+      { code: 'free_response', label: '解答题' },
       { code: 'single_choice', label: '单选题' },
-      { code: 'fill_in', label: '填空题' }
+      { code: 'multiple_choice', label: '多选题' },
+      { code: 'fill_blank', label: '填空题' },
+      { code: 'true_false', label: '判断题' }
     ];
 
     // 题型/难度浮层改成动态渲染：以前是静态 HTML，重新打开浮层勾选态全丢，
@@ -11685,7 +12032,7 @@
   </div>
 
   <!-- B5：答案解析编辑器本体（双栏实时预览 / 多题并排 / 原卷裁图 / AI 初稿对照） -->
-  <script src="/eagle-solution-editor.js?v=b5-20261115a"></script>
+  <script src="/eagle-solution-editor.js?v=b5-20261115b"></script>
   <!-- 禁用非输入区域的浏览器原生上下文菜单，保留文本框的复制粘贴功能 -->
   <script src="/browser-interactions.js" defer></script>
 </body>

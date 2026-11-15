@@ -457,7 +457,7 @@ window.__qbPdfStatus = {ready:false};
     return 0;
   };
   source.append(node('h2','print-title',input.title));
-  if(o.student_info && o.document!=='answers')source.append(node('p','print-info','姓名 ____________　班级 ____________　得分 ________'));
+  if(o.student_info && o.document!=='answers')source.append(node('p','print-info','姓名：____________    班级：____________    得分：____________'));
   let number=0;const numbered=[];
   const inline=o.document==='combined' && o.answer_layout==='inline';
   const solutionRow=(n,item,isInline)=>{

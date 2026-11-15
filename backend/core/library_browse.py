@@ -184,7 +184,7 @@ def facet_counts(params) -> dict:
     }
 
 
-def serialize_items(publications) -> list[dict]:
+def serialize_items(publications, *, list_view: bool = False) -> list[dict]:
     publications = list(publications)
     ids = [item.id for item in publications]
     waiting = library_jobs.pending_kinds(ids)
@@ -198,7 +198,8 @@ def serialize_items(publications) -> list[dict]:
         )
     # 1.26.47：标签关联、建议、退役标签名、上下级关系，整页一次查完。
     # 以前是一道题查一轮（一页 40 道题要查一百多次），页面得多等半秒。
-    items = library.publications_json(publications)
+    # list_view（Eagle view=eagle_list）：不展开解答、不扫配图磁盘。
+    items = library.publications_list_json(publications) if list_view else library.publications_json(publications)
     for item, data in zip(publications, items):
         data["jobs"] = waiting.get(str(item.id), [])
         data["job_errors"] = failed.get(str(item.id), {})
@@ -487,27 +488,30 @@ def library_list(request):
         ids = [str(pk) for pk in rows.values_list("id", flat=True)]
         return json_response({"total": len(ids), "ids": ids})
     total = rows.count()
-    items = serialize_items(rows[offset : offset + limit])
+    eagle_list = request.GET.get("view", "").strip() == "eagle_list"
+    items = serialize_items(rows[offset : offset + limit], list_view=eagle_list)
     next_offset = offset + len(items)
+    page_meta = {
+        "total": total,
+        "items": items,
+        "sort": sort,
+        "limit": limit,
+        "offset": offset,
+        "has_more": next_offset < total,
+        "next_offset": next_offset if next_offset < total else None,
+    }
     if wanted_param:
         # 只为刷新而读：不带全库统计、排队数量这些重活，前端也只合并这几行。
-        return json_response(
-            {
-                "total": total,
-                "items": items,
-                "sort": sort,
-                "limit": limit,
-                "offset": offset,
-                "has_more": next_offset < total,
-                "next_offset": next_offset if next_offset < total else None,
-            }
-        )
+        return json_response(page_meta)
+    # Eagle 精简列表、以及正式题库翻到第 2 页之后：只要 items。
+    # facets / presence / AI 状态跟第一页走一次即可，尾页再算一遍纯浪费。
+    if eagle_list or offset > 0:
+        return json_response(page_meta)
     ai_status = library_ai_settings.public_status()
     tag_work = tag_work_counts()
     return json_response(
         {
-            "total": total,
-            "items": items,
+            **page_meta,
             "facets": facet_counts(request.GET),
             "presence": dimension_presence(),
             "selected_tag_names": selected_tag_names(request.GET),
@@ -530,11 +534,6 @@ def library_list(request):
                     "verified_at",
                 )
             },
-            "sort": sort,
-            "limit": limit,
-            "offset": offset,
-            "has_more": next_offset < total,
-            "next_offset": next_offset if next_offset < total else None,
         }
     )
 

@@ -9,7 +9,6 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const W = require("./control-wording.js");
-const libraryHtml = fs.readFileSync(path.join(__dirname, "library.html"), "utf8");
 const indexHtml = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 
 // ── 一、话术表本身 ──────────────────────────────────────────
@@ -47,26 +46,9 @@ function buttonById(html, id) {
   return match[0];
 }
 
-const closeInspector = buttonById(libraryHtml, "closeInspector");
-assert.ok(libraryHtml.includes(`${closeInspector}${W.INSPECTOR.expanded.label}</button>`),
-  "面板里那颗按钮的字要跟话术表一样");
-assert.ok(closeInspector.includes(`title="${W.INSPECTOR.expanded.hint}"`),
-  "面板里那颗按钮的悬停说明要跟话术表一样");
-
-for (const [id, key] of [["sourceQuestion", "question"], ["sourceWholePage", "wholePage"], ["sourceFit", "fit"]]) {
-  const tag = buttonById(libraryHtml, id);
-  assert.ok(tag.includes(`title="${W.SOURCE[key].hint}"`), `${id} 的悬停说明要跟话术表一样`);
-}
-
 // ── 三、脚本引入顺序 ────────────────────────────────────────
-assert.match(libraryHtml, /<script src="\/control-wording\.js" defer><\/script>/,
-  "题库页要引话术文件");
 assert.match(indexHtml, /<script src="\/control-wording\.js" defer><\/script>/,
   "核对页要引话术文件");
-assert.match(libraryHtml, /<script src="\/control-wording\.js" defer><\/script>\s*<script src="\/library-answer-editor\.js"/,
-  "话术文件必须排在用它的人前面（defer 按书写顺序执行）");
-assert.match(libraryHtml, /<script src="\/control-wording\.js" defer><\/script>[\s\S]*?<script src="\/library\.js"/,
-  "话术文件必须排在题库主脚本前面");
 assert.match(indexHtml, /<script src="\/control-wording\.js" defer><\/script>[\s\S]*?<script src="\/app\.js"/,
   "话术文件必须排在核对页主脚本前面");
 

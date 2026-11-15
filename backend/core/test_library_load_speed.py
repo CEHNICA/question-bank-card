@@ -288,3 +288,81 @@ class LibraryListResponseTests(TestCase):
         payload = json.loads(body)
         self.assertEqual(payload["items"][0]["content"]["answer"], "30°", "内容没变")
         self.assertEqual(payload["tag_work"]["missing_answer"], 0, "有答案的题不算缺答案")
+
+
+class EagleListViewTests(TestCase):
+    """Eagle view=eagle_list：轻量题卡，不带解答正文，也不带 facets。"""
+
+    def setUp(self):
+        self.client = Client()
+        self.paper = Paper.objects.create(filename="必修第一册.pdf", kind="pdf", sha256="g" * 64)
+        self.publication = PublishedQuestion.objects.create(
+            paper=self.paper,
+            source_filename="必修第一册.pdf",
+            number=1,
+            question_type="fill_blank",
+            version=1,
+            status=PublishedQuestion.Status.PUBLISHED,
+            review_source="human",
+            content={
+                "stem": "求 $\\sin 30^\\circ$ 的值。",
+                "options": {},
+                "answer": "30°",
+                "figures": [{"file": "figure-1.png", "bbox": [0, 0, 10, 10], "page_idx": 0}],
+            },
+            content_hash="h" * 64,
+            search_text="",
+            extras={
+                "solution_id": "not-a-real-solution",
+                "ai_answer": {"answer": "30°", "analysis": "特殊角"},
+                "onenote": {"page_id": "abc", "url": "onenote:https://example"},
+            },
+            tags_text="",
+        )
+
+    def test_eagle_list_skips_solution_body_and_facets(self):
+        response = self.client.get("/api/library", {"view": "eagle_list", "limit": 40, "offset": 0})
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(len(body["items"]), 1)
+        item = body["items"][0]
+        self.assertIsNone(item.get("solution"), "列表不展开解答正文")
+        self.assertEqual(item["content"]["stem"], "求 $\\sin 30^\\circ$ 的值。")
+        self.assertEqual(
+            item["content"]["figures"][0]["url"],
+            f"/api/library/{self.publication.id}/figures/figure-1.png",
+        )
+        self.assertNotIn("facets", body)
+        self.assertNotIn("presence", body)
+        self.assertNotIn("tag_work", body)
+        self.assertNotIn("ai", body)
+        self.assertEqual(item["onenote"]["page_id"], "abc")
+        self.assertEqual(item["ai_answer"]["answer"], "30°")
+
+    def test_list_json_helper_does_not_scan_missing_figures(self):
+        row = library.publication_list_json(self.publication)
+        self.assertIsNone(row["solution"])
+        self.assertNotIn("missing", row["content"]["figures"][0])
+
+    def test_offset_page_without_eagle_also_skips_facets(self):
+        for number in range(2, 42):
+            PublishedQuestion.objects.create(
+                paper=self.paper,
+                source_filename="必修第一册.pdf",
+                number=number,
+                question_type="fill_blank",
+                version=1,
+                status=PublishedQuestion.Status.PUBLISHED,
+                review_source="human",
+                content={"stem": f"第 {number} 题", "options": {}, "answer": "甲"},
+                content_hash=("i" + str(number)).ljust(64, "0")[:64],
+                search_text="",
+                extras={},
+                tags_text="",
+            )
+        first = self.client.get("/api/library", {"limit": 40, "offset": 0}).json()
+        self.assertIn("facets", first)
+        second = self.client.get("/api/library", {"limit": 40, "offset": 40}).json()
+        self.assertNotIn("facets", second)
+        self.assertEqual(len(second["items"]), 1)

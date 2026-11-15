@@ -848,20 +848,8 @@ from .system_views import (  # noqa: F401
     index_page,
     katex_asset,
     library_ai_script,
-    library_answer_editor_script,
-    library_diff_script,
-    library_page,
-    library_question_editor_script,
-    library_question_viewer_script,
-    library_reading_styles,
-    library_script,
     library_solutions_script,
     library_styles,
-    library_tag_manager_script,
-    library_tag_manager_styles,
-    library_tag_map_script,
-    library_tag_map_styles,
-    library_toc_script,
     library_transfer_script,
     library_workspace_script,
     render_script,
@@ -3759,6 +3747,120 @@ def library_withdraw_batch(request):
             library.withdraw(publication)
             withdrawn.append(value)
     return JsonResponse({"withdrawn": withdrawn, "withdrawn_count": len(withdrawn), "skipped": skipped})
+
+
+def library_trash_list(request):
+    """查询正式题库统一回收站内容（已归档移入的试卷与已下架的正式题）。"""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    try:
+        limit = min(500, max(1, int(request.GET.get("limit", "200"))))
+    except ValueError:
+        return _error("limit 必须是正整数")
+    archived_qs = Paper.objects.filter(archived=True).order_by("-updated_at", "-id")
+    withdrawn_qs = (
+        PublishedQuestion.objects.filter(status=PublishedQuestion.Status.WITHDRAWN)
+        .select_related("paper")
+        .order_by("-withdrawn_at", "-id")
+    )
+    archived_papers = [
+        {**paper_json(paper, with_counts=True), "updated_at": paper.updated_at.isoformat()}
+        for paper in archived_qs[:limit]
+    ]
+    withdrawn_items = library.publications_json(list(withdrawn_qs[:limit]))
+    return JsonResponse(
+        {
+            "archived_papers": archived_papers,
+            "withdrawn_questions": withdrawn_items,
+            "counts": {
+                "papers": archived_qs.count(),
+                "questions": withdrawn_qs.count(),
+            },
+        }
+    )
+
+
+def _run_library_trash_batch(request, empty_msg: str, action_fn):
+    """统一执行回收站批量还原或彻底清理事务，逐条汇报成功与跳过原因。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    from . import library_browse
+
+    try:
+        ids = library_browse.normalize_ids((_body(request) or {}).get("ids"))
+    except library_browse.BrowseError as error:
+        return _error(str(error))
+    if not ids:
+        return _error(empty_msg)
+    found = {str(pk): pk for pk in PublishedQuestion.objects.filter(pk__in=ids).values_list("pk", flat=True)}
+    succeeded, skipped = [], []
+    with transaction.atomic():
+        for value in ids:
+            if value not in found:
+                skipped.append({"id": value, "reason": "回收站中已找不到这条记录"})
+                continue
+            publication = PublishedQuestion.objects.select_related("paper").get(pk=found[value])
+            try:
+                action_fn(publication)
+                succeeded.append(value)
+            except library.LibraryTrashError as error:
+                skipped.append({"id": value, "reason": str(error)})
+    return succeeded, skipped
+
+
+@csrf_exempt
+def library_restore(request, publication_id):
+    """将回收站中的单道已下架试题还原到正式题库。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    publication = get_object_or_404(PublishedQuestion, pk=publication_id)
+    try:
+        library.restore(publication)
+    except library.LibraryTrashError as error:
+        return _error(str(error), error.status)
+    return JsonResponse({"publication": library.publication_json(publication)})
+
+
+@csrf_exempt
+def library_restore_batch(request):
+    """批量还原回收站中选中的已下架试题。"""
+    result = _run_library_trash_batch(request, "请先选择要还原的试题", library.restore)
+    if not isinstance(result, tuple):
+        return result
+    restored, skipped = result
+    return JsonResponse({"restored": restored, "restored_count": len(restored), "skipped": skipped})
+
+
+@csrf_exempt
+def library_purge(request, publication_id):
+    """彻底删除回收站中已下架的单道正式题快照。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    publication = get_object_or_404(PublishedQuestion, pk=publication_id)
+    try:
+        purged_id = library.purge_withdrawn(publication)
+    except library.LibraryTrashError as error:
+        return _error(str(error), error.status)
+    return JsonResponse({"purged": purged_id})
+
+
+@csrf_exempt
+def library_purge_batch(request):
+    """批量彻底删除回收站中选中的已下架试题快照。"""
+    result = _run_library_trash_batch(request, "请先选择要彻底删除的试题", library.purge_withdrawn)
+    if not isinstance(result, tuple):
+        return result
+    purged, skipped = result
+    return JsonResponse({"purged": purged, "purged_count": len(purged), "skipped": skipped})
 
 
 # ---------------------------------------------------------------- 功能开关与题库任务

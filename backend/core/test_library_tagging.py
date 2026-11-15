@@ -1342,6 +1342,61 @@ class FormalLibraryTaggingTests(TestCase):
         self.assertFalse(LibraryTagAssignment.objects.filter(publication=publication, tag=rejected_tag).exists())
         self.assertEqual(publication.extras["tags"], [accepted_tag.name])
 
+    def test_manual_assign_keeps_pending_suggestion_actionable_for_remaining_items(self):
+        publication = self.publication()
+        first_tag = self.tag("先采纳的知识点", "knowledge")
+        second_tag = self.tag("中途手贴的知识点", "knowledge")
+        third_tag = self.tag("最后采纳的知识点", "knowledge")
+        proposals = [
+            {
+                "kind": "knowledge",
+                "tag_id": str(tag.pk),
+                "name": tag.name,
+                "rationale": "合成题面测试理由。",
+                "evidence": "合成题面测试依据。",
+                "scope": {"whole": True},
+            }
+            for tag in (first_tag, second_tag, third_tag)
+        ]
+        suggestion = self.suggestion(publication, proposals)
+        endpoint = "/api/library/tag-suggestions/%s/resolve" % suggestion.pk
+
+        res1 = self.post_json(
+            endpoint,
+            {
+                "action": "accept",
+                "indices": [0],
+                "expected_revision": publication.tag_revision,
+                "request_id": str(uuid.uuid4()),
+            },
+        )
+        self.assertEqual(res1.status_code, 200, res1.content)
+        publication.refresh_from_db()
+
+        manual = self.tag_request(publication, add=[second_tag])
+        self.assertEqual(manual.status_code, 200, manual.content)
+        publication.refresh_from_db()
+        suggestion.refresh_from_db()
+        self.assertEqual(suggestion.status, LibraryTagSuggestion.Status.PENDING)
+        self.assertEqual(suggestion.assignment_revision, publication.tag_revision)
+        self.assertEqual(suggestion.suggestions[1].get("decision"), "accepted")
+
+        res3 = self.post_json(
+            endpoint,
+            {
+                "action": "accept",
+                "indices": [2],
+                "expected_revision": publication.tag_revision,
+                "request_id": str(uuid.uuid4()),
+            },
+        )
+        self.assertEqual(res3.status_code, 200, res3.content)
+        publication.refresh_from_db()
+        suggestion.refresh_from_db()
+        self.assertEqual(suggestion.status, LibraryTagSuggestion.Status.ACCEPTED)
+        self.assertEqual([entry.get("decision") for entry in suggestion.suggestions], ["accepted", "accepted", "accepted"])
+        self.assertEqual(set(publication.extras["tags"]), {first_tag.name, second_tag.name, third_tag.name})
+
     def test_legacy_ai_candidate_can_be_edited_and_accepted_without_formalizing_early(self):
         publication = self.publication()
         suggestion = self.suggestion(

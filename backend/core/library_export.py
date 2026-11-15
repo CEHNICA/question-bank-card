@@ -109,8 +109,10 @@ MATHML_ELEMENTS = {
     "mlabeledtr",
     "maction",
 }
-LINE_SPACING = 1.35
-PARAGRAPH_GAP_PT = 3
+# NOTE: Word/WPS 中 12pt 中文字体的行高与浏览器 CSS line-height: 1.35 及段落间距对齐，
+# 结合题干空行与配图间距校准，使逐页容量与 A4 预览保持同步。
+LINE_SPACING = 1.25
+PARAGRAPH_GAP_PT = 2.5
 QUESTION_GAP_PT = 8
 # 有效排版、但 Word 的公式模型表达不了的公式。不再让一条这样的公式废掉整卷：
 # 交上去让本机浏览器渲染成图片，警告里点名第几题哪个位置。
@@ -966,14 +968,14 @@ def _recheck(captured, options, use_ai):
                 _fail(item["where"], "导出期间解析图片发生变化，请重新打开组卷", 409)
 
 
-def _font(run, size, bold=False):
+def _font(run, size, bold=False, east_asia="宋体"):
     from docx.oxml.ns import qn
     from docx.shared import Pt
 
     run.font.name = "Cambria"
     run.font.size = Pt(size)
     run.bold = bold
-    run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "宋体")
+    run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), east_asia)
     return run
 
 
@@ -1413,16 +1415,24 @@ def _write_field(document, blocks, size, prefix="", where="", lead_segments=None
     from docx.shared import Pt
 
     paragraph = None
+    last_paragraph = None
     if prefix:
         paragraph = document.add_paragraph()
-        _font(paragraph.add_run(prefix), size)
+        _font(paragraph.add_run(prefix), size, bool(re.fullmatch(r"\d+\.\s*", prefix)))
+        paragraph.paragraph_format.space_after = Pt(PARAGRAPH_GAP_PT)
+        paragraph.paragraph_format.line_spacing = LINE_SPACING
+        last_paragraph = paragraph
     if lead_segments:
         paragraph = paragraph or document.add_paragraph()
         _write_segments(paragraph, lead_segments, size)
+        paragraph.paragraph_format.space_after = Pt(PARAGRAPH_GAP_PT)
+        paragraph.paragraph_format.line_spacing = LINE_SPACING
+        last_paragraph = paragraph
     for block in blocks:
         if block["type"] == "table":
             _write_table(document, block["rows"], size, where)
             paragraph = None
+            last_paragraph = None
         else:
             display_group = None
             for segment in block["segments"]:
@@ -1434,8 +1444,8 @@ def _write_field(document, blocks, size, prefix="", where="", lead_segments=None
                 # Source newlines become real Word paragraphs so compact mode
                 # can break between subquestions, rather than keeping a huge
                 # paragraph with many manual line breaks on one page. Empty
-                # source lines use the normal paragraph gap, not extra full-
-                # height empty paragraphs; inline spaces still remain intact.
+                # source lines add vertical spacing to the preceding paragraph
+                # rather than inserting empty paragraphs; inline spaces remain intact.
                 parts = re.split(r"\r\n|[\r\n]", segment["raw"]) if segment["type"] == "text" else [None]
                 for index, part in enumerate(parts):
                     if part is None or (part and (paragraph is not None or part.strip())):
@@ -1445,6 +1455,17 @@ def _write_field(document, blocks, size, prefix="", where="", lead_segments=None
                         _write_segments(paragraph, [{**segment, "raw": part} if part is not None else segment], size)
                         paragraph.paragraph_format.space_after = Pt(PARAGRAPH_GAP_PT)
                         paragraph.paragraph_format.line_spacing = LINE_SPACING
+                        last_paragraph = paragraph
+                    elif 0 < index < len(parts) - 1 and not part.strip() and paragraph is None and last_paragraph is not None:
+                        # 对齐前端 qb-render.js tidyText() L570：小问序号前的空行在预览中折叠为单换行，
+                        # 仅其余段落分隔空行保留完整空行垂直高度（且不生成空段落）。
+                        next_non_empty = next((p.strip() for p in parts[index + 1 :] if p and p.strip()), "")
+                        current_after = last_paragraph.paragraph_format.space_after
+                        base_pt = current_after.pt if current_after is not None else PARAGRAPH_GAP_PT
+                        if re.match(r"^[（(]\d{1,2}[)）]|^[①②③④⑤⑥⑦⑧⑨⑩]", next_non_empty):
+                            last_paragraph.paragraph_format.space_after = Pt(PARAGRAPH_GAP_PT + 1.5)
+                        else:
+                            last_paragraph.paragraph_format.space_after = Pt(base_pt + size * 0.85)
                     if index < len(parts) - 1:
                         paragraph = None
                 display_group = group
@@ -1594,7 +1615,7 @@ def _figure_row_lines(images, text_width_mm=PREVIEW_TEXT_WIDTH_MM, settings=None
 
 
 def _write_images(document, item, slot, lines=None, settings=None):
-    from docx.shared import Mm
+    from docx.shared import Mm, Pt
 
     pictures = [image for image in item["images"] if image["slot"] == slot]
     if not pictures:
@@ -1629,6 +1650,9 @@ def _write_images(document, item, slot, lines=None, settings=None):
                 align, WD_ALIGN_PARAGRAPH.CENTER
             )
         paragraph.add_run().add_picture(io.BytesIO(image["bytes"]), width=Mm(paper), height=Mm(height * paper / width))
+        paragraph.paragraph_format.space_before = Pt(3)
+        paragraph.paragraph_format.space_after = Pt(3)
+        paragraph.paragraph_format.line_spacing = 1.0
         paragraph.paragraph_format.keep_together = True
 
 
@@ -1971,7 +1995,7 @@ def _option_columns(item, options, *, text_width_mm=178):
 def _write_compact_options(document, item, size, columns, *, text_width_mm=178):
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
-    from docx.shared import Mm
+    from docx.shared import Mm, Pt
 
     letters = [
         key
@@ -1995,6 +2019,7 @@ def _write_compact_options(document, item, size, columns, *, text_width_mm=178):
         blocks = item["fields"].get(f"options.{letter}", [])
         _write_segments(paragraph, blocks[0]["segments"] if blocks else [], size)
         paragraph.paragraph_format.line_spacing = LINE_SPACING
+        paragraph.paragraph_format.space_after = Pt(0)
         _write_images(cell, item, letter)
     for row in table.rows:
         row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
@@ -2086,6 +2111,8 @@ def _paragraph_measure(paragraph, size, width_mm=178):
         return max(int(node.get("cy", "0")) / 36_000 for node in drawings) + gap
     text = "".join(node.text or "" for node in paragraph.findall(".//" + qn("w:t")))
     metrics = [_math_extent(node) for node in paragraph.findall(".//" + qn("m:oMath"))]
+    if not text and not metrics:
+        return gap
     width = (_text_em(text) + sum(metric[0] for metric in metrics)) * size * 25.4 / 72
     height = max(LINE_SPACING, max((metric[1] for metric in metrics), default=1.0)) * size * 25.4 / 72
     return max(1, math.ceil(width / width_mm)) * height + gap
@@ -2154,8 +2181,28 @@ def _pagination(document, start, mode, size):
         formula_width = sum(_math_extent(node)[0] for node in element.findall(".//" + qn("m:oMath")))
         width_mm = (_text_em(plain) + formula_width) * size * 25.4 / 72
         short_caption = bool(plain and len(plain) <= 40 and width_mm <= 178)
-        if lead_only or (short_caption and next_visual):
+        figure_prompt = bool(plain and "如图" in plain and width_mm <= 178 * 3.5)
+        is_picture_paragraph = bool(element.findall(".//" + qn("w:drawing")))
+        next_is_table = next_element.tag == qn("w:tbl")
+        if lead_only or ((short_caption or figure_prompt) and next_visual) or (is_picture_paragraph and next_is_table):
             element.get_or_add_pPr().find(qn("w:keepNext")).set(qn("w:val"), "1")
+    first_fig_idx = next((idx for idx, el in enumerate(elements) if el.findall(".//" + qn("w:drawing"))), None)
+    if first_fig_idx:
+        first_plain = "".join(node.text or "" for node in elements[0].findall(".//" + qn("w:t"))).strip()
+        if "如图" in first_plain and all(el.tag == qn("w:p") for el in elements[:first_fig_idx]):
+            prefix_width_mm = sum(
+                (
+                    _text_em("".join(node.text or "" for node in el.findall(".//" + qn("w:t"))).strip())
+                    + sum(_math_extent(node)[0] for node in el.findall(".//" + qn("m:oMath")))
+                )
+                * size
+                * 25.4
+                / 72
+                for el in elements[:first_fig_idx]
+            )
+            if prefix_width_mm <= 178 * 6:
+                for el in elements[:first_fig_idx]:
+                    el.get_or_add_pPr().find(qn("w:keepNext")).set(qn("w:val"), "1")
 
 
 def _question_gap(document):
@@ -2172,6 +2219,7 @@ def _question_gap(document):
             style = document.styles.add_style("QB Question Gap", WD_STYLE_TYPE.PARAGRAPH)
             style.font.size = Pt(1)
             style.paragraph_format.line_spacing = Pt(1)
+            style.paragraph_format.space_before = Pt(0)
             style.paragraph_format.space_after = Pt(QUESTION_GAP_PT)
         document.add_paragraph(style="QB Question Gap")
     else:
@@ -2220,7 +2268,8 @@ def _document(captured, title, options, mode):
     heading = document.add_paragraph()
     heading.alignment = 1
     heading.paragraph_format.keep_with_next = True
-    _font(heading.add_run(title + (" · 答案解析" if mode == "answers" else "")), size + 6, True)
+    heading.paragraph_format.space_after = Pt(2)
+    _font(heading.add_run(title + (" · 答案解析" if mode == "answers" else "")), size + 4, True)
     if options["student_info"] and mode != "answers":
         from docx.enum.text import WD_ALIGN_PARAGRAPH
 
@@ -2230,14 +2279,17 @@ def _document(captured, title, options, mode):
         # 导出来却贴着左页边 —— 整张卷子上只有这一行对不上，一眼就能看出来。
         info.alignment = WD_ALIGN_PARAGRAPH.CENTER
         info.paragraph_format.keep_with_next = True
-        _font(info.add_run("姓名：____________    班级：____________    得分：____________"), size)
+        info.paragraph_format.space_after = Pt(8)
+        _font(info.add_run("姓名：____________    班级：____________    得分：____________"), size - 1.5)
     numbered, number = [], 0
     for index, (name, group) in enumerate(_ordered(captured)):
         section_title = None
         if mode != "answers":
             section_title = document.add_paragraph()
             section_title.paragraph_format.keep_with_next = True
-            _font(section_title.add_run(_section_heading(group, index, name)), size + 1, True)
+            section_title.paragraph_format.space_before = Pt(4)
+            section_title.paragraph_format.space_after = Pt(3)
+            _font(section_title.add_run(_section_heading(group, index, name)), size + 1, True, east_asia="SimHei")
         for item in group:
             number += 1
             numbered.append((number, item))
@@ -2299,7 +2351,13 @@ def _document(captured, title, options, mode):
             # 每道题都能有留白；解答题有 8 毫米下限。口径与预览、PDF 一致。
             millimetres = _answer_space_millimetres(answer_space, item["type"])
             if millimetres > 0 and not inline_answers:
-                paragraph = document.add_paragraph()
+                if "QB Answer Space" not in document.styles:
+                    from docx.enum.style import WD_STYLE_TYPE
+
+                    style = document.styles.add_style("QB Answer Space", WD_STYLE_TYPE.PARAGRAPH)
+                    style.font.size = Pt(1)
+                    style.paragraph_format.line_spacing = Pt(1)
+                paragraph = document.add_paragraph(style="QB Answer Space")
                 paragraph.paragraph_format.space_after = Mm(millimetres)
             _question_gap(document)
             _pagination(document, unit_start, options["pagination"], size)

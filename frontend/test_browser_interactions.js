@@ -16,7 +16,7 @@ console.log("Application context menus: reading area hidden, editable menu and n
 // 两套并排，老师会不知道该点哪一个。这条断言就是为了防止下回又有人加回来。
 const source = fs.readFileSync(path.join(__dirname,"browser-interactions.js"),"utf8");
 assert.ok(!source.includes("/api/window/"), "the page no longer asks the launcher to move the window");
-for (const file of ["index.html","library.html","eagle/index.html"]) {
+for (const file of ["index.html","eagle/index.html"]) {
   const page = fs.readFileSync(path.join(__dirname,file),"utf8");
   assert.ok(page.includes('src="/browser-interactions.js"'), `${file} loads browser-interactions.js to suppress default browser context menu`);
   assert.ok(!page.includes("windowControls"), `${file} has no self-drawn window buttons`);

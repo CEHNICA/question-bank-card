@@ -21,13 +21,39 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.http.ConditionalGetMiddleware",
 ]
+def _resolve_default_database() -> Path:
+    explicit = os.environ.get("QB_DATABASE")
+    if explicit:
+        return Path(explicit).resolve()
+    testdb = BASE_DIR.parent.parent / "_testdb" / "db.sqlite3"
+    if testdb.is_file():
+        return testdb.resolve()
+    local_app_db = Path.home() / "AppData" / "Local" / "QuestionBankCard" / "db.sqlite3"
+    if local_app_db.is_file():
+        return local_app_db.resolve()
+    return (BASE_DIR / "db.sqlite3").resolve()
+
+
+def _resolve_default_data_root() -> Path:
+    explicit = os.environ.get("QB_DATA_ROOT")
+    if explicit:
+        return Path(explicit).resolve()
+    testdata = BASE_DIR.parent.parent / "_testdb" / "data"
+    if testdata.is_dir():
+        return testdata.resolve()
+    local_app_data = Path.home() / "AppData" / "Local" / "QuestionBankCard" / "data"
+    if local_app_data.is_dir():
+        return local_app_data.resolve()
+    return (BASE_DIR / "data").resolve()
+
+
 ROOT_URLCONF = "qb_server.urls"
 TEMPLATES = []
 WSGI_APPLICATION = "qb_server.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": Path(os.environ.get("QB_DATABASE", BASE_DIR / "db.sqlite3")),
+        "NAME": _resolve_default_database(),
         # Keep the normal application-wide transaction mode.  MinerU heartbeats
         # have a shorter, local busy timeout because dropping a progress tick is
         # preferable to blocking the worker's wait/cancel loop for 30 seconds.
@@ -37,7 +63,7 @@ DATABASES = {
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 TIME_ZONE = "Asia/Shanghai"
 USE_TZ = True
-DATA_ROOT = Path(os.environ.get("QB_DATA_ROOT", BASE_DIR / "data")).resolve()
+DATA_ROOT = _resolve_default_data_root()
 # 测试一律用临时数据目录：默认的 backend/data 是老师真正的卷子文件夹，
 # 测试往那儿写会攒下大量没人认领的目录（实测一轮全量测试攒了 300 MB）。
 TEST_RUNNER = "qb_server.test_runner.IsolatedDataRootRunner"

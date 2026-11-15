@@ -8,7 +8,6 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const W = require("./control-wording.js");
-const libraryJs = fs.readFileSync(path.join(__dirname, "library.js"), "utf8");
 const appJs = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 
 // ── 一套够用的假 DOM ────────────────────────────────────────
@@ -84,97 +83,6 @@ function sliceBetween(source, startMarker, endMarker) {
   const end = source.indexOf(endMarker, start);
   assert.notEqual(end, -1, `源文件里找不到终点：${endMarker}`);
   return source.slice(start, end + endMarker.length);
-}
-
-// ── 一、顶栏那颗开关：开着、收着、灰着，说法都要变 ──────────
-{
-  const code = sliceBetween(libraryJs, "  function markInspectorToggle(", "\n\n");
-  const toggle = { attrs: {}, title: "", textContent: "", setAttribute(n, v) { this.attrs[n] = String(v); }, getAttribute(n) { return this.attrs[n]; } };
-  const sandbox = { ui: { inspectorToggle: toggle }, W };
-  vm.runInNewContext(code, sandbox);
-
-  sandbox.markInspectorToggle(true);
-  assert.equal(toggle.textContent, W.INSPECTOR.expanded.label, "面板开着时，按钮要写「收起详情」");
-  assert.equal(toggle.title, W.INSPECTOR.expanded.hint, "面板开着时，悬停说明要说清怎么再打开");
-  assert.equal(toggle.getAttribute("aria-label"), W.INSPECTOR.expanded.label);
-  assert.equal(toggle.getAttribute("aria-expanded"), "true");
-
-  sandbox.markInspectorToggle(false);
-  assert.equal(toggle.textContent, W.INSPECTOR.collapsed.label, "面板收着时，按钮要写「展开详情」");
-  assert.equal(toggle.title, W.INSPECTOR.collapsed.hint);
-  assert.equal(toggle.getAttribute("aria-expanded"), "false");
-
-  sandbox.markInspectorToggle(true, { disabled: true });
-  assert.equal(toggle.textContent, W.INSPECTOR.disabled.label,
-    "灰掉时「为什么灰、下一步去哪」要写在按钮上 —— 禁用时悬停气泡根本不弹");
-  assert.match(toggle.title, /先在左边点一道题/);
-  assert.equal(toggle.getAttribute("aria-expanded"), "false", "灰着的开关不算开着");
-}
-
-// ── 二、面板里那颗「收起详情」 ──────────────────────────────
-{
-  const code = sliceBetween(libraryJs,
-    '  const closeInspectorButton = $("closeInspector");',
-    "    closeInspectorButton.title = W.INSPECTOR.expanded.hint;\n  }");
-  const button = new El("button");
-  const sandbox = { $: (id) => (id === "closeInspector" ? button : null), W };
-  vm.runInNewContext(code, sandbox);
-  assert.equal(button.textContent, W.INSPECTOR.expanded.label, "面板里那颗按钮的字要跟话术表一样");
-  assert.equal(button.title, W.INSPECTOR.expanded.hint, "面板里那颗按钮的悬停说明要跟话术表一样");
-}
-
-// ── 三、教材目录面板那颗「收起目录」 ──────────────────────────
-{
-  const code = sliceBetween(libraryJs,
-    '    const close = node("button", "button button-small button-quiet", W.DIRECTORY.label);',
-    "    close.title = W.DIRECTORY.hint;");
-  const sandbox = {
-    W,
-    node: (tag, className, text) => { const element = new El(tag); element.className = className; if (text !== undefined) element.textContent = text; return element; },
-  };
-  vm.runInNewContext(`${code}\nglobalThis.__out = close;`, sandbox);
-  assert.equal(sandbox.__out.textContent, W.DIRECTORY.label, "教材目录那颗按钮的字要跟话术表一样");
-  assert.equal(sandbox.__out.title, W.DIRECTORY.hint, "教材目录那颗按钮要说清再从哪儿打开");
-}
-
-// ── 四、题卡上的「更多」：说明按菜单里实际有的项生成 ────────
-function runLibraryMenu(jobButtons) {
-  const helpers = ["node", "icon", "iconButton"].map((name) => sliceFunction(libraryJs, name)).join("\n");
-  const block = sliceBetween(libraryJs,
-    '    const more = node("details", "library-card-more");',
-    "    moreSummary.title = W.menuSummaryTitle(Array.from(menu.querySelectorAll(\"button, a\")).map((entry) => entry.textContent.trim()));");
-  const sandbox = {
-    document, W,
-    item: { id: "q-1", document_id: "doc-1" },
-    state: { basket: [] },
-    jobButtons,
-    draftLink: () => "/?document=doc-1",
-    // 事件回调里才用到，跑构造过程碰不到；列出来是为了别在报错时看不懂。
-    selectInspectorQuestion() {}, openSource() {}, openQuestionViewer() {},
-    openAnswerEditor() {}, openQuestionEditor() {}, withdrawItem() {},
-    saveBasket() {}, render() {}, toast() {},
-    copyQuestionImage() {},
-  };
-  vm.runInNewContext(`${helpers}\n${block}\nglobalThis.__out = { moreSummary, menu };`, sandbox);
-  return sandbox.__out;
-}
-
-{
-  const { moreSummary, menu } = runLibraryMenu(() => []);
-  const labels = menu.querySelectorAll("button, a").map((entry) => entry.textContent);
-  assert.deepEqual(labels, ["修改题目", "编辑答案解析", "回到题卡", "复制题目图片", "撤回"],
-    "题卡菜单里实际就是这几项");
-  assert.equal(moreSummary.title, W.menuSummaryTitle(labels),
-    "「更多」的悬停说明要跟菜单里实际有的项对得上");
-  assert.match(moreSummary.title, /修改题目/);
-  assert.doesNotMatch(moreSummary.title, /生成标签建议/, "菜单里没有的项不许出现在说明里");
-}
-
-{
-  const extra = new El("button");
-  extra.textContent = "AI 生成标签建议";
-  const { moreSummary } = runLibraryMenu(() => [extra]);
-  assert.match(moreSummary.title, /AI 生成标签建议/, "菜单里多出来的项也要写进说明");
 }
 
 // ── 五、核对页题卡上的「更多」 ──────────────────────────────

@@ -414,11 +414,11 @@ def section_label(section) -> str:
 
 def _search_text(content: dict, extras: dict | None = None) -> str:
     parts = [
-        content["stem"],
-        *content["options"].values(),
-        content["answer"],
-        content["analysis"],
-        content["source_filename"],
+        content.get("stem", ""),
+        *(content.get("options") or {}).values(),
+        content.get("answer", ""),
+        content.get("analysis", ""),
+        content.get("source_filename", ""),
         (content.get("source_group") or {}).get("title", ""),
         section_label(content.get("section")),
         str(content.get("origin") or ""),
@@ -791,12 +791,57 @@ def publication_state(question: Question) -> dict | None:
     }
 
 
+class LibraryTrashError(ValueError):
+    """正式题库回收站还原与清理校验异常。"""
+
+    def __init__(self, message: str, status: int = 409) -> None:
+        super().__init__(message)
+        self.status = status
+
+
 def withdraw(publication: PublishedQuestion) -> PublishedQuestion:
     if publication.status == PublishedQuestion.Status.PUBLISHED:
         publication.status = PublishedQuestion.Status.WITHDRAWN
         publication.withdrawn_at = timezone.now()
         publication.save(update_fields=["status", "withdrawn_at"])
     return publication
+
+
+def restore(publication: PublishedQuestion) -> PublishedQuestion:
+    """将回收站中已下架的正式题重新上架为在库状态。"""
+    if publication.status == PublishedQuestion.Status.PUBLISHED:
+        return publication
+    if publication.status != PublishedQuestion.Status.WITHDRAWN:
+        raise LibraryTrashError("该记录已被新版替代，无法从回收站还原", status=409)
+    if publication.question_id is not None:
+        has_live = (
+            PublishedQuestion.objects.filter(
+                question_id=publication.question_id,
+                status=PublishedQuestion.Status.PUBLISHED,
+            )
+            .exclude(pk=publication.pk)
+            .exists()
+        )
+        if has_live:
+            raise LibraryTrashError("该题已有更新的在库版本，不能同时启用两个版本", status=409)
+    publication.status = PublishedQuestion.Status.PUBLISHED
+    publication.withdrawn_at = None
+    publication.save(update_fields=["status", "withdrawn_at"])
+    return publication
+
+
+def purge_withdrawn(publication: PublishedQuestion) -> str:
+    """彻底删除回收站中已下架的正式题快照并清理本地配图文件。"""
+    if publication.status != PublishedQuestion.Status.WITHDRAWN:
+        raise LibraryTrashError("请先将试题下架移入回收站，再执行彻底删除", status=409)
+    pub_id = str(publication.pk)
+    library_root = (settings.DATA_ROOT / "library").resolve()
+    folder = (library_root / pub_id).resolve()
+    with transaction.atomic():
+        publication.delete()
+    if folder.parent == library_root and folder.exists():
+        shutil.rmtree(folder, ignore_errors=True)
+    return pub_id
 
 
 def _content_with_figure_state(publication: PublishedQuestion) -> dict:
@@ -877,6 +922,65 @@ def publications_json(publications) -> list[dict]:
 
     publications = list(publications)
     rows = [publication_json(item, include_tag_details=False) for item in publications]
+    return library_tagging.attach_batch_to_publications(publications, rows)
+
+
+def publication_list_json(publication: PublishedQuestion) -> dict:
+    """列表/Eagle 用的轻量题卡：不展开解答、不扫配图磁盘。
+
+    详情、编辑、对照仍走 publication_json。列表只要题干、选项、配图 URL、
+    标签和 OneNote 摘要；solution 正文留给点开再说。
+    """
+    content = dict(publication.content or {})
+    figures = content.get("figures") or []
+    if figures:
+        fixed = []
+        for index, figure in enumerate(figures):
+            if not isinstance(figure, dict):
+                fixed.append(figure)
+                continue
+            fig = dict(figure)
+            name = fig.get("file") or f"figure-{index + 1}.png"
+            if not fig.get("url"):
+                fig["url"] = f"/api/library/{publication.id}/figures/{name}"
+            fixed.append(fig)
+        content["figures"] = fixed
+    return {
+        "id": str(publication.id),
+        "draft_id": publication.question_id,
+        "document_id": str(publication.paper_id) if publication.paper_id else None,
+        "source_filename": publication.source_filename,
+        "number": publication.number,
+        "question_type": publication.question_type,
+        "version": publication.version,
+        "status": publication.status,
+        "review": {"source": publication.review_source or "human", "agent": publication.review_agent},
+        "published_at": publication.published_at.isoformat(),
+        "withdrawn_at": publication.withdrawn_at.isoformat() if publication.withdrawn_at else None,
+        "content": content,
+        "page": first_page(content.get("sources")),
+        "origin": str(content.get("origin") or ""),
+        "has_answer": bool(str(content.get("answer") or "").strip()),
+        "subquestions": qtypes.subquestion_count(content.get("stem")),
+        "tags": tags_of(publication.extras),
+        "ai_answer": (publication.extras or {}).get("ai_answer") if isinstance(publication.extras, dict) else None,
+        "onenote": (publication.extras or {}).get("onenote") if isinstance(publication.extras, dict) else None,
+        "solution": None,
+        "solution_needs_review": bool((publication.extras or {}).get("solution_needs_review_id")),
+        "previous_solution_id": (publication.extras or {}).get("solution_needs_review_id"),
+        "solution_error": "",
+        "tag_revision": publication.tag_revision,
+        "tag_assignments": [],
+        "tag_suggestion": None,
+    }
+
+
+def publications_list_json(publications) -> list[dict]:
+    """列表页批量序列化：轻量题卡 + 整页一次贴标签。"""
+    from . import library_tagging
+
+    publications = list(publications)
+    rows = [publication_list_json(item) for item in publications]
     return library_tagging.attach_batch_to_publications(publications, rows)
 
 

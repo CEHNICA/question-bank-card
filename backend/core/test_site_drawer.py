@@ -20,10 +20,10 @@ class SiteDrawerRouteTests(SimpleTestCase):
         self.assertIn(b"drawer-open", body)
         self.assertEqual(self.client.post("/site-drawer.js").status_code, 405)
 
-    def test_both_pages_load_the_drawer(self):
-        for page in ("index.html", "library.html"):
-            html = (FRONTEND / page).read_text(encoding="utf-8")
-            self.assertIn('<script src="/site-drawer.js" defer></script>', html, f"{page} 少加载了抽屉脚本")
+    def test_the_pages_load_the_drawer(self):
+        # Eagle 工作台有自己的左上角 ≡ 菜单，不走这个抽屉。
+        html = (FRONTEND / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<script src="/site-drawer.js" defer></script>', html, "index.html 少加载了抽屉脚本")
 
     def test_index_navigation_is_marked_for_the_drawer(self):
         html = (FRONTEND / "index.html").read_text(encoding="utf-8")

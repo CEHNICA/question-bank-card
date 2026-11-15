@@ -6,6 +6,7 @@ idna==3.20
 lxml==6.1.1
 mathml2omml==0.0.2
 Pillow==12.3.0
+pypinyin==0.55.0
 PyMuPDF==1.28.2
 pywin32==312; platform_system == "Windows"
 python-docx==1.2.0

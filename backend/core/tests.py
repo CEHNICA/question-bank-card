@@ -2532,14 +2532,15 @@ class FrontendCacheTests(TestCase):
     """
 
     def test_pages_are_rechecked_and_carry_an_asset_version(self):
-        for path in ("/", "/library"):
+        for path in ("/", "/eagle"):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 200, path)
-            self.assertEqual(response["Cache-Control"], "no-cache", path)
-            self.assertIn("?v=", response.content.decode("utf-8"), path)
+            self.assertTrue(response["Cache-Control"].startswith("no-cache"), path)
+        # _page() 生成的页面带 ?v= 指纹：改了静态资源能立刻生效，不用清缓存。
+        self.assertIn("?v=", self.client.get("/").content.decode("utf-8"))
 
     def test_static_assets_are_cached_by_the_browser(self):
-        for path in ("/library.js", "/library-answer-editor.js", "/library.css"):
+        for path in ("/library-solutions.js", "/library.css", "/app.js"):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 200, path)
             self.assertEqual(response["Cache-Control"], "public, max-age=604800", path)
@@ -2555,9 +2556,9 @@ class FrontendCacheTests(TestCase):
         self.assertIn(f"?v={version}", body)
 
     def test_matching_etag_gets_a_304(self):
-        response = self.client.get("/library.js")
+        response = self.client.get("/library-solutions.js")
         etag = response["ETag"]
-        again = self.client.get("/library.js", headers={"if-none-match": etag})
+        again = self.client.get("/library-solutions.js", headers={"if-none-match": etag})
         self.assertEqual(again.status_code, 304)
 
     def test_large_json_responses_are_compressed(self):

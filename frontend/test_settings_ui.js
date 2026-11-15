@@ -5,7 +5,6 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
-const libraryHtml = fs.readFileSync(path.join(__dirname, "library.html"), "utf8");
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
 const layout = fs.readFileSync(path.join(__dirname, "original-paper-layout.js"), "utf8");
@@ -34,12 +33,10 @@ for (const area of ["settingsGeneral", "settingsDisplay", "settingsTransfer", "s
   assert.ok(leads.includes(area), `每个区都有一句引导：${area}`);
 }
 
-// 两个页面和安装版设置使用同一公开品牌，不再露出旧工程名。
-for (const page of [html, libraryHtml]) {
-  assert.match(page, /<strong>题有据<\/strong>/);
-  assert.match(page, /class="brand-mark"[^>]*src="\/favicon\.png"/);
-  assert.doesNotMatch(page, /题库题卡版/);
-}
+// 设置页和安装版设置使用同一公开品牌，不再露出旧工程名。
+assert.match(html, /<strong>题有据<\/strong>/);
+assert.match(html, /class="brand-mark"[^>]*src="\/favicon\.png"/);
+assert.doesNotMatch(html, /题库题卡版/);
 assert.match(html, /id="aboutVersion"/);
 // 1.25.29：只报版本号。原来还缀着「（本机安装）」，在浏览器里跑源码时这句话是假的。
 assert.match(js, /题有据 \$\{s\.app_version\}`/);
@@ -48,8 +45,6 @@ assert.doesNotMatch(js, /（本机安装）/);
 // 两页进入一个常规设置页；API 配置只有一个外层分区和入口。
 // 1.25.29：菜单项前面加了图标，所以「>设置</a>」中间允许有 svg。
 assert.match(html, /id="settingsButton" href="\/settings">[\s\S]*?设置<\/a>/);
-assert.match(libraryHtml, /href="\/settings">[\s\S]*?设置<\/a>/);
-assert.doesNotMatch(libraryHtml, /data-library-ai-settings/);
 for (const id of ["settingsGeneral", "settingsDisplay", "settingsReview", "settingsAbout"]) {
   assert.match(html, new RegExp(`data-settings-tab="${id}"`));
   assert.match(html, new RegExp(`id="${id}" class="settings-page" role="tabpanel"`));
@@ -224,7 +219,7 @@ assert.doesNotMatch(js, /重启桌面程序后生效|重新打开题库后生效
 // 设置直接显示在页面中，键盘焦点落在标题，正常链接经保存保护返回。
 assert.doesNotMatch(js, /\$\("settingsDialog"\)\.showModal\(\)/);
 assert.match(js, /\$\("settingsTitle"\)\.focus\(\{ preventScroll: true \}\)/);
-assert.match(html, /id="settingsReturn"[^>]*href="\/library"/);
+assert.match(html, /id="settingsReturn"[^>]*href="\/eagle"/);
 assert.match(js, /async function prepareSettingsLeave\(\)/);
 assert.match(js, /await modelSaving/);
 assert.match(js, /hasUnsavedChanges\?\.\(\)/);

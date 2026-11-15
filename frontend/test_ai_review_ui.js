@@ -9,8 +9,6 @@ const vm = require("node:vm");
 
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
-const lib = fs.readFileSync(path.join(__dirname, "library.js"), "utf8");
-const libHtml = fs.readFileSync(path.join(__dirname, "library.html"), "utf8");
 
 const review = { state: { cropDraftAttention: new Map() } };
 vm.runInNewContext(js.slice(js.indexOf("  function approvalNeedsReview(q)"), js.indexOf("  function anyDialogOpen()")), review);
@@ -40,15 +38,6 @@ assert.match(js, /\{ key: "ai", label: "AI 通过", optional: true \}/);
 assert.match(js, /if \(filter\.optional && !c\[filter\.key\] && !active\) return;/);
 assert.match(js, /if \(state\.filter === "ai"\) return isAiApproved\(q\);/);
 
-// The library marks AI-reviewed questions and can show only people-checked ones.
-assert.match(lib, /node\("span", "library-review ai", `\$\{item\.review\.agent \|\| "AI"\} 审核`\)/);
-assert.match(lib, /\[\["", "全部", ai \+ human\], \["human", "人工核对", human\], \["ai", "AI 审核", ai\]\]/);
-const libraryFilters = { state: {}, URLSearchParams };
-vm.runInNewContext(lib.slice(lib.indexOf("  function libraryQuery("), lib.indexOf("  function markLibraryResult(")), libraryFilters);
-for (const value of ["human", "ai"]) {
-  assert.equal(libraryFilters.libraryQuery({ review: value }).get("review"), value);
-}
-assert.equal(libraryFilters.libraryQuery({ review: "" }).has("review"), false);
-assert.match(libHtml, /id="reviewFilters" class="draft-filters" role="group" aria-label="谁审核的" hidden/);
+// 旧「正式题库」页的「谁审核的」筛选已随该页下线；题库工作台不搬审核流。
 
 console.log("AI review UI checks: OK");

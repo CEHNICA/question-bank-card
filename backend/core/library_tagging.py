@@ -21,6 +21,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from . import library
+from . import tag_pinyin
 from .json_response import json_response
 from .models import (
     LibraryJob,
@@ -261,6 +262,11 @@ def tag_json(tag: LibraryTag, *, count=None, context=None) -> dict:
         "active": tag.active,
         "favorite": tag.favorite,
         "system_key": tag.system_key,
+        # 1.26.53：前端两处按拼音搜标签（工作台快速打标框、筛选栏标签搜索）。
+        # 这两个字段以前只在前端被读、从来没人写过，读到的永远是空串。
+        "pinyin": tag_pinyin.full_pinyin(tag.name),
+        "initials": tag_pinyin.initials(tag.name),
+        "search_keys": tag_pinyin.search_keys(tag.name, tag.aliases or []),
     }
     context = relation_context() if context is None else context
     neighbors = context.get(str(tag.pk), {})
@@ -535,6 +541,41 @@ def _sync_projection(publication_id):
     )
 
 
+def _sync_pending_suggestions_after_tag_change(publication, new_revision: int, added_tag_ids=()):
+    """Keep active pending AI tag suggestions aligned when tags are edited manually."""
+    added = {str(tag_id) for tag_id in (added_tag_ids or ()) if tag_id}
+    pending_rows = LibraryTagSuggestion.objects.select_for_update().filter(
+        publication=publication, status=LibraryTagSuggestion.Status.PENDING
+    )
+    for suggestion in pending_rows:
+        entries = copy.deepcopy(suggestion.suggestions or [])
+        update_fields = ["assignment_revision", "updated_at"]
+        changed_entries = False
+        if added and entries:
+            for entry in entries:
+                if not isinstance(entry, dict) or entry.get("decision"):
+                    continue
+                tag_id = str(entry.get("tag_id") or "")
+                if tag_id and tag_id in added:
+                    entry["decision"] = "accepted"
+                    entry["accepted_tag_id"] = tag_id
+                    changed_entries = True
+        suggestion.assignment_revision = new_revision
+        if changed_entries:
+            suggestion.suggestions = entries
+            update_fields.append("suggestions")
+            remaining = [entry for entry in entries if not (isinstance(entry, dict) and entry.get("decision"))]
+            if not remaining:
+                suggestion.status = (
+                    LibraryTagSuggestion.Status.ACCEPTED
+                    if any(isinstance(entry, dict) and entry.get("decision") == "accepted" for entry in entries)
+                    else LibraryTagSuggestion.Status.REJECTED
+                )
+                suggestion.resolved_at = timezone.now()
+                update_fields.extend(["status", "resolved_at"])
+        suggestion.save(update_fields=update_fields)
+
+
 def _reindex_tag_name(tag):
     publication_ids = list(
         LibraryTagAssignment.objects.filter(tag=tag, publication__status=PublishedQuestion.Status.PUBLISHED)
@@ -681,6 +722,7 @@ def assign(payload: dict) -> dict:
                     existing.source = LibraryTagAssignment.Source.HUMAN
                     existing.save(update_fields=["scope", "source", "updated_at"])
             _sync_projection(publication.pk)
+            _sync_pending_suggestions_after_tag_change(publication, expected[key] + 1, added_tag_ids=set(adds))
             after_revisions[key] = expected[key] + 1
         op = LibraryTagOperation.objects.create(
             client_request_id=request_id,
@@ -813,6 +855,7 @@ def replace_assignment(payload):
         source.delete()
         _bump_publication(publication, expected)
         _sync_projection(publication.pk)
+        _sync_pending_suggestions_after_tag_change(publication, expected + 1, added_tag_ids={target_id})
         publication.refresh_from_db()
         op = LibraryTagOperation.objects.create(
             client_request_id=request_id,
@@ -2047,6 +2090,8 @@ def undo_view(request):
                         tag = LibraryTag.objects.filter(pk=tag_id).first()
                         if tag is not None and not tag.assignments.exists():
                             tag.delete()
+                else:
+                    _sync_pending_suggestions_after_tag_change(publication, expected + 1)
             for value in retired_tags:
                 retired = LibraryTag.objects.filter(pk=value["id"]).first()
                 if retired is None:
@@ -2534,19 +2579,23 @@ def resolve_suggestion(suggestion_id, payload):
             return {"ok": True, "replayed": True}
         suggestion = LibraryTagSuggestion.objects.select_for_update().get(pk=suggestion_id)
         publication = PublishedQuestion.objects.select_for_update().get(pk=suggestion.publication_id)
-        if suggestion.status != LibraryTagSuggestion.Status.PENDING:
+        if suggestion.status not in {LibraryTagSuggestion.Status.PENDING, LibraryTagSuggestion.Status.STALE}:
             raise TaggingError("这批建议当前不在待核对状态", 409)
         if publication.status != PublishedQuestion.Status.PUBLISHED:
             raise StaleTagSuggestionError("题目已被替换，建议保留供查看，不能采纳", 409)
         expected = _expected_revision(payload.get("expected_revision"))
-        if publication.tag_revision != expected or suggestion.assignment_revision != expected:
-            raise StaleTagSuggestionError("题目标签后来有过修改，这批建议已过期，请重新建议。", 409)
+        if publication.tag_revision != expected:
+            raise TaggingError("题目标签版本已变化，请刷新后重试", 409)
         if catalogue_state().revision != suggestion.taxonomy_revision:
             raise StaleTagSuggestionError("标签目录已变化，请按新目录重新建议。", 409)
         if suggestion.question_fingerprint and suggestion.question_fingerprint != library.generation_fingerprint(
             publication.content or {}, publication.pk
         ):
             raise StaleTagSuggestionError("题面或配图已变化，请重新生成建议。", 409)
+        if suggestion.status == LibraryTagSuggestion.Status.STALE:
+            broken, _ = _split_by_catalogue_damage(LibraryTagSuggestion.objects.filter(pk=suggestion.pk))
+            if broken:
+                raise TaggingError("这批建议当前不在待核对状态", 409)
         requested_new_tags = payload.get("new_tags") if isinstance(payload.get("new_tags"), dict) else {}
         entries = copy.deepcopy(suggestion.suggestions or [])
         if len(set(indices)) != len(indices) or min(indices) < 0 or max(indices) >= len(entries):
@@ -2723,6 +2772,19 @@ def resolve_suggestion(suggestion_id, payload):
                     )
                 entries[index]["decision"] = "accepted"
                 entries[index]["accepted_tag_id"] = str(tag.pk)
+            formal_tag_ids = {
+                str(tag_id)
+                for tag_id in LibraryTagAssignment.objects.filter(
+                    publication=publication, needs_review=False
+                ).values_list("tag_id", flat=True)
+            }
+            for entry in entries:
+                if not isinstance(entry, dict) or entry.get("decision"):
+                    continue
+                tag_id = str(entry.get("tag_id") or "")
+                if tag_id and tag_id in formal_tag_ids:
+                    entry["decision"] = "accepted"
+                    entry["accepted_tag_id"] = tag_id
         else:
             for index in indices:
                 entries[index]["decision"] = "rejected"
@@ -2758,16 +2820,20 @@ def resolve_suggestion(suggestion_id, payload):
             )
         )
         suggestion.resolved_at = None if remaining else timezone.now()
-        suggestion.save(
-            update_fields=[
-                "suggestions",
-                "status",
-                "resolved_at",
-                "taxonomy_revision",
-                "assignment_revision",
-                "updated_at",
-            ]
-        )
+        update_fields = [
+            "suggestions",
+            "status",
+            "resolved_at",
+            "taxonomy_revision",
+            "assignment_revision",
+            "updated_at",
+        ]
+        if suggestion_before["status"] == LibraryTagSuggestion.Status.STALE and str(
+            suggestion.message or ""
+        ).startswith("题目标签后来有过修改"):
+            suggestion.message = ""
+            update_fields.append("message")
+        suggestion.save(update_fields=update_fields)
         _sync_projection(publication.pk)
         after_rev = expected + 1
         op = LibraryTagOperation.objects.create(

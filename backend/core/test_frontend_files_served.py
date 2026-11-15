@@ -57,11 +57,17 @@ class FrontendFilesAreServedTests(SimpleTestCase):
             self.assertEqual(response.status_code, 200, f"{path} 取不到")
             self.assertIn(content_type, response["Content-Type"], f"{path} 的类型不对，浏览器可能不认")
 
-    def test_the_library_page_files_are_served_too(self):
-        html = Client().get("/library").content.decode("utf-8")
+    def test_the_eagle_page_files_are_served_too(self):
+        response = Client().get("/eagle")
+        # Eagle 页走 _frontend()（FileResponse），要读流式正文。
+        html = (
+            b"".join(response.streaming_content).decode("utf-8")
+            if getattr(response, "streaming", False)
+            else response.content.decode("utf-8")
+        )
         missing = []
         for item in self.referenced_files(html):
             path = item.split("?")[0]
             if Client().get(path).status_code != 200:
                 missing.append(item)
-        self.assertEqual(missing, [], "题库页引用的文件取不到：" + "、".join(missing))
+        self.assertEqual(missing, [], "Eagle 工作台引用的文件取不到：" + "、".join(missing))

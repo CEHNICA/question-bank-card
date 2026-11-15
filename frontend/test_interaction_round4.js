@@ -9,8 +9,6 @@ const App = require("./app.js");
 const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
-const libraryJs = fs.readFileSync(path.join(__dirname, "library.js"), "utf8");
-const libraryCss = fs.readFileSync(path.join(__dirname, "library.css"), "utf8");
 
 // A background paper that finishes is announced once; the open one is not.
 const previous = new Map([["a", "reading"], ["b", "reading"], ["c", "ready"], ["d", "queued"]]);
@@ -67,13 +65,7 @@ assert.match(html, /id="viewerEdit"/);
 assert.match(js, /key\.toLowerCase\(\) === "r" \|\| key\.toLowerCase\(\) === "f"/);
 
 // Library: withdrawing is quiet in the list; the basket is arranged in the preview.
-assert.match(css, /\.library-withdraw \{ color: var\(--muted\) !important; \}/);
-assert.match(libraryJs, /function printTools\(items, group, position, number\)/);
-assert.match(libraryCss, /\.print-question-tools/);
-// 1.12.7：上限从 1480 放宽到 1760，1536 屏上右边不再空 60px；上限本身留着，
-// 免得 2560 的屏上题面一行拉到底。
-assert.match(libraryCss, /\.library-main \{ max-width: 1760px;/);
-assert.match(libraryCss, /@media \(max-width: 979px\)/);
+// （旧「正式题库」页已下线，它自己的打印工具与宽度上限随该页一起移除。）
 
 // Finishing a paper offers the next one that still has cards to review.
 const list = [
@@ -95,7 +87,7 @@ console.log("round 4 interaction checks: OK");
 
 // 1.25.43：入库的题能从核对页一键去题库里找到（题库能回来，这边原来回不去）。
 assert.match(js, /在题库中看/, "题卡动作行里有去题库的入口");
-assert.match(js, /\/library\?focus=\$\{encodeURIComponent\(q\.publication\.id\)\}/, "带着入库版本的编号过去");
+assert.match(js, /\/eagle\?q=\$\{encodeURIComponent\(q\.publication\.id\)\}/, "带着入库版本的编号过去");
 
 // 1.25.44：全部入库以后不再摆「开始审核」，只留「全部处理完 · 下一份」。
 assert.match(js, /stage === 3 && !allSettled\) actions\.append\(button\("开始审核"/, "全部做完时不再摆「开始审核」");

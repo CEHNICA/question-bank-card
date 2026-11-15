@@ -1786,7 +1786,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const actions = el("span", "done-actions");
     {
       const link = el("a", "button", "去正式题库看看");
-      link.href = "/library";
+      link.href = "/eagle";
       actions.append(link);
     }
     // Reviewing a batch: offer the next paper that still has cards to look at.
@@ -4159,7 +4159,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // 核对页原来没有路过去 —— 老师只能自己在几百道题里翻。
     if (q.publication?.id) {
       actions.append(button("在题库中看", "", () => {
-        window.location.href = `/library?focus=${encodeURIComponent(q.publication.id)}`;
+        window.location.href = `/eagle?q=${encodeURIComponent(q.publication.id)}`;
       }, "到正式题库里找到这道题，看它的标签、答案和入库版本"));
     }
     const more = el("details", "more");
@@ -6098,7 +6098,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (data.unchanged) parts.push(`${data.unchanged} 题内容没变`);
     if (data.problems.length) parts.push(`${data.problems.length} 题没入库：${data.problems.join("；")}`);
     toast(parts.join("，") || "没有需要入库的题", data.problems.length ? "error" : "success",
-      data.created && !data.problems.length ? { label: "去题库看看", onClick: () => leaveFor("/library") } : null);
+      data.created && !data.problems.length ? { label: "去题库看看", onClick: () => leaveFor("/eagle") } : null);
     // The button keeps its last count until the refreshed counts redraw it.
     if (state.paperId === paperId) refreshPaper();
     loadPapers();
@@ -9434,7 +9434,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       text: "每份试卷的进度写在列表里，点一下继续；原卷会一直保留。" },
     { target: () => firstTourCard()?.querySelector(".card-tick"), title: "核对后通过，自动入库",
       text: "先对照原卷核对题面，错字用“改字”修正。确认完整正确后打勾，通过即入库。" },
-    { target: () => document.querySelector('.topnav a[href="/library"]'), title: "找题和组卷", drawer: true,
+    { target: () => document.querySelector('.topnav a[href="/eagle"]'), title: "找题和组卷", drawer: true,
       text: "正式题库可以搜索、全屏看题和选题组卷；选好题后先看预览，再导出。" },
     { target: () => $("settingsButton"), title: "遇到问题时看帮助", drawer: true,
       text: "设置 → 帮助有新手练习、补图和跨页说明、常见问题与快捷键。" }

@@ -345,6 +345,7 @@ body.library-basket-open .question-inspector { display: none; }
 .inspector-locate { flex: none; }
 /* 定位过去以后让那道题亮一下，不然滑过去的一瞬间看不出停在哪。 */
 .library-card.locate-flash { animation: library-locate-flash 1.2s ease-out; }
+.print-question.locate-flash { animation: library-locate-flash 1.2s ease-out; border-radius: 4px; }
 @keyframes library-locate-flash {
   0%, 40% { box-shadow: 0 0 0 3px var(--accent); }
   100% { box-shadow: 0 0 0 0 transparent; }
@@ -888,9 +889,9 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .print-flow .katex, .exam-page .katex { font-size: var(--print-math-size, 1.02em); }
 .print-flow .qb-analysis .katex, .exam-page .qb-analysis .katex,
 .print-flow .print-answer-row .katex, .exam-page .print-answer-row .katex { font-size: var(--print-math-size, 1.21em); }
-.print-title { margin: 0; text-align: center; font-size: 24px; letter-spacing: .12em; font-family: var(--content-font); }
-.print-info { text-align: center; margin: 12px 0 22px; font-size: 14px; color: #333; }
-.print-section { margin: 12px 0 6px; font-size: 16px; font-family: "SimHei", "Microsoft YaHei", sans-serif; break-after: avoid; }
+.print-title { margin: 0; text-align: center; font-size: 22px; letter-spacing: .12em; font-family: var(--content-font); }
+.print-info { text-align: center; margin: 6px 0 10px; font-size: 13px; color: #333; }
+.print-section { margin: 8px 0 4px; font-size: 15px; font-family: "SimHei", "Microsoft YaHei", sans-serif; break-after: avoid; }
 .print-question { position: relative; margin: 0 0 8pt; break-inside: auto; }
 /* Arrange the basket in the preview: move a question within its section or drop it. */
 .print-question-tools { position: absolute; right: -13mm; top: 0; z-index: 2; padding: 0; margin: 0; font-family: var(--ui-font); color: #26352f; }
