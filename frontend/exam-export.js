@@ -237,7 +237,9 @@
       if (options.option_overrides) options.option_overrides = Object.fromEntries(Object.entries(options.option_overrides)
         .filter(([id, value]) => selectedIds.has(id) && ["auto", "four", "two", "vertical"].includes(value)));
       if (options.answer_space_overrides) options.answer_space_overrides = Object.fromEntries(Object.entries(options.answer_space_overrides)
-        .filter(([id, value]) => selectedIds.has(id) && ["none", "small", "medium", "large"].includes(value)));
+        .filter(([id, value]) => selectedIds.has(id)
+          && (["none", "small", "medium", "large", "auto"].includes(value)
+            || (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 200))));
       const fixedSolutions = Object.fromEntries(Object.entries(solutions || {}).filter(([id, revision]) => selectedIds.has(id) && typeof revision === "string" && revision));
       // The PDF the teacher checked on screen is the PDF they get. Send the page
       // count the preview settled on so the server can refuse a file that would

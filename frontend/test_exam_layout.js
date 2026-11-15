@@ -14,16 +14,35 @@ assert.equal(layout.requestedColumns("auto", 4), 0);
 assert.equal(layout.requestedColumns("vertical", 4), 1);
 assert.equal(layout.requestedColumns("vertical", 5), 1, "A vertical layout retains a genuine fifth option");
 assert.equal(layout.normalize({ option_layout: "vertical", option_overrides: { a: "vertical" }, answer_space: "small", answer_space_overrides: { a: "large", b: "none", invalid: "custom" } }).option_overrides.a, "vertical");
-assert.deepEqual(layout.normalize({ answer_space_overrides: { a: "large", b: "none", invalid: "custom" } }).answer_space_overrides, { a: "large", b: "none" });
+assert.deepEqual(layout.normalize({ answer_space_overrides: { a: "large", b: "none", invalid: "custom" } }).answer_space_overrides, { a: 60, b: 0 },
+  "Legacy space names collapse into millimetres; unknown values drop out");
+assert.deepEqual(layout.normalize({ answer_space_overrides: { a: 25 } }).answer_space_overrides, { a: 25 },
+  "An arbitrary millimetre value survives normalisation");
+assert.equal(layout.normalize({ answer_space: "auto" }).answer_space, "auto");
+assert.equal(layout.normalize({ answer_space: 25 }).answer_space, 25);
 for (const [mode, mm] of [["none", 0], ["small", 12], ["medium", 30], ["large", 60]]) assert.equal(layout.answerSpaceMm(mode), mm);
-assert.equal(layout.answerSpace("free_response", "a", { document: "questions", answer_space: "small" }), "small");
-assert.equal(layout.answerSpace("free_response", "a", { document: "questions", answer_space: "small", answer_space_overrides: { a: "none" } }), "none");
-assert.equal(layout.answerSpace("free_response", "a", { document: "combined", answer_layout: "appendix", answer_space_overrides: { a: "large" } }), "large");
+assert.equal(layout.answerSpaceMm(25), 25);
+assert.equal(layout.answerSpaceMm("auto", "free_response"), 30);
+assert.equal(layout.answerSpaceMm("auto", "single_choice"), 0);
+assert.equal(layout.answerSpace("free_response", "a", { document: "questions", answer_space: "small" }), 12);
+assert.equal(layout.answerSpace("free_response", "a", { document: "questions", answer_space: "small", answer_space_overrides: { a: "none" } }), 8,
+  "A free-response question keeps an 8 mm floor even when the teacher asks for none");
+assert.equal(layout.answerSpace("free_response", "a", { document: "combined", answer_layout: "appendix", answer_space_overrides: { a: "large" } }), 60);
+assert.equal(layout.answerSpace("free_response", "a", { document: "questions", answer_space_overrides: { a: 25 } }), 25,
+  "An arbitrary millimetre value reaches the paper");
 for (const mode of [{ document: "answers" }, { document: "combined", answer_layout: "inline" }]) {
-  assert.equal(layout.answerSpace("free_response", "a", { ...mode, answer_space: "large", answer_space_overrides: { a: "medium" } }), "none", "Answers and inline teacher papers cannot acquire student space via an override");
+  assert.equal(layout.answerSpace("free_response", "a", { ...mode, answer_space: "large", answer_space_overrides: { a: "medium" } }), 0, "Answers and inline teacher papers cannot acquire student space via an override");
 }
-assert.equal(layout.answerSpace("single_choice", "a", { document: "questions", answer_space: "large" }), "none");
-assert.equal(layout.answerSpace("free_response", "a", {}), "none", "Legacy drafts without a choice remain unchanged");
+assert.equal(layout.answerSpace("single_choice", "a", { document: "questions", answer_space: "large" }), 60,
+  "Every question type can carry writing space");
+assert.equal(layout.answerSpace("single_choice", "a", { document: "questions", answer_space: "auto" }), 0,
+  "The smart setting leaves choice questions blank");
+assert.equal(layout.answerSpace("single_choice", "a", { document: "questions", answer_space: "auto", answer_space_overrides: { a: 18 } }), 18,
+  "A choice question can be given room to write");
+assert.equal(layout.answerSpace("free_response", "a", { document: "questions", answer_space: "auto" }), 30,
+  "The smart setting gives a free-response question 30 mm");
+assert.equal(layout.answerSpace("free_response", "a", {}), 8, "A free-response question keeps its floor even without a setting");
+assert.equal(layout.answerSpace("single_choice", "a", {}), 0, "Without a setting a choice question stays blank");
 for (const [first, expected] of [
   [{ nodeType: 3, textContent: "如图，求 " }, "inline"],
   [{ nodeType: 1, matches: () => false }, "inline"],

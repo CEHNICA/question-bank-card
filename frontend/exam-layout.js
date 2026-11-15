@@ -8,7 +8,13 @@
   const MM = 96 / 25.4;
   const PAGE_WIDTH = 210 * MM, BODY_WIDTH = 178 * MM, BODY_HEIGHT = 261 * MM;
   const choices = new Set(["auto", "four", "two", "vertical"]);
+  // 留白统一用毫米数。旧草稿存的是 none/small/medium/large，这里继续认。
   const writingSpace = Object.freeze({ none: 0, small: 12, medium: 30, large: 60 });
+  const SPACE_MAX = 200;
+  // 解答题保底：再挤也得给学生留两行，否则卷面看着是糊的。
+  const FREE_RESPONSE_MIN = 8;
+  // 「智能」档下解答题留多少。
+  const AUTO_FREE_RESPONSE = 30;
   const positions = new Set(["left", "center", "right"]);
   function figureSettings(value) {
     // 老师在预览里对配图做的调整：width 是「第几张图 → 纸面上几毫米」，align 管整行
@@ -33,26 +39,53 @@
     }
     return result;
   }
+  // 一个留白设置 → 毫米数。解析不出来返回 null（= 没设置）。
+  // "auto" 不在这里解决：它要按题型算，见 answerSpace。
+  function spaceMm(value) {
+    if (typeof value === "number" && Number.isFinite(value)) return Math.min(SPACE_MAX, Math.max(0, value));
+    if (typeof value === "string" && Object.hasOwn(writingSpace, value)) return writingSpace[value];
+    return null;
+  }
+  // 归一化一个留白设置：auto 原样保留，其余收敛成数字，非法值丢成 null。
+  function normalizeSpace(value) {
+    if (value === "auto") return "auto";
+    return spaceMm(value);
+  }
   function normalize(options = {}) {
+    const answerSpace = normalizeSpace(options.answer_space);
     return {
       pagination: options.pagination === "keep" ? "keep" : "compact",
       option_layout: choices.has(options.option_layout) ? options.option_layout : "auto",
       option_overrides: Object.fromEntries(Object.entries(options.option_overrides || {}).filter(([, value]) => choices.has(value))),
-      answer_space: Object.hasOwn(writingSpace, options.answer_space) ? options.answer_space : "none",
-      answer_space_overrides: Object.fromEntries(Object.entries(options.answer_space_overrides || {}).filter(([, value]) => Object.hasOwn(writingSpace, value))),
+      answer_space: answerSpace === null ? "none" : answerSpace,
+      answer_space_overrides: Object.fromEntries(Object.entries(options.answer_space_overrides || {})
+        .map(([id, value]) => [id, normalizeSpace(value)])
+        .filter(([, value]) => value !== null)),
       question_breaks: Array.isArray(options.question_breaks) ? [...new Set(options.question_breaks.filter(value => typeof value === "string"))] : [],
       figure_overrides: figureSettings(options.figure_overrides)
     };
   }
   function keepWhole(height, pageHeight, mode) { return mode === "keep" && height <= pageHeight + .5; }
   function requestedColumns(layout, count) { return layout === "vertical" ? 1 : layout === "four" && count <= 4 ? 4 : layout === "auto" ? 0 : 2; }
+  // 某题最终留白多少毫米。返回数字，0 = 不留白。
+  // 每道题都能有留白（不再只有解答题）；解答题有 8 毫米硬下限。
   function answerSpace(type, id, options = {}) {
-    if (type !== "free_response" || options.document === "answers"
-      || (options.document === "combined" && options.answer_layout === "inline")) return "none";
+    if (options.document === "answers"
+      || (options.document === "combined" && options.answer_layout === "inline")) return 0;
     const normalized = normalize(options);
-    return normalized.answer_space_overrides[id] || normalized.answer_space;
+    const raw = Object.hasOwn(normalized.answer_space_overrides, id)
+      ? normalized.answer_space_overrides[id]
+      : normalized.answer_space;
+    const mm = raw === "auto"
+      ? (type === "free_response" ? AUTO_FREE_RESPONSE : 0)
+      : (typeof raw === "number" ? raw : 0);
+    return type === "free_response" && mm < FREE_RESPONSE_MIN ? FREE_RESPONSE_MIN : mm;
   }
-  function answerSpaceMm(mode) { return Object.hasOwn(writingSpace, mode) ? writingSpace[mode] : 0; }
+  function answerSpaceMm(value, type) {
+    if (value === "auto") return type === "free_response" ? AUTO_FREE_RESPONSE : 0;
+    const mm = spaceMm(value);
+    return mm === null ? 0 : mm;
+  }
   function alignQuestionNumber(question) {
     const stem = question.querySelector(".qb-stem"), body = stem?.querySelector(".qb-stem-body");
     if (!stem || !body) return;
@@ -442,5 +475,5 @@
     });
     return factor;
   }
-  return { paginate, scale, normalize, keepWhole, requestedColumns, answerSpace, answerSpaceMm, alignQuestionNumber, fitFormulas, applyFigureOverrides, figureSettings, PAGE_WIDTH, BODY_WIDTH, BODY_HEIGHT };
+  return { paginate, scale, normalize, keepWhole, requestedColumns, answerSpace, answerSpaceMm, spaceMm, normalizeSpace, alignQuestionNumber, fitFormulas, applyFigureOverrides, figureSettings, PAGE_WIDTH, BODY_WIDTH, BODY_HEIGHT, SPACE_MAX, FREE_RESPONSE_MIN, AUTO_FREE_RESPONSE };
 });

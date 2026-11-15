@@ -144,8 +144,8 @@ controls.printIndividualQuestion.value = "q1";
 sandbox.syncIndividualControls();
 assert.equal(controls.printIndividualBreak.disabled, true, "首题用不着另起一页");
 assert.match(controls.printIndividualBreak.title, /第一页/, "得说是因为它在第一页");
-assert.equal(controls.printIndividualSpace.disabled, true, "选择题不留白");
-assert.match(controls.printIndividualSpace.title, /解答题/, "留白只对解答题有用，这句得说出来");
+assert.equal(controls.printIndividualSpace.disabled, false, "每一道题都能留白，选择题也不例外");
+assert.match(controls.printIndividualSpace.title, /毫米/, "留白按毫米算，提示里得说出来");
 
 controls.printIndividualQuestion.value = "q2";
 sandbox.syncIndividualControls();

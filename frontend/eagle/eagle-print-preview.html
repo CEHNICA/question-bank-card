@@ -55,6 +55,10 @@
 
   <script src="/vendor/katex/katex.min.js" defer></script>
   <script src="/qb-render.js"></script>
+  <!-- 章节名判定住在定位模块里（exam-export.js 的 sectionHeading 找它）。
+       少了它，凡是带章节名的题（教材章节、试卷大题）一进预览就抛
+       「章节名判定没加载出来」，整页排不出来。 -->
+  <script src="/question-locator.js"></script>
   <script src="/exam-layout.js"></script>
   <script src="/exam-export.js"></script>
   <script src="/library-solutions.js"></script>

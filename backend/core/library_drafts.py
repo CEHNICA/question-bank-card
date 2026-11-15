@@ -32,7 +32,7 @@ PRINT_DEFAULTS = {
     "ai_answers": False,
     "document": "questions",
     "font_size": 12,
-    "answer_space": "none",
+    "answer_space": "auto",
     "student_info": True,
     "pagination": "compact",
     "option_layout": "auto",
@@ -42,6 +42,52 @@ PRINT_DEFAULTS = {
     "answer_space_overrides": {},
     "figure_overrides": {},
 }
+# 留白（answer_space）有两种形态：
+#
+#   "auto"  按题型自动 —— 选择题不留白，解答题留 30 毫米。
+#   数字     毫米数，0 到 200。0 表示不留白（解答题另有 8 毫米下限）。
+#
+# 旧草稿存的是 none/small/medium/large，这里继续认，落到毫米数上。
+LEGACY_SPACES = {"none": 0, "small": 12, "medium": 30, "large": 60}
+SPACE_MAX_MM = 200
+# 解答题保底：再挤也得给学生留两行（和前端 exam-layout.js 的 FREE_RESPONSE_MIN 一致）。
+FREE_RESPONSE_MIN_MM = 8
+# 「智能」档下解答题留多少（对应前端 AUTO_FREE_RESPONSE）。
+AUTO_FREE_RESPONSE_MM = 30
+
+
+def _answer_space_millimetres(value, question_type):
+    """一道题最终留白多少毫米。0 表示不留白。
+
+    口径必须和前端 exam-layout.js 的 answerSpace() 一致：预览看到的留白
+    必须等于导出的留白（PDF 走 library_pdf.py 里的同名逻辑）。
+    """
+    if value == "auto":
+        millimetres = AUTO_FREE_RESPONSE_MM if question_type == "free_response" else 0
+    else:
+        millimetres = _space_millimetres(value)
+        if millimetres is None or millimetres == "auto":
+            millimetres = 0
+    if question_type == "free_response" and millimetres < FREE_RESPONSE_MIN_MM:
+        millimetres = FREE_RESPONSE_MIN_MM
+    return millimetres
+
+
+def _space_millimetres(value):
+    """归一化一个留白设置。返回 "auto" 或毫米数；不合法返回 None。"""
+    if isinstance(value, str) and value == "auto":
+        return "auto"
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        millimetres = float(value)
+        if millimetres != millimetres or millimetres in (float("inf"), float("-inf")):
+            return None
+        millimetres = max(0.0, min(float(SPACE_MAX_MM), millimetres))
+        return int(millimetres) if millimetres.is_integer() else round(millimetres, 2)
+    if isinstance(value, str) and value in LEGACY_SPACES:
+        return LEGACY_SPACES[value]
+    return None
 # 配图调整（figure_overrides）：老师在自己这份卷子里把题干配图放大缩小、决定每行靠左还是
 # 靠右、点名让某张图从下一行开始。跟着草稿存，不写回题库 —— 换一份卷子、换一个老师，
 # 题库里那道题还是原样。
@@ -151,8 +197,8 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
         raise DraftError("字号只能选 12、14、16 磅")
     if "document" in value and value["document"] not in ("questions", "answers", "combined"):
         raise DraftError("请选择题目卷、答案解析卷或题目与答案合卷")
-    if "answer_space" in value and value["answer_space"] not in ("none", "small", "medium", "large"):
-        raise DraftError("答题留白只能选 none、small、medium、large")
+    if "answer_space" in value and _space_millimetres(value["answer_space"]) is None:
+        raise DraftError("答题留白只能是 auto 或 0 到 200 之间的毫米数")
     if "pagination" in value and value["pagination"] not in ("compact", "keep"):
         raise DraftError("分页只能选紧凑排版或尽量整题同页")
     if "option_layout" in value and value["option_layout"] not in ("auto", "four", "two", "vertical"):
@@ -163,6 +209,11 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
     if "document" not in value and "answers" in value:
         result["document"] = "combined" if value["answers"] else "questions"
     result["answers"] = result["document"] != "questions"
+    # 全局留白归一化：auto 或毫米数。默认值和草稿里存的值都从这里过一遍。
+    answer_space = _space_millimetres(result["answer_space"])
+    if answer_space is None:
+        raise DraftError("答题留白只能是 auto 或 0 到 200 之间的毫米数")
+    result["answer_space"] = answer_space
     overrides = result["option_overrides"]
     if (
         not isinstance(overrides, dict)
@@ -171,12 +222,14 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
     ):
         raise DraftError("单题选项排版应为题目编号到 auto、four、two、vertical 的映射，最多 500 题")
     spaces = result["answer_space_overrides"]
-    if (
-        not isinstance(spaces, dict)
-        or len(spaces) > 500
-        or any(mode not in ("none", "small", "medium", "large") for mode in spaces.values())
-    ):
-        raise DraftError("单题留白应为题目编号到 none、small、medium、large 的映射，最多500题")
+    if not isinstance(spaces, dict) or len(spaces) > 500:
+        raise DraftError("单题留白应为题目编号到留白毫米的映射，最多500题")
+    normalized_spaces = []
+    for mode in spaces.values():
+        millimetres = _space_millimetres(mode)
+        if millimetres is None:
+            raise DraftError("单题留白只能是 auto 或 0 到 200 之间的毫米数")
+        normalized_spaces.append(millimetres)
     try:
         figures = _figure_overrides(result["figure_overrides"])
         keys = normalize_ids(list(overrides))
@@ -196,7 +249,7 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
     if selected is not None and (set(keys) | set(space_keys) | set(figure_keys) | set(breaks)) - selected:
         raise DraftError("单题排版和另起页只能指定当前选中的题目")
     result["option_overrides"] = dict(zip(keys, overrides.values()))
-    result["answer_space_overrides"] = dict(zip(space_keys, spaces.values()))
+    result["answer_space_overrides"] = dict(zip(space_keys, normalized_spaces))
     result["figure_overrides"] = dict(zip(figure_keys, figures.values()))
     result["question_breaks"] = breaks
     return result

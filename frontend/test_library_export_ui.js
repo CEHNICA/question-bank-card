@@ -59,26 +59,26 @@ assert.equal(controls.printDocument.value, "combined");
 
 state.features.ai_answer = true;
 sandbox.applyPrintOptions({ document: "answers", answers: false, font_size: 16, answer_space: "large", student_info: false, ai_answers: true });
-assert.deepEqual(plain(sandbox.currentPrintOptions()), { answers: true, origin: false, ai_answers: true, answer_layout: "appendix", document: "answers", font_size: 16, answer_space: "large", answer_space_overrides: {}, student_info: false, pagination: "compact", option_layout: "auto", option_overrides: {}, figure_overrides: {}, question_breaks: [] });
+assert.deepEqual(plain(sandbox.currentPrintOptions()), { answers: true, origin: false, ai_answers: true, answer_layout: "appendix", document: "answers", font_size: 16, answer_space: 60, answer_space_overrides: {}, student_info: false, pagination: "compact", option_layout: "auto", option_overrides: {}, figure_overrides: {}, question_breaks: [] });
 assert.equal(controls.printAnswerLayout.value, "appendix", "A draft saved before answer positions existed keeps its original appendix layout");
 sandbox.applyPrintOptions({ document: "combined", answer_layout: "inline", answer_space: "large" });
 assert.equal(sandbox.currentPrintOptions().answer_layout, "inline");
-assert.equal(sandbox.currentPrintOptions().answer_space, "none", "An inline teacher paper never inserts student writing space");
+assert.equal(sandbox.currentPrintOptions().answer_space, 0, "An inline teacher paper never inserts student writing space");
 assert.equal(sandbox.normalizePrintOptions({ font_size: 6, answer_space: "custom", document: "invalid" }).font_size, 12);
 assert.equal(controls.printPagination.value, "compact", "Old drafts use the paper-saving default");
 sandbox.applyPrintOptions({ pagination: "keep", option_layout: "vertical", option_overrides: { a: "vertical", b: "auto", bad: "invalid" }, answer_space: "small", answer_space_overrides: { a: "none", b: "large", bad: "invalid" }, figure_overrides: { a: { width: { 0: 60 }, align: "left" }, b: { align: "right" } }, question_breaks: ["b", "b"] });
 state.basket = ["a", "b"];
 assert.equal(sandbox.currentPrintOptions().option_layout, "vertical");
-assert.equal(sandbox.currentPrintOptions().answer_space, "small");
+assert.equal(sandbox.currentPrintOptions().answer_space, 12);
 assert.deepEqual(plain(sandbox.currentPrintOptions()).option_overrides, { a: "vertical", b: "auto" });
-assert.deepEqual(plain(sandbox.currentPrintOptions()).answer_space_overrides, { a: "none", b: "large" });
+assert.deepEqual(plain(sandbox.currentPrintOptions()).answer_space_overrides, { a: 0, b: 60 });
 assert.deepEqual(plain(sandbox.currentPrintOptions()).question_breaks, ["b"]);
 // 配图调整和别的单题设置一个规矩：跟着这道题走，题移出卷子它就得跟着走。
 assert.deepEqual(plain(sandbox.currentPrintOptions()).figure_overrides,
   { a: { width: { 0: 60 }, align: "left" }, b: { align: "right" } });
 state.basket = ["a"];
 assert.deepEqual(plain(sandbox.currentPrintOptions()).option_overrides, { a: "vertical" }, "Dropped publications must not remain in export overrides");
-assert.deepEqual(plain(sandbox.currentPrintOptions()).answer_space_overrides, { a: "none" }, "Dropped writing-space overrides cannot enter an export");
+assert.deepEqual(plain(sandbox.currentPrintOptions()).answer_space_overrides, { a: 0 }, "Dropped writing-space overrides cannot enter an export");
 assert.deepEqual(plain(sandbox.currentPrintOptions()).figure_overrides, { a: { width: { 0: 60 }, align: "left" } },
   "题移出卷子，它的图宽和位置也不能跟着进导出");
 assert.deepEqual(plain(sandbox.currentPrintOptions()).question_breaks, []);

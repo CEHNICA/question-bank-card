@@ -4977,8 +4977,10 @@ $("selectedViewCount").textContent = String(state.basket.length);
       answers: document !== "questions", origin: options.origin === true, ai_answers: options.ai_answers === true,
       answer_layout: options.answer_layout === "appendix" ? "appendix" : "inline",
       document, font_size: [12, 14, 16].includes(Number(options.font_size)) ? Number(options.font_size) : 12,
-      answer_space: ["none", "small", "medium", "large"].includes(options.answer_space) ? options.answer_space : "none",
-      answer_space_overrides: Object.fromEntries(Object.entries(options.answer_space_overrides || {}).filter(([, value]) => ["none", "small", "medium", "large"].includes(value))),
+      answer_space: normalizePrintSpace(options.answer_space) ?? "auto",
+      answer_space_overrides: Object.fromEntries(Object.entries(options.answer_space_overrides || {})
+        .map(([id, value]) => [id, normalizePrintSpace(value)])
+        .filter(([, value]) => value !== null)),
       student_info: options.student_info !== false,
       pagination: options.pagination === "keep" ? "keep" : "compact",
       option_layout: ["auto", "four", "two", "vertical"].includes(options.option_layout) ? options.option_layout : "auto",
@@ -4986,6 +4988,19 @@ $("selectedViewCount").textContent = String(state.basket.length);
       question_breaks: Array.isArray(options.question_breaks) ? [...new Set(options.question_breaks.filter(id => typeof id === "string"))] : [],
       figure_overrides: normalizeFigureOverrides(options.figure_overrides)
     };
+  }
+
+  // 留白（answer_space）有两种形态：「auto」按题型自动，其余是毫米数。
+  // 旧草稿存的是 none/small/medium/large，这里继续认，落到毫米数上。
+  const LEGACY_PRINT_SPACES = { none: 0, small: 12, medium: 30, large: 60 };
+  function normalizePrintSpace(value) {
+    if (value === "auto") return "auto";
+    if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, Math.min(200, value));
+    if (typeof value === "string" && value in LEGACY_PRINT_SPACES) return LEGACY_PRINT_SPACES[value];
+    if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) {
+      return Math.max(0, Math.min(200, Number(value)));
+    }
+    return null;
   }
 
   // 老师在预览里对配图做的调整，跟着这份草稿存。服务端 library_drafts 也查一遍，
@@ -5020,7 +5035,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
       document: $("printDocument").value, origin: ui.printOrigin.checked,
       answer_layout: $("printAnswerLayout").value,
       ai_answers: Boolean(state.features.ai_answer && ui.printAi.checked),
-      font_size: $("printFontSize").value, answer_space: $("printDocument").value === "combined" && $("printAnswerLayout").value === "inline" ? "none" : $("printAnswerSpace").value,
+      font_size: $("printFontSize").value, answer_space: $("printDocument").value === "combined" && $("printAnswerLayout").value === "inline" ? 0 : (normalizePrintSpace($("printAnswerSpace").value) ?? "auto"),
       student_info: $("printStudentInfo").checked,
       pagination: $("printPagination").value, option_layout: $("printOptionLayout").value,
       option_overrides: Object.fromEntries(Object.entries(printState.optionOverrides || {}).filter(([id]) => !state.basket || state.basket.includes(id))),
@@ -5043,7 +5058,9 @@ $("selectedViewCount").textContent = String(state.basket.length);
     const restored = normalizePrintOptions(options);
     $("printDocument").value = restored.document;
     $("printFontSize").value = String(restored.font_size);
-    $("printAnswerSpace").value = restored.answer_space;
+    // 全局留白是「auto」或毫米数；下拉里只有档位，别的毫米数退回 auto。
+    $("printAnswerSpace").value = restored.answer_space === "auto" ? "auto"
+      : (["0", "8", "12", "30", "60"].includes(String(restored.answer_space)) ? String(restored.answer_space) : "auto");
     $("printStudentInfo").checked = restored.student_info;
     $("printPagination").value = restored.pagination;
     $("printOptionLayout").value = restored.option_layout;
@@ -5515,8 +5532,9 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
           block.dataset.questionId = item.id;
           block.dataset.questionType = item.question_type;
           const space = window.ExamLayout.answerSpace(item.question_type, item.id, options);
-          if (space !== "none") {
-            const blank = node("div", "print-answer-space"); blank.dataset.answerSpace = space;
+          if (space > 0) {
+            const blank = node("div", "print-answer-space"); blank.dataset.answerSpace = String(space);
+            blank.style.height = `${space}mm`;
             block.append(blank);
           }
           block.append(printTools(items, group, position, number));
@@ -5570,8 +5588,9 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     const item = printState.items.find(item => item.id === id);
     $("printIndividualOption").value = printState.optionOverrides[id] || "";
     $("printIndividualOption").disabled = printState.exporting || !item || item.content?.body_mode === "source_image" || (!Object.keys(item.content?.options || {}).length && !(item.content?.figures || []).some(figure => /^[A-E]$/.test(figure.slot)));
-    $("printIndividualSpace").value = printState.answerSpaceOverrides?.[id] || "";
-    $("printIndividualSpace").disabled = printState.exporting || !item || item.question_type !== "free_response"
+    const spaceOverride = printState.answerSpaceOverrides?.[id];
+    $("printIndividualSpace").value = spaceOverride === undefined || spaceOverride === null ? "" : String(spaceOverride);
+    $("printIndividualSpace").disabled = printState.exporting || !item
       || $("printDocument").value === "answers" || ($("printDocument").value === "combined" && $("printAnswerLayout").value === "inline");
     $("printIndividualBreak").checked = printState.questionBreaks.includes(id);
     $("printIndividualBreak").disabled = printState.exporting || !item || id === printState.firstQuestion;
@@ -5580,10 +5599,9 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     // 锁不锁是另一回事（非解答题、或答案紧跟题后），提示一个字没提，控件自己也没有悬停
     // 说明 —— 两件互不相干的事挤在一句话里，读的人猜不出哪句说的是哪个。
     $("printIndividualSpace").title = !item ? "先在上面选一道题，才能逐题调整"
-      : item.question_type !== "free_response" ? "只对解答题有用，这道题留白没有意义"
       : $("printDocument").value === "answers" ? "输出内容选了「答案与解析」，卷上没有做题的空白"
       : ($("printDocument").value === "combined" && $("printAnswerLayout").value === "inline") ? "答案紧跟在题目后面，不留做题的空白"
-      : "这一题在卷面上留多少空白给学生写过程";
+      : "这一题在卷面上留多少空白给学生写过程（解答题至少 8 毫米）";
     $("printIndividualBreak").title = !item ? "先在上面选一道题，才能逐题调整"
       : id === printState.firstQuestion ? "第一题本来就在第一页，不用再另起一页"
       : "让这道题从新的一页开始印";
@@ -5917,20 +5935,91 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
       else delete printState.optionOverrides[item.id];
       markDraftDirty(); renderPrint(items);
     });
-    const answerSpace = node("select", "print-single-space");
-    answerSpace.setAttribute("aria-label", `第 ${number} 题解答留白`);
-    [["", "留白跟随全卷"], ["none", "不留白"], ["small", "少量（12 毫米）"], ["medium", "适中（30 毫米）"], ["large", "较多（60 毫米）"]].forEach(([value, label]) => {
-      const choice = node("option", "", label); choice.value = value; answerSpace.append(choice);
-    });
-    answerSpace.value = printState.answerSpaceOverrides[item.id] || "";
-    answerSpace.hidden = item.question_type !== "free_response";
-    answerSpace.disabled = printState.exporting || $("printDocument").value === "answers"
+    // 留白以毫米为单位。每一道题都能调（不再只有解答题）；解答题有 8 毫米下限。
+    // 口径与 ExamLayout.answerSpace() 一致：这里自己算一遍当前值，是因为调整菜单
+    // 挂的是题号，取值不能依赖整卷设置；引擎不在手边时用同一套算法兜底。
+    const isFreeResponse = item.question_type === "free_response";
+    const spaceFloor = isFreeResponse ? 8 : 0;
+    const spaceGlobalRaw = $("printAnswerSpace")?.value ?? "auto";
+    const spaceGlobal = spaceGlobalRaw === "auto" ? "auto"
+      : (Number.isFinite(Number(spaceGlobalRaw)) ? Math.max(0, Math.min(200, Number(spaceGlobalRaw))) : 0);
+    const spaceOverride = printState.answerSpaceOverrides?.[item.id];
+    const spaceOverrideMm = (typeof spaceOverride === "number" && Number.isFinite(spaceOverride))
+      ? Math.max(0, Math.min(200, spaceOverride)) : null;
+    const spaceFallback = (() => {
+      let value = spaceOverrideMm !== null ? spaceOverrideMm
+        : (spaceGlobal === "auto" ? (isFreeResponse ? 30 : 0) : spaceGlobal);
+      if (isFreeResponse && value < spaceFloor) value = spaceFloor;
+      return value;
+    })();
+    const spaceDisabled = printState.exporting || $("printDocument").value === "answers"
       || ($("printDocument").value === "combined" && $("printAnswerLayout").value === "inline");
-    answerSpace.addEventListener("change", () => {
-      if (answerSpace.value) printState.answerSpaceOverrides[item.id] = answerSpace.value;
-      else delete printState.answerSpaceOverrides[item.id];
+    const spaceValue = window.ExamLayout && typeof window.ExamLayout.answerSpace === "function"
+      ? window.ExamLayout.answerSpace(item.question_type, item.id, {
+        answer_space: spaceGlobal,
+        answer_space_overrides: spaceOverrideMm === null ? {} : { [item.id]: spaceOverrideMm },
+        document: $("printDocument").value,
+        answer_layout: $("printAnswerLayout").value
+      })
+      : spaceFallback;
+    const spaceWrap = node("div", "print-space-wrap");
+    const spaceRow = node("div", "print-space-row");
+    const spaceLabel = node("label", "", "留白");
+    spaceLabel.setAttribute("for", `print-space-${item.id}`);
+    const spaceInput = node("input", "print-space-input");
+    spaceInput.type = "number";
+    spaceInput.id = `print-space-${item.id}`;
+    spaceInput.min = "0";
+    spaceInput.max = "200";
+    spaceInput.step = "1";
+    spaceInput.setAttribute("aria-label", `第 ${number} 题留白毫米数`);
+    const spaceUnit = node("span", "print-space-unit", "毫米");
+    spaceRow.append(spaceLabel, spaceInput, spaceUnit);
+    const spacePresets = node("div", "print-space-presets");
+    spacePresets.setAttribute("role", "group");
+    spacePresets.setAttribute("aria-label", `第 ${number} 题留白快捷档位`);
+    const spaceHint = node("p", "print-space-hint", "");
+    const spaceFollowing = spaceOverrideMm === null;
+    const applySpace = (millimetres) => {
+      let value = Math.round(Number(millimetres));
+      if (!Number.isFinite(value)) return;
+      value = Math.max(0, Math.min(200, value));
+      if (isFreeResponse && value < spaceFloor) value = spaceFloor;
+      printState.answerSpaceOverrides[item.id] = value;
       markDraftDirty(); renderPrint(items);
+    };
+    const followSpace = () => {
+      delete printState.answerSpaceOverrides[item.id];
+      markDraftDirty(); renderPrint(items);
+    };
+    const followSpaceButton = node("button", "", "跟随");
+    followSpaceButton.type = "button";
+    followSpaceButton.title = "跟随全卷的留白设置";
+    followSpaceButton.setAttribute("aria-label", `第 ${number} 题留白跟随全卷`);
+    followSpaceButton.addEventListener("click", followSpace);
+    spacePresets.append(followSpaceButton);
+    const spaceButtons = [];
+    [[0, "无"], [8, "8"], [12, "12"], [30, "30"], [60, "60"]].forEach(([value, text]) => {
+      const button = node("button", "", text);
+      button.type = "button";
+      button.dataset.mm = String(value);
+      button.setAttribute("aria-label", `第 ${number} 题留白 ${value} 毫米`);
+      button.addEventListener("click", () => applySpace(value));
+      spaceButtons.push(button);
+      spacePresets.append(button);
     });
+    spaceInput.value = String(spaceValue);
+    spaceInput.disabled = spaceDisabled;
+    followSpaceButton.disabled = spaceDisabled;
+    followSpaceButton.setAttribute("aria-pressed", String(spaceFollowing));
+    spaceButtons.forEach(button => {
+      button.disabled = spaceDisabled;
+      button.setAttribute("aria-pressed", String(!spaceFollowing && Number(button.dataset.mm) === spaceValue));
+    });
+    spaceHint.textContent = spaceDisabled ? "这份卷子不留答题空间。"
+      : `${spaceFollowing ? "跟随全卷" : "本题单独设定"}：${spaceValue} 毫米${isFreeResponse ? "（解答题至少 8 毫米）" : ""}。`;
+    spaceInput.addEventListener("change", () => applySpace(spaceInput.value));
+    spaceWrap.append(spaceRow, spacePresets, spaceHint);
     const pageBreak = node("button", "", printState.questionBreaks.includes(item.id) ? "取消另起页" : "另起一页");
     pageBreak.type = "button"; pageBreak.disabled = printState.exporting || item.id === printState.firstQuestion;
     pageBreak.setAttribute("aria-label", `第 ${number} 题另起一页`);
@@ -5943,7 +6032,7 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     editAnswer.disabled = printState.exporting;
     editAnswer.setAttribute("aria-label", `第 ${number} 题编辑答案解析`);
     editAnswer.addEventListener("click", () => openAnswerEditor(printState.items.map(value => ({ ...value, exam_number: groupedQuestionNumber(value) })), { scope: "paper", focus: item.id }));
-    actions.append(up, down, remove, optionLayout, answerSpace, pageBreak, editAnswer);
+    actions.append(up, down, remove, optionLayout, spaceWrap, pageBreak, editAnswer);
     tools.append(actions);
     return tools;
   }
@@ -6265,8 +6354,16 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     markDraftDirty(); renderPrint(printState.items);
   });
   $("printIndividualSpace").addEventListener("change", () => {
-    const id = $("printIndividualQuestion").value, value = $("printIndividualSpace").value;
-    if (value) printState.answerSpaceOverrides[id] = value; else delete printState.answerSpaceOverrides[id];
+    const id = $("printIndividualQuestion").value;
+    const millimetres = normalizePrintSpace($("printIndividualSpace").value);
+    if (millimetres === null) delete printState.answerSpaceOverrides[id];
+    else printState.answerSpaceOverrides[id] = millimetres;
+    markDraftDirty(); renderPrint(printState.items);
+  });
+  $("printIndividualSpaceFollow").addEventListener("click", () => {
+    const id = $("printIndividualQuestion").value;
+    delete printState.answerSpaceOverrides[id];
+    $("printIndividualSpace").value = "";
     markDraftDirty(); renderPrint(printState.items);
   });
   $("printIndividualBreak").addEventListener("change", () => {

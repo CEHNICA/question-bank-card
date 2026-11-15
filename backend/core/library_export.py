@@ -34,7 +34,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from . import features, library, tables
 from .library_browse import BrowseError, normalize_ids
-from .library_drafts import DraftError, _print_options, _title
+from .library_drafts import DraftError, _answer_space_millimetres, _print_options, _title
 from .models import PublishedQuestion
 
 MAX_BODY = 2 * 1024 * 1024
@@ -2296,9 +2296,11 @@ def _document(captured, title, options, mode):
                         _font(document.add_paragraph().add_run(f"{letter}."), size)
                     _write_images(document, item, letter)
             answer_space = options.get("answer_space_overrides", {}).get(item["id"], options["answer_space"])
-            if item["type"] == "free_response" and answer_space != "none" and not inline_answers:
+            # 每道题都能有留白；解答题有 8 毫米下限。口径与预览、PDF 一致。
+            millimetres = _answer_space_millimetres(answer_space, item["type"])
+            if millimetres > 0 and not inline_answers:
                 paragraph = document.add_paragraph()
-                paragraph.paragraph_format.space_after = Mm({"small": 12, "medium": 30, "large": 60}[answer_space])
+                paragraph.paragraph_format.space_after = Mm(millimetres)
             _question_gap(document)
             _pagination(document, unit_start, options["pagination"], size)
             if inline_answers and _has_selected_answers([item]):

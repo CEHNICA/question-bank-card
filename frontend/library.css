@@ -814,6 +814,12 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .print-options-body { display: grid; gap: 16px; padding: 0 16px 16px; }
 .print-field { display: grid; gap: 6px; font-size: 13px; font-weight: 600; }
 .print-field input, .print-field select { width: 100%; min-width: 0; box-sizing: border-box; min-height: 36px; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 7px; background: white; color: var(--ink); font: 14px var(--ui-font); }
+/* 本题留白：毫米数 + 跟随全卷。留白以毫米计，每一道题都能调。 */
+.print-space-editor { display: flex; align-items: center; gap: 8px; }
+.print-space-editor input { flex: 1 1 auto; }
+.print-space-unit { flex: none; font-weight: 400; color: #5d6b63; }
+.print-space-follow { flex: none; min-height: 36px; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: white; color: var(--ink); font: 13px var(--ui-font); cursor: pointer; }
+.print-space-follow:hover { border-color: var(--accent); color: var(--accent); }
 .print-options .library-toggle { margin: 0; font-size: 13px; flex-wrap: wrap; gap: 8px; }
 .print-options .library-toggle input:disabled + .switch-track { opacity: .45; }
 .print-options-note, .print-answer-status { margin: 0; color: var(--muted); line-height: 1.6; font-size: 12px; }
@@ -908,9 +914,22 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .exam-continuation-label { margin: 0 0 4px; color: #666; font-size: 10px; line-height: 1.35; }
 .print-question-tools button { min-width: 44px; min-height: 32px; padding: 3px 9px; border: 1px solid #b5c2ba; border-radius: 6px; background: #fff; color: #26352f; font-size: 12px; cursor: pointer; }
 .print-question-tools button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.print-question-tools button:focus-visible, .print-question-tools select:focus-visible, .print-question-tools > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.print-question-tools button:focus-visible, .print-question-tools select:focus-visible, .print-question-tools input:focus-visible, .print-question-tools > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .print-question-tools button:disabled, .print-question-tools select:disabled { opacity: 1; color: #7b867f; background: #f0f3f0; border-color: #ccd5ce; cursor: default; }
 .print-question-tools .remove:hover { border-color: var(--red); color: var(--red); }
+/* 留白控件：数字输入 + 快捷档位。留白以毫米计，每一道题都能调。
+   留白块本身的高度由内联 style 给（毫米数），这里的 12mm 只是兜底。 */
+.print-space-wrap { grid-column: 1 / -1; display: grid; gap: 5px; }
+.print-space-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #26352f; }
+.print-space-row > label { flex: none; }
+.print-space-input { flex: 1 1 auto; min-width: 0; min-height: 32px; box-sizing: border-box; padding: 3px 8px; border: 1px solid #b5c2ba; border-radius: 6px; background: #fff; color: #26352f; font: 12px var(--ui-font); }
+.print-space-unit { flex: none; color: #5d6b63; }
+.print-space-presets { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
+.print-space-presets button { min-width: 0; min-height: 30px; padding: 2px 2px; font-size: 12px; }
+.print-space-presets button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: #eef6f1; font-weight: 600; }
+.print-question-tools .print-full { grid-column: 1 / -1; width: 100%; }
+.print-space-hint { margin: 0; font-size: 11px; line-height: 1.45; color: #6b7a72; }
+.print-space-hint[data-tone="warn"] { color: #a8621c; }
 .print-question.qb-question { font-size: var(--exam-font-size, 12pt); color: #111; }
 .print-answer-space { height: 12mm; min-height: 0; }
 .print-answer-space[data-answer-space="none"] { display: none; }

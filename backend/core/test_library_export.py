@@ -974,7 +974,12 @@ class LibraryExportTests(ExportFixture, TestCase):
         for paragraph in question:
             self.assertEqual(paragraph.find("w:pPr/w:keepLines", NS).get(f"{{{NS['w']}}}val"), "0")
             self.assertEqual(paragraph.find("w:pPr/w:keepNext", NS).get(f"{{{NS['w']}}}val"), "0")
-        self.assertEqual(question[-1].find("w:pPr/w:spacing", NS).get(f"{{{NS['w']}}}after"), "160")
+        # 智能档下解答题有 30 毫米答题空间：这段空白单独占一段，题间距落在它身上，
+        # 题干最后一段不再顶着那 8 磅。
+        blank = paragraphs[paragraphs.index(question[-1]) + 1]
+        self.assertEqual("".join(blank.itertext()).strip(), "")
+        after = int(blank.find("w:pPr/w:spacing", NS).get(f"{{{NS['w']}}}after"))
+        self.assertAlmostEqual(after * 25.4 / 1440, 30, delta=0.2)
 
     def test_compact_protects_display_formula_and_picture_without_locking_long_prose(self):
         formula = math_field(r"\frac{a}{b}", "<mfrac><mi>a</mi><mi>b</mi></mfrac>", display=True)
@@ -1037,7 +1042,13 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertEqual(response.status_code, 200, response.content[:200])
         paragraphs = document_xml(response.content).find("w:body", NS).findall("w:p", NS)
         question = paragraphs[2:]  # title, section heading
-        self.assertEqual(len(question), 4)
+        self.assertEqual(len(question), 5)
+        # 最后一段是解答题的答题空白（智能档 30 毫米），它是故意留的空段。
+        writing_space = question[-1]
+        self.assertEqual("".join(writing_space.itertext()).strip(), "")
+        after = int(writing_space.find("w:pPr/w:spacing", NS).get(f"{{{NS['w']}}}after"))
+        self.assertAlmostEqual(after * 25.4 / 1440, 30, delta=0.2)
+        question = question[:-1]
         self.assertEqual(sum(paragraph.find("m:oMath", NS) is not None for paragraph in question), 1)
         self.assertFalse(
             any(
@@ -1146,9 +1157,9 @@ class LibraryExportTests(ExportFixture, TestCase):
                     return spacing.get(f"{{{NS['w']}}}after")
             return None
 
-        none = {"document": "questions", "answer_space": "none"}
-        large = {"document": "questions", "answer_space": "large"}
-        only_second = {**none, "answer_space_overrides": {str(second.id): "large"}}
+        none = {"document": "questions", "answer_space": 0}
+        large = {"document": "questions", "answer_space": 60}
+        only_second = {**none, "answer_space_overrides": {str(second.id): 60}}
 
         # The override has to print exactly what picking that value globally would.
         self.assertEqual(writing_space("第二题专用题干标记", only_second), writing_space("第二题专用题干标记", large))
@@ -1157,9 +1168,67 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertNotEqual(
             writing_space("第一题专用题干标记", only_second), writing_space("第一题专用题干标记", large)
         )
-        # Without a space there is nothing to inherit, so the override must add one.
-        self.assertIsNone(writing_space("第二题专用题干标记", none))
+        # 解答题有 8 毫米下限：全卷不留白也给它留两行，不能全挤没。
+        self.assertIsNotNone(writing_space("第二题专用题干标记", none))
         self.assertIsNotNone(writing_space("第二题专用题干标记", only_second))
+
+    def test_writing_space_takes_any_millimetre_value_and_keeps_a_floor_for_answers(self):
+        answer = self.publication(kind="free_response", stem="解答题任意毫米标记", answer="42")
+        choice = self.publication(kind="single_choice", stem="选择题任意毫米标记", answer="A")
+
+        def writing_space(stem, print_options):
+            """The blank paragraph after that question, in millimetres."""
+            response = self.post(self.payload([answer, choice], print_options=print_options))
+            self.assertEqual(response.status_code, 200, response.content[:300])
+            paragraphs = document_xml(response.content).find("w:body", NS).findall("w:p", NS)
+            index = next(i for i, p in enumerate(paragraphs) if stem in "".join(p.itertext()))
+            for paragraph in paragraphs[index + 1 :]:
+                if "".join(paragraph.itertext()).strip():
+                    break
+                spacing = paragraph.find("w:pPr/w:spacing", NS)
+                if spacing is not None and spacing.get(f"{{{NS['w']}}}after"):
+                    return int(spacing.get(f"{{{NS['w']}}}after")) * 25.4 / 1440
+            return None
+
+        # 任意毫米：预览里填 25，卷子上就是 25 毫米。
+        self.assertAlmostEqual(
+            writing_space("解答题任意毫米标记", {"document": "questions", "answer_space": 25}), 25, delta=0.2
+        )
+        # 选择题也能有留白 —— 每道题都能留，不只是解答题。
+        self.assertAlmostEqual(
+            writing_space("选择题任意毫米标记", {"document": "questions", "answer_space": 18}), 18, delta=0.2
+        )
+        # 解答题保底 8 毫米：全卷不留白也给它留两行。
+        self.assertAlmostEqual(
+            writing_space("解答题任意毫米标记", {"document": "questions", "answer_space": 0}), 8, delta=0.2
+        )
+        # 单题覆盖任意毫米。
+        self.assertAlmostEqual(
+            writing_space(
+                "解答题任意毫米标记",
+                {"document": "questions", "answer_space": 0, "answer_space_overrides": {str(answer.id): 45}},
+            ),
+            45,
+            delta=0.2,
+        )
+        # 「智能」档：选择题不留白，解答题 30 毫米。
+        self.assertIsNone(writing_space("选择题任意毫米标记", {"document": "questions", "answer_space": "auto"}))
+        self.assertAlmostEqual(
+            writing_space("解答题任意毫米标记", {"document": "questions", "answer_space": "auto"}), 30, delta=0.2
+        )
+        # 答案卷没有答题空间。
+        response = self.post(self.payload([answer, choice], print_options={"document": "answers", "answer_space": 25}))
+        self.assertEqual(response.status_code, 200, response.content[:300])
+        spacings = [
+            int(paragraph.find("w:pPr/w:spacing", NS).get(f"{{{NS['w']}}}after"))
+            for paragraph in document_xml(response.content).find("w:body", NS).findall("w:p", NS)
+            if paragraph.find("w:pPr/w:spacing", NS) is not None
+            and paragraph.find("w:pPr/w:spacing", NS).get(f"{{{NS['w']}}}after")
+        ]
+        self.assertFalse(
+            any(abs(value * 25.4 / 1440 - 25) < 0.5 for value in spacings),
+            "An answer sheet carries no student writing space",
+        )
 
     def test_five_options_and_wide_forced_four_never_drop_or_shrink_content(self):
         pub = self.publication(kind="single_choice", options=dict.fromkeys("ABCDE", "短选项"))

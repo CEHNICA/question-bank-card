@@ -38,7 +38,11 @@
     title: "练习",
     token: 0,
     // 预览里逐题调整的结果。父页面是权威持有者，这里先改先看，再回传。
-    overrides: { option_overrides: {}, answer_space_overrides: {}, question_breaks: [] }
+    overrides: { option_overrides: {}, answer_space_overrides: {}, question_breaks: [] },
+    // 展开着的「调整」面板：重排版后要还开着，不然改一个数面板就自己合上了。
+    openTools: new Set(),
+    // 被系统夹过的提示（解答题留白下限），跨重排版保留。
+    notes: {}
   };
 
   function post(message) {
@@ -89,6 +93,110 @@
     return row;
   }
 
+  // 留白以毫米为单位。每一道题都能调（不再只有解答题）；解答题有硬下限。
+  function spaceControl(item, number, options) {
+    const Layout = window.ExamLayout || {};
+    const isFree = item.question_type === "free_response";
+    const floor = isFree ? (Layout.FREE_RESPONSE_MIN || 8) : 0;
+    const max = Layout.SPACE_MAX || 200;
+    const disabled = options.document === "answers"
+      || (options.document === "combined" && options.answer_layout === "inline");
+
+    const wrap = node("div", "print-space-wrap");
+    const row = node("div", "print-space-row");
+    const label = node("label", "", "留白");
+    label.setAttribute("for", `print-space-${item.id}`);
+    const input = node("input", "print-space-input");
+    input.type = "number";
+    input.id = `print-space-${item.id}`;
+    input.min = "0";
+    input.max = String(max);
+    input.step = "1";
+    input.setAttribute("aria-label", `第 ${number} 题留白毫米数`);
+    const unit = node("span", "print-space-unit", "毫米");
+    row.append(label, input, unit);
+
+    const presets = node("div", "print-space-presets");
+    presets.setAttribute("role", "group");
+    presets.setAttribute("aria-label", `第 ${number} 题留白快捷档位`);
+    const hint = node("p", "print-space-hint", "");
+
+    function effective() {
+      return typeof Layout.answerSpace === "function"
+        ? Layout.answerSpace(item.question_type, item.id, options)
+        : 0;
+    }
+    function isFollowing() {
+      return !Object.prototype.hasOwnProperty.call(state.overrides.answer_space_overrides, item.id);
+    }
+    function apply(mm) {
+      if (disabled) return;
+      const requested = Math.round(Number(mm));
+      if (!Number.isFinite(requested)) return;
+      let value = Math.max(0, Math.min(max, requested));
+      if (isFree && value < floor) {
+        value = floor;
+        state.notes[item.id] = `解答题至少留 ${floor} 毫米，已自动补足。`;
+      } else {
+        delete state.notes[item.id];
+      }
+      state.overrides.answer_space_overrides[item.id] = value;
+      pushOverrides();
+      render();
+    }
+    function follow() {
+      if (disabled) return;
+      delete state.overrides.answer_space_overrides[item.id];
+      delete state.notes[item.id];
+      pushOverrides();
+      render();
+    }
+
+    const followButton = node("button", "", "跟随");
+    followButton.type = "button";
+    followButton.title = "跟随全卷的留白设置";
+    followButton.setAttribute("aria-label", `第 ${number} 题留白跟随全卷`);
+    followButton.addEventListener("click", follow);
+    presets.append(followButton);
+    const presetButtons = [];
+    [[0, "无"], [12, "12"], [30, "30"], [60, "60"]].forEach(([value, text]) => {
+      const button = node("button", "", text);
+      button.type = "button";
+      button.dataset.mm = String(value);
+      button.setAttribute("aria-label", `第 ${number} 题留白 ${value} 毫米`);
+      button.addEventListener("click", () => apply(value));
+      presetButtons.push(button);
+      presets.append(button);
+    });
+    input.addEventListener("change", () => apply(input.value));
+
+    const value = effective();
+    input.value = String(value);
+    input.disabled = disabled;
+    followButton.disabled = disabled;
+    followButton.setAttribute("aria-pressed", String(isFollowing()));
+    presetButtons.forEach(button => {
+      button.disabled = disabled;
+      button.setAttribute("aria-pressed", String(!isFollowing() && Number(button.dataset.mm) === value));
+    });
+    if (disabled) {
+      hint.textContent = "这份卷子不留答题空间。";
+      hint.dataset.tone = "";
+    } else if (state.notes[item.id]) {
+      hint.textContent = state.notes[item.id];
+      hint.dataset.tone = "warn";
+    } else if (isFollowing()) {
+      hint.textContent = `跟随全卷：当前 ${value} 毫米。`;
+      hint.dataset.tone = "";
+    } else {
+      hint.textContent = `本题单独设定 ${value} 毫米。`;
+      hint.dataset.tone = "";
+    }
+
+    wrap.append(row, presets, hint);
+    return wrap;
+  }
+
   // 逐题调整：选项排版 / 解答留白 / 另起一页。
   // 改动只落在这一次组卷，不动题库原题 —— 和旧版预览里的「调整」一个口径。
   function questionTools(item, number, options) {
@@ -117,21 +225,9 @@
       render();
     });
 
-    const space = node("select", "print-single-space");
-    space.setAttribute("aria-label", `第 ${number} 题解答留白`);
-    [["", "留白跟随全卷"], ["none", "不留白"], ["small", "少量（12 毫米）"], ["medium", "适中（30 毫米）"], ["large", "较多（60 毫米）"]]
-      .forEach(([value, label]) => { const choice = node("option", "", label); choice.value = value; space.append(choice); });
-    space.value = options.answer_space_overrides[item.id] || "";
-    space.hidden = item.question_type !== "free_response";
-    space.disabled = options.document === "answers" || (options.document === "combined" && options.answer_layout === "inline");
-    space.addEventListener("change", () => {
-      if (space.value) state.overrides.answer_space_overrides[item.id] = space.value;
-      else delete state.overrides.answer_space_overrides[item.id];
-      pushOverrides();
-      render();
-    });
+    const space = spaceControl(item, number, options);
 
-    const pageBreak = node("button", "", state.overrides.question_breaks.includes(item.id) ? "取消另起页" : "另起一页");
+    const pageBreak = node("button", "print-full", state.overrides.question_breaks.includes(item.id) ? "取消另起页" : "另起一页");
     pageBreak.type = "button";
     pageBreak.setAttribute("aria-label", `第 ${number} 题另起一页`);
     pageBreak.setAttribute("aria-pressed", String(state.overrides.question_breaks.includes(item.id)));
@@ -143,16 +239,14 @@
       render();
     });
 
-    // 答案解析：预览页自己开不了编辑器（它在父页面里），让父页面开。
-    const editAnswer = node("button", "", "答案解析");
-    editAnswer.type = "button";
-    editAnswer.setAttribute("aria-label", `第 ${number} 题编辑答案解析`);
-    editAnswer.addEventListener("click", () => {
-      post({ type: CHANNEL_OPEN_SOLUTION, id: item.id });
-    });
-
-    actions.append(layout, space, pageBreak, editAnswer);
+    actions.append(layout, space, pageBreak);
     tools.append(actions);
+    // 改完重排版，面板别自己合上。
+    if (state.openTools.has(item.id)) tools.open = true;
+    tools.addEventListener("toggle", () => {
+      if (tools.open) state.openTools.add(item.id);
+      else state.openTools.delete(item.id);
+    });
     return tools;
   }
 
@@ -247,9 +341,10 @@
           block.dataset.questionId = item.id;
           block.dataset.questionType = item.question_type;
           const space = window.ExamLayout.answerSpace(item.question_type, item.id, options);
-          if (space !== "none") {
+          if (space > 0) {
             const blank = node("div", "print-answer-space");
-            blank.dataset.answerSpace = space;
+            blank.dataset.answerSpace = String(space);
+            blank.style.height = `${space}mm`;
             block.append(blank);
           }
           paper.append(block);

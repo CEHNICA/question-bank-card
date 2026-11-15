@@ -445,6 +445,17 @@ window.__qbPdfStatus = {ready:false};
   source.dataset.answerSpace=o.answer_space;source.dataset.document=o.document;
   source.dataset.answerLayout=o.answer_layout;
   const node=(tag,cls,text)=>{const n=document.createElement(tag);n.className=cls;if(text!==undefined)n.textContent=text;return n;};
+  // 留白口径必须和 exam-layout.js 的 answerSpace() 一致（预览看到的 = 导出的）：
+  // auto = 选择题不留白、解答题 30 毫米；数值 = 毫米数；解答题下限 8 毫米。
+  const spaceMm=(value,type)=>{
+    if(value==='auto')return type==='free_response'?30:0;
+    if(typeof value==='number'&&isFinite(value))return Math.max(0,Math.min(200,value));
+    if(value==='none')return 0;
+    if(value==='small')return 12;
+    if(value==='medium')return 30;
+    if(value==='large')return 60;
+    return 0;
+  };
   source.append(node('h2','print-title',input.title));
   if(o.student_info && o.document!=='answers')source.append(node('p','print-info','姓名 ____________　班级 ____________　得分 ________'));
   let number=0;const numbered=[];
@@ -471,10 +482,13 @@ window.__qbPdfStatus = {ready:false};
       QBRender.renderQuestion(block,item.content,{number,showAnswer:'none',resolveUrl:x=>x.file,resolveQuestionImageUrl:x=>x.file});
       block.dataset.questionId=item.id;
       if(o.origin && item.content.origin)(block.querySelector('.qb-stem-body')||block.querySelector('.qb-stem')).prepend(node('span','print-origin','（'+item.content.origin+'）'));
-      const space=(o.answer_space_overrides||{})[item.id]||o.answer_space;
-      if(item.type==='free_response' && space!=='none'&&!inline){
-        const blank=node('div','print-answer-space');blank.dataset.answerSpace=space;
-        blank.style.height=({small:12,medium:30,large:60}[space]||0)+'mm';block.append(blank);
+      const overrides=o.answer_space_overrides||{};
+      const raw=Object.prototype.hasOwnProperty.call(overrides,item.id)?overrides[item.id]:o.answer_space;
+      let mm=spaceMm(raw,item.type);
+      if(item.type==='free_response'&&mm<8)mm=8;
+      if(mm>0&&!inline){
+        const blank=node('div','print-answer-space');blank.dataset.answerSpace=String(mm);
+        blank.style.height=mm+'mm';block.append(blank);
       }
       source.append(block);
       if(inline && (String(item.selected?.answer||'').trim() || String(item.selected?.analysis||'').trim() || (item.solution_images||[]).length))source.append(solutionRow(number,item,true));

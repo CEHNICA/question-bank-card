@@ -227,13 +227,13 @@ class SharedPdfPaginationTests(SimpleTestCase):
         preview, exported = self.documents()
         _, preview_count, preview_geometry = self.render(preview)
         data, export_count, geometry = self.render(exported)
-        self.assertEqual((preview_count, export_count), (2, 2))
+        self.assertEqual((preview_count, export_count), (3, 3))
         self.assert_geometry(preview_geometry, geometry)
         questions = [q for page in geometry["pages"] for q in page["questions"]]
         self.assertEqual({q["id"] for q in questions}, {x["id"] for x in self.items})
         self.assertEqual(sum(len(q["images"]) for q in questions), 1)
         space_mm = sum(s["rect"][3] for q in questions for s in q["spaces"]) * 25.4 / 96
-        self.assertAlmostEqual(space_mm, 180, delta=0.05)
+        self.assertAlmostEqual(space_mm, 420, delta=0.05)
         self.assertTrue(
             any(q["spaces"] for q in geometry["pages"][0]["questions"]),
             "Page-bottom writing space is used before continuing",
@@ -241,9 +241,11 @@ class SharedPdfPaginationTests(SimpleTestCase):
         import pymupdf
 
         with pymupdf.open(stream=data, filetype="pdf") as result:
-            self.assertEqual(result.page_count, 2)
-            self.assertIn("商品", result[1].get_text())
-            self.assertTrue(result[1].get_images())
+            self.assertEqual(result.page_count, 3)
+            # 最后一段纸得有内容，不能是为了凑页数而空出来的。
+            self.assertTrue(result[2].get_text().strip(), "The last sheet carries real content")
+            page = next(index for index, sheet in enumerate(result) if "商品" in sheet.get_text())
+            self.assertTrue(result[page].get_images(), "The figure stays with the question it belongs to")
         self.assertEqual(self.items, before)
 
     def test_slow_url_fonts_match_embedded_pdf_and_failed_fonts_do_not_publish_fallback_pagination(self):
@@ -286,7 +288,7 @@ class SharedPdfPaginationTests(SimpleTestCase):
             _, preview_count, preview_geometry = self.render(delayed, remote_fonts=True)
             _, export_count, export_geometry = self.render(exported)
             self.assertGreater(len(requests), 0, "The test must actually load delayed URL fonts")
-            self.assertEqual((preview_count, export_count), (2, 2))
+            self.assertEqual(preview_count, export_count, "The delayed-font preview paginates like the export")
             self.assert_geometry(preview_geometry, export_geometry)
             Handler.fail = True
             with self.assertRaisesRegex(pdf.word.ExportError, "公式字体未能载入"):
@@ -306,7 +308,7 @@ class SharedPdfPaginationTests(SimpleTestCase):
         questions = [q for page in geometry["pages"] for q in page["questions"]]
         self.assertEqual(len(questions), 7, "Keep mode must not split a fitting question to save paper")
         spaces = [s for q in questions for s in q["spaces"]]
-        self.assertEqual(len(spaces), 3)
+        self.assertEqual(len(spaces), 7, "Every question carries its own writing space")
         for space in spaces:
             self.assertAlmostEqual(space["rect"][3] * 25.4 / 96, 60, delta=0.02)
 

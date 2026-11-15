@@ -313,14 +313,14 @@
           <p class="print-options-note">PDF 按右侧分页保存；Word 可继续编辑。选项过长时自动换行，保留完整内容。</p>
           <details class="print-advanced"><summary>更多排版</summary><div class="print-options-body">
             <label class="print-field">正文字号 <select id="printFontSize"><option value="12" selected>12 磅</option><option value="14">14 磅</option><option value="16">16 磅</option></select></label>
-            <label class="print-field">解答题留白 <select id="printAnswerSpace"><option value="none">不留白</option><option value="small" selected>少量（12 毫米）</option><option value="medium">适中（30 毫米）</option><option value="large">较多（60 毫米）</option></select></label>
-            <p class="print-options-note">学生卷默认给解答题留少量思路空间；逐题紧跟答案时不留白。可在“调整单题”里单独设置。</p>
+            <label class="print-field">答题留白 <select id="printAnswerSpace"><option value="auto" selected>智能（解答题 30 毫米、选择题不留白）</option><option value="0">不留白（解答题保底 8 毫米）</option><option value="8">极简（8 毫米）</option><option value="12">少量（12 毫米）</option><option value="30">适中（30 毫米）</option><option value="60">较多（60 毫米）</option></select></label>
+            <p class="print-options-note">默认按题型自动：选择题不留白，解答题留 30 毫米。每一道题都能在“调整单题”里单独设成任意毫米数（解答题至少 8 毫米）。</p>
             <label class="library-toggle switch"><input id="printStudentInfo" type="checkbox" checked><span class="switch-track" aria-hidden="true"></span>姓名、班级与得分栏</label>
           </div></details>
           <details class="print-individual"><summary>调整单题</summary><div class="print-options-body">
             <label class="print-field">题目 <select id="printIndividualQuestion" aria-label="要调整的题目"></select></label>
             <label class="print-field">本题选项 <select id="printIndividualOption"><option value="">跟随全卷</option><option value="auto">自动排版</option><option value="four">一行四个</option><option value="two">两行两个</option><option value="vertical">四个选项竖排</option></select></label>
-            <label class="print-field">本题留白 <select id="printIndividualSpace"><option value="">跟随全卷</option><option value="none">不留白</option><option value="small">少量（12 毫米）</option><option value="medium">适中（30 毫米）</option><option value="large">较多（60 毫米）</option></select></label>
+            <div class="print-field">本题留白 <span class="print-space-editor"><input id="printIndividualSpace" type="number" min="0" max="200" step="1" placeholder="跟随全卷" aria-label="本题留白毫米数"><span class="print-space-unit">毫米</span><button id="printIndividualSpaceFollow" type="button" class="print-space-follow">跟随全卷</button></span></div>
             <label class="library-toggle switch"><input id="printIndividualBreak" type="checkbox"><span class="switch-track" aria-hidden="true"></span>这题另起一页</label>
             <p id="printIndividualHint" class="print-options-note"></p>
             <div id="printFigureBox" class="print-figure-box" hidden>
