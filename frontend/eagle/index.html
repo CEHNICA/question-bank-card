@@ -1898,24 +1898,205 @@
       `;
 
       menuEl.innerHTML = menuHtml;
-
-      const clickX = e ? e.clientX : 200;
-      const clickY = e ? e.clientY : 200;
-      const menuWidth = 240;
-      const menuHeight = 320;
-
-      const posX = (clickX + menuWidth > window.innerWidth) ? (window.innerWidth - menuWidth - 10) : clickX;
-      const posY = (clickY + menuHeight > window.innerHeight) ? (window.innerHeight - menuHeight - 10) : clickY;
-
-      menuEl.style.left = `${posX}px`;
-      menuEl.style.top = `${posY}px`;
-      menuEl.classList.remove('hidden');
+      positionEagleContextMenu(menuEl, e, 240, 320);
     }
 
     function hideEagleContextMenu() {
       const menuEl = document.getElementById('eagleContextMenu');
       if (menuEl) menuEl.classList.add('hidden');
       activeContextMenuPaperId = null;
+    }
+
+    function positionEagleContextMenu(menuEl, e, menuWidth, menuHeight) {
+      const clickX = e ? e.clientX : 200;
+      const clickY = e ? e.clientY : 200;
+      const posX = (clickX + menuWidth > window.innerWidth) ? (window.innerWidth - menuWidth - 10) : clickX;
+      const posY = (clickY + menuHeight > window.innerHeight) ? (window.innerHeight - menuHeight - 10) : clickY;
+      menuEl.style.left = `${posX}px`;
+      menuEl.style.top = `${posY}px`;
+      menuEl.classList.remove('hidden');
+    }
+
+    // ---- 左栏文件夹树右键菜单 ----
+    // B3 把左栏重写成统一文件夹树时，renderFolderTreeNode() 忘了挂 oncontextmenu，
+    // 结果树上任何节点右键都弹浏览器自己的默认菜单。这轮补回来。
+    function treeMenuHeader(text) {
+      return '<div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">' + text + '</div>';
+    }
+
+    function treeMenuItem(icon, label, onclick) {
+      return '<div onclick="' + onclick + '" class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">' +
+        '<span class="shrink-0">' + icon + '</span><span class="truncate">' + label + '</span></div>';
+    }
+
+    function treeMenuDivider() {
+      return '<div class="my-1.5 border-t border-slate-100"></div>';
+    }
+
+    function treeNodeSubtreeTagIds(node) {
+      const ids = [];
+      const walk = (n) => {
+        if (n.type === 'tag' && n.tagId) ids.push(n.tagId);
+        (n.children || []).forEach(walk);
+      };
+      walk(node);
+      return ids;
+    }
+
+    function treeTagToFilter(nodeId, mode) {
+      const node = folderNodeRegistry.get(nodeId);
+      if (!node) return;
+      hideEagleContextMenu();
+
+      // select 只选它自己（标签筛选是 AND 语义，整棵子树一起选必然空集）
+      // exclude 是「命中任一即排除」，所以带整棵子树是对的
+      const ids = mode === 'exclude' ? treeNodeSubtreeTagIds(node) : (node.tagId ? [node.tagId] : []);
+      if (!ids.length) {
+        showToast('该文件夹下没有可用的标签', 'error');
+        return;
+      }
+
+      if (mode === 'exclude') {
+        filterState.excludedTagIds = filterState.excludedTagIds.filter(id => !ids.includes(id));
+        ids.forEach(id => filterState.excludedTagIds.push(id));
+        filterState.selectedTagIds = filterState.selectedTagIds.filter(id => !ids.includes(id));
+      } else {
+        filterState.selectedTagIds = filterState.selectedTagIds.filter(id => !ids.includes(id));
+        ids.forEach(id => filterState.selectedTagIds.push(id));
+        filterState.excludedTagIds = filterState.excludedTagIds.filter(id => !ids.includes(id));
+      }
+      renderTagFilterDropdownList();
+      updateFilterPillBadges();
+      applyFilters();
+      showToast(mode === 'exclude'
+        ? '已排除 ' + ids.length + ' 个标签（含子标签）'
+        : '已在标签筛选中选中「' + node.label + '」', 'success');
+    }
+
+    // 这个标签自身是否真的挂着题。父标签 direct_count = 0，
+    // 给它「在标签筛选中选中它」会让用户看到 0 结果，所以只在有题时才给这个菜单项。
+    function treeTagHasOwnQuestions(node) {
+      if (!node || node.type !== 'tag' || !node.tagId) return false;
+      const t = tagCatalogue.find(x => x.id === node.tagId);
+      return !!(t && (t.direct_count || 0) > 0);
+    }
+
+    function copyTreeNodeLabel(nodeId) {
+      const node = folderNodeRegistry.get(nodeId);
+      if (!node) return;
+      const text = String(node.label || '');
+      hideEagleContextMenu();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => showToast('已复制: ' + text, 'success'));
+      } else {
+        showToast(text, 'info');
+      }
+    }
+
+    function expandAllFolderNodes() {
+      folderNodeRegistry.forEach(node => {
+        if (node.children && node.children.length) folderTreeState.expanded.add(node.id);
+      });
+      renderFolderTree();
+      hideEagleContextMenu();
+      showToast('已展开全部文件夹', 'success');
+    }
+
+    function collapseAllFolderNodes() {
+      folderTreeState.expanded.clear();
+      renderFolderTree();
+      hideEagleContextMenu();
+      showToast('已收起全部文件夹', 'success');
+    }
+
+    function renameCustomSmartFolder(customId) {
+      const list = readCustomSmartFolders();
+      const item = list.find(x => x.id === customId);
+      if (!item) { hideEagleContextMenu(); return; }
+      hideEagleContextMenu();
+      const name = window.prompt('重命名智能文件夹：', item.name);
+      if (!name || !name.trim() || name.trim() === item.name) return;
+      item.name = name.trim();
+      writeCustomSmartFolders(list);
+      renderFolderTree();
+      showToast('已重命名为「' + item.name + '」', 'success');
+    }
+
+    function deleteCustomSmartFolder(customId) {
+      const list = readCustomSmartFolders();
+      const item = list.find(x => x.id === customId);
+      if (!item) { hideEagleContextMenu(); return; }
+      hideEagleContextMenu();
+      if (!window.confirm('删除智能文件夹「' + item.name + '」？')) return;
+      writeCustomSmartFolders(list.filter(x => x.id !== customId));
+      if (folderTreeState.activeId === 'custom:' + customId) {
+        folderTreeState.activeId = '';
+        filterState.smartFilter = '';
+        filterState.folderType = 'all';
+        filterState.folderPaperIds = [];
+        filterState.folderTagIds = [];
+        applyFilters();
+      }
+      renderFolderTree();
+      showToast('已删除智能文件夹', 'success');
+    }
+
+    function handleFolderTreeContextMenu(e, nodeId) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      const node = folderNodeRegistry.get(nodeId);
+      if (!node) return;
+
+      // 试卷节点直接复用现成菜单（重命名/仅看该项目/看原卷/排序全都有）
+      if (node.type === 'paper') {
+        openEagleContextMenu(e, 'tree', node.paperId);
+        return;
+      }
+
+      const menuEl = document.getElementById('eagleContextMenu');
+      if (!menuEl) return;
+
+      let html = '';
+      if (node.type === 'tag') {
+        html += treeMenuHeader('标签：' + escapeHtml(node.label));
+        html += '<div class="space-y-0.5">';
+        html += treeMenuItem('\u{1F4C2}', '只看该标签（含子标签）', "applyFolderNode('" + nodeId + "'); hideEagleContextMenu();");
+        if (treeTagHasOwnQuestions(node)) {
+          html += treeMenuItem('\u{1F516}', '在标签筛选中选中它', "treeTagToFilter('" + nodeId + "','select')");
+        }
+        html += treeMenuItem('\u{1F6AB}', '从当前结果排除（含子标签）', "treeTagToFilter('" + nodeId + "','exclude')");
+        html += treeMenuItem('\u{1F4CB}', '复制标签名', "copyTreeNodeLabel('" + nodeId + "')");
+        html += '</div>';
+      } else if (node.type === 'custom') {
+        html += treeMenuHeader('智能文件夹：' + escapeHtml(node.label));
+        html += '<div class="space-y-0.5">';
+        html += treeMenuItem('\u{1F441}', '设为当前视图', "applyFolderNode('" + nodeId + "'); hideEagleContextMenu();");
+        html += treeMenuItem('\u{270F}\u{FE0F}', '重命名此智能文件夹', "renameCustomSmartFolder('" + node.customId + "')");
+        html += treeMenuItem('\u{1F5D1}\u{FE0F}', '删除此智能文件夹', "deleteCustomSmartFolder('" + node.customId + "')");
+        html += '</div>';
+      } else if (node.type === 'smart') {
+        html += treeMenuHeader('智能文件夹：' + escapeHtml(node.label));
+        html += '<div class="space-y-0.5">';
+        html += treeMenuItem('\u{1F441}', '设为当前视图', "applyFolderNode('" + nodeId + "'); hideEagleContextMenu();");
+        html += '</div>';
+      } else {
+        html += treeMenuHeader('文件夹：' + escapeHtml(node.label));
+        html += '<div class="space-y-0.5">';
+        html += treeMenuItem('\u{1F4C2}', '展开全部子文件夹', 'expandAllFolderNodes()');
+        html += treeMenuItem('\u{1F4C1}', '收起全部子文件夹', 'collapseAllFolderNodes()');
+        if (node.id === 'group:papers') {
+          html += treeMenuItem('\u{1F522}', '按包含题数排序', "setPaperSortMode('count_desc')");
+        }
+        html += '</div>';
+      }
+
+      html += treeMenuDivider();
+      html += treeMenuItem('\u{1F504}', '刷新项目数据', 'refreshPapersData(); hideEagleContextMenu();');
+
+      menuEl.innerHTML = html;
+      positionEagleContextMenu(menuEl, e, 260, 300);
     }
 
     function handlePaperSectionContextMenu(e) {
@@ -4231,7 +4412,8 @@
 
       return '<div class="flex items-center justify-between rounded-md px-1.5 py-1 ' +
         (isActive ? 'bg-emerald-50 text-emerald-900 font-semibold' : 'text-slate-600 hover:bg-slate-100') +
-        '" style="padding-left:' + (4 + depth * 11) + 'px">' +
+        '" style="padding-left:' + (4 + depth * 11) + 'px"' +
+        ' oncontextmenu="handleFolderTreeContextMenu(event, \'' + node.id + '\')">' +
         '<div class="flex items-center gap-1 min-w-0 cursor-pointer" onclick="applyFolderNode(\'' + node.id + '\')">' +
         arrow +
         '<span class="text-[11px] shrink-0">' + node.icon + '</span>' +
