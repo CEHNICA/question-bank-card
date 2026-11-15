@@ -287,8 +287,10 @@
     <!-- ================= 2. 中间主区域：极简 Eagle 筛选胶囊条 + 试题流 ================= -->
     <main class="flex-1 flex flex-col min-w-0 bg-[#f8fafc] overflow-hidden">
 
-      <!-- ================= Eagle 单行极简筛选条 (Filter Pill Bar) ================= -->
-      <div class="min-h-10 bg-white border-b border-slate-200/80 px-4 flex items-center justify-between gap-3 shrink-0 z-30 relative">
+      <!-- ================= Eagle 筛选条：胶囊行 + 生效条件 chip 行 ================= -->
+      <div class="bg-white border-b border-slate-200/80 shrink-0 z-30 relative">
+        <!-- 第一行：胶囊按钮组 + 统计 -->
+        <div class="min-h-10 px-4 flex items-center justify-between gap-3">
         
         <!-- 左侧胶囊下拉按钮组 (去除 overflow-x-auto，防止弹出菜单被无情裁剪) -->
         <div class="flex flex-wrap items-center gap-1.5 py-1">
@@ -302,6 +304,7 @@
             >
               <span class="text-slate-400">🏷️</span>
               <span id="pillLabelTag">标签筛选</span>
+              <span id="pillBadgeTag" class="hidden min-w-[16px] h-4 px-1 rounded-full bg-emerald-500 text-white text-[10px] font-bold leading-none inline-flex items-center justify-center"></span>
               <svg class="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
             </button>
 
@@ -341,22 +344,12 @@
             >
               <span>📑</span>
               <span id="pillLabelType">题型</span>
+              <span id="pillBadgeType" class="hidden min-w-[16px] h-4 px-1 rounded-full bg-sky-500 text-white text-[10px] font-bold leading-none inline-flex items-center justify-center"></span>
               <svg class="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
             </button>
 
             <div id="dropdownType" onclick="event.stopPropagation()" class="hidden dropdown-menu absolute left-0 top-full mt-1.5 w-44 rounded-xl bg-white border border-slate-200 shadow-2xl p-2 z-50 space-y-1 text-xs">
-              <label class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer">
-                <input type="checkbox" onchange="toggleTypeFilter('solution', this.checked)" class="rounded text-emerald-600 focus:ring-0">
-                <span>解答题</span>
-              </label>
-              <label class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer">
-                <input type="checkbox" onchange="toggleTypeFilter('single_choice', this.checked)" class="rounded text-emerald-600 focus:ring-0">
-                <span>单选题</span>
-              </label>
-              <label class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer">
-                <input type="checkbox" onchange="toggleTypeFilter('fill_in', this.checked)" class="rounded text-emerald-600 focus:ring-0">
-                <span>填空题</span>
-              </label>
+              <div id="dropTypeList"></div>
             </div>
           </div>
 
@@ -369,22 +362,17 @@
             >
               <span>⭐</span>
               <span id="pillLabelStar">难度星级</span>
+              <span id="pillBadgeStar" class="hidden min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold leading-none inline-flex items-center justify-center"></span>
               <svg class="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
             </button>
 
-            <div id="dropdownStar" onclick="event.stopPropagation()" class="hidden dropdown-menu absolute left-0 top-full mt-1.5 w-44 rounded-xl bg-white border border-slate-200 shadow-2xl p-2 z-50 space-y-1 text-xs">
-              <label class="flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer">
-                <span class="text-amber-500 font-bold">★★★★★ (5星)</span>
-                <input type="checkbox" onchange="toggleStarFilter(5, this.checked)" class="rounded text-emerald-600 focus:ring-0">
-              </label>
-              <label class="flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer">
-                <span class="text-amber-500 font-bold">★★★★☆ (4星)</span>
-                <input type="checkbox" onchange="toggleStarFilter(4, this.checked)" class="rounded text-emerald-600 focus:ring-0">
-              </label>
-              <label class="flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer">
-                <span class="text-amber-500 font-bold">★★★☆☆ (3星)</span>
-                <input type="checkbox" onchange="toggleStarFilter(3, this.checked)" class="rounded text-emerald-600 focus:ring-0">
-              </label>
+            <div id="dropdownStar" onclick="event.stopPropagation()" class="hidden dropdown-menu absolute left-0 top-full mt-1.5 w-52 rounded-xl bg-white border border-slate-200 shadow-2xl p-2 z-50 space-y-1 text-xs">
+              <div class="px-1.5 pb-2 mb-1 border-b border-slate-100">
+                <div class="text-[10px] font-bold text-slate-400 mb-1.5">最低星级（≥ 该星级，含更高）</div>
+                <div id="dropStarMinRow" class="grid grid-cols-5 gap-1"></div>
+              </div>
+              <div class="text-[10px] font-bold text-slate-400 px-2 pt-0.5 pb-0.5">精确星级（只看恰好该星级）</div>
+              <div id="dropStarList"></div>
             </div>
           </div>
 
@@ -397,36 +385,17 @@
             >
               <span>✓</span>
               <span id="pillLabelStatus">解析与答案</span>
+              <span id="pillBadgeStatus" class="hidden min-w-[16px] h-4 px-1 rounded-full bg-teal-500 text-white text-[10px] font-bold leading-none inline-flex items-center justify-center"></span>
               <svg class="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
             </button>
 
             <div id="dropdownStatus" onclick="event.stopPropagation()" class="hidden dropdown-menu absolute left-0 top-full mt-1.5 w-44 rounded-xl bg-white border border-slate-200 shadow-2xl p-2 z-50 space-y-1 text-xs">
-              <label class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer">
-                <input type="checkbox" id="chkRequireAnswer" onchange="toggleRequireAnswer(this.checked)" class="rounded text-emerald-600 focus:ring-0">
-                <span>必须有参考答案</span>
-              </label>
-              <label class="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer">
-                <input type="checkbox" id="chkRequireAnalysis" onchange="toggleRequireAnalysis(this.checked)" class="rounded text-emerald-600 focus:ring-0">
-                <span>必须有详细解析</span>
-              </label>
+              <button id="btnRequireAnswer" onclick="toggleRequireAnswer()" class="w-full text-left px-2 py-1.5 rounded-md border text-xs cursor-pointer transition-colors">必须有参考答案</button>
+              <button id="btnRequireAnalysis" onclick="toggleRequireAnalysis()" class="w-full text-left px-2 py-1.5 rounded-md border text-xs cursor-pointer transition-colors">必须有详细解析</button>
             </div>
           </div>
 
           <div class="h-4 w-px bg-slate-200 mx-1"></div>
-
-          <!-- 内联选定条件 Active Chips -->
-          <div id="inlineActiveChipsContainer" class="flex items-center gap-1">
-            <!-- 动态注入 -->
-          </div>
-
-          <!-- 一键重置 -->
-          <button 
-            id="btnClearAllFilters"
-            onclick="resetAllFilters()" 
-            class="hidden text-[11px] font-medium text-slate-400 hover:text-rose-600 px-1.5 transition-colors"
-          >
-            重置
-          </button>
         </div>
 
         <!-- 统计与另存智能视图 -->
@@ -440,6 +409,20 @@
           >
             <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
             <span>存为智能视图</span>
+          </button>
+        </div>
+        </div>
+
+        <!-- 第二行：当前生效的筛选条件 chip（独占一行，选多了也不挤胶囊） -->
+        <div class="px-4 pb-1.5 flex items-center gap-1.5 flex-wrap">
+          <div id="inlineActiveChipsContainer" class="flex items-center gap-1.5 flex-wrap"></div>
+          <!-- 一键重置 -->
+          <button 
+            id="btnClearAllFilters"
+            onclick="resetAllFilters()" 
+            class="hidden text-[11px] font-medium text-slate-400 hover:text-rose-600 px-1.5 transition-colors"
+          >
+            重置
           </button>
         </div>
       </div>
@@ -1131,6 +1114,7 @@
       selectedTagIds: [],
       excludedTagIds: [],
       tagLogic: 'and',
+      difficultyMinStar: null,   // N★及以上；与 difficultyStars（精确匹配）互斥
       sortBy: 'number', // number, difficulty, year
       // 文件夹树（B3）：试卷 / 知识点 / 方法 统一成 Eagle 式文件夹
       folderType: '',      // all | paper | tag | group | smart | custom
@@ -1447,6 +1431,7 @@
               custom: tagGroupsData[2]
             };
             tagGroupsData.forEach(g => g.tags = []);
+            _filterTagNameCache = null;
             tagCatalogueRevision = tagsData.revision || 0;
             tagCatalogue = (tagsData.tags || []).map(t => ({
               id: t.id,
@@ -1684,6 +1669,7 @@
           updateFavoritesBadge();
           applyFilters();
           renderInlineActiveChips();
+          syncFilterDropdownStates();
           renderRightInspector();
           renderFolderTree();
         }
@@ -2357,6 +2343,7 @@
 
         if (filterState.questionTypes.length > 0 && !filterState.questionTypes.includes(q.questionTypeCode)) return false;
         if (filterState.difficultyStars.length > 0 && !filterState.difficultyStars.includes(q.difficultyStars)) return false;
+        if (filterState.difficultyMinStar && (q.difficultyStars || 0) < filterState.difficultyMinStar) return false;
         if (filterState.hasAnswer && !q.hasAnswer) return false;
         if (filterState.hasAnalysis && !q.hasAnalysis) return false;
 
@@ -4104,6 +4091,7 @@
         smartFilter: filterState.smartFilter,
         questionTypes: filterState.questionTypes.slice(),
         difficultyStars: filterState.difficultyStars.slice(),
+        difficultyMinStar: filterState.difficultyMinStar,
         hasAnswer: filterState.hasAnswer,
         hasAnalysis: filterState.hasAnalysis,
         selectedTagIds: filterState.selectedTagIds.slice(),
@@ -4151,6 +4139,7 @@
       filterState.smartFilter = f.smartFilter || '';
       filterState.questionTypes = (f.questionTypes || []).slice();
       filterState.difficultyStars = (f.difficultyStars || []).slice();
+      filterState.difficultyMinStar = f.difficultyMinStar || null;
       filterState.hasAnswer = !!f.hasAnswer;
       filterState.hasAnalysis = !!f.hasAnalysis;
       filterState.selectedTagIds = (f.selectedTagIds || []).slice();
@@ -4349,6 +4338,85 @@
       }
     }
 
+    // ---- 筛选条件的呈现 ----
+    // 老版 renderInlineActiveChips() 只渲染 项目/文件夹/智能视图/章节/难度星级
+    // 五类，标签筛选 / 题型 / 解析与答案 三个维度虽然过滤真的生效，却一个 chip
+    // 都不渲染 —— 于是用户勾了一堆，筛选条上只剩一个「5★」。
+    // 现在改成：胶囊挂计数徽标（哪个维度被动过）+ chip 行逐值列出（动了什么）。
+
+    const FILTER_CHIP_STYLE = {
+      tag:    'bg-emerald-50 text-emerald-900 border-emerald-200',
+      tagx:   'bg-rose-50 text-rose-900 border-rose-200',
+      type:   'bg-sky-50 text-sky-900 border-sky-200',
+      star:   'bg-amber-50 text-amber-800 border-amber-200',
+      status: 'bg-teal-50 text-teal-900 border-teal-200'
+    };
+
+    // 点 +N 展开过的 chip 组
+    const expandedFilterGroups = new Set();
+
+    // 标签 id -> 名称（缓存；标签目录变了要清）
+    var _filterTagNameCache = null;
+    function filterTagName(tagId) {
+      if (!_filterTagNameCache) {
+        _filterTagNameCache = {};
+        tagCatalogue.forEach(t => { _filterTagNameCache[t.id] = t.name; });
+        tagGroupsData.forEach(g => g.tags.forEach(t => {
+          if (!_filterTagNameCache[t.id]) _filterTagNameCache[t.id] = t.name;
+        }));
+      }
+      return _filterTagNameCache[tagId] || tagId;
+    }
+
+    // 胶囊计数徽标
+    function updateFilterPillBadges() {
+      const setBadge = (id, count, colorClass) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (count > 0) {
+          el.textContent = String(count);
+          el.className = 'min-w-[16px] h-4 px-1 rounded-full text-white text-[10px] font-bold leading-none inline-flex items-center justify-center ' + colorClass;
+          el.classList.remove('hidden');
+        } else {
+          el.classList.add('hidden');
+          el.textContent = '';
+        }
+      };
+      setBadge('pillBadgeTag', filterState.selectedTagIds.length + filterState.excludedTagIds.length, 'bg-emerald-500');
+      setBadge('pillBadgeType', filterState.questionTypes.length, 'bg-sky-500');
+      setBadge('pillBadgeStar', filterState.difficultyStars.length + (filterState.difficultyMinStar ? 1 : 0), 'bg-amber-500');
+      setBadge('pillBadgeStatus', (filterState.hasAnswer ? 1 : 0) + (filterState.hasAnalysis ? 1 : 0), 'bg-teal-500');
+    }
+
+    function renderFilterChip(kind, text, removeCall) {
+      const style = FILTER_CHIP_STYLE[kind] || 'bg-slate-50 text-slate-700 border-slate-200';
+      return `<span class="inline-flex items-center gap-0.5 pl-1.5 pr-1 py-0.5 rounded border text-xs ${style}"><span>${text}</span><button onclick="${removeCall}" class="font-bold cursor-pointer opacity-60 hover:opacity-100" title="移除此条件">×</button></span>`;
+    }
+
+    // 维度组头：× = 清空该维度全部
+    function renderFilterGroupHead(label, kind, bgClass) {
+      return `<span class="inline-flex items-center gap-1 pl-1.5 pr-1 py-0.5 rounded border text-xs font-bold ${bgClass}"><span>${label}</span><button onclick="removeFilterChip('group', '${kind}')" class="font-bold cursor-pointer opacity-60 hover:opacity-100" title="清空该维度">×</button></span>`;
+    }
+
+    // 同维度超过 3 个值 -> 折叠成 +N
+    function renderFilterGroupChips(groupKey, items) {
+      if (!items.length) return '';
+      const expanded = expandedFilterGroups.has(groupKey);
+      const shown = expanded ? items : items.slice(0, 3);
+      const rest = items.length - shown.length;
+      let html = shown.join('');
+      if (rest > 0) {
+        html += `<button onclick="toggleFilterGroupExpand('${groupKey}')" class="px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 text-slate-500 text-xs cursor-pointer hover:bg-slate-100">+${rest}</button>`;
+      }
+      return html;
+    }
+
+    function toggleFilterGroupExpand(groupKey) {
+      if (expandedFilterGroups.has(groupKey)) expandedFilterGroups.delete(groupKey);
+      else expandedFilterGroups.add(groupKey);
+      renderInlineActiveChips();
+    }
+
     function renderInlineActiveChips() {
       const container = document.getElementById('inlineActiveChipsContainer');
       const clearBtn = document.getElementById('btnClearAllFilters');
@@ -4366,6 +4434,8 @@
         Boolean(filterState.smartFilter) ||
         Boolean(filterState.folderTagIds && filterState.folderTagIds.length) ||
         (filterState.folderType === 'all' && folderTreeState.activeId !== 'all');
+
+      updateFilterPillBadges();
 
       if (!hasActive) {
         container.innerHTML = '';
@@ -4421,22 +4491,95 @@
         `;
       }
 
-      filterState.difficultyStars.forEach(s => {
-        html += `
-          <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-xs">
-            <span>${s}★</span>
-            <button onclick="removeFilterChip('star', '${s}')" class="text-amber-600 hover:text-amber-900 font-bold cursor-pointer">×</button>
-          </span>
-        `;
+      // ---- 标签组（AND/OR 必须显性化，否则不知道勾的标签是「都要有」还是「有任一」）----
+      const tagChips = [];
+      filterState.selectedTagIds.forEach(id => {
+        tagChips.push(renderFilterChip('tag', '🏷 ' + escapeHtml(filterTagName(id)), "removeFilterChip('tag', '" + id + "')"));
       });
+      filterState.excludedTagIds.forEach(id => {
+        tagChips.push(renderFilterChip('tagx', '🏷 −' + escapeHtml(filterTagName(id)), "removeFilterChip('excltag', '" + id + "')"));
+      });
+      if (tagChips.length) {
+        const logicLabel = filterState.tagLogic === 'and' ? '全含' : '任一';
+        html += renderFilterGroupHead('🏷 标签·' + logicLabel, 'tag', 'bg-emerald-100 text-emerald-900 border-emerald-200');
+        html += renderFilterGroupChips('tag', tagChips);
+      }
+
+      // ---- 题型组 ----
+      const typeChips = filterState.questionTypes.map(t => {
+        const opt = FILTER_TYPE_OPTIONS.find(o => o.code === t);
+        return renderFilterChip('type', '📑 ' + (opt ? opt.label : t), "removeFilterChip('type', '" + t + "')");
+      });
+      if (typeChips.length) {
+        html += renderFilterGroupHead('📑 题型', 'type', 'bg-sky-100 text-sky-900 border-sky-200');
+        html += renderFilterGroupChips('type', typeChips);
+      }
+
+      // ---- 难度组（精确 / 及以上 分开写清楚）----
+      const starChips = [];
+      filterState.difficultyStars.forEach(s => {
+        starChips.push(renderFilterChip('star', '⭐ 恰好' + s + '★', "removeFilterChip('star', '" + s + "')"));
+      });
+      if (filterState.difficultyMinStar) {
+        starChips.push(renderFilterChip('star', '⭐ ' + filterState.difficultyMinStar + '★及以上', "removeFilterChip('minstar', '')"));
+      }
+      if (starChips.length) {
+        html += renderFilterGroupHead('⭐ 难度', 'star', 'bg-amber-100 text-amber-900 border-amber-200');
+        html += renderFilterGroupChips('star', starChips);
+      }
+
+      // ---- 解析与答案组 ----
+      const statusChips = [];
+      if (filterState.hasAnswer) statusChips.push(renderFilterChip('status', '✓ 有答案', "removeFilterChip('answer', '')"));
+      if (filterState.hasAnalysis) statusChips.push(renderFilterChip('status', '✓ 有解析', "removeFilterChip('analysis', '')"));
+      if (statusChips.length) {
+        html += renderFilterGroupHead('✓ 完整度', 'status', 'bg-teal-100 text-teal-900 border-teal-200');
+        html += renderFilterGroupChips('status', statusChips);
+      }
 
       container.innerHTML = html;
     }
 
     function removeFilterChip(type, val) {
-      if (type === 'star') {
-        filterState.difficultyStars = filterState.difficultyStars.filter(s => s !== parseInt(val));
+      switch (type) {
+        case 'star':
+          filterState.difficultyStars = filterState.difficultyStars.filter(s => s !== parseInt(val));
+          break;
+        case 'minstar':
+          filterState.difficultyMinStar = null;
+          break;
+        case 'type':
+          filterState.questionTypes = filterState.questionTypes.filter(t => t !== val);
+          break;
+        case 'tag':
+          filterState.selectedTagIds = filterState.selectedTagIds.filter(id => id !== val);
+          break;
+        case 'excltag':
+          filterState.excludedTagIds = filterState.excludedTagIds.filter(id => id !== val);
+          break;
+        case 'answer':
+          filterState.hasAnswer = false;
+          break;
+        case 'analysis':
+          filterState.hasAnalysis = false;
+          break;
+        case 'group':
+          if (val === 'tag') {
+            filterState.selectedTagIds = [];
+            filterState.excludedTagIds = [];
+          } else if (val === 'type') {
+            filterState.questionTypes = [];
+          } else if (val === 'star') {
+            filterState.difficultyStars = [];
+            filterState.difficultyMinStar = null;
+          } else if (val === 'status') {
+            filterState.hasAnswer = false;
+            filterState.hasAnalysis = false;
+          }
+          break;
       }
+      syncFilterDropdownStates();
+      renderTagFilterDropdownList();
       applyFilters();
     }
 
@@ -4451,6 +4594,7 @@
       filterState.excludedTagIds = [];
       filterState.questionTypes = [];
       filterState.difficultyStars = [];
+      filterState.difficultyMinStar = null;
       filterState.hasAnswer = false;
       filterState.hasAnalysis = false;
       filterState.keyword = '';
@@ -4473,25 +4617,50 @@
       applyFilters();
     }
 
-    function toggleTypeFilter(type, checked) {
-      if (checked) filterState.questionTypes.push(type);
-      else filterState.questionTypes = filterState.questionTypes.filter(t => t !== type);
+    // 勾选一律「先删后加」：原来直接 push，重复勾一次数组里就多一个重复值。
+    function toggleTypeFilter(type) {
+      if (filterState.questionTypes.includes(type)) {
+        filterState.questionTypes = filterState.questionTypes.filter(t => t !== type);
+      } else {
+        filterState.questionTypes.push(type);
+      }
+      syncFilterDropdownStates();
       applyFilters();
     }
 
-    function toggleStarFilter(star, checked) {
-      if (checked) filterState.difficultyStars.push(star);
-      else filterState.difficultyStars = filterState.difficultyStars.filter(s => s !== star);
+    function toggleStarFilter(star) {
+      if (filterState.difficultyStars.includes(star)) {
+        filterState.difficultyStars = filterState.difficultyStars.filter(s => s !== star);
+      } else {
+        filterState.difficultyStars.push(star);
+        // 精确星级与「N★及以上」互斥
+        filterState.difficultyMinStar = null;
+      }
+      syncFilterDropdownStates();
       applyFilters();
     }
 
-    function toggleRequireAnswer(checked) {
-      filterState.hasAnswer = checked;
+    // 「N★及以上」：单选，再点一次取消；与精确星级互斥
+    function setMinStar(star) {
+      if (filterState.difficultyMinStar === star) {
+        filterState.difficultyMinStar = null;
+      } else {
+        filterState.difficultyMinStar = star;
+        filterState.difficultyStars = [];
+      }
+      syncFilterDropdownStates();
       applyFilters();
     }
 
-    function toggleRequireAnalysis(checked) {
-      filterState.hasAnalysis = checked;
+    function toggleRequireAnswer() {
+      filterState.hasAnswer = !filterState.hasAnswer;
+      syncFilterDropdownStates();
+      applyFilters();
+    }
+
+    function toggleRequireAnalysis() {
+      filterState.hasAnalysis = !filterState.hasAnalysis;
+      syncFilterDropdownStates();
       applyFilters();
     }
 
@@ -4510,6 +4679,11 @@
       const isHidden = drop.classList.contains('hidden');
       // 浮层在 DOM 里的 class 是 dropdown-menu，不是 filter-dropdown。
       document.querySelectorAll('.dropdown-menu').forEach(d => d.classList.add('hidden'));
+      // 题型/难度浮层是动态渲染的，打开前先按 filterState 重建，
+      // 否则首次打开是空的（而且勾选态会跟真实状态对不上）。
+      if (name === 'type') renderTypeFilterDropdownList();
+      if (name === 'star') renderStarFilterDropdownList();
+      if (name === 'tag') renderTagFilterDropdownList();
       if (isHidden) drop.classList.remove('hidden');
     }
 
@@ -4520,14 +4694,25 @@
         <div class="mb-2">
           <div class="text-[10px] font-bold text-slate-400 mb-1">${g.name}</div>
           <div class="flex flex-wrap gap-1">
-            ${g.tags.map(t => `
+            ${g.tags.map(t => {
+              const picked = filterState.selectedTagIds.includes(t.id);
+              const banned = filterState.excludedTagIds.includes(t.id);
+              const cls = picked
+                ? 'bg-emerald-500 border-emerald-500 text-white'
+                : (banned
+                  ? 'bg-rose-50 border-rose-300 text-rose-700 line-through'
+                  : 'bg-white border-slate-200 text-slate-700 hover:border-emerald-400');
+              const tip = banned ? '已排除（再次点击取消）'
+                : (picked ? '已选中（再次点击取消）' : '点击选中，Alt 点击排除');
+              return `
               <button 
                 onclick="handleTagFilterClick('${t.id}', event)"
-                class="px-2 py-0.5 rounded text-[11px] border border-slate-200 bg-white text-slate-700 hover:border-emerald-400 cursor-pointer"
+                title="${tip}"
+                class="px-2 py-0.5 rounded text-[11px] border cursor-pointer transition-colors ${cls}"
               >
                 ${escapeHtml(t.name)}
-              </button>
-            `).join('')}
+              </button>`;
+            }).join('')}
           </div>
         </div>
       `).join('');
@@ -4537,12 +4722,96 @@
 
     function handleTagFilterClick(tagId, e) {
       if (e) e.stopPropagation();
-      if (filterState.selectedTagIds.includes(tagId)) {
+      const alt = !!(e && e.altKey);
+      if (alt) {
+        // Alt 点击 = 排除。浮层 placeholder 上一直写着这个功能，以前是死的
+        // （handleTagFilterClick 从来没读过 altKey，excludedTagIds 永远是空）。
+        const wasExcluded = filterState.excludedTagIds.includes(tagId);
+        filterState.excludedTagIds = filterState.excludedTagIds.filter(id => id !== tagId);
+        if (!wasExcluded) filterState.excludedTagIds.push(tagId);
         filterState.selectedTagIds = filterState.selectedTagIds.filter(id => id !== tagId);
       } else {
-        filterState.selectedTagIds.push(tagId);
+        const wasSelected = filterState.selectedTagIds.includes(tagId);
+        filterState.selectedTagIds = filterState.selectedTagIds.filter(id => id !== tagId);
+        if (!wasSelected) filterState.selectedTagIds.push(tagId);
+        filterState.excludedTagIds = filterState.excludedTagIds.filter(id => id !== tagId);
       }
+      renderTagFilterDropdownList();
+      updateFilterPillBadges();
       applyFilters();
+    }
+
+    const FILTER_TYPE_OPTIONS = [
+      { code: 'solution', label: '解答题' },
+      { code: 'single_choice', label: '单选题' },
+      { code: 'fill_in', label: '填空题' }
+    ];
+
+    // 题型/难度浮层改成动态渲染：以前是静态 HTML，重新打开浮层勾选态全丢，
+    // 用户只能反复勾（还会 push 出重复值）。
+    function renderTypeFilterDropdownList() {
+      const container = document.getElementById('dropTypeList');
+      if (!container) return;
+      container.innerHTML = FILTER_TYPE_OPTIONS.map(o => {
+        const on = filterState.questionTypes.includes(o.code);
+        const cls = on
+          ? 'bg-emerald-500 border-emerald-500 text-white font-bold'
+          : 'bg-white border-slate-200 text-slate-700 hover:border-emerald-400';
+        return `
+        <button onclick="toggleTypeFilter('${o.code}')" title="${on ? '已选中（再次点击取消）' : '点击选中'}"
+          class="w-full text-left px-2 py-1.5 rounded-md border text-xs cursor-pointer transition-colors ${cls}">
+          ${o.label}
+        </button>`;
+      }).join('');
+    }
+
+    function renderStarFilterDropdownList() {
+      const list = document.getElementById('dropStarList');
+      if (list) {
+        list.innerHTML = [5, 4, 3].map(s => {
+          const on = filterState.difficultyStars.includes(s);
+          const cls = on
+            ? 'bg-amber-500 border-amber-500 text-white font-bold'
+            : 'bg-white border-slate-200 text-slate-700 hover:border-amber-400';
+          return `
+          <button onclick="toggleStarFilter(${s})" title="${on ? '已选中（再次点击取消）' : '只看恰好该星级'}"
+            class="w-full text-left px-2 py-1.5 rounded-md border text-xs cursor-pointer transition-colors ${cls}">
+            <span class="text-amber-500 font-bold">${'★'.repeat(s)}${'☆'.repeat(5 - s)} (${s}星)</span>
+          </button>`;
+        }).join('');
+      }
+      const minRow = document.getElementById('dropStarMinRow');
+      if (minRow) {
+        minRow.innerHTML = [1, 2, 3, 4, 5].map(s => {
+          const on = filterState.difficultyMinStar === s;
+          return `
+            <button onclick="setMinStar(${s})"
+              class="px-1 py-1 rounded text-[11px] border transition-colors ${on
+                ? 'bg-amber-500 border-amber-500 text-white font-bold'
+                : 'bg-white border-slate-200 text-slate-600 hover:border-amber-400'}"
+              title="${s}★及以上（含更高）">${s}★</button>`;
+        }).join('');
+      }
+    }
+
+    function syncFilterDropdownStates() {
+      renderTypeFilterDropdownList();
+      renderStarFilterDropdownList();
+      const ansBtn = document.getElementById('btnRequireAnswer');
+      if (ansBtn) {
+        ansBtn.className = 'w-full text-left px-2 py-1.5 rounded-md border text-xs cursor-pointer transition-colors ' +
+          (filterState.hasAnswer
+            ? 'bg-teal-500 border-teal-500 text-white font-bold'
+            : 'bg-white border-slate-200 text-slate-700 hover:border-teal-400');
+      }
+      const anaBtn = document.getElementById('btnRequireAnalysis');
+      if (anaBtn) {
+        anaBtn.className = 'w-full text-left px-2 py-1.5 rounded-md border text-xs cursor-pointer transition-colors ' +
+          (filterState.hasAnalysis
+            ? 'bg-teal-500 border-teal-500 text-white font-bold'
+            : 'bg-white border-slate-200 text-slate-700 hover:border-teal-400');
+      }
+      updateFilterPillBadges();
     }
 
     function openLightboxSourceImage() {
@@ -4663,6 +4932,7 @@
           subtree_count: t.subtree_count || 0, isPinned: !!t.favorite
         }));
         tagGroupsData.forEach(g => g.tags = []);
+        _filterTagNameCache = null;
         tagCatalogue.forEach(t => {
           const group = t.kind === 'method' ? tagGroupsData[1] : (t.kind === 'knowledge' ? tagGroupsData[0] : tagGroupsData[2]);
           group.tags.push({ id: t.id, name: t.name, color: group.color, useCount: t.count || 0, isPinned: !!t.favorite });
