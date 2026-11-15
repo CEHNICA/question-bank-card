@@ -69,14 +69,26 @@ test('Eagle 7大核心Bug修复综合验证套件', async (t) => {
     assert.ok(content.includes("mode: 'combined'"), '出图模式应为 combined 完整题面与配图');
     assert.ok(content.includes('正在生成…'), '出图期间按钮需显示正在生成提示');
 
-    // 2. 界面挂载点：卡片、紧凑行、右栏属性面板、快速审题弹窗
-    assert.ok(content.includes("copyQuestionImage('${q.id}', this)"), '卡片中应挂载 copyQuestionImage 按钮');
-    assert.ok(content.includes('id="btn_compact_copy_image_'), '紧凑行模式中应包含复制图片按钮');
+    // 2. 界面挂载点：右键菜单、右栏属性面板、快速审题弹窗
+    assert.ok(content.includes("copyQuestionImage('${q.id}')"), '右键菜单中应能触发 copyQuestionImage');
     assert.ok(content.includes('id="qlCopyImageBtn"'), '快速审题中应包含 qlCopyImageBtn 按钮');
     assert.ok(content.includes('id="metaCopyImageBtn"'), '右侧属性面板应包含 metaCopyImageBtn 按钮');
 
     // 3. 全局快捷键与说明
     assert.ok(content.includes("e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c')"), '应支持 Ctrl+Shift+C 快捷键');
     assert.ok(content.includes('Ctrl + Shift + C'), '快捷键指南弹窗应声明 Ctrl + Shift + C');
+  });
+
+  await t.test('试题卡片右键菜单与操作栏优雅收纳 (openQuestionContextMenu)', () => {
+    // 1. 试题专属右键菜单定义
+    assert.ok(content.includes('function openQuestionContextMenu(e, qid)'), '应包含 openQuestionContextMenu 函数');
+    assert.ok(content.includes('复制题目图片'), '右键菜单应包含复制题目图片选项');
+    assert.ok(content.includes('核验证据 (原卷扫描件)'), '右键菜单应包含核验证据选项');
+    assert.ok(content.includes('全屏快速审题'), '右键菜单应包含全屏快速审题选项');
+    assert.ok(content.includes('编辑题目与选项'), '右键菜单应包含编辑题目选项');
+
+    // 2. 卡片与紧凑行挂载 oncontextmenu 与 ··· 更多按钮
+    assert.ok(content.includes("oncontextmenu=\"openQuestionContextMenu(event, '${q.id}')\""), '卡片与行节点应绑定 oncontextmenu');
+    assert.ok(content.includes("openQuestionContextMenu(event, '${q.id}')"), '卡片更多按钮点击应触发 openQuestionContextMenu');
   });
 });

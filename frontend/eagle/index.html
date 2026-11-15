@@ -3157,6 +3157,7 @@
           id="qcard_${q.id}"
           onclick="focusQuestion('${q.id}')"
           ondblclick="openQuickLookModal('${q.id}')"
+          oncontextmenu="openQuestionContextMenu(event, '${q.id}')"
           class="compact-row bg-white rounded-lg border p-2.5 px-3 flex items-center justify-between gap-3 text-xs transition-all cursor-pointer shadow-2xs group hover:border-emerald-400 hover:shadow-xs ${
             isFocused ? 'border-emerald-500 ring-1 ring-emerald-500/20' : 'border-slate-200/90'
           }"
@@ -3181,25 +3182,16 @@
           <div class="flex items-center gap-1.5 shrink-0 whitespace-nowrap">
             <span class="text-[10px] text-slate-400 truncate max-w-[90px] hidden xl:inline-block font-mono" title="${escapeHtml(q.source)}">${escapeHtml(q.source)}</span>
             <button 
-              id="btn_compact_copy_image_${q.id}"
-              onclick="event.stopPropagation(); copyQuestionImage('${q.id}', this)" 
-              class="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-emerald-700 cursor-pointer shrink-0" 
-              title="把这道题做成图片放进剪贴板 (Ctrl+Shift+C)"
+              onclick="event.stopPropagation(); openQuestionContextMenu(event, '${q.id}')" 
+              class="p-1 px-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded transition-colors cursor-pointer shrink-0 whitespace-nowrap text-xs font-bold leading-none tracking-widest"
+              title="更多操作 (右键此行也可直接打开)"
             >
-              📷
+              ···
             </button>
             <button onclick="event.stopPropagation(); toggleFavorite('${q.id}')" class="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-amber-500 cursor-pointer shrink-0" title="收藏试题">
               ${isFav ? '⭐' : '☆'}
             </button>
-            <button onclick="event.stopPropagation(); openQuickLookModal('${q.id}')" class="px-2 py-0.8 rounded bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 text-[11px] cursor-pointer shrink-0 whitespace-nowrap" title="按空格键也可快速审题">
-              🔍 审题
-            </button>
-            <button onclick="event.stopPropagation(); openEditQuestionModal('${q.id}')" class="px-2 py-0.8 rounded hover:bg-slate-100 text-slate-600 text-[11px] cursor-pointer shrink-0 whitespace-nowrap" title="编辑题目">
-              ✏️
-            </button>
-            <button onclick="event.stopPropagation(); openSolutionEditor(['${q.id}'])" class="px-2 py-0.8 rounded hover:bg-slate-100 text-slate-600 text-[11px] cursor-pointer shrink-0 whitespace-nowrap" title="答案解析编辑器（可多题并排）">
-              🧠
-            </button>
+
             <button 
               id="btn_basket_${q.id}"
               onclick="event.stopPropagation(); toggleBasketItem('${q.id}')" 
