@@ -1,12 +1,11 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+"use strict";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const eagleHtmlPath = path.resolve(__dirname, 'eagle/index.html');
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const eagleHtmlPath = path.resolve(__dirname, "eagle/index.html");
 
 test('Eagle 7大核心Bug修复综合验证套件', async (t) => {
   const content = fs.readFileSync(eagleHtmlPath, 'utf-8');

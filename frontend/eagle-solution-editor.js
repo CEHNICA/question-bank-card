@@ -29,15 +29,24 @@
 
   const apiHeaders = { 'Content-Type': 'application/json', 'X-QB-Request': '1' };
 
+  function hostList(name) {
+    const value = window[name];
+    return Array.isArray(value) ? value : [];
+  }
+
+  function hostBasketIds() {
+    const raw = window.basketQuestionIds;
+    if (raw instanceof Set) return Array.from(raw).map(String);
+    return Array.isArray(raw) ? raw.map(String) : [];
+  }
+
   function allQuestions() {
-    const list = (typeof filteredQuestions !== 'undefined' && filteredQuestions && filteredQuestions.length)
-      ? filteredQuestions
-      : (typeof questionsData !== 'undefined' ? questionsData : []);
-    return list || [];
+    const filtered = hostList('filteredQuestions');
+    return filtered.length ? filtered : hostList('questionsData');
   }
 
   function findItem(id) {
-    const pool = (typeof questionsData !== 'undefined' ? questionsData : []) || [];
+    const pool = hostList('questionsData');
     return pool.find(q => String(q.id) === String(id)) || allQuestions().find(q => String(q.id) === String(id)) || null;
   }
 
@@ -71,7 +80,7 @@
 
     let wanted = Array.isArray(ids) ? ids.map(String) : [];
     if (!wanted.length) {
-      const basket = (typeof basketQuestionIds !== 'undefined' ? Array.from(basketQuestionIds) : []).map(String);
+      const basket = hostBasketIds();
       wanted = basket.length ? basket : allQuestions().slice(0, 3).map(q => String(q.id));
     }
     wanted = wanted.slice(0, 6);
@@ -682,7 +691,7 @@
   window.toggleSolutionColumn = toggleColumn;
   window.solutionEditorSearch = (keyword) => { SOL.keyword = keyword || ''; renderList(); };
   window.solutionEditorPickBasket = () => {
-    const ids = (typeof basketQuestionIds !== 'undefined' ? Array.from(basketQuestionIds) : []).map(String);
+    const ids = hostBasketIds();
     if (!ids.length) { setStatus('试题篮是空的', 'error'); return; }
     openSolutionEditor(ids);
   };

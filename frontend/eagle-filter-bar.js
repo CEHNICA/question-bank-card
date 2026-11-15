@@ -5,7 +5,6 @@
 (() => {
   "use strict";
 
-  const QB = window.QBRender || {};
   const TYPE_NAMES = {
     single_choice: "单选题",
     multiple_choice: "多选题",
@@ -569,9 +568,6 @@
       const panel = this.sourceCapsule.panel;
       panel.replaceChildren();
       panel.className = "eagle-dropdown-panel eagle-source-panel show";
-
-      const state = this.context.state;
-      const sources = state.facets?.sources || [];
 
       const searchInput = el("input", "eagle-tag-search-input");
       searchInput.type = "search";

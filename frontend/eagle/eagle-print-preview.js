@@ -23,7 +23,7 @@
   const CHANNEL_PAYLOAD = "qbc:eagle-print-preview";
   const CHANNEL_RESULT = "qbc:eagle-print-preview-result";
   const CHANNEL_OVERRIDES = "qbc:eagle-print-preview-overrides";
-  const CHANNEL_OPEN_SOLUTION = "qbc:eagle-print-preview-open-solution";
+  // 预留：父页打开单题答案编辑 —— "qbc:eagle-print-preview-open-solution"
 
   function node(tag, className, text) {
     const element = document.createElement(tag);
