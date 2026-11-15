@@ -250,16 +250,20 @@ class QuestionRecycleBinApiTests(TestCase):
         question = Question.objects.select_related("paper", "group").get(pk=self.q1.pk)
         self.assertTrue(library.approval_is_current(question))
 
-    def test_archive_and_photo_page_order_are_blocked_until_trash_is_restored(self):
+    def test_archive_keeps_trash_but_page_order_still_blocked(self):
         deleted = self._delete(self.q1.pk)
         self.assertEqual(deleted.status_code, 200, deleted.content)
 
+        # 录入做完后回收站不应再挡归档；题卡跟着卷一起收起。
         archived = self._post(f"/api/papers/{self.paper.pk}/archive", {})
-        self.assertEqual(archived.status_code, 409, archived.content)
-        self.assertIn("回收站", archived.json()["error"])
+        self.assertEqual(archived.status_code, 200, archived.content)
         self.paper.refresh_from_db()
-        self.assertFalse(self.paper.archived)
+        self.assertTrue(self.paper.archived)
+        self.assertTrue(Question.all_objects.filter(pk=self.q1.pk, deleted_at__isnull=False).exists())
 
+        # 恢复后再测：改页序仍要求先处理回收站（会重切题面）。
+        restored = self._post(f"/api/papers/{self.paper.pk}/restore", {})
+        self.assertEqual(restored.status_code, 200, restored.content)
         self.paper.pages = [
             {"page_idx": 0, "width": 1000, "height": 1000},
             {"page_idx": 1, "width": 1000, "height": 1000},

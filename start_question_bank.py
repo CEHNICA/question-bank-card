@@ -802,8 +802,9 @@ def main() -> int:
         return 1
     existing = _running_instance()
     if existing:
-        print(f"题有据已经在运行：{existing}（已为你打开）。")
-        webbrowser.open_new_tab(existing)
+        home = f"{existing.rstrip('/')}/eagle"
+        print(f"题有据已经在运行：{home}（已为你打开）。")
+        webbrowser.open_new_tab(home)
         return 0
     instance_mutex = InstanceMutex()
     if not instance_mutex.acquired:
@@ -875,9 +876,10 @@ def main() -> int:
         job.add(web)
         _health(url, web)
         _write_instance(port)
-        print(f"\n题有据逐题核对页已就绪：{url}")
-        print(f"正式题库：{url}/library")
-        webbrowser.open_new_tab(url)
+        home = f"{url.rstrip('/')}/eagle"
+        print(f"\n题有据题库工作台已就绪：{home}")
+        print(f"切题核对：{url.rstrip('/')}/")
+        webbrowser.open_new_tab(home)
         print("关闭此窗口或按 Ctrl+C 即停止本次服务。")
         try:
             input("也可以按回车停止服务：")

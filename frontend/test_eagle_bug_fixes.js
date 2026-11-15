@@ -62,6 +62,65 @@ test('Eagle 7大核心Bug修复综合验证套件', async (t) => {
     assert.ok(content.includes('copyTextToClipboard(textToCopy'), 'copyQuestionText 应调用 copyTextToClipboard');
   });
 
+  await t.test('标签浮层搜索必须按输入收列表', () => {
+    const start = content.indexOf('function renderTagFilterDropdownList()');
+    assert.ok(start > 0, '必须定义 renderTagFilterDropdownList()');
+    const slice = content.slice(start, start + 2200);
+    assert.match(slice, /dropTagSearchInput/, '重画标签列表时必须读取搜索框');
+    assert.match(slice, /matchTagByQuery/, '必须走和联想框同一套名字/别名/拼音匹配');
+    assert.match(slice, /没有匹配/, '一个都对不上时要有空态，不能继续铺全表');
+    assert.match(content, /id="dropTagSearchInput"[\s\S]{0,180}oninput="renderTagFilterDropdownList\(\)"/);
+  });
+
+  await t.test('筛选条一个维度只有一个值时不画组头', () => {
+    const start = content.indexOf('function renderInlineActiveChips()');
+    assert.ok(start > 0, '必须定义 renderInlineActiveChips()');
+    const end = content.indexOf('\n    function removeFilterChip(', start);
+    const slice = content.slice(start, end > start ? end : start + 9000);
+    assert.match(slice, /tagChips\.length > 1[\s\S]{0,160}renderFilterGroupHead\('标签·'/, '标签只在多值时画「标签·全含/任一」组头');
+    assert.match(slice, /typeChips\.length > 1[\s\S]{0,80}renderFilterGroupHead\('题型'/, '题型只在多值时画组头');
+    assert.match(slice, /starChips\.length > 1[\s\S]{0,80}renderFilterGroupHead\('评分'/, '评分只在多值时画组头');
+    assert.match(slice, /statusChips\.length > 1[\s\S]{0,80}renderFilterGroupHead\('完整度与笔记'/, '完整度只在多值时画组头');
+    assert.doesNotMatch(
+      slice,
+      /if \(tagChips\.length\) \{\s*const logicLabel[\s\S]{0,80}renderFilterGroupHead/,
+      '不得无条件地给单值标签再画一颗组头'
+    );
+  });
+
+  await t.test('顶栏关键词搜索覆盖右侧详情字段', () => {
+    const start = content.indexOf('function questionMatchesKeyword(');
+    assert.ok(start > 0, '必须抽出 questionMatchesKeyword()');
+    const slice = content.slice(start, start + 2800);
+    assert.match(slice, /getQuestionAnnotation/, '必须搜自定义名称/注释/链接');
+    assert.match(slice, /q\.tags/, '必须搜本题已贴标签');
+    assert.match(slice, /matchTagByQuery/, '标签要命中别名/拼音');
+    assert.match(slice, /readUserFolders/, '必须搜所属自定义文件夹名');
+    assert.match(slice, /isQuestionInDocFolder/, '必须搜所属试卷/教材名');
+    assert.match(slice, /onenote/, '必须搜 OneNote 页标题');
+    assert.match(
+      content,
+      /if \(s\.keyword && !questionMatchesKeyword\(q, s\.keyword\)\) return false;/,
+      'questionMatchesFilterSpec 必须走 questionMatchesKeyword'
+    );
+    assert.match(
+      content,
+      /placeholder="搜索题干、名称、注释、标签、文件夹…/,
+      '占位符要写明能搜详情字段'
+    );
+  });
+
+  await t.test('筛选条项目与文件夹不得双写同一份卷子', () => {
+    assert.match(content, /function folderCoversPaperChip\(/, '必须有 folderCoversPaperChip()');
+    assert.match(content, /function clearActiveFolderScope\(/, '关掉文件夹时要清被覆盖的项目条件');
+    const start = content.indexOf('function renderInlineActiveChips()');
+    const end = content.indexOf('\n    function removeFilterChip(', start);
+    const slice = content.slice(start, end > start ? end : start + 4000);
+    assert.match(slice, /folderCoversPaperChip\(folderNode\)/, '画项目胶囊前必须检查文件夹是否已覆盖');
+    assert.match(slice, /paperId && !paperCoveredByFolder/, '被覆盖时不得再画项目胶囊');
+    assert.match(slice, /clearActiveFolderScope\(\)/, '文件夹胶囊的 × 必须走 clearActiveFolderScope');
+  });
+
   await t.test('复制题目为图片能力验证 (copyQuestionImage)', () => {
     // 1. 函数定义与后端接口调用
     assert.ok(content.includes('async function copyQuestionImage(qid, button = null)'), '应包含 copyQuestionImage 函数');

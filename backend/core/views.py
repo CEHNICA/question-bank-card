@@ -1079,6 +1079,8 @@ def papers(request):
             )
         include_archived = request.GET.get("archived") == "1"
         queryset = Paper.objects.all() if include_archived else Paper.objects.filter(archived=False)
+        # 题库侧栏按创建时间排序；列表接口也固定新→旧，避免前端缺 created_at 时顺序乱跳。
+        queryset = queryset.order_by("-created_at", "-id")
         return JsonResponse({"papers": [paper_json(p) for p in queryset[:200]]})
     if request.method != "POST":
         return HttpResponseNotAllowed(["GET", "POST"])
@@ -1695,8 +1697,7 @@ def paper_archive(request, paper_id):
     paper = get_object_or_404(Paper, pk=paper_id)
     if paper.status in {Paper.Status.QUEUED, Paper.Status.PARSING, Paper.Status.SEGMENTING, Paper.Status.READING}:
         return _error("任务正在处理中，完成或失败后再归档")
-    if question_layout.ordinary_deleted(paper).exists():
-        return _error("回收站里还有题卡；请先恢复这些题卡，再归档任务", 409)
+    # 回收站题卡跟着卷一起归档，不挡收起；恢复归档后仍可从题卡回收站找回。
     paper.archived = True
     paper.save(update_fields=["archived", "updated_at"])
     return JsonResponse({"paper": paper_json(paper), "archived": True})

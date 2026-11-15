@@ -127,12 +127,12 @@ function harness(options = {}) {
     "卷被删了不能卡在空白页，要退回第一份并说清楚");
 }
 
-// 顶栏两个页面的「核对题目」（原「录入终审」）都是不带参数的整页跳转，恢复只能靠 sessionStorage。
+// 顶栏两个页面的「录入题目」（原「核对题目」）都是不带参数的整页跳转，恢复只能靠 sessionStorage。
 {
   const index = fs.readFileSync(require.resolve("./index.html"), "utf8");
   const library = fs.readFileSync(require.resolve("./library.html"), "utf8");
-  assert.match(index, /<a class="active" href="\/" aria-current="page">[\s\S]*?核对题目<\/a>/);
-  assert.match(library, /<a class="header-link" href="\/">[\s\S]*?核对题目<\/a>/);
+  assert.match(index, /<span class="eyebrow">录入题目<\/span>/);
+  assert.match(library, /<a class="header-link" href="\/">[\s\S]*?录入题目<\/a>/);
   assert.match(helpers, /window\.sessionStorage/);
   assert.doesNotMatch(helpers, /window\.localStorage/,
     "用 sessionStorage：换一台机器、隔一天回来，不该被旧现场劫持");

@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>题有据 · 逐题核对</title>
-  <link rel="icon" type="image/png" href="favicon.png">
+  <title>题有据 · 录入题目</title>
+  <link rel="icon" type="image/png" href="favicon.png?v=brand-check">
   <link rel="stylesheet" href="/vendor/katex/katex.min.css">
   <link rel="stylesheet" href="/styles.css">
 <!-- 1.26.50：打开软件时试卷列表还在准备，这一行说明现在是什么状态。 -->
@@ -39,32 +39,29 @@
     <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
   </svg>
 
-  <header class="topbar app-topbar">
-    <!-- 品牌只作标识，不跳首页：这里已经是当前页，点自己的图标却切走属于误导。
-         页面导航统一收进 ☰ 抽屉（下面的 .topnav 是抽屉的搬运源）。 -->
-    <div class="brand">
-      <img class="brand-mark" src="/favicon.png" width="34" height="34" alt="" aria-hidden="true">
-      <span class="brand-text">
-        <strong>题有据</strong>
-      </span>
-    </div>
-    <nav class="topnav" aria-label="页面" data-drawer="nav">
-      <a class="active" href="/" aria-current="page"><svg class="icon" aria-hidden="true"><use href="#i-review"/></svg>核对题目</a>
-      <a href="/library"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>正式题库</a>
-      <a id="settingsButton" href="/settings"><svg class="icon" aria-hidden="true"><use href="#i-gear"/></svg>设置</a>
-    </nav>
-    <div class="topbar-tools">
+  <header class="topbar app-topbar review-topbar" data-no-drawer>
+    <!-- 左上侧栏折叠 + 题库工作台，右上设置；不再写场景名。 -->
+    <div class="review-top-actions review-top-actions-start topbar-tools">
+      <button id="entrySidebarToggle" class="entry-sidebar-toggle" type="button" aria-pressed="false" title="收起/展开左侧试卷与章节栏（[）">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/></svg>
+        <span>试卷栏</span>
+      </button>
+      <nav class="topnav review-topnav" aria-label="页面">
+        <a id="reviewReturnLibrary" class="review-nav-primary" href="/eagle" title="打开题库工作台">
+          <svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>题库工作台
+        </a>
+      </nav>
       <span id="engineLine" class="engine-line" hidden></span>
     </div>
-    <!-- 1.26.3：窗口的最小化 / 最大化 / 关闭交给浏览器标题栏（宿主窗口是普通的
-         浏览器窗口，标题栏自带那三个按钮）。页面不再自绘这几个按钮 ——
-         两套控件并排，老师会不知道该点哪一个。 -->
+    <div class="review-top-actions review-top-actions-end topbar-tools">
+      <a id="settingsButton" class="review-settings-link" href="/settings"><svg class="icon" aria-hidden="true"><use href="#i-gear"/></svg>设置</a>
+    </div>
   </header>
 
   <main id="settingsHome" class="settings-home" hidden>
     <header class="settings-head">
       <div><h1 id="settingsTitle" tabindex="-1">设置</h1><p class="settings-description" id="settingsPageLead">这些设置只影响这台电脑，不改题库里的题。</p></div>
-      <a id="settingsReturn" class="button quiet" href="/library">返回题库</a>
+      <a id="settingsReturn" class="button quiet" href="/eagle">返回题库</a>
     </header>
     <section id="settingsDialog" class="settings-panel" aria-labelledby="settingsTitle">
       <div class="settings-nav" role="tablist" aria-label="设置分区">
@@ -197,14 +194,23 @@
       <label id="dropZone" class="drop-zone" tabindex="-1">
         <input id="fileInput" class="visually-hidden" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx" multiple>
         <span class="drop-icon" aria-hidden="true"><svg class="icon"><use href="#i-upload"/></svg></span>
-        <strong>上传资料</strong>
-        <span>PDF、Word 或照片；拖进窗口任意处，或复制后按 Ctrl+V</span>
+        <span class="drop-text">
+          <strong>上传资料</strong>
+          <span>拖拽文件或 Ctrl+V 粘贴截图</span>
+        </span>
       </label>
-      <!-- 1.25.36：不再让人先选「试卷」还是「书」——40 页以上自动按书/讲义处理
-           （不自动切题，避免各章题号被并成一条），其余按试卷自动切。 -->
-      <p id="uploadNote" class="side-note">自动判断是试卷还是整本书：试卷先在本机切题，整本书保留原页由你框题。</p>
-      <p class="side-heading"><span>试卷</span><span id="paperCount"></span></p>
+      <!-- uploadNote 留给脚本按需写入临时提示；默认不占位。 -->
+      <p id="uploadNote" class="side-note side-note-quiet" hidden></p>
+      <p class="side-heading" title="只显示还没录入完的卷；全部入库后会自动收起"><span>待录入</span><span id="paperCount"></span></p>
       <ol id="paperList" class="paper-list"></ol>
+      <section id="entryChapterNav" class="entry-chapter-nav" aria-label="本卷章节目录" hidden>
+        <button id="entryChapterToggle" class="entry-chapter-toggle" type="button" aria-expanded="true" title="展开/收起本卷章节目录">
+          <svg class="icon entry-chapter-chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
+          <span>章节目录</span>
+          <span id="entryChapterCount" class="entry-chapter-total"></span>
+        </button>
+        <ol id="entryChapterList" class="entry-chapter-list"></ol>
+      </section>
       <div class="side-footer">
         <button id="archivedPapersButton" class="link-button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg>已归档的试卷</button>
         <button id="m3Button" class="link-button" type="button" hidden><svg class="icon"><use href="#i-archive"/></svg>从 M3 导入已解析的试卷</button>
@@ -222,13 +228,17 @@
           <circle cx="104" cy="82" r="14" fill="#1f6b5f"/>
           <path d="m97.5 82 4.5 4.5 8.5-9" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        <h2>把题目留下，也把出处留下</h2>
-        <p>上传资料后自动判断，先在本机切题。没有切出的题，也能从原卷选取、核对和入库，无需密钥。</p>
-        <div class="empty-learning"><button id="emptyAutomaticGuide" class="button primary" type="button">自动切题入门</button><button id="emptyLearn" class="button" type="button">切题与校正练习（不用密钥）</button></div>
+        <h2>切题 · 录入 · 入库</h2>
+        <p>从左侧上传试卷或照片。录入通过后题目进入题库；做完的卷会从这里收起，不再跟题库混在一起。</p>
+        <div class="empty-learning">
+          <button id="emptyAutomaticGuide" class="button primary" type="button">自动切题入门</button>
+          <button id="emptyLearn" class="button" type="button">手工练习（不用密钥）</button>
+          <a class="button quiet" href="/eagle">先去题库看看</a>
+        </div>
         <ol class="empty-steps">
-          <li><b>1</b>上传原卷，程序先尝试切题；未切出的题手工补齐</li>
-          <li><b>2</b>用已保存的题目 AI 识读，也可直接保留原图</li>
-          <li><b>3</b>对照原卷核对文字和配图，审核后入库</li>
+          <li><b>1</b>上传原卷，本机先切；切不出再手工框</li>
+          <li><b>2</b>识读成文字，或直接保留原图题卡</li>
+          <li><b>3</b>对照原卷通过，自动入库</li>
         </ol>
       </section>
 
@@ -240,12 +250,17 @@
         <div class="paper-head">
           <div class="paper-title">
             <div class="paper-name-row">
-              <h2 id="paperName"></h2>
+              <h2 id="paperName" title="点击右侧「试卷操作」或在标题上右键打开菜单"></h2>
               <button id="renameNudge" class="rename-nudge" type="button" hidden title="名字还是照片的文件名，题库里不好找；点这里改成卷子的名字">起个好认的名字</button>
-              <details class="menu paper-menu" id="paperMenu">
-                <summary class="button quiet small">试卷操作<svg class="icon" style="width:13px;height:13px" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
-                <div class="menu-panel paper-menu-panel">
-                  <p id="settingsTaskStatus" class="menu-note"></p>
+              <button id="paperMenuTrigger" class="paper-menu-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="paperMenu" title="打开试卷操作菜单（批量通过、重命名、切题与校正、调整页序、归档）">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.8" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.8" fill="currentColor" stroke="none"/></svg>
+                <span>试卷操作</span>
+              </button>
+              <!-- 试卷操作支持显式按钮 + 右键菜单；保留 details 供脚本 open=true 兼容 -->
+              <details class="menu paper-menu paper-context-menu" id="paperMenu">
+                <summary class="paper-menu-summary-sr" tabindex="-1">试卷操作</summary>
+                <div class="menu-panel paper-menu-panel" role="menu" aria-label="试卷操作">
+                  <p id="settingsTaskStatus" class="menu-note paper-menu-status" hidden></p>
                   <button id="settingsRename" class="link-button" type="button">修改名称</button>
                   <button id="settingsReparse" class="link-button" type="button" hidden title="MinerU 久久没有结果时用：不再等这一次，把文件重新上传给 MinerU">重新交给 MinerU 解析</button>
                   <button id="paperContinueAi" class="link-button" type="button" hidden>继续 AI 切题</button>
@@ -253,22 +268,18 @@
                   <button id="settingsStop" class="link-button" type="button" hidden title="停止本机处理，保留原卷和已有题卡">停止处理</button>
                   <button id="settingsConfirmStructure" class="link-button" type="button" hidden>确认属于同一份资料并继续</button>
                   <button id="settingsSplit" class="link-button" type="button" hidden>拆分任务</button>
-                  <hr class="menu-divider">
-                  <p class="menu-note">原卷与题卡</p>
+                  <hr class="menu-divider" id="paperMenuProcessDivider" hidden>
                   <button id="viewOriginalPaper" class="link-button" type="button">切题与校正</button>
                   <button id="resegment" class="link-button" type="button" hidden title="先查看重新切题预演，再确认是否应用">重新切题…</button>
                   <button id="pageOrder" class="link-button" type="button" hidden>调整页序</button>
                   <button id="questionTrash" class="link-button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg><span id="questionTrashLabel">题卡回收站</span></button>
-                  <hr class="menu-divider">
-                  <p class="menu-note">批量审核</p>
-                  <p class="menu-note">能通过的题直接入库；不能通过的会按原因归类说明。</p>
                   <button id="approveAllGreen" class="link-button" type="button" hidden>批量通过可入库题目…</button>
                   <details class="paper-notes">
                     <summary>处理记录（<span id="paperNotesCount">0</span>）</summary>
                     <ul id="settingsTaskNotes"></ul>
                   </details>
                   <hr class="menu-divider">
-                  <button id="settingsArchive" class="link-button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg>归档（从试卷列表隐藏）</button>
+                  <button id="settingsArchive" class="link-button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg>归档</button>
                   <button id="settingsDelete" class="link-button danger" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>永久删除…</button>
                   <p id="settingsDangerHint" class="menu-note"></p>
                 </div>
@@ -293,28 +304,19 @@
           <div id="progress" class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden><span id="progressBar"></span></div>
         </div>
         <p id="paperError" class="paper-error" hidden></p>
-        <p id="orderCheck" class="order-check" hidden></p>
-        <div id="reviewMeter" class="review-meter" hidden>
-          <span class="meter-figure" id="meterFigure"></span>
-          <div class="meter-bar" id="meterBar" role="img"></div>
-          <span class="meter-percent" id="meterPercent"></span>
-          <details class="meter-note">
-            <summary title="识读完成后如何入库"><svg class="icon" aria-hidden="true"><use href="#i-question"/></svg>入库说明</summary>
-            <p class="review-boundary">识读完成的题标记通过后自动入库；有待处理问题的题先调整内容、范围或配图。</p>
-          </details>
-        </div>
+        <p id="orderCheck" class="order-check" hidden aria-hidden="true"></p>
         <div id="doneBanner" class="done-banner" hidden></div>
         <div id="toolbar" class="toolbar">
           <span id="toolbarPaper" class="toolbar-paper" aria-hidden="true"></span>
           <div id="filters" class="filters" role="tablist" aria-label="筛选题卡"></div>
           <span class="toolbar-spacer"></span>
-          <div class="tool-group">
-            <button id="reviewFindToggle" class="toggle-pill" type="button" aria-expanded="false" aria-controls="reviewFinderPanel" title="在当前试卷中找题（Ctrl+F）">找题</button>
-            <button id="fullscreenToggle" class="toggle-pill" type="button" aria-pressed="false" title="全屏审核：收起顶栏、试卷列表和试卷信息，题卡铺满屏幕（Q；Esc 退出）"><svg class="icon"><use href="#i-expand"/></svg><span id="fullscreenLabel">全屏</span></button>
-            <button id="focusToggle" class="toggle-pill" type="button" aria-pressed="true" title="专注：正在看的这道题正常显示，其余题暗下来；滚动时跟着换（Z）"><svg class="icon"><use href="#i-focus"/></svg>专注</button>
-            <button id="lensToggle" class="toggle-pill" type="button" aria-pressed="true" title="鼠标停在原卷截图上时放大局部（L）"><svg class="icon"><use href="#i-lens"/></svg>放大镜</button>
+          <div class="tool-group tool-group-icons">
+            <button id="reviewFindToggle" class="toggle-pill tool-icon" type="button" aria-expanded="false" aria-controls="reviewFinderPanel" title="在当前试卷中找题（Ctrl+F）" aria-label="找题"><svg class="icon" aria-hidden="true"><use href="#i-zoom"/></svg><span class="tool-label">找题</span></button>
+            <button id="fullscreenToggle" class="toggle-pill tool-icon" type="button" aria-pressed="false" title="全屏审核：收起顶栏、试卷列表和试卷信息，题卡铺满屏幕（Q；Esc 退出）" aria-label="全屏"><svg class="icon" aria-hidden="true"><use href="#i-expand"/></svg><span id="fullscreenLabel" class="tool-label">全屏</span></button>
+            <button id="focusToggle" class="toggle-pill tool-icon" type="button" aria-pressed="true" title="专注：正在看的这道题正常显示，其余题暗下来；滚动时跟着换（Z）" aria-label="专注"><svg class="icon" aria-hidden="true"><use href="#i-focus"/></svg><span class="tool-label">专注</span></button>
+            <button id="lensToggle" class="toggle-pill tool-icon" type="button" aria-pressed="true" title="鼠标停在原卷截图上时放大局部（L）" aria-label="放大镜"><svg class="icon" aria-hidden="true"><use href="#i-lens"/></svg><span class="tool-label">放大镜</span></button>
             <details class="menu" id="notesBox" hidden>
-              <summary class="toggle-pill"><svg class="icon"><use href="#i-note"/></svg>处理说明</summary>
+              <summary class="toggle-pill tool-icon" title="处理说明" aria-label="处理说明"><svg class="icon" aria-hidden="true"><use href="#i-note"/></svg><span class="tool-label">处理说明</span></summary>
               <div class="menu-panel notes-panel"><ul id="notesList"></ul></div>
             </details>
           </div>
@@ -708,7 +710,7 @@
     <div class="dialog-head">
       <div>
         <h3 id="archivedPapersTitle">已归档的试卷</h3>
-        <p class="hint">归档只收起任务。可以查看原卷和题卡，也可以恢复后继续核对。</p>
+        <p class="hint">全部入库的卷会自动收进这里；中途也可手动归档。可以查看原卷和题卡，也可以恢复后继续录入。</p>
       </div>
       <button class="button" type="button" data-close>关闭</button>
     </div>

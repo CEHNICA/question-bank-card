@@ -34,12 +34,17 @@ for (const area of ["settingsGeneral", "settingsDisplay", "settingsTransfer", "s
   assert.ok(leads.includes(area), `每个区都有一句引导：${area}`);
 }
 
-// 两个页面和安装版设置使用同一公开品牌，不再露出旧工程名。
-for (const page of [html, libraryHtml]) {
-  assert.match(page, /<strong>题有据<\/strong>/);
-  assert.match(page, /class="brand-mark"[^>]*src="\/favicon\.png"/);
-  assert.doesNotMatch(page, /题库题卡版/);
-}
+// 正式题库页仍用公开品牌；录入页顶栏已去掉图标与「题有据」字样，只留场景名。
+assert.match(libraryHtml, /<strong>题有据<\/strong>/);
+assert.match(libraryHtml, /class="brand-mark"/);
+assert.doesNotMatch(libraryHtml, /题库题卡版/);
+assert.doesNotMatch(html, /class="brand-mark"/, "录入页顶栏不再放品牌图标");
+assert.doesNotMatch(html, /<strong>题有据<\/strong>/, "录入页顶栏不再写题有据");
+assert.doesNotMatch(html, /review-scene-label/, "录入页不再写场景名");
+assert.match(html, /data-no-drawer/, "核对页顶栏不再挂 ☰ 抽屉");
+assert.match(html, /review-topnav/, "左上题库工作台");
+assert.match(html, /review-settings-link/, "右上单独放设置");
+assert.doesNotMatch(html, /data-drawer="nav"/, "核对页导航不再搬进抽屉");
 assert.match(html, /id="aboutVersion"/);
 // 1.25.29：只报版本号。原来还缀着「（本机安装）」，在浏览器里跑源码时这句话是假的。
 assert.match(js, /题有据 \$\{s\.app_version\}`/);
@@ -185,9 +190,12 @@ assert.match(js, /if \(\$\("settingsFocus"\)\) \$\("settingsFocus"\)\.checked = 
 // 读题模型改了就保存，不再依赖单独的保存按钮。
 assert.doesNotMatch(html, /id="settingsModelSave"/);
 assert.match(js, /\.forEach\(\(id\) => \$\(id\)\.addEventListener\("change", \(\) => \{ void saveModelSettings\(\); \}\)\)/);
-// 当前这份试卷的操作不属于“设置”：在试卷标题旁的“试卷操作”里。
+// 当前这份试卷的操作不属于“设置”：右键打开试卷操作菜单。
 assert.doesNotMatch(html, /id="settingsTask"/);
-assert.match(html, /<details class="menu paper-menu" id="paperMenu">[\s\S]*?id="settingsRename"[\s\S]*?id="settingsTaskNotes"[\s\S]*?id="settingsArchive"[\s\S]*?id="settingsDelete"/);
+assert.match(html, /<details class="menu paper-menu paper-context-menu" id="paperMenu">[\s\S]*?id="settingsRename"[\s\S]*?id="settingsTaskNotes"[\s\S]*?id="settingsArchive"[\s\S]*?id="settingsDelete"/);
+assert.doesNotMatch(html, /paper-menu-trigger/, "试卷操作不再单独占一颗按钮");
+assert.match(js, /function openPaperContextMenu\(/, "试卷操作改走右键菜单");
+assert.match(js, /function retireCurrentPaperIfComplete\(/, "看完的当前卷会当场归档收起");
 
 // 1.13.1：题库里还有活题才拦删除，撤回完就应该能删。
 // 提示必须给出路（先去题库撤回），不能只丢一句“不能删除”让人反复试。
@@ -224,7 +232,7 @@ assert.doesNotMatch(js, /重启桌面程序后生效|重新打开题库后生效
 // 设置直接显示在页面中，键盘焦点落在标题，正常链接经保存保护返回。
 assert.doesNotMatch(js, /\$\("settingsDialog"\)\.showModal\(\)/);
 assert.match(js, /\$\("settingsTitle"\)\.focus\(\{ preventScroll: true \}\)/);
-assert.match(html, /id="settingsReturn"[^>]*href="\/library"/);
+assert.match(html, /id="settingsReturn"[^>]*href="\/eagle"/);
 assert.match(js, /async function prepareSettingsLeave\(\)/);
 assert.match(js, /await modelSaving/);
 assert.match(js, /hasUnsavedChanges\?\.\(\)/);
