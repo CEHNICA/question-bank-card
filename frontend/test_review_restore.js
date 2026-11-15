@@ -131,7 +131,7 @@ function harness(options = {}) {
 {
   const index = fs.readFileSync(require.resolve("./index.html"), "utf8");
   const library = fs.readFileSync(require.resolve("./library.html"), "utf8");
-  assert.match(index, /<span class="eyebrow">录入题目<\/span>/);
+  assert.match(index, /<title>题有据 · 录入题目<\/title>/);
   assert.match(library, /<a class="header-link" href="\/">[\s\S]*?录入题目<\/a>/);
   assert.match(helpers, /window\.sessionStorage/);
   assert.doesNotMatch(helpers, /window\.localStorage/,

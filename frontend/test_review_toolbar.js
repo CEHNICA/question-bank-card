@@ -35,7 +35,7 @@ assert.match(css, /\.chip\.approved::before \{[^}]*content: "✓"/,
 // for 专注 / 放大镜, not a second button design.
 assert.match(css, /\.toggle-pill\[aria-pressed="true"\]/,
   "pressed toolbar buttons are distinguished by state, not by a different class");
-const pills = (fs.readFileSync(require.resolve("./index.html"), "utf8").match(/class="toggle-pill"/g) || []).length;
+const pills = (fs.readFileSync(require.resolve("./index.html"), "utf8").match(/class="[^"]*\btoggle-pill\b[^"]*"/g) || []).length;
 assert.ok(pills >= 4, `the toolbar buttons share one class (found ${pills})`);
 assert.ok(!/\.toggle-pill\.accent|button-primary[^"]*toggle-pill/.test(css),
   "no toolbar button is promoted to the primary style while others stay plain");

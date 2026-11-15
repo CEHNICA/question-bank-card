@@ -68,7 +68,7 @@ assert.equal(screenshots[2].name, "已有名称.webp");
   const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
   const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
   assert.doesNotMatch(html, /name="materialType"/, "不再让人先选「试卷」还是「书」");
-  assert.match(html, /自动判断是试卷还是整本书/, "上传区说清现在由程序判断");
+  assert.match(js, /试卷和整本书由程序自动判断/, "粘贴与拖放提示说清现在由程序判断");
   assert.match(js, /function selectedMaterialType\(\) \{\s*return "auto";/, "上传时交给后端自动判断");
   assert.match(js, /form\.append\("material_type", materialType\)/);
   assert.match(js, /form\.append\("material_type", photoUpload\.materialType\)/);

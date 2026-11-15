@@ -16,7 +16,7 @@ assert.doesNotMatch(js, /旁证 MinerU 文字|有出入时复核 \$\{s\.checker\
 assert.match(js, /brandNotice\(""\)/);
 assert.doesNotMatch(js, /还不能读新资料：点右上角“设置”填写密钥/);
 assert.doesNotMatch(html, /id="parseMode"/);
-assert.match(html, /上传原卷，程序先尝试切题/);
+assert.match(html, /上传原卷，本机先切/);
 assert.match(js, /brandNotice\("连不上本机服务：请关掉题有据再重新打开", "error"\)/);
 
 // Automatic flow is explained separately from an actual offline manual course.

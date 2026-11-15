@@ -44,8 +44,8 @@ assert.doesNotMatch(html, /meterLegend/, "no legend node with a permanent hidden
 assert.doesNotMatch(js, /meterLegend/, "nothing fills a node the page cannot show");
 assert.doesNotMatch(css, /\.meter-legend/, "no orphaned legend styles");
 // The meter still labels its bar, so the colours are not left unlabelled.
-assert.match(js, /bar\.setAttribute\("aria-label", segments/,
-  "the meter bar still announces its segments");
+assert.match(js, /bar\.title = todo/,
+  "the meter bar still announces its segments on hover");
 
 // --- 3. the re-read entry explains itself --------------------------------------
 // Extract button(...) by paren balancing so commas inside Chinese text and

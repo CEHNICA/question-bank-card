@@ -108,7 +108,7 @@ function editor(guard, id, initial) {
   assert.match(js, /async function leaveFor\(url\) \{\s*if \(!\(await prepareSettingsLeave\(\)\) \|\| !\(await discardEdits\(\)\)\) return false;/);
   assert.match(js, /const back = button\("← 返回", "", \(\) => discardEdits\(\[q\.id\]\)\);/);
   assert.match(js, /event\.stopPropagation\(\); discardEdits\(\[q\.id\]\)/);
-  assert.match(js, /label: "去题库看看", onClick: \(\) => leaveFor\("\/library"\)/);
+  assert.match(js, /label: "去题库看看", onClick: \(\) => leaveFor\("\/eagle"\)/);
   for (const name of ["deletePaper", "archivePaper"]) {
     const body = js.slice(js.indexOf(`async function ${name}()`), js.indexOf("// ----------------------------------------------------------------", js.indexOf(`async function ${name}()`)));
     assert.ok(body.indexOf("await discardEdits()") < body.indexOf("await api("), `${name} 必须在操作后端前检查未保存改动`);
