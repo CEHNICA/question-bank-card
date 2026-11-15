@@ -523,6 +523,8 @@ def carried_extras(previous: PublishedQuestion | None, content: dict) -> dict:
         # Fingerprint binding is evidence of which task was generated, never
         # evidence that the mathematical answer has been checked by a person.
         extras["ai_answer"] = deepcopy(answer)
+    if "onenote" in previous.extras:
+        extras["onenote"] = deepcopy(previous.extras["onenote"])
     if previous.extras.get("solution_id"):
         # The old immutable solution and its assets stay with the old version.
         # Never silently apply an edited solution to a replacement question.
@@ -850,6 +852,7 @@ def publication_json(publication: PublishedQuestion, *, include_tag_details: boo
         "subquestions": qtypes.subquestion_count((publication.content or {}).get("stem")),
         "tags": tags_of(publication.extras),
         "ai_answer": (publication.extras or {}).get("ai_answer") if isinstance(publication.extras, dict) else None,
+        "onenote": (publication.extras or {}).get("onenote") if isinstance(publication.extras, dict) else None,
         "solution": solution,
         "solution_needs_review": bool(solution_error or (publication.extras or {}).get("solution_needs_review_id")),
         "previous_solution_id": (publication.extras or {}).get("solution_needs_review_id"),

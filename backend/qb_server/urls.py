@@ -7,6 +7,7 @@ from core import (
     library_clipboard,
     library_drafts,
     library_export,
+    library_onenote,
     library_pdf,
     library_question_editor,
     library_solutions,
@@ -185,4 +186,7 @@ urlpatterns = [
     path("api/library/<uuid:publication_id>/pages/<int:page>", views.library_source_page),
     path("api/library/<uuid:publication_id>/crop", views.library_crop),
     path("api/library/<uuid:publication_id>/withdraw", views.library_withdraw),
+    path("api/library/<uuid:publication_id>/onenote/create", library_onenote.onenote_create_view),
+    path("api/library/<uuid:publication_id>/onenote/open", library_onenote.onenote_open_view),
+    path("api/library/<uuid:publication_id>/onenote/unbind", library_onenote.onenote_unbind_view),
 ]
