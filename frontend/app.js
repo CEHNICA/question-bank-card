@@ -1485,15 +1485,21 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   function renderPaperList() {
     const list = $("paperList");
+    const chapterNav = typeof $ === "function" ? $("entryChapterNav") : null;
+    // 在清空列表前先把章节目录暂存到列表外，避免 replaceChildren 将其销毁
+    if (chapterNav && list.contains(chapterNav)) list.after(chapterNav);
     list.replaceChildren();
     const visible = entryPaperList();
     $("paperCount").textContent = visible.length ? String(visible.length) : "";
     if (!visible.length) {
+      if (chapterNav) chapterNav.hidden = true;
       list.append(el("li", "side-empty", "没有待录入的试卷"));
       return;
     }
+    let mountedNav = false;
     visible.forEach((paper) => {
-      const item = el("li", `paper-item${paper.id === state.paperId ? " active" : ""}${paper.status === "failed" ? " failed" : ""}`);
+      const isActive = paper.id === state.paperId;
+      const item = el("li", `paper-item${isActive ? " active" : ""}${paper.status === "failed" ? " failed" : ""}`);
       const link = el("button", "paper-link");
       link.type = "button";
       link.title = paperDisplayName(paper);
@@ -1507,15 +1513,22 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       link.append(meta);
       const bar = miniMeter(paper);
       if (bar) link.append(bar);
-      if (paper.id === state.paperId) link.setAttribute("aria-current", "true");
+      if (isActive) link.setAttribute("aria-current", "true");
       link.addEventListener("click", () => selectPaper(paper.id));
       link.addEventListener("contextmenu", (event) => {
         event.preventDefault();
         void openPaperContextMenu(event, paper.id);
       });
       item.append(link);
+      // 章节/小节目录归属当前激活试卷，直接挂在对应试卷项下方呈树形展开
+      if (isActive && chapterNav) {
+        item.append(chapterNav);
+        item.classList.toggle("has-chapters", !chapterNav.hidden);
+        mountedNav = true;
+      }
       list.append(item);
     });
+    if (chapterNav && !mountedNav) chapterNav.hidden = true;
   }
 
   function placePaperContextMenu(clientX, clientY) {
@@ -2098,13 +2111,21 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   /**
-   * 统计当前试卷分组章节，并在存在多章时于左侧栏渲染目录以支持快速跳转
+   * 统计当前试卷分组章节，并在存在多章时直接挂载在当前激活试卷下方呈树形目录展示
    */
   function renderEntryChapterNav() {
     const nav = $("entryChapterNav");
     const list = $("entryChapterList");
     const countEl = $("entryChapterCount");
+    const toggleBtn = $("entryChapterToggle");
     if (!nav || !list) return;
+    const paperList = $("paperList");
+    const activeItem = paperList?.querySelector?.(".paper-item.active") || null;
+    if (activeItem && nav.parentElement !== activeItem) {
+      activeItem.append(nav);
+    } else if (!activeItem && paperList && paperList.contains(nav)) {
+      paperList.after(nav);
+    }
     const questions = (state.questions || []).filter((q) => !q.trashed);
     const chapters = [];
     const byTitle = new Map();
@@ -2124,11 +2145,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     if (chapters.length < 2) {
       nav.hidden = true;
+      activeItem?.classList?.remove?.("has-chapters");
       list.replaceChildren();
       if (countEl) countEl.textContent = "";
       return;
     }
     nav.hidden = false;
+    activeItem?.classList?.add?.("has-chapters");
+    if (toggleBtn && !nav.classList.contains("is-collapsed")) {
+      toggleBtn.setAttribute("aria-expanded", "true");
+    }
     if (countEl) countEl.textContent = `${chapters.length} 节`;
     list.replaceChildren(...chapters.map((chapter) => {
       const item = document.createElement("li");
@@ -3338,6 +3364,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const collapsed = !document.documentElement.classList.contains("entry-sidebar-collapsed");
     setEntrySidebarCollapsed(collapsed);
     releaseToggleFocus(event);
+  });
+
+  $("entryChapterToggle")?.addEventListener("click", () => {
+    const nav = $("entryChapterNav");
+    if (!nav) return;
+    const collapsed = nav.classList.toggle("is-collapsed");
+    $("entryChapterToggle")?.setAttribute("aria-expanded", String(!collapsed));
   });
 
   $("paperName")?.addEventListener("contextmenu", (event) => {

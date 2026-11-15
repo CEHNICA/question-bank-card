@@ -1,21 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
   <title id="title">题有据应用图标</title>
-  <desc id="desc">原卷和题卡由一条来源带连接，表示每道题都可追溯到原卷。</desc>
-  <rect x="32" y="32" width="960" height="960" rx="224" fill="#163f3a"/>
-
-  <rect x="160" y="176" width="438" height="628" rx="78" fill="#fff4dc"/>
-  <path d="M238 330v-72h72M448 258h72v72M238 650v72h72M448 722h72v-72"
-        fill="none" stroke="#d6a65d" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
-
-  <rect x="430" y="314" width="430" height="522" rx="76" fill="#f9edcf"/>
-  <rect x="548" y="438" width="214" height="48" rx="24" fill="#245e55"/>
-  <rect x="548" y="532" width="246" height="48" rx="24" fill="#245e55"/>
-
-  <path d="M354 424h62c62 0 98 35 98 94v112c0 66 40 104 108 104h126"
-        fill="none" stroke="#2f9668" stroke-width="78" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="354" cy="424" r="27" fill="#fff4dc"/>
-  <circle cx="354" cy="424" r="13" fill="#2f9668"/>
-  <circle cx="748" cy="734" r="42" fill="#d6a65d"/>
-  <circle cx="748" cy="734" r="17" fill="#fff4dc"/>
+  <desc id="desc">展开试卷与核验对勾，表示每道题都可追溯原卷、核对有据。</desc>
+  <defs>
+    <linearGradient id="bg" x1="120" y1="80" x2="900" y2="940" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#34D399"/>
+      <stop offset="40%" stop-color="#10B981"/>
+      <stop offset="80%" stop-color="#059669"/>
+      <stop offset="100%" stop-color="#047857"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="230" fill="url(#bg)"/>
+  <circle cx="360" cy="260" r="420" fill="#fff" opacity="0.18"/>
+  <path d="M230 620 C310 680 420 690 520 640 C620 590 720 535 810 500 L780 455 C700 485 590 540 500 585 C410 625 310 615 230 555 Z" fill="#D1FAE5" opacity="0.9"/>
+  <path d="M270 535 C335 565 410 605 460 675 C525 540 625 365 785 260 C755 250 685 275 640 330 C530 455 460 560 430 580 C390 530 325 490 270 535 Z" fill="#FFFFFF"/>
+  <circle cx="785" cy="255" r="32" fill="#FBBF24"/>
+  <circle cx="785" cy="255" r="16" fill="#FFFFFF"/>
 </svg>

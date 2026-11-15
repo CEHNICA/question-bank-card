@@ -204,7 +204,11 @@
       <p class="side-heading" title="只显示还没录入完的卷；全部入库后会自动收起"><span>待录入</span><span id="paperCount"></span></p>
       <ol id="paperList" class="paper-list"></ol>
       <section id="entryChapterNav" class="entry-chapter-nav" aria-label="本卷章节目录" hidden>
-        <p class="side-heading"><span>本卷章节</span><span id="entryChapterCount"></span></p>
+        <button id="entryChapterToggle" class="entry-chapter-toggle" type="button" aria-expanded="true" title="展开/收起本卷章节目录">
+          <svg class="icon entry-chapter-chevron" aria-hidden="true"><use href="#i-chevron"/></svg>
+          <span>章节目录</span>
+          <span id="entryChapterCount" class="entry-chapter-total"></span>
+        </button>
         <ol id="entryChapterList" class="entry-chapter-list"></ol>
       </section>
       <div class="side-footer">
