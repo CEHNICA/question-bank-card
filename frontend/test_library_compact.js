@@ -24,8 +24,8 @@ assert.ok(!libraryJs.includes("--basket-top"), "篮子不吸顶了，不必再�
 
 // ---- 导航与工具折进抽屉，但类名一个字没改
 assert.match(libraryHtml, /<nav class="topnav header-nav"[^>]*data-drawer="nav">/);
-assert.match(libraryHtml, /<a class="header-link" href="\/">[\s\S]*?核对题目<\/a>/,
-  "入口改成老师读得懂的名字：核对题目（原「录入终审」）；教学巡演按 href 定位，不受影响");
+assert.match(libraryHtml, /<a class="header-link" href="\/">[\s\S]*?录入题目<\/a>/,
+  "入口改成老师读得懂的名字：录入题目（原「核对题目」）；教学巡演按 href 定位，不受影响");
 // 1.25.29：抽屉里只留「去哪一页」。组卷草稿搬进试题篮，快捷键交给设置 → 帮助和「?」键。
 assert.doesNotMatch(libraryHtml, /id="openDrafts"[^>]*data-drawer/,
   "组卷草稿不再挂在抽屉里");

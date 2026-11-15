@@ -33,7 +33,8 @@ assert.match(js, /softDeleteQuestions\(\[q\.id\], \{ singleQuestion: q \}\)/);
 assert.match(js, /label: "撤销"[\s\S]*restoreDeletedBatch\(paperId, batchId\)/);
 assert.match(js, /\/api\/papers\/\$\{paperId\}\/question-trash`/);
 assert.match(js, /\/api\/papers\/\$\{paperId\}\/question-trash\/\$\{batchId\}\/restore/);
-assert.match(js, /回收站里还有题卡；请先恢复这些题卡，再归档任务/);
+assert.doesNotMatch(js, /回收站里还有题卡；请先恢复这些题卡，再归档任务/, "归档不再被回收站挡住");
+assert.match(js, /回收站题卡会跟着这份卷一起归档/);
 assert.match(js, /回收站里还有题卡；请先恢复这些题卡，再调整页序/);
 for (const id of ["questionTrash", "trashDialog", "trashList"]) {
   assert.match(html, new RegExp(`id="${id}"`));

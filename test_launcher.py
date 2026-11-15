@@ -252,7 +252,7 @@ class LauncherTests(unittest.TestCase):
                 patch.object(launcher.webbrowser, "open_new_tab") as browser, contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(launcher.main(), 0)
         prepare.assert_not_called()
-        browser.assert_called_once_with("http://127.0.0.1:8768")
+        browser.assert_called_once_with("http://127.0.0.1:8768/eagle")
 
     def test_busy_mutex_never_starts_a_second_copy(self):
         mutex = Mock(acquired=False)

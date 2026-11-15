@@ -852,8 +852,9 @@ def _main(arguments: list[str] | None = None) -> int:
         if focus_existing_window():
             print(f"已在运行：{existing}，已切到现有窗口", flush=True)
             return 0
-        print(f"已在运行：{existing}，只打开窗口", flush=True)
-        window = open_window(existing)
+        home = f"{existing.rstrip('/')}/eagle"
+        print(f"已在运行：{home}，只打开窗口", flush=True)
+        window = open_window(home)
         # 窗口上的「最小化 / 关闭」是网页自己画的按钮，由 watch_window 这条守护
         # 线程照着控制文件去做。就在这里 return 的话，进程一退出，线程跟着被杀，
         # 两个按钮就再也点不动了 —— 窗口还开着，按钮却是死的。
@@ -926,7 +927,8 @@ def _main(arguments: list[str] | None = None) -> int:
             if worker.poll() is not None:
                 print("注意：后台工作者没有启动成功，新卷暂时不会被处理；详见 worker.log", flush=True)
             ui.say("正在打开窗口…")
-            return ("ready", url)
+            # 默认进题库工作台；切题核对仍在根路径 /
+            return ("ready", f"{url.rstrip('/')}/eagle")
 
         kind, value = splash.run(start)
         if kind == "configure":

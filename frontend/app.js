@@ -1462,15 +1462,37 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return bar;
   }
 
+  // 录入页只管还没做完的卷：待核查、处理中、失败、还没切出题的都留着。
+  // 全部通过并入库之后归题库管，不再占左侧列表。
+  // 回收站题卡不单独卡住录入列表——做完就能收起，回收站跟着卷一起走。
+  function paperNeedsEntry(paper) {
+    if (!paper || paper.archived) return false;
+    if (paper.demo) return true;
+    if (ACTIVE_STATUS.has(paper.status)) return true;
+    if (paper.status === "failed" || paper.status === "needs_grouping") return true;
+    const counts = paper.counts || {};
+    const { todo, total } = QBProgress.paperProgress(counts);
+    if (Number(counts.waiting || 0) > 0) return true;
+    if (todo > 0) return true;
+    // 还没切出题：仍是录入活，不能当成做完了。
+    if (!total) return true;
+    return false;
+  }
+
+  function entryPaperList(papers = state.papers) {
+    return papers.filter((paper) => paperNeedsEntry(paper) || paper.id === state.paperId);
+  }
+
   function renderPaperList() {
     const list = $("paperList");
     list.replaceChildren();
-    $("paperCount").textContent = state.papers.length ? String(state.papers.length) : "";
-    if (!state.papers.length) {
-      list.append(el("li", "side-empty", "还没有试卷"));
+    const visible = entryPaperList();
+    $("paperCount").textContent = visible.length ? String(visible.length) : "";
+    if (!visible.length) {
+      list.append(el("li", "side-empty", "没有待录入的试卷"));
       return;
     }
-    state.papers.forEach((paper) => {
+    visible.forEach((paper) => {
       const item = el("li", `paper-item${paper.id === state.paperId ? " active" : ""}${paper.status === "failed" ? " failed" : ""}`);
       const link = el("button", "paper-link");
       link.type = "button";
@@ -1487,9 +1509,129 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       if (bar) link.append(bar);
       if (paper.id === state.paperId) link.setAttribute("aria-current", "true");
       link.addEventListener("click", () => selectPaper(paper.id));
+      link.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        void openPaperContextMenu(event, paper.id);
+      });
       item.append(link);
       list.append(item);
     });
+  }
+
+  function placePaperContextMenu(clientX, clientY) {
+    const menu = $("paperMenu");
+    const panel = menu?.querySelector(".paper-menu-panel");
+    const pad = 8;
+    const width = panel?.offsetWidth || 240;
+    const height = panel?.offsetHeight || 320;
+    const x = Math.max(pad, Math.min(clientX, window.innerWidth - width - pad));
+    const y = Math.max(pad, Math.min(clientY, window.innerHeight - height - pad));
+    menu.style.setProperty("--paper-menu-x", `${x}px`);
+    menu.style.setProperty("--paper-menu-y", `${y}px`);
+  }
+
+  async function openPaperContextMenu(event, paperId = state.paperId) {
+    if (!paperId) return;
+    if (paperId !== state.paperId) {
+      if (!(await discardEdits())) return;
+      await selectPaper(paperId);
+    }
+    renderSettingsTask();
+    const menu = $("paperMenu");
+    menu.open = true;
+    // 先亮出来再量宽高，避免贴边时裁切
+    placePaperContextMenu(event.clientX, event.clientY);
+    requestAnimationFrame(() => placePaperContextMenu(event.clientX, event.clientY));
+  }
+
+  function closePaperContextMenu() {
+    const menu = $("paperMenu");
+    if (menu?.open) menu.open = false;
+  }
+
+  const retiringPaperIds = new Set();
+
+  // 详情页已经判定「全部处理完」时，把列表口径也改成 done，避免还按旧 todo 卡住。
+  function markPaperEntryComplete(paper, c = counts()) {
+    if (!paper) return;
+    paper.counts = {
+      ...(paper.counts || {}),
+      total: c.all,
+      todo: 0,
+      waiting: 0,
+      done: c.all,
+      approved: Math.max(Number(paper.counts?.approved) || 0, c.approved || 0),
+      settled: Math.max(Number(paper.counts?.settled) || 0, c.approved || 0)
+    };
+  }
+
+  // 录入做完的卷自动归档：题库里已有题，录入页不再管。
+  async function retireCompletedPaper(paperId, { announce = false } = {}) {
+    if (!paperId || retiringPaperIds.has(paperId)) return false;
+    const paper = state.papers.find((item) => item.id === paperId)
+      || (state.paper?.id === paperId ? state.paper : null);
+    if (!paper || paper.demo) return false;
+    if (paperNeedsEntry(paper)) return false;
+    if (ACTIVE_STATUS.has(paper.status)) return false;
+    retiringPaperIds.add(paperId);
+    const displayName = paperDisplayName(paper);
+    const oldIndex = state.papers.findIndex((item) => item.id === paperId);
+    const wasCurrent = state.paperId === paperId;
+    try {
+      await api(`/api/papers/${paperId}/archive`, { method: "POST", body: {} });
+      state.papers = state.papers.filter((item) => item.id !== paperId);
+      finishedUnseen.delete(paperId);
+      if (wasCurrent) {
+        const next = state.papers.find((item) => paperNeedsEntry(item))
+          || state.papers[Math.min(Math.max(oldIndex, 0), Math.max(0, state.papers.length - 1))]
+          || null;
+        await clearPaperSelection();
+        if (next) await selectPaper(next.id);
+        else renderPaperList();
+        if (announce) {
+          toast(`「${displayName}」已全部入库，已从录入列表收起；题库里的题还在，可从「已归档的试卷」找回原卷`,
+            "success", { label: "撤销归档", onClick: () => restoreArchivedPaper(paperId) });
+        }
+      } else {
+        renderPaperList();
+      }
+      return true;
+    } catch (error) {
+      if (announce) toast(error.message, "error");
+      return false;
+    } finally {
+      retiringPaperIds.delete(paperId);
+    }
+  }
+
+  function sweepCompletedEntryPapers({ includeCurrent = false } = {}) {
+    const ids = state.papers
+      .filter((paper) => (includeCurrent || paper.id !== state.paperId)
+        && !paperNeedsEntry(paper)
+        && !paper.demo
+        && !ACTIVE_STATUS.has(paper.status))
+      .map((paper) => paper.id);
+    ids.forEach((id) => {
+      void retireCompletedPaper(id, { announce: includeCurrent && id === state.paperId });
+    });
+  }
+
+  const retireAttemptedIds = new Set();
+
+  function retireCurrentPaperIfComplete() {
+    const paper = state.paper;
+    if (!paper || paper.archived || paper.demo) return false;
+    const c = counts();
+    if (!paperComplete(c)) return false;
+    if (retireAttemptedIds.has(paper.id) || retiringPaperIds.has(paper.id)) return false;
+    markPaperEntryComplete(paper, c);
+    const listed = state.papers.find((item) => item.id === paper.id);
+    if (listed) markPaperEntryComplete(listed, c);
+    retireAttemptedIds.add(paper.id);
+    void retireCompletedPaper(paper.id, { announce: true }).then((ok) => {
+      if (!ok) retireAttemptedIds.delete(paper.id);
+    });
+    return true;
   }
 
   function noteFinishedPapers(previous, papers) {
@@ -1513,6 +1655,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }
       noteFinishedPapers(previous, state.papers);
       renderPaperList();
+      sweepCompletedEntryPapers();
     } catch (error) {
       toast(error.message, "error");
     }
@@ -1747,55 +1890,50 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function renderMeter(c) {
-    const meter = $("reviewMeter");
-    meter.hidden = !c.all || paperComplete(c);
-    if (!c.all) return;
-    const segments = [
-      ["approved", c.approved, "已入库", "var(--accent)"],
-      ["yellow", c.todo, "需要核查", "var(--amber-bar)"],
-      ["waiting", c.waiting, "识读中", "#c7cfc8"]
-    ];
-    const bar = $("meterBar");
-    bar.replaceChildren(...segments.filter(([, n]) => n > 0).map(([key, n, label]) => {
-      const part = el("span", `seg-${key}`);
-      part.style.flexGrow = String(n);
-      part.title = `${label} ${n}`;
-      return part;
-    }));
-    bar.setAttribute("aria-label", segments.filter(([, n]) => n).map(([, n, label]) => `${label} ${n}`).join("，"));
-    $("meterFigure").replaceChildren(el("strong", "", String(c.approved)), document.createTextNode(` / ${c.all} 已入库`));
-    $("meterFigure").title = `这份卷子的进度：${c.approved} / ${c.all} 题已入库`;
-    $("meterPercent").textContent = `${Math.round((c.approved / c.all) * 100)}%`;
-    $("toolbarPaper").replaceChildren(el("strong", "", paperDisplayName(state.paper || {})),
+    // 入库进度条已删：筛选页签本身已有「已通过 / 需要核查」数量，不再另占一条。
+    const toolbar = $("toolbarPaper");
+    if (!toolbar) return;
+    if (!c.all) {
+      toolbar.replaceChildren();
+      toolbar.title = "";
+      return;
+    }
+    toolbar.replaceChildren(el("strong", "", paperDisplayName(state.paper || {})),
       document.createTextNode(` · ${c.approved} / ${c.all} 已入库`));
-    $("toolbarPaper").title = $("toolbarPaper").textContent;
-    // 以前这里还往一个写死了 hidden 的 .meter-legend 里填「已入库 2 / 需要核查 32 /
-    // 识读中 N」。那个节点从来没人解开过 hidden，页面上从来不显示，进度条和页签
-    // 也已经把同样的数字写过一遍。留着这段等于：控制台里看着有内容、实际看不见，
-    // 下一个人很容易据此误判「图例已经显示了」。连同 HTML 和 CSS 一起删掉。
+    toolbar.title = toolbar.textContent;
   }
 
   function renderDoneBanner(c) {
     const banner = $("doneBanner");
     const done = paperComplete(c);
-    banner.hidden = !done;
-    if (!done) return;
+    // 做完就收起；归档进行中时这条横幅只短暂提示。
+    banner.hidden = !done || retiringPaperIds.has(state.paperId);
+    if (banner.hidden || !done) return;
+    const trash = Math.max(0, Number(state.paper?.trash_count) || 0);
     const text = el("span");
-    text.append(icon("check"), document.createTextNode(`全部 ${c.all} 题已处理完。` + aiNote(c)));
+    text.append(icon("check"), document.createTextNode(
+      trash
+        ? `全部 ${c.all} 题已处理完（回收站另有 ${trash} 张题卡，会跟着卷一起收起）。`
+        : `全部 ${c.all} 题已处理完，正在从录入列表收起…`
+    ));
     banner.replaceChildren(text);
     const actions = el("span", "done-actions");
+    actions.append(button("立刻收起", "primary", () => {
+      markPaperEntryComplete(state.paper, c);
+      void retireCompletedPaper(state.paperId, { announce: true });
+    }, "归档并离开录入列表"));
     {
-      const link = el("a", "button", "去正式题库看看");
-      link.href = "/library";
+      const link = el("a", "done-library-link", "去题库");
+      link.href = "/eagle";
+      link.title = "已入库的题在题库工作台查看";
       actions.append(link);
     }
-    // Reviewing a batch: offer the next paper that still has cards to look at.
     const next = QBNotify.nextToReview(state.papers, state.paperId);
     if (next) {
       const c2 = next.counts || {};
       const { todo } = QBProgress.paperProgress(c2);
-      actions.append(button(`下一份：${paperDisplayName(next)}${todo ? `（${todo} 题待核对）` : ""}`,
-        c.unpublished ? "" : "primary", () => selectPaper(next.id), "打开下一份还有题卡没通过的试卷"));
+      actions.append(button(`下一份${todo ? `（${todo} 题）` : ""}`,
+        "", () => selectPaper(next.id), `打开「${paperDisplayName(next)}」`));
     }
     banner.append(actions);
   }
@@ -1816,6 +1954,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("paperName").textContent = paperDisplayName(paper);
     $("renameNudge").hidden = !looksLikeFileName(paperDisplayName(paper));
     const c = counts();
+    // 正在看的这份若已全部处理完，当场归档——以前会因为“当前卷跳过清扫”一直挂着。
+    if (paperComplete(c) && !paper.archived && !paper.demo) {
+      retireCurrentPaperIfComplete();
+    }
     const statusText = $("paperStatus");
     const isProcessing = ACTIVE_STATUS.has(paper.status);
     const processing = isProcessing ? QBProgress.processingPresentation(paper) : null;
@@ -1942,24 +2084,92 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const canReorder = Boolean(paper.photos) && (paper.pages || []).length > 1 && ["ready", "failed", "needs_grouping"].includes(paper.status);
     $("pageOrder").hidden = !canReorder;
     syncTrashControls();
+    // 题号重复/页序黄条不再提示：需要时右键「调整页序」「拆分任务」即可。
     const check = $("orderCheck");
-    const hasConflict = Boolean(paper.structure_conflict);
-    check.hidden = !(hasConflict || (paper.photos && paper.photos.check));
-    if (!check.hidden) {
-      const message = paper.structure_message || (typeof paper.structure_conflict === "object" && paper.structure_conflict.message)
-        || paper.photos?.check || "检测到题号重复或重新开始，请确认这些页面属于同一份资料还是多份资料。";
-      const actions = el("span", "error-actions");
-      const fix = button("调整页序", "small", openOrderDialog);
-      fix.disabled = !canReorder;
-      actions.append(fix);
-      if (hasConflict) actions.append(button("确认是一份资料并继续", "small primary", confirmStructure));
-      if (hasConflict && suggestedSplitGroups(paper).length > 1) actions.append(button("拆分任务", "small button-outline", openSplitDialog));
-      check.replaceChildren(el("span", "", message), actions);
+    if (check) {
+      check.hidden = true;
+      check.replaceChildren();
     }
     renderSettingsTask();
     renderCutReadingStage();
     renderFilters(c);
+    renderEntryChapterNav();
     renderCards();
+  }
+
+  /**
+   * 统计当前试卷分组章节，并在存在多章时于左侧栏渲染目录以支持快速跳转
+   */
+  function renderEntryChapterNav() {
+    const nav = $("entryChapterNav");
+    const list = $("entryChapterList");
+    const countEl = $("entryChapterCount");
+    if (!nav || !list) return;
+    const questions = (state.questions || []).filter((q) => !q.trashed);
+    const chapters = [];
+    const byTitle = new Map();
+    for (const q of questions) {
+      const title = String(q?.group?.title || "").trim();
+      if (!title) continue;
+      let chapter = byTitle.get(title);
+      if (!chapter) {
+        chapter = { title, firstId: q.id, firstTodoId: null, total: 0, approved: 0, questionIds: new Set() };
+        byTitle.set(title, chapter);
+        chapters.push(chapter);
+      }
+      chapter.total += 1;
+      chapter.questionIds.add(q.id);
+      if (q.review_status === "approved") chapter.approved += 1;
+      else if (chapter.firstTodoId === null) chapter.firstTodoId = q.id;
+    }
+    if (chapters.length < 2) {
+      nav.hidden = true;
+      list.replaceChildren();
+      if (countEl) countEl.textContent = "";
+      return;
+    }
+    nav.hidden = false;
+    if (countEl) countEl.textContent = `${chapters.length} 节`;
+    list.replaceChildren(...chapters.map((chapter) => {
+      const item = document.createElement("li");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "entry-chapter-link";
+      if (chapter.approved >= chapter.total) btn.classList.add("is-done");
+      if (state.current !== null && chapter.questionIds.has(state.current)) btn.classList.add("is-active");
+      btn.dataset.chapterTitle = chapter.title;
+      btn.dataset.questionIds = [...chapter.questionIds].join(",");
+      const titleSpan = el("span", "entry-chapter-title", chapter.title);
+      titleSpan.title = `${chapter.title}（已通过 ${chapter.approved}/${chapter.total} 题）`;
+      const badge = el("span", "entry-chapter-badge",
+        chapter.approved >= chapter.total ? `✓ ${chapter.total}` : `${chapter.approved}/${chapter.total}`);
+      btn.append(titleSpan, badge);
+      btn.addEventListener("click", () => {
+        const targetId = chapter.firstTodoId !== null ? chapter.firstTodoId : chapter.firstId;
+        const targetQ = (state.questions || []).find((q) => q.id === targetId);
+        // 若当前筛选条件隐藏了目标题，先切换到「全部」确保点击目录必达
+        if (targetQ && typeof visible === "function" && !visible(targetQ) && state.filter !== "all") {
+          setFilter("all");
+        }
+        requestAnimationFrame(() => setCurrent(targetId, { scroll: true, focus: true }));
+      });
+      item.append(btn);
+      return item;
+    }));
+  }
+
+  /**
+   * 随当前聚焦题号高亮左侧章节目录对应项，不重绘整份列表
+   * @param {number|null} currentId 当前聚焦题目 ID
+   */
+  function syncActiveChapterNav(currentId) {
+    const list = $("entryChapterList");
+    if (!list) return;
+    const target = currentId !== null && currentId !== undefined ? String(currentId) : "";
+    list.querySelectorAll(".entry-chapter-link").forEach((btn) => {
+      const ids = String(btn.dataset.questionIds || "").split(",");
+      btn.classList.toggle("is-active", Boolean(target) && ids.includes(target));
+    });
   }
 
   const cutReadingRequests = new Set();
@@ -2006,7 +2216,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       : summary.pending ? `${summary.pending} 道题正在 AI 识读`
         : stage === 2 ? `${summary.eligibleIds.length} 道题尚未识读` : "对照原卷核对文字和配图，审核后入库";
     $("cutReadingDetail").textContent = allSettled
-      ? "要继续从原卷补题，用下面的「继续切题与校正」；要复核已入库的题，去正式题库。"
+      ? "录入已完成，这份卷会从左侧列表收起。要继续从原卷补题，先恢复归档或用「继续切题与校正」；要看已入库的题，去题库工作台。"
       : stage === 1
       ? "框出完整题目，跨页或跨栏可以添加多个片段。切题只保存原图范围，不调用 AI。"
       : summary.pending ? "AI 直接读取已保存的题目范围，无需重新框选。识读成功后文字会显示在原图旁，接着核对配图并审核。"
@@ -2540,6 +2750,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // until they scroll themselves. hold 默认跟着 scroll，老调用点行为不变。
     if (card && hold) state.followHold = true;
     markReading();
+    if (typeof syncActiveChapterNav === "function") syncActiveChapterNav(id);
     if (card && scroll) card.scrollIntoView?.({ behavior: "smooth", block: "start" });
     if (card && focus) card.focus?.({ preventScroll: true });
   }
@@ -2639,6 +2850,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const card = state.current !== null ? document.querySelector(`.card[data-id="${state.current}"]`) : null;
     root.classList.toggle("review-fullscreen", on);
     $("fullscreenToggle").setAttribute("aria-pressed", String(on));
+    $("fullscreenToggle").setAttribute("aria-label", on ? "退出全屏" : "全屏");
     $("fullscreenLabel").textContent = on ? "退出全屏" : "全屏";
     if (on && !document.fullscreenElement && root.requestFullscreen) {
       root.requestFullscreen({ navigationUI: "hide" }).catch(() => {});
@@ -3087,11 +3299,80 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   $("lensToggle").addEventListener("click", (event) => { setLens(!state.lens); releaseToggleFocus(event); });
 
-  // 试卷操作菜单关闭后把键盘焦点交回当前题卡，避免连续审核时焦点停在菜单按钮上。
+  // 试卷操作支持显式按钮点击 + 右键菜单；关闭后把键盘焦点交回当前题卡。
   $("paperMenu").addEventListener("toggle", () => {
-    if ($("paperMenu").open) { renderSettingsTask(); return; }
+    const isOpen = Boolean($("paperMenu").open);
+    $("paperMenuTrigger")?.setAttribute("aria-expanded", String(isOpen));
+    if (isOpen) { renderSettingsTask(); return; }
     const card = state.current !== null ? $("cards").querySelector(`.card[data-id="${state.current}"]`) : null;
-    if (card && document.activeElement === $("paperMenu").querySelector("summary")) card.focus({ preventScroll: true });
+    if (card && $("paperMenu").contains(document.activeElement)) card.focus({ preventScroll: true });
+  });
+
+  $("paperMenuTrigger")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const menu = $("paperMenu");
+    if (menu?.open) {
+      closePaperContextMenu();
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    void openPaperContextMenu({ clientX: rect.left, clientY: rect.bottom + 6 }, state.paperId);
+  });
+
+  /**
+   * 切换左侧试卷与章节侧边栏收起状态，并在本地持久化
+   * @param {boolean} collapsed 是否收起侧栏
+   */
+  function setEntrySidebarCollapsed(collapsed) {
+    const next = Boolean(collapsed);
+    document.documentElement.classList.toggle("entry-sidebar-collapsed", next);
+    $("entrySidebarToggle")?.setAttribute("aria-pressed", String(next));
+    writePref("qb-entry-sidebar-collapsed", next ? "1" : "0");
+  }
+
+  if (typeof readPref === "function" && readPref("qb-entry-sidebar-collapsed") === "1") {
+    setEntrySidebarCollapsed(true);
+  }
+  $("entrySidebarToggle")?.addEventListener("click", (event) => {
+    const collapsed = !document.documentElement.classList.contains("entry-sidebar-collapsed");
+    setEntrySidebarCollapsed(collapsed);
+    releaseToggleFocus(event);
+  });
+
+  $("paperName")?.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    void openPaperContextMenu(event, state.paperId);
+  });
+  $("paperView")?.querySelector(".paper-head")?.addEventListener("contextmenu", (event) => {
+    if (event.target.closest("a, button, input, textarea, select, summary")) return;
+    event.preventDefault();
+    void openPaperContextMenu(event, state.paperId);
+  });
+  document.addEventListener("pointerdown", (event) => {
+    const menu = $("paperMenu");
+    if (!menu?.open) return;
+    if (menu.contains(event.target) || event.target.closest?.("#paperMenuTrigger")) return;
+    closePaperContextMenu();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && $("paperMenu")?.open) {
+      event.preventDefault();
+      closePaperContextMenu();
+      return;
+    }
+    if (event.key === "[" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const active = document.activeElement;
+      if (active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable)) return;
+      if (document.querySelector("dialog[open]") || document.documentElement.classList.contains("review-fullscreen")) return;
+      event.preventDefault();
+      setEntrySidebarCollapsed(!document.documentElement.classList.contains("entry-sidebar-collapsed"));
+    }
+  }, true);
+  $("paperMenu")?.querySelector(".paper-menu-panel")?.addEventListener("click", (event) => {
+    if (!event.target.closest("button.link-button")) return;
+    // 点菜单项后收起；真正干活的 click 处理器仍会继续跑。
+    requestAnimationFrame(() => closePaperContextMenu());
   });
 
   document.addEventListener("pointermove", (event) => {
@@ -4159,8 +4440,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // 核对页原来没有路过去 —— 老师只能自己在几百道题里翻。
     if (q.publication?.id) {
       actions.append(button("在题库中看", "", () => {
-        window.location.href = `/library?focus=${encodeURIComponent(q.publication.id)}`;
-      }, "到正式题库里找到这道题，看它的标签、答案和入库版本"));
+        window.location.href = `/eagle?q=${encodeURIComponent(q.publication.id)}`;
+      }, "到题库工作台里找到这道题，看它的标签、答案和入库版本"));
     }
     const more = el("details", "more");
     const summary = el("summary", "", "更多");
@@ -4377,10 +4658,20 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       if (approved) {
         const c = counts();
         const left = c.todo;
-        toast(confirming ? `已确认第 ${q.number} 题（原来是 ${agentLabel(q)} 通过）`
-          : left ? `第 ${q.number} 题已通过并入库` : "本卷已全部通过并入库",
-          left ? "" : "success", { label: "撤销", onClick: () => revokeQuestion(fresh, { advance: false }) });
         teach({ type: "approve", number: q.number });
+        if (!left) {
+          const retired = await retireCompletedPaper(state.paperId, { announce: true });
+          if (!retired) {
+            toast(confirming ? `已确认第 ${q.number} 题（原来是 ${agentLabel(q)} 通过）`
+              : "本卷已全部通过并入库",
+              "success", { label: "撤销", onClick: () => revokeQuestion(fresh, { advance: false }) });
+            if (advance) focusNext(q);
+          }
+          return true;
+        }
+        toast(confirming ? `已确认第 ${q.number} 题（原来是 ${agentLabel(q)} 通过）`
+          : `第 ${q.number} 题已通过并入库`,
+          "", { label: "撤销", onClick: () => revokeQuestion(fresh, { advance: false }) });
         if (advance) focusNext(q);
       }
       return true;
@@ -4471,7 +4762,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         problems: data.problems || [],
         skipped: data.skipped || []
       });
-      toast(`已入库 ${Number(data.approved) || 0} 道`, "success");
+      const retired = await retireCompletedPaper(paperId, { announce: true });
+      if (!retired) toast(`已入库 ${Number(data.approved) || 0} 道`, "success");
     } catch (error) {
       toast(error.message, "error");
     } finally {
@@ -4848,15 +5140,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       toast("任务正在处理中，完成后再归档", "error");
       return;
     }
-    if ((Number(paper.trash_count) || 0) > 0) {
-      toast("回收站里还有题卡；请先恢复这些题卡，再归档任务", "error");
-      return;
-    }
     if (!(await discardEdits())) return;
     const displayName = paperDisplayName(paper);
     const ok = await confirmDialog({
       title: `归档任务“${displayName}”？`,
-      text: "归档后会从左侧任务列表隐藏，原文件、题卡和入库历史都保留。以后可从左侧“已归档的试卷”查看或恢复。",
+      text: "归档只从左侧「待录入」列表收起，不改题库。原文件、题卡和已入库的题都还在；以后可从「已归档的试卷」查看或恢复。",
       ok: "归档任务"
     });
     if (!ok) return;
@@ -5500,8 +5788,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const paper = state.paper;
     syncTrashControls();
     if (!paper) return;
-    $("settingsTaskStatus").textContent = paper.status_label || paperSummary(paper);
+    const statusEl = $("settingsTaskStatus");
     const active = ACTIVE_STATUS.has(paper.status);
+    const statusLine = active || paper.status === "failed" || paper.status === "needs_grouping"
+      ? (paper.status_label || paperSummary(paper))
+      : "";
+    if (statusEl) {
+      statusEl.textContent = statusLine;
+      statusEl.hidden = !statusLine;
+    }
     const hasTrash = (Number(paper.trash_count) || 0) > 0;
     $("settingsRename").disabled = active;
     $("settingsRename").title = active ? "处理完成后才能修改名称" : "";
@@ -5538,6 +5833,17 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("settingsConfirmStructure").hidden = paper.status !== "needs_grouping";
     $("settingsSplit").hidden = !(paper.structure_conflict && groups.length > 1);
     $("settingsSplit").textContent = groups.length > 1 ? `按建议拆成 ${groups.length} 份` : "拆分任务";
+    const processDivider = $("paperMenuProcessDivider");
+    if (processDivider) {
+      processDivider.hidden = Boolean(
+        $("settingsReparse").hidden
+        && $("paperContinueAi").hidden
+        && $("settingsManualFallback").hidden
+        && $("settingsStop").hidden
+        && $("settingsConfirmStructure").hidden
+        && $("settingsSplit").hidden
+      );
+    }
 
     const notes = [...(paper.notes || [])];
     const parseReason = paper.processing_plan?.fallback_reason;
@@ -5552,9 +5858,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
     const published = paper.counts?.published || 0;
     $("settingsArchive").hidden = Boolean(paper.archived);
-    $("settingsArchive").disabled = active || hasTrash;
+    $("settingsArchive").disabled = active;
     $("settingsArchive").title = hasTrash
-      ? "回收站里还有题卡；请先恢复后再归档" : "";
+      ? "回收站题卡会跟着这份卷一起归档" : "";
     const isSplitTask = Boolean(paper.structure?.split_from || paper.structure?.split_children?.length);
     $("settingsDelete").hidden = published > 0 || isSplitTask
       || !["ready", "failed", "needs_grouping"].includes(paper.status);
@@ -6098,7 +6404,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (data.unchanged) parts.push(`${data.unchanged} 题内容没变`);
     if (data.problems.length) parts.push(`${data.problems.length} 题没入库：${data.problems.join("；")}`);
     toast(parts.join("，") || "没有需要入库的题", data.problems.length ? "error" : "success",
-      data.created && !data.problems.length ? { label: "去题库看看", onClick: () => leaveFor("/library") } : null);
+      data.created && !data.problems.length ? { label: "去题库看看", onClick: () => leaveFor("/eagle") } : null);
     // The button keeps its last count until the refreshed counts redraw it.
     if (state.paperId === paperId) refreshPaper();
     loadPapers();
@@ -8844,9 +9150,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // 云服务已经配好时不再挂这行常驻提示：它一直在说一件你早就知道的事，
     // 真到了会把资料发出去的那一步，弹窗里本来就会写清发送范围。
     const note = $("uploadNote");
-    if (cloudCutReady()) { note.hidden = true; note.textContent = ""; return; }
-    note.hidden = false;
-    note.textContent = "自动判断资料，先在本机切题；未切出的题可以从原卷选取，无需密钥。";
+    if (!note) return;
+    // 上传区不再常驻解释文案；只在确有状态变化时临时写入。
+    note.hidden = true;
+    note.textContent = "";
   }
 
   // 「设置 → API 配置」以前整页只有一句说明和一个「配置 API」按钮：走进来的人
@@ -9434,8 +9741,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       text: "每份试卷的进度写在列表里，点一下继续；原卷会一直保留。" },
     { target: () => firstTourCard()?.querySelector(".card-tick"), title: "核对后通过，自动入库",
       text: "先对照原卷核对题面，错字用“改字”修正。确认完整正确后打勾，通过即入库。" },
-    { target: () => document.querySelector('.topnav a[href="/library"]'), title: "找题和组卷", drawer: true,
-      text: "正式题库可以搜索、全屏看题和选题组卷；选好题后先看预览，再导出。" },
+    { target: () => document.querySelector('.topnav a[href="/eagle"]'), title: "找题和组卷", drawer: true,
+      text: "题库工作台可以搜索、贴标签和选题组卷；选好题后先看预览，再导出。" },
     { target: () => $("settingsButton"), title: "遇到问题时看帮助", drawer: true,
       text: "设置 → 帮助有新手练习、补图和跨页说明、常见问题与快捷键。" }
   ];
@@ -9987,9 +10294,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       });
       try {
         const previous = new URL(document.referrer);
-        if (previous.origin === window.location.origin && ["/", "/library"].includes(previous.pathname)) {
-          $("settingsReturn").href = previous.pathname + previous.search;
-          $("settingsReturn").textContent = previous.pathname === "/" ? "返回核对题目" : "返回题库";
+        if (previous.origin === window.location.origin && ["/", "/library", "/eagle", "/eagle/"].includes(previous.pathname)) {
+          const backPath = previous.pathname.startsWith("/eagle") ? "/eagle" : previous.pathname;
+          $("settingsReturn").href = backPath + previous.search;
+          $("settingsReturn").textContent = backPath === "/" ? "返回录入题目" : "返回题库";
         }
       } catch (_) { /* A direct bookmark defaults to the library. */ }
       openSettings();

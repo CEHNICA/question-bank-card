@@ -22,7 +22,7 @@
   // 干活的面，不是菜单项。抽屉里也只剩老师真会用的东西：源码在设置 → 关于，
   // 操作说明搬到了设置 → 帮助，这个抽屉不重复摆。这个文件只管导航和工具。
   //
-  // 1.25.29：抽屉里只剩「去哪一页」这一组（核对题目 / 正式题库 / 设置）。
+  // 1.25.29：抽屉里只剩「去哪一页」这一组（录入题目 / 题库工作台 / 设置）。
   // 组卷草稿搬进了试题篮（组卷时接着备课的地方）；快捷键设置 → 帮助里已有，
   // 这一页按「?」也能打开。既然只剩一组，就不摆组标题。
   const GROUPS = [
@@ -98,6 +98,10 @@
     if (ui || !document?.body) return api;
     const topbar = document.querySelector(".topbar");
     if (!topbar) return api;
+    // 核对页等已把导航摆回顶栏右侧的页面：不再注入 ☰，也不搬走 .topnav。
+    if (topbar.hasAttribute("data-no-drawer") || topbar.classList.contains("review-topbar")) {
+      return api;
+    }
 
     const scrim = element(document, "div", "drawer-scrim");
     scrim.hidden = true;

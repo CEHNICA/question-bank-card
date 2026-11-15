@@ -423,7 +423,7 @@ class MainFlowTests(unittest.TestCase):
         result = self.run_patched(self.patches(open_window=opened, wait_for_reattached_window=waited, focus_existing_window=Mock(return_value=False)),
                                   {"_running_instance": Mock(return_value="http://127.0.0.1:8768"), "_prepare": prepare})
         self.assertEqual(result, 0)
-        opened.assert_called_once_with("http://127.0.0.1:8768")
+        opened.assert_called_once_with("http://127.0.0.1:8768/eagle")
         prepare.assert_not_called()
         # This launch has to stay alive for as long as the window is open. The
         # page draws its own minimise and close buttons, and the thread that acts

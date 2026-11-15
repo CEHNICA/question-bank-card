@@ -28,18 +28,14 @@ assert.equal(App.title("题有据", 2), "（2 份读完）题有据");
 assert.equal(App.title("题有据", 0), "题有据");
 assert.match(js, /item\.classList\.add\("fresh"\)/);
 
-// The review meter is one row; its explanation opens on demand.
-assert.match(html, /<details class="meter-note">/);
-assert.match(css, /\.review-meter \{[^}]*display: flex/);
-// What the yellow bar means must still be spelled out in words — colour alone is
-// not a cue. This used to be checked against the header sentence "34 道题，32 题
-// 需要核查。", but that sentence was a third copy of numbers the meter and the
-// tabs already show, so it was removed. Pin the two places that carry the word
-// now: the filter tab a person clicks, and the bar's own label.
+// 入库进度条已去掉；筛选页签本身带数量。
+assert.doesNotMatch(html, /id="reviewMeter"|meter-note/);
+assert.match(js, /入库进度条已删/);
+// 进度条删了以后，「需要核查」只留在筛选页签上。
 assert.match(js, /\{ key: "todo", label: "需要核查" \}/,
-  "the filter tab still names what the yellow bar counts");
-assert.match(js, /\["yellow", c\.todo, "需要核查"/,
-  "the bar segment still carries its label rather than a colour alone");
+  "the filter tab still names cards that need checking");
+assert.doesNotMatch(js, /\["yellow", c\.todo, "需要核查"/,
+  "the removed meter no longer carries a yellow segment label");
 
 // Long cards keep their buttons on screen; while editing, the original stays
 // in the sticky left column (1.10.1: every card is crop left, text right).
@@ -84,7 +80,7 @@ const list = [
 ];
 assert.equal(App.nextToReview(list, "2").id, "4");
 assert.equal(App.nextToReview(list, "4"), null);
-assert.match(js, /下一份：\$\{paperDisplayName\(next\)\}/);
+assert.match(js, /下一份\$\{todo \? `（\$\{todo\} 题）` : ""\}/);
 
 
 // A textbook example is headed “例 N”: its printed label is no longer in the stem.
@@ -99,3 +95,10 @@ assert.match(js, /\/library\?focus=\$\{encodeURIComponent\(q\.publication\.id\)\
 
 // 1.25.44：全部入库以后不再摆「开始审核」，只留「全部处理完 · 下一份」。
 assert.match(js, /stage === 3 && !allSettled\) actions\.append\(button\("开始审核"/, "全部做完时不再摆「开始审核」");
+
+// 录入页与题库拆开：左侧只显示待录入；全部入库后自动归档收起。
+assert.match(js, /function paperNeedsEntry\(paper\)/, "录入列表有待录入判定");
+assert.match(js, /function retireCompletedPaper\(paperId/, "全部入库后收起已完成试卷");
+assert.match(js, /sweepCompletedEntryPapers\(/, "刷新列表时清掉已入库试卷");
+assert.match(js, /retireCurrentPaperIfComplete\(/, "正在看的已完成卷也会归档");
+assert.match(js, /没有待录入的试卷/, "空列表文案对准录入职责");
