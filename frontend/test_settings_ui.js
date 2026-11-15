@@ -52,7 +52,7 @@ assert.doesNotMatch(js, /（本机安装）/);
 
 // 两页进入一个常规设置页；API 配置只有一个外层分区和入口。
 // 1.25.29：菜单项前面加了图标，所以「>设置</a>」中间允许有 svg。
-assert.match(html, /id="settingsButton" href="\/settings">[\s\S]*?设置<\/a>/);
+assert.match(html, /id="settingsButton"[^>]*href="\/settings"[^>]*>[\s\S]*?设置<\/a>/);
 assert.match(libraryHtml, /href="\/settings">[\s\S]*?设置<\/a>/);
 assert.doesNotMatch(libraryHtml, /data-library-ai-settings/);
 for (const id of ["settingsGeneral", "settingsDisplay", "settingsReview", "settingsAbout"]) {
@@ -193,7 +193,7 @@ assert.match(js, /\.forEach\(\(id\) => \$\(id\)\.addEventListener\("change", \(\
 // 当前这份试卷的操作不属于“设置”：右键打开试卷操作菜单。
 assert.doesNotMatch(html, /id="settingsTask"/);
 assert.match(html, /<details class="menu paper-menu paper-context-menu" id="paperMenu">[\s\S]*?id="settingsRename"[\s\S]*?id="settingsTaskNotes"[\s\S]*?id="settingsArchive"[\s\S]*?id="settingsDelete"/);
-assert.doesNotMatch(html, /paper-menu-trigger/, "试卷操作不再单独占一颗按钮");
+assert.match(html, /id="paperMenuTrigger"/, "录入页试卷操作入口挂在 paperMenuTrigger");
 assert.match(js, /function openPaperContextMenu\(/, "试卷操作改走右键菜单");
 assert.match(js, /function retireCurrentPaperIfComplete\(/, "看完的当前卷会当场归档收起");
 
