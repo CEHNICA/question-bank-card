@@ -413,18 +413,20 @@ def section_label(section) -> str:
 
 
 def _search_text(content: dict, extras: dict | None = None) -> str:
+    options = content.get("options") or {}
+    option_values = options.values() if isinstance(options, dict) else []
     parts = [
-        content["stem"],
-        *content["options"].values(),
-        content["answer"],
-        content["analysis"],
-        content["source_filename"],
+        content.get("stem") or "",
+        *option_values,
+        content.get("answer") or "",
+        content.get("analysis") or "",
+        content.get("source_filename") or "",
         (content.get("source_group") or {}).get("title", ""),
         section_label(content.get("section")),
         str(content.get("origin") or ""),
         *tags_of(extras),
     ]
-    return search_key(" ".join(parts))
+    return search_key(" ".join(str(part) for part in parts))
 
 
 def tags_of(extras: dict | None) -> list[str]:

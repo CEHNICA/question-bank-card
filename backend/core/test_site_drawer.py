@@ -27,7 +27,13 @@ class SiteDrawerRouteTests(SimpleTestCase):
 
     def test_index_navigation_is_marked_for_the_drawer(self):
         html = (FRONTEND / "index.html").read_text(encoding="utf-8")
-        self.assertIn('class="topnav" aria-label="页面" data-drawer="nav"', html)
+        # 录入页顶栏固定「试卷栏 + 题库工作台 + 设置」，整栏 data-no-drawer，不再搬进抽屉。
+        self.assertIn("data-no-drawer", html)
+        self.assertIn('class="topnav review-topnav" aria-label="页面"', html)
+        self.assertNotIn('data-drawer="nav"', html)
+        # 正式题库页仍把主导航交给抽屉搬移。
+        library = (FRONTEND / "library.html").read_text(encoding="utf-8")
+        self.assertIn('data-drawer="nav"', library)
         # 1.12.7：源码链接从抽屉里删了。AGPL 义务由「设置 → 关于」那一栏
         # （查看源代码按钮 + AGPL-3.0）和发布页承担，菜单里不再摆一份。
         self.assertNotIn('class="source-link"', html)

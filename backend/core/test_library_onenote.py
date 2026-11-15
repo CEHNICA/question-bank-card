@@ -36,6 +36,7 @@ class OneNoteLinkTests(TestCase):
                 "options": {},
                 "answer": "[1, +\\infty)",
                 "analysis": "",
+                "source_filename": "2026年高三模拟考.pdf",
             },
             content_hash="a" * 64,
             extras={},

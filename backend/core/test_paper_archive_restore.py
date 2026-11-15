@@ -192,7 +192,9 @@ class PaperArchiveRestoreTests(TestCase):
         self.assertEqual(self.post("archive").status_code, 400)
         self.paper.status = Paper.Status.READY
         self.paper.save(update_fields=["status"])
+        # 录入归档 ≠ 题库撤回：回收站题卡跟着卷一起收起，不再挡归档。
         Question.all_objects.create(paper=self.paper, number=1, deleted_at=timezone.now())
-        self.assertEqual(self.post("archive").status_code, 409)
+        archived = self.post("archive")
+        self.assertEqual(archived.status_code, 200, archived.content)
         self.paper.refresh_from_db()
-        self.assertFalse(self.paper.archived)
+        self.assertTrue(self.paper.archived)
