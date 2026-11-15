@@ -151,10 +151,30 @@ class OneNoteLinkTests(TestCase):
         self.assertEqual(tiyouju_protocol.parse_question_id(f"tiyouju://question/{qid}/"), qid)
         self.assertIsNone(tiyouju_protocol.parse_question_id("https://example.com/123"))
         self.assertEqual(tiyouju_protocol.build_target_url(8769, qid), f"http://127.0.0.1:8769/eagle?q={qid}")
+        self.assertEqual(
+            tiyouju_protocol.extract_uri_from_argv(["--tiyouju-uri", f"tiyouju://question/{qid}"]),
+            f"tiyouju://question/{qid}",
+        )
+        self.assertEqual(
+            tiyouju_protocol.extract_uri_from_argv([f"tiyouju://question/{qid}"]), f"tiyouju://question/{qid}"
+        )
 
         with patch.dict(os.environ, {"TIYOUJU_PORT": "9876"}, clear=False):
             ports = tiyouju_protocol.candidate_ports()
             self.assertEqual(ports[0], 9876)
+
+        with (
+            patch.object(tiyouju_protocol, "FROZEN", True),
+            patch.object(tiyouju_protocol.sys, "executable", r"C:\Apps\QuestionBankCard.exe"),
+        ):
+            self.assertEqual(
+                tiyouju_protocol.build_command_line(), r'"C:\Apps\QuestionBankCard.exe" --tiyouju-uri "%1"'
+            )
+
+        tiyouju_protocol.queue_deep_link(qid)
+        pending = tiyouju_protocol.consume_deep_link()
+        self.assertEqual(pending["q"], qid)
+        self.assertIsNone(tiyouju_protocol.consume_deep_link())
 
     @patch("core.library_onenote.call_bridge")
     def test_open_page_calls_navigate(self, mock_call):

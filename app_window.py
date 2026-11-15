@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import contextlib
-from concurrent.futures import ThreadPoolExecutor
 import faulthandler
 import hashlib
 import json
@@ -27,6 +26,7 @@ import tempfile
 import threading
 import time
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import start_question_bank as launcher
@@ -825,6 +825,34 @@ def main(arguments: list[str] | None = None) -> int:
             log.flush()
 
 
+def _handle_protocol_uri(uri: str) -> int:
+    """处理 OneNote 回跳的 tiyouju:// 协议：写深链、置前已有窗口；冷启动则交回正常开机流程。"""
+    try:
+        from core import tiyouju_protocol
+    except ImportError:
+        sys.path.insert(0, str(launcher.BACKEND))
+        from core import tiyouju_protocol  # type: ignore
+
+    try:
+        tiyouju_protocol.ensure_registered()
+    except Exception as exc:  # noqa: BLE001 - 注册失败不能挡住回跳
+        print(f"协议注册失败：{exc!r}", flush=True)
+
+    question_id = tiyouju_protocol.parse_question_id(uri)
+    if question_id:
+        tiyouju_protocol.queue_deep_link(question_id)
+
+    existing = launcher._running_instance()
+    if existing:
+        focused = focus_existing_window()
+        print(f"协议回跳：已通知运行中的窗口 q={question_id} focused={focused}", flush=True)
+        return 0
+
+    # 尚未运行：本进程就是冷启动，不要再拉一份 exe。深链留给 Eagle 首屏消费。
+    print(f"协议回跳：将冷启动并定位 q={question_id}", flush=True)
+    return -1
+
+
 def _main(arguments: list[str] | None = None) -> int:
     _set_app_id()
     arguments = [] if arguments is None else list(arguments)
@@ -835,6 +863,27 @@ def _main(arguments: list[str] | None = None) -> int:
             suffix = "\n\n题库当前正在运行：新配置从下一份任务或下一次重读开始时生效。" if running else ""
             _message(f"API 密钥与模型选择已保存；密钥已加密。{suffix}")
         return 0
+
+    try:
+        from core import tiyouju_protocol as _protocol
+    except ImportError:
+        sys.path.insert(0, str(launcher.BACKEND))
+        try:
+            from core import tiyouju_protocol as _protocol  # type: ignore
+        except ImportError:
+            _protocol = None
+    if _protocol is not None:
+        try:
+            _protocol.ensure_registered()
+        except Exception as exc:  # noqa: BLE001
+            print(f"启动时协议注册失败：{exc!r}", flush=True)
+        protocol_uri = _protocol.extract_uri_from_argv(arguments)
+        if protocol_uri:
+            handled = _handle_protocol_uri(protocol_uri)
+            if handled >= 0:
+                return handled
+            arguments = []
+
     if arguments:
         _message("无法识别的启动参数。", error=True)
         return 2
@@ -928,7 +977,18 @@ def _main(arguments: list[str] | None = None) -> int:
                 print("注意：后台工作者没有启动成功，新卷暂时不会被处理；详见 worker.log", flush=True)
             ui.say("正在打开窗口…")
             # 默认进题库工作台；切题核对仍在根路径 /
-            return ("ready", f"{url.rstrip('/')}/eagle")
+            home = f"{url.rstrip('/')}/eagle"
+            try:
+                from core import tiyouju_protocol as protocol
+
+                pending = protocol.consume_deep_link()
+                if pending and pending.get("q"):
+                    # 冷启动时把 q 直接带进首屏；同时再写回一份，供轮询兜底。
+                    protocol.queue_deep_link(pending["q"])
+                    home = protocol.build_target_url(port, pending["q"])
+            except Exception as exc:  # noqa: BLE001
+                print(f"读取回跳深链失败：{exc!r}", flush=True)
+            return ("ready", home)
 
         kind, value = splash.run(start)
         if kind == "configure":

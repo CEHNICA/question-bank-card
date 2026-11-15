@@ -185,4 +185,5 @@ urlpatterns = [
     path("api/library/<uuid:publication_id>/onenote/create", library_onenote.onenote_create_view),
     path("api/library/<uuid:publication_id>/onenote/open", library_onenote.onenote_open_view),
     path("api/library/<uuid:publication_id>/onenote/unbind", library_onenote.onenote_unbind_view),
+    path("api/deep-link", library_onenote.deep_link_view),
 ]

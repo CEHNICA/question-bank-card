@@ -3,6 +3,15 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 1.26.57
+
+**修好 OneNote：关联、打开、回跳**
+
+- **回跳**：安装版 `tiyouju://` 改为 `QuestionBankCard.exe --tiyouju-uri`；深链定位题目；已运行时只置前窗口。
+- **打开**：不再整页跳到 `onenote:`；优先 COM 定位，失败再用系统打开链接。
+- **关联**：建页写回时补字段并兜底保存，避免 OneNote 有页、题有据没记录。
+
+
 ## 1.26.56
 
 **录入与题库工作台分流，Eagle 筛选与右键精简**

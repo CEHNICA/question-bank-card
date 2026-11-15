@@ -1,7 +1,10 @@
 """tiyouju:// 自定义协议注册与回跳调起模块。
 
 OneNote 页面中的「在题有据中打开此题」链接使用 `tiyouju://question/<publication_id>`，
-点击时由本模块探测当前正在运行的题有据端口（或按需拉起服务），再通过浏览器打开对应题目页。
+点击时由本模块探测当前正在运行的题有据端口（或按需拉起服务），再打开对应题目页。
+
+安装版（PyInstaller 冻结）没有松散的 .py 脚本可喂给解释器，必须注册成：
+`QuestionBankCard.exe --tiyouju-uri "%1"`，由窗口启动器接手。
 """
 
 from __future__ import annotations
@@ -21,11 +24,14 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 SCHEME = "tiyouju"
+URI_FLAG = "--tiyouju-uri"
 FALLBACK_PORTS: tuple[int, ...] = (8768, 8769, 8765, 8000)
+DEEP_LINK_NAME = "deep-link.json"
 
 SCRIPT_PATH = Path(__file__).resolve()
 BACKEND_DIR = SCRIPT_PATH.parent.parent
 PROJECT_ROOT = BACKEND_DIR.parent
+FROZEN = bool(getattr(sys, "frozen", False))
 
 
 def parse_question_id(uri: str) -> str | None:
@@ -50,12 +56,80 @@ def parse_question_id(uri: str) -> str | None:
     return None
 
 
+def extract_uri_from_argv(argv: list[str] | None) -> str | None:
+    """从启动参数里抽出协议 URI（`--tiyouju-uri <uri>` 或裸 `tiyouju://...`）。"""
+    args = [str(item).strip() for item in (argv or []) if str(item).strip()]
+    if not args:
+        return None
+    if args[0] == URI_FLAG:
+        return args[1] if len(args) >= 2 else None
+    if args[0].lower().startswith(f"{SCHEME}:"):
+        return args[0]
+    return None
+
+
 def _instance_file_paths() -> list[Path]:
     paths = [BACKEND_DIR / "runtime" / "instance.json"]
     local_app_data = os.getenv("LOCALAPPDATA") or ""
     if local_app_data:
         paths.append(Path(local_app_data) / "QuestionBankCard" / "runtime" / "instance.json")
     return paths
+
+
+def _runtime_dirs() -> list[Path]:
+    dirs = [BACKEND_DIR / "runtime"]
+    local_app_data = os.getenv("LOCALAPPDATA") or ""
+    if local_app_data:
+        dirs.append(Path(local_app_data) / "QuestionBankCard" / "runtime")
+    return dirs
+
+
+def deep_link_paths() -> list[Path]:
+    """可能存放回跳深链的文件路径（安装版与源码版各一份）。"""
+    return [folder / DEEP_LINK_NAME for folder in _runtime_dirs()]
+
+
+def queue_deep_link(question_id: str | None) -> None:
+    """把要定位的题目写进 runtime，供已打开的 Eagle 页消费。"""
+    qid = str(question_id or "").strip()
+    if not qid:
+        return
+    payload = {"q": qid, "ts": time.time()}
+    text = json.dumps(payload, ensure_ascii=False)
+    for folder in _runtime_dirs():
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / DEEP_LINK_NAME).write_text(text, encoding="utf-8")
+        except OSError as exc:
+            logger.debug("写入深链失败 (%s): %s", folder, exc)
+
+
+def consume_deep_link() -> dict | None:
+    """读取并删除深链文件；没有有效内容时返回 None。
+
+    源码版与安装版可能各写一份，这里一次性清掉所有副本，只返回最先读到的有效定位。
+    """
+    found: dict | None = None
+    for path in deep_link_paths():
+        try:
+            if not path.is_file():
+                continue
+            raw = path.read_text(encoding="utf-8")
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            if found is not None:
+                continue
+            payload = json.loads(raw)
+            if not isinstance(payload, dict):
+                continue
+            qid = str(payload.get("q") or "").strip()
+            if qid:
+                found = {"q": qid, "ts": payload.get("ts")}
+        except (OSError, ValueError, TypeError) as exc:
+            logger.debug("读取深链失败 (%s): %s", path, exc)
+    return found
 
 
 def candidate_ports() -> list[int]:
@@ -121,6 +195,9 @@ def _pythonw_executable() -> Path:
 
 def build_command_line() -> str:
     """构造写入 Windows 注册表 shell\\open\\command 的命令行。"""
+    if FROZEN:
+        exe = Path(sys.executable).resolve()
+        return f'"{exe}" {URI_FLAG} "%1"'
     exe = _pythonw_executable()
     return f'"{exe}" "{SCRIPT_PATH}" "%1"'
 
@@ -158,24 +235,28 @@ def ensure_registered() -> bool:
             current_cmd = None
         if current_cmd != desired_cmd:
             winreg.SetValueEx(cmd_key, "", 0, winreg.REG_SZ, desired_cmd)
+            logger.info("已更新 tiyouju:// 协议命令: %s", desired_cmd)
 
     return True
 
 
 def _launch_server_process() -> bool:
     """当题有据未运行时尝试在后台拉起本地服务。"""
-    launcher = PROJECT_ROOT / "start_question_bank.py"
     creationflags = 0
     if sys.platform == "win32":
         creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200) | getattr(
             subprocess, "DETACHED_PROCESS", 0x00000008
         )
 
-    if launcher.is_file():
+    if FROZEN:
+        cmd = [str(Path(sys.executable).resolve())]
+        cwd = str(Path(sys.executable).resolve().parent)
+    else:
+        launcher = PROJECT_ROOT / "start_question_bank.py"
+        if not launcher.is_file():
+            return False
         cmd = [str(_pythonw_executable()), str(launcher)]
         cwd = str(PROJECT_ROOT)
-    else:
-        return False
 
     try:
         subprocess.Popen(
@@ -218,13 +299,19 @@ def build_target_url(port: int, question_id: str | None) -> str:
     return base
 
 
-def handle_uri(uri: str) -> bool:
-    """解析 tiyouju:// URI 并打开对应的题有据题目页。"""
+def handle_uri(uri: str, *, open_browser: bool = True) -> bool:
+    """解析 tiyouju:// URI：写入深链，并在需要时打开题目页。"""
     question_id = parse_question_id(uri)
+    if question_id:
+        queue_deep_link(question_id)
+
     port = ensure_server_running()
     if port is None:
         logger.error("未能连接或启动题有据本地服务 (uri=%s)", uri)
         return False
+
+    if not open_browser:
+        return True
 
     target_url = build_target_url(port, question_id)
     logger.info("打开题有据页面: %s", target_url)
@@ -248,7 +335,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args or args[0] == "--register":
         return 0 if ensure_registered() else 1
 
-    uri = args[0]
+    uri = extract_uri_from_argv(args) or args[0]
     if handle_uri(uri):
         return 0
 

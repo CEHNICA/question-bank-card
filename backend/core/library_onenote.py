@@ -534,9 +534,22 @@ def create_or_sync_page(publication: PublishedQuestion) -> dict[str, Any]:
         "updated_at": datetime.now(UTC).isoformat(),
     }
 
+    # 旧题 content 可能缺 source_filename；补上再写 extras，避免关联写失败后「题有据里看不见笔记」。
+    content = dict(publication.content or {})
+    if not str(content.get("source_filename") or "").strip():
+        content["source_filename"] = publication.source_filename or ""
+        publication.content = content
+        publication.save(update_fields=["content"])
+
     extras = dict(publication.extras or {})
     extras["onenote"] = onenote_record
-    library.save_extras(publication, extras)
+    try:
+        library.save_extras(publication, extras)
+    except Exception:
+        logger.exception("OneNote 页面已建好，但写入题库关联失败 publication=%s", publication.pk)
+        # 最后兜底：只改 extras，不碰 search_text，至少让前端能看到关联。
+        publication.extras = extras
+        publication.save(update_fields=["extras"])
 
     return onenote_record
 
@@ -615,3 +628,16 @@ def onenote_unbind_view(request: HttpRequest, publication_id: str) -> JsonRespon
         library.save_extras(publication, extras)
 
     return JsonResponse({"ok": True, "unbound": True})
+
+
+@csrf_exempt
+def deep_link_view(request: HttpRequest) -> JsonResponse:
+    """GET /api/deep-link: 消费一次 tiyouju:// 回跳留下的定位请求。"""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    from . import tiyouju_protocol
+
+    pending = tiyouju_protocol.consume_deep_link()
+    if not pending:
+        return JsonResponse({"ok": True, "q": None})
+    return JsonResponse({"ok": True, "q": pending.get("q"), "ts": pending.get("ts")})

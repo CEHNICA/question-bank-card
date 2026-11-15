@@ -1967,6 +1967,21 @@
     }
 
     // ================= 初始化与数据拉取 =================
+    async function consumeDeepLinkOnce() {
+      try {
+        const resp = await fetch(`${API_BASE}/api/deep-link`, { headers: { 'X-QB-Request': '1' } });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const qid = data && data.q ? String(data.q) : '';
+        if (qid) locateQuestionById(qid);
+      } catch (_) { /* 回跳轮询失败时静默，下一轮再试 */ }
+    }
+
+    function startDeepLinkPolling() {
+      consumeDeepLinkOnce();
+      setInterval(consumeDeepLinkOnce, 1200);
+    }
+
     async function init() {
       syncFilterPanelUI();
 
@@ -1981,6 +1996,7 @@
       if (targetQid) {
         locateQuestionById(targetQid);
       }
+      startDeepLinkPolling();
     }
 
     function updateFavoritesBadge() {
@@ -2992,6 +3008,20 @@
       await createOneNotePage(qid);
     }
 
+    function launchOneNoteUrl(url) {
+      // 绝不能 window.location.href = onenote:... —— 那会把题有据自己的窗口整页跳走，回不来。
+      const href = String(url || '').trim();
+      if (!href) return false;
+      const anchor = document.createElement('a');
+      anchor.href = href;
+      anchor.target = '_blank';
+      anchor.rel = 'noopener noreferrer';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      return true;
+    }
+
     async function openOneNotePage(qid) {
       const q = questionsData.find(item => item.id === qid);
       if (!q || !q.onenote || (!q.onenote.url && !q.onenote.page_id)) {
@@ -3001,19 +3031,26 @@
       if (oneNoteBusyBlocked()) return;
       const token = showOneNoteBusy(qid, ONE_NOTE_OPEN_STEPS);
       try {
-        if (q.onenote.url) {
-          // 统一仅由真实桌面浏览器触发一次 onenote: 协议跳转，避免与后台 COM 并发拉起产生冲突
-          window.location.href = q.onenote.url;
-          await new Promise(resolve => setTimeout(resolve, 3200));
+        // 优先 COM 定位（OneNote 已开时最快，且不碰题有据窗口）
+        if (q.onenote.page_id) {
+          const resp = await fetch(`${API_BASE}/api/library/${qid}/onenote/open`, { method: 'POST' });
+          const data = await resp.json().catch(() => ({}));
+          if (data.ok && data.opened) {
+            showToast('已在 OneNote 中打开', 'success');
+            return;
+          }
+        }
+        if (q.onenote.url && launchOneNoteUrl(q.onenote.url)) {
+          showToast('正在打开 OneNote…', 'info');
           return;
         }
-        const resp = await fetch(`${API_BASE}/api/library/${qid}/onenote/open`, { method: 'POST' });
-        const data = await resp.json();
-        if (!data.ok) {
-          showToast(data.error || '未能唤起 OneNote', 'error');
-        }
+        showToast('未能唤起 OneNote', 'error');
       } catch (_) {
-        showToast('打开 OneNote 失败，请确认 OneNote 已启动', 'error');
+        if (q.onenote.url && launchOneNoteUrl(q.onenote.url)) {
+          showToast('正在打开 OneNote…', 'info');
+        } else {
+          showToast('打开 OneNote 失败，请确认 OneNote 已启动', 'error');
+        }
       } finally {
         hideOneNoteBusy(token);
       }
@@ -3039,7 +3076,7 @@
         refreshOneNoteFilterAndCounts();
         showToast('OneNote 答题页已写好，正在打开。', 'success');
         if (data.onenote && data.onenote.url) {
-          window.location.href = data.onenote.url;
+          launchOneNoteUrl(data.onenote.url);
         }
       } catch (err) {
         showToast('创建 OneNote 页面异常: ' + err.message, 'error');
