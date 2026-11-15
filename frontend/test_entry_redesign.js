@@ -11,6 +11,7 @@ describe("录入题目页（/）重设计契约检查", () => {
   it("index.html 包含侧栏折叠、章节目录与显式试卷操作按钮，且保留原有 #paperMenu 结构", () => {
     assert.match(html, /id="entrySidebarToggle"/);
     assert.match(html, /id="entryChapterNav"[^>]*hidden/);
+    assert.match(html, /id="entryChapterToggle"/);
     assert.match(html, /id="entryChapterList"/);
     assert.match(html, /id="paperMenuTrigger"[^>]*aria-controls="paperMenu"/);
     assert.match(html, /<details[^>]*id="paperMenu"/);
@@ -32,10 +33,12 @@ describe("录入题目页（/）重设计契约检查", () => {
     assert.match(css, /\.card-tick\s*\{[\s\S]*?color:\s*#94a3b8;/);
   });
 
-  it("app.js 挂载试卷操作按钮、侧栏折叠及多章节导航渲染逻辑", () => {
+  it("app.js 挂载试卷操作按钮、侧栏折叠及对应试卷下挂载多章节导航", () => {
     assert.match(appJs, /function\s+renderEntryChapterNav\s*\(/);
     assert.match(appJs, /function\s+syncActiveChapterNav\s*\(/);
     assert.match(appJs, /function\s+setEntrySidebarCollapsed\s*\(/);
+    assert.match(appJs, /if\s*\(isActive\s*&&\s*chapterNav\)\s*\{[\s\S]*?item\.append\(chapterNav\)/);
+    assert.match(appJs, /\$\("entryChapterToggle"\)\?\.addEventListener\("click"/);
     assert.match(appJs, /\$\("paperMenuTrigger"\)\?\.addEventListener\("click"/);
     assert.match(appJs, /\$\("entrySidebarToggle"\)\?\.addEventListener\("click"/);
     assert.match(appJs, /renderEntryChapterNav\(\);/);
