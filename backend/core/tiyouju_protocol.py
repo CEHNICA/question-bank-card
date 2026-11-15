@@ -63,8 +63,10 @@ def candidate_ports() -> list[int]:
     ordered: list[int] = []
 
     def _add(port_value: object) -> None:
+        if port_value is None or isinstance(port_value, bool):
+            return
         try:
-            port = int(port_value)  # type: ignore[arg-type]
+            port = int(port_value) if isinstance(port_value, int) else int(str(port_value).strip())
         except (TypeError, ValueError):
             return
         if 1 <= port <= 65535 and port not in ordered:
