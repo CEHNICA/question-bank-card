@@ -2039,7 +2039,14 @@ body.is-resizing, body.is-resizing * {
     display: block;
     position: fixed;
     z-index: 57;
-    top: var(--topbar-h);
+    /* 窄屏上侧栏是从顶栏底下开始的整块浮层。筛选行和批量条正好就贴在它
+       底下那一行 —— 浮层一盖，「标签」「来源」两个胶囊就点不动了：看着还在，
+       按下去没反应（实测 1024 宽时 elementFromPoint 落在目录面板上，
+       不是落在胶囊上；1100 和 1440 宽都正常，因为那时侧栏在栅格列里）。
+       所以浮层改成从「顶部控制区」的底下开始，别压着它们。控制区占多高由
+       JS 量出来写进 --library-directory-top；量不到就退回顶栏高度。
+       宽屏时侧栏在栅格列里，这条用不上。 */
+    top: var(--library-directory-top, var(--topbar-h));
     left: 0;
     bottom: 0;
     width: min(86vw, 300px);

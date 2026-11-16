@@ -4456,6 +4456,44 @@ $("selectedViewCount").textContent = String(state.basket.length);
   window.addEventListener("resize", syncBulkBar, { passive: true });
   syncBulkBar();
 
+  // 1.26.43：窄屏上目录面板是左侧浮层，从顶栏底下一直盖到底。筛选行和批量条
+  // 正好贴在它底下那一行，浮层一盖，「标签」「来源」两个胶囊就点不动了 ——
+  // 看着还在，按下去没反应。实测 1024 宽时 elementFromPoint 落在目录面板上；
+  // 1100 和 1440 宽都正常，因为那时侧栏在栅格列里，不覆盖筛选行。
+  //
+  // 这里量出顶部控制区（筛选行 + 批量条）占多高，写进 --library-directory-top，
+  // 浮层从它底下开始。控制区滚出视口了就只算顶栏 —— 那时浮层盖的是正文，
+  // 本来就不该压住任何控件。
+  let directoryTopFrame = 0;
+  const syncDirectoryTop = () => {
+    if (directoryTopFrame) return;
+    directoryTopFrame = requestAnimationFrame(() => {
+      directoryTopFrame = 0;
+      const topbar = document.querySelector(".topbar");
+      let bottom = topbar ? topbar.getBoundingClientRect().bottom : 56;
+      for (const selector of [".library-filterbar", ".library-bulk"]) {
+        const element = document.querySelector(selector);
+        if (!element) continue;
+        const rect = element.getBoundingClientRect();
+        if (rect.height <= 0 || rect.bottom <= 0 || rect.top >= window.innerHeight) continue;
+        if (rect.bottom > bottom) bottom = rect.bottom;
+      }
+      document.documentElement.style.setProperty("--library-directory-top", `${Math.round(bottom)}px`);
+    });
+  };
+  window.addEventListener("scroll", syncDirectoryTop, { passive: true });
+  window.addEventListener("resize", syncDirectoryTop, { passive: true });
+  // 批量条里勾选后按钮会冒出来、窄屏会折行 —— 高度变了浮层的起点就得跟着变。
+  // 只靠 scroll / resize 看不见这两种变化（实测差出 38px，浮层压着批量条下沿）。
+  if (window.ResizeObserver) {
+    const directoryTopObserver = new window.ResizeObserver(syncDirectoryTop);
+    for (const selector of [".library-filterbar", ".library-bulk"]) {
+      const element = document.querySelector(selector);
+      if (element) directoryTopObserver.observe(element);
+    }
+  }
+  syncDirectoryTop();
+
   function questionSignature(item) {
     return JSON.stringify([item, state.features, state.ai.mode, state.basket.includes(item.id)]);
   }
