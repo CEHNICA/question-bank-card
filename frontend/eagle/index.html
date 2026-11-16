@@ -1922,15 +1922,48 @@
       });
     }
 
+    // KaTeX 延后排版：auto-render 不管元素可见性，扫到什么就排什么。
+    // 题目解析框 analysis_box 默认带 hidden 类，但列表分块渲染时对整块调用
+    // renderMathInElement，于是折叠着的解析框里几十个公式照样被排版，白占几千个
+    // DOM 节点。做法：渲染前把"自身不可见"的容器打上 katex-defer 并塞进
+    // ignoredClasses，auto-render 会整棵跳过；标记是临时的（每次渲染前清干净、
+    // 按当前可见性重算），展开解析框时再调一次 triggerKaTeX 就能补上。
+    function collectKatexDeferredContainers(root) {
+      const marks = [];
+      if (!root || typeof root.querySelectorAll !== 'function') return marks;
+      const nodes = root.querySelectorAll('*');
+      for (const el of nodes) {
+        const cs = getComputedStyle(el);
+        if (cs.display !== 'none' && cs.visibility !== 'hidden') continue;
+        // 只有真的含公式文本的隐藏容器才值得标记
+        if ((el.textContent || '').indexOf('$') === -1) continue;
+        marks.push(el);
+      }
+      return marks;
+    }
+
     function triggerKaTeX(targetElement = null) {
       if (typeof window.renderMathInElement !== 'function') return;
       const target = targetElement || document.getElementById('questionListContainer');
       if (!target) return;
+      let deferred = [];
       try {
         normalizeMathUnicodeIn(target);
-        window.renderMathInElement(target, KATEX_OPTIONS);
+        // 先清掉上一轮留下的延后标记，再按当前可见性重算
+        target.querySelectorAll('.katex-defer').forEach((el) => {
+          el.classList.remove('katex-defer');
+        });
+        deferred = collectKatexDeferredContainers(target);
+        deferred.forEach((el) => el.classList.add('katex-defer'));
+        const katexOptions = Object.assign({}, KATEX_OPTIONS, {
+          ignoredClasses: (KATEX_OPTIONS.ignoredClasses || ['katex']).concat(['katex-defer'])
+        });
+        window.renderMathInElement(target, katexOptions);
       } catch (err) {
         console.warn('KaTeX render error:', err);
+      } finally {
+        // 标记必须撤掉：否则展开解析框时那一层会被 ignoredClasses 挡回来，公式永远排不出来
+        deferred.forEach((el) => el.classList.remove('katex-defer'));
       }
     }
 
