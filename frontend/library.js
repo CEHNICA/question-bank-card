@@ -7580,4 +7580,12 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
       }
     });
   }
+  // 标签地图深链：Eagle 页左下角那个「📒 展开标签地图」在新标签页打开
+  // /library?tag_map=1（带标签时是 ?tag_map=<标签 id>）。
+  // 这个参数以前根本没人消费 —— 点过去只是普通题库页，
+  // 入口看着能用，落到地上是空的。现在直接开标签管理面板的地图视图。
+  const tagMapParam = params.get("tag_map");
+  if (tagMapParam) {
+    void openTagManager({ view: "map", tagId: tagMapParam === "1" ? undefined : tagMapParam });
+  }
 })();
