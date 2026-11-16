@@ -70,6 +70,8 @@ urlpatterns = [
     path("api-redesign.css", views.api_redesign_styles),
     path("library.css", views.library_styles),
     path("eagle-filter-bar.css", views._frontend("eagle-filter-bar.css", "text/css; charset=utf-8")),
+    # Eagle 的 Tailwind 本地预编译产物：跟着前端目录走，离线可用（不再依赖 cdn.tailwindcss.com）
+    path("eagle/tailwind.css", views._frontend("eagle/tailwind.css", "text/css; charset=utf-8")),
     path("eagle-filter-bar.js", views._frontend("eagle-filter-bar.js", "application/javascript; charset=utf-8")),
     path(
         "eagle-solution-editor.js", views._frontend("eagle-solution-editor.js", "application/javascript; charset=utf-8")
