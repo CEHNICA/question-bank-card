@@ -56,6 +56,20 @@
       #rightInspectorPane.force-open #inspectorBody { display: block; }
       #rightInspectorPane.force-open #inspectorHead { display: flex; }
     }
+    /* 窄屏（<768px）：左栏别再跟中栏抢宽度。
+       左栏固定 256px：768px 时正文只剩 440px；390px 时更惨 —— 正文只剩 62px，
+       题干被压成每行 3 个字，一张题卡能撑到 1350px 高。
+       所以窄屏默认收起左栏；手动展开时左栏浮在内容上面，不再把正文挤成一条缝。 */
+    @media (max-width: 767px) {
+      #leftFolderSidebar:not(.collapsed) {
+        position: fixed;
+        left: 0; top: 0; bottom: 0;
+        z-index: 60;
+        width: 16rem !important;
+        max-width: 85vw;
+        box-shadow: 0 8px 32px rgba(15, 23, 42, 0.18);
+      }
+    }
       .compact-row .katex-display {
       display: inline !important;
       margin: 0 !important;
@@ -1650,6 +1664,41 @@
       });
     }
 
+    // 窄屏下左栏自动收起。
+    // 768px 以下左栏固定占 256px，中栏会被挤成一条缝（实测 390px 时正文只剩
+    // 62px，题干每行 3 个字）。用户手动开合过就听用户的，别跟人较劲。
+    const LEFT_SIDEBAR_NARROW_BREAKPOINT = 768;
+    let leftSidebarNarrowAuto = false;   // 当前收起状态是自动收的，不是用户点的
+    let leftSidebarUserPref = null;      // 用户手动选择：true=收起 / false=展开
+    let leftSidebarResizeTimer = null;
+
+    function applyResponsiveLeftSidebar() {
+      const side = document.getElementById('leftFolderSidebar');
+      if (!side) return;
+      const narrow = window.innerWidth < LEFT_SIDEBAR_NARROW_BREAKPOINT;
+      const collapsed = side.classList.contains('collapsed');
+      if (!narrow) {
+        // 回到宽屏：把自动收起的那次还原成用户原本的样子
+        if (leftSidebarNarrowAuto) {
+          applyLeftSidebarCollapsed(false);
+          leftSidebarNarrowAuto = false;
+        }
+        return;
+      }
+      // 窄屏
+      if (leftSidebarUserPref === false) return;   // 用户明确要展开，听用户的
+      if (leftSidebarUserPref === null && !collapsed) {
+        // 用户还没表过态：第一次进窄屏自动收起
+        applyLeftSidebarCollapsed(true);
+        leftSidebarNarrowAuto = true;
+        return;
+      }
+      if (leftSidebarUserPref === true && !collapsed) {
+        applyLeftSidebarCollapsed(true);
+        leftSidebarNarrowAuto = false;
+      }
+    }
+
     function toggleFocusMode() {
       const left = document.getElementById('leftFolderSidebar');
       const right = document.getElementById('rightInspectorPane');
@@ -2056,6 +2105,12 @@
       syncFilterPanelUI();
 
       setupEventListeners();
+      // 窄屏先把左栏收起来，别让中栏被挤成一条缝（宽度变了也跟着走）
+      applyResponsiveLeftSidebar();
+      window.addEventListener('resize', () => {
+        clearTimeout(leftSidebarResizeTimer);
+        leftSidebarResizeTimer = setTimeout(applyResponsiveLeftSidebar, 120);
+      });
       bindTagAutocomplete();
       updatePaperSectionCollapseUI();
       renderFolderTree();
@@ -3623,6 +3678,9 @@
           btn.classList.remove('inline-flex');
         }
       });
+      // 用户手动开合：记住他的选择，窄屏自动收起别再跟他打架
+      leftSidebarUserPref = collapsed;
+      leftSidebarNarrowAuto = false;
     }
 
     /**
