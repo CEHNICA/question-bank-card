@@ -169,7 +169,11 @@
       .op-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .tm-head { flex-wrap: wrap; row-gap: 4px; }
       .tm-head-text { min-width: 0; flex: 1 1 auto; }
-      .tm-head-text p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      /* 说明文字不是标题：窄屏下让它整句换行显示。截断会把
+         "可新建标签、启用/停用；标签归并请走题库设置" 这后半句藏进省略号，
+         而它既没有 title 也没有详情入口，用户永远看不到（.op-title 的标题
+         截断是设计内，保留）。 */
+      .tm-head-text p { overflow: visible; text-overflow: clip; white-space: normal; }
       .tm-body { min-width: 0; }
       .tm-search-row { flex-wrap: wrap; }
       .tm-search-row input { width: auto; flex: 1 1 120px; min-width: 0; }
@@ -13494,7 +13498,7 @@
       </div>
 
       <div class="border-t border-slate-100 px-4 py-2 flex items-center justify-between gap-3 text-[11px] shrink-0">
-        <span class="text-slate-400 truncate">保存会写回题库正式解析（支持 Ctrl+S 保存当前题 · Ctrl+V 直接粘贴截图作为解析配图）</span>
+        <span class="text-slate-400 min-w-0">保存会写回题库正式解析（支持 Ctrl+S 保存当前题 · Ctrl+V 直接粘贴截图作为解析配图）</span>
         <div class="flex gap-2 shrink-0">
           <button type="button" onclick="saveAllSolutionColumns()" class="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold">保存全部</button>
           <button type="button" onclick="closeSolutionEditor()" class="px-3 py-1.5 rounded-md border border-slate-200 text-xs text-slate-600 hover:bg-slate-50">关闭</button>
