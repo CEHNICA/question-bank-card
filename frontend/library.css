@@ -1414,6 +1414,18 @@ body.printing { overflow: hidden; }
   :root { background: #fff; }
   .site-header, .topbar, .no-print, .toast, .site-drawer, .drawer-scrim, .drawer-staging, .library-rail, .rail-scrim, .rail-collapse, .question-inspector, .inspector-scrim, .basket-panel, .basket-handle { display: none !important; }
   body.printing > *:not(.print-sheet) { display: none !important; }
+  /* 没开组卷预览就按 Ctrl+P，整页题库界面会被原样印出来：目录树、「加入试题篮」、
+     「看答案▾」「标签与详情」全在纸上，实测 18 页全是这种废纸，没有一道题能直接用。
+     题库页本身没有可打印的内容 —— 要印的是组卷预览里那份卷子。
+     所以这里把界面收掉，只留一句指引，告诉他从哪儿印。 */
+  body:not(.printing) > main.library-main { display: none !important; }
+  body:not(.printing)::after {
+    content: "题有据题库页没有可打印的内容。打印试卷请先在「试题篮」里打开组卷预览，再从预览里打印。";
+    display: block;
+    padding: 40mm 18mm;
+    color: #111;
+    font: 14px/2 var(--ui-font);
+  }
   body.printing { overflow: visible; background: #fff; }
   .print-sheet { position: static; width: auto; height: auto; max-height: none; padding: 0; background: #fff; overflow: visible; border-radius: 0; box-shadow: none; animation: none; }
   .print-sheet::backdrop { display: none; }
