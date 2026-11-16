@@ -99,6 +99,21 @@ class ConnectionError(ServiceError):
     """A credential or transport failure invalidates the API connection probe."""
 
 
+class TruncationError(ServiceError):
+    """The answer was cut off by the token budget.
+
+    This is a property of *this* request, not of the service: the connection is
+    still good, the key still works.  It must never clear the verified flag —
+    otherwise one long question silently pauses every AI feature on the site
+    until the user manually runs the connection probe again.
+    """
+
+
+# A truncated answer is retried once with a bigger budget on the same service.
+# It never falls back to another model, key or endpoint.
+TRUNCATION_RETRY_TOKEN_CAP = 32000
+
+
 def path() -> Path:
     explicit = (os.environ.get("QB_LIBRARY_AI_SETTINGS_FILE") or os.environ.get("QB_LIBRARY_AI_FILE") or "").strip()
     return (
@@ -835,7 +850,7 @@ def _request(
         body = response.json()
         choice = body["choices"][0]
         if choice.get("finish_reason") == "length":
-            raise ConnectionError("答案超过本次长度限制，未保存不完整结果。")
+            raise TruncationError("答案超过本次长度限制，未保存不完整结果。")
         message = choice["message"]
         text, thinking = _response_content(message)
         return text, {"model": str(body.get("model") or config["model"]), "thinking": thinking}
@@ -864,11 +879,30 @@ def chat(
         raise ServiceError("当前是助手模式：请由当前 AI 助手通过本地工具领取并提交任务，不调用云 API。")
     try:
         if explicit_api or manual_tag:
-            text, evidence = _request(
-                config, prompt, image_urls, max_tokens, kind=None if manual_tag else kind, explicit_api=True
-            )
+            call_kind = None if manual_tag else kind
+            call_explicit = True
         else:
-            text, evidence = _request(config, prompt, image_urls, max_tokens, kind=kind)
+            call_kind = kind
+            call_explicit = False
+        try:
+            text, evidence = _request(
+                config, prompt, image_urls, max_tokens, kind=call_kind, explicit_api=call_explicit
+            )
+        except TruncationError:
+            # 内容太长不是服务坏了：同一个服务、同一把 key，把额度加大再试一次。
+            # 不换模型、不换端点、不动「已验证」状态。
+            budget = min(max_tokens * 2, TRUNCATION_RETRY_TOKEN_CAP)
+            if budget <= max_tokens:
+                raise
+            try:
+                text, evidence = _request(
+                    config, prompt, image_urls, budget, kind=call_kind, explicit_api=call_explicit
+                )
+            except TruncationError:
+                raise TruncationError(
+                    "答案过长，两次生成都被长度上限截断，结果未保存；"
+                    "请缩短题干或减少配图后重试。"
+                ) from None
         if _needs_reasoning_evidence(config) and not evidence["thinking"]:
             raise ConnectionError("本次响应未返回所选思考内容，结果未保存；请核对模型思考配置。")
     except ConnectionError:
