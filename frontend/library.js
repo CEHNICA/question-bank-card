@@ -1695,6 +1695,63 @@
     toggle.setAttribute("aria-label", wording.label);
   }
 
+  // 窄屏下抽屉是模态（有遮罩、盖住整屏），焦点得跟着走：打开时进抽屉、
+  // Tab 在抽屉里循环、关掉时还回触发按钮。少了这三步，键盘用户一打开抽屉，
+  // 焦点还留在背后的题目列表上 —— 屏幕被抽屉盖着、焦点却看不见，
+  // 按什么键都像没反应。
+  function inspectorFocusables() {
+    const panel = ui.inspector;
+    if (!panel) return [];
+    const selector = "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])";
+    return [...panel.querySelectorAll(selector)].filter((el) => {
+      if (el.disabled || el.hidden) return false;
+      if (el.getAttribute("aria-hidden") === "true") return false;
+      const style = getComputedStyle(el);
+      return style.visibility !== "hidden" && style.display !== "none";
+    });
+  }
+
+  function focusInspectorPanel() {
+    const panel = ui.inspector;
+    if (!panel) return;
+    const target = $("closeInspector") || inspectorFocusables()[0];
+    target?.focus({ preventScroll: true });
+  }
+
+  function trapInspectorFocus(event) {
+    if (event.key !== "Tab") return;
+    if (!document.body.classList.contains("library-inspector-open")) return;
+    // 原生 <dialog> 在 top layer，焦点该在它那儿转，别抢。
+    if (document.querySelector("dialog[open]")) return;
+    const panel = ui.inspector;
+    if (!panel) return;
+    const items = inspectorFocusables();
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey) {
+      if (active === first || !panel.contains(active)) { event.preventDefault(); last.focus(); }
+    } else if (active === last || !panel.contains(active)) {
+      event.preventDefault(); first.focus();
+    }
+  }
+
+  // 窄屏下抽屉关着的时候，它只是被 translateX(100%) 挪到了屏幕外边 —— 元素还在，
+  // 里面的「收起详情」照样能被键盘聚焦。焦点一进去就掉到屏幕外，键盘用户按 Tab
+  // 什么反应都看不见。inert 让它彻底进不去（也不给读屏报），比 visibility 干净：
+  // visibility 会挡住过渡，还会让「打开就聚焦」的既有行为失效。
+  function syncInspectorInert() {
+    const panel = ui.inspector;
+    if (!panel) return;
+    const mobile = window.matchMedia("(max-width: 979px)").matches;
+    const open = document.body.classList.contains("library-inspector-open");
+    const hidden = mobile && !open;
+    panel.inert = hidden;
+    if (hidden) panel.setAttribute("aria-hidden", "true");
+    else panel.removeAttribute("aria-hidden");
+  }
+
   function setInspectorOpen(open) {
     const next = Boolean(open);
     const mobile = window.matchMedia("(max-width: 979px)").matches;
@@ -1706,6 +1763,12 @@
     if (!mobile) document.body.classList.toggle("library-inspector-collapsed", !next);
     const scrim = $("inspectorScrim"); if (scrim) scrim.hidden = !mobile || !next;
     markInspectorToggle(next, { disabled: Boolean(ui.inspectorToggle?.disabled) });
+    syncInspectorInert();
+    // 窄屏上抽屉是模态，焦点跟着走；宽屏它是常驻的第三栏，动焦点反而添乱。
+    if (mobile) {
+      if (next) focusInspectorPanel();
+      else ui.inspectorToggle?.focus({ preventScroll: true });
+    }
   }
 
   function draftLink(item, extra = "") {
@@ -6679,10 +6742,13 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
   }
   initLocateQuestion();
   $("inspectorScrim").addEventListener("click", () => setInspectorOpen(false));
+  document.addEventListener("keydown", trapInspectorFocus);
   window.matchMedia("(max-width: 979px)").addEventListener("change", () => {
     document.body.classList.remove("library-inspector-open"); $("inspectorScrim").hidden = true;
     markInspectorToggle(!window.matchMedia("(max-width: 979px)").matches && !document.body.classList.contains("library-inspector-collapsed"));
+    syncInspectorInert();
   });
+  syncInspectorInert();
   $("libraryTagManager").addEventListener("click", openTagManager);
   $("editSelectedTags").addEventListener("click", () => openTagEditor(null));
   document.addEventListener("keydown", (event) => {
