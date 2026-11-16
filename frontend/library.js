@@ -1782,7 +1782,23 @@
     }
     return body;
   }
-  async function loadTagCatalogue() { tagCatalogue = await tagRequest("/api/library/tags"); return tagCatalogue; }
+  // 标签目录的并发请求单飞。
+  //
+  // 初始化时目录面板（directoryToggle → directoryLoad）和全局缓存（loadTagCatalogue）
+  // 是**并发**触发的，两处各拉一次同一个端点 —— 实测同一时刻各发一次，
+  // 同一份数据白等一整轮（这台机器 /api/library/tags 单次约 394ms）。
+  // 同一个 pending promise 复用，请求失败时清掉，别让后面所有调用都拿到同一个失败结果。
+  let tagCataloguePending = null;
+  async function loadTagCatalogue() {
+    if (tagCataloguePending) return tagCataloguePending;
+    tagCataloguePending = (async () => {
+      tagCatalogue = await tagRequest("/api/library/tags");
+      return tagCatalogue;
+    })();
+    try { return await tagCataloguePending; }
+    catch (error) { tagCataloguePending = null; throw error; }
+    finally { tagCataloguePending = null; }
+  }
   function hierarchyTag(id) { return (tagCatalogue.tags || []).find(tag => tag.id === id); }
   function tagHierarchyRows(id, direction) {
     const tag = hierarchyTag(id);
@@ -6782,7 +6798,9 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
     directory.loading = true; directory.error = "";
     directoryRender();
     try {
-      const body = await tagRequest("/api/library/tags");
+      // 目录面板和全局缓存用的是同一份数据 —— 走 loadTagCatalogue，
+      // 别自己再发一次请求（并发时会和白等的一遍撞上）。
+      const body = await loadTagCatalogue();
       directory.tags = (body.tags || []).filter(tag => tag.active !== false);
     } catch (error) {
       directory.error = error.message || "目录暂时无法载入。";
