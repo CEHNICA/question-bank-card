@@ -1001,6 +1001,13 @@
       if (segment.type === "math") {
         const span = document.createElement("span");
         span.className = `qb-math${segment.auto ? " is-auto" : ""}${segment.display ? " is-display" : ""}`;
+        // 行内公式不能从中间断开。KaTeX 会把一段公式拆成多个 .katex-base
+        // （"AE=3DE" → "AE=" + "3DE"），.katex-base 自己 nowrap，可两个 base
+        // 之间留着断行机会 —— 公式于是被排成两行，"AE=" 挂在行尾、"3DE" 掉到
+        // 下一行行首。整段锁成 nowrap 就不会断。
+        // 打印流另有 .print-paper/.print-flow 规则对 .katex-html 显式写
+        // white-space:normal，会盖掉这里的继承值 —— 纸上仍按原来的方式换行。
+        if (!segment.display && span.style) span.style.whiteSpace = "nowrap";
         const raw = source.slice(segment.start, segment.end);
         span.dataset.raw = raw;
         if (trackSource) previewSource(span, sourceOffset + segment.start, sourceOffset + segment.end, "math", null,
