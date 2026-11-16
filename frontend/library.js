@@ -291,8 +291,14 @@
       while (quiet && body.items.length < Math.min(wanted, body.total)) {
         query.set("offset", String(body.items.length));
         const more = await fetch(`/api/library?${query}`, { cache: "no-store" });
+        // 失败和「读到头了」是两回事，不能混成一句 break。
+        // 混着写的后果：后台续拉中途 500，这里静默 break，上面那次已经拿到的
+        // 也一起丢掉，题库悄悄少了一半，界面上只剩「已显示 100 / 共 400 题」，
+        // 没人知道是读失败还是本来就这么少。失败要抛出去，让上面统一报错，
+        // 并保留上一次读到的内容（宁可旧一点，也不能少一半还装作没事）。
+        if (!more.ok) throw new Error(`读取题库失败（HTTP ${more.status}）`);
         const page = await more.json();
-        if (!more.ok || !page.items.length) break;
+        if (!page.items || !page.items.length) break;   // 真的到头了，不是失败
         body.items = body.items.concat(page.items);
       }
       if (token !== state.token) return;

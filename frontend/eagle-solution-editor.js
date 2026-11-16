@@ -162,6 +162,7 @@
       value: { answer: '', analysis: '', figures: [] },
       base: null,
       ai: null,
+      aiDraftError: '',
       stale: false,
       status: '正在读取…',
       dirty: false,
@@ -179,9 +180,15 @@
       col.stale = Boolean(body.ai_answer_stale);
       if (!col.ai) {
         const draft = await fetchAiDraft(col.id);
-        if (draft) {
-          col.ai = draft;
+        if (draft.draft) {
+          col.ai = draft.draft;
           col.stale = false;
+          col.aiDraftError = '';
+        } else {
+          // 「读不到」和「没有初稿」是两回事。以前这里一律当成没有，
+          // 界面上就写「这道题还没有 AI 初稿」——服务器 500 也照样这么说，
+          // 老师真去点生成，白跑一趟额度。
+          col.aiDraftError = draft.error || '';
         }
       }
       col.base = body.base_revision || null;
@@ -194,6 +201,8 @@
       col.status = solution ? '已有正式解析，可继续编辑' : '尚无正式解析，当前显示原卷答案';
     } catch (error) {
       col.status = (error && error.message) || '读取失败';
+      // 解析都没读到，AI 初稿自然也读不到：别让下面那块显示成「还没有初稿」。
+      col.aiDraftError = col.aiDraftError || ((error && error.message) || '读取失败');
     }
     renderColumns();
   }
@@ -208,20 +217,21 @@
         `${window.API_BASE || ''}/api/library/jobs?ids=${encodeURIComponent(publicationId)}&solution_scope=true`,
         { headers: { 'X-QB-Request': '1' }, cache: 'no-store' }
       );
-      if (!res.ok) return null;
+      // 读失败要带出原因：返回 null 会和「确实没有初稿」混成一条路。
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = await res.json();
       const jobs = Array.isArray(body.jobs) ? body.jobs : [];
       const done = jobs
         .filter((j) => j && j.kind === 'answer' && j.status === 'done' && j.result)
         .sort((a, b) => String(b.updated_at || b.id || '').localeCompare(String(a.updated_at || a.id || '')));
-      if (!done.length) return null;
+      if (!done.length) return { draft: null, error: '' };
       const r = done[0].result || {};
       const answer = typeof r.answer === 'string' ? r.answer : '';
       const analysis = typeof r.analysis === 'string' ? r.analysis : '';
-      if (!answer && !analysis) return null;
-      return { answer, analysis, engine: r.engine || r.model || 'AI' };
+      if (!answer && !analysis) return { draft: null, error: '' };
+      return { draft: { answer, analysis, engine: r.engine || r.model || 'AI' }, error: '' };
     } catch (e) {
-      return null;
+      return { draft: null, error: (e && e.message) || '读取失败' };
     }
   }
 
@@ -230,7 +240,11 @@
   function columnHtml(col) {
     const item = col.item || {};
     const ai = col.ai;
-    const aiBox = ai && (ai.answer || ai.analysis)
+    const aiBox = col.aiDraftError
+      ? `<div class="rounded-md border border-amber-200 bg-amber-50 p-2 text-[10px] text-amber-800 leading-snug">
+           <b>AI 初稿没读到</b>（${esc(col.aiDraftError)}）：这里显示的是「读不到」，不是「没有初稿」。点下方「重新读取」再试一次，别急着排生成任务。
+         </div>`
+      : (ai && (ai.answer || ai.analysis)
       ? `<div class="rounded-md border border-emerald-200 bg-emerald-50/60 p-2 space-y-1.5">
            <div class="flex items-center justify-between">
              <span class="text-[10px] font-bold text-emerald-900">⚡ AI 初稿对照${col.stale ? '（已过期，不可直接采纳）' : ''}</span>
@@ -243,7 +257,7 @@
              <button data-act="adopt-analysis" ${col.stale ? 'disabled' : ''} class="px-1.5 py-0.5 rounded border border-emerald-300 text-[10px] text-emerald-800 ${col.stale ? 'opacity-40 cursor-not-allowed' : 'hover:bg-emerald-100'}">采纳到解析</button>
            </div>
          </div>`
-      : `<div class="rounded-md border border-dashed border-slate-200 bg-slate-50 p-2 text-[10px] text-slate-400">这道题还没有 AI 初稿。用顶部「⚡ AI 一键生成推导与解析」排一个任务，初稿会回到这里。</div>`;
+      : `<div class="rounded-md border border-dashed border-slate-200 bg-slate-50 p-2 text-[10px] text-slate-400">这道题还没有 AI 初稿。用顶部「⚡ AI 一键生成推导与解析」排一个任务，初稿会回到这里。</div>`);
 
     const origin = col.origin || {};
     const originBox = (origin.answer || origin.analysis)

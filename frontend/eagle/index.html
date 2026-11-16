@@ -2970,21 +2970,24 @@
       const key = String(paperId || '');
       if (!key) return;
       if (_documentLoadInFlight.has(key)) return _documentLoadInFlight.get(key);
+      const sentinel = document.getElementById('chunkSentinel');
+      const label = (targetPaper && (targetPaper.name || targetPaper.filename)) || '资料';
       const job = (async () => {
-        const sentinel = document.getElementById('chunkSentinel');
-        const label = (targetPaper && (targetPaper.name || targetPaper.filename)) || '资料';
         if (sentinel) sentinel.innerText = `正在载入《${label}》的已入库试题...`;
         const pageSize = 100;
         let offset = 0;
         let total = Math.max(0, Number(wantTotal) || 0);
         const incoming = [];
         const seen = new Set(questionsData.map(q => String(q.id)));
+        let loadError = '';
         while (offset < total || (total === 0 && offset === 0)) {
           const res = await fetch(
             `${API_BASE}/api/library?document=${encodeURIComponent(key)}&limit=${pageSize}&offset=${offset}&sort=source&slim=1`,
             { headers: { 'X-QB-Request': '1', 'Referer': window.location.href } }
           );
-          if (!res.ok) break;
+          // 失败不是「到头了」。以前这里直接 break：翻页中途 500 会静默停下，
+          // 底下却还写「已入库 N 题已在列表中」，等于替失败作了假证。
+          if (!res.ok) { loadError = `读取失败（HTTP ${res.status}）`; break; }
           const data = await res.json();
           if (typeof data.total === 'number') total = data.total;
           const items = Array.isArray(data.items) ? data.items : [];
@@ -3008,13 +3011,23 @@
             if (pendingLocateQuestionId) revealLocatedQuestion(pendingLocateQuestionId);
           }
           renderRightInspector();
-        } else if (sentinel) {
+        } else if (sentinel && !loadError) {
           sentinel.innerText = total
             ? `— 《${label}》已入库 ${total} 题已在列表中 —`
             : `— 《${label}》还没有已入库试题；未入库的题请去「录入题目」—`;
         }
+        if (loadError) {
+          // 说清楚「没载入完」和「只到了一半」，别让半截数据冒充全量。
+          const got = incoming.length;
+          const tail = `《${label}》没有载入完：${loadError}。列表里只有已取到的 ${got} 道题（共 ${total} 道）；再点一次这份资料可重试。`;
+          if (sentinel) sentinel.innerText = `— ${tail} —`;
+          showToast(tail, 'error');
+        }
       })().catch(err => {
         console.warn('Failed to load published questions for document:', err);
+        const tail = `《${label}》没有载入完：${(err && err.message) || '读取失败'}。再点一次这份资料可重试。`;
+        if (sentinel) sentinel.innerText = `— ${tail} —`;
+        showToast(tail, 'error');
       });
       _documentLoadInFlight.set(key, job);
       try { await job; } finally { _documentLoadInFlight.delete(key); }
