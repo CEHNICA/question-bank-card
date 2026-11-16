@@ -326,7 +326,10 @@
         const imageScale = Math.min(chosenWidth > 0 ? Math.max(5, Math.min(178, chosenWidth)) * MM / image.naturalWidth : 96 / 150,
           BODY_WIDTH / image.naturalWidth, 210 * MM / image.naturalHeight);
         image.style.width = `${image.naturalWidth * imageScale}px`;
-        image.style.height = "auto";
+        // 写死像素高度，不要交给 "auto"：图片是 atomic 块（不可切分），
+        // 只要布局那一刻它还没拿到内在尺寸，量出来就是 0 高，
+        // 整块图会被当成不占地方 → 卷面糊出页面、页数还少一页。
+        image.style.height = `${Math.max(1, Math.round(image.naturalHeight * imageScale))}px`;
       }));
       work.querySelectorAll(".print-question").forEach(question => {
         alignQuestionNumber(question);

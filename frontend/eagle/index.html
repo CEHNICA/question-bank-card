@@ -6818,7 +6818,9 @@
     // 老师得先看见排好的样子，才敢印。这一版把它补回来：独立页面 + iframe，
     // 排版走 qb-render / exam-layout / exam-export，跟导出共用同一份分组定义。
 
-    const previewState = { ready: false, items: [] };
+    // pageCount 是预览排出来的页数。导出 PDF 时把它一起送回后台：后台排出来
+    // 对不上就拒发 —— 老师印的必须是他刚在屏幕上看过的那一份卷子。
+    const previewState = { ready: false, items: [], pageCount: 0 };
 
     function setPreviewStatus(text, tone) {
       const badge = document.getElementById('previewStatusBadge');
@@ -6854,6 +6856,7 @@
       const modal = document.getElementById('basketPreviewModal');
       if (!modal) return;
       modal.classList.remove('hidden');
+      previewState.pageCount = 0;
       setPreviewStatus('正在读取题目原文…', '');
       try {
         const items = await loadExportItems(Array.from(basketQuestionIds));
@@ -6884,7 +6887,9 @@
       const custom = document.getElementById('exportAnswerSpaceCustom');
       if (select && custom) custom.classList.toggle('hidden', select.value !== 'custom');
       const modal = document.getElementById('basketPreviewModal');
-      if (!modal || modal.classList.contains('hidden')) return;
+      // 预览没开着的时候改设置，屏幕上那份卷已经作废了，页数也跟着作废。
+      // 不作废的话，导出会拿旧页数去跟后台对不上，白白把老师挡在门外。
+      if (!modal || modal.classList.contains('hidden')) { previewState.pageCount = 0; return; }
       setPreviewStatus('正在按新设置排版…', '');
       postPreviewPayload();
     }
@@ -6901,6 +6906,7 @@
         return;
       }
       if (data.type === 'qbc:eagle-print-preview-result') {
+        previewState.pageCount = Number(data.page_count) || 0;
         if (data.error) { setPreviewStatus(data.error, 'error'); return; }
         const warnings = Array.isArray(data.warnings) ? data.warnings : [];
         setPreviewStatus(
@@ -7165,11 +7171,20 @@
       try {
         const items = await loadExportItems(ids);
         setExportStatus(`正在排版 ${items.length} 道题…`);
+        // 看过预览才把页数带过去：后台排出来不是同一份卷，就拒发并让老师重新预览。
+        // 篮里换了题、或者预览早就作废了，这种不带，免得白挡老师一次。
+        const previewIds = previewState.items.map((item) => String(item.id));
+        const currentIds = items.map((item) => String(item.id));
+        const previewMatches = previewIds.length === currentIds.length
+          && previewIds.every((id) => currentIds.includes(id));
         const result = await window.ExamExport.download(items, {
           title,
           print_options: collectExportPrintOptions(),
           solutions: {},
-          format
+          format,
+          ...(format === "pdf" && previewState.pageCount > 0 && previewMatches
+            ? { preview_page_count: previewState.pageCount }
+            : {})
         });
         const count = result.question_count || items.length;
         const suffix = result.warning ? `（${result.warning}）` : '';
