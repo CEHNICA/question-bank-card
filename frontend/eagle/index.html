@@ -224,6 +224,34 @@
       /* 题卡勾选框：14×14 太迷你，按 WCAG 2.5.8 (AA) 的 24px 最小目标放大 */
       #questionListContainer input[type="checkbox"] { width: 24px; height: 24px; }
       #qlToggleAnalysisBtn { min-height: 32px; }
+      /* 标签管理中心：390px 下左栏群组导航占 176px（w-44），右列表只剩 148px，
+         标签名被 truncate 到 63px（「一元一次不等式」少 21px），而且 ✕ 被 flex-wrap
+         挤到标题第二行左侧。→ 窄屏改上下堆叠：群组变顶部横条，列表整栏吃满宽度；
+         标题行不换行，✕ 归位右上角。 */
+      #tagManagerModal .tm-body { flex-direction: column; overflow-y: auto; }
+      #tagManagerModal #modalTagGroupsNav {
+        width: 100%; flex-shrink: 0; display: flex; gap: 4px; overflow-x: auto;
+        border-right: none; border-bottom: 1px solid #f1f5f9;
+      }
+      #tagManagerModal #modalTagGroupsNav > div { flex: 0 0 auto; gap: 6px; }
+      #tagManagerModal #modalTagList { min-height: 160px; }
+      /* 标签名宁可换行也不许丢字 —— 窄屏右列窄，truncate 会把「一元一次不等式」
+         砍成「一元一次…」，用户根本看不出是哪个标签。 */
+      #tagManagerModal #modalTagList .truncate {
+        overflow: visible; text-overflow: clip; white-space: normal;
+      }
+      #tagManagerModal .tm-head { flex-wrap: nowrap; align-items: center; }
+      #tagManagerModal .tm-head-text { min-width: 0; flex: 1 1 auto; }
+      #tagManagerModal .tm-head > button { flex-shrink: 0; }
+      /* 顶栏 / 左栏工具条：还有一批 23~24px 高的入口（应用菜单、左右栏开关、
+         展开全部、树搜索、顶栏搜索、筛选按钮、试题篮入口），窄屏下同样难点。 */
+      #btnEagleAppMenu,
+      #btnToggleLeftSidebar,
+      button[title="一键展开 / 收起全部文件夹"] { min-width: 32px; min-height: 32px; }
+      #treeSearchInput,
+      #globalSearchInput { min-height: 32px; }
+      #btnToggleFilterPanel,
+      button[title="打开试题篮"] { min-height: 32px; }
     }
       .compact-row .katex-display {
       display: inline !important;

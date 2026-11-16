@@ -149,6 +149,60 @@ for (const [sel, size, label] of TOUCH_RULES) {
   );
 }
 
+// ---- ②b 标签管理中心窄屏：群组导航别吃掉半个弹窗，标签名别丢字 ----------
+// 390px 实测：左栏 #modalTagGroupsNav 占 176px（w-44），右列表只剩 148px，
+// 标签名被 truncate 到 63px（「一元一次不等式」少 21px）；✕ 被 flex-wrap 挤到
+// 标题第二行左侧。→ 窄屏改上下堆叠 + 标题不换行 + 标签名允许换行不截断。
+
+assertInMedia(
+  "max-width: 640px",
+  /#tagManagerModal\s+\.tm-body\s*\{[^}]*flex-direction:\s*column/,
+  "标签管理中心窄屏改上下堆叠"
+);
+assertInMedia(
+  "max-width: 640px",
+  /#tagManagerModal\s+#modalTagGroupsNav\s*\{[^}]*width:\s*100%/,
+  "标签管理中心群组导航整栏吃满宽度"
+);
+assertInMedia(
+  "max-width: 640px",
+  /#tagManagerModal\s+\.tm-head\s*\{[^}]*flex-wrap:\s*nowrap/,
+  "标签管理中心标题行不换行（✕ 留在右上角）"
+);
+assertInMedia(
+  "max-width: 640px",
+  /#tagManagerModal\s+#modalTagList\s+\.truncate\s*\{[^}]*white-space:\s*normal/,
+  "标签名窄屏允许换行，不许 ellipsis 截断丢字"
+);
+
+// ---- ②c 顶栏 / 左栏工具条的小入口也别漏 -------------------------------------
+
+assertInMedia(
+  "max-width: 640px",
+  /#btnEagleAppMenu[^{]*\{[^}]*min-height:\s*32px/,
+  "顶栏应用菜单按钮抬到 32px"
+);
+assertInMedia(
+  "max-width: 640px",
+  /#treeSearchInput[^{]*\{[^}]*min-height:\s*32px/,
+  "左栏树搜索框抬到 32px"
+);
+assertInMedia(
+  "max-width: 640px",
+  /#globalSearchInput[^{]*\{[^}]*min-height:\s*32px/,
+  "顶栏搜索框抬到 32px"
+);
+assertInMedia(
+  "max-width: 640px",
+  /#btnToggleFilterPanel[^{]*\{[^}]*min-height:\s*32px/,
+  "筛选面板入口按钮抬到 32px"
+);
+assertInMedia(
+  "max-width: 640px",
+  /button\[title="打开试题篮"\][^{]*\{[^}]*min-height:\s*32px/,
+  "顶栏试题篮入口按钮抬到 32px"
+);
+
 // ---- ③ 宽屏零变化：这些选择器不得出现在媒体查询块外 ------------------------
 
 const WIDE_FORBIDDEN = [
@@ -161,7 +215,11 @@ const WIDE_FORBIDDEN = [
   "#filterPillsPanel button[id^=\"pillBtn\"]",
   "#questionListContainer button[id^=\"star_btn_\"]",
   "#questionListContainer input[type=\"checkbox\"]",
-  "#selectAllCheckbox"
+  "#selectAllCheckbox",
+  "#tagManagerModal .tm-body",
+  "#tagManagerModal #modalTagGroupsNav",
+  "#tagManagerModal .tm-head",
+  "#tagManagerModal #modalTagList .truncate"
 ];
 for (const sel of WIDE_FORBIDDEN) {
   assert.ok(
