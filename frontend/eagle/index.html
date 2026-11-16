@@ -2303,6 +2303,32 @@
       free_response: '解答题'
     };
 
+    // 卡上那两句话统一由 QBQuestionLocator 说出来（全库只留一套说法）。
+    //
+    // 以前这里直接拼一句「第 N 题」。但同一本教材里题号从小节
+    // 重新开始 —— 810 道题里 128 道都叫「第 1 题」，老师根本认不出是哪道题。
+    // 页码是唯一的硬锚点：章节名（「练习」「思考」）全书几十处，题号也重号，
+    // 只有「书上第几页」认得出来。所以卡头说「这是第几题」，旁边小字说
+    // 「书上第几页、哪一节」。
+    function questionIdentity(q) {
+      const locator = typeof window !== 'undefined' ? window.QBQuestionLocator : null;
+      if (locator && typeof locator.identityOf === 'function') {
+        const text = String(locator.identityOf(q) || '').trim();
+        if (text) return text;
+      }
+      // 模块没加载时的兜底：宁可退回裸题号，也不能白屏。
+      const number = q && q.number;
+      return (number !== undefined && number !== null && number !== '') ? `第 ${number} 题` : '栏目题';
+    }
+
+    function questionPosition(q) {
+      const locator = typeof window !== 'undefined' ? window.QBQuestionLocator : null;
+      if (locator && typeof locator.positionOf === 'function') {
+        return String(locator.positionOf(q) || '').trim();
+      }
+      return '';
+    }
+
     function convertLibraryListItem(item, idx) {
       const c = item.content || {};
       const qNum = item.number || (idx + 1);
@@ -2360,6 +2386,10 @@
       return {
         id: String(item.id || `q_${idx}`),
         questionNumber: qNum,
+        // 原卷题号与页码要单独留着：questionNumber 会在没有印刷题号时退回列表
+        // 序号，那不是题号。定位模块（QBQuestionLocator）认的是这两个字段。
+        number: (item.number !== undefined && item.number !== null) ? item.number : null,
+        page: (item.page && item.page > 0) ? item.page : 0,
         chapter: c.section || '综合题库',
         section: (c && c.section) || '',
         questionType: LIBRARY_TYPE_NAMES[item.question_type] || '解答题',
@@ -3208,7 +3238,7 @@
 
       const menuHtml = `
         <div class="px-3 py-1.5 text-[11px] font-bold text-slate-700 border-b border-slate-100 flex items-center justify-between bg-slate-50/80 rounded-t-lg">
-          <span class="truncate max-w-[170px] text-slate-900">第 ${q.questionNumber} 题 · ${escapeHtml(q.questionType)}</span>
+          <span class="truncate max-w-[170px] text-slate-900">${escapeHtml(questionIdentity(q))} · ${escapeHtml(q.questionType)}</span>
           <span class="text-amber-500 font-bold ml-1">${q.difficultyStars > 0 ? '★'.repeat(q.difficultyStars) : ''}</span>
         </div>
 
@@ -4810,7 +4840,8 @@
                 onclick="event.stopPropagation(); toggleSelectQuestion('${q.id}', this.checked)"
                 class="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 focus:ring-0 cursor-pointer"
               >
-              <span class="font-bold text-slate-900 text-sm">第 ${q.questionNumber} 题</span>
+              <span class="font-bold text-slate-900 text-sm">${escapeHtml(questionIdentity(q))}</span>
+              ${questionPosition(q) ? `<span class="text-[11px] text-slate-500 font-mono shrink-0 whitespace-nowrap" title="在原卷上的位置">${escapeHtml(questionPosition(q))}</span>` : ''}
               ${qName ? `<span onclick="event.stopPropagation(); focusInspectorNameInput('${q.id}')" class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200/80 font-bold text-xs truncate max-w-[240px] cursor-pointer hover:bg-emerald-100 transition-colors" title="题目名称：${escapeHtml(qName)}（点击可修改）">${escapeHtml(qName)}</span>` : ''}
               <span class="text-slate-300">·</span>
               <span class="text-slate-600 font-medium">${escapeHtml(q.questionType)}</span>
@@ -4947,7 +4978,7 @@
               onclick="event.stopPropagation(); toggleSelectQuestion('${q.id}', this.checked)"
               class="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 focus:ring-0 cursor-pointer shrink-0"
             >
-            <span class="font-bold text-slate-900 font-mono shrink-0">#${q.questionNumber}</span>
+            <span class="font-bold text-slate-900 font-mono shrink-0">${escapeHtml(questionIdentity(q))}</span>
             ${qName ? `<span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200/80 font-bold text-[11px] shrink-0 max-w-[160px] truncate" title="题目名称：${escapeHtml(qName)}">${escapeHtml(qName)}</span>` : ''}
             <span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 text-slate-700 font-medium shrink-0 whitespace-nowrap">${escapeHtml(q.questionType)}</span>
             <span class="q-difficulty-stars text-amber-500 font-bold shrink-0 text-[11px] whitespace-nowrap transition-transform inline-block">${q.difficultyStars > 0 ? '★'.repeat(q.difficultyStars) : ''}</span>
@@ -5712,7 +5743,7 @@
       const q = questionsData.find(item => item.id === qid);
       if (!q) return;
 
-      let textToCopy = `【第 ${q.questionNumber} 题 · ${q.questionType}】\n${q.rawStem}\n`;
+      let textToCopy = `【${questionIdentity(q)} · ${q.questionType}】\n${q.rawStem}\n`;
       if (q.rawOptions && Object.keys(q.rawOptions).length > 0) {
         Object.keys(q.rawOptions).sort().forEach(k => {
           textToCopy += `${k}. ${q.rawOptions[k]}\n`;
@@ -5974,7 +6005,7 @@
       if (qBadge) {
         if (q) {
           qBadge.classList.remove('hidden');
-          qBadge.innerText = `第 ${q.questionNumber} 题`;
+          qBadge.innerText = questionIdentity(q);
         } else {
           qBadge.classList.add('hidden');
         }
@@ -6283,7 +6314,7 @@
           img.title = img.title || '点击放大查看高清原图';
           img.onclick = (e) => {
             e.stopPropagation();
-            previewImageModal(img.src, `第 ${q.questionNumber || '-'} 题 配图 ${idx + 1}`);
+            previewImageModal(img.src, `${questionIdentity(q)} 配图 ${idx + 1}`);
           };
         }
       });
@@ -6429,7 +6460,7 @@
                 <div class="ql-sol-content font-serif" data-ql-typeset="saved-analysis"></div>
               </div>
             ` : ''}
-            ${buildQuickLookFiguresHtml(saved.figures, `第 ${q.questionNumber || '-'} 题 正式解析`)}
+            ${buildQuickLookFiguresHtml(saved.figures, `${questionIdentity(q)} 正式解析`)}
           </section>
         `);
         if (rawCardHtml || aiCardHtml) {
@@ -6554,7 +6585,7 @@
 
       currentActiveQuestionId = q.id;
 
-      document.getElementById('qlTitleBadge').innerText = `第 ${q.questionNumber} 题 · 快速审题 (${quickLookQuestionIndex + 1}/${filteredQuestions.length})`;
+      document.getElementById('qlTitleBadge').innerText = `${questionIdentity(q)} · 快速审题 (${quickLookQuestionIndex + 1}/${filteredQuestions.length})`;
       const qlNameEl = document.getElementById('qlNameInput');
       if (qlNameEl) qlNameEl.value = getQuestionDisplayName(q);
       document.getElementById('qlTypeBadge').innerText = q.questionType;
@@ -6911,7 +6942,7 @@
             <span class="inline-flex items-center justify-center w-5 h-5 rounded bg-slate-100 text-slate-700 font-bold text-[11px] shrink-0 font-mono">${idx + 1}</span>
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2 mb-0.5">
-                <span class="font-bold text-slate-900">第 ${q.questionNumber} 题</span>
+                <span class="font-bold text-slate-900">${escapeHtml(questionIdentity(q))}</span>
                 ${qName ? `<span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200/80 font-bold text-[11px] shrink-0 max-w-[160px] truncate" title="题目名称：${escapeHtml(qName)}">${escapeHtml(qName)}</span>` : ''}
                 <span class="text-slate-400 font-medium">· ${escapeHtml(q.questionType)}</span>
                 <span class="text-amber-500 font-bold">${q.difficultyStars > 0 ? '★'.repeat(q.difficultyStars) : ''}</span>
@@ -7262,7 +7293,7 @@
       const modal = document.getElementById('editQuestionModal');
       if (!modal) return;
 
-      document.getElementById('editModalQBadge').innerText = `第 ${q.questionNumber} 题 · ID: ${q.id.slice(0, 8)}`;
+      document.getElementById('editModalQBadge').innerText = `${questionIdentity(q)} · ID: ${q.id.slice(0, 8)}`;
       document.getElementById('editInputType').value = q.questionTypeCode || 'single_choice';
       setEditStarsDisplay(q.difficultyStars || 0);
       document.getElementById('editInputStem').value = q.rawStem || '';
@@ -7558,7 +7589,7 @@
 
       closeEditQuestionModal();
       if (savedOk) {
-        showToast(`第 ${q.questionNumber} 题修改已保存！`, 'success');
+        showToast(`${questionIdentity(q)}修改已保存！`, 'success');
       } else {
         showToast(`修改未入库：${saveDetail}（页面已暂时更新，请刷新核对）`, 'error');
       }
@@ -7836,9 +7867,9 @@
       }
 
       if (stars > 0) {
-        showToast(`已将第 ${q.questionNumber} 题评为 ${stars}★`, 'success');
+        showToast(`已将${questionIdentity(q)}评为 ${stars}★`, 'success');
       } else {
-        showToast(`已取消第 ${q.questionNumber} 题的评分`, 'info');
+        showToast(`已取消${questionIdentity(q)}的评分`, 'info');
       }
     }
 
@@ -8913,7 +8944,10 @@
       archivedPapers: [],
       withdrawnQuestions: [],
       counts: { papers: 0, questions: 0 },
-      loaded: false
+      loaded: false,
+      // 读失败时的话要看得见。静默失败时面板装作是空的，
+      // 用户以为没删过东西，其实请求当场就被守卫拦下了。
+      error: ''
     };
 
     function folderIconFor(nodeId, hasChildren) {
@@ -10774,23 +10808,36 @@
     }
 
     async function refreshLibraryTrash() {
+      // 改动必须来自本机题库页面：不带 X-QB-Request 头，后端守卫一律 403。
+      // 以前这里既没带头、又把失败静默吞掉 —— 面板于是装作是空的，
+      // 用户以为没删过东西，其实「移入回收站」当场就被拦下了。
       try {
-        const resp = await fetch('/api/library/trash');
-        if (resp && resp.ok) {
-          const data = await resp.json();
-          if (data && Array.isArray(data.archived_papers) && Array.isArray(data.withdrawn_questions)) {
-            libraryTrashCache = {
-              archivedPapers: data.archived_papers,
-              withdrawnQuestions: data.withdrawn_questions,
-              counts: data.counts || {
-                papers: data.archived_papers.length,
-                questions: data.withdrawn_questions.length
-              },
-              loaded: true
-            };
-          }
+        const resp = await fetch('/api/library/trash', {
+          headers: { 'X-QB-Request': '1', 'Referer': window.location.origin + '/eagle' }
+        });
+        if (!resp.ok) {
+          const reason = resp.status === 403 ? '请求需从题库页面发起' : ('回收站读取失败（HTTP ' + resp.status + '）');
+          libraryTrashCache.error = reason;
+          libraryTrashCache.loaded = false;
+          return libraryTrashCache;
         }
-      } catch (e) {}
+        const data = await resp.json();
+        if (data && Array.isArray(data.archived_papers) && Array.isArray(data.withdrawn_questions)) {
+          libraryTrashCache = {
+            archivedPapers: data.archived_papers,
+            withdrawnQuestions: data.withdrawn_questions,
+            counts: data.counts || {
+              papers: data.archived_papers.length,
+              questions: data.withdrawn_questions.length
+            },
+            loaded: true,
+            error: ''
+          };
+        }
+      } catch (e) {
+        libraryTrashCache.error = '回收站读取失败：' + ((e && e.message) || e);
+        libraryTrashCache.loaded = false;
+      }
       return libraryTrashCache;
     }
 
@@ -11019,7 +11066,7 @@
         if (liveQids.length) {
           const wResp = await fetch('/api/library/withdraw-batch', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
             body: JSON.stringify({ ids: liveQids })
           });
           if (!wResp.ok) throw new Error('下架试卷题目失败');
@@ -11027,7 +11074,7 @@
           qMap[paperId] = liveQids;
           writePaperTrashQidsMap(qMap);
         }
-        const aResp = await fetch(`/api/papers/${paperId}/archive`, { method: 'POST' });
+        const aResp = await fetch(`/api/papers/${paperId}/archive`, { method: 'POST', headers: { 'X-QB-Request': '1' } });
         if (!aResp.ok) throw new Error('归档试卷失败');
 
         if (filterState.folderPaperIds.includes(paperId) || filterState.paperId === paperId) {
@@ -11038,6 +11085,7 @@
           folderTreeState.activeId = 'all';
         }
         await loadInitialLibraryData();
+        await refreshLibraryTrash();
         renderFolderTree();
         renderInlineActiveChips();
         applyFilters();
@@ -11051,7 +11099,7 @@
       try {
         const resp = await fetch('/api/library/withdraw-batch', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
           body: JSON.stringify({ ids: qids })
         });
         const data = await resp.json();
@@ -11059,6 +11107,7 @@
         selectedQuestionIds.clear();
         if (typeof updateBatchActionBar === 'function') updateBatchActionBar();
         await loadInitialLibraryData();
+        await refreshLibraryTrash();
         renderFolderTree();
         renderInlineActiveChips();
         applyFilters();
@@ -11121,7 +11170,9 @@
 
     async function restoreTrashPaper(paperId) {
       try {
-        const resp = await fetch(`/api/papers/${paperId}/restore`, { method: 'POST' });
+        // 先把回收站总账拉最新：要恢复哪些伴随下架的题，是从这份总账里对出来的。
+        await refreshLibraryTrash();
+        const resp = await fetch(`/api/papers/${paperId}/restore`, { method: 'POST', headers: { 'X-QB-Request': '1' } });
         if (!resp.ok) throw new Error('恢复资料失败');
         const qMap = readPaperTrashQidsMap();
         const recordedIds = Array.isArray(qMap[paperId]) ? qMap[paperId] : [];
@@ -11130,13 +11181,14 @@
         if (idsToRestore.length) {
           await fetch('/api/library/restore-batch', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
             body: JSON.stringify({ ids: idsToRestore })
           });
         }
         delete qMap[paperId];
         writePaperTrashQidsMap(qMap);
         await loadInitialLibraryData();
+        await refreshLibraryTrash();
         renderFolderTree();
         if (filterState.folderType === 'trash') renderRecycleBinPanel();
         showToast('已恢复试卷/教材及其伴随下架的试题', 'success');
@@ -11147,10 +11199,11 @@
 
     async function restoreTrashQuestion(pubId) {
       try {
-        const resp = await fetch(`/api/library/${pubId}/restore`, { method: 'POST' });
+        const resp = await fetch(`/api/library/${pubId}/restore`, { method: 'POST', headers: { 'X-QB-Request': '1' } });
         const data = await resp.json();
         if (!resp.ok || !data.ok) throw new Error((data && data.error) || '恢复试题失败');
         await loadInitialLibraryData();
+        await refreshLibraryTrash();
         renderFolderTree();
         if (filterState.folderType === 'trash') renderRecycleBinPanel();
         showToast('已将该试题恢复至正式题库', 'success');
@@ -11222,11 +11275,11 @@
             if (qids.length) {
               await fetch('/api/library/purge-batch', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
                 body: JSON.stringify({ ids: qids })
               });
             }
-            const resp = await fetch(`/api/papers/${paperId}`, { method: 'DELETE' });
+            const resp = await fetch(`/api/papers/${paperId}`, { method: 'DELETE', headers: { 'X-QB-Request': '1' } });
             if (!resp.ok) throw new Error('删除资料失败');
             const qMap = readPaperTrashQidsMap();
             delete qMap[paperId];
@@ -11251,7 +11304,7 @@
         confirmLabel: '确认永久删除',
         onConfirm: async () => {
           try {
-            const resp = await fetch(`/api/library/${pubId}/purge`, { method: 'POST' });
+            const resp = await fetch(`/api/library/${pubId}/purge`, { method: 'POST', headers: { 'X-QB-Request': '1' } });
             const data = await resp.json();
             if (!resp.ok || !data.ok) throw new Error((data && data.error) || '永久删除失败');
             await refreshLibraryTrash();
@@ -11290,7 +11343,7 @@
             if (qs.length) {
               await fetch('/api/library/purge-batch', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
                 body: JSON.stringify({ ids: qs.map(x => x.id) })
               });
             }
@@ -11298,7 +11351,7 @@
             for (const p of papers) {
               const published = Number(p.published || p.counts?.published || 0);
               if (published > 0 || p.entryArchived || p.archived) continue;
-              await fetch(`/api/papers/${p.id}`, { method: 'DELETE' });
+              await fetch(`/api/papers/${p.id}`, { method: 'DELETE', headers: { 'X-QB-Request': '1' } });
             }
             writeLocalTrash({ folders: [], smartFolders: [] });
             writePaperTrashQidsMap({});
@@ -11366,8 +11419,12 @@
 
       const listEl = document.getElementById('recycleBinListContainer');
       if (!listEl) return;
+      // 读失败的话要说出来。装作是空的，用户会以为「刚才删的东西没进去」。
+      const errorNote = libraryTrashCache.error
+        ? `<div class="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">⚠️ ${escapeHtml(String(libraryTrashCache.error))}</div>`
+        : '';
       if (!total) {
-        listEl.innerHTML = `<div class="py-16 text-center text-slate-400 text-xs">🗑️ 回收站是空的，删除的文件夹、智能视图、试卷或试题会先暂存在这里。</div>`;
+        listEl.innerHTML = errorNote + `<div class="py-16 text-center text-slate-400 text-xs">🗑️ 回收站是空的，删除的文件夹、智能视图、试卷或试题会先暂存在这里。</div>`;
         return;
       }
 
@@ -11430,13 +11487,18 @@
       if (showQs) {
         qs.forEach(q => {
           const qPaperName = q.paperName || q.source_filename || '未知试卷';
-          const qNum = q.questionNumber !== undefined ? q.questionNumber : (q.number !== undefined ? q.number : '');
+          // 回收站里也要说得清是哪道题：教材里「第 1 题」有一百多处，
+          // 光有题号认不出来，得带上原卷页码和章节。
+          const qIdentity = questionIdentity(q);
+          const qPosition = questionPosition(q);
           const qType = q.questionType || q.question_type || '试题';
           const rawStem = q.stemPreview || (q.content && q.content.stem) || '';
           const preview = String(rawStem).trim() || '（无文字题干预览）';
           rows.push(`<div class="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-2xs">` +
             `<div class="min-w-0 flex-1">` +
-              `<div class="flex items-center gap-2"><span class="text-sm">📝</span><span class="text-xs font-bold text-slate-800 truncate">${escapeHtml(qPaperName)} · 第${escapeHtml(String(qNum))}题</span><span class="px-1.5 py-0.5 rounded bg-slate-100 text-[10px] text-slate-600">${escapeHtml(qType)}</span></div>` +
+              `<div class="flex items-center gap-2"><span class="text-sm">📝</span><span class="text-xs font-bold text-slate-800 truncate">${escapeHtml(qPaperName)} · ${escapeHtml(qIdentity)}</span>` +
+              (qPosition ? `<span class="text-[10px] text-slate-500 font-mono shrink-0">${escapeHtml(qPosition)}</span>` : '') +
+              `<span class="px-1.5 py-0.5 rounded bg-slate-100 text-[10px] text-slate-600">${escapeHtml(qType)}</span></div>` +
               `<div class="text-[11px] text-slate-500 mt-0.5 truncate">${escapeHtml(preview)}</div>` +
             `</div>` +
             `<div class="flex items-center gap-2 shrink-0">` +
@@ -11447,9 +11509,9 @@
         });
       }
 
-      listEl.innerHTML = rows.length
+      listEl.innerHTML = errorNote + (rows.length
         ? rows.join('')
-        : `<div class="py-12 text-center text-slate-400 text-xs">当前分类下暂无已删除项目</div>`;
+        : `<div class="py-12 text-center text-slate-400 text-xs">当前分类下暂无已删除项目</div>`);
     }
 
     // ---- 死按钮修复：标签 AND / OR 逻辑切换 ----
