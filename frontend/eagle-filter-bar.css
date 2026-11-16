@@ -476,3 +476,16 @@ body.library-page {
   line-height: 1.6;
   animation: eagleDropdownFade .18s ease-out;
 }
+
+/* ───── 窄屏：胶囊组别再把整页撑破 ─────
+   390px 视口下 .eagle-capsules-group 是 inline-flex + flex-shrink: 0，
+   5 颗胶囊（题型/标签/来源/试卷状态/排序）不换行，撑到 543px 宽，
+   右边再接一颗「智能文件夹」胶囊 → 排到 x=631，页面 scrollWidth 631 vs 390。
+   整页能横向拖，右半截筛选按钮全在屏幕外。
+   这段必须放在文件末尾：基础规则里 .eagle-capsules-group 的 flex-shrink: 0
+   写在前面，同特异性下后来者才生效。 */
+@media (max-width: 700px) {
+  .eagle-filter-container { flex-wrap: wrap; row-gap: 6px; }
+  .eagle-capsules-group { flex-wrap: wrap; flex-shrink: 1; min-width: 0; row-gap: 4px; }
+  .eagle-smart-folder-capsule { flex-shrink: 0; }
+}

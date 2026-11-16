@@ -135,6 +135,29 @@
     @media (hover: none) {
       .qc-evidence-btn { opacity: 1 !important; }
     }
+    /* 窄屏弹窗：头部按钮别挤出屏幕。
+       390px 实测三处硬伤：
+       ① 快速审题头部右组（上一题/下一题 + 试题篮 + 收藏 + 关闭）372px，
+          弹窗内可用只有 326px，「✕」跑到 x=405，屏幕外 15px —— 点不到。
+       ② 原卷核验的「整页位置 / 只看本题」组被容器裁掉 24px。
+       ③ 标签管理的「+ 新建标签」按钮落在 x=380..408，屏幕外 18px。
+       修法：窄屏下头部行允许换行、按钮组允许收缩换行、长标题截断。 */
+    @media (max-width: 640px) {
+      .ql-head-actions { flex-wrap: wrap; flex-shrink: 1 !important; min-width: 0; margin-left: 0 !important; }
+      .ql-head-actions > * { min-width: 0; }
+      /* 底部工具条（📄原卷/✎解析/✏️编辑/📷复制图片/📋文本）一行放不下，
+         390px 下「📋 文本」被推到 x=340..405，屏幕外 15px，点不到。 */
+      .ql-foot-actions { flex-wrap: wrap; flex-shrink: 1 !important; min-width: 0; row-gap: 4px; }
+      .op-head, .op-toolbar { flex-wrap: wrap; row-gap: 6px; }
+      .op-head-left { min-width: 0; flex: 1 1 auto; }
+      .op-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .tm-head { flex-wrap: wrap; row-gap: 4px; }
+      .tm-head-text { min-width: 0; flex: 1 1 auto; }
+      .tm-head-text p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .tm-body { min-width: 0; }
+      .tm-search-row { flex-wrap: wrap; }
+      .tm-search-row input { width: auto; flex: 1 1 120px; min-width: 0; }
+    }
       .compact-row .katex-display {
       display: inline !important;
       margin: 0 !important;
@@ -750,15 +773,15 @@
 
   <div id="tagManagerModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-xs p-4">
     <div class="flex h-[520px] w-full max-w-2xl flex-col rounded-xl bg-white shadow-2xl overflow-hidden border border-slate-200">
-      <div class="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-        <div>
+      <div class="tm-head flex items-center justify-between border-b border-slate-100 px-5 py-3">
+        <div class="tm-head-text">
           <h3 class="text-sm font-bold text-slate-900">标签管理中心</h3>
           <p class="text-[11px] text-slate-400">按群组查看真实标签目录，可新建标签、启用/停用；标签归并请走题库设置</p>
         </div>
         <button onclick="closeTagManagerModal()" class="text-slate-400 hover:text-slate-600 text-sm">✕</button>
       </div>
 
-      <div class="flex flex-1 min-h-0 overflow-hidden">
+      <div class="tm-body flex flex-1 min-h-0 overflow-hidden">
         <!-- 左侧分类 -->
         <div id="modalTagGroupsNav" class="w-44 border-r border-slate-100 bg-slate-50/50 p-2 space-y-0.5 text-xs">
           <!-- 动态导航 -->
@@ -766,7 +789,7 @@
 
         <!-- 右侧标签清单与合并抽屉 -->
         <div class="flex-1 flex flex-col p-4 overflow-hidden">
-          <div class="flex items-center justify-between gap-2 mb-3">
+          <div class="tm-search-row flex items-center justify-between gap-2 mb-3">
             <input 
               id="modalSearchTagInput"
               type="text" 
@@ -1367,7 +1390,7 @@
           <span id="qlScoreBadge" class="text-xs px-2 py-0.5 rounded-md bg-slate-200/70 text-slate-700 font-medium whitespace-nowrap shrink-0">5 分</span>
           <span id="qlSolutionStatusBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 font-medium whitespace-nowrap shrink-0">状态加载中</span>
         </div>
-        <div class="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto">
+        <div class="ql-head-actions flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto">
           <div class="flex items-center border border-slate-200 rounded-lg overflow-hidden bg-white shadow-2xs shrink-0">
             <button type="button" onclick="navQuickLook(-1)" class="px-2.5 py-1.5 text-slate-700 hover:bg-slate-100 text-xs font-medium border-r border-slate-200 flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer" title="上一题 (快捷键: ← 或 A)">
               <span>←</span><span>上一题</span>
@@ -1424,7 +1447,7 @@
           <span id="qlSourceText" class="truncate">出处：...</span>
           <span class="hidden sm:inline text-[11px] text-slate-400 whitespace-nowrap shrink-0">Space/Esc 关闭 · ←→ 切题 · V 看解析</span>
         </div>
-        <div class="flex items-center gap-1.5 shrink-0">
+        <div class="ql-foot-actions flex items-center gap-1.5 shrink-0">
           <button type="button" id="qlPaperBtn" onclick="openPaperFromQuickLook()" class="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer flex items-center gap-1" title="查看原卷裁切区域">
             <span>📄 原卷</span>
           </button>
@@ -1449,9 +1472,9 @@
   <div id="originalPaperModal" class="hidden fixed inset-0 z-[10006] flex items-center justify-center bg-slate-900/75 backdrop-blur-xs p-4 select-none" onclick="closeOriginalPaperModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[92vh] flex flex-col overflow-hidden border border-slate-200" onclick="event.stopPropagation()">
       <!-- 弹窗顶栏 -->
-      <div class="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50 shrink-0">
-        <div class="flex items-center gap-2.5">
-          <span class="text-sm font-bold text-slate-800">📄 所属试卷原卷高分辨率扫描件核验</span>
+      <div class="op-head flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50 shrink-0">
+        <div class="op-head-left flex items-center gap-2.5">
+          <span class="op-title text-sm font-bold text-slate-800">📄 所属试卷原卷高分辨率扫描件核验</span>
           <span id="opPaperNameBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-slate-200 text-slate-700 font-medium"></span>
           <span id="opQuestionBadge" class="hidden text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold font-mono"></span>
         </div>
@@ -1462,7 +1485,7 @@
       </div>
 
       <!-- 工具栏：模式切换、缩放控制、手势说明 -->
-      <div class="flex items-center justify-between px-5 py-2 border-b border-slate-100 bg-white text-xs shrink-0 gap-3">
+      <div class="op-toolbar flex items-center justify-between px-5 py-2 border-b border-slate-100 bg-white text-xs shrink-0 gap-3">
         <div class="flex items-center gap-1.5">
           <span class="text-slate-500 font-medium mr-1">显示方式:</span>
           <button id="btnOpModePage" onclick="setOpMode('page')" class="px-2.5 py-1 rounded border border-emerald-600 text-xs font-semibold bg-emerald-600 text-white shadow-2xs cursor-pointer" title="显示整页原卷，并在原卷上高亮框出题目位置">

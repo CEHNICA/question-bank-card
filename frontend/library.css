@@ -224,6 +224,16 @@ a.library-type.undecided:hover { text-decoration: underline; }
 .library-todos .library-todo-menu[data-working] > .library-todo-summary::after { color: rgba(255, 255, 255, .8); }
 .library-todo-lead { font-weight: 600; }
 .library-todo-bits { color: var(--muted); }
+/* 窄屏：「还有活没干」那条折叠条别把整页撑破。
+   summary 是 white-space: nowrap，390px 视口下宽 481px，
+   把 .library-bulk 顶到 502px，页面 scrollWidth 被它带着一起溢出。
+   所以窄屏让它换行。 */
+@media (max-width: 700px) {
+  .library-todos { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+  .library-todo-menu { min-width: 0; max-width: 100%; }
+  .library-todos .library-todo-summary { white-space: normal; flex-wrap: wrap; row-gap: 2px; }
+  .library-todo-lead, .library-todo-bits { overflow-wrap: anywhere; }
+}
 .library-todos .library-todo-menu[data-working] .library-todo-bits { color: rgba(255, 255, 255, .85); }
 .library-todos .library-batch-live { padding: 1px 6px; border-radius: 99px; background: rgba(255, 255, 255, .26); color: inherit; font-size: 11px; font-weight: 700; }
 /* 1.25.96：这块面板原来写的是 right: 0，锚在「还有没干」按钮上，而那个按钮住在吸顶的
