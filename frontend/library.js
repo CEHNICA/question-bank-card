@@ -1726,28 +1726,39 @@
     box.addEventListener("toggle", () => {
       if (box.open) state.opened.add(item.id); else state.opened.delete(item.id);
     });
-    const history = saved && (original || ai) ? node("details", "library-answer-history") : null;
-    if (history) history.append(node("summary", "", ai ? "原卷答案与 AI 初稿历史" : "原卷答案历史"));
-    if (original) {
-      const part = node("div", "qb-answer");
-      part.append(...QB.answerRows(document, content));
-      (history || box).append(part);
-    }
-    if (saved) {
-      const part = node("div", "qb-answer");
-      part.append(node("p", "library-answer-label", item.solution_needs_review ? "保存的答案解析 · 题面有改动，待核对" : "保存的答案解析"));
-      const body = node("div"); solutions.render(body, saved, { node, QB, subQuestions: true }); part.append(body); box.append(part);
-    }
-    if (ai) {
-      const part = node("div", "qb-answer ai-answer");
-      const label = node("p", "library-answer-label", "AI 参考答案 · 未核对");
-      label.title = `${ai.engine || "解题模型"} 生成的初稿，尚未确认数学内容；保存后的答案优先显示，初稿保留作历史对照。`;
-      const rows = QB.answerRows(document, ai, { empty: "（空）" });
-      if (!String(ai.analysis || "").trim()) rows.pop();
-      part.append(label, ...rows);
-      (history || box).append(part);
-    }
-    if (history) box.append(history);
+    // 1.26.56：答案与解析只在**展开时**才排版。
+    // 折叠着的 <details> 里内容早就在 DOM 里（只是看不见）—— 每张卡白白排版三四十个公式，
+    // 40 张卡就是 500 多个 KaTeX 块、两万多个节点，全花在看不见的地方（实测首屏 1.5 秒）。
+    // 已经展开着的题（state.opened 里有）照旧立刻有内容。
+    let filled = false;
+    const fill = () => {
+      if (filled) return;
+      filled = true;
+      const history = saved && (original || ai) ? node("details", "library-answer-history") : null;
+      if (history) history.append(node("summary", "", ai ? "原卷答案与 AI 初稿历史" : "原卷答案历史"));
+      if (original) {
+        const part = node("div", "qb-answer");
+        part.append(...QB.answerRows(document, content));
+        (history || box).append(part);
+      }
+      if (saved) {
+        const part = node("div", "qb-answer");
+        part.append(node("p", "library-answer-label", item.solution_needs_review ? "保存的答案解析 · 题面有改动，待核对" : "保存的答案解析"));
+        const body = node("div"); solutions.render(body, saved, { node, QB, subQuestions: true }); part.append(body); box.append(part);
+      }
+      if (ai) {
+        const part = node("div", "qb-answer ai-answer");
+        const label = node("p", "library-answer-label", "AI 参考答案 · 未核对");
+        label.title = `${ai.engine || "解题模型"} 生成的初稿，尚未确认数学内容；保存后的答案优先显示，初稿保留作历史对照。`;
+        const rows = QB.answerRows(document, ai, { empty: "（空）" });
+        if (!String(ai.analysis || "").trim()) rows.pop();
+        part.append(label, ...rows);
+        (history || box).append(part);
+      }
+      if (history) box.append(history);
+    };
+    if (box.open) fill();
+    else box.addEventListener("toggle", () => { if (box.open) fill(); });
     return box;
   }
 
@@ -4058,6 +4069,9 @@
     // Unchanged cards are kept as they are (an opened answer stays open while jobs finish).
     const previous = state.cards || new Map();
     state.cards = new Map();
+    // 1.26.56：40 张题卡逐个 append 进 live DOM —— 每插一张就触发一次样式重算，
+    // 实测 RecalcStyle 75 次 / 211 ms，全花在首屏上。攒进 fragment 一次插入。
+    const fragment = document.createDocumentFragment();
     shown.forEach((item, index) => {
       const signature = JSON.stringify([item, state.basket.includes(item.id), state.features, state.ai.mode, state.selected.has(item.id), state.expanded.has(item.id), state.opened.has(item.id), state.tag, state.tagAll, state.tagAny, state.tagNot, state.tagMode]);
       const kept = previous.get(item.id);
@@ -4066,8 +4080,9 @@
       node.classList.toggle("inspector-active", state.inspectorId === item.id);
       if (state.inspectorId === item.id) node.setAttribute("aria-current", "true"); else node.removeAttribute("aria-current");
       state.cards.set(item.id, { signature, node });
-      ui.list.append(node);
+      fragment.append(node);
     });
+    ui.list.append(fragment);
     renderInspector(state.catalog.get(state.inspectorId) || shown.find((item) => item.id === state.inspectorId) || null);
     const currentQuestion = state.catalog.get(state.questionReturnId);
     if ($("questionDialog").open && currentQuestion && state.questionSignature !== questionSignature(currentQuestion)) openQuestion(currentQuestion);
@@ -4077,7 +4092,7 @@
       : "");
     ui.more.hidden = state.view === "selected" || state.items.length >= state.total;
     if (state.view !== "selected" && state.retainedTagItems.size) updateLibraryMatchStatus();
-    requestAnimationFrame(() => readingOverflowHints(ui.list));
+    scheduleReadingOverflowHints(ui.list);
     if (state.focus) {
       const target = document.getElementById(`q-${state.focus}`);
       if (target) {
@@ -4105,14 +4120,38 @@
     // A genuinely wide formula always stays focusable and horizontally
     // scrollable; only the sentence explaining it is dismissible.
     const hintOff = hintHidden("reading-overflow");
+    // 1.26.56：先只读、再只写。
+    // 原来在一个 forEach 里读 clientWidth/scrollWidth，读到一个溢出的就 after(hint)
+    // 写一个提示节点 —— 写完布局失效，下一个字段再读一次又逼一次布局，
+    // 读一次写一次循环，把整页布局反复逼出来（实测 Layout 59 次 / 654 ms）。
+    const overflowFields = [];
     container.querySelectorAll(".qb-stem-body, .qb-option-body, .qb-analysis").forEach((field) => {
       if (!field.clientWidth || field.scrollWidth <= field.clientWidth + 2) return;
+      overflowFields.push(field);
+    });
+    overflowFields.forEach((field) => {
       field.tabIndex = 0;
       field.setAttribute("aria-label", "题目内容，可左右滚动查看完整公式");
       if (hintOff) return;
       const hint = node("span", "reading-overflow-hint", "左右滑动查看完整公式；键盘可用左右方向键。");
       (field.closest(".qb-stem, .qb-option") || field).after(hint);
     });
+  }
+
+  // 1.26.56：溢出提示的测量别再挂在 requestAnimationFrame 上 ——
+  // rAF 回调跑完浏览器才 paint，等于把这几百毫秒顶在首屏绘制前面。
+  // 挪到空闲时做：题卡先出来，提示随后补上。
+  let overflowHintCancel = null;
+  function scheduleReadingOverflowHints(container) {
+    if (overflowHintCancel) { overflowHintCancel(); overflowHintCancel = null; }
+    const run = () => { overflowHintCancel = null; readingOverflowHints(container); };
+    if (typeof window.requestIdleCallback === "function") {
+      const handle = window.requestIdleCallback(run, { timeout: 400 });
+      overflowHintCancel = () => window.cancelIdleCallback(handle);
+    } else {
+      const handle = window.setTimeout(run, 1);
+      overflowHintCancel = () => window.clearTimeout(handle);
+    }
   }
 
   function visibleItems() {
@@ -4566,7 +4605,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
     if (refreshing) dialog.scrollTop = scroll;
     paper.scrollTop = 0;
     QB.fitOptions(paper);
-    requestAnimationFrame(() => readingOverflowHints(paper));
+    scheduleReadingOverflowHints(paper);
   }
 
   async function withdrawItem(item) {
