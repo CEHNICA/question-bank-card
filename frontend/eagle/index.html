@@ -9891,7 +9891,11 @@
     function formatFolderCreatedLabel(ms) {
       if (!ms) return '创建时间未知';
       try {
-        return new Date(ms).toLocaleString('zh-CN', { hour12: false });
+        const date = new Date(ms);
+        // try/catch 接不住 "Invalid Date"：new Date(坏值) 不会抛异常，只是把文本化成
+        // "Invalid Date" 摆给老师看。无效就当不知道，不猜。
+        if (Number.isNaN(date.getTime())) return '创建时间未知';
+        return date.toLocaleString('zh-CN', { hour12: false });
       } catch (e) {
         return '创建时间未知';
       }

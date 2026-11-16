@@ -12,6 +12,13 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
     let apiSettings = null, checkingApi = false, apiSettingsError = "";
     const requests = new Map(), pendingSaves = new Set(), MAX_WATCH = 10 * 60 * 1000;
     const jobsPending = new Set(["queued", "pending", "running", "waiting"]);
+  // 时间戳显示：坏的就说“时间未知”，不把 "Invalid Date" 甩给老师。
+  function formatStamp(value) {
+    if (!value) return "时间未知";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "时间未知";
+    return date.toLocaleString("zh-CN", { hour12: false });
+  }
     const jobsSucceeded = new Set(["done", "completed", "succeeded", "success"]);
     // 1.25.38：答案框默认两行，三四行的答案会被截成一条滚动条。按内容长高，
     // 最高 220px，超过再在框里滚动。1.25.40：解析框同理，最少留 8 行、最高 520px，
@@ -361,7 +368,7 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
         const entry = node("div", `answer-version${isCurrent ? " current" : ""}`);
         const head = node("div", "answer-version-head");
         head.append(node("strong", "", isCurrent ? "当前在用" : "以前那一版"));
-        head.append(node("span", "helper", row.created_at ? new Date(row.created_at).toLocaleString() : "时间未知"));
+        head.append(node("span", "helper", formatStamp(row.created_at)));
         if (row.needs_check) head.append(node("span", "answer-quality result_only", "和现在的题面对不上"));
         entry.append(head);
         const body = node("div", "paper answer-version-body"); body.hidden = true;

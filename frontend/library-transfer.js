@@ -47,15 +47,23 @@
 
   // 1.26.16：机器时间写成人话 —— "3 天前 · 10 月 23 日 05:28"。
   // 只看得出是哪一天的记录不够，合并记录往往是几天前的事，"几天前"才管用。
-  function when(iso) {
+  function when(iso, now = new Date()) {
     const date = new Date(iso);
     if (Number.isNaN(date.getTime())) return "";
-    const days = Math.floor((Date.now() - date.getTime()) / 86400000);
+    // 按"日历天"算差，不按固定 24 小时。
+    // 固定 24 小时会把"昨天 23:00 存的、今天 08:00 看的"算成 0 天，
+    // 于是"今天"和"昨天"永远分不开 —— 老师以为今早刚合的，其实是昨晚的事。
+    const dayStart = (d) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+    const days = Math.round((dayStart(now) - dayStart(date)) / 86400000);
     const stamp = `${date.getMonth() + 1} 月 ${date.getDate()} 日 ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-    if (days <= 0) return `今天 ${stamp}`;
+    if (days < 0) return `时间对不上（比现在还晚）· ${stamp}`;
+    if (days === 0) return `今天 ${stamp}`;
     if (days === 1) return `昨天 ${stamp}`;
-    if (days < 30) return `${days} 天前 · ${stamp}`;
-    return stamp;
+    // 跨年时年份必须带上：不然去年 12 月的记录和今年 12 月的长得一模一样，
+    // 分不清是去年的旧账还是刚导进来的。多少天前照说，年份另加。
+    const year = date.getFullYear() === now.getFullYear() ? "" : `${date.getFullYear()} 年`;
+    if (days < 30) return `${days} 天前 · ${year}${stamp}`;
+    return `${year}${stamp}`;
   }
 
   // ---- 导出 --------------------------------------------------------

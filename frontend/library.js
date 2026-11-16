@@ -1121,6 +1121,14 @@
     });
   }
 
+  // 时间戳显示：坏的就说“时间未知”，不把 "Invalid Date" 甩给老师。
+  function formatStamp(value) {
+    if (!value) return "时间未知";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "时间未知";
+    return date.toLocaleString("zh-CN", { hour12: false });
+  }
+
   function formatDate(value) {
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("zh-CN");
@@ -2843,7 +2851,7 @@
         const statusNames = { queued: "排队中", running: "生成中", pending: "待核对", accepted: "已采纳", rejected: "已拒绝", no_match: "无合适标签", review: "暂不能判断", failed: "生成失败", stale: "依据已变化" };
         (result.items || []).forEach(function(record) {
           const article = node("article", "tag-history-record"), top = node("header"), stateText = statusNames[record.status] || record.status;
-          top.append(node("strong", "", stateText), node("small", "", new Date(record.created_at).toLocaleString() + (record.generation_source ? " · " + record.generation_source : "")));
+          top.append(node("strong", "", stateText), node("small", "", formatStamp(record.created_at) + (record.generation_source ? " · " + record.generation_source : "")));
           article.append(top);
           if (record.message) article.append(node("p", "", record.message));
           const snapshot = record.catalogue_snapshot || {}, snapshotRows = snapshot.tags || [];

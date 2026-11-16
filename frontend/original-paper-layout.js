@@ -13,6 +13,14 @@
   // A group owns a set of pages. The same page can belong to several groups
   // (two exams side by side, or a book split into two scopes), so the page
   // alone is not always enough to pick one group.
+  // 时间戳显示：坏的就说“时间未知”，不把 "Invalid Date" 甩给老师。
+  function formatStamp(value) {
+    if (!value) return "时间未知";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "时间未知";
+    return date.toLocaleString("zh-CN", { hour12: false });
+  }
+
   function groupPages(group) {
     const pages = group?.pages;
     if (Array.isArray(pages)) return pages.filter((page) => typeof page === "number");
@@ -772,7 +780,7 @@
       if (!operations.length) details.append(el("p", "hint", "尚无范围操作记录。"));
       operations.forEach((op) => {
         const row = el("details", "layout-operation"); row.dataset.layoutOperationId = op.id;
-        row.append(el("summary", "", `${kindNames[op.kind] || op.kind} · ${new Date(op.created_at).toLocaleString()}${op.undone_at ? " · 已撤销" : ""}`));
+        row.append(el("summary", "", `${kindNames[op.kind] || op.kind} · ${formatStamp(op.created_at)}${op.undone_at ? " · 已撤销" : ""}`));
         row.append(el("p", "hint", op.blocked_reason || (op.can_undo ? "可撤销；会恢复操作前的题目和原有人工内容。" : "此记录目前不可撤销。")));
         (op.before_snapshot?.questions || []).forEach((q) => {
           const previous = el("details", "layout-before-question"); previous.append(el("summary", "", `${label(q)} · 保存前`));

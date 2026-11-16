@@ -10,6 +10,14 @@
     "catalogue:set_parents": "设置标签父级", "catalogue:add_parent": "增加标签父级",
     "catalogue:remove_parent": "移除标签父级", "catalogue:move_parent": "移动标签父级",
     "catalogue:set_related_methods": "调整相关方法" };
+  // 时间戳显示：坏的就说“时间未知”，不把 "Invalid Date" 甩给老师。
+  function formatStamp(value) {
+    if (!value) return "时间未知";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "时间未知";
+    return date.toLocaleString("zh-CN", { hour12: false });
+  }
+
   function element(name, className, text) {
     const value = document.createElement(name);
     if (className) value.className = className;
@@ -728,7 +736,7 @@
       if (!state.history.length) { historyList.append(element("p", "tag-directory-hint", "还没有标签修改记录。")); return; }
       state.history.forEach((operation) => {
         const row = element("div", "tag-directory-history-row"), description = element("div"), name = historyNames[operation.action] || "标签操作";
-        description.append(element("strong", "", name), element("small", "", new Date(operation.created_at).toLocaleString()));
+        description.append(element("strong", "", name), element("small", "", formatStamp(operation.created_at)));
         const undo = button(operation.undone ? "已撤销" : "撤销", () => run(() => options.request("/api/library/tags/undo", { method: "POST", body: JSON.stringify({ operation_id: operation.id }) }), "已撤销；之前取消的任务不会自动恢复"));
         undo.disabled = !operation.can_undo; if (!operation.can_undo && !operation.undone) undo.title = "后续已有修改，当前不能撤销覆盖";
         row.append(description, undo); historyList.append(row);
