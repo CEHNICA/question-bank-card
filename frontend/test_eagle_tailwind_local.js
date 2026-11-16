@@ -36,3 +36,17 @@ for (const cls of [
 
 // 5) 产物是编译快照，不允许内嵌 @import 外链
 assert.doesNotMatch(css, /@import\s+url\(https?:/, "tailwind.css 不得再向外链 CSS");
+
+// 6) 必须留下可重建的构建配置：改了源码里的 class 后要能重新编译产物，
+//    否则新样式永远进不了产物，页面会静默缺样式。
+const configPath = path.join(__dirname, "tailwind.config.js");
+const inputPath = path.join(__dirname, "tailwind.input.css");
+assert.ok(fs.existsSync(configPath), "frontend/tailwind.config.js 必须存在（用于重建产物）");
+assert.ok(fs.existsSync(inputPath), "frontend/tailwind.input.css 必须存在（用于重建产物）");
+
+const configSrc = fs.readFileSync(configPath, "utf8");
+assert.match(configSrc, /eagle\/index\.html/, "tailwind.config.js 的 content 必须包含 eagle/index.html");
+assert.match(configSrc, /qb-render\.js/, "tailwind.config.js 的 content 必须包含 qb-render.js");
+const inputSrc = fs.readFileSync(inputPath, "utf8");
+assert.match(inputSrc, /@tailwind\s+utilities/, "tailwind.input.css 必须包含 @tailwind utilities");
+
