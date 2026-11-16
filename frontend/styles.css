@@ -1577,6 +1577,13 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
   .resegment-preview-actions .button { flex: 1 1 120px; }
   .api-settings-actions { align-items: stretch; flex-direction: column; }
   .api-settings-actions .button { width: 100%; }
+  /* 触屏可达性：窄屏下这几处控件原本只有 20~31px 高，抬到 32px 才好按。 */
+  .entry-chapter-toggle { min-height: 32px; }
+  .entry-chapter-link { min-height: 32px; }
+  #archivedPapersButton { min-height: 32px; }
+  #paperMenuTrigger { min-height: 32px; }
+  .cut-reading-stage > a { display: inline-flex; align-items: center; min-height: 32px; }
+  .filter { min-height: 32px; }
 }
 @media (max-width: 540px) {
   .topbar { grid-template-columns: 34px minmax(0, 1fr) auto; gap: 6px; padding-inline: 12px; }
@@ -3416,6 +3423,10 @@ kbd {
   color: #64748b;
   line-height: 1.45;
 }
+/* 「> p」这条规则会把错误条也塞进 detail 格子，红字直接压在说明文字上（两个元素 rect 完全重合）。
+   让错误条和下面那个链接一样走自动排布，在左列依次堆叠。 */
+.cut-reading-stage .cut-reading-error { grid-area: auto; grid-column: 1; }
+.cut-reading-stage > a { grid-area: auto; grid-column: 1; }
 .cut-reading-stage .cut-reading-actions {
   grid-area: actions;
   margin-top: 0;
