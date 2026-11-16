@@ -12,6 +12,7 @@ from core import (
     library_question_editor,
     library_solutions,
     library_tagging,
+    library_trash,
     practice,
     transfer_views,
     views,
@@ -145,6 +146,11 @@ urlpatterns = [
     path("api/library/batch", library_browse.library_batch),
     path("api/library/copy-image", library_clipboard.copy_question_view),
     path("api/library/withdraw-batch", views.library_withdraw_batch),
+    # 统一回收站：Eagle 工作台左下角那个「🗑️ 回收站」的总账与四个按钮。
+    # 以前这条链整条都不存在（面板永远空、四个按钮全 404），这里补齐。
+    path("api/library/trash", library_trash.trash_view),
+    path("api/library/restore-batch", library_trash.restore_batch_view),
+    path("api/library/purge-batch", library_trash.purge_batch_view),
     path("api/library/export-docx", library_export.export_docx_view),
     path("api/library/export-pdf", library_pdf.export_pdf_view),
     path("api/library/drafts", library_drafts.drafts_view),
@@ -183,6 +189,8 @@ urlpatterns = [
     path("api/library/<uuid:publication_id>/pages/<int:page>", views.library_source_page),
     path("api/library/<uuid:publication_id>/crop", views.library_crop),
     path("api/library/<uuid:publication_id>/withdraw", views.library_withdraw),
+    path("api/library/<uuid:publication_id>/restore", library_trash.restore_view),
+    path("api/library/<uuid:publication_id>/purge", library_trash.purge_view),
     path("api/library/<uuid:publication_id>/onenote/create", library_onenote.onenote_create_view),
     path("api/library/<uuid:publication_id>/onenote/open", library_onenote.onenote_open_view),
     path("api/library/<uuid:publication_id>/onenote/unbind", library_onenote.onenote_unbind_view),
