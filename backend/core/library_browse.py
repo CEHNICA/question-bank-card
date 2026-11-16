@@ -18,6 +18,19 @@ DEFAULT_LIMIT = 40
 # bulk=1 时的单次上限：整库一次拉走用。题库工作台首屏要全量题目，
 # 拆成九次请求的话每次都重算一遍跟分页无关的统计，光 API 就要十二秒。
 BULK_LIMIT_CAP = 1000
+# slim=1：列表瘦身。题库工作台首屏一次把整库拉走，列表真正用得上的只有
+# 题干、选项、配图、页码、标签名。下面这些是详情页才要的：
+#   content.review        每题的配图核验快照（bbox/page_idx/status）。真库 810 道题
+#                         合计 37 万字节 —— 占整个列表响应的四分之一，列表一个字节都不读。
+#   content.source_group  资料组信息，列表从不读。
+#   标签对象里的 description/aliases/levels/parent_ids/... 以及 AI 的
+#                         rationale/evidence/generation_source/scope
+#                         列表的标签芯片只要 id/name/kind/color/source/needs_review。
+# 丢掉这些不影响列表显示；展开一道题时前端按 publication_id 另拉详情补齐，
+# 那条详情接口走的是完整载荷，一个字段都没少。
+SLIM_DROP_CONTENT_KEYS = ("review", "source_group")
+SLIM_TAG_KEYS = ("id", "name", "kind", "color")
+SLIM_ASSIGNMENT_KEYS = ("source", "needs_review")
 # 「原卷顺序」承诺的是这份资料上印出来的先后。试卷的题号本身就是那个先后，
 # 教材不是：每章的习题都从 1 重新编，真库两本教材里「第 1 题」各有 94 / 82 张，
 # 按题号排等于把各章的「第 1 题」堆在一起（698 张里只有 14 张落在书上位置）。
@@ -187,7 +200,41 @@ def facet_counts(params) -> dict:
     }
 
 
-def serialize_items(publications) -> list[dict]:
+def _slim_content(content):
+    """只丢列表根本不读的 content 子字段。
+
+    content 是模型上那一份 dict（除非配图缺失才会复制），所以这里必须新建
+    一个 dict，绝不能就地 del —— 否则会把这个 PublishedQuestion 实例上的
+    content 掏空，后面谁再拿它渲染就炸了。
+    """
+    if not isinstance(content, dict):
+        return content
+    return {key: value for key, value in content.items() if key not in SLIM_DROP_CONTENT_KEYS}
+
+
+def _slim_assignments(assignments):
+    slim = []
+    for row in assignments:
+        if not isinstance(row, dict):
+            continue
+        entry = {key: row.get(key) for key in SLIM_ASSIGNMENT_KEYS if key in row}
+        tag = row.get("tag")
+        if isinstance(tag, dict):
+            entry["tag"] = {key: tag.get(key) for key in SLIM_TAG_KEYS if key in tag}
+        slim.append(entry)
+    return slim
+
+
+def slim_item(data: dict) -> dict:
+    """把一道题的行载荷削成列表用得上的样子。其余字段一律原样保留。"""
+    if "content" in data:
+        data["content"] = _slim_content(data.get("content"))
+    if "tag_assignments" in data:
+        data["tag_assignments"] = _slim_assignments(data.get("tag_assignments"))
+    return data
+
+
+def serialize_items(publications, *, slim: bool = False) -> list[dict]:
     publications = list(publications)
     ids = [item.id for item in publications]
     waiting = library_jobs.pending_kinds(ids)
@@ -206,6 +253,9 @@ def serialize_items(publications) -> list[dict]:
         data["jobs"] = waiting.get(str(item.id), [])
         data["job_errors"] = failed.get(str(item.id), {})
         data["job_details"] = details.get(str(item.id), [])
+    if slim:
+        for data in items:
+            slim_item(data)
     return items
 
 
@@ -495,7 +545,10 @@ def library_list(request):
         ids = [str(pk) for pk in rows.values_list("id", flat=True)]
         return json_response({"total": len(ids), "ids": ids})
     total = rows.count()
-    items = serialize_items(rows[offset : offset + limit])
+    # slim=1：列表瘦身，只给列表用得上的字段。题库工作台首屏拉全库时用，
+    # 详情页那条接口走完整载荷，展开一道题时补齐。
+    slim = request.GET.get("slim") == "1"
+    items = serialize_items(rows[offset : offset + limit], slim=slim)
     next_offset = offset + len(items)
     if wanted_param:
         # 只为刷新而读：不带全库统计、排队数量这些重活，前端也只合并这几行。

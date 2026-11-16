@@ -1207,9 +1207,15 @@
       </div>
 
       <div class="flex-1 min-h-0 overflow-hidden bg-slate-100">
+        <!--
+          src 是空的，第一次打开预览时才由 ensurePreviewFrameLoaded() 填上。
+          <iframe src> 即使外层是 hidden 也会照样下载：预览页带着 styles.css /
+          library.css / exam-layout.js / exam-export.js 一整套排版资源（约 110 KB
+          gzip），首屏一道题都还没看见就先把这些拉下来，还跟题库数据抢带宽。
+        -->
         <iframe
           id="eaglePreviewFrame"
-          src="/eagle-print-preview.html"
+          data-src="/eagle-print-preview.html"
           title="A4 试卷预览"
           class="w-full h-full border-0 bg-white"
         ></iframe>
@@ -2506,7 +2512,7 @@
         const seen = new Set(questionsData.map(q => String(q.id)));
         while (offset < total || (total === 0 && offset === 0)) {
           const res = await fetch(
-            `${API_BASE}/api/library?document=${encodeURIComponent(key)}&limit=${pageSize}&offset=${offset}&sort=source`,
+            `${API_BASE}/api/library?document=${encodeURIComponent(key)}&limit=${pageSize}&offset=${offset}&sort=source&slim=1`,
             { headers: { 'X-QB-Request': '1', 'Referer': window.location.href } }
           );
           if (!res.ok) break;
@@ -2563,7 +2569,10 @@
           // 整库一次拉走（bulk=1）。以前拆成 limit=100 的九次请求，每次都把
           // facets 这些跟分页无关的统计重算一遍；九次请求在同一个进程里排成
           // 一队，光 API 就十二秒。一次给完只要几百毫秒。
-          fetch(`${API_BASE}/api/library?bulk=1&limit=1000&offset=0`, {
+          // slim=1：列表只用得上题干、选项、配图、页码和标签名。配图核验快照
+          // （真库 810 道题合计 37 万字节）和标签上的 AI 理由列表一个字节都不读，
+          // 展开一道题时按 publication_id 另拉详情补齐。
+          fetch(`${API_BASE}/api/library?bulk=1&limit=1000&offset=0&slim=1`, {
             headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
           })
         ]);
@@ -2654,7 +2663,7 @@
           let offset = allRawItems.length;
           while (offset < totalCount) {
             try {
-              const res = await fetch(`${API_BASE}/api/library?bulk=1&limit=1000&offset=${offset}`, {
+              const res = await fetch(`${API_BASE}/api/library?bulk=1&limit=1000&offset=${offset}&slim=1`, {
                 headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
               });
               if (!res.ok) break;
@@ -6898,6 +6907,18 @@
       if (line && tone === 'error') line.textContent = text;
     }
 
+    // 预览框懒加载：第一次打开预览时把 src 填上。
+    // 预览页自己带一整套排版资源（styles.css / library.css / exam-layout.js …），
+    // 首屏用不上，别让它们跟题库数据抢带宽。
+    function ensurePreviewFrameLoaded() {
+      const frame = document.getElementById('eaglePreviewFrame');
+      if (!frame) return null;
+      if (!frame.getAttribute('src') && frame.dataset.src) {
+        frame.setAttribute('src', frame.dataset.src);
+      }
+      return frame;
+    }
+
     function postPreviewPayload() {
       const frame = document.getElementById('eaglePreviewFrame');
       if (!frame || !frame.contentWindow || !previewState.ready) return;
@@ -6918,6 +6939,8 @@
       const modal = document.getElementById('basketPreviewModal');
       if (!modal) return;
       modal.classList.remove('hidden');
+      // 先把预览页拉起来，跟读取题目原文并行跑，别等题取回来才开始排版。
+      ensurePreviewFrameLoaded();
       previewState.pageCount = 0;
       setPreviewStatus('正在读取题目原文…', '');
       try {
@@ -6964,7 +6987,9 @@
       if (frame && event.source && frame.contentWindow && event.source !== frame.contentWindow) return;
       if (data.type === 'qbc:eagle-print-preview-ready') {
         previewState.ready = true;
-        postPreviewPayload();
+        // 题还没取回来就别先发一个空篮子过去 —— 预览页会把「试题篮是空的」
+        // 当成真的结果报上来，状态栏会闪一下假消息。
+        if (previewState.items.length) postPreviewPayload();
         return;
       }
       if (data.type === 'qbc:eagle-print-preview-result') {
