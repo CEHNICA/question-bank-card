@@ -993,7 +993,10 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
   .page-dialog .dialog-tools { width: 100%; flex-wrap: wrap; }
   .page-dialog .page-zoom-toolbar .hint { display: none; }
   .page-dialog .zoom-controls { gap: 2px; }
-  .page-dialog .zoom-controls .button { padding: 4px 7px; font-size: 12px; min-height: 30px; }
+  .page-dialog .zoom-controls .button { padding: 4px 7px; font-size: 12px; min-height: 32px; min-width: 32px; }
+  /* 触屏可达性：原卷画布与原卷查看器的这批小按钮原本只有 28~30px 高 */
+  .page-dialog .button.small { min-height: 32px; }
+  .viewer-dialog .zoom-controls .button { min-height: 32px; min-width: 32px; }
   .page-dialog .page-tabs { display: none; }
   .page-dialog .page-number-field input { width: 44px; }
   .page-dialog .page-navigation { gap: 5px; }

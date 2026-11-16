@@ -149,4 +149,37 @@ for (const [sel, label] of TOUCH_RULES) {
   );
 }
 
+// ---- ④ 原卷画布 / 原卷查看器：窄屏小按钮抬到 32px -----------------------------
+//
+// 390px 实测（真实打开弹窗，不是 showModal 空开）：
+//   · pageDialog（原卷画布）缩放条 4 个按钮只有 28~30px 高，
+//     翻页栏 #pagePrevious / #pageNext / 手动裁切 / 布局加块 / 撤销 / 重试
+//     都是 .button.small = 28px；
+//   · viewerDialog（原卷查看器）缩放条 4 个按钮同样 28px 高。
+// → 全部在 @media (max-width: 540px) 里抬到 32px（宽屏零变化）。
+
+const CANVAS_RULES = [
+  ["\\.page-dialog\\s+\\.zoom-controls\\s+\\.button", "min-height:\\s*32px", "原卷画布缩放条按钮"],
+  ["\\.page-dialog\\s+\\.zoom-controls\\s+\\.button", "min-width:\\s*32px", "原卷画布缩放条按钮"],
+  ["\\.page-dialog\\s+\\.button\\.small", "min-height:\\s*32px", "原卷画布翻页/裁切等小按钮"],
+  ["\\.viewer-dialog\\s+\\.zoom-controls\\s+\\.button", "min-height:\\s*32px", "原卷查看器缩放条按钮"],
+  ["\\.viewer-dialog\\s+\\.zoom-controls\\s+\\.button", "min-width:\\s*32px", "原卷查看器缩放条按钮"]
+];
+
+for (const [sel, size, label] of CANVAS_RULES) {
+  assertInMedia(
+    "max-width: 540px",
+    new RegExp(sel + "\\s*[,{][^}]*" + size),
+    `${label} 触摸目标抬到 32px`
+  );
+}
+
+// 宽屏不得有残留：.page-dialog / .viewer-dialog 的 32px 抬升只能在窄屏媒体查询里
+for (const [sel] of CANVAS_RULES) {
+  assert.ok(
+    !new RegExp(sel + "[^{}]*\\{[^}]*min-(height|width):\\s*32px").test(wideRules),
+    `${sel} 的 32px 抬升只允许出现在窄屏媒体查询里，宽屏不得有残留规则`
+  );
+}
+
 console.log(`经典题库页切题面板 + 窄屏触摸目标静态检查：OK（${cssPath}）`);

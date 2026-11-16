@@ -338,6 +338,15 @@
       #solutionEditorModal #solutionEditorSearchInput { min-height: 32px; }
       #solutionEditorModal .se-left button { min-height: 32px; }
       #solutionEditorModal > div > div:last-child button { min-height: 32px; }
+      /* 文件夹树分组标题行的「+」小按钮：w-4 h-4 = 16×16，手机上根本点不准
+         （390px 抽屉展开态实测 3 个都是 16×16）→ 抬到 32px。
+         用 class 钩子 .eagle-tree-action-btn 定位：Tailwind 是本地预编译产物，
+         新增 utility class 不会生效，只能靠钩子写自定义规则。 */
+      #folderTreeContainer .eagle-tree-action-btn { min-width: 32px; min-height: 32px; }
+      /* 侧栏底栏两个入口按钮（展开标签地图 / 管理）只有 28px 高 → 抬到 32px。
+         按 title 定位，不依赖容器结构。 */
+      button[title="在经典题库页打开标签地图（浏览不写库）"],
+      button[title="打开标签管理中心"] { min-height: 32px; }
     }
       .compact-row .katex-display {
       display: inline !important;
@@ -10854,7 +10863,7 @@
           ? ` ondragover="handleFolderDragOver(event, '${safeNodeId}', this)" ondragleave="handleFolderDragLeave(this)" ondrop="handleFolderDrop(event, '${safeNodeId}', this)"`
           : '';
         const actionBtn = node.actionCall
-          ? `<button onclick="${node.actionCall}" class="w-4 h-4 rounded flex items-center justify-center text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 text-xs font-bold leading-none cursor-pointer" title="${escapeHtml(node.actionTitle || '')}">${node.actionLabel || '+'}</button>`
+          ? `<button onclick="${node.actionCall}" class="eagle-tree-action-btn w-4 h-4 rounded flex items-center justify-center text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 text-xs font-bold leading-none cursor-pointer" title="${escapeHtml(node.actionTitle || '')}">${node.actionLabel || '+'}</button>`
           : '';
         const sectionCount = node.folderCount !== undefined ? node.folderCount : node.count;
         const sectionCountLabel = (sectionCount !== null && sectionCount !== undefined && sectionCount !== '')
