@@ -353,11 +353,26 @@ body.library-basket-open .question-inspector { display: none; }
    （第一版挂在下面的「标签」区，可那一区只有题打过标签才渲染，实机一验不出现）。
    面板头部是 flex，这里只给它一个间距，位置由后面的「收起」顶着。 */
 .inspector-locate { flex: none; }
-/* 定位过去以后让那道题亮一下，不然滑过去的一瞬间看不出停在哪。 */
+/* 定位过去以后让那道题亮一下，不然滑过去的一瞬间看不出停在哪。
+   用 outline 而不是 box-shadow：eagle-filter-bar.css 里 .library-card 的 box-shadow
+   带着 !important，属于「作者 !important」层，优先级高过 CSS 动画层，
+   写在 keyframes 里的 box-shadow 一次都没显示过（实测 200ms / 400ms 都是基础阴影）。
+   outline 在全仓没有 !important 冲突，能被 keyframes 正常驱动。 */
 .library-card.locate-flash { animation: library-locate-flash 1.2s ease-out; }
 @keyframes library-locate-flash {
-  0%, 40% { box-shadow: 0 0 0 3px var(--accent); }
-  100% { box-shadow: 0 0 0 0 transparent; }
+  0%, 40% { outline: 3px solid var(--accent); outline-offset: 2px; }
+  100% { outline: 3px solid transparent; outline-offset: 2px; }
+}
+/* 减弱动效：动画被压成 0.01ms，等于没有反馈。改成静态描边，亮到 class 被摘掉为止。
+   前面加 body.library-page 是为了压过 library-reading.css 里
+   .library-page .library-card.inspector-active 的 outline: 0（同样是 0-3-0，
+   但那份文件在后面加载，源序会赢）。 */
+@media (prefers-reduced-motion: reduce) {
+  body.library-page .library-card.locate-flash {
+    animation: none !important;
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+  }
 }
 .question-inspector-actions { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
 .question-inspector-empty { display: grid; justify-items: start; gap: 4px; padding: 12px 3px; }
@@ -1010,6 +1025,12 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .answer-list-row[data-state="ready"] .answer-list-question::after { background: var(--green-bar); }
 .answer-list-row[data-state="review"] .answer-list-question::after, .answer-list-row[data-state="failed"] .answer-list-question::after { background: var(--red); }
 .answer-list-row[data-state="working"] .answer-list-question::after { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+/* 必须写 animation: none：全局那条 reduced-motion 只压 animation-duration，
+   不压 animation-iteration-count，infinite 动画会以 0.01ms 的周期一直转。
+   这条要 !important：上面那条状态选择器带了属性选择器，不加会被它盖住。 */
+@media (prefers-reduced-motion: reduce) {
+  .answer-list-row[data-state="working"] .answer-list-question::after { animation: none !important; }
+}
 .answer-list-row.active .answer-list-question::after { outline: 2px solid var(--accent); outline-offset: 2px; }
 .answer-editor-status { margin: 0; color: var(--ink-2); font-size: 12.5px; line-height: 1.5; }
 .answer-question, .answer-origin { padding: 12px 14px; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); }

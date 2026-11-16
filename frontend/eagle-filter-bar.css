@@ -531,6 +531,13 @@ body.library-page {
   max-width: 100%;
 }
 
+/* 减弱动效：上面那条 .library-card 的 transition 带着 !important，特异性高过
+   styles.css 里全局那条 transition-duration: .01ms !important，
+   所以卡片在减弱动效下还是 0.15s 过渡。同权重 + 靠后源序才压得过去。 */
+@media (prefers-reduced-motion: reduce) {
+  .library-card { transition: none !important; }
+}
+
 /* ≤979px：胶囊组和智能文件夹挤在一行里全被压扁。
    让筛选容器换行（智能文件夹单独占一行），胶囊组内部再自己换行，
    每颗胶囊都能保住完整文字，不用靠省略号截断。 */

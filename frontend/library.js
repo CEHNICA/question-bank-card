@@ -1592,7 +1592,8 @@
         toast("这道题还没加载出来，滚到底或点「加载更多」再找。", "error");
         return;
       }
-      card.scrollIntoView({ behavior: "smooth", block: "center" });
+      // 减弱动效：系统里开了「减少动态效果」就改成瞬时到位，别再慢慢滑过去。
+      card.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
       card.classList.add("locate-flash");
       window.setTimeout(() => card.classList.remove("locate-flash"), 1200);
     });
@@ -4195,7 +4196,7 @@
     if (state.focus) {
       const target = document.getElementById(`q-${state.focus}`);
       if (target) {
-        requestAnimationFrame(() => target.scrollIntoView({ behavior: "smooth", block: "center" }));
+        requestAnimationFrame(() => target.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" }));
         state.focus = "";
       }
     } else restoreLibraryViewport(viewport);
@@ -6573,7 +6574,7 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
       }
     }, { rootMargin: "600px 0px" }).observe(ui.more);
   }
-  $("backToTop").addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+  $("backToTop").addEventListener("click", () => window.scrollTo({ top: 0, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }));
   ui.basketButton.addEventListener("click", openPrint);
   $("printButton").addEventListener("click", () => exportPaper("print"));
   $("exportWord").addEventListener("click", () => exportPaper("docx"));

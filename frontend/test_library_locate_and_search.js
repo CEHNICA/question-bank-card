@@ -82,8 +82,8 @@ assert.match(scrollSyncSrc, /syncLocateButton\(/,
 // 找不到时要说清下一步去哪，别只弹一句「找不到」。
 assert.match(js, /还没加载出来[\s\S]*?加载更多/,
   "题还没加载出来时，写清要滚到底或点「加载更多」，而不是干说找不到");
-assert.match(js, /card\.scrollIntoView\(\{ behavior: "smooth", block: "center" \}\)/,
-  "点一下把左边列表滚到这道题正中间，不要滚到边缘");
+assert.match(js, /card\.scrollIntoView\(\{[^}]*behavior:[^}]*,\s*block: "center"/,
+  "点一下把左边列表滚到这道题正中间，不要滚到边缘（behavior 随减弱动效切换，block 必须是 center）");
 assert.match(js, /card\.classList\.add\("locate-flash"\)/,
   "滚过去要让那道题亮一下，否则滑过去的一瞬间看不出停在哪");
 assert.match(css, /\.library-card\.locate-flash \{ animation: library-locate-flash/,

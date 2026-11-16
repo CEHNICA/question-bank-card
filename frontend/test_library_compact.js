@@ -272,7 +272,7 @@ assert.ok(!libraryHtml.includes('id="compactFilters"'), "批量条里不再有�
 assert.ok(!libraryJs.includes("syncCompactFilters"), "收起/展开那套逻辑整段撤掉");
 assert.ok(!libraryCss.includes(".library-compact-filters"), "对应的样式也删干净");
 assert.match(libraryHtml, /id="backToTop"/, "右下角留着「回到顶部」");
-assert.match(libraryJs, /window\.scrollTo\(\{ top: 0, behavior: "smooth" \}\)/, "点它一下回到最上面，再筛选");
+assert.match(libraryJs, /window\.scrollTo\(\{[^}]*top: 0[^}]*behavior:[^}]*\}\)/, "点它一下回到最上面，再筛选");
 
 // ── 1.25.31：题多起来以后的手感 ──
 // ① 后台刷新只读有任务的那几行。以前每 4 秒把屏上几百道题整屏重读一遍。
@@ -296,7 +296,7 @@ assert.match(libraryJs, /ids\.slice\(0, 500\)\.forEach/, "和试题篮一样，�
 
 // ④ 回到顶部。
 assert.match(libraryHtml, /id="backToTop"/, "滚深了以后有回顶部的按钮");
-assert.match(libraryJs, /scrollTo\(\{ top: 0, behavior: "smooth" \}\)/, "点了平滑滚回去");
+assert.match(libraryJs, /scrollTo\(\{[^}]*top: 0[^}]*behavior:[^}]*\}\)/, "点了平滑滚回去");
 assert.match(libraryJs, /top_button\.hidden = window\.scrollY < 900/, "滚过几屏才露出来");
 
 // ⑤ 排序多一个「按题号」。
