@@ -2449,12 +2449,114 @@
         .replace(/'/g, '&#039;');
     }
 
+    /* ===== SANITIZER-BLOCK-START ===== */
+    /*
+     * 内容净化：题干 / 解析里混进来的 HTML 不能变成可执行内容。
+     *
+     * 规则（保守但够用）：
+     *   1. script / style / iframe / object / embed / applet / noscript 连内容一起删；
+     *      link / meta / base / frame / frameset 只删标签本身。
+     *   2. 所有 on* 事件属性删掉 —— 双引号 / 单引号 / 无引号 / 大写 / 斜杠分隔都算。
+     *   3. href / src / action / formaction 等属性里的 javascript: / vbscript: /
+     *      data:text/html 伪协议删掉；data:image/* 保留（题目配图靠它）。
+     *   4. 公式、MathML、KaTeX、正文里的尖括号（a<b>c、x < y）一律原样保留。
+     */
+    const SANITIZE_DROP_WITH_CONTENT = ['script', 'style', 'iframe', 'object', 'embed', 'applet', 'noscript'];
+    const SANITIZE_SCRIPT_LIKE = ['script', 'style'];
+    const SANITIZE_DROP_TAG_ONLY = ['link', 'meta', 'base', 'frame', 'frameset'];
+    const SANITIZE_URL_ATTRS = ['xlink:href', 'href', 'src', 'action', 'formaction', 'poster', 'background', 'srcdoc'];
+
     function sanitizeMathHtml(html) {
       if (!html) return '';
-      return html
-        .replace(/<script[\s\S]*?<\/script>/gi, '')
-        .replace(/on\w+="[^"]*"/gi, '');
+      return sanitizeHtmlFragment(String(html));
     }
+
+    function sanitizeHtmlFragment(html) {
+      let out = '';
+      let i = 0;
+      const n = html.length;
+      while (i < n) {
+        const lt = html.indexOf('<', i);
+        if (lt < 0) { out += html.slice(i); break; }
+        out += html.slice(i, lt);
+        const next = html[lt + 1] || '';
+        // '<' 后面不是标签起始（多半是正文里的数学不等号）→ 当普通文本原样留着
+        if (!/[a-zA-Z/!?]/.test(next)) { out += '<'; i = lt + 1; continue; }
+        const end = findTagEnd(html, lt);
+        if (end < 0) { out += html.slice(lt); break; }
+        const tagText = html.slice(lt, end + 1);
+        const match = /^<(\/?)\s*([a-zA-Z][a-zA-Z0-9:_.-]*)/.exec(tagText);
+        const tagName = match ? match[2].toLowerCase() : '';
+        const isEndTag = match ? match[1] === '/' : false;
+        if (!isEndTag && SANITIZE_DROP_WITH_CONTENT.indexOf(tagName) >= 0) {
+          const closeRe = new RegExp('<\\/\\s*' + tagName + '\\s*>', 'i');
+          const rest = html.slice(end + 1);
+          const hit = closeRe.exec(rest);
+          if (hit) i = end + 1 + hit.index + hit[0].length;
+          else i = SANITIZE_SCRIPT_LIKE.indexOf(tagName) >= 0 ? n : end + 1;
+          continue;
+        }
+        if (!isEndTag && SANITIZE_DROP_TAG_ONLY.indexOf(tagName) >= 0) { i = end + 1; continue; }
+        out += isEndTag ? tagText : sanitizeTagAttributes(tagText);
+        i = end + 1;
+      }
+      return out;
+    }
+
+    // 找标签结束位置：引号里的 > 不算结束
+    function findTagEnd(html, from) {
+      let j = from + 1;
+      let quote = '';
+      while (j < html.length) {
+        const ch = html[j];
+        if (quote) { if (ch === quote) quote = ''; }
+        else if (ch === '"' || ch === "'") quote = ch;
+        else if (ch === '>') return j;
+        j++;
+      }
+      return -1;
+    }
+
+    // 标签里的属性逐个过：事件属性删掉，危险伪协议删掉，其余原样保留
+    function sanitizeTagAttributes(tagText) {
+      const match = /^<([a-zA-Z][a-zA-Z0-9:_.-]*)([\s\S]*?)(\/?)>$/.exec(tagText);
+      if (!match) return tagText;
+      const name = match[1];
+      const rawAttrs = match[2];
+      const selfClose = match[3];
+      const parts = rawAttrs.match(/[^\s=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'`<>]+))?/g) || [];
+      const kept = [];
+      for (const raw of parts) {
+        const am = /^([^\s=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'`<>]+)))?$/.exec(raw);
+        if (!am) continue;
+        const attrName = am[1].replace(/^\//, '').toLowerCase();
+        const hasValue = am[0].indexOf('=') >= 0;
+        const value = am[2] !== undefined ? am[2] : (am[3] !== undefined ? am[3] : (am[4] !== undefined ? am[4] : ''));
+        if (/^on[a-z0-9_-]*$/.test(attrName)) continue;
+        if (hasValue && SANITIZE_URL_ATTRS.indexOf(attrName) >= 0 && isDangerousUrl(value)) continue;
+        kept.push(raw);
+      }
+      return '<' + name + (kept.length ? ' ' + kept.join(' ') : '') + selfClose + '>';
+    }
+
+    // javascript: / vbscript: / data:text/html 一律危险；data:image/* 留着（题目配图）
+    function isDangerousUrl(value) {
+      const normalized = decodeUrlEntities(String(value == null ? '' : value))
+        .replace(/[\s\u0000-\u0020]/g, '')
+        .toLowerCase();
+      if (!normalized) return false;
+      if (normalized.indexOf('javascript:') === 0 || normalized.indexOf('vbscript:') === 0) return true;
+      if (normalized.indexOf('data:') === 0) return normalized.indexOf('data:image/') !== 0;
+      return false;
+    }
+
+    function decodeUrlEntities(text) {
+      return String(text)
+        .replace(/&#x([0-9a-f]+);?/gi, (m, hex) => { const code = parseInt(hex, 16); return Number.isFinite(code) ? String.fromCharCode(code) : ''; })
+        .replace(/&#(\d+);?/g, (m, dec) => { const code = Number(dec); return Number.isFinite(code) ? String.fromCharCode(code) : ''; })
+        .replace(/&colon;/gi, ':');
+    }
+    /* ===== SANITIZER-BLOCK-END ===== */
 
     // ---- 难度估算：只用真实信号（题型/分值/题干长度/配图/小问/解析长度） ----
     function estimateDifficultyStars(ctx) {

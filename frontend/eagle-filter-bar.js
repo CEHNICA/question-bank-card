@@ -30,6 +30,21 @@
     return node;
   }
 
+  // 解析接口返回的是对象（{solution:{answer,analysis,...}}），旧代码把对象当字符串用，
+  // 结果明明有解析也显示「未能读取到原卷解析」。这里只负责把正文取成**纯文本字符串**，
+  // 渲染一律走 textContent，不当 HTML 解析。
+  function extractSolutionText(payload) {
+    if (!payload || typeof payload !== "object") return "";
+    const solution = payload.solution && typeof payload.solution === "object" ? payload.solution : null;
+    const pick = (value) => (typeof value === "string" && value.trim() ? value : "");
+    return pick(solution && solution.analysis)
+      || pick(solution && solution.answer)
+      || pick(payload.analysis)
+      || pick(payload.content && payload.content.analysis)
+      || pick(payload.content && payload.content.answer)
+      || "";
+  }
+
   function safeToast(message, type = "success") {
     if (typeof window.toast === "function") {
       window.toast(message, type);
@@ -986,11 +1001,16 @@
               fetch(`/api/library/${pubId}/solution`, { headers: { 'X-QB-Request': '1', 'Referer': window.location.href } })
                 .then(r => r.json())
                 .then(res => {
-                  const content = res.solution || res.analysis || (res.content && res.content.analysis);
+                  const content = extractSolutionText(res);
                   const solEl = solutionBox.querySelector(".eagle-sol-content");
                   if (solEl) {
                     if (content) {
-                      solEl.innerHTML = content.replace(/\n/g, "<br/>");
+                      // 解析正文是纯文本（老师写的 / AI 生成的）：当文本塞进去，
+                      // 既不让 <> 变成标签，也不让整段解析变成可执行内容。
+                      solEl.textContent = content;
+                      solEl.style.whiteSpace = 'pre-wrap';
+                      solEl.style.color = '#475569';
+                      solEl.style.fontStyle = '';
                       if (window.renderMathInElement) {
                         window.renderMathInElement(solEl, {
                           delimiters: [
@@ -1003,7 +1023,9 @@
                         });
                       }
                     } else {
-                      solEl.innerHTML = '<span style="color:#94a3b8;font-style:italic;">暂无原卷解析。可在题目详情中让 AI 辅助生成解答。</span>';
+                      solEl.textContent = '暂无原卷解析。可在题目详情中让 AI 辅助生成解答。';
+                      solEl.style.color = '#94a3b8';
+                      solEl.style.fontStyle = 'italic';
                     }
                   }
                 })
