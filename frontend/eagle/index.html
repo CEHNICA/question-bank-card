@@ -1913,6 +1913,11 @@
     let libraryBackgroundPending = false;  // 后台补拉还没完
     let libraryLoadGeneration = 0;   // 每次整库重载 +1，旧的补拉结果直接作废
     let libraryFilterSignature = ''; // 首屏渲染时的筛选快照，后台补完用来判断用户有没有中途改筛选
+    // 后台补拉断在半路时的状态 { loaded, total }，null = 没断过。
+    // 断了又不说话的话，用户看到的是「已呈现全部 150 道试题」，
+    // 而库里其实有 810 道 —— 他会以为题库就这么大，或者数据丢了。
+    let libraryLoadIncomplete = null;
+    let libraryBackgroundOffset = 0;  // 补拉已经拉到第几条（重试要从这里接着拉）
 
     let currentActiveQuestionId = null;
     const selectedQuestionIds = new Set();
@@ -3220,14 +3225,19 @@
      * 不用重画，只要把命中数和滚动提示更新到整库口径就行。
      */
     async function loadRemainingLibraryItems(generation, totalCount, offset) {
+      libraryBackgroundOffset = offset;   // 断点续拉要知道从哪开始
       try {
         while (offset < totalCount) {
           const res = await fetch(`${API_BASE}/api/library?bulk=1&limit=1000&offset=${offset}&slim=1&sort=display`, {
             headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
           });
-          if (!res.ok) break;
+          // 非 2xx 必须当失败处理：直接 break 会走正常收尾，界面上写
+          // 「已呈现全部 N 道试题」，等于拿一句假话盖住一次失败。
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const page = await res.json();
-          if (!page || !Array.isArray(page.items) || !page.items.length) break;
+          if (!page || !Array.isArray(page.items) || !page.items.length) {
+            throw new Error('返回的试题列表为空');
+          }
           const realItems = page.items.map((item, idx) => convertLibraryListItem(item, offset + idx));
           page.items.forEach(it => {
             if (it.draft_id) loadedSourceQuestionIds.add(String(it.draft_id));
@@ -3237,17 +3247,58 @@
           if (generation !== libraryLoadGeneration) return;  // 整库已经重载，这批作废
           questionsData.push(...realItems);
           offset += page.items.length;
+          libraryBackgroundOffset = offset;
         }
         if (generation !== libraryLoadGeneration) return;
         libraryBackgroundPending = false;
+        libraryLoadIncomplete = null;
         refreshLibraryAfterBackgroundLoad();
       } catch (e) {
         console.warn('Library background load failed:', e);
         if (generation === libraryLoadGeneration) {
           libraryBackgroundPending = false;
           refreshLibraryAfterBackgroundLoad();
+          showLibraryLoadIncompleteNotice(offset, totalCount);
         }
       }
+    }
+
+    /**
+     * 后台补拉中断的可见提示：说清"库里一共多少、实际载入了多少"，并给重试入口。
+     * 没有这个提示，界面上只剩一句「已呈现全部 N 道试题」，用户会把断档
+     * 当成"题库本来就这么大"或者"数据丢了"。
+     */
+    function showLibraryLoadIncompleteNotice(loaded, total) {
+      const safeLoaded = Math.max(0, Math.min(loaded, total));
+      libraryLoadIncomplete = { loaded: safeLoaded, total };
+      const missing = Math.max(0, total - safeLoaded);
+      showToast(`题库加载中断：只载入了 ${safeLoaded} / ${total} 道试题，还有 ${missing} 道没载入`, 'error');
+      renderLibraryLoadIncompleteNotice();
+    }
+
+    /** 把「加载中断 + 重试按钮」写进列表底部的提示条。 */
+    function renderLibraryLoadIncompleteNotice() {
+      if (!libraryLoadIncomplete) return;
+      const { loaded, total } = libraryLoadIncomplete;
+      const missing = Math.max(0, total - loaded);
+      const sentinel = document.getElementById('chunkSentinel');
+      if (!sentinel) return;
+      sentinel.innerHTML = `
+        <div class="py-2.5 px-3 rounded-md bg-amber-50 border border-amber-200 text-amber-900 text-left">
+          <div class="text-xs font-medium">题库没有加载完：已载入 ${loaded} / ${total} 道，还有 ${missing} 道没载入</div>
+          <button type="button" onclick="retryRemainingLibraryLoad()" class="mt-1 text-xs text-amber-800 underline hover:no-underline font-medium cursor-pointer">重新加载剩余试题</button>
+        </div>`;
+    }
+
+    /** 从中断的地方接着拉剩下的试题。 */
+    async function retryRemainingLibraryLoad() {
+      if (libraryBackgroundPending) return;
+      const gen = libraryLoadGeneration;
+      libraryBackgroundPending = true;
+      libraryLoadIncomplete = null;
+      const sentinel = document.getElementById('chunkSentinel');
+      if (sentinel) sentinel.innerText = `题库载入中… (${renderedQuestionCount} / ${libraryEffectiveTotal()})`;
+      await loadRemainingLibraryItems(gen, libraryTotalCount, libraryBackgroundOffset);
     }
 
     /**
@@ -3268,6 +3319,11 @@
       updateBatchActionBar();
       const sentinel = document.getElementById('chunkSentinel');
       if (sentinel) {
+        if (libraryLoadIncomplete) {
+          // 补拉断过：别再写「已呈现全部」，写中断提示 + 重试。
+          renderLibraryLoadIncompleteNotice();
+          return;
+        }
         sentinel.innerText = renderedQuestionCount >= filteredQuestions.length
           ? `— 已呈现全部 ${filteredQuestions.length} 道试题 —`
           : `向下滚动加载更多 (${renderedQuestionCount} / ${filteredQuestions.length})...`;
@@ -3286,6 +3342,8 @@
       libraryLoadGeneration += 1;
       libraryBackgroundPending = false;
       libraryTotalCount = 0;
+      libraryLoadIncomplete = null;
+      libraryBackgroundOffset = 0;
       await loadRealData();
     }
     window.loadInitialLibraryData = loadInitialLibraryData;
@@ -5409,6 +5467,11 @@
 
       if (renderedQuestionCount >= filteredQuestions.length) {
         if (sentinel) {
+          if (libraryLoadIncomplete) {
+            // 补拉断过：显示中断提示 + 重试按钮，别显示「已呈现全部」。
+            renderLibraryLoadIncompleteNotice();
+            return;
+          }
           // 后台还在补拉时别写「已呈现全部」—— 整库还没到，写了就是骗人。
           sentinel.innerText = libraryBackgroundPending
             ? `题库载入中… (${renderedQuestionCount} / ${libraryEffectiveTotal()})`
@@ -5438,7 +5501,10 @@
       renderedQuestionCount += nextChunk.length;
 
       if (sentinel) {
-        if (libraryBackgroundPending) {
+        if (libraryLoadIncomplete) {
+          // 补拉断过：显示中断提示 + 重试按钮，别显示「已呈现全部」。
+          renderLibraryLoadIncompleteNotice();
+        } else if (libraryBackgroundPending) {
           sentinel.innerText = `题库载入中… (${renderedQuestionCount} / ${libraryEffectiveTotal()})`;
         } else if (renderedQuestionCount >= filteredQuestions.length) {
           sentinel.innerText = `— 已呈现全部 ${filteredQuestions.length} 道试题 —`;
