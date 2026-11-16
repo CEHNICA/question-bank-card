@@ -1892,6 +1892,9 @@
     // 全量标签目录（保留父子关系与真实计数），供文件夹树 / 标签管理中心使用
     let tagCatalogue = [];
     let tagCatalogueRevision = 0;
+    // 标签目录上一次读取失败的原因（空串 = 上次读到了）。
+    // 读不到目录不是「目录是空的」，也不能当刷新成功悄悄咽下去。
+    let tagCatalogueReadError = '';
 
     let papersData = [];
     let paperSearchKeyword = '';
@@ -3136,6 +3139,11 @@
             });
             renderTagFilterDropdownList();
           }
+        } else {
+          // 标签目录没读到 ≠ 没有标签。静默跳过的话，标签筛选和文件夹树空着，
+          // 看着就像「这库本来就没标签」。
+          tagCatalogueReadError = `读取失败（HTTP ${tagsRes.status}）`;
+          showToast('标签目录没读到（HTTP ' + tagsRes.status + '）：标签筛选和文件夹树暂时是空的，不是真的没有标签。刷新页面再试。', 'error');
         }
 
         // 3. 处理试题数据：首批先画，剩下的后台补
@@ -5978,7 +5986,20 @@
         const currentState = aiTagJobStateByQuestion.get(qid);
         if (!currentState) return;
 
-        const list = await fetchLibraryJobs(qid, 'tags');
+        const { jobs: list, error: jobReadError } = await fetchLibraryJobs(qid, 'tags');
+        if (jobReadError) {
+          // 读不到任务状态，不是「任务还在跑」。空转到 5 分钟再谎报「仍在后台排队」是骗人。
+          aiTagJobStateByQuestion.delete(qid);
+          aiTagPollingPausedQuestions.add(qid);
+          if (q.tagJobReadError !== jobReadError) {
+            q.tagJobReadError = jobReadError;
+            if (currentActiveQuestionId === qid) renderRightInspector();
+          }
+          stopAiTagTimerIfIdle();
+          showToast('读不到标签建议的任务状态：' + jobReadError + '。后台可能还在跑，过一会儿点「重新生成建议」再试一次。', 'error');
+          return;
+        }
+        q.tagJobReadError = '';
         let mine = currentState.jobIds.length
           ? list.filter(j => currentState.jobIds.includes(String(j.id)))
           : list.filter(j => j && j.kind === 'tags' && (j.status === 'queued' || j.status === 'running'));
@@ -6069,6 +6090,10 @@
       return body || {};
     }
 
+    // 读不到任务状态 ≠ 没有任务。
+    // 以前这里失败就返回空数组，轮询会一路空转到 5 分钟超时，
+    // 最后对外说「AI 还在后台跑」——那是拿「读不到」冒充「还在跑」。
+    // 现在失败必须把原因带出来，由调用方如实告诉用户。
     async function fetchLibraryJobs(publicationId, scope) {
       const suffix = scope === 'tags' ? '&tag_scope=true' : '&solution_scope=true';
       try {
@@ -6076,11 +6101,13 @@
           headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
           cache: 'no-store'
         });
-        if (!res.ok) return [];
+        if (!res.ok) {
+          return { jobs: [], error: `读取任务状态失败（HTTP ${res.status}）` };
+        }
         const body = await res.json();
-        return Array.isArray(body.jobs) ? body.jobs : [];
+        return { jobs: Array.isArray(body.jobs) ? body.jobs : [], error: '' };
       } catch (e) {
-        return [];
+        return { jobs: [], error: `读取任务状态失败：${(e && e.message) || '网络错误'}` };
       }
     }
 
@@ -6141,22 +6168,28 @@
       try {
         // 后台跑完的答案任务，结果只在 job.result 里，先把它捞回来。
         try {
-          const jobs = await fetchLibraryJobs(q.id, 'answer');
+          const { jobs } = await fetchLibraryJobs(q.id, 'answer');
           applyAnswerJobResult(q, jobs);
         } catch (e) { /* 拿不到就当没有 */ }
         const res = await fetch(`${API_BASE}/api/library/${q.id}`, {
           headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
           cache: 'no-store'
         });
-        if (!res.ok) return null;
+        // 读不到详情不是「没有详情」。记下来，渲染层才能说「读不到」而不是说「没有」。
+        if (!res.ok) {
+          if (q) q.detailReadError = `读取失败（HTTP ${res.status}）`;
+          return null;
+        }
         const data = await res.json();
         // 单题详情接口的载荷是 {publication:{...}, versions, history, ...}，
         // 取错字段会让 AI 标签建议整块丢失（右栏永远显示「暂无待采纳建议」）。
         const item = data.publication || data.item || data;
         applyAiPayloadToQuestion(q, item);
+        if (q) q.detailReadError = '';
         return item;
       } catch (e) {
         console.warn('refreshQuestionSolution failed:', e);
+        if (q) q.detailReadError = (e && e.message) || '读取失败';
         return null;
       }
     }
@@ -6260,15 +6293,21 @@
 
       const deadline = Date.now() + AI_POLL_TIMEOUT_MS;
       let settled = false;
+      let jobReadError = '';
       while (Date.now() < deadline) {
         await new Promise(r => setTimeout(r, AI_POLL_INTERVAL_MS));
         const fetched = await Promise.all([fetchLibraryJobs(qid, 'answer'), fetchLibraryJobs(qid, 'tags')]);
-        const mine = fetched.flat().filter(j => jobIds.includes(String(j.id)));
+        jobReadError = fetched.map(f => f.error).filter(Boolean).join('；');
+        if (jobReadError) {
+          // 读不到任务状态就停，别空转到超时再对外说「还在后台跑」。
+          break;
+        }
+        const mine = fetched.flatMap(f => f.jobs).filter(j => jobIds.includes(String(j.id)));
         if (!mine.length) continue;
 
         // 同步更新右栏 AI 标签建议的实时状态与耗时
         if (tagJobIds.length) {
-          const tagMine = fetched[1].filter(j => tagJobIds.includes(String(j.id)));
+          const tagMine = fetched[1].jobs.filter(j => tagJobIds.includes(String(j.id)));
           const activeTag = tagMine.find(j => j.status === 'queued' || j.status === 'running');
           if (activeTag) {
             const state = aiTagJobStateByQuestion.get(qid);
@@ -6322,7 +6361,13 @@
           stopAiTagTimerIfIdle();
           if (currentActiveQuestionId === qid) renderRightInspector();
         }
-        box.innerHTML = aiBoxError('AI 还在后台跑（超过 5 分钟没回），过一会儿刷新题库就能看到结果。');
+        if (jobReadError) {
+          // 读不到 ≠ 还在跑。这句必须说人话。
+          box.innerHTML = aiBoxError('读不到 AI 任务状态：' + jobReadError + '。这里显示的是「读不到」，不是「还在后台跑」。过一会儿点「重新生成建议」再试一次。');
+          showToast('读不到 AI 任务状态：' + jobReadError, 'error');
+        } else {
+          box.innerHTML = aiBoxError('AI 还在后台跑（超过 5 分钟没回），过一会儿刷新题库就能看到结果。');
+        }
       }
     }
 
@@ -6354,7 +6399,7 @@
 
         // 若后端因为已有活跃任务而跳过新建，则自动挂载到该题已有的 queued/running 任务上
         if (!jobs.length) {
-          const existing = await fetchLibraryJobs(qid, 'tags');
+          const { jobs: existing } = await fetchLibraryJobs(qid, 'tags');
           const activeExisting = existing.find(j => j && (j.status === 'queued' || j.status === 'running'));
           if (activeExisting) {
             jobs = [String(activeExisting.id)];
@@ -7092,6 +7137,10 @@
         } else if (ai) {
           statusBadge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 font-medium whitespace-nowrap shrink-0';
           statusBadge.innerText = '⚡ 仅 AI 初稿';
+        } else if (q.detailReadError) {
+          // 读不到详情 ≠ 没有解析。以前这里一律说「暂无解析」，把读失败说成了没有内容。
+          statusBadge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 font-medium whitespace-nowrap shrink-0';
+          statusBadge.innerText = '⚠ 解析没读到';
         } else {
           statusBadge.className = 'text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200 font-medium whitespace-nowrap shrink-0';
           statusBadge.innerText = '○ 暂无解析';
@@ -7212,14 +7261,20 @@
       }
 
       if (!blocks.length) {
+        // 详情没读到 ≠ 这道题没有解析。以前这里一律说「还没有答案与解析」，把读失败说成了没有内容。
+        const readFailed = Boolean(q.detailReadError);
         blocks.push(`
-          <section class="rounded-xl border border-dashed border-slate-300 bg-white/80 p-5 flex flex-wrap items-center justify-between gap-3">
+          <section class="rounded-xl border border-dashed ${readFailed ? 'border-amber-200 bg-amber-50/50' : 'border-slate-300 bg-white/80'} p-5 flex flex-wrap items-center justify-between gap-3">
             <div class="space-y-0.5">
-              <div class="text-xs font-semibold text-slate-700">这道题还没有答案与解析</div>
-              <div class="text-[11px] text-slate-400">可立即打开图文解析编辑器录入，或调用 AI 生成解题思路初稿</div>
+              <div class="text-xs font-semibold ${readFailed ? 'text-amber-900' : 'text-slate-700'}">${readFailed ? '这道题的解析没读到' : '这道题还没有答案与解析'}</div>
+              <div class="text-[11px] ${readFailed ? 'text-amber-800' : 'text-slate-400'}">${readFailed
+                ? '读取详情失败（' + escapeHtml(q.detailReadError) + '）：这里显示的是「读不到」，不是「没有解析」。先重试读取，或直接录入正式解析。'
+                : '可立即打开图文解析编辑器录入，或调用 AI 生成解题思路初稿'}</div>
             </div>
             <div class="flex items-center gap-2 shrink-0">
-              <button type="button" onclick="openSolutionEditorFromQuickLook()" class="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium whitespace-nowrap cursor-pointer">✎ 录入正式解析</button>
+              ${readFailed
+                ? `<button type="button" onclick="retryReadQuestionDetail('${safeQid}')" class="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-amber-800 border border-amber-200 text-xs font-medium whitespace-nowrap cursor-pointer">↻ 重新读取</button>`
+                : `<button type="button" onclick="openSolutionEditorFromQuickLook()" class="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium whitespace-nowrap cursor-pointer">✎ 录入正式解析</button>`}
               <button type="button" onclick="triggerQuickLookAiAnalysis()" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold whitespace-nowrap cursor-pointer shadow-2xs">⚡ AI 生成解析</button>
             </div>
           </section>
@@ -8950,11 +9005,16 @@
       const allFlat = tagGroupsData.flatMap(g => g.tags);
       const pinned = allFlat.filter(t => t.isPinned && !tags.some(curr => curr.id === t.id));
       if (pinnedContainer) {
-        pinnedContainer.innerHTML = pinned.slice(0, 5).map(t => `
-          <button onclick="addTagToCurrent('${t.id}')" class="px-2 py-0.5 rounded border border-slate-200 bg-white text-[11px] text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer">
-            + ${escapeHtml(t.name)}
-          </button>
-        `).join('');
+        if (tagCatalogueReadError) {
+          // 目录没读到，置顶标签区空着会被当成「没有置顶标签」。
+          pinnedContainer.innerHTML = `<span class="text-[10px] text-amber-800">标签目录没读到（${escapeHtml(tagCatalogueReadError)}），这里显示的是「读不到」，不是「没有置顶标签」</span>`;
+        } else {
+          pinnedContainer.innerHTML = pinned.slice(0, 5).map(t => `
+            <button onclick="addTagToCurrent('${t.id}')" class="px-2 py-0.5 rounded border border-slate-200 bg-white text-[11px] text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer">
+              + ${escapeHtml(t.name)}
+            </button>
+          `).join('');
+        }
       }
 
       if (aiContainer) {
@@ -9008,6 +9068,13 @@
           parts.push(`<span class="text-[10px] text-slate-600/90">AI 未匹配到合适标签 · 可点下方重试</span>`);
         } else if (suggestion && suggestion.status === 'review') {
           parts.push(`<span class="text-[10px] text-amber-700/80">AI 暂不能判断 · 建议人工选择或重试</span>`);
+        } else if (activeQ && activeQ.tagJobReadError) {
+          // 读不到任务状态，不是「没有建议」。
+          parts.push(`<span class="text-[10px] text-amber-800 leading-snug">读不到标签建议的任务状态（${escapeHtml(activeQ.tagJobReadError)}）：这里显示的是「读不到」，不是「没有建议」。过一会儿点下方「重新生成建议」再试一次。</span>`);
+        } else if (activeQ && activeQ.detailReadError) {
+          // 详情没读到，不是「没有建议」。
+          parts.push(`<span class="text-[10px] text-amber-800 leading-snug">这道题的详情没读到（${escapeHtml(activeQ.detailReadError)}）：这里显示的是「读不到」，不是「没有建议」。</span>`);
+          parts.push(`<button onclick="retryReadQuestionDetail('${activeQ.id}')" class="px-1.5 py-0.5 rounded bg-white border border-amber-200 text-amber-800 text-[10px] cursor-pointer">↻ 重新读取</button>`);
         } else {
           parts.push(`<span class="text-[10px] text-emerald-700/70">暂无待采纳建议 · 点下方按钮即可生成</span>`);
         }
@@ -9022,6 +9089,16 @@
         }
         aiContainer.innerHTML = parts.join('');
       }
+    }
+
+    // 右栏「读不到」的重试入口：只重读这道题的详情，不触发任何 AI 生成。
+    async function retryReadQuestionDetail(qid) {
+      const q = questionsData.find(item => item.id === qid);
+      if (!q) return;
+      const item = await refreshQuestionSolution(q);
+      if (currentActiveQuestionId === qid) renderRightInspector();
+      if (item) showToast('已重新读到这道题的详情', 'success');
+      else showToast('还是没读到：' + (q.detailReadError || '读取失败'), 'error');
     }
 
     // ---- 真实落库：POST /api/library/{publication_id}/tags/assign ----
@@ -9067,7 +9144,12 @@
         const res = await fetch(`${API_BASE}/api/library/${q.id}`, {
           headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
         });
-        if (!res.ok) return;
+        // 读不到不是「没有标签」。以前这里直接 return，右栏标签区就保持旧样子，
+        // 用户以为标签没贴上。
+        if (!res.ok) {
+          if (q) q.detailReadError = `读取失败（HTTP ${res.status}）`;
+          return;
+        }
         const data = await res.json();
         // 同上：详情接口的真身是 data.publication。
         const item = data.publication || data.item || data;
@@ -9088,8 +9170,10 @@
           q.tagSuggestion = item.tag_suggestion;
           q.aiSuggestedTags = buildPendingTagSuggestions(item.tag_suggestion, q.tags);
         }
+        if (q) q.detailReadError = '';
       } catch (e) {
         console.warn('refreshQuestionFromServer failed:', e);
+        if (q) q.detailReadError = (e && e.message) || '读取失败';
       }
     }
 
@@ -13179,9 +13263,20 @@
         const res = await fetch(`${API_BASE}/api/library/tags`, {
           headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
         });
-        if (!res.ok) return null;
+        if (!res.ok) {
+          tagCatalogueReadError = `读取失败（HTTP ${res.status}）`;
+          // 谁调的都别想悄悄咽下去：目录读不到，标签筛选和文件夹树都是空的，
+          // 不说一声就等着被当成「这库本来就没标签」。
+          showToast('标签目录没读到（HTTP ' + res.status + '）：标签筛选和文件夹树暂时是空的，不是真的没有标签。刷新页面再试。', 'error');
+          return null;
+        }
         const data = await res.json();
-        if (!Array.isArray(data.tags)) return null;
+        if (!Array.isArray(data.tags)) {
+          tagCatalogueReadError = '返回内容里没有标签列表';
+          showToast('标签目录没读到（返回内容里没有标签列表）：标签筛选和文件夹树暂时是空的，不是真的没有标签。刷新页面再试。', 'error');
+          return null;
+        }
+        tagCatalogueReadError = '';
         tagCatalogueRevision = data.revision || tagCatalogueRevision;
         tagCatalogue = data.tags.map(t => ({
           id: t.id, name: t.name, kind: t.kind, description: t.description || '',
@@ -13206,6 +13301,8 @@
         return data;
       } catch (e) {
         console.warn('reloadTagCatalogue failed:', e);
+        tagCatalogueReadError = `读取失败：${(e && e.message) || '网络错误'}`;
+        showToast('标签目录没读到（' + tagCatalogueReadError + '）：标签筛选和文件夹树暂时是空的，不是真的没有标签。刷新页面再试。', 'error');
         return null;
       }
     }
