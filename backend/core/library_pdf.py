@@ -596,7 +596,16 @@ def _html_document(captured, title, options):
     if re.search(r"</style", css, re.I):
         raise word.ExportError("PDF 排版资源不完整，请修复安装。", 503)
     # Measurements use fixed print width, independent of the headless viewport.
-    fixed = "html,body{margin:0;background:#fff}#printSource{position:absolute;left:-20000px;top:0;width:178mm;max-width:none}#printPaper{width:210mm;max-width:none;padding:0;box-shadow:none}"
+    fixed = (
+        "html,body{margin:0;background:#fff}#printSource{position:absolute;left:-20000px;top:0;width:178mm;max-width:none}"
+        "#printPaper{width:210mm;max-width:none;padding:0;box-shadow:none}"
+        # 这份文档是卷子本身，不是题库页。题库页那句「没有可打印的内容」的指引
+        # （library.css 的 @media print body:not(.printing)::after）是为「用户在题库页
+        # 直接按 Ctrl+P」准备的，printToPDF 按 print 媒体类型渲染，会照单全收把它
+        # 当成真内容印在最后一页 —— 实测 3 页的卷子导出成 4 页，页数校验直接失败，
+        # PDF 导出整条链路走不通。这里精确掐掉它，题库页上按 Ctrl+P 仍看得到指引。
+        "body:not(.printing)::after{content:none !important}"
+    )
     return (
         '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="'
         + html.escape(policy, quote=True)
