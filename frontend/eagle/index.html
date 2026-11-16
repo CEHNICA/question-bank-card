@@ -55,6 +55,17 @@
       #rightInspectorPane.force-open { width: 18rem; }
       #rightInspectorPane.force-open #inspectorBody { display: block; }
       #rightInspectorPane.force-open #inspectorHead { display: flex; }
+      /* 窄屏下展开的属性栏浮在内容上面，别再把正文挤没了：
+         它是 flex 占位时，390px 视口下正文从 342px 被挤到 102px，
+         题卡只剩 78px，题干跟挤牙膏似的。 */
+      #rightInspectorPane.force-open {
+        position: fixed;
+        right: 0; top: 0; bottom: 0;
+        z-index: 60;
+        width: 18rem !important;
+        max-width: 85vw;
+        box-shadow: -8px 0 32px rgba(15, 23, 42, 0.18);
+      }
     }
     /* 窄屏（<768px）：左栏别再跟中栏抢宽度。
        左栏固定 256px：768px 时正文只剩 440px；390px 时更惨 —— 正文只剩 62px，
@@ -7786,6 +7797,22 @@
         btn.setAttribute('aria-label', btn.title);
       }
     }
+
+    // 窄屏下属性栏是浮层抽屉，盖住了大半个屏。手机上除了那个小箭头没别的出口，
+    // 所以点抽屉外面的正文空白处就把它收回去（点到别的控件上不抢它的点击）。
+    document.addEventListener('click', (ev) => {
+      const pane = document.getElementById('rightInspectorPane');
+      if (!pane || !pane.classList.contains('force-open')) return;
+      if (window.innerWidth >= INSPECTOR_COLLAPSE_BREAKPOINT) return;
+      const t = ev.target;
+      if (!t || !t.closest) return;
+      if (pane.contains(t)) return;
+      if (!t.closest('main')) return;
+      if (t.closest('button,a,input,select,textarea,label,[role="button"],[contenteditable="true"]')) return;
+      pane.classList.remove('force-open');
+      pane.classList.add('collapsed');
+      syncInspectorToggleButton();
+    }, true);
 
     function openShortcutsModal() {
       document.getElementById('shortcutsModal')?.classList.remove('hidden');
