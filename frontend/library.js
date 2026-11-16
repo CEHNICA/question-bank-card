@@ -7483,7 +7483,16 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
   applyDirectoryWidth();
   load();
   // 1.25.58：目录默认开在左栏；关过一次就记住不再自动开。
-  try { if (localStorage.getItem("qb-library-directory") !== "0") void directoryToggle(true); } catch (_) { /* 记不住就不自动开 */ }
+  // 1.26.55：≤1099px 时目录面板不是左栏，而是 position:fixed、z-index:57 的
+  // 左侧浮层（宽 300px），整块压在卡片列表上 —— 卡片列表窄屏下从 x=16 开始。
+  // 一进来就自动打开，第一张卡的勾选框会被浮层里的「＋ 按课本目录新建」按钮
+  // 整个盖住：elementFromPoint 落在那个按钮上，勾选框点不动，还可能误触新建。
+  // 实测 900 / 768 宽都是这个状态。宽屏侧栏在栅格列里（grid-column:1），
+  // 不覆盖正文，照旧自动打开。
+  try {
+    const narrow = window.matchMedia("(max-width: 1099px)").matches;
+    if (!narrow && localStorage.getItem("qb-library-directory") !== "0") void directoryToggle(true);
+  } catch (_) { /* 记不住就不自动开 */ }
   // 1.25.64：拉一份目录进 tagCatalogue，让筛选条、悬停都能拿到每条标签的颜色。
   // 目录本身已经各自 fetch 了一份，这里只为了把同一份数据放进 tag picker / 筛选条用的全局缓存。
   void loadTagCatalogue().catch(() => { /* 失败也不影响题库主功能 */ });
