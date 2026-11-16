@@ -64,22 +64,26 @@ test("窄屏展开的题目属性栏不许把正文挤成一条缝", async (t) =
   });
 
   await t.test("5. 点抽屉外面的正文要把抽屉收回去", () => {
-    const h = html.match(/document\.addEventListener\('click',[\s\S]{0,1200}?\}, true\);/);
+    // 页面里有多处 document click 捕获监听（左栏抽屉也有一个），
+    // 必须按内容挑出「属性栏」这一个，别靠出现顺序。
+    const handlers =
+      html.match(/document\.addEventListener\('click',[\s\S]{0,1500}?\}, true\);/g) || [];
+    const h = handlers.find((x) => /rightInspectorPane/.test(x));
     assert.ok(h, "应能找到点外面关闭的监听");
     assert.ok(
-      /force-open/.test(h[0]),
+      /force-open/.test(h),
       "监听要判断属性栏是不是展开状态"
     );
     assert.ok(
-      /INSPECTOR_COLLAPSE_BREAKPOINT/.test(h[0]),
+      /INSPECTOR_COLLAPSE_BREAKPOINT/.test(h),
       "只在窄屏生效，宽屏别抢点击"
     );
     assert.ok(
-      /pane\.contains\(t\)/.test(h[0]),
+      /pane\.contains\(t\)/.test(h),
       "点抽屉自己内部不能关"
     );
     assert.ok(
-      /classList\.remove\('force-open'\)/.test(h[0]) && /classList\.add\('collapsed'\)/.test(h[0]),
+      /classList\.remove\('force-open'\)/.test(h) && /classList\.add\('collapsed'\)/.test(h),
       "要真的把抽屉收回去"
     );
   });

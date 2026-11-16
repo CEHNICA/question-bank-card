@@ -75,7 +75,11 @@
       #leftFolderSidebar:not(.collapsed) {
         position: fixed;
         left: 0; top: 0; bottom: 0;
-        z-index: 60;
+        /* z-index 必须高于右侧属性浮层（60）：
+           390px 视口下左栏占 0..256px、右栏占 102..390px，两者重叠 154px。
+           万一互斥逻辑没生效，抽屉也得压在属性栏上面 —— 不然抽屉自己的
+           「收起」按钮(223..247px)被盖住，用户点不到出口，只能刷新页面。 */
+        z-index: 70;
         width: 16rem !important;
         max-width: 85vw;
         box-shadow: 0 8px 32px rgba(15, 23, 42, 0.18);
@@ -92,6 +96,18 @@
       .eagle-toolbar-left { display: contents; }
       .eagle-search-slot { order: 10; flex: 1 0 100%; }
       .eagle-toolbar-right { margin-left: auto; }
+    }
+    /* 窄屏触摸目标：手机上 24px 高的按钮/输入框根本点不准（实测 390px 下
+       顶栏 ≡ / 筛选 / 篮 / 搜索框全是 23~24px 高，搜索框 366×24）。
+       只放大「拇指区」——顶栏和抽屉头部；题卡里的星标、勾选框不动，
+       放大会撑破卡片头（那条路已经单独处理过了）。
+       宽度不动的按钮用 min-height 撑高，行高跟着长，不影响横向排版。 */
+    @media (max-width: 767px) {
+      .eagle-toolbar-row button,
+      .eagle-toolbar-row input:not([type="checkbox"]),
+      .eagle-search-slot input { min-height: 32px; }
+      #leftSidebarHead button,
+      #leftSidebarHead input { min-height: 32px; }
     }
     /* 窄屏：题卡头部别把右组挤出卡片。
        卡片一窄，左组（题号 + 页码 + 名称 + 题型 + 星 + 收藏 + OneNote）
@@ -327,7 +343,7 @@
     <!-- ================= 1. 左侧栏：智能文件夹与教材目录 ================= -->
     <!-- ================= 1. 左侧栏：Eagle 式统一文件夹树（卷 / 知识点 / 方法同树） ================= -->
     <aside id="leftFolderSidebar" class="w-64 bg-[#fafafa] border-r border-slate-200/80 flex flex-col shrink-0">
-      <div class="px-2 py-1.5 border-b border-slate-200/60 shrink-0">
+      <div id="leftSidebarHead" class="px-2 py-1.5 border-b border-slate-200/60 shrink-0">
         <div class="flex items-center gap-1.5">
           <button id="btnEagleAppMenu" type="button" onclick="toggleEagleAppMainMenu(event)" class="w-6 h-6 rounded-md flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 text-sm font-bold cursor-pointer transition-colors shrink-0" title="打开应用主菜单">≡</button>
           <input
@@ -1762,6 +1778,20 @@
       });
     }
 
+    // 窄屏下左栏抽屉和右侧属性浮层都是 position:fixed 的浮层，一起开会互相盖死：
+    //   左栏抽屉占 0..256px，右栏浮层占 102..390px，重叠 154px；
+    //   抽屉的「收起」按钮(223..247px)被右栏整个盖住，
+    //   而中栏的「◫ 侧栏」按钮又被抽屉盖住 —— 用户点不到任何出口，只能刷新。
+    // 所以窄屏下两个浮层互斥：开一个就关另一个。
+    function closeNarrowRightInspectorOverlay() {
+      const pane = document.getElementById('rightInspectorPane');
+      if (!pane) return;
+      if (!pane.classList.contains('force-open')) return;
+      pane.classList.remove('force-open');
+      pane.classList.add('collapsed');
+      syncInspectorToggleButton();
+    }
+
     // 窄屏下左栏自动收起。
     // 768px 以下左栏固定占 256px，中栏会被挤成一条缝（实测 390px 时正文只剩
     // 62px，题干每行 3 个字）。用户手动开合过就听用户的，别跟人较劲。
@@ -1796,6 +1826,22 @@
         leftSidebarNarrowAuto = false;
       }
     }
+
+    // 窄屏下抽屉没有遮罩，点中栏空白处就收回去（跟右侧属性浮层一个规矩）：
+    // 点抽屉自己内部、点可交互控件都不关，免得抢点击。
+    // 实测 390px 下点 (350,400) 落在题卡配图上，抽屉纹丝不动 —— 用户想
+    // 看正文却得先找那个 24px 的小 ◫ 按钮，体验很轴。
+    document.addEventListener('click', (ev) => {
+      const side = document.getElementById('leftFolderSidebar');
+      if (!side || side.classList.contains('collapsed')) return;
+      if (window.innerWidth >= LEFT_SIDEBAR_NARROW_BREAKPOINT) return;
+      const t = ev.target;
+      if (!t || !t.closest) return;
+      if (side.contains(t)) return;
+      if (!t.closest('main')) return;
+      if (t.closest('button,a,input,select,textarea,label,[role="button"],[contenteditable="true"]')) return;
+      toggleLeftSidebar();
+    }, true);
 
     function toggleFocusMode() {
       const left = document.getElementById('leftFolderSidebar');
@@ -3841,6 +3887,10 @@
       if (!side) return;
       side.classList.toggle('collapsed');
       const collapsed = side.classList.contains('collapsed');
+      // 窄屏下开抽屉前先关掉右栏属性浮层：两个浮层一起开会把彼此的出口盖住
+      if (!collapsed && window.innerWidth < LEFT_SIDEBAR_NARROW_BREAKPOINT) {
+        closeNarrowRightInspectorOverlay();
+      }
       [reopenBtn, collapsedMenuBtn].forEach(btn => {
         if (!btn) return;
         if (collapsed) {
@@ -7968,6 +8018,12 @@
         } else {
           pane.classList.remove('collapsed');
           pane.classList.add('force-open');
+          // 窄屏下左栏也是浮层，开属性栏前先把左栏抽屉收掉：
+          // 390px 下右栏占 102..390px，会把抽屉的「收起」按钮整个盖住。
+          if (window.innerWidth < LEFT_SIDEBAR_NARROW_BREAKPOINT) {
+            const side = document.getElementById('leftFolderSidebar');
+            if (side && !side.classList.contains('collapsed')) toggleLeftSidebar();
+          }
         }
       } else {
         pane.classList.remove('force-open');
