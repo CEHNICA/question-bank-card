@@ -2943,3 +2943,36 @@ body.library-page {
   border-color: var(--accent) !important;
   box-shadow: 0 0 0 3px var(--accent-ring), 0 10px 15px -3px rgba(0, 0, 0, 0.06) !important;
 }
+
+/* ─────────────────────────────────────────────────────────────
+   窄屏触摸目标。这里有两层保险：
+   1) 放在文件最后 —— 同 specificity 时源序在后者胜，插在中间会被后面
+      的规则压回去（.library-page .library-card-actions .button 的
+      min-height: 30px 当初就是这么把尺寸盖掉的）；
+   2) 选择器统一加 body.library-page 前缀，把特异性抬高一档 ——
+      library.css 之后还加载 library-reading.css 等 4 个文件，
+      它们里的同选择器不加前缀是压不过的。
+
+   手机上的手指比鼠标粗：原来这些次要操作只有 28~30px 高、复选框 17px，
+   按下去容易落空，落空了没反应，人只会以为按钮坏了。
+   窄屏抬到 32px，复选框抬到 24px（WCAG 2.2 最小目标尺寸）。
+   宽屏是鼠标操作，这套规矩一行都不动。
+   ───────────────────────────────────────────────────────────── */
+@media (max-width: 979px) {
+  body.library-page .button.small,
+  body.library-page .button.button-small,
+  body.library-page .quiet.small,
+  body.library-page .library-card-actions .button,
+  body.library-page .library-card-actions .button.small,
+  body.library-page .library-card-actions .button.button-small,
+  body.library-page .library-card-more > summary,
+  body.library-page .question-inspector-info > summary,
+  body.library-page .library-tags-edit { min-height: 32px; }
+  body.library-page .library-tag-manager-entry,
+  body.library-page .basket-handle { min-width: 32px; }
+  body.library-page .library-card-select,
+  body.library-page .library-bulk input[type="checkbox"] { width: 24px; height: 24px; }
+  /* 卡片上的标签小徽章属于「小目标」那一档：24px 够用，
+     再高会把每张卡片的标签行撑得很难看。 */
+  body.library-page .library-card-tag-glimpse { min-height: 24px; }
+}

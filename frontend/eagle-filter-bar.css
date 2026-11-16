@@ -489,3 +489,8 @@ body.library-page {
   .eagle-capsules-group { flex-wrap: wrap; flex-shrink: 1; min-width: 0; row-gap: 4px; }
   .eagle-smart-folder-capsule { flex-shrink: 0; }
 }
+
+/* 窄屏上这些胶囊只有 28px 高，手指点不准（规矩同 library.css 末尾那条）。 */
+@media (max-width: 979px) {
+  .eagle-capsule-btn, .eagle-smart-folder-btn { height: 32px; }
+}
