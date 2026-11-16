@@ -1646,6 +1646,15 @@
     if (item.origin) inspectorFact(facts, "题源", item.origin);
     if (state.features.subquestions && item.subquestions >= 2) inspectorFact(facts, "小问", `${item.subquestions} 问`);
     info.append(facts);
+    // 1.26.55：折叠的 <details> 里是 content-visibility:hidden —— 子元素 rect
+    // 照常报坐标、DOM 里也在，但人看不见也点不到，连滚都滚不到它（容器
+    // scrollHeight == clientHeight）。「为本题写答案」这类入口就折在里面，
+    // 实测 1440 / 1024 / 900 / 768 宽都是 is_visible()=false、真实点击超时。
+    // 折叠的 details 用的是 content-visibility:hidden，不是 display:none，
+    // 所以「它在 DOM 里、rect 也对」这种查法查不出来，只能真的去点。
+    // 所以：details 里只要有可点的入口，就自动展开；没有入口的题仍旧折叠，
+    // 右侧面板不为一屏用不上的信息摊开。
+    if (facts.querySelector(".question-inspector-fact-action")) info.open = true;
 
     content.append(info);
     content.scrollTop = inspectorScrolls.get(item.id) || 0;
