@@ -174,6 +174,57 @@
       .tm-search-row { flex-wrap: wrap; }
       .tm-search-row input { width: auto; flex: 1 1 120px; min-width: 0; }
     }
+
+    /* ---- 窄屏浮层体检修整（390×844 实测，全部只作用于窄屏）----
+       ① 试题篮导出弹窗：两栏并排时右栏只剩 142px，里面的 6 个下拉框被压到
+          47px 宽，选项文字（"智能（解答题 30 毫米、选择题不留白）"）全挤没了，
+          基本没法选。窄屏改成上下堆叠，右栏整栏吃满宽度，下拉框回到 ~150px。
+       ② 一批触摸目标不足 32px：弹窗 ✕（11×20）、标签「停用」（20×16）、
+          筛选胶囊（高 26px）、快速审题的题名输入框（高 16px）等。
+       全部锁在媒体查询里，宽屏零变化。 */
+    @media (max-width: 768px) {
+      #basketExportModal .bkm-body { flex-direction: column; overflow-y: auto; }
+      #basketExportModal .bkm-col-left,
+      #basketExportModal .bkm-col-right { display: block; width: 100%; overflow: visible; }
+      #basketExportModal .bkm-col-left { border-right: none; border-bottom: 1px solid #f1f5f9; }
+      #basketExportModal select,
+      #basketExportModal input[type="text"],
+      #basketExportModal input[type="number"] { min-height: 32px; }
+      #basketExportModal .bkm-close { min-width: 32px; min-height: 32px; }
+      #basketExportModal #basketModalItemList button { min-width: 32px; min-height: 32px; }
+    }
+    @media (max-width: 640px) {
+      /* 触摸目标统一抬到 32px（窄屏手指头最小能打中的尺寸） */
+      .ql-head-actions button { min-height: 32px; }
+      .ql-head-actions > button { min-width: 32px; }
+      .ql-foot-actions button { min-height: 32px; }
+      #qlNameInput { min-height: 32px; }
+      #tagManagerModal .tm-head > button { min-width: 32px; min-height: 32px; }
+      #tagManagerModal .tm-search-row button { min-height: 32px; }
+      #tagManagerModal #modalSearchTagInput { min-height: 32px; }
+      #tagManagerModal #modalTagList button { min-width: 32px; min-height: 32px; padding: 0 8px; }
+      #tagManagerModal > div > div:last-child button { min-height: 32px; }
+      #shortcutsModal .sc-close { min-width: 32px; min-height: 32px; }
+      #filterPillsPanel button[id^="pillBtn"] { min-height: 32px; }
+      #basketExportModal .bkm-clear { min-height: 32px; padding: 0 6px; }
+      #basketExportModal label:has(input[type="checkbox"]) { min-height: 32px; }
+      #basketExportModal input[type="checkbox"] { width: 18px; height: 18px; }
+      /* 题卡与工具栏上的小按钮：390px 下收藏星只有 18×18、「查看解析」24px 高，
+         手指头根本点不准 —— 窄屏统一抬到 32px。 */
+      #btnCollapsedAppMenu,
+      #btnToggleInspector { min-width: 32px; min-height: 32px; }
+      button[title="存为智能视图"] { min-width: 32px; min-height: 32px; }
+      label:has(#selectAllCheckbox) { min-height: 32px; }
+      #selectAllCheckbox { width: 18px; height: 18px; }
+      #questionListContainer button[id^="star_btn_"] { min-width: 32px; min-height: 32px; }
+      #questionListContainer button[id^="btn_analysis_"] { min-height: 32px; }
+      #questionListContainer button[id^="btn_basket_"] { min-height: 32px; }
+      #questionListContainer button[title^="更多操作"] { min-width: 32px; min-height: 32px; }
+      #questionListContainer button[title^="OneNote 中有此题做题笔记"] { min-height: 32px; }
+      /* 题卡勾选框：14×14 太迷你，按 WCAG 2.5.8 (AA) 的 24px 最小目标放大 */
+      #questionListContainer input[type="checkbox"] { width: 24px; height: 24px; }
+      #qlToggleAnalysisBtn { min-height: 32px; }
+    }
       .compact-row .katex-display {
       display: inline !important;
       margin: 0 !important;
@@ -1162,16 +1213,16 @@
           <span class="text-base font-bold text-slate-800">🧺 试题篮组卷与排版导出</span>
           <span id="basketModalCountBadge" class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold font-mono">0 题</span>
         </div>
-        <button onclick="closeBasketExportModal()" class="text-slate-400 hover:text-slate-600 p-1 rounded-md text-base">✕</button>
+        <button onclick="closeBasketExportModal()" class="bkm-close text-slate-400 hover:text-slate-600 p-1 rounded-md text-base">✕</button>
       </div>
 
       <!-- 主体内容 -->
-      <div class="flex-1 flex overflow-hidden">
+      <div class="bkm-body flex-1 flex overflow-hidden">
         <!-- 左侧试题清单 -->
-        <div class="w-3/5 p-5 overflow-y-auto border-r border-slate-100 flex flex-col">
+        <div class="bkm-col-left w-3/5 p-5 overflow-y-auto border-r border-slate-100 flex flex-col">
           <div class="flex items-center justify-between mb-2">
             <span class="text-xs font-bold text-slate-600">已选试题列表</span>
-            <button onclick="clearAllBasket()" class="text-[11px] text-rose-500 hover:underline">清空试题篮</button>
+            <button onclick="clearAllBasket()" class="bkm-clear text-[11px] text-rose-500 hover:underline">清空试题篮</button>
           </div>
           <div id="basketModalItemList" class="space-y-2 flex-1 overflow-y-auto pr-1">
             <!-- 动态填充 -->
@@ -1179,7 +1230,7 @@
         </div>
 
         <!-- 右侧组卷设置与导出 -->
-        <div class="w-2/5 p-5 bg-slate-50/50 flex flex-col justify-between text-xs text-slate-700 overflow-y-auto">
+        <div class="bkm-col-right w-2/5 p-5 bg-slate-50/50 flex flex-col justify-between text-xs text-slate-700 overflow-y-auto">
           <div class="space-y-3">
             <span class="font-bold text-slate-800 text-sm">试卷标题与排版设置</span>
             <div>
@@ -1548,7 +1599,7 @@
         <span class="text-sm font-bold text-slate-800 flex items-center gap-2">
           <span>⌨️</span><span>键盘快捷键指南 (Eagle 工作台模式)</span>
         </span>
-        <button onclick="closeShortcutsModal()" class="text-slate-400 hover:text-slate-700 text-sm cursor-pointer">✕</button>
+        <button onclick="closeShortcutsModal()" class="sc-close text-slate-400 hover:text-slate-700 text-sm cursor-pointer">✕</button>
       </div>
       <div class="p-5 space-y-3 text-xs text-slate-700">
         <div class="grid grid-cols-2 gap-3">
