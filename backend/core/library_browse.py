@@ -44,6 +44,11 @@ SORTS = {
     # 1.25.31：按题号。跨资料的题号本来会重号，所以第二排序键仍是资料名，
     # 同一份卷里才是真正的「按题号」。
     "number": ("number", "source_filename", "-published_at", "id"),
+    # 题库工作台首屏的「显示顺序」：按题号，同号按入库时间新的在前。
+    # 这是前端列表真正在用的顺序（前端按题号稳定排序，后到的批次排在后面），
+    # 有了这个键，首屏就能只取一批先把卡片画出来，剩下的后台补 —— 批次边界
+    # 必须跟显示顺序对齐，不然补进来的题会把屏幕上这批挤下去。
+    "display": ("number", "-published_at", "-id"),
 }
 
 
@@ -548,7 +553,13 @@ def library_list(request):
     # slim=1：列表瘦身，只给列表用得上的字段。题库工作台首屏拉全库时用，
     # 详情页那条接口走完整载荷，展开一道题时补齐。
     slim = request.GET.get("slim") == "1"
-    items = serialize_items(rows[offset : offset + limit], slim=slim)
+    # 先只排编号取这一批，再按编号回表取整行。
+    # 整行排序在 810 道题上要多花一百多毫秒：SQLite 的 filesort 会把
+    # content 这些大字段也带着走。只排编号时排序器只带 id 和排序键，
+    # 810 道题两毫秒排完，回表取 150 行七毫秒。
+    batch_ids = list(rows.values_list("id", flat=True)[offset : offset + limit])
+    picked = rows.filter(id__in=batch_ids).order_by(*SORTS[sort])
+    items = serialize_items(picked, slim=slim)
     next_offset = offset + len(items)
     if wanted_param:
         # 只为刷新而读：不带全库统计、排队数量这些重活，前端也只合并这几行。

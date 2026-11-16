@@ -1623,6 +1623,16 @@
     let renderedQuestionCount = 0;
     const CHUNK_SIZE = 25; // 每次增量渲染 25 题，彻底杜绝整页卡死
 
+    // 首屏只画这一批，剩下的题目后台补拉。
+    // 以前是把 810 道题一次拉完才画第一张卡片：光这一条接口就要两百多毫秒，
+    // 首屏还得多等一整轮 JSON 解析跟渲染。改成先画首批，其余在后台悄悄补上，
+    // 用户不用盯着空列表干等。
+    const LIBRARY_FIRST_BATCH = 150;
+    let libraryTotalCount = 0;      // 服务端给的整库题数
+    let libraryBackgroundPending = false;  // 后台补拉还没完
+    let libraryLoadGeneration = 0;   // 每次整库重载 +1，旧的补拉结果直接作废
+    let libraryFilterSignature = ''; // 首屏渲染时的筛选快照，后台补完用来判断用户有没有中途改筛选
+
     let currentActiveQuestionId = null;
     const selectedQuestionIds = new Set();
     const basketQuestionIds = new Set();
@@ -2709,13 +2719,16 @@
           fetch(`${API_BASE}/api/library/tags`, {
             headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
           }),
-          // 整库一次拉走（bulk=1）。以前拆成 limit=100 的九次请求，每次都把
-          // facets 这些跟分页无关的统计重算一遍；九次请求在同一个进程里排成
-          // 一队，光 API 就十二秒。一次给完只要几百毫秒。
+          // 首屏只取一批（LIBRARY_FIRST_BATCH 道），先把卡片画出来；
+          // 剩下的题目在后台补拉，用户不用等整库到齐。
+          // 以前是把 810 道题一次拉完才画第一张卡片：光这一条接口两百多毫秒，
+          // 首批 + 后台补之后，首屏这条只要六十毫秒。
+          // sort=display：按「题号 + 入库时间」排 —— 跟列表真正显示的顺序一致，
+          // 批次边界才对得上，补进来的题排在屏幕上这批后面，不会把卡片挤下去。
           // slim=1：列表只用得上题干、选项、配图、页码和标签名。配图核验快照
           // （真库 810 道题合计 37 万字节）和标签上的 AI 理由列表一个字节都不读，
           // 展开一道题时按 publication_id 另拉详情补齐。
-          fetch(`${API_BASE}/api/library?bulk=1&limit=1000&offset=0&slim=1`, {
+          fetch(`${API_BASE}/api/library?bulk=1&limit=${LIBRARY_FIRST_BATCH}&offset=0&slim=1&sort=display`, {
             headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
           })
         ]);
@@ -2796,34 +2809,21 @@
           }
         }
 
-        // 3. 处理全量试题数据 (bulk 一次给全；题库特别大时才续拉)
+        // 3. 处理试题数据：首批先画，剩下的后台补
         if (libFirstRes.ok) {
           const firstData = await libFirstRes.json();
-          const allRawItems = [...(firstData.items || [])];
-          const totalCount = firstData.total || allRawItems.length;
+          const firstRawItems = [...(firstData.items || [])];
+          const totalCount = firstData.total || firstRawItems.length;
+          libraryTotalCount = totalCount;
+          // 「后台还在补」这个状态必须在画卡片之前就摆上。
+          // 摆晚了的话，首屏第一帧的命中数会报 150（就这一批的条数），
+          // 补完之后再跳成 810 —— 数字在老师眼皮底下闪一下，看着像出 bug。
+          libraryBackgroundPending = totalCount > firstRawItems.length;
 
-          // 超过一批（题库特别大）才继续往后拉。正常情况一个请求就拿完。
-          let offset = allRawItems.length;
-          while (offset < totalCount) {
-            try {
-              const res = await fetch(`${API_BASE}/api/library?bulk=1&limit=1000&offset=${offset}&slim=1`, {
-                headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
-              });
-              if (!res.ok) break;
-              const page = await res.json();
-              if (!page || !Array.isArray(page.items) || !page.items.length) break;
-              allRawItems.push(...page.items);
-              offset += page.items.length;
-            } catch (pageErr) {
-              console.warn('Library bulk pagination error:', pageErr);
-              break;
-            }
-          }
-
-          const realItems = allRawItems.map((item, idx) => convertLibraryListItem(item, idx));
+          const realItems = firstRawItems.map((item, idx) => convertLibraryListItem(item, idx));
 
           // 记录已终审入库题的源题 id（用于补拉时去重）
-          allRawItems.forEach(it => {
+          firstRawItems.forEach(it => {
             if (it.draft_id) loadedSourceQuestionIds.add(String(it.draft_id));
           });
 
@@ -2838,48 +2838,24 @@
 
           // 把后台跑完的答案任务结果（job.result）回填成 AI 初稿，
           // 这样刷新页面也能看到「⚡ AI 解析」草稿，而不是一片空白。
-          try {
-            // 后端一次最多收 500 个 ids（views.py:3945），题库 810 题一次塞满
-            // 直接 400，整条「AI 初稿回填」就静废了 —— 必须分批发。
-            // 还要先滤掉非法 id：后端拿 uuid.UUID() 解析，一个坏 id 能让整批 400。
-            const uuidIds = questionsData
-              .map(x => x.id)
-              .filter(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
-            const JOBS_BATCH = 500;
-            const allJobs = [];
-            for (let i = 0; i < uuidIds.length; i += JOBS_BATCH) {
-              const chunk = uuidIds.slice(i, i + JOBS_BATCH);
-              const jobRes = await fetch(`${API_BASE}/api/library/jobs?ids=${chunk.join(',')}&solution_scope=true`, {
-                headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
-                cache: 'no-store'
-              });
-              if (!jobRes.ok) continue;
-              const jobBody = await jobRes.json();
-              (jobBody.jobs || []).forEach(j => allJobs.push(j));
-            }
-            const byPub = new Map();
-            allJobs.forEach(j => {
-              if (!j || !j.publication_id) return;
-              const list = byPub.get(j.publication_id) || [];
-              list.push(j);
-              byPub.set(j.publication_id, list);
-            });
-            questionsData.forEach(q => {
-              const list = byPub.get(q.id);
-              if (list && list.length) applyAnswerJobResult(q, list);
-            });
-          } catch (e) { /* 拿不到就算了，不影响主流程 */ }
+          await backfillAiAnswersFromJobs(realItems);
 
           updateSmartFolderCounts();
           updateFavoritesBadge();
           // 首屏只要徽标上的数字，别把 331 KB 的回收站明细拖回来。
           await refreshLibraryTrashSummary();
           // 录入归档 ≠ 题库下架：已入库题必须继续留在题库，不能按 archived 试卷剔掉。
+          libraryFilterSignature = JSON.stringify(filterState);
           applyFilters();
           renderInlineActiveChips();
           syncFilterDropdownStates();
           renderRightInspector();
           renderFolderTree();
+
+          // 剩下的题目后台补拉。首屏不等它 —— 用户已经能看题、能筛选了。
+          if (totalCount > firstRawItems.length) {
+            loadRemainingLibraryItems(libraryLoadGeneration, totalCount, firstRawItems.length);
+          }
         }
       } catch (e) {
         console.warn('Real data loading fallback:', e);
@@ -2887,9 +2863,118 @@
       }
     }
 
+    /**
+     * 把后台跑完的答案任务结果（job.result）回填成 AI 初稿，
+     * 这样刷新页面也能看到「⚡ AI 解析」草稿，而不是一片空白。
+     * @param {Array} questions 要回填的题目（首批或后台补进来的那批）
+     */
+    async function backfillAiAnswersFromJobs(questions) {
+      if (!Array.isArray(questions) || !questions.length) return;
+      try {
+        // 后端一次最多收 500 个 ids（views.py:3945），题库 810 题一次塞满
+        // 直接 400，整条「AI 初稿回填」就静废了 —— 必须分批发。
+        // 还要先滤掉非法 id：后端拿 uuid.UUID() 解析，一个坏 id 能让整批 400。
+        const uuidIds = questions
+          .map(x => x.id)
+          .filter(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
+        const JOBS_BATCH = 500;
+        const allJobs = [];
+        for (let i = 0; i < uuidIds.length; i += JOBS_BATCH) {
+          const chunk = uuidIds.slice(i, i + JOBS_BATCH);
+          const jobRes = await fetch(`${API_BASE}/api/library/jobs?ids=${chunk.join(',')}&solution_scope=true`, {
+            headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
+            cache: 'no-store'
+          });
+          if (!jobRes.ok) continue;
+          const jobBody = await jobRes.json();
+          (jobBody.jobs || []).forEach(j => allJobs.push(j));
+        }
+        const byPub = new Map();
+        allJobs.forEach(j => {
+          if (!j || !j.publication_id) return;
+          const list = byPub.get(j.publication_id) || [];
+          list.push(j);
+          byPub.set(j.publication_id, list);
+        });
+        questions.forEach(q => {
+          const list = byPub.get(q.id);
+          if (list && list.length) applyAnswerJobResult(q, list);
+        });
+      } catch (e) { /* 拿不到就算了，不影响主流程 */ }
+    }
+
+    /**
+     * 后台补拉剩下的题目。首屏不等它。
+     * 补进来的题按「题号 + 入库时间」排在已画出来那批后面，屏幕上的卡片
+     * 不用重画，只要把命中数和滚动提示更新到整库口径就行。
+     */
+    async function loadRemainingLibraryItems(generation, totalCount, offset) {
+      try {
+        while (offset < totalCount) {
+          const res = await fetch(`${API_BASE}/api/library?bulk=1&limit=1000&offset=${offset}&slim=1&sort=display`, {
+            headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
+          });
+          if (!res.ok) break;
+          const page = await res.json();
+          if (!page || !Array.isArray(page.items) || !page.items.length) break;
+          const realItems = page.items.map((item, idx) => convertLibraryListItem(item, offset + idx));
+          page.items.forEach(it => {
+            if (it.draft_id) loadedSourceQuestionIds.add(String(it.draft_id));
+          });
+          // 先回填 AI 初稿再入库：卡片滚到这一批时，AI 解析已经在手上。
+          await backfillAiAnswersFromJobs(realItems);
+          if (generation !== libraryLoadGeneration) return;  // 整库已经重载，这批作废
+          questionsData.push(...realItems);
+          offset += page.items.length;
+        }
+        if (generation !== libraryLoadGeneration) return;
+        libraryBackgroundPending = false;
+        refreshLibraryAfterBackgroundLoad();
+      } catch (e) {
+        console.warn('Library background load failed:', e);
+        if (generation === libraryLoadGeneration) {
+          libraryBackgroundPending = false;
+          refreshLibraryAfterBackgroundLoad();
+        }
+      }
+    }
+
+    /**
+     * 后台补拉完成后的收尾：数字更新到整库口径，屏幕上的卡片保持不动。
+     * 用户中途改过筛选的话例外 —— 那时命中集合变了，得重画一次。
+     */
+    function refreshLibraryAfterBackgroundLoad() {
+      const filterChanged = (JSON.stringify(filterState) !== libraryFilterSignature);
+      if (filterChanged) {
+        applyFilters();
+        return;
+      }
+      filteredQuestions = computeFilteredQuestions();
+      const countEl = document.getElementById('matchedQuestionCount');
+      if (countEl) countEl.innerText = filteredQuestions.length;
+      updateSmartFolderCounts();
+      updateFavoritesBadge();
+      updateBatchActionBar();
+      const sentinel = document.getElementById('chunkSentinel');
+      if (sentinel) {
+        sentinel.innerText = renderedQuestionCount >= filteredQuestions.length
+          ? `— 已呈现全部 ${filteredQuestions.length} 道试题 —`
+          : `向下滚动加载更多 (${renderedQuestionCount} / ${filteredQuestions.length})...`;
+      }
+    }
+
+    /** 列表对外报的总题数：后台补拉没完时先报整库口径，免得数字闪一下。 */
+    function libraryEffectiveTotal() {
+      const pristine = JSON.stringify(filterState) === libraryFilterSignature;
+      return (libraryBackgroundPending && pristine) ? libraryTotalCount : filteredQuestions.length;
+    }
+
     async function loadInitialLibraryData() {
       questionsData.length = 0;
       loadedSourceQuestionIds.clear();
+      libraryLoadGeneration += 1;
+      libraryBackgroundPending = false;
+      libraryTotalCount = 0;
       await loadRealData();
     }
     window.loadInitialLibraryData = loadInitialLibraryData;
@@ -4918,11 +5003,14 @@
       return { docSets, userFolderSet, overrides, folders };
     }
 
-    function applyFilters() {
-      document.getElementById('recycleBinPanel')?.classList.add('hidden');
-      document.getElementById('questionListContainer')?.classList.remove('hidden');
+    /**
+     * 按当前筛选条件算出命中列表并排好序。
+     * 单独拆出来，是因为后台补拉完题目后要重算一遍 —— 那时屏幕上这批卡片
+     * 不用重画（补进来的题排在它们后面），只要数字对得上就行。
+     */
+    function computeFilteredQuestions() {
       const membershipCache = buildFilterMembershipCache(filterState);
-      filteredQuestions = questionsData.filter(q => questionMatchesFilterSpec(q, filterState, membershipCache));
+      const list = questionsData.filter(q => questionMatchesFilterSpec(q, filterState, membershipCache));
 
       // 排序
       if (filterState.smartFilter === 'random') {
@@ -4933,19 +5021,32 @@
           }
           return h;
         };
-        filteredQuestions.sort((a, b) => hashOf(String(a.id)) - hashOf(String(b.id)));
+        list.sort((a, b) => hashOf(String(a.id)) - hashOf(String(b.id)));
       } else if (filterState.smartFilter === 'recent') {
         const order = new Map(readRecentQuestions().map((x, i) => [String(x.id), i]));
-        filteredQuestions.sort((a, b) => (order.get(String(a.id)) ?? 9999) - (order.get(String(b.id)) ?? 9999));
+        list.sort((a, b) => (order.get(String(a.id)) ?? 9999) - (order.get(String(b.id)) ?? 9999));
       } else if (filterState.sortBy === 'difficulty') {
-        filteredQuestions.sort((a, b) => b.difficultyStars - a.difficultyStars);
+        list.sort((a, b) => b.difficultyStars - a.difficultyStars);
       } else if (filterState.sortBy === 'year') {
-        filteredQuestions.sort((a, b) => (b.year || 0) - (a.year || 0));
+        list.sort((a, b) => (b.year || 0) - (a.year || 0));
       } else {
-        filteredQuestions.sort((a, b) => a.questionNumber - b.questionNumber);
+        list.sort((a, b) => a.questionNumber - b.questionNumber);
       }
+      return list;
+    }
 
-      document.getElementById('matchedQuestionCount').innerText = filteredQuestions.length;
+    function applyFilters() {
+      document.getElementById('recycleBinPanel')?.classList.add('hidden');
+      document.getElementById('questionListContainer')?.classList.remove('hidden');
+      filteredQuestions = computeFilteredQuestions();
+
+      // 后台还在补拉时，命中数先按整库口径报（就是服务端给的总数），
+      // 免得数字从 150 跳到 810 闪一下。用户中途改了筛选就按命中数报。
+      const countEl = document.getElementById('matchedQuestionCount');
+      if (countEl) {
+        const pristine = JSON.stringify(filterState) === libraryFilterSignature;
+        countEl.innerText = (libraryBackgroundPending && pristine) ? libraryTotalCount : filteredQuestions.length;
+      }
 
       renderedQuestionCount = 0;
       const container = document.getElementById('questionListContainer');
@@ -4992,7 +5093,12 @@
       }
 
       if (renderedQuestionCount >= filteredQuestions.length) {
-        if (sentinel) sentinel.innerText = `— 已呈现全部 ${filteredQuestions.length} 道试题 —`;
+        if (sentinel) {
+          // 后台还在补拉时别写「已呈现全部」—— 整库还没到，写了就是骗人。
+          sentinel.innerText = libraryBackgroundPending
+            ? `题库载入中… (${renderedQuestionCount} / ${libraryEffectiveTotal()})`
+            : `— 已呈现全部 ${filteredQuestions.length} 道试题 —`;
+        }
         return;
       }
 
@@ -5017,7 +5123,9 @@
       renderedQuestionCount += nextChunk.length;
 
       if (sentinel) {
-        if (renderedQuestionCount >= filteredQuestions.length) {
+        if (libraryBackgroundPending) {
+          sentinel.innerText = `题库载入中… (${renderedQuestionCount} / ${libraryEffectiveTotal()})`;
+        } else if (renderedQuestionCount >= filteredQuestions.length) {
           sentinel.innerText = `— 已呈现全部 ${filteredQuestions.length} 道试题 —`;
         } else {
           sentinel.innerText = `向下滚动加载更多 (${renderedQuestionCount} / ${filteredQuestions.length})...`;

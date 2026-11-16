@@ -23,17 +23,17 @@ const path = require("node:path");
 const html = fs.readFileSync(path.join(__dirname, "eagle", "index.html"), "utf8");
 
 test("Eagle 列表取数要瘦身，详情取数不许瘦身", async (t) => {
-  await t.test("1. 首屏拉全库的那次请求必须带 slim=1", () => {
+  await t.test("1. 首屏取首批的那次请求必须带 slim=1", () => {
     assert.ok(
-      /api\/library\?bulk=1&limit=1000&offset=0&slim=1/.test(html),
-      "首屏整库请求必须带 ?slim=1"
+      /api\/library\?bulk=1&limit=\$\{LIBRARY_FIRST_BATCH\}&offset=0&slim=1/.test(html),
+      "首屏首批请求必须带 ?slim=1"
     );
   });
 
-  await t.test("2. 续拉下一页的那次请求也必须带 slim=1", () => {
+  await t.test("2. 后台补拉的那次请求也必须带 slim=1", () => {
     assert.ok(
       /api\/library\?bulk=1&limit=1000&offset=\$\{offset\}&slim=1/.test(html),
-      "续拉请求必须带 ?slim=1"
+      "后台补拉请求必须带 ?slim=1"
     );
   });
 
