@@ -37,6 +37,9 @@ PRINT_DEFAULTS = {
     "pagination": "compact",
     "option_layout": "auto",
     "option_overrides": {},
+    # 预览量出来的每道题最终排成几栏。Word 照它排，别再自己猜一遍 ——
+    # 两边各猜各的，屏幕上四栏、文件里竖排，老师核对的是屏幕、拿到手的是文件。
+    "option_columns": {},
     "question_breaks": [],
     "answer_layout": "inline",
     "answer_space_overrides": {},
@@ -248,12 +251,28 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
         or len(figure_keys) != len(figures)
     ):
         raise DraftError("单题排版或另起页的题目编号不能重复")
-    if selected is not None and (set(keys) | set(space_keys) | set(figure_keys) | set(breaks)) - selected:
+    # 预览量出来的栏数：题目编号 → 1 到 5 的整数。写错的值不能进导出。
+    columns = result["option_columns"]
+    if not isinstance(columns, dict) or len(columns) > 500:
+        raise DraftError("单题选项栏数应为题目编号到栏数的映射，最多 500 题")
+    for value in columns.values():
+        if type(value) is not int or not 1 <= value <= 5:
+            raise DraftError("单题选项栏数只能是 1 到 5 之间的整数")
+    try:
+        column_keys = normalize_ids(list(columns))
+    except BrowseError as error:
+        raise DraftError("单题选项栏数的题目编号不正确：" + str(error)) from None
+    if len(column_keys) != len(columns):
+        raise DraftError("单题选项栏数的题目编号不能重复")
+    if selected is not None and (
+        set(keys) | set(space_keys) | set(figure_keys) | set(breaks) | set(column_keys)
+    ) - selected:
         raise DraftError("单题排版和另起页只能指定当前选中的题目")
     result["option_overrides"] = dict(zip(keys, overrides.values()))
     result["answer_space_overrides"] = dict(zip(space_keys, normalized_spaces))
     result["figure_overrides"] = dict(zip(figure_keys, figures.values()))
     result["question_breaks"] = breaks
+    result["option_columns"] = dict(zip(column_keys, columns.values()))
     return result
 
 

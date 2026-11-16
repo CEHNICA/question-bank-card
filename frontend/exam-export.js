@@ -236,6 +236,9 @@
       // publications cannot revive an old option or writing-space override.
       if (options.option_overrides) options.option_overrides = Object.fromEntries(Object.entries(options.option_overrides)
         .filter(([id, value]) => selectedIds.has(id) && ["auto", "four", "two", "vertical"].includes(value)));
+      // 预览量到的栏数只对这次选中的题有效，别把别的题的栏数带过去。
+      if (options.option_columns) options.option_columns = Object.fromEntries(Object.entries(options.option_columns)
+        .filter(([id, value]) => selectedIds.has(id) && Number.isInteger(value) && value >= 1 && value <= 5));
       if (options.answer_space_overrides) options.answer_space_overrides = Object.fromEntries(Object.entries(options.answer_space_overrides)
         .filter(([id, value]) => selectedIds.has(id)
           && (["none", "small", "medium", "large", "auto"].includes(value)

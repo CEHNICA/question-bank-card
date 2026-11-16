@@ -5252,6 +5252,22 @@ $("selectedViewCount").textContent = String(state.basket.length);
     return result;
   }
 
+  // 预览已经把每道题最后排成几栏量出来了（exam-layout 量的是 A4 正文宽，
+  // 跟 Word 的 178 毫米正文宽一样宽）。把这份结果交给后端，Word 就照屏幕的样子排。
+  // 两边各算各的迟早对不上：屏幕上四栏、文件里竖排，而老师核对的是屏幕、
+  // 拿到手的是文件。跨页续片（.exam-fragment）只带着半道题，它的栏数不算数。
+  function measuredOptionColumns() {
+    const columns = {};
+    for (const block of ui.paper.querySelectorAll(".print-question")) {
+      const id = block.dataset.questionId;
+      if (!id || columns[id] !== undefined) continue;
+      if (block.classList.contains("exam-fragment")) continue;
+      const value = Number(block.querySelector(".qb-options")?.dataset.examColumns);
+      if (Number.isInteger(value) && value >= 1 && value <= 5) columns[id] = value;
+    }
+    return columns;
+  }
+
   function currentPrintOptions() {
     return normalizePrintOptions({
       document: $("printDocument").value, origin: ui.printOrigin.checked,
@@ -6392,7 +6408,8 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
       await waitForPrintAssets();
       await printState.layoutPromise;
       preparePrintLayout();
-      const options = currentPrintOptions();
+      // 带上预览量到的栏数：Word 照屏幕排，不再自己猜一遍。
+      const options = { ...currentPrintOptions(), option_columns: measuredOptionColumns() };
       if ((format === "print" || format === "pdf") && printState.layoutError) throw new Error(printState.layoutError);
       if ((format === "print" || format === "pdf") && printState.tooWide) throw new Error("有公式超出 A4 正文，请调整本次字号或导出 Word 继续排版");
       if (format === "print") {

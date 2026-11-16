@@ -1929,6 +1929,13 @@ def _option_columns(item, options, *, text_width_mm=178):
     ]
     if len(letters) < 2 or requested == "vertical":
         return 1
+    # 屏幕预览已经把这道题最后排成几栏量出来了（前端量的是 A4 正文宽，
+    # 和 Word 的 178 毫米正文宽一样宽）。照它排 —— 两边各算各的，迟早对不上：
+    # 老师核对的是屏幕，拿到手的是文件。宽度仍由 Word 自己兜底：
+    # 下面的估算只在没有实测值时才用。
+    measured = (options.get("option_columns") or {}).get(item["id"])
+    if type(measured) is int and 1 <= measured <= len(letters):
+        return measured
     widths = []
     for letter in letters:
         blocks = item["fields"].get(f"options.{letter}", [])
@@ -2384,7 +2391,10 @@ def export(payload, *, warnings=None):
             requested = options.get("option_overrides", {}).get(item["id"], options.get("option_layout", "auto"))
             wanted = 4 if requested == "four" else 2 if requested == "two" else 1
             actual = _option_columns(item, options)
-            if wanted > actual and (
+            # 预览量过栏数时，文件照屏幕排，屏幕上已经提示过降级，这里不再重复；
+            # 没有实测值（老前端、PDF 路径）才由 Word 自己决定，这时必须说清楚。
+            measured = (options.get("option_columns") or {}).get(item["id"])
+            if type(measured) is not int and wanted > actual and (
                 item["content"].get("options") or any(image["slot"] in "ABCDE" for image in item["images"])
             ):
                 warnings.append(
