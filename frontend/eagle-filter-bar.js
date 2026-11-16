@@ -198,6 +198,10 @@
       document.addEventListener("click", this._handleGlobalClick);
       document.addEventListener("keydown", this._handleKeyDown);
 
+      // 卡片是分批渲染的：首屏一批，滚动加载一批一批来。
+      // 不盯着列表容器的话，后来的卡片永远等不到「👁 查看解析」。
+      this._observeCardList();
+
       this.syncUI();
     }
 
@@ -1038,6 +1042,26 @@
           actions.prepend(solutionBtn);
         }
       });
+    }
+
+    // 卡片是分批渲染的（首屏一批，滚动加载一批一批来）。
+    // 以前只在筛选刷新时绑一次「👁 查看解析」，
+    // 于是首屏那批卡片没有这个按钮，滚动加载的新卡片也没有 ——
+    // 功能在，但用户点不到。这里盯着列表容器，一有新卡片就补上。
+    // _bindCardEnhancements 本身是幂等的（data-eagle-enhanced 标记），
+    // 所以自己加的按钮不会再触发新一轮绑定。
+    _observeCardList() {
+      if (this._cardObserver || typeof MutationObserver !== "function") return;
+      const list = document.getElementById("libraryList");
+      if (!list) return;
+      this._cardObserver = new MutationObserver(() => {
+        if (this._cardBindTimer) clearTimeout(this._cardBindTimer);
+        this._cardBindTimer = setTimeout(() => {
+          this._cardBindTimer = null;
+          this._bindCardEnhancements();
+        }, 60);
+      });
+      this._cardObserver.observe(list, { childList: true, subtree: true });
     }
 
     _notifyFilterChanged() {
