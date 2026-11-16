@@ -4118,9 +4118,33 @@
     renderActiveFilters();
     renderBasket();
     syncSelection();
-    ui.list.replaceChildren();
     const shown = visibleItems();
     if (!shown.some((item) => item.id === state.inspectorId)) state.inspectorId = shown[0]?.id || "";
+    // Unchanged cards are kept as they are (an opened answer stays open while jobs finish).
+    const previous = state.cards || new Map();
+    state.cards = new Map();
+    // 1.26.56：40 张题卡逐个 append 进 live DOM —— 每插一张就触发一次样式重算，
+    // 实测 RecalcStyle 75 次 / 211 ms，全花在首屏上。攒进 fragment 一次插入。
+    //
+    // 1.26.57（第十九轮）：别再每加一页就把整面卡片墙拆了重装。
+    // 原来每次 render 都先 replaceChildren() 清空，再把（复用的）节点一张张插回去 ——
+    // 实测每追加 40 题就产生一个 302ms→892ms 的主线程长任务（随卡片数线性涨），
+    // API 本身只要 130ms，全花在拆装上。现在：新顺序的节点数组跟当前 DOM 比一下，
+    // 当前 children 若是新数组的严格前缀（只在末尾多了新卡），就只 append 尾部；
+    // 顺序变了、卡片被删了、筛选变了，照旧 replaceChildren 全量替换（兜底不能少）。
+    const basketSet = new Set(state.basket);
+    const nodes = [];
+    shown.forEach((item, index) => {
+      const signature = JSON.stringify([item, basketSet.has(item.id), state.features, state.ai.mode, state.selected.has(item.id), state.expanded.has(item.id), state.opened.has(item.id), state.tag, state.tagAll, state.tagAny, state.tagNot, state.tagMode]);
+      const kept = previous.get(item.id);
+      // 复用的前提是它此刻确实挂在列表里 —— 否则这面墙会凭空少卡片。
+      const node = kept && kept.signature === signature && kept.node.parentNode === ui.list ? kept.node : card(item);
+      syncSourceLabel(node, item, index > 0 ? shown[index - 1] : null);
+      node.classList.toggle("inspector-active", state.inspectorId === item.id);
+      if (state.inspectorId === item.id) node.setAttribute("aria-current", "true"); else node.removeAttribute("aria-current");
+      state.cards.set(item.id, { signature, node });
+      nodes.push(node);
+    });
     if (!shown.length) {
       const empty = node("div", "library-empty");
       const filtered = Boolean(state.q.trim() || state.document || state.type || state.review || state.answer || state.tag
@@ -4141,25 +4165,20 @@
         upload.href = "/#dropZone";
         empty.append(upload);
       }
-      ui.list.append(empty);
+      ui.list.replaceChildren(empty);
+    } else {
+      const current = Array.from(ui.list.children);
+      const canAppend = current.length <= nodes.length && current.every((child, index) => child === nodes[index]);
+      if (canAppend) {
+        // 尾部新增的卡片也要批量插入：逐个 append 会触发 N 次样式重算
+        // （1.26.56 踩过的坑，见 test_library_first_screen_render_cost.js）。
+        const fragment = document.createDocumentFragment();
+        for (let index = current.length; index < nodes.length; index++) fragment.append(nodes[index]);
+        ui.list.append(fragment);
+      } else {
+        ui.list.replaceChildren(...nodes);
+      }
     }
-    // Unchanged cards are kept as they are (an opened answer stays open while jobs finish).
-    const previous = state.cards || new Map();
-    state.cards = new Map();
-    // 1.26.56：40 张题卡逐个 append 进 live DOM —— 每插一张就触发一次样式重算，
-    // 实测 RecalcStyle 75 次 / 211 ms，全花在首屏上。攒进 fragment 一次插入。
-    const fragment = document.createDocumentFragment();
-    shown.forEach((item, index) => {
-      const signature = JSON.stringify([item, state.basket.includes(item.id), state.features, state.ai.mode, state.selected.has(item.id), state.expanded.has(item.id), state.opened.has(item.id), state.tag, state.tagAll, state.tagAny, state.tagNot, state.tagMode]);
-      const kept = previous.get(item.id);
-      const node = kept && kept.signature === signature ? kept.node : card(item);
-      syncSourceLabel(node, item, index > 0 ? shown[index - 1] : null);
-      node.classList.toggle("inspector-active", state.inspectorId === item.id);
-      if (state.inspectorId === item.id) node.setAttribute("aria-current", "true"); else node.removeAttribute("aria-current");
-      state.cards.set(item.id, { signature, node });
-      fragment.append(node);
-    });
-    ui.list.append(fragment);
     renderInspector(state.catalog.get(state.inspectorId) || shown.find((item) => item.id === state.inspectorId) || null);
     const currentQuestion = state.catalog.get(state.questionReturnId);
     if ($("questionDialog").open && currentQuestion && state.questionSignature !== questionSignature(currentQuestion)) openQuestion(currentQuestion);
