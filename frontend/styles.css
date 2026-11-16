@@ -508,7 +508,7 @@ body.drawer-open { overflow: hidden; }
 .filter.active { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(22,44,39,.12), 0 0 0 1px rgba(22,44,39,.04); }
 .filter-count { min-width: 20px; padding: 1px 6px; border-radius: 99px; background: rgba(0,0,0,.06); font-size: 11.5px; font-weight: 600; text-align: center; font-variant-numeric: tabular-nums; }
 .filter.active .filter-count { background: var(--accent-soft); color: var(--accent); }
-.filter.attention .filter-count { background: var(--amber-bar); color: #fff; }
+.filter.attention .filter-count { background: var(--amber); color: #fff; }
 .toolbar-spacer { flex: 1; }
 .review-finder { position: relative; z-index: 10; display: grid; gap: 7px; margin: -6px 0 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); }
 .review-finder[hidden], .review-finder-results[hidden] { display: none; }
@@ -1913,17 +1913,17 @@ mark.qb-mark.region-location { background: var(--accent-soft); outline: 2px soli
   --line-strong: #cbd5e1;
   --ink: #0f172a;
   --ink-2: #334155;
-  --muted: #64748b;
+  --muted: #5b6574;
   --faint: #94a3b8;
-  --accent: #059669;
-  --accent-hover: #047857;
+  --accent: #047857;
+  --accent-hover: #036249;
   --accent-soft: #ecfdf5;
   --accent-ring: rgba(16, 185, 129, 0.2);
   --accent-dark: #065f46;
-  --green: #059669;
+  --green: #047857;
   --green-soft: #ecfdf5;
   --green-bar: #6ee7b7;
-  --amber: #d97706;
+  --amber: #b45309;
   --amber-soft: #fffbeb;
   --amber-line: #fde68a;
   --amber-bar: #f59e0b;
@@ -2721,7 +2721,7 @@ kbd {
   background: #f0fdf4;
   border: 1px solid #bbf7d0;
   box-shadow: none;
-  color: #059669;
+  color: #047857;
 }
 
 .drop-zone strong {
@@ -2739,7 +2739,7 @@ kbd {
 .drop-zone:hover,
 .drop-zone.over {
   background: #ecfdf5;
-  border-color: #059669;
+  border-color: #047857;
 }
 
 .side-note,
@@ -2767,7 +2767,7 @@ kbd {
   font-weight: 650;
   letter-spacing: .06em;
   text-transform: uppercase;
-  color: #94a3b8;
+  color: #475569;
 }
 
 .paper-list {
@@ -2800,7 +2800,7 @@ kbd {
   bottom: 8px;
   width: 3px;
   border-radius: 0 3px 3px 0;
-  background: #059669;
+  background: #047857;
 }
 
 .paper-list li.active .paper-link,
@@ -2843,7 +2843,7 @@ kbd {
   font-size: 10px;
   line-height: 15px;
   padding: 0 5px;
-  background: #059669;
+  background: #047857;
 }
 
 /* —— 2. 卷头与完成条：操作安静、下一份为主 —— */
@@ -2992,7 +2992,7 @@ kbd {
   border-radius: 999px;
   border: 1px solid transparent;
   background: transparent;
-  color: #64748b;
+  color: #5b6574;
   font-size: 12.5px;
   font-weight: 500;
   box-shadow: none;
@@ -3015,18 +3015,18 @@ kbd {
   padding: 0 5px;
   border-radius: 999px;
   background: transparent;
-  color: #94a3b8;
+  color: #475569;
   font-size: 11px;
   font-weight: 600;
 }
 
 .filter.active .filter-count {
   background: #ecfdf5;
-  color: #059669;
+  color: #047857;
 }
 
 .filter.attention .filter-count {
-  background: #f59e0b;
+  background: var(--amber);
   color: #fff;
 }
 
@@ -3156,15 +3156,15 @@ kbd {
 }
 
 .card-tick:hover:not(:disabled) {
-  border-color: #059669;
+  border-color: #047857;
   background: #ecfdf5;
-  color: #059669;
+  color: #047857;
   transform: none;
 }
 
 .card-tick[aria-pressed="true"] {
-  border-color: #059669;
-  background: #059669;
+  border-color: #047857;
+  background: #047857;
   color: #ffffff;
   box-shadow: none;
 }
@@ -3280,7 +3280,7 @@ kbd {
 .entry-chapter-total {
   margin-left: auto;
   font-size: 10.5px;
-  color: #94a3b8;
+  color: #475569;
   font-weight: 500;
 }
 .entry-chapter-list {
@@ -3328,7 +3328,7 @@ kbd {
   padding: 1px 6px;
   border-radius: 999px;
   background: #f1f5f9;
-  color: #64748b;
+  color: #475569;
   font-size: 10.5px;
   font-variant-numeric: tabular-nums;
 }
@@ -3338,7 +3338,7 @@ kbd {
 }
 .entry-chapter-link.is-done .entry-chapter-badge {
   background: #ecfdf5;
-  color: #059669;
+  color: #047857;
 }
 
 /* 主区呼吸间距与显式「试卷操作」触发按钮 */
@@ -3488,11 +3488,11 @@ kbd {
   padding-top: 10px;
 }
 .card-tick {
-  color: #94a3b8;
+  color: #64748b;
 }
 .card-tick:hover:not(:disabled) {
-  color: #059669;
-  border-color: #059669;
+  color: #047857;
+  border-color: #047857;
   background: #ecfdf5;
 }
 .card-tick[aria-pressed="true"] {
@@ -3519,6 +3519,6 @@ kbd {
 }
 .empty-steps b {
   background: #ecfdf5;
-  color: #059669;
+  color: #047857;
 }
 

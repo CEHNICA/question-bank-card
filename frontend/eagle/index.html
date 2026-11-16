@@ -348,6 +348,26 @@
       button[title="在经典题库页打开标签地图（浏览不写库）"],
       button[title="打开标签管理中心"] { min-height: 32px; }
     }
+    /* 浅灰小字看不清（对比度，不是窄屏问题，所有宽度都要修）：
+       Tailwind 的 text-slate-400 在白底上只有 2.56:1，WCAG AA 要 4.5:1。
+       题卡上的来源文件名、目录里的计数、滚动提示、树上的「+」、右侧属性栏的
+       「评分:」「OneNote:」「按 T 快速打标」「常用高频考点」全都用它 → 整族抬到
+       #5b6574（白底 5.90:1 / slate-100 5.39:1 / slate-50 5.64:1，全部达标）。
+       Tailwind 是本地预编译产物，改不了 utility class，只能用自定义规则盖过去；
+       本规则写在 tailwind.css 之后、选择器权重相同 → 天然覆盖。 */
+    .text-slate-400 { color: #5b6574; }
+    /* 深色批量操作条上必须保持浅色，别跟着变灰。 */
+    #batchActionBar .text-slate-400 { color: #cbd5e1; }
+    /* 评分星星：未点亮的 slate-300 只有 1.44:1（非文字控件要 3:1）→ 抬到 5.73:1。
+       点亮时 JS 会摘掉 text-slate-300 换成 text-amber-500，本规则自动失效。 */
+    #metaDifficultyStars .text-slate-300 { color: #5b6574; }
+    /* 列表里的收藏星（未收藏态）同理。 */
+    button[id^="star_btn_"].text-slate-300,
+    button[id^="compact_fav_btn_"].text-slate-300 { color: #5b6574; }
+    /* 标签上的「×」是唯一的删除入口，emerald-400 只有 1.84:1 → 提到 emerald-700（5.1:1）。 */
+    #currentTagsContainer button.text-emerald-400 { color: #047857; }
+    /* 「点标签即采纳」用了 emerald-700/80（3.68:1）→ 去掉透明度。 */
+    #inspectorBody .text-emerald-700\/80 { color: #047857; }
       .compact-row .katex-display {
       display: inline !important;
       margin: 0 !important;

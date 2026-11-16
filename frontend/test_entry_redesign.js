@@ -30,7 +30,9 @@ describe("录入题目页（/）重设计契约检查", () => {
     assert.match(css, /\.cut-reading-stage\s*\{[\s\S]*?grid-template-areas:/);
     assert.match(css, /\.card:not\(\.compact\)\s+\.card-actions\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?bottom:\s*0/);
     assert.match(css, /\.card:not\(\.compact\)\s+\.card-actions\s*\{[\s\S]*?box-shadow:\s*none;/);
-    assert.match(css, /\.card-tick\s*\{[\s\S]*?color:\s*#94a3b8;/);
+    // 静止对勾必须显色。旧值 #94a3b8 在白底只有 2.56:1，已改成达标的色值，
+    // 具体色值与对比度由 test_readability_contrast.js 按 WCAG AA 守，这里只管「有没有显色」。
+    assert.match(css, /\.card-tick\s*\{[\s\S]*?color:\s*#[0-9a-fA-F]{3,6};/);
   });
 
   it("app.js 挂载试卷操作按钮、侧栏折叠及对应试卷下挂载多章节导航", () => {
