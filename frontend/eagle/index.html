@@ -2497,7 +2497,10 @@
           fetch(`${API_BASE}/api/library/tags`, {
             headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
           }),
-          fetch(`${API_BASE}/api/library?limit=100&offset=0`, {
+          // 整库一次拉走（bulk=1）。以前拆成 limit=100 的九次请求，每次都把
+          // facets 这些跟分页无关的统计重算一遍；九次请求在同一个进程里排成
+          // 一队，光 API 就十二秒。一次给完只要几百毫秒。
+          fetch(`${API_BASE}/api/library?bulk=1&limit=1000&offset=0`, {
             headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
           })
         ]);
@@ -2578,32 +2581,27 @@
           }
         }
 
-        // 3. 处理全量试题数据 (并发分页抓取全部 810 题)
+        // 3. 处理全量试题数据 (bulk 一次给全；题库特别大时才续拉)
         if (libFirstRes.ok) {
           const firstData = await libFirstRes.json();
           const allRawItems = [...(firstData.items || [])];
           const totalCount = firstData.total || allRawItems.length;
 
-          if (totalCount > 100) {
-            const remainingOffsets = [];
-            for (let off = 100; off < totalCount; off += 100) {
-              remainingOffsets.push(off);
-            }
+          // 超过一批（题库特别大）才继续往后拉。正常情况一个请求就拿完。
+          let offset = allRawItems.length;
+          while (offset < totalCount) {
             try {
-              const remainingPages = await Promise.all(
-                remainingOffsets.map(off =>
-                  fetch(`${API_BASE}/api/library?limit=100&offset=${off}`, {
-                    headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
-                  }).then(r => r.ok ? r.json() : { items: [] })
-                )
-              );
-              remainingPages.forEach(pData => {
-                if (pData && Array.isArray(pData.items)) {
-                  allRawItems.push(...pData.items);
-                }
+              const res = await fetch(`${API_BASE}/api/library?bulk=1&limit=1000&offset=${offset}`, {
+                headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
               });
+              if (!res.ok) break;
+              const page = await res.json();
+              if (!page || !Array.isArray(page.items) || !page.items.length) break;
+              allRawItems.push(...page.items);
+              offset += page.items.length;
             } catch (pageErr) {
-              console.warn('Library pagination partial error:', pageErr);
+              console.warn('Library bulk pagination error:', pageErr);
+              break;
             }
           }
 
