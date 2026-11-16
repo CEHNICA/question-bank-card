@@ -601,6 +601,7 @@
             id="treeSearchInput"
             type="text"
             placeholder="搜索文件夹…"
+            aria-label="搜索文件夹与标签"
             oninput="handleTreeSearch(this.value)"
             class="flex-1 min-w-0 h-6 text-[11px] px-2 rounded border border-slate-200 bg-white placeholder-slate-400 focus:border-emerald-500 outline-none transition-colors"
           >
@@ -679,6 +680,7 @@
               <input
                 id="globalSearchInput"
                 type="text"
+                aria-label="搜索题目、名称、标签、文件夹"
                 placeholder="搜索题干、名称、标签、文件夹… (/)"
                 class="w-full h-6 pl-7 pr-6 text-[11px] bg-slate-100 hover:bg-slate-100/80 focus:bg-white text-slate-700 placeholder-slate-400 rounded-md border border-transparent focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 transition-all outline-hidden"
               >
@@ -772,6 +774,7 @@
                 </div>
                 <input
                   id="dropTagSearchInput"
+                  aria-label="搜索标签"
                   oninput="renderTagFilterDropdownList()"
                   type="text"
                   placeholder="搜索标签 (按住 Alt 点击设为排除)..."
@@ -918,6 +921,7 @@
             <input
               id="inspectorNameInput"
               type="text"
+              aria-label="题目名称"
               placeholder="给题目起个名字（如：阿氏圆最值母题）..."
               onchange="saveInspectorNoteAndUrl()"
               onblur="saveInspectorNoteAndUrl()"
@@ -930,6 +934,7 @@
             <textarea
               id="inspectorNoteInput"
               rows="2"
+              aria-label="题目注释"
               placeholder="添加注释（如易错点、教学备注，自动保存）..."
               onchange="saveInspectorNoteAndUrl()"
               onblur="saveInspectorNoteAndUrl()"
@@ -941,6 +946,7 @@
             <input
               id="inspectorUrlInput"
               type="url"
+              aria-label="参考链接"
               placeholder="http:// 或 https:// 参考链接..."
               oninput="updateInspectorUrlActions()"
               onchange="saveInspectorNoteAndUrl()"
@@ -979,7 +985,8 @@
           <div class="relative mt-2">
             <input 
               id="tagAutocompleteInput"
-              type="text" 
+              type="text"
+              aria-label="输入标签名或拼音" 
               placeholder="输入标签名或拼音 (按 Enter 贴标)..." 
               autocomplete="off"
               class="w-full rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:border-emerald-500 focus:outline-hidden transition-all"
@@ -1059,7 +1066,8 @@
           <div class="tm-search-row flex items-center justify-between gap-2 mb-3">
             <input 
               id="modalSearchTagInput"
-              type="text" 
+              type="text"
+              aria-label="搜索当前群组标签" 
               placeholder="搜索当前群组标签..." 
               oninput="renderModalTags()"
               class="w-48 px-2 py-1 text-xs border border-slate-200 rounded-md focus:border-emerald-500"
@@ -1281,7 +1289,7 @@
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block font-semibold mb-1 text-slate-700">题型</label>
-              <select id="editInputType" onchange="handleEditTypeChange()" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none">
+              <select id="editInputType" aria-label="题型" onchange="handleEditTypeChange()" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none">
                 <option value="single_choice">单选题</option>
                 <option value="multiple_choice">多选题</option>
                 <option value="fill_blank">填空题</option>
@@ -1302,7 +1310,8 @@
             <label class="block font-semibold mb-1 text-slate-700">题干正文 (支持 LaTeX，如 $f(x)=x^2$)</label>
             <textarea 
               id="editInputStem" 
-              rows="5" 
+              rows="5"
+              aria-label="题干" 
               oninput="updateEditLivePreview()"
               class="w-full p-2.5 border border-slate-200 rounded-md font-mono text-xs focus:border-emerald-500 outline-none leading-relaxed"
               placeholder="请输入题干内容..."
@@ -1318,27 +1327,27 @@
             <div class="grid grid-cols-1 gap-2">
               <div class="flex items-center gap-2">
                 <span class="font-bold text-slate-600 w-5">A.</span>
-                <input id="editOptA" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 A 内容...">
+                <input id="editOptA" aria-label="选项 A" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 A 内容...">
               </div>
               <div class="flex items-center gap-2">
                 <span class="font-bold text-slate-600 w-5">B.</span>
-                <input id="editOptB" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 B 内容...">
+                <input id="editOptB" aria-label="选项 B" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 B 内容...">
               </div>
               <div class="flex items-center gap-2">
                 <span class="font-bold text-slate-600 w-5">C.</span>
-                <input id="editOptC" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 C 内容...">
+                <input id="editOptC" aria-label="选项 C" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 C 内容...">
               </div>
               <div class="flex items-center gap-2">
                 <span class="font-bold text-slate-600 w-5">D.</span>
-                <input id="editOptD" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 D 内容...">
+                <input id="editOptD" aria-label="选项 D" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 D 内容...">
               </div>
               <div class="flex items-center gap-2">
                 <span class="font-bold text-slate-600 w-5">E.</span>
-                <input id="editOptE" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 E 内容（选填）...">
+                <input id="editOptE" aria-label="选项 E" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 E 内容（选填）...">
               </div>
               <div class="flex items-center gap-2">
                 <span class="font-bold text-slate-600 w-5">F.</span>
-                <input id="editOptF" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 F 内容（选填）...">
+                <input id="editOptF" aria-label="选项 F" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 F 内容（选填）...">
               </div>
             </div>
           </div>
@@ -1346,11 +1355,11 @@
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block font-semibold mb-1 text-slate-700">参考答案</label>
-              <input id="editInputAnswer" type="text" oninput="updateEditLivePreview()" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="如: B 或 x>1">
+              <input id="editInputAnswer" aria-label="参考答案" type="text" oninput="updateEditLivePreview()" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="如: B 或 x>1">
             </div>
             <div>
               <label class="block font-semibold mb-1 text-slate-700">分值</label>
-              <input id="editInputScore" type="number" oninput="updateEditLivePreview()" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none" placeholder="分值，如 5">
+              <input id="editInputScore" aria-label="分值" type="number" oninput="updateEditLivePreview()" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none" placeholder="分值，如 5">
             </div>
           </div>
 
@@ -1358,7 +1367,8 @@
             <label class="block font-semibold mb-1 text-slate-700">参考解析 / 详细解题步骤</label>
             <textarea 
               id="editInputAnalysis" 
-              rows="4" 
+              rows="4"
+              aria-label="答案解析" 
               oninput="updateEditLivePreview()"
               class="w-full p-2.5 border border-slate-200 rounded-md font-mono text-xs focus:border-emerald-500 outline-none leading-relaxed"
               placeholder="参考解析内容..."
@@ -1434,12 +1444,12 @@
           <div class="space-y-3">
             <span class="font-bold text-slate-800 text-sm">试卷标题与排版设置</span>
             <div>
-              <label class="block text-slate-600 mb-1">试卷标题</label>
+              <label class="block text-slate-600 mb-1" for="paperMainTitle">试卷标题</label>
               <input id="paperMainTitle" type="text" onchange="onExportOptionsChanged()" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md bg-white focus:border-emerald-500 outline-none text-xs" value="练习">
             </div>
             <div class="grid grid-cols-2 gap-2">
               <div>
-                <label class="block text-slate-600 mb-1">输出内容</label>
+                <label class="block text-slate-600 mb-1" for="exportDocument">输出内容</label>
                 <select id="exportDocument" onchange="onExportOptionsChanged()" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
                   <option value="questions">题目</option>
                   <option value="answers">答案与解析</option>
@@ -1447,21 +1457,21 @@
                 </select>
               </div>
               <div>
-                <label class="block text-slate-600 mb-1">答案解析位置</label>
+                <label class="block text-slate-600 mb-1" for="exportAnswerLayout">答案解析位置</label>
                 <select id="exportAnswerLayout" onchange="onExportOptionsChanged()" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
                   <option value="inline">逐题紧跟</option>
                   <option value="appendix">卷末集中</option>
                 </select>
               </div>
               <div>
-                <label class="block text-slate-600 mb-1">分页</label>
+                <label class="block text-slate-600 mb-1" for="exportPagination">分页</label>
                 <select id="exportPagination" onchange="onExportOptionsChanged()" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
                   <option value="compact">连续排版，节省纸张</option>
                   <option value="keep">尽量保持单题完整</option>
                 </select>
               </div>
               <div>
-                <label class="block text-slate-600 mb-1">选择题选项</label>
+                <label class="block text-slate-600 mb-1" for="exportOptionLayout">选择题选项</label>
                 <select id="exportOptionLayout" onchange="onExportOptionsChanged()" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
                   <option value="auto">自动排版</option>
                   <option value="four">一行四个</option>
@@ -1470,7 +1480,7 @@
                 </select>
               </div>
               <div>
-                <label class="block text-slate-600 mb-1">正文字号</label>
+                <label class="block text-slate-600 mb-1" for="exportFontSize">正文字号</label>
                 <select id="exportFontSize" onchange="onExportOptionsChanged()" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
                   <option value="12">12 磅</option>
                   <option value="14">14 磅</option>
@@ -1478,7 +1488,7 @@
                 </select>
               </div>
               <div>
-                <label class="block text-slate-600 mb-1">解答题留白</label>
+                <label class="block text-slate-600 mb-1" for="exportAnswerSpace">解答题留白</label>
                 <select id="exportAnswerSpace" onchange="onExportOptionsChanged()" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
                   <option value="auto" selected>智能（解答题 30 毫米、选择题不留白）</option>
                   <option value="0">不留白（解答题保底 8 毫米）</option>
@@ -3840,7 +3850,7 @@
 
         <div class="px-2 pt-1.5 pb-1 border-b border-slate-100 sticky top-0 bg-white/95 backdrop-blur-xs z-10">
           <input
-            id="contextMenuSearchInput"
+            id="contextMenuSearchInput" aria-label="搜索菜单动作"
             type="text"
             placeholder="🔍 搜索菜单动作..."
             oninput="filterEagleContextMenu(this.value)"
@@ -5462,6 +5472,7 @@
             <div class="flex items-center gap-2 shrink-0 whitespace-nowrap qc-card-head-left">
               <input 
                 type="checkbox" 
+                aria-label="选择题目 ${escapeHtml(questionIdentity(q))}"
                 ${isChecked ? 'checked' : ''}
                 onclick="event.stopPropagation(); toggleSelectQuestion('${q.id}', this.checked)"
                 class="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 focus:ring-0 cursor-pointer"
@@ -5600,6 +5611,7 @@
           <div class="flex items-center gap-2.5 min-w-0 flex-1">
             <input 
               type="checkbox" 
+              aria-label="选择题目 ${escapeHtml(questionIdentity(q))}"
               ${isChecked ? 'checked' : ''}
               onclick="event.stopPropagation(); toggleSelectQuestion('${q.id}', this.checked)"
               class="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 focus:ring-0 cursor-pointer shrink-0"
@@ -13462,7 +13474,7 @@
         <!-- 左侧选题：快速定位 / 多题加入工作台 -->
         <div class="se-left w-64 border-r border-slate-100 bg-slate-50/60 flex flex-col shrink-0 min-h-0">
           <div class="p-2 space-y-1.5 border-b border-slate-100 shrink-0">
-            <input id="solutionEditorSearchInput" type="text" placeholder="搜题号 / 出处 / 题干..."
+            <input id="solutionEditorSearchInput" aria-label="搜索题号、出处或题干" type="text" placeholder="搜题号 / 出处 / 题干..."
                    oninput="solutionEditorSearch(this.value)"
                    class="w-full px-2 py-1 text-xs border border-slate-200 rounded-md focus:border-emerald-500 focus:outline-none">
             <div class="flex flex-wrap gap-1">
