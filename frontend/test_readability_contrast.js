@@ -165,7 +165,7 @@ assertContrast(stylesCss, ".filter", "color", ["#f1f5f9", "#ffffff"], AA, "工�
   assert.ok(hasStars, "Eagle 右侧属性栏的未点亮评分星要抬到 #5b6574（原来 1.44:1）");
   const hasFavStars = /button\[id\^="star_btn_"\]\.text-slate-300/.test(eagleHtml);
   assert.ok(hasFavStars, "Eagle 列表里的未收藏星要抬到 #5b6574");
-  const hasEmerald = /#currentTagsContainer\s+button\.text-emerald-400\s*\{[^}]*color:\s*#047857;/.test(eagleHtml);
+  const hasEmerald = /button\.text-emerald-400\s*\{[^}]*color:\s*#047857;/.test(eagleHtml);
   assert.ok(hasEmerald, "Eagle 页标签上的「×」要提到 emerald-700");
   const hasHint = /#inspectorBody\s+\.text-emerald-700\\\/80\s*\{[^}]*color:\s*#047857;/.test(eagleHtml);
   assert.ok(hasHint, "Eagle「点标签即采纳」要去掉 emerald-700/80 的透明度（原来 3.68:1）");
@@ -176,6 +176,60 @@ assertContrast(stylesCss, ".filter", "color", ["#f1f5f9", "#ffffff"], AA, "工�
   }
   const ratioGreen = contrast(parseHex("#047857"), parseHex("#ffffff"));
   assert.ok(ratioGreen >= AA, `#047857 在白底上只有 ${ratioGreen.toFixed(2)}:1`);
+}
+
+// 第二轮体检（静态色对扫描）挖出来的一批：字色压浅底，全都不到 AA 的 4.5:1。
+// 这些是浏览器扫不到的坑 —— 默认 hidden、hover 才变色、或者在别的容器底上。
+const EAGLE_TEXT_RULES = [
+  // [选择器, 背景列表, 说明]
+  [".text-slate-300", ["#ffffff", "#f8fafc", "#f1f5f9"], "排序菜单未选中项 / 树里「（当前目录）」「（超过N层上限）」/ 题干预览占位符"],
+  [".text-slate-400", ["#ffffff", "#f8fafc", "#f1f5f9"], "题卡来源文件名 / 目录计数 / 属性栏小字"],
+  [".text-slate-500", ["#ffffff", "#f8fafc", "#f1f5f9", "#e2e8f0"], "次级文字"],
+  [".text-amber-500", ["#ffffff", "#f8fafc"], "评分星 / 「未评分」"],
+  [".text-amber-600", ["#ffffff", "#f8fafc"], "主菜单「AI生成未人工核对」的计数徽章"],
+  [".text-emerald-600", ["#ffffff", "#f8fafc"], "标签「启用」/ 次级强调"],
+  [".text-rose-400", ["#ffffff", "#f8fafc"], "上下文菜单的 Delete 键帽"],
+  [".text-rose-500", ["#ffffff", "#f8fafc", "#fff1f2"], "「清空试题篮」/「停用」小字按钮"],
+  [".text-rose-600", ["#ffffff", "#f8fafc", "#fff1f2"], "导出状态行报错文字 / 上下文菜单红字"],
+  ["button.text-emerald-400", ["#ecfdf5", "#ffffff"], "标签条上的「×」删除入口"],
+  ["button.text-emerald-500", ["#ecfdf5", "#ffffff"], "文件夹条上的「×」移出入口"],
+];
+for (const [selector, backgrounds, label] of EAGLE_TEXT_RULES) {
+  assertContrast(eagleHtml, selector, "color", backgrounds, AA, label);
+}
+
+// 白字压浅色底（徽章底 + 主操作按钮）：底色整族抬到 -700，白字才够 4.5:1
+const EAGLE_BADGE_BG = [
+  [".bg-emerald-500", "#047857"],
+  [".bg-emerald-600", "#047857"],
+  [".bg-amber-500", "#b45309"],
+  [".bg-amber-600", "#b45309"],
+  [".bg-teal-500", "#0f766e"],
+  [".bg-sky-500", "#0369a1"],
+  [".bg-violet-500", "#6d28d9"],
+];
+for (const [selector, expected] of EAGLE_BADGE_BG) {
+  const body = lastRule(eagleHtml, selector);
+  const bg = resolve(eagleHtml, declOf(body, "background-color"));
+  assert.equal(bg, expected, `${selector} 的底色应当是 ${expected}`);
+  const ratio = contrast(parseHex("#ffffff"), parseHex(bg));
+  assert.ok(ratio >= AA, `${selector} 底色 ${bg} 配白字只有 ${ratio.toFixed(2)}:1`);
+}
+// 深色批量操作条上的玫瑰红图标（rose-400 on slate-900）是非文字控件，只要 3:1
+{
+  const body = lastRule(eagleHtml, "#batchActionBar .text-rose-400");
+  const fg = resolve(eagleHtml, declOf(body, "color"));
+  const ratio = contrast(parseHex(fg), parseHex("#0f172a"));
+  assert.ok(ratio >= 3, `深色批量条上的玫瑰红图标 ${fg} on #0f172a 只有 ${ratio.toFixed(2)}:1`);
+}
+
+// 输入框占位符：Tailwind preflight 把 ::placeholder 设成 slate-400（2.56:1）/ gray-400（2.54:1），
+// 白底上根本看不清该填什么 → 抬到 #5b6574（5.90:1）
+{
+  const ok = /input::placeholder,\s*textarea::placeholder,\s*\n?\s*\.placeholder-slate-400::placeholder\s*\{[^}]*color:\s*#5b6574;/.test(eagleHtml);
+  assert.ok(ok, "Eagle 页的输入框占位符要抬到 #5b6574（原来 2.56:1 / 2.54:1）");
+  const ratio = contrast(parseHex("#5b6574"), parseHex("#ffffff"));
+  assert.ok(ratio >= AA, `占位符色 #5b6574 在白底上只有 ${ratio.toFixed(2)}:1`);
 }
 
 console.log("浅灰小字都看得清了（WCAG AA 对比度）：OK");

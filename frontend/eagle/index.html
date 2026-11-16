@@ -365,9 +365,66 @@
     button[id^="star_btn_"].text-slate-300,
     button[id^="compact_fav_btn_"].text-slate-300 { color: #5b6574; }
     /* 标签上的「×」是唯一的删除入口，emerald-400 只有 1.84:1 → 提到 emerald-700（5.1:1）。 */
-    #currentTagsContainer button.text-emerald-400 { color: #047857; }
+    button.text-emerald-400 { color: #047857; }
+    /* 文件夹/标签条上的「×」移出按钮：emerald-500 在 emerald-50 底上只有 2.4:1。 */
+    button.text-emerald-500 { color: #047857; }
     /* 「点标签即采纳」用了 emerald-700/80（3.68:1）→ 去掉透明度。 */
     #inspectorBody .text-emerald-700\/80 { color: #047857; }
+
+    /* 白字压浅色底（筛选芯片上的计数徽章、主操作按钮）：
+       emerald-500 2.54 / emerald-600 3.77 / amber-500 2.15 / amber-600 3.19 /
+       teal-500 2.49 / sky-500 2.77 / violet-500 4.23 —— 白字一律达不到 AA 要求的 4.5:1。
+       底色整族抬到 -700：emerald #047857(5.48) / amber #b45309(5.29) /
+       teal #0f766e(5.60) / sky #0369a1(5.93) / violet #6d28d9(7.42)。 */
+    .bg-emerald-500 { background-color: #047857; }
+    .bg-emerald-600 { background-color: #047857; }
+    .bg-amber-500 { background-color: #b45309; }
+    .bg-amber-600 { background-color: #b45309; }
+    .bg-teal-500 { background-color: #0f766e; }
+    .bg-sky-500 { background-color: #0369a1; }
+    .bg-violet-500 { background-color: #6d28d9; }
+    /* 底色抬到 -700 后 hover:bg-emerald-700 / amber-700 就跟常态同色了，悬停反馈要另给一档。 */
+    button.bg-emerald-500:hover, button.bg-emerald-600:hover { background-color: #036249; }
+    button.bg-amber-500:hover, button.bg-amber-600:hover { background-color: #92400e; }
+
+    /* 次级文字色：这几个在白底/浅底上都不到 4.5:1。
+       emerald-600 3.68 → #047857 5.48；amber-500 2.15 → #b45309 5.29；
+       slate-500 压 slate-100 底 4.34、压 slate-200 底 3.86 → #475569 6.92 / 5.90。 */
+    .text-emerald-600 { color: #047857; }
+    .text-amber-500 { color: #b45309; }
+    .text-slate-500 { color: #475569; }
+    /* 星星悬停的浅金色 hover:text-amber-400 只有 1.71:1 → 换成 amber-600（3.19:1）。 */
+    .hover\:text-amber-400:hover { color: #d97706; }
+
+    /* —— 第二轮：静态色对扫描挖出来的「字色压浅底」——
+       浏览器看不见的坑（默认 hidden、激活才出现、hover 才变色）：
+       slate-300 2.56 / rose-400 2.69 / rose-500 3.67 / rose-600 4.28 /
+       amber-600 3.19 —— 全都在 AA 的 4.5:1 线下。
+       涉及的都是真文字，不是装饰：
+         · 排序菜单里未选中的项（text-slate-300）
+         · 文件夹树里「（当前目录）」「（超过 N 层上限）」（text-slate-300）
+         · 题干预览占位符「在左侧输入题干以预览效果」（text-slate-300）
+         · 主菜单徽章「⚡ AI生成未人工核对」后面的计数（text-amber-600）
+         · 「清空试题篮」「停用」这类小字按钮（text-rose-500）
+         · 上下文菜单里的 Delete 键帽（text-rose-400）
+         · 导出状态行报错文字（text-rose-600，压 rose-50 底 4.28:1）
+       修法：整族抬到 -700 一档，白底 6.29 / slate-50 6.01 / rose-50 5.72，
+       深色批量条上的玫瑰红图标（rose-400 on slate-900）保持 3.80:1 达标。 */
+    .text-slate-300 { color: #5b6574; }
+    .text-amber-600 { color: #b45309; }
+    .text-rose-400 { color: #be123c; }
+    /* 深色批量条上的玫瑰红图标例外：rose-700 压 slate-900 只有 2.84:1（图标要 3:1），
+       换 rose-600 → 3.80:1 达标。 */
+    #batchActionBar .text-rose-400 { color: #e11d48; }
+    .text-rose-500 { color: #be123c; }
+    .text-rose-600 { color: #be123c; }
+    /* 输入框占位符：Tailwind 的 preflight 把 ::placeholder 设成 slate-400（2.56:1）/
+       gray-400（2.54:1），白底上根本看不出这个框该填什么 → 抬到 #5b6574（5.90:1）。
+       注意 placeholder-slate-400 这个工具类是 0-1-1 权重，比 input::placeholder（0-0-2）高，
+       只写前者盖不住，必须把工具类一起点名（我的 <style> 在 tailwind.css 之后，同权重后来居上）。
+       经典页用的是浏览器默认 #757575（4.61:1），达标，不动。 */
+    input::placeholder, textarea::placeholder,
+    .placeholder-slate-400::placeholder { color: #5b6574; opacity: 1; }
       .compact-row .katex-display {
       display: inline !important;
       margin: 0 !important;
