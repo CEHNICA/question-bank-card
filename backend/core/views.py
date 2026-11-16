@@ -1062,8 +1062,41 @@ def _distinct_task_name(filename: str) -> str:
     return f"{stem} ({uuid.uuid4().hex[:6]}){suffix}"
 
 
+def paper_slim_json(paper: Paper) -> dict:
+    """题库工作台侧栏用的轻量资料条目。
+
+    口径必须和 :func:`paper_json` 一致（total / published 逐份相等），但不算
+    逐卡判定，也不带 pages / structure / processing_plan 这些胖字段——侧栏只要
+    四样东西，而 13 份资料里有一份 509 题的教材，把每张题卡的 JSON 拉出来算
+    指纹再判一次状态，单这一项就是首屏近 0.4 秒。
+    """
+    published = (
+        PublishedQuestion.objects.filter(paper=paper, status=PublishedQuestion.Status.PUBLISHED)
+        .values("question_id")
+        .distinct()
+        .count()
+    )
+    return {
+        "id": str(paper.id),
+        "name": paper.display_name,
+        "filename": paper.filename,
+        "kind": paper.kind,
+        "status": paper.status,
+        "material_type": paper.material_type,
+        "archived": paper.archived,
+        "created_at": paper.created_at.isoformat(),
+        "counts": {
+            # 完整模式里 total = len(card_verdicts(paper))，而 card_verdicts 对
+            # 该资料的每一张题卡给一条判定，所以这里就是题卡总数。
+            "total": paper.questions.count(),
+            "published": published,
+        },
+    }
+
+
 def papers(request):
     if request.method == "GET":
+        build = paper_slim_json if request.GET.get("slim") == "1" else paper_json
         if request.GET.get("archived") == "only":
             try:
                 offset = int(request.GET.get("offset", "0"))
@@ -1074,7 +1107,7 @@ def papers(request):
             rows = list(Paper.objects.filter(archived=True).order_by("-created_at", "-id")[offset : offset + 201])
             return JsonResponse(
                 {
-                    "papers": [paper_json(p) for p in rows[:200]],
+                    "papers": [build(p) for p in rows[:200]],
                     "next_offset": offset + 200 if len(rows) > 200 else None,
                 }
             )
@@ -1082,7 +1115,7 @@ def papers(request):
         queryset = Paper.objects.all() if include_archived else Paper.objects.filter(archived=False)
         # 题库侧栏按创建时间排序；列表接口也固定新→旧，避免前端缺 created_at 时顺序乱跳。
         queryset = queryset.order_by("-created_at", "-id")
-        return JsonResponse({"papers": [paper_json(p) for p in queryset[:200]]})
+        return JsonResponse({"papers": [build(p) for p in queryset[:200]]})
     if request.method != "POST":
         return HttpResponseNotAllowed(["GET", "POST"])
     rejected = _guard(request, json_body=False)

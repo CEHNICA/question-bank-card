@@ -2491,7 +2491,9 @@
       try {
         const [papersRes, tagsRes, libFirstRes] = await Promise.all([
           // 题库要看全部来源卷：录入页「归档」只是藏进录入列表，不等于从题库撤题。
-          fetch(`${API_BASE}/api/papers?archived=1`, {
+          // slim=1：侧栏只要 id/名称/总题数/已入库数，别把每份资料的结构、页表和
+          // 逐卡判定算一遍传过来（509 题的教材一份就够首屏卡半秒）。
+          fetch(`${API_BASE}/api/papers?archived=1&slim=1`, {
             headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
           }),
           fetch(`${API_BASE}/api/library/tags`, {
@@ -4151,7 +4153,7 @@
 
     async function refreshPapersData() {
       try {
-        const res = await fetch(`${API_BASE}/api/papers?archived=1`, {
+        const res = await fetch(`${API_BASE}/api/papers?archived=1&slim=1`, {
           headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
         });
         if (res.ok) {
