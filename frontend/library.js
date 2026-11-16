@@ -1305,7 +1305,10 @@
         headers: { "Content-Type": "application/json", "X-QB-Request": "1" },
         body: JSON.stringify({ publication_id: item.id })
       });
-      const body = await response.json();
+      // 后端挂掉时未必回 JSON（网关 502 是 HTML、反代的错误页也是 HTML）。
+      // 直接 await response.json() 会抛一句英文的 "Unexpected token '<'"，
+      // 那句话原样冒到 toast 和状态栏上 —— 换成一句人话。
+      const body = await response.json().catch(() => { throw new Error("题目图片没有生成，请重试"); });
       if (!response.ok) throw new Error(body.error || "题目图片没有生成，请重试");
       toast(body.message || "已复制题目图片。", "success");
     } catch (error) {
@@ -4418,7 +4421,7 @@
     if (!ids.length) return { items: [], missing: [] };
     const response = await fetch("/api/library/batch", { method: "POST", cache: "no-store",
       headers: { "Content-Type": "application/json", "X-QB-Request": "1" }, body: JSON.stringify({ ids }) });
-    const body = await response.json();
+    const body = await response.json().catch(() => { throw new Error("选题读取失败，请重试"); });
     if (!response.ok) throw new Error(body.error || "选题读取失败，请重试");
     if (!Array.isArray(body.items) || !Array.isArray(body.missing)) throw new Error("选题返回不完整，请重试");
     const returned = new Set([...body.items, ...body.missing].map((item) => item.id));
@@ -4430,10 +4433,30 @@
   // not_found），直接印出来就是一句英文。后端已经带了一句中文，这里以它为准，
   // 兜底再翻一次本地表 —— 界面上不该出现任何英文枚举。
   const MISSING_REASONS = { superseded: "题面改过，这道题已经有新版本了", withdrawn: "这道题已撤回", not_found: "这道题已不存在" };
+  // 有没有中文：用来分辨「后端给的英文状态枚举」和「前端自己写的一句人话」。
+  function hasChinese(text) {
+    return /[\u4e00-\u9fa5]/.test(String(text || ""));
+  }
+
+  // 22.x：reason 有两种来路 —— 后端给的状态枚举，和前端自己塞的一句人话
+  // （读取失败、连不上服务器）。以前只有枚举认得，枚举之外的自由文本一律被压成
+  // 「这道题当前不能使用」：后端整个挂掉的时候，篮子里每一道好题都被说成
+  // 「这道题有问题」，老师照着这句话把题全移出篮子。现在自由文本照原样说出来。
   function missingReason(entry) {
     if (!entry) return "这道题当前不能使用";
-    if (typeof entry === "string") return MISSING_REASONS[entry] || "这道题当前不能使用";
-    return entry.message || MISSING_REASONS[entry.reason] || "这道题当前不能使用";
+    if (typeof entry === "string") {
+      return MISSING_REASONS[entry] || (hasChinese(entry) ? entry : "这道题当前不能使用");
+    }
+    if (entry.message) return entry.message;
+    if (entry.reason) {
+      if (MISSING_REASONS[entry.reason]) return MISSING_REASONS[entry.reason];
+      // 前端自己塞的一句人话（读取失败、连不上服务器）照原样说出来：后端整个
+      // 挂掉的时候，每一道题的原因都是同一句「为什么没读出来」，不能一律压成
+      // 「这道题当前不能使用」—— 那等于把系统故障说成题目有问题。
+      // 认不出来的英文枚举仍然兜底：界面上不该出现英文。
+      return hasChinese(entry.reason) ? entry.reason : "这道题当前不能使用";
+    }
+    return "这道题当前不能使用";
   }
 
   // 把篮里那一道换成它现在该用的版本，位置不变。老师刚改完题面回来发现的正是这个：
@@ -4715,7 +4738,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
       const response = await fetch(`/api/library/${encodeURIComponent(item.id)}/withdraw`, {
         method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" }, body: "{}"
       });
-      const body = await response.json();
+      const body = await response.json().catch(() => { throw new Error("撤回失败"); });
       if (!response.ok) throw new Error(body.error || "撤回失败");
       state.basket = state.basket.filter((id) => id !== item.id);
       state.selected.delete(item.id);
@@ -4756,7 +4779,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
         method: "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" },
         body: JSON.stringify({ ids: picked.map((item) => item.id) })
       });
-      const body = await response.json();
+      const body = await response.json().catch(() => { throw new Error("撤回失败"); });
       if (!response.ok) throw new Error(body.error || "撤回失败");
       const done = body.withdrawn_count ?? (body.withdrawn || []).length;
       const skipped = body.skipped || [];
@@ -5429,7 +5452,19 @@ $("selectedViewCount").textContent = String(state.basket.length);
       items.forEach((item) => { state.catalog.set(item.id, byId.get(item.id)); printNames.set(item.id, `${item.source_filename || "试卷"} · ${sourceLocator(item)}`); });
       missing = body.missing.map((item) => ({ ...item, label: printNames.get(item.id) || `未载入的第 ${ids.indexOf(item.id) + 1} 道选题` }));
     } catch (error) {
-      missing = ids.map((id, index) => ({ id, label: printNames.get(id) || `未载入的第 ${index + 1} 道选题`, reason: error.message || "读取失败，请重试" }));
+      // 整批没读出来的时候，原因只有一句话，却会落到每一道题上 —— 所以那句话
+      // 必须是「为什么没读出来」，不能是「这道题不能用」。
+      // fetch 自己失败时抛的是英文的 "Failed to fetch"，先换成中文再往下传。
+      const raw = String(error.message || "").trim();
+      const reason = /failed to fetch|networkerror|load failed|network request failed/i.test(raw)
+        ? "连不上服务器，请检查网络后重试"
+        : (raw || "读取失败，请重试");
+      missing = ids.map((id, index) => ({
+        id,
+        label: printNames.get(id) || `未载入的第 ${index + 1} 道选题`,
+        reason,
+        message: reason
+      }));
     }
     if (token !== printState.token || !ui.sheet.open) return;
     // Merely opening a paper can resolve its fixed answer revisions. That is
@@ -5492,7 +5527,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
       if (existing) payload.revision = existing.revision;
       const response = await fetch(existing ? `/api/library/drafts/${encodeURIComponent(existing.id)}` : "/api/library/drafts", {
         method: existing ? "PUT" : "POST", headers: { "Content-Type": "application/json", "X-QB-Request": "1" }, body: JSON.stringify(payload) });
-      const body = await response.json();
+      const body = await response.json().catch(() => { throw new Error("草稿未保存"); });
       if (!response.ok) throw new Error(body.error || "草稿未保存");
       if (state.draft === previousDraft) {
         state.draft = body.draft;
@@ -5514,7 +5549,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
     status.textContent = "正在读取草稿…";
     try {
       const response = await fetch("/api/library/drafts", { cache: "no-store" });
-      const body = await response.json();
+      const body = await response.json().catch(() => { throw new Error("草稿读取失败"); });
       if (!response.ok) throw new Error(body.error || "草稿读取失败");
       status.textContent = body.drafts.length ? `共 ${body.drafts.length} 份草稿 · 保存的题目版本与顺序保持不变` : "还没有组卷草稿。在组卷预览里点“保存草稿”，下次继续备课。";
       body.drafts.forEach((draft) => {
@@ -5534,7 +5569,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
           // Re-read the revision so another window's saved changes aren't lost.
           try {
             const response = await fetch(`/api/library/drafts/${encodeURIComponent(draft.id)}`, { cache: "no-store" });
-            const body = await response.json();
+            const body = await response.json().catch(() => { throw new Error("草稿读取失败"); });
             if (!response.ok) throw new Error(body.error || "草稿读取失败");
             if (openToken !== state.draftOpenToken || !dialog.open) return;
             if (currentSnapshot !== JSON.stringify(draftPayload())) {
@@ -5566,7 +5601,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
           if (!await confirmDialog({ title: `删除“${draft.title}”？`, text: "只删除这份组卷草稿，题库中的题目和原卷都保留。", ok: "删除草稿", danger: true })) return;
           try {
             const response = await fetch(`/api/library/drafts/${encodeURIComponent(draft.id)}`, { method: "DELETE", headers: { "Content-Type": "application/json", "X-QB-Request": "1" }, body: "{}" });
-            const body = await response.json();
+            const body = await response.json().catch(() => { throw new Error("草稿删除失败"); });
             if (!response.ok) throw new Error(body.error || "草稿删除失败");
             if (state.draft?.id === draft.id) { state.draft = null; markDraftDirty(); }
             await openDrafts();
