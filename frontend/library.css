@@ -3039,6 +3039,27 @@ body.library-page {
    窄屏抬到 32px，复选框抬到 24px（WCAG 2.2 最小目标尺寸）。
    宽屏是鼠标操作，这套规矩一行都不动。
    ───────────────────────────────────────────────────────────── */
+/* ── Windows 高对比度模式（forced-colors: active）────────────────────
+   系统会接管 color / background-color / border-color / box-shadow，
+   凡是靠这些属性传达的状态都会整个消失。实测（forced-colors: active）：
+     · 勾选题卡后，选中卡与未选中卡的 computed 样式零差异 —— 绿色边框被系统
+       接管、box-shadow 被移除，用户根本看不出勾了哪一张；
+     · 提示条的深色底被换成白底，又没有边框和阴影，飘在页面上完全没有边界；
+     · 禁用按钮的系统 DisabledText 色再叠一层 opacity: .45，实际对比度只剩 2.93:1。
+   这三样都得靠系统色管不到的东西补回来。 */
+@media (forced-colors: active) {
+  /* 选中态：border-color 靠不住（系统会接管），改用 outline —— 系统高亮色和正文色
+     不是一个色，能区分开。向内画，免得被列表容器裁掉；
+     聚焦时挪到外侧，别把焦点环顶掉。 */
+  body.library-page .library-card.is-selected { outline: 3px solid Highlight; outline-offset: -3px; }
+  body.library-page .library-card.is-selected:focus-visible { outline: 3px solid Highlight; outline-offset: 3px; }
+  /* 禁用态：别再叠透明度，把系统 DisabledText 的颜色完整地让出来。 */
+  button:disabled, .button:disabled { opacity: 1; }
+  /* 浮层：阴影被移除后，靠边框撑出边界。 */
+  body .toast[popover] { border: 1px solid CanvasText; }
+  body .site-drawer { border: 1px solid CanvasText; }
+}
+
 @media (max-width: 979px) {
   body.library-page .button.small,
   body.library-page .button.button-small,
