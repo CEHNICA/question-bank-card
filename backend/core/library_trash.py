@@ -189,12 +189,34 @@ def trash_payload() -> dict:
     }
 
 
+def trash_summary_payload() -> dict:
+    """只要计数。
+
+    首屏要的只是左下角那个「🗑️ 回收站」徽标上的一个数字。
+    明细是 10 份资料 + 445 道下架题（真库实测 331 KB），首屏一个字节都用不上，
+    却占了首屏网络里最大的一块 —— 比 /api/library/tags 还大。
+
+    所以数个数就行，不读题面 content、不读 extras、更不拼明细行。
+    """
+    return {
+        "counts": {
+            "papers": Paper.objects.filter(archived=True).count(),
+            "questions": PublishedQuestion.objects.filter(
+                status=PublishedQuestion.Status.WITHDRAWN
+            ).count(),
+        }
+    }
+
+
 # ------------------------------------------------------------------ 读
 
 
 @csrf_exempt
 def trash_view(request):
-    """回收站总账。"""
+    """回收站总账。
+
+    ?summary=1 只回计数 —— 首屏只要徽标数字时走这条，别把明细拖回来。
+    """
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
     rejected = _guard(request, json_body=False)
@@ -202,6 +224,9 @@ def trash_view(request):
         return rejected
     from .json_response import json_response
 
+    # 只认「恰好是 1」：summary=0 / yes 都不算，那会让面板拿到空明细。
+    if request.GET.get("summary") == "1":
+        return json_response(trash_summary_payload())
     return json_response(trash_payload())
 
 

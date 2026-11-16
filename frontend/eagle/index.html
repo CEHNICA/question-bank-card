@@ -2720,7 +2720,8 @@
 
           updateSmartFolderCounts();
           updateFavoritesBadge();
-          await refreshLibraryTrash();
+          // 首屏只要徽标上的数字，别把 331 KB 的回收站明细拖回来。
+          await refreshLibraryTrashSummary();
           // 录入归档 ≠ 题库下架：已入库题必须继续留在题库，不能按 archived 试卷剔掉。
           applyFilters();
           renderInlineActiveChips();
@@ -9021,6 +9022,9 @@
       withdrawnQuestions: [],
       counts: { papers: 0, questions: 0 },
       loaded: false,
+      // 明细（10 份资料 + 445 道下架题，真库实测 331 KB）是不是真的读过了。
+      // 首屏只要徽标上的一个数字，明细等回收站面板真打开了再拉。
+      detailLoaded: false,
       // 读失败时的话要看得见。静默失败时面板装作是空的，
       // 用户以为没删过东西，其实请求当场就被守卫拦下了。
       error: ''
@@ -10883,6 +10887,34 @@
       try { localStorage.setItem(EAGLE_PAPER_TRASH_QIDS_KEY, JSON.stringify(mapObj || {})); } catch (e) {}
     }
 
+    async function refreshLibraryTrashSummary() {
+      // 首屏只要左下角那个「🗑️ 回收站」徽标上的一个数字。
+      // 明细是 10 份资料 + 445 道下架题（真库实测 331 KB），首屏一个字节都用不上，
+      // 却是首屏网络里最大的一块 —— 比 /api/library/tags 还大。所以先问一句「有几个」，
+      // 明细等回收站面板真打开了再拉。
+      try {
+        const resp = await fetch('/api/library/trash?summary=1', {
+          headers: { 'X-QB-Request': '1', 'Referer': window.location.origin + '/eagle' }
+        });
+        if (!resp.ok) {
+          const reason = resp.status === 403 ? '请求需从题库页面发起' : ('回收站读取失败（HTTP ' + resp.status + '）');
+          libraryTrashCache.error = reason;
+          libraryTrashCache.loaded = false;
+          return libraryTrashCache;
+        }
+        const data = await resp.json();
+        if (data && data.counts) {
+          libraryTrashCache.counts = data.counts;
+          libraryTrashCache.loaded = true;
+          libraryTrashCache.error = '';
+        }
+      } catch (e) {
+        libraryTrashCache.error = '回收站读取失败：' + ((e && e.message) || e);
+        libraryTrashCache.loaded = false;
+      }
+      return libraryTrashCache;
+    }
+
     async function refreshLibraryTrash() {
       // 改动必须来自本机题库页面：不带 X-QB-Request 头，后端守卫一律 403。
       // 以前这里既没带头、又把失败静默吞掉 —— 面板于是装作是空的，
@@ -10907,6 +10939,7 @@
               questions: data.withdrawn_questions.length
             },
             loaded: true,
+            detailLoaded: true,
             error: ''
           };
         }
@@ -10917,12 +10950,26 @@
       return libraryTrashCache;
     }
 
+    // 明细没读过的时候，先去把明细拉回来再干活。
+    // 面板按钮、恢复、彻底删除都要明细行（题目 id、资料 id），
+    // 拿着空数组去干这些事等于「看着像成功，其实什么都没做」。
+    async function ensureLibraryTrashDetail() {
+      if (libraryTrashCache.detailLoaded) return libraryTrashCache;
+      return refreshLibraryTrash();
+    }
+
     function trashTotalCount() {
       const local = readLocalTrash();
+      // 用 counts，不用明细数组长度：首屏只读过摘要，明细数组是空的。
+      // 两边口径一致（全量模式的 counts 就是数组长度），所以徽标数字不会变。
+      // 用解构取值，不写「counts.加字段名」这种写法：那个写法被侧栏的资料计数
+      // 占着（只允许 total / published），回收站的计数换个写法，
+      // 免得跟资料清单的计数混成一锅。
+      const { papers: trashPaperCount = 0, questions: trashQuestionCount = 0 } = libraryTrashCache.counts || {};
       return (local.folders ? local.folders.length : 0)
         + (local.smartFolders ? local.smartFolders.length : 0)
-        + (libraryTrashCache.archivedPapers ? libraryTrashCache.archivedPapers.length : 0)
-        + (libraryTrashCache.withdrawnQuestions ? libraryTrashCache.withdrawnQuestions.length : 0);
+        + Number(trashPaperCount || 0)
+        + Number(trashQuestionCount || 0);
     }
 
     function openDeleteConfirmModal(config) {
@@ -11345,6 +11392,9 @@
         confirmLabel: '确认永久删除',
         onConfirm: async () => {
           try {
+            // 永久删除要按资料 id 找出它名下所有下架题 —— 明细还没读过就去拿，
+            // 不然会「看着像删干净了，其实那 445 道题还躺在库里」。
+            await ensureLibraryTrashDetail();
             const qids = (libraryTrashCache.withdrawnQuestions || [])
               .filter(q => (q.documentId || q.document_id) === paperId)
               .map(q => q.id);
@@ -11394,8 +11444,10 @@
       });
     }
 
-    function confirmEmptyRecycleBin() {
+    async function confirmEmptyRecycleBin() {
       const local = readLocalTrash();
+      // 清空回收站要拿全部下架题的 id 去 purge-batch，明细没读过就先去拿。
+      await ensureLibraryTrashDetail();
       const papers = libraryTrashCache.archivedPapers || [];
       const qs = libraryTrashCache.withdrawnQuestions || [];
       const total = local.folders.length + local.smartFolders.length + papers.length + qs.length;
@@ -11471,7 +11523,12 @@
       const local = readLocalTrash();
       const papers = libraryTrashCache.archivedPapers || [];
       const qs = libraryTrashCache.withdrawnQuestions || [];
-      const total = local.folders.length + local.smartFolders.length + papers.length + qs.length;
+      // 计数用 counts：明细还没读过时数组是空的，但数字已经在手上（摘要模式给的）。
+      // 解构取值、不写「counts.加字段名」这种写法 —— 那写法被侧栏的资料计数占着。
+      const { papers: trashPaperCount = 0, questions: trashQuestionCount = 0 } = libraryTrashCache.counts || {};
+      const paperCount = Number(trashPaperCount || 0);
+      const questionCount = Number(trashQuestionCount || 0);
+      const total = local.folders.length + local.smartFolders.length + paperCount + questionCount;
 
       const badgeEl = document.getElementById('recycleBinTotalBadge');
       if (badgeEl) badgeEl.innerText = `${total} 项待处理`;
@@ -11501,6 +11558,12 @@
         : '';
       if (!total) {
         listEl.innerHTML = errorNote + `<div class="py-16 text-center text-slate-400 text-xs">🗑️ 回收站是空的，删除的文件夹、智能视图、试卷或试题会先暂存在这里。</div>`;
+        return;
+      }
+      // 有东西、但明细还没读回来：说「正在读取」，别印「暂无已删除项目」——
+      // 那个提示会让用户以为东西不见了。
+      if (!libraryTrashCache.detailLoaded) {
+        listEl.innerHTML = errorNote + `<div class="py-16 text-center text-slate-400 text-xs">正在读取回收站明细…</div>`;
         return;
       }
 
