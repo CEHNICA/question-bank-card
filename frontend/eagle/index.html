@@ -301,7 +301,7 @@
               class="hidden items-center gap-1 px-1.5 py-0.5 text-[11px] font-medium rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer transition-colors shrink-0"
             >◫ 侧栏</button>
 
-            <div class="relative flex-1 min-w-[10rem] max-w-md">
+            <div class="relative flex-1 min-w-0 max-w-md">
               <div class="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none text-slate-400">
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -346,12 +346,12 @@
               <span>篮 <span id="headerBasketCount">1</span></span>
             </button>
             <span class="text-slate-300">|</span>
-            <span class="text-slate-400">
+            <span class="text-slate-400 hidden md:inline">
               共 <strong id="matchedQuestionCount" class="font-bold text-slate-800">...</strong> 题
             </span>
             <label class="flex items-center gap-1.5 cursor-pointer select-none">
               <input id="selectAllCheckbox" onchange="toggleSelectAll(this.checked)" type="checkbox" class="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 focus:ring-0">
-              <span>全选 (<span id="selectedCountText">已勾选 0 题</span>)</span>
+              <span>全选<span class="hidden lg:inline"> (<span id="selectedCountText">已勾选 0 题</span>)</span></span>
             </label>
             <button
               onclick="saveCurrentAsSmartFolder()"
@@ -359,7 +359,7 @@
               title="存为智能视图"
             >
               <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
-              <span class="hidden sm:inline">存视图</span>
+              <span class="hidden lg:inline">存视图</span>
             </button>
           </div>
         </div>
