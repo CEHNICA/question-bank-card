@@ -6493,10 +6493,24 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
   // ---------------------------------------------------------------- 事件
 
   let searchTimer = null;
-  ui.search.value = state.q;
-  ui.search.addEventListener("input", () => {
+  // 中文输入法：拼音还没上屏时也会触发 input。那会儿就拿拼音去搜，
+  // 用户会先看到一次「0 条结果」，地址栏里还会留下 ?q=拼音 的脏链接
+  // （复制发给别人，别人搜的是拼音）。项目里另一个搜索框（标签管理器）
+  // 早就是这个标准写法，这里跟它对齐。
+  let searchComposing = false;
+  const scheduleSearch = () => {
     window.clearTimeout(searchTimer);
     searchTimer = window.setTimeout(() => { state.q = ui.search.value; syncUrl(); load(); }, 250);
+  };
+  ui.search.value = state.q;
+  ui.search.addEventListener("compositionstart", () => { searchComposing = true; });
+  ui.search.addEventListener("compositionend", () => {
+    searchComposing = false;
+    scheduleSearch();   // 有些浏览器上屏后不再派发 input，这里兜底
+  });
+  ui.search.addEventListener("input", (event) => {
+    if (searchComposing || event.isComposing) return;
+    scheduleSearch();
   });
   ui.source.addEventListener("change", () => { state.document = ui.source.value; syncUrl(); load(); });
   $("sortSelect").addEventListener("change", () => { state.sort = $("sortSelect").value; syncUrl(); load(); });
