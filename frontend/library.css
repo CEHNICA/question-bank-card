@@ -2944,6 +2944,54 @@ body.library-page {
   box-shadow: 0 0 0 3px var(--accent-ring), 0 10px 15px -3px rgba(0, 0, 0, 0.06) !important;
 }
 
+
+
+/* ─────────────────────────────────────────────────────────────
+   第二十轮：窄屏顶栏别把「切换到 Eagle 现代视图」压成一列竖排字。
+
+   .library-top-navigation 是 display:flex + nowrap（骨架在 styles.css 的
+   .app-topbar > .library-top-navigation）。它里面挤着搜索框（最小 90px）、
+   「切换到 Eagle 现代视图」（内容约 140px）、标签管理（32px），外加两个
+   14px 间距 —— 合计 290px，比 320px 视口能给的 288px 还宽一点。flex 只能靠
+   压缩来腾地方，于是那个链接被压成 63px 宽、98px 高：一列一个字的竖条，
+   还从 96px 高的顶栏里溢出去，压住右边的「题目详情」按钮。
+
+   窄屏改成两行：搜索独占一行，链接和标签管理另起一行。
+   宽屏是鼠标操作，这一行都不动。
+   ───────────────────────────────────────────────────────────── */
+@media (max-width: 560px) {
+  body.library-page .library-top-navigation { flex-wrap: wrap; row-gap: 6px; }
+  body.library-page .library-top-navigation .library-search { flex: 1 1 100%; }
+  body.library-page .library-top-navigation > a { flex: 0 1 auto; min-width: 0; }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   第二十轮：「还有活没干」待办条也别把整页撑宽。
+
+   .library-todos 是 flex: 0 0 auto（不许缩），里面的 summary 又是
+   white-space: nowrap。最小字体调到 24px 后，「801 题没知识点（5 题有
+   AI 建议）」这一串要 640px 宽 —— 768px 视口下整页横向拖到 954px，
+   1280px 视口下它直接压到右边「AI 生成答案」那条上。
+
+   改成：待办条允许收缩，前半句（「还有活没干」）不缩，后半句用省略号截断。
+   放得下的时候一点不变。
+   ───────────────────────────────────────────────────────────── */
+.library-todos:not([hidden]) { flex: 0 1 auto; min-width: 0; }
+.library-todos .library-todo-menu { min-width: 0; }
+.library-todos .library-todo-summary { min-width: 0; max-width: 100%; }
+.library-todos .library-todo-lead { flex: none; }
+.library-todos .library-todo-bits { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* ───── 20. 目录栏的分类/学段切换不许越栏 ─────
+   最小字体 24px 时，「知识点 208 / 解题方法 58 / 自定义 2」三颗徽标
+   合计约 390px，左栏只有 212px：flex:1 + white-space:nowrap 不换行，
+   整排溢出左栏压到中间栏的题卡上。允许换行后，字号放大就竖着排，绝不越栏。
+   正常字号下三颗刚好排一行 → 布局一个像素都不动。 */
+.library-directory-kinds,
+.library-directory-stages { flex-wrap: wrap; }
+.library-directory-kind,
+.library-directory-stages .button { min-width: 0; }
+
 /* ─────────────────────────────────────────────────────────────
    窄屏触摸目标。这里有两层保险：
    1) 放在文件最后 —— 同 specificity 时源序在后者胜，插在中间会被后面

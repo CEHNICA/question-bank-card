@@ -487,10 +487,54 @@ body.library-page {
 @media (max-width: 700px) {
   .eagle-filter-container { flex-wrap: wrap; row-gap: 6px; }
   .eagle-capsules-group { flex-wrap: wrap; flex-shrink: 1; min-width: 0; row-gap: 4px; }
-  .eagle-smart-folder-capsule { flex-shrink: 0; }
+  .eagle-smart-folder-capsule { flex-shrink: 1; min-width: 0; }
 }
 
 /* 窄屏上这些胶囊只有 28px 高，手指点不准（规矩同 library.css 末尾那条）。 */
 @media (max-width: 979px) {
   .eagle-capsule-btn, .eagle-smart-folder-btn { height: 32px; }
+}
+
+/* ≤979px：筛选胶囊挤在一行里，智能文件夹那颗必须自己单行 ——
+   折成两行时，24px 的最小字体会把它压成 48×360 的一列字，还把页面撑宽。 */
+@media (max-width: 979px) {
+  .eagle-smart-folder-btn { white-space: nowrap; }
+  .eagle-smart-folder-btn > span:last-child { white-space: nowrap; }
+}
+
+/* ───── 6. 文字放大时，胶囊不许被压成竖排单字柱，也不许把整页撑宽 ─────
+   用户把浏览器「最小字体大小」调到 24px（Chrome 设置 → 外观 → 字体），
+   胶囊里的 12px 字会涨到 24px，而胶囊自己是固定高度的盒子：
+     · .eagle-smart-folder-btn 里的「智能文件夹」没有 nowrap，
+       被 flex 一压就成 24px 宽、180px 高的一列字（1280px 视口就能看到），
+       文字顺着顶栏往外淌，把筛选条撑成两行；
+     · .eagle-smart-folder-capsule 写了 flex-shrink: 0，硬撑着不缩，
+       320px 视口下直接把页面撑出 6px 横向滚动条；
+     · .eagle-capsules-group 同样 flex-shrink: 0，5 颗胶囊在 768px 视口
+       放大后撑到 891px，整页跟着横向拖。
+
+   修法（三个字：宁可截断，不可塌列）：
+     · 标签文字单行 + 省略号 —— 永远是一行横向的字，绝不变成一列竖字；
+     · 智能文件夹按钮不参与收缩 —— 保住自然宽度，标签才不会被挤成一条缝；
+     · 胶囊组允许收缩，宽度不够时由每颗胶囊自己的省略号兜底。 */
+.eagle-capsules-group { flex-shrink: 1; min-width: 0; }
+.eagle-capsule-wrapper { min-width: 0; max-width: 100%; }
+.eagle-capsule-btn { min-width: 0; max-width: 100%; }
+.eagle-capsule-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eagle-smart-folder-capsule { flex-shrink: 0; min-width: 0; }
+.eagle-smart-folder-btn { min-width: 0; max-width: 100%; }
+.eagle-smart-folder-btn > span:last-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* ≤979px：胶囊组和智能文件夹挤在一行里全被压扁。
+   让筛选容器换行（智能文件夹单独占一行），胶囊组内部再自己换行，
+   每颗胶囊都能保住完整文字，不用靠省略号截断。 */
+@media (max-width: 979px) {
+  .eagle-filter-container { flex-wrap: wrap; row-gap: 6px; }
+  .eagle-capsules-group { flex-wrap: wrap; row-gap: 4px; }
 }
