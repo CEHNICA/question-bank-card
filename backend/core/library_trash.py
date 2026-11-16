@@ -53,12 +53,32 @@ def _error(message: str, status: int = 400):
     return error(message, status)
 
 
-def _paper_counts(papers) -> dict:
+def _paper_names(paper_ids) -> dict:
+    """一次把资料名查齐。
+
+    别用 select_related("paper")：Paper 上有 pages / structure /
+    processing_plan / photos 四个 JSON 字段，一份教材的 structure 就有
+    28 万字节。join 一次，445 道下架题就把同一份资料的 JSON 重新解析 445 遍
+    —— 回收站接口 2.5 秒里 2.2 秒花在这上面，真正常用的字段只要 20 毫秒。
+
+    名字的口径跟 Paper.display_name 一致：人改过的任务名优先，没有就用文件名。
+    """
+    if not paper_ids:
+        return {}
+    names = {}
+    for pk, task_name, filename in Paper.objects.filter(pk__in=paper_ids).values_list(
+        "pk", "task_name", "filename"
+    ):
+        names[str(pk)] = (task_name or "").strip() or (filename or "")
+    return names
+
+
+def _paper_counts(paper_ids) -> dict:
     """每份资料下还有几道在库里、几道在下架。"""
-    if not papers:
+    if not paper_ids:
         return {}
     rows = (
-        PublishedQuestion.objects.filter(paper__in=papers)
+        PublishedQuestion.objects.filter(paper_id__in=paper_ids)
         .values("paper_id")
         .annotate(
             published=Count("pk", filter=Q(status=PublishedQuestion.Status.PUBLISHED)),
@@ -125,17 +145,36 @@ def _question_json(publication: PublishedQuestion, paper_name: str) -> dict:
 
 
 def _archived_paper_rows() -> list[dict]:
-    papers = list(Paper.objects.filter(archived=True).order_by("-updated_at"))
-    counts = _paper_counts(papers)
+    # 只取面板要印的那几列。资料本身的 pages/structure/planning/photos 是
+    # 几百 KB 的 JSON，回收站一个字节都用不上。
+    papers = list(
+        Paper.objects.filter(archived=True)
+        .only("id", "task_name", "filename", "material_type", "archived", "updated_at")
+        .order_by("-updated_at")
+    )
+    counts = _paper_counts([paper.pk for paper in papers])
     return [_paper_json(paper, counts.get(str(paper.id), {})) for paper in papers]
 
 
 def _withdrawn_question_rows() -> list[dict]:
-    rows = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.WITHDRAWN).select_related("paper")
+    # 只取面板要印的那几列：题面要读（stem/sources/section 都在 content 里），
+    # extras 一个字段都用不上，别读。
+    publications = list(
+        PublishedQuestion.objects.filter(status=PublishedQuestion.Status.WITHDRAWN).only(
+            "id",
+            "number",
+            "question_type",
+            "paper_id",
+            "source_filename",
+            "published_at",
+            "withdrawn_at",
+            "content",
+        )
+    )
+    names = _paper_names({item.paper_id for item in publications if item.paper_id})
     result = []
-    for publication in rows:
-        paper = publication.paper
-        paper_name = paper.display_name if paper else (publication.source_filename or "未知资料")
+    for publication in publications:
+        paper_name = names.get(str(publication.paper_id), "") or (publication.source_filename or "未知资料")
         result.append(_question_json(publication, paper_name))
     return result
 

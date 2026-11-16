@@ -15,6 +15,9 @@ from .models import LibraryJob, LibraryTagAssignment, PublishedQuestion
 
 MAX_BATCH_IDS = 500
 DEFAULT_LIMIT = 40
+# bulk=1 时的单次上限：整库一次拉走用。题库工作台首屏要全量题目，
+# 拆成九次请求的话每次都重算一遍跟分页无关的统计，光 API 就要十二秒。
+BULK_LIMIT_CAP = 1000
 # 「原卷顺序」承诺的是这份资料上印出来的先后。试卷的题号本身就是那个先后，
 # 教材不是：每章的习题都从 1 重新编，真库两本教材里「第 1 题」各有 94 / 82 张，
 # 按题号排等于把各章的「第 1 题」堆在一起（698 张里只有 14 张落在书上位置）。
@@ -464,8 +467,13 @@ def selected_tag_names(params) -> dict:
 def library_list(request):
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
+    # bulk=1：整库一次拉走。
+    # 题库工作台首屏要全量题目。以前拆成 limit=100 的九次请求，每次都把
+    # facets / presence / tag_work 这些跟分页无关的统计重算一遍 —— 九次请求
+    # 在同一个进程里排成一队，光 API 就要十二秒。改成一次给完。
+    bulk = request.GET.get("bulk") == "1"
     try:
-        limit = min(100, max(1, int(request.GET.get("limit", str(DEFAULT_LIMIT)))))
+        limit = min(BULK_LIMIT_CAP if bulk else 100, max(1, int(request.GET.get("limit", str(DEFAULT_LIMIT)))))
         offset = max(0, int(request.GET.get("offset", "0")))
     except ValueError:
         return json_response({"error": "limit 与 offset 必须是整数"}, status=400)
@@ -491,6 +499,20 @@ def library_list(request):
     next_offset = offset + len(items)
     if wanted_param:
         # 只为刷新而读：不带全库统计、排队数量这些重活，前端也只合并这几行。
+        return json_response(
+            {
+                "total": total,
+                "items": items,
+                "sort": sort,
+                "limit": limit,
+                "offset": offset,
+                "has_more": next_offset < total,
+                "next_offset": next_offset if next_offset < total else None,
+            }
+        )
+    if bulk:
+        # 批量模式只给题目本身。facets / presence / ai 这些是全库统计，
+        # 跟分页无关 —— 批量请求再算一遍就是白算，题库工作台也不用它们。
         return json_response(
             {
                 "total": total,
