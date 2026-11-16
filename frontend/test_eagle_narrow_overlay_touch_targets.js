@@ -203,6 +203,60 @@ assertInMedia(
   "顶栏试题篮入口按钮抬到 32px"
 );
 
+// ---- ②d 其余浮层（第三轮）：答案解析编辑器 / 题目修改 / 文件夹选择 /
+// 删除确认 / 图片灯箱 / A4 试卷预览 / 原卷核验 ------------------------------
+// 390px 实测：答案解析编辑器的预览列是固定 w-[400px]，整列越界到 x=681；
+// 题目修改弹窗的表单 w-1/2 只剩 ~195px，顶栏提示文字溢出到 x=442；
+// 其余弹窗的 ✕ 与小按钮只有 18~26px 高。
+
+assertInMedia(
+  "max-width: 768px",
+  /#solutionEditorModal\s+\.se-body\s*\{[^}]*flex-direction:\s*column/,
+  "答案解析编辑器窄屏改上下堆叠"
+);
+assertInMedia(
+  "max-width: 768px",
+  /#solutionEditorModal\s+#solutionEditorColumns\s*>\s*div\s*\{[^}]*width:\s*auto/,
+  "答案解析编辑器的固定 400px 预览列改成自适应"
+);
+assertInMedia(
+  "max-width: 768px",
+  /#editQuestionModal\s+\.eq-body\s*\{[^}]*flex-direction:\s*column/,
+  "题目修改弹窗窄屏改上下堆叠"
+);
+assertInMedia(
+  "max-width: 768px",
+  /#editQuestionModal\s+\.eq-left\s*\{[^}]*width:\s*100%/,
+  "题目修改弹窗表单整栏吃满宽度"
+);
+
+const MODAL_TOUCH = [
+  ["#folderPickerModal .x-close", "文件夹选择弹窗关闭按钮"],
+  ["#deleteConfirmModal .x-close", "删除确认弹窗关闭按钮"],
+  ["#editQuestionModal .x-close", "题目修改弹窗关闭按钮"],
+  ["#originalPaperModal .x-close", "原卷核验弹窗关闭按钮"],
+  ["#solutionEditorModal .x-close", "答案解析编辑器关闭按钮"],
+  ["#folderPickerModal #folderPickerTreeList button", "文件夹树行"],
+  ["#deleteConfirmModal #deleteConfirmBtn", "删除确认主按钮"],
+  ["#editQuestionModal input", "题目修改输入控件"],
+  ["#originalPaperModal #opRawImgLink", "原卷大图链接"],
+  ["#solutionEditorModal #solutionEditorSearchInput", "解析编辑器搜索框"],
+  ["#imageLightboxModal button", "图片灯箱按钮"],
+  ["#basketPreviewModal button", "A4 试卷预览弹窗按钮"]
+];
+for (const [sel, label] of MODAL_TOUCH) {
+  assertInMedia(
+    "max-width: 640px",
+    // 选择器可能是逗号合并列表（`#a .x-close,\n#b .x-close { ... }`），
+    // 所以只要求「该选择器出现在同一条规则的选择器前段」，用 [^{}]* 跨过其余选择器。
+    new RegExp(
+      sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s*") +
+        "[^{}]*\\{[^}]*min-(?:height|width):\\s*32px"
+    ),
+    `${label} 触摸目标抬到 32px`
+  );
+}
+
 // ---- ③ 宽屏零变化：这些选择器不得出现在媒体查询块外 ------------------------
 
 const WIDE_FORBIDDEN = [
@@ -219,7 +273,18 @@ const WIDE_FORBIDDEN = [
   "#tagManagerModal .tm-body",
   "#tagManagerModal #modalTagGroupsNav",
   "#tagManagerModal .tm-head",
-  "#tagManagerModal #modalTagList .truncate"
+  "#tagManagerModal #modalTagList .truncate",
+  "#solutionEditorModal .se-body",
+  "#solutionEditorModal .se-left",
+  "#editQuestionModal .eq-body",
+  "#editQuestionModal .eq-left",
+  "#folderPickerModal .x-close",
+  "#deleteConfirmModal .x-close",
+  "#editQuestionModal .x-close",
+  "#originalPaperModal .x-close",
+  "#solutionEditorModal .x-close",
+  "#imageLightboxModal button",
+  "#basketPreviewModal button"
 ];
 for (const sel of WIDE_FORBIDDEN) {
   assert.ok(
@@ -246,6 +311,20 @@ for (const [cls, label] of HOOKS) {
   );
 }
 
+// 关闭按钮钩子 x-close 必须覆盖这五个弹窗（窄屏下统一抬到 32px）
+for (const [modal, label] of [
+  ["folderPickerModal", "文件夹选择"],
+  ["deleteConfirmModal", "删除确认"],
+  ["editQuestionModal", "题目修改"],
+  ["originalPaperModal", "原卷核验"],
+  ["solutionEditorModal", "答案解析编辑器"]
+]) {
+  const block = html.slice(html.indexOf(`id="${modal}"`));
+  const end = block.indexOf("\n  </div>");
+  const scope = end > 0 ? block.slice(0, end) : block;
+  assert.match(scope, /class="[^"]*\bx-close\b[^"]*"/, `${label}弹窗缺少 x-close 钩子`);
+}
+
 // ---- ⑤ 窄屏关闭/清空按钮不许再是裸 Tailwind 尺寸类 ------------------------
 // （若有人把钩子删了只留 Tailwind class，本断言会红）
 
@@ -253,6 +332,75 @@ assert.match(
   html,
   /#basketExportModal\s+\.bkm-close\s*\{[^}]*min-width:\s*32px/,
   "bkm-close 必须带 32px 最小尺寸"
+);
+
+// ---- ⑥ 第四轮：题目修改弹窗（eq-*）窄屏堆叠后的三处真缺陷 ------------------
+//
+// 390×844 实测：
+//   ① 预览区容器还挂着 w-1/2 → 堆叠后右半屏一直空着（宽度只有 178px）。
+//   ② 表单区被 flex 压成 137px 高（内容 472px），打开弹窗只能看到一条缝。
+//   ③ 弹窗打开时 stemInput.focus() 把滚动祖先滚到底，「题型 / 试题评分」
+//      两行被顶出视野，用户根本看不到第一行。
+
+assertInMedia(
+  "max-width: 768px",
+  /#editQuestionModal\s+\.eq-right\s*\{[^}]*width:\s*100%/,
+  "题目修改弹窗预览区窄屏吃满整行宽度"
+);
+assertInMedia(
+  "max-width: 768px",
+  /#editQuestionModal\s+\.eq-left\s*\{[^}]*min-height:\s*2\d\dpx/,
+  "题目修改弹窗表单区窄屏不得被压扁"
+);
+assertInMedia(
+  "max-width: 768px",
+  /#editQuestionModal\s*>\s*div\s*>\s*div:first-child\s*\{[^}]*flex-wrap:\s*wrap/,
+  "题目修改弹窗头部窄屏允许换行（标题不再折成两行）"
+);
+assertInMedia(
+  "max-width: 768px",
+  /#editQuestionModal\s*>\s*div\s*>\s*div:last-child\s*\{[^}]*flex-wrap:\s*wrap/,
+  "题目修改弹窗底部窄屏允许换行（按钮文字不再被挤断行）"
+);
+assertInMedia(
+  "max-width: 640px",
+  /#editQuestionModal\s*>\s*div\s*>\s*div:last-child\s+button\s*\{[^}]*min-height:\s*32px/,
+  "题目修改弹窗底部按钮触摸目标抬到 32px"
+);
+
+// 打开弹窗时聚焦题干框不得把表单区滚走
+assert.match(
+  html,
+  /stemInput\.focus\(\{\s*preventScroll:\s*true\s*\}\)/,
+  "题目修改弹窗打开时聚焦题干框必须 preventScroll，否则窄屏首行被顶出视野"
+);
+
+// 预览区 class 钩子必须存在
+assert.match(
+  html,
+  /class="[^"]*\beq-right\b[^"]*"/,
+  "题目修改弹窗预览区缺少 class 钩子 eq-right"
+);
+
+// 宽屏不得有残留
+assert.ok(
+  !wideRules.includes("#editQuestionModal .eq-right"),
+  "#editQuestionModal .eq-right 只允许出现在窄屏媒体查询里，宽屏不得有残留规则"
+);
+
+// ---- ⑦ 第五轮：A4 试卷预览弹窗窄屏下的截断 --------------------------------
+// 390×844 实测：底部说明文字被 truncate 削剩「预览与导…」，徽章被削成
+// 「A4 · 共 1…」，两处都是「有信息但看不到」。
+
+assertInMedia(
+  "max-width: 640px",
+  /#basketPreviewModal\s+#previewStatusLine\s*\{[^}]*white-space:\s*normal/,
+  "A4 预览弹窗底部说明文字窄屏不得被 truncate 削掉"
+);
+assertInMedia(
+  "max-width: 640px",
+  /#basketPreviewModal\s+#previewStatusBadge\s*\{[^}]*white-space:\s*normal/,
+  "A4 预览弹窗页数徽章窄屏不得被 truncate 削掉"
 );
 
 console.log(

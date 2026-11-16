@@ -193,6 +193,46 @@
       #basketExportModal .bkm-close { min-width: 32px; min-height: 32px; }
       #basketExportModal #basketModalItemList button { min-width: 32px; min-height: 32px; }
     }
+    /* ---- 其余浮层的窄屏体检修整（第三轮，390×844 实测）----
+       ① 答案解析编辑器：双栏实时预览的列是固定 w-[400px]，390px 下整列越界
+          （left 281 → right 681，超出屏幕 291px），左侧选题栏又占掉 256px。
+          → 窄屏改上下堆叠：选题栏压成顶部一条（限高），预览列改成自适应宽度。
+       ② 题目修改弹窗：左表单 w-1/2 + 右预览并排，窄屏下表单只剩 ~195px，
+          顶栏提示「光标实时联动 · 题干正文 · 第 141 字符」一路溢出到 x=442。
+          → 窄屏改上下堆叠，表单整栏吃满宽度。
+       ③ 一批弹窗的 ✕ 与小按钮在窄屏只有 18~26px 高，手指头根本点不准。 */
+    @media (max-width: 768px) {
+      #solutionEditorModal .se-body { flex-direction: column; overflow-y: auto; }
+      #solutionEditorModal .se-left {
+        width: 100%; max-height: 34vh; border-right: none;
+        border-bottom: 1px solid #f1f5f9;
+      }
+      #solutionEditorModal #solutionEditorColumns {
+        flex-direction: column; overflow-y: auto; gap: 12px;
+      }
+      #solutionEditorModal #solutionEditorColumns > div {
+        width: auto !important; flex: 1 1 auto !important; min-width: 0;
+      }
+      #editQuestionModal .eq-body { flex-direction: column; overflow-y: auto; }
+      #editQuestionModal .eq-left {
+        width: 100%; border-right: none; border-bottom: 1px solid #f1f5f9;
+        /* 堆叠后表单区不能被 flex 压扁成一条缝，要留出够用的高度 */
+        flex: 1 1 auto; min-height: 260px;
+      }
+      /* 预览区原来靠 w-1/2 定宽，堆叠后必须放开，否则右半屏一直空着 */
+      #editQuestionModal .eq-right {
+        width: 100%; flex: 1 1 auto; min-height: 240px; border-top: 1px solid #f1f5f9;
+      }
+      #editQuestionModal .eq-left * { overflow-wrap: anywhere; }
+      /* 头部：标题、题号徽章、✕ 挤在一行会把标题折成两行，窄屏允许换行 */
+      #editQuestionModal > div > div:first-child { flex-wrap: wrap; row-gap: 4px; }
+      #editQuestionModal > div > div:first-child > div { flex-wrap: wrap; min-width: 0; }
+      #editQuestionModal > div > div:first-child span { white-space: nowrap; }
+      /* 底部：说明文字别把「取消 / 保存」挤到换行 */
+      #editQuestionModal > div > div:last-child { flex-wrap: wrap; row-gap: 6px; }
+      #editQuestionModal > div > div:last-child > span { flex: 1 1 100%; }
+      #editQuestionModal > div > div:last-child button { white-space: nowrap; }
+    }
     @media (max-width: 640px) {
       /* 触摸目标统一抬到 32px（窄屏手指头最小能打中的尺寸） */
       .ql-head-actions button { min-height: 32px; }
@@ -252,6 +292,52 @@
       #globalSearchInput { min-height: 32px; }
       #btnToggleFilterPanel,
       button[title="打开试题篮"] { min-height: 32px; }
+      /* 弹窗关闭按钮：文件夹选择 / 删除确认 / 题目修改 / 原卷核验 / 答案解析编辑器 */
+      #folderPickerModal .x-close,
+      #deleteConfirmModal .x-close,
+      #editQuestionModal .x-close,
+      #originalPaperModal .x-close,
+      #solutionEditorModal .x-close { min-width: 32px; min-height: 32px; }
+      /* 文件夹选择弹窗：树行与底部按钮 */
+      #folderPickerModal #folderPickerTreeList button { min-height: 32px; }
+      #folderPickerModal #folderPickerNewBtn,
+      #folderPickerModal > div > div:last-child button { min-height: 32px; }
+      /* 删除确认弹窗 */
+      #deleteConfirmModal #deleteConfirmBtn,
+      #deleteConfirmModal > div > div:last-child button { min-height: 32px; }
+      /* 题目修改弹窗的输入控件 */
+      #editQuestionModal input,
+      #editQuestionModal select,
+      #editQuestionModal textarea { min-height: 32px; }
+      /* 底部「取消 / 保存并更新题目」按钮 */
+      #editQuestionModal > div > div:last-child button { min-height: 32px; }
+      /* A4 试卷预览：窄屏下底部说明文字被 truncate 削剩「预览与导…」，
+         徽章也被削成「A4 · 共 1…」→ 都改成完整显示（说明最多两行）。 */
+      #basketPreviewModal > div > div:last-child { flex-wrap: wrap; row-gap: 6px; }
+      #basketPreviewModal #previewStatusLine {
+        flex: 1 1 100%; white-space: normal; text-overflow: clip;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      }
+      #basketPreviewModal #previewStatusBadge { white-space: normal; }
+      /* 原卷核验弹窗 */
+      #originalPaperModal #opRawImgLink {
+        min-height: 32px; display: inline-flex; align-items: center;
+      }
+      #originalPaperModal button[title="缩小原卷"],
+      #originalPaperModal button[title="放大原卷"],
+      #originalPaperModal button[title="把整页原卷缩到刚好放进窗口 (快捷键 0)"] { min-height: 32px; }
+      #originalPaperModal button[title="缩小原卷"],
+      #originalPaperModal button[title="放大原卷"] { min-width: 32px; }
+      /* 答案解析编辑器：列头里的 ✕ 与「保存本题 / 重新读取」也是小按钮 */
+      #solutionEditorModal #solutionEditorColumns button { min-width: 32px; min-height: 32px; }
+      /* 图片灯箱 */
+      #imageLightboxModal button { min-width: 32px; min-height: 32px; }
+      /* A4 试卷预览弹窗：头部「重新排版 / ✕」与底部导出按钮 */
+      #basketPreviewModal button { min-width: 32px; min-height: 32px; }
+      /* 答案解析编辑器 */
+      #solutionEditorModal #solutionEditorSearchInput { min-height: 32px; }
+      #solutionEditorModal .se-left button { min-height: 32px; }
+      #solutionEditorModal > div > div:last-child button { min-height: 32px; }
     }
       .compact-row .katex-display {
       display: inline !important;
@@ -921,7 +1007,7 @@
     <div class="bg-white rounded-xl shadow-2xl w-full max-w-md border border-slate-200 overflow-hidden text-xs" onclick="event.stopPropagation()">
       <div class="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50/80">
         <span id="folderPickerTitle" class="font-bold text-slate-800 text-sm">选择目标文件夹</span>
-        <button type="button" onclick="closeFolderPickerModal()" class="text-slate-400 hover:text-slate-600 p-1 rounded cursor-pointer">✕</button>
+        <button type="button" onclick="closeFolderPickerModal()" class="x-close text-slate-400 hover:text-slate-600 p-1 rounded cursor-pointer">✕</button>
       </div>
       <div id="folderPickerSubtitle" class="px-4 pt-2.5 text-[11px] text-slate-500"></div>
       <div id="folderPickerTreeList" class="p-3 max-h-72 overflow-y-auto space-y-1"></div>
@@ -947,7 +1033,7 @@
           <span id="deleteConfirmIcon" class="text-base shrink-0">⚠️</span>
           <span id="deleteConfirmTitle" class="font-bold text-sm text-slate-800 truncate">确认删除？</span>
         </div>
-        <button type="button" onclick="closeDeleteConfirmModal()" class="text-slate-400 hover:text-slate-700 cursor-pointer text-sm leading-none p-1">✕</button>
+        <button type="button" onclick="closeDeleteConfirmModal()" class="x-close text-slate-400 hover:text-slate-700 cursor-pointer text-sm leading-none p-1">✕</button>
       </div>
       <div class="p-4 space-y-3">
         <p id="deleteConfirmSummary" class="text-xs text-slate-700 leading-relaxed"></p>
@@ -1099,13 +1185,13 @@
           <span class="text-base font-bold text-slate-800">✏️ 修改与校订题目</span>
           <span id="editModalQBadge" class="text-xs font-mono px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold"></span>
         </div>
-        <button onclick="closeEditQuestionModal()" class="text-slate-400 hover:text-slate-600 p-1 rounded-md text-base">✕</button>
+        <button onclick="closeEditQuestionModal()" class="x-close text-slate-400 hover:text-slate-600 p-1 rounded-md text-base">✕</button>
       </div>
 
       <!-- 编辑主体：左侧表单 + 右侧实时预览 -->
-      <div class="flex-1 flex overflow-hidden">
+      <div class="eq-body flex-1 flex overflow-hidden">
         <!-- 左侧编辑表单 -->
-        <div class="w-1/2 p-5 overflow-y-auto space-y-4 border-r border-slate-100 text-xs text-slate-700">
+        <div class="eq-left w-1/2 p-5 overflow-y-auto space-y-4 border-r border-slate-100 text-xs text-slate-700">
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block font-semibold mb-1 text-slate-700">题型</label>
@@ -1195,7 +1281,7 @@
         </div>
 
         <!-- 右侧实时排版预览 -->
-        <div class="w-1/2 p-5 overflow-y-auto bg-slate-50/50 flex flex-col">
+        <div class="eq-right w-1/2 p-5 overflow-y-auto bg-slate-50/50 flex flex-col">
           <div class="flex items-center justify-between mb-2">
             <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">实时渲染排版预览</span>
             <span class="text-[10px] text-emerald-600 font-medium">KaTeX 实时排版</span>
@@ -1575,7 +1661,7 @@
         </div>
         <div class="flex items-center gap-3">
           <a id="opRawImgLink" href="#" target="_blank" class="text-xs text-emerald-600 hover:underline">在新标签页查看大图</a>
-          <button onclick="closeOriginalPaperModal()" class="text-slate-400 hover:text-slate-700 text-base cursor-pointer px-1.5 py-0.5 rounded hover:bg-slate-200/60" title="关闭 (Esc)">✕</button>
+          <button onclick="closeOriginalPaperModal()" class="x-close text-slate-400 hover:text-slate-700 text-base cursor-pointer px-1.5 py-0.5 rounded hover:bg-slate-200/60" title="关闭 (Esc)">✕</button>
         </div>
       </div>
 
@@ -7808,7 +7894,9 @@
       if (stemInput) {
         lastActiveEditInput = stemInput;
         setTimeout(() => {
-          stemInput.focus();
+          // preventScroll：窄屏下焦点落在题干框时会把滚动祖先（表单区）滚到底，
+          // 导致弹窗一打开「题型 / 试题评分」就被顶出视野。
+          stemInput.focus({ preventScroll: true });
           syncPreviewCursorPosition(stemInput);
         }, 60);
       }
@@ -13280,13 +13368,13 @@
         </div>
         <div class="flex items-center gap-2.5 shrink-0">
           <span id="solutionEditorStatus" class="text-[11px] text-slate-500"></span>
-          <button type="button" onclick="closeSolutionEditor()" class="text-slate-400 hover:text-slate-700 text-sm px-2" title="关闭">✕</button>
+          <button type="button" onclick="closeSolutionEditor()" class="x-close text-slate-400 hover:text-slate-700 text-sm px-2" title="关闭">✕</button>
         </div>
       </div>
 
-      <div class="flex flex-1 min-h-0 overflow-hidden">
+      <div class="se-body flex flex-1 min-h-0 overflow-hidden">
         <!-- 左侧选题：快速定位 / 多题加入工作台 -->
-        <div class="w-64 border-r border-slate-100 bg-slate-50/60 flex flex-col shrink-0 min-h-0">
+        <div class="se-left w-64 border-r border-slate-100 bg-slate-50/60 flex flex-col shrink-0 min-h-0">
           <div class="p-2 space-y-1.5 border-b border-slate-100 shrink-0">
             <input id="solutionEditorSearchInput" type="text" placeholder="搜题号 / 出处 / 题干..."
                    oninput="solutionEditorSearch(this.value)"
