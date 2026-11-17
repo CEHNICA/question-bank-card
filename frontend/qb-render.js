@@ -841,6 +841,12 @@
     element.className = width >= DENSE_TABLE_COLUMNS ? "qb-table qb-table-dense" : "qb-table";
     table.rows.forEach((row, rowIndex) => {
       const tr = doc.createElement("tr");
+      // 首行整行都是表头格时，给这行打个标记：表格跨页时后一页要把这行再印一遍，
+      // 不然读者根本看不出那一列是什么（exam-layout.js 靠这个 class 找表头行）。
+      // 只认「整行都是表头格」的行 —— 半表头半数据的行重复出来是错的。
+      if (rowIndex === 0 && row.length && row.every((cell) => cell.header || table.header)) {
+        tr.classList.add("qb-table-head-row");
+      }
       let used = 0;
       row.forEach((cell) => {
         const td = doc.createElement(cell.header || (table.header && rowIndex === 0) ? "th" : "td");

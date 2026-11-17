@@ -224,10 +224,15 @@
       }
       if (!stem && node.matches(".print-question")) result.prepend(element(node.ownerDocument, "div", "exam-continuation-label", `第 ${parseInt(node.querySelector(".qb-number")?.textContent, 10) || "?"} 题（续）`));
       if (node.matches(".print-answer-row") && result.firstElementChild?.tagName !== "STRONG") result.prepend(element(node.ownerDocument, "strong", "exam-continued", `${node.querySelector("strong")?.textContent || ""}（续）`));
-      // Repeat a table header when the next page starts inside its body.
+      // Repeat the table's header row when the next page starts inside its body.
+      // 表头行是 qb-render.js 打的标记（整行都是表头格的那一行）。
+      // 早先这里找的是 <thead>，可渲染出来的表格根本没有 thead —— 整段等于
+      // 死代码：实测 40 行的表跨页后，第二页一个列名都没有，读者根本不知道
+      // 那一列是什么。片段自带表头行时（切点刚好在表头之后）不要重复加。
       result.querySelectorAll("table").forEach(table => {
-        if (table.querySelector("thead")) return;
-        const header = node.querySelector(`table[data-exam-table="${table.dataset.examTable}"] thead`); if (header) table.prepend(header.cloneNode(true));
+        if (table.querySelector("tr.qb-table-head-row")) return;
+        const source = node.querySelector(`table[data-exam-table="${table.dataset.examTable}"] tr.qb-table-head-row`);
+        if (source) table.insertBefore(source.cloneNode(true), table.firstElementChild);
       });
     }
     return result;

@@ -1461,6 +1461,19 @@ def _set_table_widths(table, widths):
             tc_w.set(qn("w:w"), twips(value))
 
 
+def _mark_repeat_header(trpr):
+    """把这一行标成「表头行」：表格跨页时 Word 会把它在每页顶端重复一遍。
+
+    不写 w:tblHeader 的话，续页只剩一串没有列名的数字 —— 跟 PDF 路线
+    （exam-layout.js 补表头行）必须是一个效果。
+    """
+    from docx.oxml import OxmlElement
+
+    header = OxmlElement("w:tblHeader")
+    # w:trPr 里的元素有固定顺序，tblHeader 排在 cantSplit / trHeight 之后。
+    trpr.insert_element_before(header, "w:tblCellSpacing", "w:jc", "w:hidden", "w:ins", "w:del", "w:trPrChange")
+
+
 def _write_table(document, rows, size, where):
     from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.oxml import OxmlElement
@@ -1512,9 +1525,15 @@ def _write_table(document, rows, size, where):
             shade = OxmlElement("w:shd")
             shade.set(qn("w:fill"), "F1F5F3")
             target._tc.get_or_add_tcPr().append(shade)
-    for row in table.rows:
+    # 首行整行都是表头格时，把它标成「表头行」：表格跨页时 Word 会把这一行
+    # 在每一页的顶端重复一遍。
+    head_row = bool(rows) and all(cell["header"] for cell in rows[0])
+    for index, row in enumerate(table.rows):
+        trpr = row._tr.get_or_add_trPr()
         avoid = OxmlElement("w:cantSplit")
-        row._tr.get_or_add_trPr().append(avoid)
+        trpr.append(avoid)
+        if index == 0 and head_row:
+            _mark_repeat_header(trpr)
 
 
 def _write_field(document, blocks, size, prefix="", where="", lead_segments=None):
