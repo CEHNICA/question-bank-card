@@ -917,7 +917,7 @@ class LibraryExportTests(ExportFixture, TestCase):
         paragraphs = xml.find("w:body", NS).findall("w:p", NS)
         question = [paragraph for paragraph in paragraphs if "离线合成题" in "".join(paragraph.itertext())][0]
         self.assertEqual(question.find("w:pPr/w:keepNext", NS).get(f"{{{NS['w']}}}val"), "1")
-        last_option = [paragraph for paragraph in paragraphs if "B. 乙" in "".join(paragraph.itertext())][0]
+        last_option = [paragraph for paragraph in paragraphs if "B.乙" in "".join(paragraph.itertext())][0]
         self.assertEqual(last_option.find("w:pPr/w:keepNext", NS).get(f"{{{NS['w']}}}val"), "0")
 
     def test_stale_ai_binding_is_rejected_without_overwriting_original(self):
@@ -1254,7 +1254,9 @@ class LibraryExportTests(ExportFixture, TestCase):
         xml = document_xml(result.content)
         self.assertIsNone(xml.find(".//w:tbl", NS))
         for key in "ABCD":
-            self.assertIn(key + ". " + "长选项" * 30, "".join(xml.itertext()))
+            # 单栏路径也是「标签 + 制表位 + 正文」（预览里标签和正文是两列），
+            # 所以取到的文本是「A.长选项…」，不是「A. 长选项…」。
+            self.assertIn(key + "." + "长选项" * 30, "".join(xml.itertext()))
 
     def test_a_non_choice_question_warns_before_its_own_letters_reach_the_paper(self):
         # 数学九上第 1 题：书上印的是 (1)(2)(3)(4) 和物体下面的括号，12 张图却被

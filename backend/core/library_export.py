@@ -2108,6 +2108,7 @@ def _write_field(
     first_paragraph=None,
     first_paragraph_tab_mm=None,
     right_indent_mm=None,
+    list_indent_mm=None,
 ):
     """Write one field (题干预览里的一个字段块) into the document.
 
@@ -2134,6 +2135,12 @@ def _write_field(
     ``table_column`` 是这些表所在那一列的 (左缘, 宽度) —— 量不到时按这一列居中。
     ``table_column_shrinks`` 说这一列会不会缩到内容那么宽（题干正文列会，
     答案正文列不会）。
+
+    ``list_indent_mm`` 是这一段所属**列表**的左缩进（毫米）—— 预览里
+    ``.qb-options`` 那个 2em 的 padding。多栏路径里选项被塞进表格格子，
+    格子的左缘已经是栏左缘，所以不用给（None）；单栏路径里选项直接写在
+    正文里，就要把这 2em 补上，否则整块选项比预览靠左 8.47 毫米
+    （第五十五轮实测：Word 顶格 0.11 毫米，预览 13.85 毫米）。
     """
     from docx.shared import Mm, Pt
 
@@ -2172,9 +2179,13 @@ def _write_field(
     if first_paragraph is not None:
         fmt = first_paragraph.paragraph_format
         if first_paragraph_tab_mm:
-            fmt.left_indent = Mm(first_paragraph_tab_mm)
+            # 悬挂缩进的第一行落在**标签**的位置上（预览的标签列），
+            # 正文落在标签 + 间隙那一列。列表自己的缩进（预览 .qb-options 的
+            # padding-left）加在左边，两边一起才是正文列的左缘。
+            base = float(list_indent_mm or 0.0)
+            fmt.left_indent = Mm(base + first_paragraph_tab_mm)
             fmt.first_line_indent = Mm(-first_paragraph_tab_mm)
-            fmt.tab_stops.add_tab_stop(Mm(first_paragraph_tab_mm))
+            fmt.tab_stops.add_tab_stop(Mm(base + first_paragraph_tab_mm))
             _font(first_paragraph.add_run("\t"), size)
         # 右缩进和悬挂缩进是两回事：栏间间隙要一直让出来，
         # 不能因为这一格没有 tab（标签栏没复用）就跟着丢掉。
@@ -3613,18 +3624,71 @@ def _document(captured, title, options, mode):
             if columns > 1:
                 _write_compact_options(document, item, size, columns, figures=figures)
             else:
+                # 单栏路径：预览里选项照样是「选项区缩进 2em + 标签列 + 正文列」
+                # 两列网格（.qb-options padding-left 2em，.qb-option 两列 grid），
+                # 不是顶格的一段话。原来这里直接写 "A. 正文"，整块选项比预览
+                # 靠左 8.47 毫米，折行也不回正文列（实测：Word 顶格 0.11 毫米，
+                # 预览正文列 13.85 毫米）。
+                #
+                # 这里照抄预览：段落左缩进 = 选项区缩进 + 标签宽 + 标签与正文的
+                # 间隙，首行悬挂缩进 = 负的（标签宽 + 间隙）—— 标签落在选项区
+                # 缩进那一列，正文落在正文列，制表位把正文推过去。
+                # 选项里的图钉在正文列（.qb-option .qb-figure { grid-column: 2 }），
+                # 选项里的表在正文列里居中（.qb-table { margin: 0 auto }），
+                # 两样都按正文列算。
                 for letter in "" if image_body else "ABCDE":
-                    if f"options.{letter}" in item["fields"]:
+                    has_field = f"options.{letter}" in item["fields"]
+                    has_image = any(image["slot"] == letter for image in item["images"])
+                    if not has_field and not has_image:
+                        continue
+                    # 标签列是 auto 宽，各行自己算：「A.」比「B.」宽，
+                    # 所以 A 那一行的正文列比 B 窄（Chrome 实测 13.853 / 13.618）。
+                    label_offset_mm = _option_label_indent_mm(letter, size)
+                    body_left_mm = OPTION_LIST_INDENT_MM + label_offset_mm
+                    body_width_mm = PREVIEW_TEXT_WIDTH_MM - body_left_mm
+                    if has_field:
+                        paragraph = document.add_paragraph()
+                        _font(paragraph.add_run(f"{letter}."), size)
+                        # 标签这一段自己也要缩进：选项以表开头时正文用不上
+                        # first_paragraph（表是独立的一块），标签就落回顶格了。
+                        fmt = paragraph.paragraph_format
+                        fmt.left_indent = Mm(body_left_mm)
+                        fmt.first_line_indent = Mm(-label_offset_mm)
                         _write_field(
                             document,
                             item["fields"][f"options.{letter}"],
                             size,
-                            prefix=f"{letter}. ",
                             where=item["where"],
+                            # 正文列的左缘（版心左缘起算）。
+                            indent_mm=body_left_mm,
+                            text_width_mm=body_width_mm,
+                            first_paragraph=paragraph,
+                            # 标签 → 正文：正文从悬挂缩进那一列开始。
+                            first_paragraph_tab_mm=label_offset_mm,
+                            # 选项区自己的 2em 缩进。
+                            list_indent_mm=OPTION_LIST_INDENT_MM,
+                            # 选项里的表在预览里是在**正文列**里居中，不是整栏居中。
+                            table_column=(body_left_mm, body_width_mm),
+                            table_column_shrinks=False,
                         )
-                    elif any(image["slot"] == letter for image in item["images"]):
-                        _font(document.add_paragraph().add_run(f"{letter}."), size)
-                    _write_images(document, item, letter, measured=figures["measured"].get(letter))
+                    else:
+                        paragraph = document.add_paragraph()
+                        _font(paragraph.add_run(f"{letter}."), size)
+                        fmt = paragraph.paragraph_format
+                        fmt.left_indent = Mm(body_left_mm)
+                        fmt.first_line_indent = Mm(-label_offset_mm)
+                    # 选项里的图在预览里被钉在正文列、左对齐，一张一行。
+                    option_pictures = [image for image in item["images"] if image["slot"] == letter]
+                    _write_images(
+                        document,
+                        item,
+                        letter,
+                        lines=[1] * len(option_pictures) if option_pictures else None,
+                        measured=figures["measured"].get(letter),
+                        max_width_mm=body_width_mm,
+                        indent_mm=body_left_mm,
+                        align_override="left",
+                    )
             answer_space = options.get("answer_space_overrides", {}).get(item["id"], options["answer_space"])
             # 每道题都能有留白；解答题有 8 毫米下限。口径与预览、PDF 一致。
             millimetres = _answer_space_millimetres(answer_space, item["type"])
