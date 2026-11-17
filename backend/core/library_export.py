@@ -255,6 +255,15 @@ PREVIEW_PAGE_TOP_LINE_TWIPS = 180  # 9 磅 = 180 twips（固定行距）
 # .print-section 的 margin-top 12px（= 9 磅）。大题标题、答案区标题的段前距都是它。
 PREVIEW_SECTION_SPACE_BEFORE_PT = 9.0
 
+# .print-question { margin: 0 0 8pt }（frontend/library.css:931）——
+# 预览里一个题块的下外边距，**写死的是 8 磅**（不是 px）。
+#
+# 这个数在「Word 取大 vs 预览相加」的模型里是块间距的一半：
+# 预览的 .exam-page-body 是 flex 容器，相邻两块的外边距**相加**
+# （题块的下外边距 8 磅 + 下一个大题标题的上外边距 9 磅 = 17 磅）；
+# Word 是 max(前段段后距, 后段段前距)，只写 9 磅的话那 8 磅会被吃掉。
+PREVIEW_QUESTION_MARGIN_BOTTOM_PT = 8.0
+
 # 大题标题落在**页首**时的垫行高度（不是 9 磅，见下面）。
 #
 # 预览（Chrome DOM 实测 _probe106.py，纸面真值 _probe105.py）：
@@ -3983,6 +3992,8 @@ def _document(captured, title, options, mode):
             color=PREVIEW_INFO_COLOR,
         )
     numbered, number = [], 0
+    # 考生信息行在不在（第一组大题标题的前一个块就是它）。
+    has_student_info = bool(options["student_info"]) and mode != "answers"
     # 预览量出来的表格位置：题目编号 → 位置 → 离版心左缘多少毫米。
     # 表格在预览里的横向位置不是定值（题干正文越长，表在那一列里越靠中间），
     # Word 排版是静态的，只能照量好的位置摆。
@@ -3997,6 +4008,13 @@ def _document(captured, title, options, mode):
         # 照样被 Word 吃掉，标题比预览高 2.291 毫米（实测 _probe105.py）。
         # 现在改成：组开头先垫一个带分页的垫行，标题跟着它，段前距归零。
         group_starts_page = mode != "answers" and number > 0 and group[0]["id"] in options["question_breaks"]
+        # 前一块在预览里的下外边距 —— 大题标题的段前距要把它加上（见下面）。
+        # 第一组的前一块是考生信息行（.print-info 的 margin-bottom 22px），
+        # 之后每一组的前一块都是上一组的最后一道题（.print-question 的 8pt）。
+        if index == 0:
+            previous_margin_bottom = PREVIEW_INFO_SPACE_AFTER_PT if has_student_info else 0.0
+        else:
+            previous_margin_bottom = PREVIEW_QUESTION_MARGIN_BOTTOM_PT
         if mode != "answers":
             if group_starts_page:
                 _section_page_top_space(document)
@@ -4010,10 +4028,20 @@ def _document(captured, title, options, mode):
             )
             # .print-section { margin: 12px 0 6px; line-height: 1.5 } → 18 磅行盒。
             _line_spacing(section_title, PREVIEW_SECTION_LINE_HEIGHT_PT)
-            # 段前距 12px：标题在页首时 Word 不吃段前距，那 12px 已经由垫行
-            # 补回来了，这里再写一遍就补两次。
+            # 段前距 = **前一块在预览里的下外边距 + 本标题的上外边距**。
+            #
+            # 预览的 .exam-page-body 是 flex 容器：相邻两块的外边距**相加**
+            # （题块 8 磅 + 标题 9 磅 = 17 磅；考生信息行 16.5 磅 + 标题 9 磅
+            # = 25.5 磅）。Word 却是 max(前段段后距, 后段段前距)（真 Word 实测
+            # _probe107.py，本轮 _probe113.py 又验了一遍）：只写 9 磅，前一块的
+            # 下外边距就被 Word 吃掉 —— 整卷从第一个大题标题起逐段往下漂移
+            # （实测三个标题分别偏 −1.798 / −3.463 / −6.091 毫米）。
+            #
+            # 把和值整个写进段前距，Word 取大时取到的正是预览那个和值。
+            # 标题落在页首时另说：那里没有前一块，12px 由垫行补回来（见上面
+            # PREVIEW_SECTION_PAGE_TOP_LINE_TWIPS）。
             section_title.paragraph_format.space_before = Pt(
-                0 if group_starts_page else PREVIEW_SECTION_SPACE_BEFORE_PT
+                0 if group_starts_page else previous_margin_bottom + PREVIEW_SECTION_SPACE_BEFORE_PT
             )
             section_title.paragraph_format.space_after = Pt(PREVIEW_ANSWER_ROW_MARGIN_PT)
         for item in group:

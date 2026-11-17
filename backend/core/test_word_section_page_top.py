@@ -47,7 +47,11 @@ W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 # 预览侧的字面值：
 #   .print-section { margin: 12px 0 6px }  → 上外边距 12px = 9 磅 = 180 twips
 #   .exam-page-body { display: flex }      → flex 容器，外边距不塌陷（相加）
-PREVIEW_SECTION_MARGIN_TWIPS = 180
+#
+# 大题标题的段前距写的是「前一块的下外边距 + 标题自己的上外边距」的和值
+# （Word 是 max(前段段后距, 后段段前距)，和值要整个写进去）——
+# 口径与判据见 test_word_block_spacing.py。
+#
 # 垫行高度：实测标定（真 Word 六档对照 _probe108/_probe109.py）
 #     140/146 twips → 21.857mm（残差 −0.175mm）
 #     150/152 twips → 22.069mm（残差 +0.037mm）  ← 预览 22.032mm
@@ -185,10 +189,16 @@ class SectionPageTopTests(SimpleTestCase):
         self.assertEqual(title["before"], 0, title)
 
     def test_the_first_section_title_keeps_the_preview_margin(self):
-        """第一个大题标题不在页首：12px 的外边距照写。"""
+        """第一个大题标题不在页首：段前距 = 前一块的下外边距 + 标题自己的上外边距。
+
+        预览里 .exam-page-body 是 flex 容器，相邻块的外边距**相加**：
+        考生信息行的 margin-bottom 22px（16.5 磅）+ 标题的 margin-top 12px（9 磅）
+        = 25.5 磅。Word 是 max(前段段后距, 后段段前距)，所以和值整个写进段前距。
+        见 test_word_block_spacing.py。
+        """
         rows = _paragraphs(_document(_options(breaks=[FREE])))
         title = rows[_index_of(rows, "一、选择题")]
-        self.assertEqual(title["before"], PREVIEW_SECTION_MARGIN_TWIPS, title)
+        self.assertEqual(title["before"], 510, title)
         self.assertFalse(title["break"], title)
 
     def test_the_break_is_not_written_on_the_question_itself(self):
@@ -206,7 +216,9 @@ class SectionPageTopTests(SimpleTestCase):
         rows = _paragraphs(_document(_options()))
         self.assertFalse([row for row in rows if row["break"]], rows)
         title = rows[_index_of(rows, "二、解答题")]
-        self.assertEqual(title["before"], PREVIEW_SECTION_MARGIN_TWIPS, title)
+        # 第二组的前一块是上一组的最后一道题：.print-question 的 margin-bottom
+        # 8 磅 + 标题的 margin-top 9 磅 = 17 磅（Word 取大，写整个和值）。
+        self.assertEqual(title["before"], 340, title)
 
     def test_the_answer_paper_is_not_affected(self):
         rows = _paragraphs(_document(_options(document="answers", breaks=[FREE])))
