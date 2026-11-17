@@ -264,6 +264,16 @@ PREVIEW_SECTION_SPACE_BEFORE_PT = 9.0
 # Word 是 max(前段段后距, 后段段前距)，只写 9 磅的话那 8 磅会被吃掉。
 PREVIEW_QUESTION_MARGIN_BOTTOM_PT = 8.0
 
+# .qb-options { row-gap: .1em }（frontend/styles.css:1642）—— 选项区里
+# **行与行之间**的间距，按字号算（.1em = 字号的十分之一）。
+#
+# Word 的表格行之间没有间距这回事，行间距只能靠段落段后距顶出来
+# （Word 表格行高 = 单元格段落行高 + 该段段后距）。所以：
+#     单栏（选项写在正文里）：每段段后距 = .1em
+#     多栏（选项在表格里）：非末行的段落段后距 = .1em，末行 = 0
+#                          （末行给了，表格底就多出来，后面全被顶下去）
+PREVIEW_OPTION_ROW_GAP_EM = 0.1
+
 # 大题标题落在**页首**时的垫行高度（不是 9 磅，见下面）。
 #
 # 预览（Chrome DOM 实测 _probe106.py，纸面真值 _probe105.py）：
@@ -3570,6 +3580,41 @@ def _write_compact_options(document, item, size, columns, *, text_width_mm=178, 
         )
     for row in table.rows:
         row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
+    _set_option_row_spacing(table, size, columns, len(letters))
+
+
+def _set_option_row_spacing(table, size, columns, letter_count):
+    """把选项表格里单元格的段后距写死。
+
+    Word 表格的行高 = 单元格内段落行高 **+ 该段的段后距**。选项表格的
+    单元格段落原来没写段后距，全都继承 Normal 样式的 3 磅 —— 每一行白胖
+    3 磅，整张表比预览高 3 磅，后面的内容全被顶下去（真 Word 实测
+    _exp116.py：选项表①末行 → 下一题题干这一处边界，Word 比预览宽
+    1.062 毫米；把表格内的段后距清零后只剩 0.003 毫米）。
+
+    预览侧的真值（frontend/styles.css:1642）：
+        .qb-options { row-gap: .1em }        行与行之间 0.1em
+        .qb-option-body { white-space: pre-wrap }  一个选项就是一个块，
+                                                  块内没有段后距这回事
+
+    所以：
+        多行（末行以外）：段后距 = .1em —— 顶出预览那个行间距
+        末行：段后距 = 0 —— 表格底不能多出来
+        单行：段后距 = 0 —— 预览里只有一行，没有行间距
+
+    嵌套表（选项里带的表）不在这里动 —— 它的行高由 _write_table 自己管。
+    """
+    from docx.shared import Pt
+
+    count = max(1, int(columns or 1))
+    row_count = (letter_count + count - 1) // count
+    gap = Pt(size * PREVIEW_OPTION_ROW_GAP_EM)
+    for row_index, row in enumerate(table.rows):
+        # 只有「不是末行」的行才顶出预览的行间距。
+        after = gap if row_count > 1 and row_index < row_count - 1 else Pt(0)
+        for cell in row.cells:
+            for paragraph in cell.paragraphs:
+                paragraph.paragraph_format.space_after = after
 
 
 def _ordered(captured):
@@ -4164,6 +4209,11 @@ def _document(captured, title, options, mode):
                         fmt = paragraph.paragraph_format
                         fmt.left_indent = Mm(body_left_mm)
                         fmt.first_line_indent = Mm(-label_offset_mm)
+                    # 单栏路径里选项的段后距也写死：预览 .qb-options 的 row-gap
+                    # 是 .1em（frontend/styles.css:1642），而这一段原来继承
+                    # Normal 的 3 磅，选项之间凭空多出 1.8 磅（0.63 毫米）。
+                    # 最后一个选项的段后距由 _question_gap 抬到 8 磅（题块下外边距）。
+                    paragraph.paragraph_format.space_after = Pt(size * PREVIEW_OPTION_ROW_GAP_EM)
                     # 选项里的图在预览里被钉在正文列、左对齐，一张一行。
                     option_pictures = [image for image in item["images"] if image["slot"] == letter]
                     _write_images(
