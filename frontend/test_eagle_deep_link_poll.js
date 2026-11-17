@@ -34,7 +34,7 @@ test("Eagle 的 OneNote 回跳轮询要有限", async (t) => {
   });
 
   await t.test("3. 消费到定位请求后必须停止轮询", () => {
-    const fn = html.match(/function startDeepLinkPolling\([\s\S]{0,1200}?\n    \}/);
+    const fn = html.match(/function startDeepLinkPolling\([\s\S]{0,1200}?\n {4}\}/);
     assert.ok(fn, "应能找到 startDeepLinkPolling");
     assert.ok(
       /consumed|if\s*\(.*\)\s*return/.test(fn[0]),
@@ -47,7 +47,7 @@ test("Eagle 的 OneNote 回跳轮询要有限", async (t) => {
   });
 
   await t.test("4. consumeDeepLinkOnce 要回报有没有消费到", () => {
-    const fn = html.match(/async function consumeDeepLinkOnce\([\s\S]{0,1200}?\n    \}/);
+    const fn = html.match(/async function consumeDeepLinkOnce\([\s\S]{0,1200}?\n {4}\}/);
     assert.ok(fn, "应能找到 consumeDeepLinkOnce");
     assert.ok(
       /return\s+true/.test(fn[0]),
@@ -60,7 +60,7 @@ test("Eagle 的 OneNote 回跳轮询要有限", async (t) => {
   });
 
   await t.test("5. 页面不在前台时不要打扰后端", () => {
-    const fn = html.match(/function startDeepLinkPolling\([\s\S]{0,1200}?\n    \}/);
+    const fn = html.match(/function startDeepLinkPolling\([\s\S]{0,1200}?\n {4}\}/);
     assert.ok(fn, "应能找到 startDeepLinkPolling");
     assert.ok(
       /document\.hidden/.test(fn[0]),

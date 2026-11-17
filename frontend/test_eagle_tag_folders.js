@@ -26,7 +26,7 @@ assert.doesNotMatch(
 assert.match(html, /openTagManagerModal\(\);\s*hideEagleAppMainMenu\(\);/, "≡ 主菜单保留标签管理中心");
 {
   // 左树：标签分区要紧挨「最近浏览」下面，别沉到文件夹后面。
-  const rootsFn = html.match(/function getFolderTreeRoots\(\)[\s\S]*?\n    function collectTagIds/);
+  const rootsFn = html.match(/function getFolderTreeRoots\(\)[\s\S]*?\n {4}function collectTagIds/);
   assert.ok(rootsFn, "应能找到 getFolderTreeRoots");
   const recentAt = rootsFn[0].indexOf("smart:recent");
   const tagsAt = rootsFn[0].indexOf("section:tags");

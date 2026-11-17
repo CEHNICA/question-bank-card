@@ -58,12 +58,6 @@ function parseHex(value) {
   const hex = match[1];
   return [0, 2, 4].map((offset) => parseInt(hex.slice(offset, offset + 2), 16));
 }
-function mixHex(hex, alpha, over) {
-  const base = parseHex(hex);
-  const under = parseHex(over);
-  return base.map((channel, index) => channel * alpha + under[index] * (1 - alpha));
-}
-
 // ---- 从样式表里读出「最后一条同名规则」的值（层叠：同级后者胜） ---------
 function escapeRe(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

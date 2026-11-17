@@ -24,7 +24,7 @@ test("窄屏下左栏别再把正文挤成一条缝", async (t) => {
       /const LEFT_SIDEBAR_NARROW_BREAKPOINT = 768;/.test(html),
       "应定义窄屏断点 768"
     );
-    const fn = html.match(/function applyResponsiveLeftSidebar\([\s\S]{0,2000}?\n    \}/);
+    const fn = html.match(/function applyResponsiveLeftSidebar\([\s\S]{0,2000}?\n {4}\}/);
     assert.ok(fn, "应能找到 applyResponsiveLeftSidebar");
     assert.ok(
       /window\.innerWidth < LEFT_SIDEBAR_NARROW_BREAKPOINT/.test(fn[0]),
@@ -41,13 +41,13 @@ test("窄屏下左栏别再把正文挤成一条缝", async (t) => {
   });
 
   await t.test("2. 用户手动开合过就听用户的", () => {
-    const fn = html.match(/function toggleLeftSidebar\([\s\S]{0,1200}?\n    \}/);
+    const fn = html.match(/function toggleLeftSidebar\([\s\S]{0,1200}?\n {4}\}/);
     assert.ok(fn, "应能找到 toggleLeftSidebar");
     assert.ok(
       /leftSidebarUserPref = collapsed;/.test(fn[0]),
       "用户手动开合要记下来，自动逻辑别再跟他打架"
     );
-    const resp = html.match(/function applyResponsiveLeftSidebar\([\s\S]{0,2000}?\n    \}/);
+    const resp = html.match(/function applyResponsiveLeftSidebar\([\s\S]{0,2000}?\n {4}\}/);
     assert.ok(
       /leftSidebarUserPref === null/.test(resp[0]),
       "用户没表过态才自动收起"
@@ -72,7 +72,7 @@ test("窄屏下左栏别再把正文挤成一条缝", async (t) => {
   });
 
   await t.test("4. 初始化和窗口缩放都要跟", () => {
-    const init = html.match(/async function init\([\s\S]{0,1500}?\n    \}/);
+    const init = html.match(/async function init\([\s\S]{0,1500}?\n {4}\}/);
     assert.ok(init, "应能找到 init");
     assert.ok(
       /applyResponsiveLeftSidebar\(\);/.test(init[0]),
@@ -85,7 +85,7 @@ test("窄屏下左栏别再把正文挤成一条缝", async (t) => {
   });
 
   await t.test("5. 断点之上不许自动收起", () => {
-    const resp = html.match(/function applyResponsiveLeftSidebar\([\s\S]{0,2000}?\n    \}/);
+    const resp = html.match(/function applyResponsiveLeftSidebar\([\s\S]{0,2000}?\n {4}\}/);
     assert.ok(
       /if \(leftSidebarNarrowAuto\)[\s\S]{0,300}?applyLeftSidebarCollapsed\(false\)/.test(resp[0]),
       "回宽屏要把自动收起的那次还原掉"

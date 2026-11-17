@@ -35,7 +35,7 @@ test("A4 预览框要懒加载，别在首屏就把排版资源拉下来", async
   });
 
   await t.test("2. 必须有加载预览框的函数", () => {
-    const fn = html.match(/function ensurePreviewFrameLoaded\([\s\S]{0,600}?\n    \}/);
+    const fn = html.match(/function ensurePreviewFrameLoaded\([\s\S]{0,600}?\n {4}\}/);
     assert.ok(fn, "应能找到 ensurePreviewFrameLoaded");
     assert.ok(
       /setAttribute\('src'/.test(fn[0]),
@@ -48,7 +48,7 @@ test("A4 预览框要懒加载，别在首屏就把排版资源拉下来", async
   });
 
   await t.test("3. 打开预览时必须调用它", () => {
-    const fn = html.match(/async function openBasketPreview\([\s\S]{0,1500}?\n    \}/);
+    const fn = html.match(/async function openBasketPreview\([\s\S]{0,1500}?\n {4}\}/);
     assert.ok(fn, "应能找到 openBasketPreview");
     assert.ok(
       /ensurePreviewFrameLoaded\(\)/.test(fn[0]),

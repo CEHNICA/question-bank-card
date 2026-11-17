@@ -63,7 +63,7 @@ test("Eagle 折叠解析框的公式按需排版", async (t) => {
   await t.test("5. 展开解析框的路径必须重新排版", () => {
     // toggleAnalysisInstant 展开时会调 triggerKaTeX —— 这是被延后的公式
     // 唯一的补渲染入口，少了它用户看到的就是 $...$ 源码。
-    const fn = html.match(/function toggleAnalysisInstant\([\s\S]{0,1600}?\n    \}/);
+    const fn = html.match(/function toggleAnalysisInstant\([\s\S]{0,1600}?\n {4}\}/);
     assert.ok(fn, "应能找到 toggleAnalysisInstant");
     assert.ok(
       fn[0].includes("triggerKaTeX"),

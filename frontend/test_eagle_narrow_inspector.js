@@ -16,7 +16,7 @@ const html = fs.readFileSync(path.join(__dirname, "eagle", "index.html"), "utf8"
 
 test("窄屏展开的题目属性栏不许把正文挤成一条缝", async (t) => {
   await t.test("1. 窄屏媒体查询里存在", () => {
-    const blocks = html.match(/@media \(max-width: 1100px\) \{[\s\S]{0,2000}?\n    \}/g) || [];
+    const blocks = html.match(/@media \(max-width: 1100px\) \{[\s\S]{0,2000}?\n {4}\}/g) || [];
     assert.ok(blocks.length >= 2, "应能找到 1100px 的媒体查询");
   });
 

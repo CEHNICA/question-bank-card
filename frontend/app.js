@@ -1873,7 +1873,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       link.title = "已入库的题在题库工作台查看";
       actions.append(link);
     }
-    const next = QBNotify.nextToReview(state.papers, state.paperId);
+    const nextPool = state.papers.filter(paperNeedsEntry);
+    const next = QBNotify.nextToReview(nextPool, state.paperId)
+      || QBNotify.nextToReview(state.papers, state.paperId);
     if (next) {
       const c2 = next.counts || {};
       const { todo } = QBProgress.paperProgress(c2);
@@ -2929,7 +2931,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     releaseToggleFocus(event);
   });
 
-  let followFrame = 0;
   let reviewStateSaveTimer = 0;
   window.addEventListener("scroll", () => {
     if (!state.paperId || reviewStateSaveTimer) return;
