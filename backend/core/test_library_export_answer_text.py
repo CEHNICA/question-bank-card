@@ -77,7 +77,10 @@ class AnswerTextParityTests(ExportFixture, TestCase):
             any(text.startswith("1.") and "答案：原卷答案" in text for text in texts),
             "答案正文前面必须有「答案：」标签：%s" % texts,
         )
-        self.assertIn("解析：原卷解析", texts, "解析正文前面必须有「解析：」标签：%s" % texts)
+        # 「解析：」标签在预览里独占一行，Word 现在也写成独立一段，
+        # 正文另起一段 —— 所以只锁「标签存在」和「正文存在」，不锁它们挤在一段。
+        self.assertIn("解析：", texts, "解析前面必须有「解析：」标签：%s" % texts)
+        self.assertIn("原卷解析", texts, "解析正文必须单独成段：%s" % texts)
 
     def test_analysis_without_an_answer_still_gets_one_label_only(self):
         """只有解析没有答案时，题号和「解析：」只能出现一次。"""
@@ -85,7 +88,9 @@ class AnswerTextParityTests(ExportFixture, TestCase):
         result = self.export([pub], {"document": "answers"})
         texts = paragraphs(result.content)
         self.assertEqual(sum(text.startswith("1.") for text in texts), 1, "题号只该出现一次：%s" % texts)
-        self.assertTrue(any(text.startswith("1.") and "解析：原卷仅有解析" in text for text in texts), texts)
+        # 「解析：」标签独占一段，题号跟它同段（没有答案时），正文另起一段。
+        self.assertTrue(any(text.startswith("1.") and "解析：" in text for text in texts), texts)
+        self.assertIn("原卷仅有解析", texts, "解析正文必须单独成段：%s" % texts)
 
     def test_inline_answer_has_no_prefix_and_no_question_number(self):
         """D4：inline 的答案紧跟题目，不带「【答案解析】」，也不重复题号。"""

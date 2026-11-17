@@ -398,10 +398,14 @@ class LibrarySolutionTests(TransactionTestCase):
             text = "".join(child.xpath(".//w:t/text()", namespaces=NS))
             rows.append("image" if child.xpath(".//a:blip", namespaces=NS) else text)
         first = rows.index("image")
-        self.assertIn("第一段", rows[first + 1])
-        self.assertEqual(rows[first + 2], "image")
-        self.assertIn("第二段", rows[first + 3])
-        self.assertEqual(rows[first + 4], "image")
+        # 「解析：」标签现在独占一段（跟预览一致），解析正文另起一段 ——
+        # 所以按标签定位，再往下数图和段落的相对位置。
+        label = next(index for index, text in enumerate(rows) if text.endswith("解析："))
+        self.assertLess(first, label, rows)
+        self.assertIn("第一段", rows[label + 1])
+        self.assertEqual(rows[label + 2], "image")
+        self.assertIn("第二段", rows[label + 3])
+        self.assertEqual(rows[label + 4], "image")
 
     def test_pdf_input_uses_same_solution_images_and_student_excludes_them(self):
         row = self.save(

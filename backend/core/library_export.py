@@ -116,9 +116,31 @@ MATHML_ELEMENTS = {
     "mlabeledtr",
     "maction",
 }
+# LINE_SPACING 是「em 倍数」，跟预览的 CSS line-height 一个意思：1.35em = 1.35 倍字号。
+#
+# Word 的「倍数行距」不是这个意思 —— 它是「字体自然行高」的倍数（宋体 12pt 约
+# 1.29em）。同一个 1.35，浏览器给 1.35 倍字号，Word 给 1.74 倍字号：同一段话，
+# Word 每行比预览高 0.39em，实测 1.67 毫米/行（2026-11-17）。答案卷一屏下来能差出
+# 小半厘米，纸和屏幕就对不上了。
+#
+# 所以 Word 这边一律用「至少 N 磅」落行高，不用「倍数」，也不用「固定」——
+# 固定行高会把行里的大分数和行内图裁掉，「至少」跟浏览器一样：内容高就把行撑开。
 LINE_SPACING = 1.35
 PARAGRAPH_GAP_PT = 3
 QUESTION_GAP_PT = 8
+# 预览打印流里另外几处行高（frontend/library.css、frontend/styles.css）：
+#     .qb-table      line-height: 1.6   （表格）
+#     .print-section line-height: 1.5   （16px 字号 → 24px 行盒 = 18 磅）
+#     .print-title   继承 body 的 1.5  （24px 字号 → 36px 行盒 = 27 磅）
+PREVIEW_TABLE_LINE_HEIGHT_EM = 1.6
+PREVIEW_SECTION_LINE_HEIGHT_PT = 18
+PREVIEW_TITLE_LINE_HEIGHT_PT = 27
+# .print-answer-row 的上下外边距：6px = 4.5 磅（每个答案块上下各一圈）。
+PREVIEW_ANSWER_ROW_MARGIN_PT = 4.5
+# .solution-paragraph（解析正文）的上下外边距：3pt。
+PREVIEW_SOLUTION_PARAGRAPH_MARGIN_PT = 3
+# .solution-figure（解析配图）的上下外边距：6px = 4.5pt。
+PREVIEW_SOLUTION_FIGURE_MARGIN_PT = 4.5
 # 有效排版、但 Word 的公式模型表达不了的公式。不再让一条这样的公式废掉整卷：
 # 交上去让本机浏览器渲染成图片，警告里点名第几题哪个位置。
 _UNSUPPORTED = object()
@@ -990,6 +1012,20 @@ def _font(run, size, bold=False):
     return run
 
 
+def _line_spacing(paragraph, points):
+    """把行高（磅）写进 Word 的行距。
+
+    用「至少 N 磅」：行里有大分数或行内图时，预览的行会被撑高，固定行高会把内容裁掉。
+    """
+    from docx.enum.text import WD_LINE_SPACING
+    from docx.shared import Pt
+
+    fmt = paragraph.paragraph_format
+    fmt.line_spacing = Pt(points)
+    fmt.line_spacing_rule = WD_LINE_SPACING.AT_LEAST
+    return paragraph
+
+
 _FORMULA_DRIVER = r"""
 window.__qbPictureStatus = {ready:false};
 (async () => {
@@ -1478,7 +1514,7 @@ def _write_table(document, rows, size, where, text_width_mm=None):
     from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
-    from docx.shared import Mm
+    from docx.shared import Mm, Pt
 
     # Place rowspan cells into a complete grid; overlapping/out-of-bounds spans abort.
     grid, placements, width = {}, [], 0
@@ -1521,6 +1557,12 @@ def _write_table(document, rows, size, where, text_width_mm=None):
         target = table.cell(r, c)
         target.text = ""
         _write_segments(target.paragraphs[0], cell["segments"], size, cell["header"])
+        # 预览里表格是 .qb-table { line-height: 1.6 }，单元格没有外边距。
+        # Word 这边跟着走：行高用 1.6em，段后距清零（Normal 样式默认留 3 磅，
+        # 不清的话每一行都白胖 3 磅）。
+        cell_paragraph = target.paragraphs[0]
+        _line_spacing(cell_paragraph, size * PREVIEW_TABLE_LINE_HEIGHT_EM)
+        cell_paragraph.paragraph_format.space_after = Pt(0)
         if cell["header"]:
             shade = OxmlElement("w:shd")
             shade.set(qn("w:fill"), "F1F5F3")
@@ -1537,15 +1579,29 @@ def _write_table(document, rows, size, where, text_width_mm=None):
 
 
 def _write_field(
-    document, blocks, size, prefix="", where="", lead_segments=None, indent_mm=None, hanging=False, text_width_mm=None
+    document,
+    blocks,
+    size,
+    prefix="",
+    where="",
+    lead_segments=None,
+    indent_mm=None,
+    hanging=False,
+    text_width_mm=None,
+    space_before_pt=None,
+    space_after_pt=None,
 ):
     """Write one field (题干预览里的一个字段块) into the document.
 
     ``indent_mm`` 把这一段挪到答案正文列里（预览里那一列缩在题号右边）；
     ``hanging`` 让首行顶格放题号、后续行缩进，跟预览的两栏网格一致；
-    ``text_width_mm`` 是这一列的净宽，里面的表格不能比它宽。
+    ``text_width_mm`` 是这一列的净宽，里面的表格不能比它宽；
+    ``space_before_pt`` / ``space_after_pt`` 覆盖预览里那一段的外边距
+    （.solution-result 没有外边距、.solution-paragraph 上下各 3pt）。
     """
     from docx.shared import Mm, Pt
+
+    written = []
 
     def _new_paragraph():
         paragraph = document.add_paragraph()
@@ -1555,6 +1611,7 @@ def _write_field(
             if hanging:
                 fmt.first_line_indent = Mm(-indent_mm)
                 fmt.tab_stops.add_tab_stop(Mm(indent_mm))
+        written.append(paragraph)
         return paragraph
 
     paragraph = None
@@ -1589,11 +1646,18 @@ def _write_field(
                             paragraph.alignment = 1
                         _write_segments(paragraph, [{**segment, "raw": part} if part is not None else segment], size)
                         paragraph.paragraph_format.space_after = Pt(PARAGRAPH_GAP_PT)
-                        paragraph.paragraph_format.line_spacing = LINE_SPACING
+                        _line_spacing(paragraph, size * LINE_SPACING)
                     if index < len(parts) - 1:
                         paragraph = None
                 display_group = group
             paragraph = None
+    if written:
+        if space_before_pt is not None:
+            written[0].paragraph_format.space_before = Pt(space_before_pt)
+        if space_after_pt is not None:
+            for item in written:
+                item.paragraph_format.space_after = Pt(space_after_pt)
+    return written
 
 
 # 组卷预览里的配图不是交给样式表管的。frontend/exam-layout.js 的 paginate() 会等
@@ -1705,8 +1769,9 @@ def _figure_settings(options, item):
     reach the layout maths.
     """
     settings = (options.get("figure_overrides") or {}).get(item["id"]) or {}
+    default_align = "center"
     if not isinstance(settings, dict):
-        return {"width": {}, "breaks": [], "align": "center"}
+        return {"width": {}, "breaks": [], "align": default_align}
     widths = {}
     for key, value in (settings.get("width") or {}).items():
         try:
@@ -1734,7 +1799,7 @@ def _figure_settings(options, item):
     return {
         "width": widths,
         "breaks": breaks,
-        "align": align if align in ("left", "center", "right") else "center",
+        "align": align if align in ("left", "center", "right") else default_align,
         "measured": measured,
     }
 
@@ -1825,6 +1890,8 @@ def _write_images(document, item, slot, lines=None, settings=None, measured=None
     if not pictures:
         return
     align = (settings or {}).get("align", "center")
+    if align not in ("left", "center", "right"):
+        align = "right"
     widths = _figure_widths_for_slot(pictures, slot, settings, measured)
     # 格子有上限：图比格子宽就压到隔壁列上（选项表就是这种情况）。
     if max_width_mm is not None:
@@ -2066,8 +2133,8 @@ def _analysis_parts(blocks):
     return parts
 
 
-def _write_solution_image(document, image, indent_mm=0.0, text_width_mm=None):
-    from docx.shared import Mm
+def _write_solution_image(document, image, indent_mm=0.0, text_width_mm=None, space_before_pt=None):
+    from docx.shared import Mm, Pt
 
     width, height = image["size"]
     px_per_mm = 96 / 25.4
@@ -2091,10 +2158,28 @@ def _write_solution_image(document, image, indent_mm=0.0, text_width_mm=None):
         io.BytesIO(image["bytes"]), width=Mm(box_width_px * 25.4 / 96), height=Mm(box_height_px * 25.4 / 96)
     )
     paragraph.paragraph_format.keep_together = True
+    if space_before_pt is not None:
+        paragraph.paragraph_format.space_before = Pt(space_before_pt)
+    # .solution-figure { margin: 6px 0 } 的下外边距。
+    paragraph.paragraph_format.space_after = Pt(PREVIEW_SOLUTION_FIGURE_MARGIN_PT)
+    return paragraph
 
 
-def _write_solution(document, item, size, label):
-    from docx.shared import Mm
+def _write_solution(document, item, size, label, lead_space_pt=0.0):
+    """把一道题的答案块写进 Word。
+
+    结构照抄预览（frontend/library-solutions.js 的 render()）：
+
+        div.print-answer-row（题号列 + 正文列）
+          div.solution-result    → strong「答案：」+ 正文（同一行）
+          figure.solution-figure  → position=before 的配图
+          strong.solution-label「解析：」  ← 独占一行
+          div.qb-analysis.solution-paragraph × N
+
+    竖向节奏也照抄：行高 1.35em（Word 的「倍数行距」是字体自然行高的倍数，
+    跟 CSS 的 em 不是一回事），每一段的外边距按 CSS 折叠后的结果给。
+    """
+    from docx.shared import Mm, Pt
 
     selected, images = item["selected"], item.get("solution_images", [])
     # 预览里答案块是「题号列 + 正文列」两栏网格：题号顶格，答案正文和解析配图
@@ -2107,28 +2192,68 @@ def _write_solution(document, item, size, label):
     note = AI_REFERENCE_NOTE if item.get("ai") else ""
     # 题号只出现一次：要么顶格单独占一段，要么跟在正文前面（用制表符接到右列）。
     head = f"{number}\t{note}" if number else note
+    lead = lead_space_pt or 0.0
+    # 预览里的外边距会折叠（相邻两块取大的那个），Word 不会 —— Word 是段后距加段前距。
+    # 所以这里记着上一块留下的下外边距，下一段只补差值：折叠后该有的空白，
+    # 一分不多一分不少。
+    pending = [0.0]
+    last = [None]
 
-    def _head_paragraph(text):
+    def _space_before(top_margin, first=False):
+        gap = max(0.0, top_margin - pending[0])
+        pending[0] = 0.0
+        return (lead if first else 0.0) + gap
+
+    def _close_block():
+        """给这个答案块补上「块外面那一圈空白」。
+
+        预览里两个答案块之间是 .print-answer-row 的下外边距（6px）+ 上一个块
+        的上外边距（6px）= 12px = 9 磅。Word 没有「外边距」这个东西，只有段后距，
+        所以把这两个 4.5 磅一起记在这一段的段后距上。
+        """
+        if last[0] is None:
+            return
+        after = last[0].paragraph_format.space_after
+        extra = PREVIEW_ANSWER_ROW_MARGIN_PT * 2
+        last[0].paragraph_format.space_after = Pt((after.pt if after is not None else 0.0) + extra)
+
+    def _paragraph(text, hanging=False, top=0.0, bottom=0.0, first=False):
         paragraph = document.add_paragraph()
         if indent:
             fmt = paragraph.paragraph_format
             fmt.left_indent = Mm(indent)
-            if number:
+            if hanging:
                 fmt.first_line_indent = Mm(-indent)
                 fmt.tab_stops.add_tab_stop(Mm(indent))
         _font(paragraph.add_run(text), size)
+        _line_spacing(paragraph, size * LINE_SPACING)
+        paragraph.paragraph_format.space_before = Pt(_space_before(top, first))
+        paragraph.paragraph_format.space_after = Pt(bottom)
+        pending[0] = bottom
+        last[0] = paragraph
         return paragraph
+
+    def _image(image):
+        last[0] = _write_solution_image(
+            document,
+            image,
+            indent_mm=indent,
+            text_width_mm=column,
+            space_before_pt=_space_before(PREVIEW_SOLUTION_FIGURE_MARGIN_PT),
+        )
+        pending[0] = PREVIEW_SOLUTION_FIGURE_MARGIN_PT
 
     # 题号和 AI 标记只出现一次：要么跟在答案前面，要么（没有答案正文时）自己占一段，
     # 跟预览里 .print-answer-row 的结构一一对应。
     has_answer = bool(str(selected.get("answer") or "").strip())
     has_analysis = bool(str(selected.get("analysis") or "").strip())
     if not has_answer and not has_analysis and not images:
-        _head_paragraph(head + EMPTY_SOLUTION_TEXT)
+        _paragraph(head + EMPTY_SOLUTION_TEXT, hanging=bool(number), first=True)
+        _close_block()
         return
     parts = _analysis_parts(item["fields"].get("analysis", []))
     if has_answer:
-        _write_field(
+        written = _write_field(
             document,
             item["fields"]["answer"],
             size,
@@ -2137,37 +2262,47 @@ def _write_solution(document, item, size, label):
             indent_mm=indent,
             hanging=bool(number),
             text_width_mm=column,
+            space_before_pt=_space_before(0.0, first=True),
+            space_after_pt=0.0,
         )
+        if written:
+            last[0] = written[-1]
+        pending[0] = 0.0
     elif not parts:
         # 只有答案配图、没有解析正文时，题号不能丢；预览里这一行只有题号和图。
-        _head_paragraph(head)
+        _paragraph(head, hanging=bool(number), first=True)
     for image in images:
         if image["position"] == "before":
-            _write_solution_image(document, image, indent_mm=indent, text_width_mm=column)
+            _image(image)
     for index, blocks in enumerate(parts):
-        # 「解析：」标签跟预览一样，只在确有解析正文时出现，且只出现在第一段前面。
-        if index == 0 and has_answer:
-            prefix = "解析："
-        elif index == 0:
-            prefix = head + "解析："
-        else:
-            prefix = ""
-        _write_field(
+        # 「解析：」标签在预览里独占一行：library-solutions.js 把 strong 直接挂在
+        # 容器上（不是塞进正文段里）。Word 当年把它写进正文段的前缀，纸上就挤成
+        # 一行了 —— 结构就不一样，段前段后也没法照抄。
+        if index == 0:
+            if has_answer:
+                _paragraph("解析：")
+            else:
+                _paragraph(head + "解析：", hanging=bool(number))
+        written = _write_field(
             document,
             blocks,
             size,
-            prefix=prefix,
             where=item["where"],
             indent_mm=indent,
-            hanging=index == 0 and not has_answer and bool(number),
             text_width_mm=column,
+            space_before_pt=_space_before(PREVIEW_SOLUTION_PARAGRAPH_MARGIN_PT),
+            space_after_pt=PREVIEW_SOLUTION_PARAGRAPH_MARGIN_PT,
         )
+        if written:
+            last[0] = written[-1]
+        pending[0] = PREVIEW_SOLUTION_PARAGRAPH_MARGIN_PT
         for image in images:
             if image["position"] == "paragraph" and image["paragraph"] == index:
-                _write_solution_image(document, image, indent_mm=indent, text_width_mm=column)
+                _image(image)
     for image in images:
         if image["position"] == "after" or (image["position"] == "paragraph" and image["paragraph"] >= len(parts)):
-            _write_solution_image(document, image, indent_mm=indent, text_width_mm=column)
+            _image(image)
+    _close_block()
 
 
 def _text_em(value):
@@ -2318,7 +2453,7 @@ def _write_compact_options(document, item, size, columns, *, text_width_mm=178, 
         _font(paragraph.add_run(letter + ". "), size)
         blocks = item["fields"].get(f"options.{letter}", [])
         _write_segments(paragraph, blocks[0]["segments"] if blocks else [], size)
-        paragraph.paragraph_format.line_spacing = LINE_SPACING
+        _line_spacing(paragraph, size * LINE_SPACING)
         # 选项里的图在预览里被选项栏宽收口过，Word 照实测宽度排；
         # 就算没有实测值（老前端、预览没量到），也不能超过这一格的净宽。
         _write_images(
@@ -2584,7 +2719,7 @@ def _document(captured, title, options, mode):
     size = options["font_size"]
     normal = document.styles["Normal"]
     normal.font.name, normal.font.size = "Cambria", Pt(size)
-    normal.paragraph_format.line_spacing = LINE_SPACING
+    _line_spacing(normal, size * LINE_SPACING)
     normal.paragraph_format.space_after = Pt(PARAGRAPH_GAP_PT)
     normal.paragraph_format.widow_control = True
     normal._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "宋体")
@@ -2595,6 +2730,8 @@ def _document(captured, title, options, mode):
     heading.alignment = 1
     heading.paragraph_format.keep_with_next = True
     _font(heading.add_run(title), size + 6, True)
+    # .print-title 继承 body 的 line-height: 1.5 → 24px 字号 = 36px 行盒 = 27 磅。
+    _line_spacing(heading, PREVIEW_TITLE_LINE_HEIGHT_PT)
     if options["student_info"] and mode != "answers":
         from docx.enum.text import WD_ALIGN_PARAGRAPH
 
@@ -2612,6 +2749,10 @@ def _document(captured, title, options, mode):
             section_title = document.add_paragraph()
             section_title.paragraph_format.keep_with_next = True
             _font(section_title.add_run(_section_heading(group, index, name)), size + 1, True)
+            # .print-section { margin: 12px 0 6px; line-height: 1.5 } → 18 磅行盒。
+            _line_spacing(section_title, PREVIEW_SECTION_LINE_HEIGHT_PT)
+            section_title.paragraph_format.space_before = Pt(9)
+            section_title.paragraph_format.space_after = Pt(PREVIEW_ANSWER_ROW_MARGIN_PT)
         for item in group:
             number += 1
             numbered.append((number, item))
@@ -2703,12 +2844,20 @@ def _document(captured, title, options, mode):
         answer_heading = document.add_paragraph()
         answer_heading.paragraph_format.keep_with_next = True
         _font(answer_heading.add_run("参考答案与解析"), size + 1, True)
-        for number, item in numbered:
+        # .print-section { margin: 12px 0 6px; line-height: 1.5 } → 18 磅行盒。
+        _line_spacing(answer_heading, PREVIEW_SECTION_LINE_HEIGHT_PT)
+        answer_heading.paragraph_format.space_before = Pt(9)
+        answer_heading.paragraph_format.space_after = Pt(PREVIEW_ANSWER_ROW_MARGIN_PT)
+        for index, (number, item) in enumerate(numbered):
             unit_start = len(document._element.body) - 1
             # 题号后面留一个空格：预览里题号和正文是分开的两栏，Word 是同一段，
             # 挤在一起读起来像「2.答案：」。
             label = f"{number}. "
-            _write_solution(document, item, size, label)
+            # 第一个答案块紧跟在小标题后面：预览里那一行的上外边距（6px = 4.5 磅）
+            # 就是这一块自己的。之后的块靠 _question_gap 隔开（上下各 6px = 9 磅）。
+            _write_solution(
+                document, item, size, label, lead_space_pt=PREVIEW_ANSWER_ROW_MARGIN_PT if index == 0 else 0.0
+            )
             _question_gap(document)
             # Even keep-whole-question mode must allow a long solution to flow.
             _pagination(document, unit_start, "compact", size)
