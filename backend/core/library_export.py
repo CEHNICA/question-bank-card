@@ -1374,6 +1374,93 @@ def _table_column_widths(placements, width, size, text_width_mm=178.0):
     return _fair_widths(need, text_width_mm)
 
 
+def _set_table_widths(table, widths):
+    """把列宽写实：w:tblW（表格总宽）+ 每个单元格的 w:tcW。
+
+    为什么非要写这两样：python-docx 的 ``column.width`` **只**改 ``w:gridCol``，
+    每个单元格原有的 ``w:tcW`` 原地不动 —— 两者对不上的时候，Word 不按你写的
+    排，而是按自己的规矩重排成等宽。
+
+    实测（Word 16）：三列表，gridCol 写 17.69 毫米、tcW 还留着建表时的
+    59.33 毫米（建表时按正文宽平均分的默认值），Word 打开后认成
+    50.8×3（等宽，总宽 6 英寸 152.4 毫米），预览里按内容分配的列宽全丢了。
+
+    三变体对照（_probe42.py）：
+      只改 gridCol           -> Word 认 50.8×3（152.4 毫米）
+      再加 w:tblW            -> 总宽对了，但仍均分 21.68/21.66/21.66
+      再把每格 w:tcW 改成一样 -> Word 认 30.0 / 20.0 / 14.99，一字不差
+
+    元素顺序是硬要求：``w:tblW`` 必须排在 ``w:jc`` 前面，``w:tcW`` 必须排在
+    ``w:gridSpan`` 前面，否则 Word 打开时会自己重排 pPr/tcPr，那两条顺序
+    也就跟着丢了（和 _paragraph_flag 里说的是同一件事）。
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    def twips(mm):
+        return str(int(round(mm * 1440 / 25.4)))
+
+    tbl_pr = table._tbl.tblPr
+    existing = tbl_pr.find(qn("w:tblW"))
+    if existing is not None:
+        tbl_pr.remove(existing)
+    tbl_w = OxmlElement("w:tblW")
+    tbl_pr.insert_element_before(
+        tbl_w,
+        "w:jc",
+        "w:tblCellSpacing",
+        "w:tblInd",
+        "w:tblBorders",
+        "w:shd",
+        "w:tblLayout",
+        "w:tblCellMar",
+        "w:tblLook",
+        "w:tblCaption",
+        "w:tblDescription",
+    )
+    tbl_w.set(qn("w:type"), "dxa")
+    tbl_w.set(qn("w:w"), twips(sum(widths)))
+
+    # 逐行按网格推进：合并单元格的 tc 跨了若干列（w:gridSpan），
+    # 它的宽度是那几列宽度之和；纵向合并（w:vMerge）的行沿用同一列宽。
+    for row in table._tbl.tr_lst:
+        column = 0
+        for cell in row.tc_lst:
+            tc_pr = cell.find(qn("w:tcPr"))
+            span = 1
+            if tc_pr is not None:
+                grid_span = tc_pr.find(qn("w:gridSpan"))
+                if grid_span is not None:
+                    try:
+                        span = max(1, int(grid_span.get(qn("w:val"))))
+                    except (TypeError, ValueError):
+                        span = 1
+            value = sum(widths[column : column + span])
+            column += span
+            if tc_pr is None:
+                tc_pr = OxmlElement("w:tcPr")
+                cell.insert(0, tc_pr)
+            tc_w = tc_pr.find(qn("w:tcW"))
+            if tc_w is None:
+                tc_w = OxmlElement("w:tcW")
+                tc_pr.insert_element_before(
+                    tc_w,
+                    "w:gridSpan",
+                    "w:hMerge",
+                    "w:vMerge",
+                    "w:tcBorders",
+                    "w:shd",
+                    "w:noWrap",
+                    "w:tcMar",
+                    "w:textDirection",
+                    "w:tcFitText",
+                    "w:vAlign",
+                    "w:hideMark",
+                )
+            tc_w.set(qn("w:type"), "dxa")
+            tc_w.set(qn("w:w"), twips(value))
+
+
 def _write_table(document, rows, size, where):
     from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.oxml import OxmlElement
@@ -1405,12 +1492,20 @@ def _write_table(document, rows, size, where):
     table.autofit = False
     # `.qb-table { margin: 0 auto }`：预览里窄表是居中的，Word 这边也要跟着居中。
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    for column, value in zip(table.columns, _table_column_widths(placements, width, size)):
+    # 先合并，再写宽度：合并之后 w:gridSpan 才在，_set_table_widths 才能把
+    # 跨列的格子写成「那几列宽度之和」。反过来（先写宽度再合并）的话，
+    # 合并格的宽度就轮到 python-docx 自己去加 —— 那是它的内部行为，
+    # 我们既没写、也没测，Word 打开后是什么样全看它心情。
+    for r, c, cell in placements:
+        if cell["rowspan"] > 1 or cell["colspan"] > 1:
+            table.cell(r, c).merge(table.cell(r + cell["rowspan"] - 1, c + cell["colspan"] - 1))
+    widths = _table_column_widths(placements, width, size)
+    for column, value in zip(table.columns, widths):
         column.width = Mm(value)
+    # 光写 w:gridCol 不够，Word 会按自己的规矩把表重排成等宽。
+    _set_table_widths(table, widths)
     for r, c, cell in placements:
         target = table.cell(r, c)
-        if cell["rowspan"] > 1 or cell["colspan"] > 1:
-            target = target.merge(table.cell(r + cell["rowspan"] - 1, c + cell["colspan"] - 1))
         target.text = ""
         _write_segments(target.paragraphs[0], cell["segments"], size, cell["header"])
         if cell["header"]:
@@ -2334,6 +2429,27 @@ def _write_footer(document, count):
     _font(footer.add_run(" 页"), 9)
 
 
+def _page_setup(document):
+    """纸张和页边距：A4，上下 18、左右 16 毫米。
+
+    正文净宽 = 210 - 16 * 2 = 178 毫米，和 PREVIEW_TEXT_WIDTH_MM 必须一致 ——
+    表格的列宽就是按这个数分配的。
+
+    抽成函数是因为体检器要用同一份设置（第四十二轮）：尺子自己拿
+    python-docx 默认模板造文档的话，那份模板是 Letter 纸加 1 英寸边距，
+    正文净宽只有 165 毫米 —— 178 毫米的表在里头当然出血。
+    那是尺子的锅，不是实现的锅，尺子得跟生产共用这一份。
+    """
+    from docx.shared import Mm
+
+    section = document.sections[0]
+    section.page_width, section.page_height = Mm(210), Mm(297)
+    section.top_margin = section.bottom_margin = Mm(18)
+    section.left_margin = section.right_margin = Mm(16)
+    section.header_distance = section.footer_distance = Mm(8)
+    return section
+
+
 def _document(captured, title, options, mode):
     from docx import Document
     from docx.oxml.ns import qn
@@ -2342,11 +2458,7 @@ def _document(captured, title, options, mode):
     mode = _effective_document(captured, mode)
     inline_answers = mode == "combined" and options.get("answer_layout", "appendix") == "inline"
     document = Document()
-    section = document.sections[0]
-    section.page_width, section.page_height = Mm(210), Mm(297)
-    section.top_margin = section.bottom_margin = Mm(18)
-    section.left_margin = section.right_margin = Mm(16)
-    section.header_distance = section.footer_distance = Mm(8)
+    _page_setup(document)
     size = options["font_size"]
     normal = document.styles["Normal"]
     normal.font.name, normal.font.size = "Cambria", Pt(size)
