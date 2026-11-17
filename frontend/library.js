@@ -5412,6 +5412,46 @@ $("selectedViewCount").textContent = String(state.basket.length);
     return widths;
   }
 
+  // 预览里每张表在纸面上离版心左缘多远（毫米）。表格在预览里的横向位置不是定值：
+  // 题干里的表在「题号右边那一列」里居中，而那一列有多宽取决于题干正文有多长
+  // （正文比表窄 → 表贴左；正文比表宽 → 表在正文里居中）。Word 排版是静态的，
+  // 自己判断不了，只能照这里量好的位置摆。
+  function measuredTableOffsets() {
+    const offsets = {};
+    // 正文栏（.print-flow / .exam-page-body）是 178 毫米宽的一条。
+    const columnWidthMm = 178;
+    const measure = (table) => {
+      const column = table.closest(".exam-page-body, .print-flow");
+      if (!column) return null;
+      const columnRect = column.getBoundingClientRect();
+      const rect = table.getBoundingClientRect();
+      if (!columnRect.width) return null;
+      // 用比例算：整张卷子是缩放过的，除掉缩放系数才是纸面上的位置。
+      const value = (rect.left - columnRect.left) / columnRect.width * columnWidthMm;
+      return value >= 0 ? Math.round(value * 100) / 100 : null;
+    };
+    const collect = (id, key, tables) => {
+      const values = [...tables].map(measure).filter(value => value !== null);
+      if (!values.length) return;
+      const entry = offsets[id] || (offsets[id] = {});
+      entry[key] = values;
+    };
+    for (const block of ui.paper.querySelectorAll(".print-question")) {
+      const id = block.dataset.questionId;
+      if (!id) continue;
+      // 跨页续片只是半道题，量它等于量半张表，不算数。
+      if (block.classList.contains("exam-fragment")) continue;
+      collect(id, "stem", block.querySelectorAll(".qb-stem .qb-table"));
+    }
+    for (const row of ui.paper.querySelectorAll(".print-answer-row")) {
+      const id = row.dataset.questionId;
+      if (!id) continue;
+      collect(id, "answer", row.querySelectorAll(".solution-result .qb-table"));
+      collect(id, "analysis", row.querySelectorAll(".qb-analysis .qb-table"));
+    }
+    return offsets;
+  }
+
   function currentPrintOptions() {
     return normalizePrintOptions({
       document: $("printDocument").value, origin: ui.printOrigin.checked,
@@ -6564,7 +6604,7 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
       preparePrintLayout();
       // 带上预览量到的栏数：Word 照屏幕排，不再自己猜一遍。
       // 带上预览量到的图宽：选项里的图在屏幕上被栏宽收口过，Word 照这个宽度排。
-      const options = { ...currentPrintOptions(), option_columns: measuredOptionColumns(), measured_figure_widths: measuredFigureWidths() };
+      const options = { ...currentPrintOptions(), option_columns: measuredOptionColumns(), measured_figure_widths: measuredFigureWidths(), measured_table_offsets: measuredTableOffsets() };
       if ((format === "print" || format === "pdf") && printState.layoutError) throw new Error(printState.layoutError);
       if ((format === "print" || format === "pdf") && printState.tooWide) throw new Error("有公式超出 A4 正文，请调整本次字号或导出 Word 继续排版");
       if (format === "print") {

@@ -1740,11 +1740,54 @@ def _cell_vertical_padding(cell, twips_value):
     cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
 
 
-def _write_table(document, rows, size, where, text_width_mm=None):
+def _set_table_indent(table, left_mm):
+    """把表格的左边缘挪到离版心左缘 ``left_mm`` 毫米的位置。
+
+    ``w:tblInd`` 是表格相对左边距的缩进，``w:jc`` 必须写成 left ——
+    jc=center 是「在整栏里居中」，那正是 Word 这边一直排错的地方：
+    预览里题干里那张表贴在题号右边（实测离版心左缘 4.66 毫米），
+    Word 却把它摆在 178 毫米版心的正中间（差 56.9 毫米）。
+
+    但 ``w:tblInd`` 量到的是**第一格文字的左缘**，不是表格边框的左缘 ——
+    边框还要再往左退一个单元格左边距。Word 默认给每格留 108 twips
+    （1.905 毫米）的左右内边距，``_write_table`` 没有覆盖 ``w:tblCellMar``，
+    所以这个默认值一直在。实测（Word 16.0 实测 PDF）：写 ``tblInd=264``
+    （= 4.66 毫米）时边框只落在离版心左缘 2.65 毫米处，正好差这 1.905 毫米。
+    不补这一格，题干表差 2 毫米、答案表也差 2 毫米 —— 看着像对了，其实没对。
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tbl_pr = table._tbl.tblPr
+    existing = tbl_pr.find(qn("w:tblInd"))
+    if existing is not None:
+        tbl_pr.remove(existing)
+    indent = OxmlElement("w:tblInd")
+    indent.set(qn("w:type"), "dxa")
+    # tblInd 量到第一格文字的左缘，边框还要再往左退一个单元格左边距，
+    # 所以这里要把那 108 twips 加回去（否则边框比目标位置偏左 1.905 毫米）。
+    twips = int(round(float(left_mm) * 1440 / 25.4)) + WORD_TABLE_CELL_MARGIN_LEFT_TWIPS
+    indent.set(qn("w:w"), str(twips))
+    # 元素顺序是硬要求：w:tblInd 排在 w:jc 之后、w:tblBorders 之前。
+    tbl_pr.insert_element_before(
+        indent, "w:tblBorders", "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription"
+    )
+
+
+def _write_table(document, rows, size, where, text_width_mm=None, left_mm=None, column=None):
+    """写一张表。
+
+    ``left_mm`` 是预览量出来的表格左边缘位置（离版心左缘多少毫米）；
+    ``column`` 是这张表所在那一列的 (左缘, 宽度)，没有实测值时退回到「在那一列里居中」。
+    """
     from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     from docx.shared import Mm, Pt
+
+    # 下面两个循环都要用 "column" 这个名字（网格列号、python-docx 的列对象），
+    # 会把形参 column 覆盖掉 —— 形参先另存一份，落位时用它。
+    column_box = column
 
     # Place rowspan cells into a complete grid; overlapping/out-of-bounds spans abort.
     grid, placements, width = {}, [], 0
@@ -1769,8 +1812,14 @@ def _write_table(document, rows, size, where, text_width_mm=None):
     table = document.add_table(rows=len(rows), cols=width)
     table.style = "Table Grid"
     table.autofit = False
-    # `.qb-table { margin: 0 auto }`：预览里窄表是居中的，Word 这边也要跟着居中。
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    # 横向位置：预览量出来的位置说了算，实在量不到才退回到「在这一列里居中」。
+    # 什么都不给的时候才居中整栏 —— 那正是 Word 这边一直排错的地方：
+    # 预览里题干里那张表贴在题号右边（离版心左缘 4.66 毫米），
+    # Word 却把它摆在 178 毫米版心的正中间（差 56.9 毫米）。
+    if left_mm is not None or column_box is not None:
+        table.alignment = WD_TABLE_ALIGNMENT.LEFT
+    else:
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
     # 先合并，再写宽度：合并之后 w:gridSpan 才在，_set_table_widths 才能把
     # 跨列的格子写成「那几列宽度之和」。反过来（先写宽度再合并）的话，
     # 合并格的宽度就轮到 python-docx 自己去加 —— 那是它的内部行为，
@@ -1783,6 +1832,14 @@ def _write_table(document, rows, size, where, text_width_mm=None):
         column.width = Mm(value)
     # 光写 w:gridCol 不够，Word 会按自己的规矩把表重排成等宽。
     _set_table_widths(table, widths)
+    # 表格的左边缘该落在哪儿：优先用预览量出来的实测位置；
+    # 量不到（没渲染过预览、或题被拆到跨页续片里）就退回「在这一列里居中」。
+    offset = left_mm
+    if offset is None and column_box is not None:
+        column_left, column_width = column_box
+        offset = column_left + max(0.0, (column_width - sum(widths)) / 2)
+    if offset is not None:
+        _set_table_indent(table, offset)
     for r, c, cell in placements:
         target = table.cell(r, c)
         target.text = ""
@@ -1838,6 +1895,8 @@ def _write_field(
     text_width_mm=None,
     space_before_pt=None,
     space_after_pt=None,
+    table_lefts=None,
+    table_column=None,
 ):
     """Write one field (题干预览里的一个字段块) into the document.
 
@@ -1846,10 +1905,18 @@ def _write_field(
     ``text_width_mm`` 是这一列的净宽，里面的表格不能比它宽；
     ``space_before_pt`` / ``space_after_pt`` 覆盖预览里那一段的外边距
     （.solution-result 没有外边距、.solution-paragraph 上下各 3pt）。
+    ``table_lefts`` 是预览量出来的每张表的位置（离版心左缘多少毫米），
+    ``table_column`` 是这些表所在那一列的 (左缘, 宽度) —— 量不到时按这一列居中。
     """
     from docx.shared import Mm, Pt
 
     written = []
+
+    # 一张表对一个位置。数量对不上就整份丢掉：一张表配错位置，
+    # 表就摆在错的地方 —— 比位置差一点更糟。
+    tables = [block for block in blocks if block["type"] == "table"]
+    offsets = list(table_lefts) if table_lefts is not None and len(table_lefts) == len(tables) else None
+    table_index = 0
 
     def _new_paragraph():
         paragraph = document.add_paragraph()
@@ -1871,7 +1938,11 @@ def _write_field(
         _write_segments(paragraph, lead_segments, size)
     for block in blocks:
         if block["type"] == "table":
-            _write_table(document, block["rows"], size, where, text_width_mm=text_width_mm)
+            left = offsets[table_index] if offsets is not None else None
+            _write_table(
+                document, block["rows"], size, where, text_width_mm=text_width_mm, left_mm=left, column=table_column
+            )
+            table_index += 1
             paragraph = None
         else:
             display_group = None
@@ -1944,6 +2015,21 @@ WORD_CELL_MARGIN_MM = 1.9
 PREVIEW_ANSWER_NUMBER_COLUMN_EM = 2.4
 PREVIEW_ANSWER_COLUMN_GAP_PX = 4
 PREVIEW_PX_TO_MM = 25.4 / 96
+# 题干正文列的左缘：预览里题干也是「题号列 + 正文列」两栏
+# （.qb-stem { display: flex; gap: .35em }），正文列紧跟在题号列右边。
+# 题号列多宽取决于题号有几位：Times New Roman 粗体下数字宽 0.5em、句点 0.25em，
+# 再加 0.35em 的列间隙 —— 1 位数时正文列左缘 = 1.1em
+# （实测 17.59 像素 @12pt，与 1.1em 一字不差）。
+PREVIEW_NUMBER_DIGIT_EM = 0.5
+PREVIEW_NUMBER_DOT_EM = 0.25
+PREVIEW_STEM_COLUMN_GAP_EM = 0.35
+# Word 的 Table Grid 样式给每个单元格留 108 twips（1.905 毫米）的左右内边距，
+# 而 ``w:tblInd`` 量的是**第一格文字的左缘**，不是表格边框的左缘 ——
+# 边框还要再往左退这一个单元格左边距。实测（Word 16.0 转 PDF）：
+# 题干表预览在离版心左缘 4.66 毫米处，写 tblInd=264（4.66 毫米）后
+# Word 的边框却落在 2.65 毫米处，差的正是这 1.905 毫米；答案表同样差 1.905。
+# 写 tblInd 时必须把它加回去，否则「看着贴左了，其实还差 2 毫米」。
+WORD_TABLE_CELL_MARGIN_LEFT_TWIPS = 108
 # 选项列数不再照抄 styles.css 那条 "@container qpaper (max-width: 680px) {
 # .qb-options.cols-4 -> two columns }"。
 #
@@ -1976,6 +2062,16 @@ def _answer_block_indent_mm(size):
 def _answer_block_text_width_mm(size):
     """答案正文列的净宽（毫米）：版心宽度减去题号列和列间隙。"""
     return PREVIEW_TEXT_WIDTH_MM - _answer_block_indent_mm(size)
+
+
+def _stem_column_left_mm(size, digits):
+    """题干正文列相对版心左边缘的缩进（毫米）。
+
+    与 ``.qb-stem`` 的两栏结构逐字对应：题号列的宽度随题号位数变，
+    再加 0.35em 的列间隙，就是正文列的左缘。
+    """
+    font_mm = size * 25.4 / 72
+    return (PREVIEW_NUMBER_DIGIT_EM * digits + PREVIEW_NUMBER_DOT_EM + PREVIEW_STEM_COLUMN_GAP_EM) * font_mm
 
 
 def _figure_paper_size(
@@ -2415,7 +2511,7 @@ def _write_solution_image(document, image, indent_mm=0.0, text_width_mm=None, sp
     return paragraph
 
 
-def _write_solution(document, item, size, label, lead_space_pt=0.0):
+def _write_solution(document, item, size, label, lead_space_pt=0.0, table_lefts=None):
     """把一道题的答案块写进 Word。
 
     结构照抄预览（frontend/library-solutions.js 的 render()）：
@@ -2428,6 +2524,9 @@ def _write_solution(document, item, size, label, lead_space_pt=0.0):
 
     竖向节奏也照抄：行高 1.35em（Word 的「倍数行距」是字体自然行高的倍数，
     跟 CSS 的 em 不是一回事），每一段的外边距按 CSS 折叠后的结果给。
+
+    ``table_lefts`` 是预览量出来的表格位置：``{"answer": [...], "analysis": [...]}``，
+    每个数是那张表离版心左缘多少毫米（答案正文列里的表是居中的，实测 79.80 毫米）。
     """
     from docx.shared import Mm, Pt
 
@@ -2504,6 +2603,14 @@ def _write_solution(document, item, size, label, lead_space_pt=0.0):
         _close_block()
         return
     parts = _analysis_parts(item["fields"].get("analysis", []))
+    # 答案正文列里的表：预览把它放在这一列里居中（实测离版心左缘 79.80 毫米）。
+    answer_lefts = (table_lefts or {}).get("answer")
+    # 解析里的表按段落顺序排，这里按同样的顺序一段一段切给它们。
+    part_tables = [sum(1 for block in blocks if block["type"] == "table") for blocks in parts]
+    analysis_lefts = (table_lefts or {}).get("analysis")
+    analysis_offsets = (
+        list(analysis_lefts) if analysis_lefts is not None and len(analysis_lefts) == sum(part_tables) else None
+    )
     if has_answer:
         written = _write_field(
             document,
@@ -2517,6 +2624,8 @@ def _write_solution(document, item, size, label, lead_space_pt=0.0):
             text_width_mm=column,
             space_before_pt=_space_before(0.0, first=True),
             space_after_pt=0.0,
+            table_lefts=answer_lefts,
+            table_column=(indent, column),
         )
         if written:
             last[0] = written[-1]
@@ -2545,6 +2654,12 @@ def _write_solution(document, item, size, label, lead_space_pt=0.0):
             text_width_mm=column,
             space_before_pt=_space_before(PREVIEW_SOLUTION_PARAGRAPH_MARGIN_PT),
             space_after_pt=PREVIEW_SOLUTION_PARAGRAPH_MARGIN_PT,
+            table_lefts=(
+                analysis_offsets[sum(part_tables[:index]) : sum(part_tables[: index + 1])]
+                if analysis_offsets is not None
+                else None
+            ),
+            table_column=(indent, column),
         )
         if written:
             last[0] = written[-1]
@@ -3001,6 +3116,10 @@ def _document(captured, title, options, mode):
         info.paragraph_format.keep_with_next = True
         _font(info.add_run("姓名：____________    班级：____________    得分：____________"), size)
     numbered, number = [], 0
+    # 预览量出来的表格位置：题目编号 → 位置 → 离版心左缘多少毫米。
+    # 表格在预览里的横向位置不是定值（题干正文越长，表在那一列里越靠中间），
+    # Word 排版是静态的，只能照量好的位置摆。
+    measured_tables = options.get("measured_table_offsets") or {}
     for index, (name, group) in enumerate(_ordered(captured)):
         section_title = None
         if mode != "answers":
@@ -3040,6 +3159,10 @@ def _document(captured, title, options, mode):
                     )
                     prefix = ""
             image_body = item["content"].get("body_mode", "text") == "source_image"
+            # 题干正文列的左缘随题号位数变（题号列 + 0.35em 的列间隙）。
+            stem_left = _stem_column_left_mm(size, len(str(number)))
+            stem_column = (stem_left, PREVIEW_TEXT_WIDTH_MM - stem_left)
+            table_lefts = measured_tables.get(item["id"]) or {}
             _write_field(
                 document,
                 [] if image_body else item["fields"]["stem"],
@@ -3047,6 +3170,8 @@ def _document(captured, title, options, mode):
                 prefix=prefix,
                 where=item["where"],
                 lead_segments=lead_segments,
+                table_lefts=table_lefts.get("stem"),
+                table_column=stem_column,
             )
             # 老师在预览里改过的图宽、整行位置和换行点，跟预览走同一套算法，
             # 而不是在这里再猜一次。预览和 PDF 共用 exam-layout.js 的排版，
@@ -3128,7 +3253,15 @@ def _document(captured, title, options, mode):
             # 第一个答案块紧跟在小标题后面：预览里那一行的上外边距（6px = 4.5 磅）
             # 就是这一块自己的。之后的块靠 _question_gap 隔开（上下各 6px = 9 磅）。
             _write_solution(
-                document, item, size, label, lead_space_pt=PREVIEW_ANSWER_ROW_MARGIN_PT if index == 0 else 0.0
+                document,
+                item,
+                size,
+                label,
+                lead_space_pt=PREVIEW_ANSWER_ROW_MARGIN_PT if index == 0 else 0.0,
+                table_lefts={
+                    "answer": (measured_tables.get(item["id"]) or {}).get("answer"),
+                    "analysis": (measured_tables.get(item["id"]) or {}).get("analysis"),
+                },
             )
             _question_gap(document)
             # Even keep-whole-question mode must allow a long solution to flow.

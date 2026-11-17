@@ -43,6 +43,10 @@ PRINT_DEFAULTS = {
     # 预览量出来的每张图在纸面上实际有多宽（毫米）：题目编号 → 位置 → 宽度列表。
     # 选项里的图在屏幕上会被选项栏宽收口，Word 不知道这件事，只能照这个宽度排。
     "measured_figure_widths": {},
+    # 预览量出来的每张表离版心左缘多远（毫米）：题目编号 → 位置 → 偏移列表。
+    # 表格在预览里的横向位置不是定值（题干正文越长，表在那一列里越靠中间），
+    # Word 排版是静态的，只能照这个位置摆。
+    "measured_table_offsets": {},
     "question_breaks": [],
     "answer_layout": "inline",
     "answer_space_overrides": {},
@@ -113,6 +117,9 @@ FIGURE_MAX_PER_QUESTION = 50
 # 预览量出来的图宽能记哪些位置：题干那一行，以及 A 到 E 各选项。
 # 原图题（正文整段是截图）走的是另一条路，不在这里。
 MEASURED_FIGURE_SLOTS = frozenset({"stem", "A", "B", "C", "D", "E"})
+# 预览量出来的表格位置能记哪儿：题干、答案正文、解析。
+MEASURED_TABLE_SLOTS = frozenset({"stem", "answer", "analysis"})
+TABLE_MAX_PER_QUESTION = 50
 INPUT_FIELDS = {"title", "ids", "print_options", "revision", "solutions"}
 STORED_FIELDS = {"id", "title", "ids", "print_options", "created_at", "updated_at", "revision"}
 _LOCK = threading.RLock()
@@ -297,9 +304,43 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
         raise DraftError("单题配图实测宽度的题目编号不正确：" + str(error)) from None
     if len(measured_keys) != len(measured):
         raise DraftError("单题配图实测宽度的题目编号不能重复")
+    # 预览量出来的每张表离版心左缘多远（毫米）：题目编号 → 位置 → 偏移列表。
+    # 位置不对，表格就摆在错的地方 —— 写错的值不能进导出。
+    tables = result["measured_table_offsets"]
+    if not isinstance(tables, dict) or len(tables) > 500:
+        raise DraftError("单题表格实测位置应为题目编号到位置的映射，最多 500 题")
+    tables_clean = {}
+    for question, slots in tables.items():
+        if not isinstance(slots, dict) or set(slots) - MEASURED_TABLE_SLOTS:
+            raise DraftError("单题表格实测位置只能是题干、答案或解析")
+        for values in slots.values():
+            if not isinstance(values, list) or len(values) > TABLE_MAX_PER_QUESTION:
+                raise DraftError(f"每题最多测量 {TABLE_MAX_PER_QUESTION} 张表")
+            for value in values:
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not 0 <= value <= FIGURE_WIDTH_MAX_MM
+                ):
+                    raise DraftError("表格实测位置只能是 0 到 178 之间的毫米数")
+        tables_clean[question] = {slot: list(values) for slot, values in slots.items()}
+    try:
+        table_keys = normalize_ids(list(tables))
+    except BrowseError as error:
+        raise DraftError("单题表格实测位置的题目编号不正确：" + str(error)) from None
+    if len(table_keys) != len(tables):
+        raise DraftError("单题表格实测位置的题目编号不能重复")
     if (
         selected is not None
-        and (set(keys) | set(space_keys) | set(figure_keys) | set(breaks) | set(column_keys) | set(measured_keys))
+        and (
+            set(keys)
+            | set(space_keys)
+            | set(figure_keys)
+            | set(breaks)
+            | set(column_keys)
+            | set(measured_keys)
+            | set(table_keys)
+        )
         - selected
     ):
         raise DraftError("单题排版和另起页只能指定当前选中的题目")
@@ -309,6 +350,7 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
     result["question_breaks"] = breaks
     result["option_columns"] = dict(zip(column_keys, columns.values()))
     result["measured_figure_widths"] = dict(zip(measured_keys, measured_clean.values()))
+    result["measured_table_offsets"] = dict(zip(table_keys, tables_clean.values()))
     return result
 
 
