@@ -34,6 +34,20 @@ const exportJs = read("QB_EXPORT_JS", "frontend/exam-export.js");
 const exportPy = read("QB_EXPORT_PY", "backend/core/library_export.py");
 const draftsPy = read("QB_DRAFTS_PY", "backend/core/library_drafts.py");
 
+// 找出 needle 在源码里出现处的所有片段。
+// 不能只取「第一次出现」：导出模块里同一份键可能出现在兜底赋值处
+// （第三十八轮加的 fillMeasured 就排在过滤代码前面），
+// 只看第一处会把真正的过滤代码判成「没有」。
+function blocksAround(source, needle, window) {
+  const blocks = [];
+  let at = source.indexOf(needle);
+  while (at >= 0) {
+    blocks.push(source.slice(at, at + window));
+    at = source.indexOf(needle, at + 1);
+  }
+  return blocks;
+}
+
 // 从源码里抠出 measuredOptionColumns 的函数体（配对花括号）。
 function extractFunction(src, name) {
   const start = src.indexOf("function " + name + "(");
@@ -140,14 +154,13 @@ test("导出：exportPaper 必须把实测栏数交给后端", () => {
 test("导出：option_columns 只保留本次选中且合法的题", () => {
   assert.match(exportJs, /options\.option_columns/,
     "导出端没有处理 option_columns：别的卷子的栏数会被带过来");
-  const at = exportJs.indexOf("options.option_columns");
-  assert.ok(at > 0, "尺子自检：exam-export.js 里找不到 options.option_columns");
-  const block = exportJs.slice(at, at + 600);
-  assert.match(block, /selectedIds\.has\(id\)/,
+  const blocks = blocksAround(exportJs, "options.option_columns", 600);
+  assert.ok(blocks.length, "尺子自检：exam-export.js 里找不到 options.option_columns");
+  assert.ok(blocks.some(block => /selectedIds\.has\(id\)/.test(block)),
     "option_columns 没按本次选中的题过滤：没选中的题也带着栏数过去");
-  assert.match(block, /Number\.isInteger\(value\)/,
+  assert.ok(blocks.some(block => /Number\.isInteger\(value\)/.test(block)),
     "option_columns 没校验栏数是不是整数：脏值会一路带到后端");
-  assert.match(block, /value\s*>=\s*1\s*&&\s*value\s*<=\s*5/,
+  assert.ok(blocks.some(block => /value\s*>=\s*1\s*&&\s*value\s*<=\s*5/.test(block)),
     "option_columns 没限制栏数范围（应为 1 到 5）");
 });
 

@@ -133,6 +133,97 @@
     return result;
   }
 
+  // ── 预览实测：选项栏数与配图宽度 ─────────────────────────────────
+  // 老师核对的是屏幕，拿到手的是文件。这两样必须照预览那份来：
+  //   · 选项排成几栏 —— 后端自己估一遍迟早对不上（实测同一批题里两题栏数不同：
+  //     屏幕上两栏，Word 里四栏）。
+  //   · 每张图在纸面上多宽 —— 选项里的图在屏幕上被选项栏宽收口过，Word 不知道
+  //     这件事，照 150dpi 自然尺寸排，纸上就比屏幕大了一圈（实测 30.69 毫米 → 55.71 毫米）。
+  //
+  // 经典题库页自己量好了再传进来（library.js 的 measuredOptionColumns /
+  // measuredFigureWidths）；题库工作台的预览跑在 iframe 里，父页面从没量过，
+  // 那份卷子只能让后端猜 —— 于是「预览看到的」和「导出的」对不上。
+  //
+  // 这里补上「没人量就自己量」：调用方没给实测值，就从眼前这份预览里量。
+  // 同一份预览、同一个排版引擎，量出来的就是老师刚才核对过的那张纸。
+
+  // 找到已经排好版的那张纸。本文档里的（经典题库页），或者同源 iframe 里的
+  // （题库工作台的 A4 预览）。没有排过版的空纸不算数。
+  // 这一步只准「找到」或「没找到」，不许抛：找不到预览只是量不到实测值，
+  // 不能把整条导出带崩（无头环境里 document 上甚至没有 querySelector）。
+  function previewPaper() {
+    const doc = root.document;
+    if (!doc) return null;
+    if (typeof doc.querySelector === "function") {
+      const own = doc.querySelector(".print-paper[data-page-count]");
+      if (own && typeof own.querySelector === "function" && own.querySelector(".print-question")) return own;
+    }
+    if (typeof doc.querySelectorAll !== "function") return null;
+    const frames = doc.querySelectorAll("iframe");
+    for (const frame of frames) {
+      let frameDoc = null;
+      try { frameDoc = frame.contentDocument; } catch (error) { continue; }
+      if (!frameDoc || typeof frameDoc.querySelector !== "function") continue;
+      const paper = frameDoc.querySelector(".print-paper[data-page-count]");
+      if (paper && typeof paper.querySelector === "function" && paper.querySelector(".print-question")) return paper;
+    }
+    return null;
+  }
+
+  // 预览把每道题最后排成几栏写在了选项表上（exam-layout 的 fitOptions 量的是
+  // A4 正文宽，跟 Word 的 178 毫米正文宽一样宽）。跨页续片（.exam-fragment）
+  // 只带着半道题，它的栏数不算数。
+  function measureOptionColumns(paper) {
+    const columns = {};
+    for (const block of paper.querySelectorAll(".print-question")) {
+      const id = block.dataset.questionId;
+      if (!id || columns[id] !== undefined) continue;
+      if (block.classList.contains("exam-fragment")) continue;
+      const value = Number(block.querySelector(".qb-options")?.dataset.examColumns);
+      if (Number.isInteger(value) && value >= 1 && value <= 5) columns[id] = value;
+    }
+    return columns;
+  }
+
+  // 预览里每张图在纸面上实际有多宽（毫米）。预览页是 CSS transform 缩放过的，
+  // 量到的矩形是缩放后的尺寸，要除掉缩放系数才是纸面宽度。
+  function measureFigureWidths(paper) {
+    const raw = Number(paper.style.getPropertyValue("--exam-scale"));
+    const scale = Number.isFinite(raw) && raw > 0 ? raw : 1;
+    const widths = {};
+    for (const block of paper.querySelectorAll(".print-question")) {
+      const id = block.dataset.questionId;
+      if (!id || widths[id]) continue;
+      if (block.classList.contains("exam-fragment")) continue;
+      const entry = {};
+      const measure = (slot, images) => {
+        const values = Array.from(images).map(image => {
+          const width = image.getBoundingClientRect().width / scale;
+          return width > 0 ? Math.round((width * 25.4 / 96) * 100) / 100 : 0;
+        }).filter(value => value > 0);
+        if (values.length) entry[slot] = values;
+      };
+      // 题干配图在 .qb-figures 这一行里；选项配图挂在各自的选项上。
+      measure("stem", block.querySelectorAll(".qb-figures .qb-figure img"));
+      for (const option of block.querySelectorAll(".qb-option")) {
+        const letter = (option.querySelector(".qb-option-label")?.textContent || "").replace(/[.．、\s]/g, "");
+        if (!letter) continue;
+        measure(letter, option.querySelectorAll(".qb-figure img"));
+      }
+      if (Object.keys(entry).length) widths[id] = entry;
+    }
+    return widths;
+  }
+
+  // 没人给实测值，就从眼前这份预览里量一份。
+  // 调用方给了就一个字都不改（经典题库页量得比这里细：它量的是自己那张纸）。
+  function fillMeasured(options, paper) {
+    if (!paper) return options;
+    if (!Object.hasOwn(options, "option_columns")) options.option_columns = measureOptionColumns(paper);
+    if (!Object.hasOwn(options, "measured_figure_widths")) options.measured_figure_widths = measureFigureWidths(paper);
+    return options;
+  }
+
   function fileName(header, fallback) {
     let name = fallback;
     const encoded = header?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
@@ -232,6 +323,11 @@
         if (index % 8 === 0) await new Promise((resolve) => root.setTimeout(resolve, 0));
       }
       const selectedIds = new Set(items.map(item => item.id));
+      // 没人给实测值，就从眼前这份预览里量一份。
+      const paper = previewPaper();
+      if (paper) {
+        fillMeasured(options, paper);
+      }
       // Carry the same paper-only choices to both PDF and Word. Removed
       // publications cannot revive an old option or writing-space override.
       if (options.option_overrides) options.option_overrides = Object.fromEntries(Object.entries(options.option_overrides)
@@ -308,5 +404,5 @@
   }
 
   return Object.freeze({ serializeField, serializeFields, selectedAnswer, fileName, paperGroups, paperOrder,
-    shortSectionLabel, sectionHeading, download });
+    shortSectionLabel, sectionHeading, download, previewPaper, fillMeasured, measureOptionColumns, measureFigureWidths });
 });

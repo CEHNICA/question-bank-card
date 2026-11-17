@@ -31,6 +31,20 @@ const exportJs = read("QB_EXPORT_JS", "frontend/exam-export.js");
 const exportPy = read("QB_EXPORT_PY", "backend/core/library_export.py");
 const draftsPy = read("QB_DRAFTS_PY", "backend/core/library_drafts.py");
 
+// 找出 needle 在源码里出现处的所有片段。
+// 不能只取「第一次出现」：导出模块里同一份键可能出现在兜底赋值处
+// （第三十八轮加的 fillMeasured 就排在过滤代码前面），
+// 只看第一处会把真正的过滤代码判成「没有」。
+function blocksAround(source, needle, window) {
+  const blocks = [];
+  let at = source.indexOf(needle);
+  while (at >= 0) {
+    blocks.push(source.slice(at, at + window));
+    at = source.indexOf(needle, at + 1);
+  }
+  return blocks;
+}
+
 // 从源码里抠出 measuredFigureWidths 的函数体（配对花括号）。
 function extractFunction(src, name) {
   const start = src.indexOf("function " + name + "(");
@@ -171,12 +185,11 @@ test("导出：exportPaper 必须把实测图宽交给后端", () => {
 
 // ── 7. 导出端必须按本次选题过滤 ──────────────────────────────────
 test("导出：measured_figure_widths 只保留本次选中的题", () => {
-  const at = exportJs.indexOf("options.measured_figure_widths");
-  assert.ok(at > 0, "尺子自检：exam-export.js 里找不到 options.measured_figure_widths");
-  const block = exportJs.slice(at, at + 900);
-  assert.match(block, /selectedIds\.has\(id\)/,
+  const blocks = blocksAround(exportJs, "options.measured_figure_widths", 900);
+  assert.ok(blocks.length, "尺子自检：exam-export.js 里找不到 options.measured_figure_widths");
+  assert.ok(blocks.some(block => /selectedIds\.has\(id\)/.test(block)),
     "measured_figure_widths 没按本次选中的题过滤：没选中的题也带着图宽过去");
-  assert.match(block, /Number\.isFinite\(value\)/,
+  assert.ok(blocks.some(block => /Number\.isFinite\(value\)/.test(block)),
     "measured_figure_widths 没校验宽度是不是数字：脏值会一路带到后端");
 });
 
