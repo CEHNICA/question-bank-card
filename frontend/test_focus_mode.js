@@ -11,37 +11,16 @@ const html = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
 
-assert.match(html, /id="focusToggle"[^>]*aria-pressed="true"[\s\S]*?>[\s\S]*?专注[\s\S]*?<\/button>/);
-assert(require("./shortcut-help.js").reference("review").more.some(item => item.keys.includes("Z") && item.label.includes("专注")));
-// On by default, remembered per viewer.
-assert.match(js, /focus: readPref\("qb-focus", "1"\) === "1"/);
-assert.match(js, /case "z": event\.preventDefault\(\); setFocus\(!state\.focus\)/);
-// Only the current card is lit; every other card dims.
-assert.match(css, /\.cards\.focus-mode\.reading \.card:not\(\.is-current\) \{ opacity: \.34;/);
-assert.match(css, /\.cards\.focus-mode \{ gap: 26px; \}/);
-assert.match(css, /\.cards\.focus-mode \.card\.compact \+ \.card\.compact \{ margin-top: -14px; \}/);
-// Dimming needs a full card being read: a collapsed (approved) row, a card
-// scrolled away (or mostly under the toolbar, off the reading line) or a screen
-// of collapsed rows dims nothing.
-assert.match(js, /const reading = Boolean\(state\.focus && card && !card\.classList\.contains\("compact"\) && \(state\.followHold \|\| wellInView\(card\)\)\);/);
-assert.match(js, /container\.classList\.toggle\("reading", reading\);/);
-// Collapsed rows are never picked as the card being read.
-// In full screen the top bar is 0 px high, which is not "missing".
-assert.match(js, /return \(bar \? bar\.offsetHeight : 56\) \+/);
-// The card being read follows the scroll, but not while a jump scrolls past cards.
-assert.match(js, /window\.addEventListener\("scroll", \(\) => \{\s*if \(!state\.focus \|\| followFrame\) return;/);
+// 录入页已撤掉「专注」开关与 Z 快捷键（见 test_entry_redesign）；setFocus 只负责清掉旧状态。
+assert.doesNotMatch(html, /id="focusToggle"/);
+assert.doesNotMatch(js, /case "z":\s*event\.preventDefault\(\);\s*setFocus\(/);
+assert.match(js, /function setFocus\(\) \{\s*state\.focus = false;/);
 assert.match(js, /function setCurrent\(id, \{ scroll = false, focus = false, hold = scroll \} = \{\}\)/);
 assert.match(js, /if \(card && hold\) state\.followHold = true;/);
-// 1.13.5: keyboard focus lights the card too, and holds it.  Without the hold the
-// scroll-follow immediately re-dims it — focus lands on a control, the browser
-// scrolls it into view, and the follow logic picks the card at the top of the
-// viewport instead of the one holding focus.  hold defaults to scroll, so every
-// existing caller behaves exactly as before.
 assert.match(js, /card\.addEventListener\("focusin", \(\) => \{ if \(state\.current !== q\.id\) setCurrent\(q\.id, \{ hold: true \}\); \}\);/);
-assert.match(js, /if \(!state\.followHold\) \{\s*const card = readingCard\(\);/);
 assert.match(js, /window\.addEventListener\("wheel", releaseFollow, \{ passive: true \}\)/);
-// The card being read sits under a reading line a third of the way down;
-// the line starts at the top of the page and runs to the bottom at its end.
+assert.match(js, /return \(bar \? bar\.offsetHeight : 56\) \+/);
+// 阅读线几何仍给后续全屏/跳题用；只测纯函数，不再要求变暗样式入口。
 const band = { top: 100, bottom: 700 };
 assert.equal(readingLine({ ...band, scrollY: 2000, below: 2000 }), 300);
 assert.equal(readingLine({ ...band, scrollY: 0, below: 2000 }), 100);
@@ -81,7 +60,7 @@ assert.match(js, /const toolbar = \$\("toolbarPaper"\);[\s\S]*?toolbar\.replaceC
 // 键盘 Tab 过来激活的（detail 为 0）不抢，Tab 顺序和连按空格切开关都要留着。
 assert.match(js, /function releaseToggleFocus\(event\) \{\s*if \(event\.detail === 0\) return;/);
 assert.match(js, /\$\("fullscreenToggle"\)\.addEventListener\("click", \(event\) => \{\s*setReviewFullscreen\([\s\S]*?releaseToggleFocus\(event\);/);
-assert.match(js, /\$\("focusToggle"\)\.addEventListener\("click", \(event\) => \{ setFocus\(!state\.focus\); releaseToggleFocus\(event\); \}\)/);
+assert.doesNotMatch(js, /\$\("focusToggle"\)\.addEventListener/);
 assert.match(js, /\$\("lensToggle"\)\.addEventListener\("click", \(event\) => \{ setLens\(!state\.lens\); releaseToggleFocus\(event\); \}\)/);
 assert.match(js, /\$\("paperMenu"\)\.addEventListener\("toggle",[\s\S]*?if \(isOpen\) \{ renderSettingsTask\(\); return; \}/);
 console.log("full-screen review checks: OK");

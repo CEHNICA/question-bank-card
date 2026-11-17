@@ -19,7 +19,7 @@ assert.ok(figuresRow, ".qb-figures is the container that wraps stem figures");
 const row = figuresRow[1];
 assert.match(row, /display:\s*flex/, "figures wrap by flex, not by an explicit grid");
 assert.match(row, /flex-wrap:\s*wrap/, "figures wrap onto new rows");
-assert.match(row, /justify-content:\s*center/, ".qb-figures centres the row, so Word must too");
+assert.match(row, /justify-content:\s*flex-end/, ".qb-figures 默认靠右，Word 默认 figure_align=right 必须对上");
 
 const gap = row.match(/gap:\s*(\d+(?:\.\d+)?)px/);
 assert.ok(gap, ".qb-figures declares its own gap");
