@@ -191,9 +191,10 @@ assert.doesNotMatch(html, /id="settingsReady"/);
 assert.doesNotMatch(js, /function renderSettingsReady/);
 assert.match(js, /现在是 AI 助手读题：导入会先在本机准备原卷并尝试切题，无需 MinerU/);
 assert.doesNotMatch(js, /新资料的题卡先用 MinerU 的文字/);
-// 专注和放大镜两个开关在“审核界面”里，与工具栏按钮保持同步。
-assert.match(html, /id="settingsFocus" type="checkbox" role="switch"/);
-assert.match(js, /if \(\$\("settingsFocus"\)\) \$\("settingsFocus"\)\.checked = on;/);
+// 放大镜开关在“审核界面”里，与工具栏按钮保持同步。聚光灯入口已从设置页撤掉。
+assert.match(html, /id="settingsLens" type="checkbox" role="switch"/);
+assert.doesNotMatch(html, /id="settingsFocus"/);
+assert.doesNotMatch(js, /\$\("settingsFocus"\)\.checked/);
 // 读题模型改了就保存，不再依赖单独的保存按钮。
 assert.doesNotMatch(html, /id="settingsModelSave"/);
 assert.match(js, /\.forEach\(\(id\) => \$\(id\)\.addEventListener\("change", \(\) => \{ void saveModelSettings\(\); \}\)\)/);
