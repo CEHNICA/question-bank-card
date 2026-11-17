@@ -1753,46 +1753,42 @@ class LibraryExportTests(ExportFixture, TestCase):
                     for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
                         node = table.find(f"w:tblPr/w:tblBorders/w:{side}", NS)
                         self.assertEqual(node.get(f"{{{NS['w']}}}val"), "nil", f"{label} line {number}: {side} border")
-                    # The preview centres every line on its own; a table left
-                    # aligned on an A4 text area is the difference the teacher sees.
+                    # 预览 .qb-figures 默认 justify-content:flex-end；表与单元格都靠右。
                     justification = table.find("w:tblPr/w:jc", NS)
-                    self.assertIsNotNone(justification, f"{label} line {number}: has to be centred")
-                    self.assertEqual(justification.get(f"{{{NS['w']}}}val"), "center")
-                    # Centring the table is only half of it. Each column is a gap
-                    # wider than its picture, and the picture has to sit in the
-                    # middle of that column — a left-aligned cell paragraph puts
-                    # it hard against the neighbour and drags the row left by half
-                    # a gap, about 1.9mm, which is visible on the page.
+                    self.assertIsNotNone(justification, f"{label} line {number}: has to be right-aligned")
+                    self.assertEqual(justification.get(f"{{{NS['w']}}}val"), "right")
                     for cell in table.findall(".//w:tc", NS):
                         inner = cell.find("w:p/w:pPr/w:jc", NS)
-                        self.assertIsNotNone(inner, f"{label} line {number}: a cell has to centre its picture")
+                        self.assertIsNotNone(inner, f"{label} line {number}: a cell has to align its picture")
                         self.assertEqual(
                             inner.get(f"{{{NS['w']}}}val"),
-                            "center",
-                            f"{label} line {number}: a cell paragraph is not centred",
+                            "right",
+                            f"{label} line {number}: a cell paragraph is not right-aligned",
                         )
-                    # Word table columns touch, so each column carries the gap the
-                    # preview shows — including the last one, which is what keeps
-                    # the same space before the first diagram as after the last.
+                    # 靠右时 gap 加在第 2 列及以后（左边空出邻居间距）；第 1 列贴图本身。
                     column_mm = [
                         int(column.get(f"{{{NS['w']}}}w")) * 25.4 / 1440
                         for column in table.findall("w:tblGrid/w:gridCol", NS)
                     ]
                     for position in range(columns):
                         slack = column_mm[position] - row[position]
-                        self.assertGreater(
-                            slack,
-                            1.5,
-                            f"{label} line {number}: column {position + 1} "
-                            f"has no gap ({column_mm[position]} vs {row[position]})",
-                        )
-                    # The pictures and the gaps between them must fit the text
-                    # area. The columns add one empty gap at each end on top of
-                    # that; it is the space that centres the row and may spill
-                    # into the A4 margins, which is far better than shrinking
-                    # every diagram by a percent and putting it out of step.
+                        if position == 0:
+                            self.assertAlmostEqual(
+                                slack,
+                                0.0,
+                                delta=0.05,
+                                msg=f"{label} line {number}: first column is picture-only when right-aligned",
+                            )
+                        else:
+                            self.assertGreater(
+                                slack,
+                                1.5,
+                                f"{label} line {number}: column {position + 1} "
+                                f"has no gap ({column_mm[position]} vs {row[position]})",
+                            )
+                    # 图宽 + 列间 gap；靠右不再在两端各多塞一截。
                     self.assertLessEqual(
-                        sum(column_mm) - gap_mm, 178, f"{label} line {number}: the row runs off the page"
+                        sum(column_mm), 178, f"{label} line {number}: the row runs off the page"
                     )
 
         # Two pictures too wide to share a row get one paragraph each — the
@@ -2003,8 +1999,8 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertEqual([len(table.findall("w:tblGrid/w:gridCol", NS)) for table in tables], [2, 1, 3])
         self.assertEqual(
             [table.find("w:tblPr/w:jc", NS).get(f"{{{NS['w']}}}val") for table in tables],
-            ["right", "right", "center"],
-            "没被调过的那道题仍然是居中，不能被上一道题的设置带跑",
+            ["right", "right", "right"],
+            "没被调过的那道题仍是默认靠右，不能被上一道题的设置带跑",
         )
 
     def test_three_side_by_side_diagrams_stay_on_one_row(self):
@@ -2055,27 +2051,21 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertEqual(len(columns_mm), 3)
         self.assertGreater(columns_mm[0], columns_mm[1])
         self.assertGreater(columns_mm[1], columns_mm[2])
-        # Each column carries the gap the preview shows between figures. It is
-        # not optional on the last column either: the pictures sit centred in
-        # their cells, so a bare last column leaves 1.85mm more space on the
-        # left of the row than on the right — Word 16.0 measured that on the
-        # real export before the trailing gap was added.
+        # 靠右：第 1 列 = 图宽；第 2、3 列 = 图宽 + 列间 gap（14px）。
         for position, (column_mm, picture_mm) in enumerate(zip(columns_mm, extents)):
-            self.assertGreater(
-                column_mm - picture_mm,
-                1.5,
-                f"column {position + 1} ({column_mm} mm) has no room for its {picture_mm} mm picture",
-            )
-        # Centred, like .qb-figures, and still inside the 178mm text area.
-        self.assertEqual(table.find("w:tblPr/w:jc", NS).get(f"{{{NS['w']}}}val"), "center")
+            slack = column_mm - picture_mm
+            if position == 0:
+                self.assertAlmostEqual(slack, 0.0, delta=0.05, msg="first column is picture-only when right-aligned")
+            else:
+                self.assertGreater(
+                    slack,
+                    1.5,
+                    f"column {position + 1} ({column_mm} mm) has no room for its {picture_mm} mm picture",
+                )
+        self.assertEqual(table.find("w:tblPr/w:jc", NS).get(f"{{{NS['w']}}}val"), "right")
         self.assertLessEqual(sum(columns_mm), 178)
-        # The whole point: the pictures and the gaps between them are exactly
-        # what the teacher checked on screen. 178.56 + 147.84 + 134.4 px of
-        # pictures plus two 14px gaps = 488.8 px, and 488.8 / 3.7795 = 129.3 mm.
-        # The grid carries one extra gap at each end, which is the empty space
-        # that puts the content in the middle.
-        content_mm = sum(columns_mm) - export.PREVIEW_FIGURE_GAP_PX * 25.4 / 96
-        self.assertAlmostEqual(content_mm, 129.3, delta=0.2, msg="the row must be the same width as the preview row")
+        # 178.56 + 147.84 + 134.4 px 图 + 两个 14px gap = 488.8 px ≈ 129.3 mm。
+        self.assertAlmostEqual(sum(columns_mm), 129.3, delta=0.2, msg="the row must be the same width as the preview row")
 
         # Centring only means something with these three in place. Word pads each
         # cell by 1.9mm a side, which measured 4mm of rightward drift, and it
@@ -2160,14 +2150,8 @@ class LibraryExportTests(ExportFixture, TestCase):
                     "姓名／班级／得分 must land in the middle, not against the margin",
                 )
 
-    def test_a_lone_stem_figure_is_centred_like_the_preview_centres_it(self):
-        """A single picture is a .qb-figures row of one, so it is centred.
-
-        Word 16.0 was asked directly where a lone 50mm diagram lands: against
-        the left margin, paragraph alignment left, with 128mm of blank page to
-        its right. The preview puts it in the middle with 242px of space on each
-        side. The grid case has its own test; this is the one-figure case.
-        """
+    def test_a_lone_stem_figure_follows_default_right_align(self):
+        """单张题干配图跟 .qb-figures 默认靠右，不再居中。"""
         pub = self.publication(kind="free_response")
         self.figure(pub)
         response = self.post(self.payload([pub], print_options={"document": "questions"}))
@@ -2177,8 +2161,8 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertIsNotNone(drawing)
         paragraph = next(node for node in tree.iter(f"{{{NS['w']}}}p") if node.find(".//w:drawing", NS) is not None)
         justification = paragraph.find("w:pPr/w:jc", NS)
-        self.assertIsNotNone(justification, "a lone figure must be centred, not left on the margin")
-        self.assertEqual(justification.get(f"{{{NS['w']}}}val"), "center")
+        self.assertIsNotNone(justification, "a lone figure must carry explicit alignment")
+        self.assertEqual(justification.get(f"{{{NS['w']}}}val"), "right")
 
     def test_a_scanned_page_stays_left_because_the_preview_leaves_it_left(self):
         """The mirror image: .qb-question-images is a column flex box.
