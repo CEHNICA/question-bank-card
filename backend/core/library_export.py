@@ -2084,6 +2084,7 @@ def _write_table(
     ``column_shrinks`` 时用得上：正文列宽 = min(列可用宽, max(正文宽, 表宽))。
     """
     from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     from docx.shared import Mm, Pt
@@ -2177,6 +2178,17 @@ def _write_table(
         cell_paragraph = target.paragraphs[0]
         _line_spacing(cell_paragraph, size * PREVIEW_TABLE_LINE_HEIGHT_EM)
         cell_paragraph.paragraph_format.space_after = Pt(0)
+        # 预览里格子里的字是**居中**的：``.qb-table td, .qb-table th
+        # { text-align: center }``（frontend/styles.css:1690）。Chrome 实测
+        # （_probe80.py）：表头格和数据格都居中，dense 表也一样。
+        #
+        # Word 这边默认左对齐 —— 窄表那一列的内容盒只有 4.97 毫米，
+        # 居中时左边空 1.30 毫米，左对齐只空 0.13 毫米，纸上差 1.17 毫米。
+        #
+        # 注意这跟**表格整体**的位置是两回事：w:tblPr/w:jc 管的是表格框在页面
+        # 上的位置（题干表靠左、答案表在正文列里居中），w:pPr/w:jc 管的才是
+        # 格子里的文字。
+        cell_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         if cell["header"]:
             shade = OxmlElement("w:shd")
             shade.set(qn("w:fill"), "F1F5F3")
