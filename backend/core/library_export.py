@@ -1542,7 +1542,17 @@ def _figure_settings(options, item):
             widths[index] = millimetres
     breaks = sorted({int(value) for value in settings.get("breaks") or [] if str(value).lstrip("-").isdigit()})
     align = settings.get("align")
-    return {"width": widths, "breaks": breaks, "align": align if align in ("left", "center", "right") else "center"}
+    # 预览量出来的每张图在纸面上的实际宽度（毫米）：位置 → 宽度列表。
+    # 选项里的图在屏幕上会被选项栏宽收口，Word 自己量不到那个栏宽 ——
+    # 没有这份实测值，Word 就照 150dpi 自然尺寸排，纸上比屏幕上大了一圈。
+    measured = (options.get("measured_figure_widths") or {}).get(item["id"]) or {}
+    measured = {
+        slot: [float(value) for value in values if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0]
+        for slot, values in measured.items()
+        if isinstance(values, list)
+    }
+    return {"width": widths, "breaks": breaks, "align": align if align in ("left", "center", "right") else "center",
+            "measured": measured}
 
 
 def _figure_widths(images, text_width_mm=PREVIEW_TEXT_WIDTH_MM, settings=None):
@@ -1580,7 +1590,7 @@ def _pack_lines(widths, text_width_mm=PREVIEW_TEXT_WIDTH_MM, forced=()):
     return lines or [1]
 
 
-def _figure_row_lines(images, text_width_mm=PREVIEW_TEXT_WIDTH_MM, settings=None):
+def _figure_row_lines(images, text_width_mm=PREVIEW_TEXT_WIDTH_MM, settings=None, widths=None):
     """How many figures the preview puts on each line, e.g. ``[2, 1]``.
 
     The line lengths are kept, not just the widest one. The preview centres
@@ -1589,20 +1599,42 @@ def _figure_row_lines(images, text_width_mm=PREVIEW_TEXT_WIDTH_MM, settings=None
     2+1 puts the lone third picture in the first column, hard against the left
     of a table that is itself centred. Three questions in the bank wrap that way,
     so each line gets its own table.
+
+    ``widths`` passes in the widths already resolved (teacher's millimetres or
+    the preview's measured ones) so the packing matches what the screen did.
     """
-    return _pack_lines(_figure_widths(images, text_width_mm, settings), text_width_mm, (settings or {}).get("breaks"))
+    resolved = list(widths) if widths is not None else _figure_widths(images, text_width_mm, settings)
+    return _pack_lines(resolved, text_width_mm, (settings or {}).get("breaks"))
 
 
-def _write_images(document, item, slot, lines=None, settings=None):
+def _figure_widths_for_slot(pictures, slot, settings=None, measured=None):
+    """这个位置上的每张图，纸面上最终有多宽（毫米）。
+
+    两层：先是老师自己在预览里改的宽度（只对题干配图有意义，``settings``
+    里那个索引空间是题干配图的序号），再是预览量出来的实测宽度 ——
+    选项里的图在屏幕上被选项栏宽收口过，Word 自己量不到那个栏宽，
+    不按实测值收口，纸上就比屏幕上大一圈。
+    """
+    widths = _figure_widths(pictures, PREVIEW_TEXT_WIDTH_MM, settings if slot != "body" else None)
+    measured = list(measured or [])
+    if not measured or slot == "body":
+        return widths
+    return [
+        min(width, measured[index]) if index < len(measured) else width
+        for index, width in enumerate(widths)
+    ]
+
+
+def _write_images(document, item, slot, lines=None, settings=None, measured=None):
     from docx.shared import Mm
 
     pictures = [image for image in item["images"] if image["slot"] == slot]
     if not pictures:
         return
     align = (settings or {}).get("align", "center")
-    widths = _figure_widths(pictures, PREVIEW_TEXT_WIDTH_MM, settings if slot != "body" else None)
+    widths = _figure_widths_for_slot(pictures, slot, settings, measured)
     if slot != "body" and lines is None:
-        lines = _figure_row_lines(pictures, settings=settings)
+        lines = _figure_row_lines(pictures, settings=settings, widths=widths)
     # Only a line that actually holds two or more diagrams needs a table. When
     # every line holds one, they are lone figures and a single aligned
     # paragraph says so with less machinery than a one-column table.
@@ -1975,7 +2007,7 @@ def _option_columns(item, options, *, text_width_mm=178):
     return 1
 
 
-def _write_compact_options(document, item, size, columns, *, text_width_mm=178):
+def _write_compact_options(document, item, size, columns, *, text_width_mm=178, figures=None):
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     from docx.shared import Mm
@@ -2002,7 +2034,8 @@ def _write_compact_options(document, item, size, columns, *, text_width_mm=178):
         blocks = item["fields"].get(f"options.{letter}", [])
         _write_segments(paragraph, blocks[0]["segments"] if blocks else [], size)
         paragraph.paragraph_format.line_spacing = LINE_SPACING
-        _write_images(cell, item, letter)
+        # 选项里的图在预览里被选项栏宽收口过，Word 照实测宽度排。
+        _write_images(cell, item, letter, measured=(figures or {}).get("measured", {}).get(letter))
     for row in table.rows:
         row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
 
@@ -2273,22 +2306,28 @@ def _document(captured, title, options, mode):
                 where=item["where"],
                 lead_segments=lead_segments,
             )
+            # 老师在预览里改过的图宽、整行位置和换行点，跟预览走同一套算法，
+            # 而不是在这里再猜一次。预览和 PDF 共用 exam-layout.js 的排版，
+            # 只有 Word 是这份代码，所以两边最容易分家 —— 数字先统一到这里。
+            figures = _figure_settings(options, item)
             # 原图题在预览里就是一张一张竖排（.qb-question-images 是 column 方向），
             # 只有排版文字的题干配图跟着 .qb-figures 的换行走。
             if image_body:
                 _write_images(document, item, "body")
             else:
                 stem_figures = [image for image in item["images"] if image["slot"] == "stem"]
-                # 老师在预览里改过的图宽、整行位置和换行点，跟预览走同一套算法，
-                # 而不是在这里再猜一次。预览和 PDF 共用 exam-layout.js 的排版，
-                # 只有 Word 是这份代码，所以两边最容易分家 —— 数字先统一到这里。
-                figures = _figure_settings(options, item)
+                stem_measured = figures["measured"].get("stem")
                 _write_images(
-                    document, item, "stem", _figure_row_lines(stem_figures, settings=figures), settings=figures
+                    document, item, "stem",
+                    _figure_row_lines(
+                        stem_figures, settings=figures,
+                        widths=_figure_widths_for_slot(stem_figures, "stem", figures, stem_measured),
+                    ),
+                    settings=figures, measured=stem_measured,
                 )
             columns = _option_columns(item, options) if not image_body else 1
             if columns > 1:
-                _write_compact_options(document, item, size, columns)
+                _write_compact_options(document, item, size, columns, figures=figures)
             else:
                 for letter in "" if image_body else "ABCDE":
                     if f"options.{letter}" in item["fields"]:
@@ -2301,7 +2340,7 @@ def _document(captured, title, options, mode):
                         )
                     elif any(image["slot"] == letter for image in item["images"]):
                         _font(document.add_paragraph().add_run(f"{letter}."), size)
-                    _write_images(document, item, letter)
+                    _write_images(document, item, letter, measured=figures["measured"].get(letter))
             answer_space = options.get("answer_space_overrides", {}).get(item["id"], options["answer_space"])
             # 每道题都能有留白；解答题有 8 毫米下限。口径与预览、PDF 一致。
             millimetres = _answer_space_millimetres(answer_space, item["type"])

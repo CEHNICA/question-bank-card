@@ -239,6 +239,21 @@
       // 预览量到的栏数只对这次选中的题有效，别把别的题的栏数带过去。
       if (options.option_columns) options.option_columns = Object.fromEntries(Object.entries(options.option_columns)
         .filter(([id, value]) => selectedIds.has(id) && Number.isInteger(value) && value >= 1 && value <= 5));
+      // 预览量到的图宽同理：只留这次选中的题，宽度也要是看得懂的数字。
+      if (options.measured_figure_widths) {
+        const kept = {};
+        for (const [id, slots] of Object.entries(options.measured_figure_widths)) {
+          if (!selectedIds.has(id) || !slots || typeof slots !== "object") continue;
+          const perSlot = {};
+          for (const [slot, values] of Object.entries(slots)) {
+            if (!Array.isArray(values) || !values.length) continue;
+            const widths = values.map(value => Number(value)).filter(value => Number.isFinite(value) && value > 0);
+            if (widths.length) perSlot[slot] = widths;
+          }
+          if (Object.keys(perSlot).length) kept[id] = perSlot;
+        }
+        options.measured_figure_widths = kept;
+      }
       if (options.answer_space_overrides) options.answer_space_overrides = Object.fromEntries(Object.entries(options.answer_space_overrides)
         .filter(([id, value]) => selectedIds.has(id)
           && (["none", "small", "medium", "large", "auto"].includes(value)

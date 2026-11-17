@@ -40,6 +40,9 @@ PRINT_DEFAULTS = {
     # 预览量出来的每道题最终排成几栏。Word 照它排，别再自己猜一遍 ——
     # 两边各猜各的，屏幕上四栏、文件里竖排，老师核对的是屏幕、拿到手的是文件。
     "option_columns": {},
+    # 预览量出来的每张图在纸面上实际有多宽（毫米）：题目编号 → 位置 → 宽度列表。
+    # 选项里的图在屏幕上会被选项栏宽收口，Word 不知道这件事，只能照这个宽度排。
+    "measured_figure_widths": {},
     "question_breaks": [],
     "answer_layout": "inline",
     "answer_space_overrides": {},
@@ -105,6 +108,9 @@ FIGURE_ALIGNMENTS = ("left", "center", "right")
 FIGURE_WIDTH_MIN_MM = 5
 FIGURE_WIDTH_MAX_MM = 178
 FIGURE_MAX_PER_QUESTION = 50
+# 预览量出来的图宽能记哪些位置：题干那一行，以及 A 到 E 各选项。
+# 原图题（正文整段是截图）走的是另一条路，不在这里。
+MEASURED_FIGURE_SLOTS = frozenset({"stem", "A", "B", "C", "D", "E"})
 INPUT_FIELDS = {"title", "ids", "print_options", "revision", "solutions"}
 STORED_FIELDS = {"id", "title", "ids", "print_options", "created_at", "updated_at", "revision"}
 _LOCK = threading.RLock()
@@ -264,8 +270,30 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
         raise DraftError("单题选项栏数的题目编号不正确：" + str(error)) from None
     if len(column_keys) != len(columns):
         raise DraftError("单题选项栏数的题目编号不能重复")
+    # 预览量出来的每张图在纸面上实际有多宽：题目编号 → 位置 → 毫米列表。
+    # 写错的宽度不能进导出 —— 老师核对的是屏幕，Word 照着一个错的宽度排，纸上就变形了。
+    measured = result["measured_figure_widths"]
+    if not isinstance(measured, dict) or len(measured) > 500:
+        raise DraftError("单题配图实测宽度应为题目编号到宽度的映射，最多 500 题")
+    measured_clean = {}
+    for question, slots in measured.items():
+        if not isinstance(slots, dict) or set(slots) - MEASURED_FIGURE_SLOTS:
+            raise DraftError("单题配图实测宽度的位置只能是题干或 A 到 E")
+        for values in slots.values():
+            if not isinstance(values, list) or len(values) > FIGURE_MAX_PER_QUESTION:
+                raise DraftError("每题最多测量 50 张配图")
+            for value in values:
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= 178:
+                    raise DraftError("配图实测宽度只能是 0 到 178 之间的毫米数")
+        measured_clean[question] = {slot: list(values) for slot, values in slots.items()}
+    try:
+        measured_keys = normalize_ids(list(measured))
+    except BrowseError as error:
+        raise DraftError("单题配图实测宽度的题目编号不正确：" + str(error)) from None
+    if len(measured_keys) != len(measured):
+        raise DraftError("单题配图实测宽度的题目编号不能重复")
     if selected is not None and (
-        set(keys) | set(space_keys) | set(figure_keys) | set(breaks) | set(column_keys)
+        set(keys) | set(space_keys) | set(figure_keys) | set(breaks) | set(column_keys) | set(measured_keys)
     ) - selected:
         raise DraftError("单题排版和另起页只能指定当前选中的题目")
     result["option_overrides"] = dict(zip(keys, overrides.values()))
@@ -273,6 +301,7 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
     result["figure_overrides"] = dict(zip(figure_keys, figures.values()))
     result["question_breaks"] = breaks
     result["option_columns"] = dict(zip(column_keys, columns.values()))
+    result["measured_figure_widths"] = dict(zip(measured_keys, measured_clean.values()))
     return result
 
 

@@ -5376,6 +5376,39 @@ $("selectedViewCount").textContent = String(state.basket.length);
     return columns;
   }
 
+  // 预览里每张图在纸面上实际有多宽（毫米）。老师核对的是屏幕，Word 必须照这个宽度排：
+  // 选项里的图会被选项栏宽收口（栏里放不下的图缩到栏宽为止），Word 那边不知道这件事，
+  // 照 150dpi 自然尺寸排 —— 屏幕上核对过的那张图，拿到手却大了一圈。
+  // 预览页是 CSS transform 缩放过的，量到的矩形是缩放后的尺寸，要除掉缩放系数才是纸面宽度。
+  function measuredFigureWidths() {
+    const raw = Number(ui.paper.style.getPropertyValue("--exam-scale"));
+    const scale = Number.isFinite(raw) && raw > 0 ? raw : 1;
+    const widths = {};
+    for (const block of ui.paper.querySelectorAll(".print-question")) {
+      const id = block.dataset.questionId;
+      if (!id || widths[id]) continue;
+      // 跨页续片只是半道题，量它等于量半张图，不算数。
+      if (block.classList.contains("exam-fragment")) continue;
+      const entry = {};
+      const measure = (slot, images) => {
+        const values = Array.from(images).map(image => {
+          const width = image.getBoundingClientRect().width / scale;
+          return width > 0 ? Math.round((width * 25.4 / 96) * 100) / 100 : 0;
+        }).filter(value => value > 0);
+        if (values.length) entry[slot] = values;
+      };
+      // 题干配图在 .qb-figures 这一行里；选项配图挂在各自的选项上。
+      measure("stem", block.querySelectorAll(".qb-figures .qb-figure img"));
+      for (const option of block.querySelectorAll(".qb-option")) {
+        const letter = (option.querySelector(".qb-option-label")?.textContent || "").replace(/[.．、\s]/g, "");
+        if (!letter) continue;
+        measure(letter, option.querySelectorAll(".qb-figure img"));
+      }
+      if (Object.keys(entry).length) widths[id] = entry;
+    }
+    return widths;
+  }
+
   function currentPrintOptions() {
     return normalizePrintOptions({
       document: $("printDocument").value, origin: ui.printOrigin.checked,
@@ -6520,7 +6553,8 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
       await printState.layoutPromise;
       preparePrintLayout();
       // 带上预览量到的栏数：Word 照屏幕排，不再自己猜一遍。
-      const options = { ...currentPrintOptions(), option_columns: measuredOptionColumns() };
+      // 带上预览量到的图宽：选项里的图在屏幕上被栏宽收口过，Word 照这个宽度排。
+      const options = { ...currentPrintOptions(), option_columns: measuredOptionColumns(), measured_figure_widths: measuredFigureWidths() };
       if ((format === "print" || format === "pdf") && printState.layoutError) throw new Error(printState.layoutError);
       if ((format === "print" || format === "pdf") && printState.tooWide) throw new Error("有公式超出 A4 正文，请调整本次字号或导出 Word 继续排版");
       if (format === "print") {
