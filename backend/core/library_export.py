@@ -1559,6 +1559,106 @@ def _cell_width_mm(cell, size):
     return em * size * 25.4 / 72.0 + CELL_PADDING_MM
 
 
+def _preview_char_em(ch):
+    """预览里这个字符占多少 em。
+
+    预览的正文字体是 ``Times New Roman, Source Han Serif SC``：
+    汉字 1 个字宽，数字 0.5 个（实测「2023」四个字 31.96 像素，字号 16 像素），
+    大写字母约 0.72 个，小写约 0.5 个，空格 0.25 个。
+    """
+    if _WIDE_CHAR(ch):
+        return 1.0
+    if ch == " ":
+        return 0.25
+    if ch.isupper():
+        return 0.72
+    return 0.5
+
+
+def _field_max_text_width_mm(blocks, size, extra_segments=None):
+    """这一段正文「不换行」时最多占多宽（毫米）。
+
+    预览里 ``.qb-stem-body`` 是 flex item，宽度 = 正文内容宽度，但不超过
+    题干正文列的可用宽度；正文比表窄时，整个正文列会缩到表那么宽，
+    表于是**贴左**（实测离版心左缘 4.66 毫米），而不是在 173 毫米里居中。
+
+    要算准这张表的位置，就得知道正文有多宽。这里按硬换行（源码里的换行符）
+    分段，取最宽的那一段 —— 跟浏览器 max-content 的算法一致：软换行的机会
+    在 max-content 下不算换行点，只有源码里的真换行才算。
+    """
+    em = 0.0
+    line = 0.0
+
+    def feed(segments):
+        nonlocal em, line
+        for segment in segments or []:
+            if segment.get("type") == "math":
+                stripped = re.sub(r"\\[a-zA-Z]+", "ab", segment.get("latex") or "")
+                line += max(1.0, len(stripped) * 0.6)
+                continue
+            parts = (segment.get("raw") or "").split("\n")
+            for index, part in enumerate(parts):
+                if index:
+                    em = max(em, line)
+                    line = 0.0
+                line += sum(_preview_char_em(ch) for ch in part)
+        em = max(em, line)
+        line = 0.0
+
+    for block in blocks or []:
+        if block.get("type") == "text":
+            feed(block.get("segments"))
+    if extra_segments:
+        feed(extra_segments)
+    return em * size * 25.4 / 72.0
+
+
+def _cell_content_mm(cell, size):
+    """这一格里的**文字**有多宽（毫米），不含单元格内边距。
+
+    与 ``_cell_width_mm`` 用同一套字宽系数，但不去掉那 5 毫米的内边距 ——
+    预览里（``styles.css`` 全局 ``box-sizing: border-box``）单元格的内边距是
+    ``.7em`` 两侧，最小宽度 ``2.6em`` 是一起算的，所以这里单独留一份。
+    """
+    em = 0.0
+    for segment in cell["segments"]:
+        if segment.get("type") == "math":
+            stripped = re.sub(r"\\[a-zA-Z]+", "ab", segment.get("latex") or "")
+            em += max(1.0, len(stripped) * 0.6)
+        else:
+            em += sum(_preview_char_em(ch) for ch in segment.get("raw") or "")
+    return em * size * 25.4 / 72.0
+
+
+def _preview_table_width_mm(placements, width, size):
+    """这张表在**预览**里有多宽（毫米）。
+
+    预览的 ``.qb-table`` 是 ``table-layout: auto``，列宽按内容分，
+    每格还有 ``min-width: 2.6em`` 和 ``.7em`` 的左右内边距
+    （``styles.css`` 全局 ``box-sizing: border-box``，最小宽度含内边距）。
+
+    真实宽度是这么来的（Chrome 实测，12pt / 16 像素字号）：
+      · 单元格边框盒 = max(2.6em, 文字宽 + 1.4em 内边距 + 1 像素边框)；
+      · 表宽 = 各列边框盒之和 + 左右外边框（各半像素，合起来 1 像素）。
+
+    拿「年份 | 产量（辆） | 备注」这张三列表验：56.92 毫米（实测 56.9185）。
+    拿「甲 | 乙」那张两列表验：22.27 毫米（实测 22.2746）。
+
+    表宽决定它在一列里居中时落在哪儿，所以兜底落位必须按预览的宽算，
+    不能拿 Word 自己的列宽（那边内边距是 1.9 毫米）来算。
+    """
+    em_mm = size * 25.4 / 72.0
+    border_mm = 25.4 / 96.0  # 1 像素
+    need = [0.0] * width
+    for _, column, cell in placements:
+        span = min(max(1, cell["colspan"]), width - column)
+        share = _cell_content_mm(cell, size) / span
+        for offset in range(span):
+            need[column + offset] = max(need[column + offset], share)
+    total = sum(max(2.6 * em_mm, need[index] + 1.4 * em_mm + border_mm) for index in range(width))
+    return total + border_mm
+
+
 def _fair_widths(need, budget):
     """版心放不下时，先让每一列都够用，实在放不下的几列再一起挤。
 
@@ -1774,11 +1874,29 @@ def _set_table_indent(table, left_mm):
     )
 
 
-def _write_table(document, rows, size, where, text_width_mm=None, left_mm=None, column=None):
+def _write_table(
+    document,
+    rows,
+    size,
+    where,
+    text_width_mm=None,
+    left_mm=None,
+    column=None,
+    column_shrinks=False,
+    field_text_width_mm=None,
+):
     """写一张表。
 
     ``left_mm`` 是预览量出来的表格左边缘位置（离版心左缘多少毫米）；
-    ``column`` 是这张表所在那一列的 (左缘, 宽度)，没有实测值时退回到「在那一列里居中」。
+    ``column`` 是这张表所在那一列的 (左缘, 宽度)，没有实测值时退回到按预览的排版规则算。
+
+    ``column_shrinks`` 说那一列会不会「缩到内容那么宽」：预览里题干正文列是
+    flex item，正文比表窄时整列缩到表宽，表于是**贴左**；答案正文列是
+    ``minmax(0, 1fr)``，宽度恒定，表永远在列里居中。两条规则不一样，
+    搞混了窄表就会差 77 毫米（实测：贴左 4.66 毫米 vs 居中 82.10 毫米）。
+
+    ``field_text_width_mm`` 是这一段正文不换行时的宽度（估算），只在
+    ``column_shrinks`` 时用得上：正文列宽 = min(列可用宽, max(正文宽, 表宽))。
     """
     from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.oxml import OxmlElement
@@ -1833,11 +1951,25 @@ def _write_table(document, rows, size, where, text_width_mm=None, left_mm=None, 
     # 光写 w:gridCol 不够，Word 会按自己的规矩把表重排成等宽。
     _set_table_widths(table, widths)
     # 表格的左边缘该落在哪儿：优先用预览量出来的实测位置；
-    # 量不到（没渲染过预览、或题被拆到跨页续片里）就退回「在这一列里居中」。
+    # 量不到（没渲染过预览、或题被拆到跨页续片里）就按预览的排版规则算。
+    #
+    # 预览里表是在**自己的那一列**里居中（.qb-table { margin: 0 auto }），
+    # 但「那一列」有多宽，两种情况不一样：
+    #   - 题干正文列是 flex item（.qb-stem-body），宽度 = min(列可用宽, max(正文, 表)）。
+    #     正文比表窄时整列缩到表宽 → 表**贴左**（实测离版心左缘 4.66 毫米）；
+    #     正文撑满时列宽 173.34 毫米 → 表居中（实测 80.19 毫米）。
+    #   - 答案正文列是 grid 的 minmax(0, 1fr)，宽度恒定 166.78 毫米 → 表永远居中
+    #     （实测 83.47 毫米，答案长短不影响）。
+    # 两种规则差 77 毫米，不能混。
     offset = left_mm
     if offset is None and column_box is not None:
         column_left, column_width = column_box
-        offset = column_left + max(0.0, (column_width - sum(widths)) / 2)
+        preview_width = _preview_table_width_mm(placements, width, size)
+        if column_shrinks:
+            body_width = min(column_width, max(field_text_width_mm or 0.0, preview_width))
+        else:
+            body_width = column_width
+        offset = column_left + max(0.0, (body_width - preview_width) / 2)
     if offset is not None:
         _set_table_indent(table, offset)
     for r, c, cell in placements:
@@ -1897,6 +2029,7 @@ def _write_field(
     space_after_pt=None,
     table_lefts=None,
     table_column=None,
+    table_column_shrinks=False,
 ):
     """Write one field (题干预览里的一个字段块) into the document.
 
@@ -1907,6 +2040,8 @@ def _write_field(
     （.solution-result 没有外边距、.solution-paragraph 上下各 3pt）。
     ``table_lefts`` 是预览量出来的每张表的位置（离版心左缘多少毫米），
     ``table_column`` 是这些表所在那一列的 (左缘, 宽度) —— 量不到时按这一列居中。
+    ``table_column_shrinks`` 说这一列会不会缩到内容那么宽（题干正文列会，
+    答案正文列不会）。
     """
     from docx.shared import Mm, Pt
 
@@ -1917,6 +2052,9 @@ def _write_field(
     tables = [block for block in blocks if block["type"] == "table"]
     offsets = list(table_lefts) if table_lefts is not None and len(table_lefts) == len(tables) else None
     table_index = 0
+    # 这一段正文不换行时有多宽（估算）。题干正文列是 flex item，正文比表窄时
+    # 整列缩到表宽，表于是贴左 —— 要算准位置就得知道正文有多宽。
+    field_text_width = _field_max_text_width_mm(blocks, size, extra_segments=lead_segments)
 
     def _new_paragraph():
         paragraph = document.add_paragraph()
@@ -1940,7 +2078,15 @@ def _write_field(
         if block["type"] == "table":
             left = offsets[table_index] if offsets is not None else None
             _write_table(
-                document, block["rows"], size, where, text_width_mm=text_width_mm, left_mm=left, column=table_column
+                document,
+                block["rows"],
+                size,
+                where,
+                text_width_mm=text_width_mm,
+                left_mm=left,
+                column=table_column,
+                column_shrinks=table_column_shrinks,
+                field_text_width_mm=field_text_width,
             )
             table_index += 1
             paragraph = None
@@ -3172,6 +3318,8 @@ def _document(captured, title, options, mode):
                 lead_segments=lead_segments,
                 table_lefts=table_lefts.get("stem"),
                 table_column=stem_column,
+                # 题干正文列是 flex item：正文比表窄时整列缩到表宽，表于是贴左。
+                table_column_shrinks=True,
             )
             # 老师在预览里改过的图宽、整行位置和换行点，跟预览走同一套算法，
             # 而不是在这里再猜一次。预览和 PDF 共用 exam-layout.js 的排版，

@@ -1400,14 +1400,29 @@ class LibraryExportTests(ExportFixture, TestCase):
 
         self.assertLessEqual(sum(widths), 178.5)
 
-    def test_a_narrow_table_is_left_at_its_own_width_and_centred(self):
-        """内容窄的表不硬撑满版心——预览里那张表是 `margin: 0 auto`，居中收着。"""
+    def test_a_narrow_table_sits_at_the_left_edge_of_the_stem_column(self):
+        """内容窄的表不硬撑满版心——预览里那张表是 `margin: 0 auto`，居中收着。
+
+        注意「在哪儿居中」：预览里题干正文列（``.qb-stem-body``）是 flex item，
+        宽度 = min(列可用宽, max(正文宽, 表宽))。这张表只有表、没有正文，
+        整列就缩到表那么宽（Chrome 实测 22.27 毫米），表于是**贴着正文列的左缘**，
+        离版心左缘 4.655 毫米 —— 不是在 173.34 毫米里居中（那是 82.10 毫米）。
+
+        两者差 77 毫米，位置根本不是一回事。
+
+        所以 Word 这边写 ``w:jc=left`` + ``w:tblInd``，而不是 ``jc=center``。
+        （第五十一轮实测：题干表原来被摆在整栏正中，离版心左缘 56.9 毫米。）
+        """
         raw = "| 甲 | 乙 |\n| --- | --- |\n| 1 | 2 |"
         xml = self.table_export(raw)
         widths = self.column_widths_mm(xml)
 
         self.assertLess(sum(widths), 178.0)
-        self.assertEqual(xml.find(".//w:tbl/w:tblPr/w:jc", NS).get(f"{{{NS['w']}}}val"), "center")
+        self.assertEqual(xml.find(".//w:tbl/w:tblPr/w:jc", NS).get(f"{{{NS['w']}}}val"), "left")
+        indent = xml.find(".//w:tbl/w:tblPr/w:tblInd", NS)
+        self.assertIsNotNone(indent, "窄表要落在题干正文列里，必须写 w:tblInd")
+        # 题干正文列左缘 4.655 毫米 = 264 twips，加 108 twips 单元格左边距 = 372 twips。
+        self.assertEqual(indent.get(f"{{{NS['w']}}}w"), "372")
 
     def test_an_over_wide_table_keeps_the_columns_that_already_fit(self):
         """版心放不下时，被挤的只该是本来就超宽的那几列。
