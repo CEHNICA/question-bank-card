@@ -27,6 +27,18 @@ M = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 
 TABLE_ONLY = "| x |\n| --- |\n| 1 |"
 
+# Chrome 2026-11-17 实测的预览几何（独立字面值，不引用被测模块的常量）。
+TEXT_WIDTH_MM = 178.0
+LIST_INDENT_MM = 8.4667  # 2em
+COLUMN_GAP_MM = 8.4667  # 2em
+LABEL_OFFSET_MM = {"A": 5.386, "B": 5.151, "C": 5.151, "D": 5.386}
+
+
+def option_body_column_mm(columns, letter="A", text_width_mm=TEXT_WIDTH_MM):
+    """预览里这个选项的正文列有多宽（毫米）。"""
+    column_mm = (text_width_mm - LIST_INDENT_MM - (columns - 1) * COLUMN_GAP_MM) / columns
+    return column_mm - LABEL_OFFSET_MM[letter]
+
 
 def text_block(raw):
     return {"type": "text", "segments": [{"type": "text", "raw": raw}]}
@@ -167,12 +179,13 @@ class OptionTableTests(SimpleTestCase):
 
     def test_the_table_in_an_option_stays_inside_its_cell(self):
         document = build_options(columns=2, option_blocks=[table_block()])
-        table = document.tables[0]
-        column_mm = table.columns[0].width / 36000.0
-        usable = column_mm - 2 * library_export.WORD_CELL_MARGIN_MM
         inner = nested_tables(document)[0]
         width_mm = sum(column.width for column in inner.columns) / 36000.0
-        self.assertLessEqual(width_mm, usable + 0.5, f"选项里的表有 {width_mm:.2f} 毫米宽，格子只有 {usable:.2f} 毫米")
+        # 选项里的表最多占满正文列（栏宽减去标签和它后面的间隙）。
+        usable = option_body_column_mm(2, "A")
+        self.assertLessEqual(
+            width_mm, usable + 0.05, f"选项里的表有 {width_mm:.2f} 毫米宽，正文列只有 {usable:.2f} 毫米"
+        )
 
     def test_the_whole_export_survives_an_option_that_is_only_a_table(self):
         """The export must not fall over; that is the bug this file watches."""

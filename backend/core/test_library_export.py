@@ -1241,7 +1241,11 @@ class LibraryExportTests(ExportFixture, TestCase):
         xml = document_xml(result.content)
         table = xml.find(".//w:tbl", NS)
         self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), 2)
-        self.assertIn("E. 短选项", "".join(table.itertext()))
+        # 标签和正文之间是一个制表位（Word 里标签和正文各占一列），
+        # 不是硬敲的空格 —— 所以纸上取到的文本是「A.短选项」。
+        texts = ["".join(cell.itertext()) for cell in table.findall(".//w:tr/w:tc", NS)]
+        for letter in "ABCDE":
+            self.assertIn(f"{letter}.短选项", texts, f"{letter} 这个选项的内容不在纸上")
         pub.content["options"] = dict.fromkeys("ABCD", "长选项" * 30)
         pub.save(update_fields=["content"])
         result = self.post(
@@ -1617,7 +1621,7 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertIsNone(document_xml(response.content).find(".//w:tbl", NS))
         self.assertIn("X-QB-Layout-Warning", response)
 
-    def test_explicit_picture_columns_retain_all_labels_images_and_natural_width(self):
+    def test_explicit_picture_columns_retain_all_labels_and_fit_their_own_column(self):
         pub = self.publication(kind="single_choice", options=dict.fromkeys("ABCD", ""))
         folder = self.root / "library" / str(pub.id)
         folder.mkdir(parents=True)
@@ -1628,7 +1632,17 @@ class LibraryExportTests(ExportFixture, TestCase):
             pub.content["figures"].append({"slot": key, "file": target.name, "page_idx": 0, "bbox": [0, 0, 100, 100]})
         pub.content_hash = library.content_hash(pub.content)
         pub.save(update_fields=["content", "content_hash"])
-        for mode, columns in (("four", 4), ("two", 2), ("vertical", 0), ("auto", 4)):
+        # 150dpi 自然尺寸：200 像素 = 33.8667 毫米。
+        natural = 200 * 25.4 / 150
+        # 4 栏时图在预览里被正文列收口（Chrome 实测 2026-11-17）：
+        # 「A.」比「B.」宽，A 那一行的正文列就窄一点点。
+        body_width = {"A": 30.646, "B": 30.882, "C": 30.882, "D": 30.646}
+        for mode, columns, want in (
+            ("four", 4, [body_width[letter] for letter in "ABCD"]),
+            ("two", 2, [natural] * 4),
+            ("vertical", 0, [natural] * 4),
+            ("auto", 4, [body_width[letter] for letter in "ABCD"]),
+        ):
             # A 200px diagram fits a 178mm/4 column, so "four" and "auto" keep four
             # columns and every label and image survives. Only the explicit "two"
             # and "vertical" reduce.
@@ -1646,7 +1660,9 @@ class LibraryExportTests(ExportFixture, TestCase):
                 extents = tree.xpath(
                     "//*[local-name()='extent' and namespace-uri()='http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx"
                 )
-                self.assertTrue(all(abs(int(width) / 36000 - 200 * 25.4 / 150) < 0.01 for width in extents))
+                self.assertEqual(len(extents), len(want))
+                for width, expected in zip(extents, want):
+                    self.assertAlmostEqual(int(width) / 36000, expected, delta=0.05)
 
         # A wide image downgrades the requested grid and is never shrunk just
         # to preserve the number of columns. The transport explains the change.

@@ -1874,6 +1874,64 @@ def _set_table_indent(table, left_mm):
     )
 
 
+def _set_table_text_indent(table, text_left_mm):
+    """把表格里**第一格文字**的左缘挪到离版心左缘 ``text_left_mm`` 毫米。
+
+    ``w:tblInd`` 量到的就是第一格文字的左缘（真 Word 16 实测：写 480 twips
+    = 8.4667 毫米，文字就落在离版心左缘 8.4667 毫米处）。这一点与单元格
+    左边距无关 —— 默认的 108 twips 和写成 0，量出来都是同一个位置；
+    变的只是表格**边框**落在哪儿（边框还要再往左退一个单元格左边距）。
+
+    ``_set_table_indent`` 管的是边框位置（题干里那些表要的就是它）；
+    选项块要对齐的是文字，所以这里另写一个。
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tbl_pr = table._tbl.tblPr
+    existing = tbl_pr.find(qn("w:tblInd"))
+    if existing is not None:
+        tbl_pr.remove(existing)
+    indent = OxmlElement("w:tblInd")
+    indent.set(qn("w:type"), "dxa")
+    indent.set(qn("w:w"), str(int(round(float(text_left_mm) * 1440 / 25.4))))
+    # 元素顺序是硬要求：w:tblInd 排在 w:jc 之后、w:tblBorders 之前。
+    tbl_pr.insert_element_before(
+        indent, "w:tblBorders", "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription"
+    )
+
+
+def _zero_cell_margins(cell):
+    """把一个单元格的左右内边距清零。
+
+    预览里选项那一栏两侧都没有留白（``.qb-option`` 没有 padding），
+    Word 默认每格留 108 twips（1.905 毫米），不清掉的话正文那一列会比
+    预览窄 3.81 毫米 —— 折行位置就不一样了。
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tc_pr = cell._tc.get_or_add_tcPr()
+    existing = tc_pr.find(qn("w:tcMar"))
+    if existing is not None:
+        tc_pr.remove(existing)
+    mar = OxmlElement("w:tcMar")
+    for side in ("top", "left", "bottom", "right"):
+        node = OxmlElement("w:" + side)
+        node.set(qn("w:w"), "0")
+        node.set(qn("w:type"), "dxa")
+        mar.append(node)
+    # w:tcPr 里的顺序也是硬要求：w:tcMar 排在 w:textDirection 之前。
+    for tag in ("w:textDirection", "w:tcFitText", "w:vAlign", "w:hideMark"):
+        found = tc_pr.find(qn(tag))
+        if found is not None:
+            found.addprevious(mar)
+            break
+    else:
+        tc_pr.append(mar)
+    return cell
+
+
 def _write_table(
     container,
     rows,
@@ -2034,6 +2092,8 @@ def _write_field(
     table_column=None,
     table_column_shrinks=False,
     first_paragraph=None,
+    first_paragraph_tab_mm=None,
+    right_indent_mm=None,
 ):
     """Write one field (题干预览里的一个字段块) into the document.
 
@@ -2043,6 +2103,13 @@ def _write_field(
 
     ``first_paragraph`` 是已经建好的第一个段落：调用方先把「A. 」这样的题号
     写进去了，正文要接着往下写，不能另起一段（预览里题号和选项正文在同一格里）。
+
+    ``first_paragraph_tab_mm`` 是「标签 → 正文」的距离（毫米）：复用那个段落时，
+    先插一个 tab 把正文推到标签右边，并把段落设成悬挂缩进 —— 折行时折回正文
+    那一列，跟预览里 ``.qb-option`` 的两列网格一致。
+
+    ``right_indent_mm`` 把这一段的右边让出来（毫米）：Word 的表格没有列间距，
+    预览里栏与栏之间那 2em 的间隙就是这么让出来的。
 
     ``indent_mm`` 把这一段挪到答案正文列里（预览里那一列缩在题号右边）；
     ``hanging`` 让首行顶格放题号、后续行缩进，跟预览的两栏网格一致；
@@ -2085,6 +2152,21 @@ def _write_field(
         if not reusable:
             first_paragraph = None
 
+    # 标签和正文之间留出预览里那 0.3em：正文从悬挂缩进的位置开始，
+    # 折行也折回这一列。tab stop 必须自己写 —— Word 默认的制表位是
+    # 12.7 毫米，我们要的是 5.4 毫米。
+    if first_paragraph is not None:
+        fmt = first_paragraph.paragraph_format
+        if first_paragraph_tab_mm:
+            fmt.left_indent = Mm(first_paragraph_tab_mm)
+            fmt.first_line_indent = Mm(-first_paragraph_tab_mm)
+            fmt.tab_stops.add_tab_stop(Mm(first_paragraph_tab_mm))
+            _font(first_paragraph.add_run("\t"), size)
+        # 右缩进和悬挂缩进是两回事：栏间间隙要一直让出来，
+        # 不能因为这一格没有 tab（标签栏没复用）就跟着丢掉。
+        if right_indent_mm:
+            fmt.right_indent = Mm(right_indent_mm)
+
     def _new_paragraph():
         nonlocal first_paragraph
         if first_paragraph is not None:
@@ -2092,12 +2174,14 @@ def _write_field(
             first_paragraph = None
         else:
             paragraph = container.add_paragraph()
+        fmt = paragraph.paragraph_format
         if indent_mm:
-            fmt = paragraph.paragraph_format
             fmt.left_indent = Mm(indent_mm)
             if hanging:
                 fmt.first_line_indent = Mm(-indent_mm)
                 fmt.tab_stops.add_tab_stop(Mm(indent_mm))
+        if right_indent_mm:
+            fmt.right_indent = Mm(right_indent_mm)
         written.append(paragraph)
         return paragraph
 
@@ -2179,10 +2263,6 @@ PREVIEW_PAGE_HEIGHT_MM = 210
 # 从左往右排，加上间距塞不下正文栏就换下一行。一 CSS 像素是 1/96 英寸，14px 即 3.70mm。
 PREVIEW_PX_PER_INCH = 96
 PREVIEW_FIGURE_GAP_PX = 14
-# Word 单元格里能放东西的宽度 = 列宽 - 左右单元格边距。
-# Word 默认左右各 108 twips = 1.905 毫米（导出没有改这个默认值，
-# Word 16 实测：44.5 毫米的列，净宽 40.69 毫米）。
-WORD_CELL_MARGIN_MM = 1.9
 # 预览里答案块是「题号列 + 正文列」两栏网格：
 #     .print-answer-row { display: grid; grid-template-columns: 2.4em minmax(0, 1fr); gap: 4px; }
 # 老师核对的是屏幕：题干顶格，答案正文和解析配图缩在题号右边（实测缩进 11.22mm）。
@@ -2397,16 +2477,70 @@ def _figure_widths_for_slot(pictures, slot, settings=None, measured=None):
     return [min(width, measured[index]) if index < len(measured) else width for index, width in enumerate(widths)]
 
 
-def _option_cell_usable_mm(columns, text_width_mm=PREVIEW_TEXT_WIDTH_MM):
+# ---- 选项块的水平排版规矩（照抄打印预览）--------------------------
+#
+# 预览里选项是两层 grid：``.qb-options`` 排栏，``.qb-option`` 排标签和正文。
+#   · ``.qb-options`` 的 padding-left 是 2em —— 选项区整体离版心左缘 2em；
+#   · 栏与栏之间 column-gap 是 2em；
+#   · 标签（「A.」）和正文之间 column-gap 是 .3em。
+# 预览的字号是写死的 16px，也就是 12 磅，所以 1em = 4.2333 毫米。
+#
+# 以上三个数都是 Chrome 实测（2026-11-17，_probe53.py）：
+#   选项区左缘 8.47 毫米；栏 1 左缘 8.47 宽 80.53；栏 2 左缘 97.47。
+#
+# Word 这边原来一张表平均分栏（每栏 89 毫米），既没有那 2em 缩进，也没有栏间
+# 2em 间隙 —— 纸上的选项整体比预览靠左 8.47 毫米，第二栏还整整偏左 8.47 毫米。
+# 现在照抄预览的规矩：左边缩进用 tblInd，栏间间隙算进左栏宽度 +
+# 段落右缩进（Word 的表格没有列间距这一说）。
+PREVIEW_EM_MM = 12 * 25.4 / 72.0  # 16px = 12 磅 = 4.2333 毫米
+OPTION_LIST_INDENT_MM = 2 * PREVIEW_EM_MM  # 8.4667
+OPTION_COLUMN_GAP_MM = 2 * PREVIEW_EM_MM  # 8.4667
+OPTION_LABEL_GAP_MM = 0.3 * PREVIEW_EM_MM  # 1.27
+# Times New Roman 的大写字母宽度（em）。预览的西文首选就是这个字体：
+# Chrome 实测「A.」4.11 毫米、「B.」3.88 毫米，与 (advance + 0.25em) 逐个对得上。
+OPTION_LABEL_EM = {"A": 0.722, "B": 0.667, "C": 0.667, "D": 0.722, "E": 0.611}
+OPTION_PERIOD_EM = 0.25
+
+
+def _option_column_width_mm(columns, text_width_mm=PREVIEW_TEXT_WIDTH_MM):
+    """选项表里一栏有多宽（毫米）—— 照抄预览的 ``.qb-options``。
+
+    预览里选项区左边留 2em，栏与栏之间还有 2em 的间隙，所以一栏比
+    「版心平均分」要窄：两栏时 80.53 毫米（平均分是 89）。
+    """
+    columns = max(1, int(columns or 1))
+    gaps = (columns - 1) * OPTION_COLUMN_GAP_MM
+    return (text_width_mm - OPTION_LIST_INDENT_MM - gaps) / columns
+
+
+def _option_label_width_mm(letter, size=12):
+    """标签（「A.」）有多宽（毫米）。"""
+    em = size * 25.4 / 72.0
+    return (OPTION_LABEL_EM.get(letter, 0.722) + OPTION_PERIOD_EM) * em
+
+
+def _option_label_indent_mm(letter, size=12):
+    """标签加标签与正文之间的间隙 —— 正文从这儿开始（毫米）。
+
+    Chrome 实测：正文左缘离栏左缘 5.386 毫米（A）/ 5.151 毫米（B），
+    与这里的 5.3848 / 5.1520 逐个对得上。
+    """
+    return _option_label_width_mm(letter, size) + OPTION_LABEL_GAP_MM
+
+
+def _option_cell_usable_mm(columns, text_width_mm=PREVIEW_TEXT_WIDTH_MM, size=12, letter="A"):
     """选项表格里，一格最多能放多宽的东西（毫米）。
 
     Word 不会自动缩图：图比格子宽，就直接压到隔壁列上。
-    选项表按正文宽平均分栏，每格再扣掉 Word 默认的左右单元格边距。
-    实测（Word 16）：4 栏时列宽 44.5 毫米、净宽 40.69 毫米；
-    没有这条收口时，一张 169 毫米的图会压出 128 毫米，把后面的列全盖掉。
+    预览里选项里的图排在正文那一列（``.qb-option .qb-figure { grid-column: 2 }``），
+    所以上限就是正文列的宽：栏宽减去标签和它后面的间隙。
+
+    ``letter`` 是这一格是哪个选项：预览里标签列的宽是 ``auto``，各行自己算 ——
+    「A.」比「B.」宽，所以 A 那一行的正文列就比 B 窄（Chrome 实测 2026-11-17：
+    4 栏时 A 的正文列 30.646 毫米、B 的 30.882 毫米）。一律按最宽的 A 算，
+    B、C、D 的图就会被多裁掉两三毫米。
     """
-    columns = max(1, int(columns or 1))
-    return text_width_mm / columns - 2 * WORD_CELL_MARGIN_MM
+    return _option_column_width_mm(columns, text_width_mm) - _option_label_indent_mm(letter, size)
 
 
 def _write_images(document, item, slot, lines=None, settings=None, measured=None, max_width_mm=None):
@@ -2977,13 +3111,23 @@ def _write_compact_options(document, item, size, columns, *, text_width_mm=178, 
         for key in "ABCDE"
         if f"options.{key}" in item["fields"] or any(image["slot"] == key for image in item["images"])
     ]
+    columns = max(1, int(columns or 1))
+    # 预览里栏与栏之间有 2em 的间隙，Word 的表格没有列间距这一说。
+    # 把那一段间隙算进左边那一栏的宽度，再用段落的右缩进把它让出来：
+    # 这样每栏的文字区宽度还是预览里的栏宽（80.53 毫米），折行位置才对得上，
+    # 而第二栏的左缘正好落在 97.47 毫米 —— 跟预览一模一样。
+    column_mm = _option_column_width_mm(columns, text_width_mm)
+    widths = [column_mm + OPTION_COLUMN_GAP_MM] * (columns - 1) + [column_mm]
     table = document.add_table(rows=(len(letters) + columns - 1) // columns, cols=columns)
     table.autofit = False
-    column_mm = text_width_mm / columns
-    for column in table.columns:
-        column.width = Mm(column_mm)
-    # 选项里的图最多只能占满自己那一格：Word 不会缩图，画超了就压到隔壁列上。
-    usable_mm = _option_cell_usable_mm(columns, text_width_mm)
+    for column, width in zip(table.columns, widths):
+        column.width = Mm(width)
+    # 只改 w:gridCol 是不够的：每个格子原来的 w:tcW 原地不动，Word 打开时
+    # 会自己重排成等宽（第四十二轮实测：写成 30/20/15 毫米的表，Word 认成
+    # 50.8×3）。tblW 和 tcW 都要写，Word 才认我们写的列宽。
+    _set_table_widths(table, widths)
+    # 选项区整体离版心左缘 2em（预览的 .qb-options padding-left）。
+    _set_table_text_indent(table, OPTION_LIST_INDENT_MM)
     borders = OxmlElement("w:tblBorders")
     for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
         border = OxmlElement("w:" + side)
@@ -2996,11 +3140,18 @@ def _write_compact_options(document, item, size, columns, *, text_width_mm=178, 
         borders, "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription"
     )
     for index, letter in enumerate(letters):
-        cell = table.cell(index // columns, index % columns)
+        row_index, column_index = divmod(index, columns)
+        cell = table.cell(row_index, column_index)
+        # 预览里选项那一栏两侧不留白，清掉 Word 默认的 1.905 毫米。
+        _zero_cell_margins(cell)
         paragraph = cell.paragraphs[0]
-        _font(paragraph.add_run(letter + ". "), size)
+        _font(paragraph.add_run(letter + "."), size)
         blocks = item["fields"].get(f"options.{letter}", [])
         _line_spacing(paragraph, size * LINE_SPACING)
+        # 选项里的图最多只能占满正文那一列：Word 不会缩图，画超了就压到隔壁列上。
+        # 正文列的宽按这一格的标签算（预览里标签列是 auto，各行自己算宽：
+        # 「A.」比「B.」宽，A 那一行的正文列就比 B 窄）。
+        usable_mm = _option_cell_usable_mm(columns, text_width_mm, size, letter)
         # 一个选项的内容可能不止一段，还可能带着一张表（预览里选项里也能排表）。
         #
         # 原来这里只写 blocks[0]：选项以表开头时直接 KeyError('segments') 崩掉，
@@ -3018,9 +3169,14 @@ def _write_compact_options(document, item, size, columns, *, text_width_mm=178, 
             # 表格不能比这一格还宽：Word 不会缩表，超了就压到隔壁列上。
             text_width_mm=usable_mm,
             first_paragraph=paragraph,
+            # 标签和正文之间留出预览里那 0.3em，正文从这儿开始，
+            # 折行也折回这一列（预览里正文是一个独立的列）。
+            first_paragraph_tab_mm=_option_label_indent_mm(letter, size),
+            # 最后一栏右边没有下一栏了，不用让出间隙。
+            right_indent_mm=0 if column_index == columns - 1 else OPTION_COLUMN_GAP_MM,
         )
         # 选项里的图在预览里被选项栏宽收口过，Word 照实测宽度排；
-        # 就算没有实测值（老前端、预览没量到），也不能超过这一格的净宽。
+        # 就算没有实测值（老前端、预览没量到），也不能超过正文那一列的宽。
         _write_images(
             cell, item, letter, measured=(figures or {}).get("measured", {}).get(letter), max_width_mm=usable_mm
         )
