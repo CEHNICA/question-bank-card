@@ -1431,8 +1431,9 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertEqual(xml.find(".//w:tbl/w:tblPr/w:jc", NS).get(f"{{{NS['w']}}}val"), "left")
         indent = xml.find(".//w:tbl/w:tblPr/w:tblInd", NS)
         self.assertIsNotNone(indent, "窄表要落在题干正文列里，必须写 w:tblInd")
-        # 题干正文列左缘 4.655 毫米 = 264 twips，加 108 twips 单元格左边距 = 372 twips。
-        self.assertEqual(indent.get(f"{{{NS['w']}}}w"), "372")
+        # 题干正文列左缘 4.655 毫米 = 264 twips，加这张表实际写进去的单元格
+        # 左边距（普通表 .7em = 168 twips）= 432 twips。
+        self.assertEqual(indent.get(f"{{{NS['w']}}}w"), "432")
 
     def test_an_over_wide_table_keeps_the_columns_that_already_fit(self):
         """版心放不下时，被挤的只该是本来就超宽的那几列。

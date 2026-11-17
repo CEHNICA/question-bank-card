@@ -103,8 +103,9 @@ class WordTableIndentTests(ExportFixture, TestCase):
         result = self.post(payload)
         self.assertEqual(result.status_code, 200)
         xml = document_xml(result.content)
-        # 4.66 毫米 = 264 twips，加 108 twips 的单元格左边距 = 372 twips。
-        self.assertEqual(self.indent_of(xml), 372)
+        # 4.66 毫米 = 264 twips，加这张表实际写进去的单元格左边距（普通表 .7em
+        # = 168 twips）= 432 twips。补的是**这张表的**边距，不是 Word 默认的 108。
+        self.assertEqual(self.indent_of(xml), 432)
 
     def test_a_different_measured_position_moves_the_table(self):
         publication = self.publication(stem=TABLE)
@@ -122,8 +123,8 @@ class WordTableIndentTests(ExportFixture, TestCase):
         result = self.post(payload)
         self.assertEqual(result.status_code, 200)
         xml = document_xml(result.content)
-        # 79.80 毫米 = 4524 twips，加 108 = 4632 twips。
-        self.assertEqual(self.indent_of(xml), 4632)
+        # 79.80 毫米 = 4524 twips，加 168 = 4692 twips。
+        self.assertEqual(self.indent_of(xml), 4692)
 
     def test_without_a_measurement_the_table_falls_back_to_its_column(self):
         xml = self.table_xml()
@@ -208,16 +209,17 @@ class FallbackTablePlacementTests(ExportFixture, TestCase):
         return int(node.get(f"{W}w"))
 
     def test_a_stem_table_without_text_sits_at_the_left_edge_of_the_stem_column(self):
-        # 题干正文比表窄 → 正文列缩到表宽 → 表贴左：4.655 毫米 = 264 twips + 108 = 372。
-        self.assertEqual(self.indent_of(self.stem_xml()), 372)
+        # 题干正文比表窄 → 正文列缩到表宽 → 表贴左：4.655 毫米 = 264 twips，
+        # 加这张表的单元格左边距（普通表 168 twips）= 432。
+        self.assertEqual(self.indent_of(self.stem_xml()), 432)
 
     def test_a_stem_table_after_a_long_text_is_centred_in_the_stem_column(self):
-        # 正文撑满 → 正文列 173.34 毫米 → 表在列里居中：76.543 毫米 = 4339 + 108 = 4447。
-        self.assertEqual(self.indent_of(self.stem_xml(self.LONG)), 4447)
+        # 正文撑满 → 正文列 173.34 毫米 → 表在列里居中：76.543 毫米 = 4339 + 168 = 4507。
+        self.assertEqual(self.indent_of(self.stem_xml(self.LONG)), 4507)
 
     def test_an_answer_table_is_centred_in_the_answer_column(self):
-        # 答案正文列宽度恒定（1fr），表永远居中：79.822 毫米 = 4525 + 108 = 4633。
-        self.assertEqual(self.indent_of(self.answer_xml()), 4633)
+        # 答案正文列宽度恒定（1fr），表永远居中：79.822 毫米 = 4525 + 168 = 4693。
+        self.assertEqual(self.indent_of(self.answer_xml()), 4693)
 
     def test_the_fallback_never_centres_the_table_in_the_whole_page(self):
         # 整栏居中是 Word 这边一直排错的老毛病：题干表会飘到版心正中（差 56.9 毫米）。

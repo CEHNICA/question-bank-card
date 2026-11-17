@@ -1860,11 +1860,18 @@ def _mark_repeat_header(trpr):
     trpr.insert_element_before(header, "w:tblCellSpacing", "w:jc", "w:hidden", "w:ins", "w:del", "w:trPrChange")
 
 
-def _cell_vertical_padding(cell, twips_value):
+def _cell_vertical_padding(cell, twips_value, horizontal_twips=None):
     """给单元格留出上下白，并把文字垂直居中（照抄 .qb-table td 的 padding）。
 
     预览里单元格上下各 .2em 的白，文字在这块白里居中；Word 默认上下不留白、
     文字贴顶。写 w:tcMar（上下）+ w:vAlign（居中）才跟预览一样。
+
+    左右内边距（``horizontal_twips``）也写进同一个 w:tcMar：Word 对「只写了
+    上下的 tcMar」不一定去继承表级的 w:tblCellMar，左右也写死最保险 ——
+    真 Word 实测（_probe76.py）：同一张表里把 w:tblCellMar 的左右从 0 改到
+    216 twips，格子里三段探针（居中/右对齐）的位置跟着变，唯独**左对齐那一段
+    纹丝不动**（x0 恒为 45.650pt），说明内容盒的左缘是钉在 tblInd 上的，
+    边距只决定右边往回收多少。
     """
     from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
     from docx.oxml import OxmlElement
@@ -1875,20 +1882,72 @@ def _cell_vertical_padding(cell, twips_value):
     if margin is None:
         margin = OxmlElement("w:tcMar")
         tc_pr.insert_element_before(margin, "w:textDirection", "w:tcFitText", "w:vAlign", "w:hideMark")
-    for side in ("w:top", "w:bottom"):
-        existing = margin.find(qn(side))
-        if existing is not None:
-            margin.remove(existing)
-    # w:tcMar 里的顺序是 上、左、下、右。
-    for side in ("w:top", "w:bottom"):
-        element = OxmlElement(side)
-        element.set(qn("w:w"), str(twips_value))
+    # 旧的四边先收起来：w:tcMar 里的顺序是 上、左、下、右，重排才合法。
+    previous = {}
+    for side in list(margin):
+        name = side.tag.split("}")[-1]
+        if name in ("top", "left", "bottom", "right"):
+            previous[name] = side.get(qn("w:w"))
+            margin.remove(side)
+    values = {"top": twips_value, "bottom": twips_value}
+    for name in ("left", "right"):
+        values[name] = horizontal_twips if horizontal_twips is not None else previous.get(name)
+    for name in ("top", "left", "bottom", "right"):
+        if values[name] is None:
+            continue
+        element = OxmlElement("w:" + name)
+        element.set(qn("w:w"), str(values[name]))
         element.set(qn("w:type"), "dxa")
         margin.append(element)
     cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
 
 
-def _set_table_indent(table, left_mm, nested=False):
+def _table_cell_margin_twips(size, dense):
+    """预览里单元格的**左右内边距**，换算成 twips。
+
+    预览（frontend/styles.css）：``.qb-table td { padding: .2em .7em }`` →
+    左右各 .7em；列数 >= 13 的 dense 表（frontend/library.css 的
+    ``.print-flow .qb-table-dense td``）收成 ``.15em .45em`` → 左右各 .45em。
+
+    12 磅正文里（Chrome 实测，_probe72.py）：.7em = 2.963 毫米 = 168 twips，
+    .45em = 1.905 毫米 = 108 twips。
+
+    Word 的 Table Grid 默认每格留 108 twips —— 普通表每侧少 60 twips
+    （1.058 毫米），格子里的内容盒比预览**宽 2.1 毫米**：11.005 毫米那一列，
+    预览的内容盒 4.82 毫米，Word 却有 7.09 毫米，格子里的字折行位置直接对不上。
+    """
+    em = PREVIEW_TABLE_DENSE_CELL_PADDING_X_EM if dense else PREVIEW_TABLE_CELL_PADDING_X_EM
+    return int(round(size * em * 20))
+
+
+def _set_table_cell_margins(table, horizontal_twips):
+    """写 w:tblCellMar：单元格的左右内边距照抄打印预览。
+
+    上下留白是每格的 w:tcMar（.2em，见 _cell_vertical_padding），这里只管左右；
+    表级的 w:tblCellMar 是「这张表每格默认留多少白」的声明，写上它，
+    没被单独指定过的格子才不会退回 Word 默认的 108 twips。
+
+    w:tblCellMar 在 w:tblPr 里必须排在 w:tblLook 之前，顺序错了 Word 会自己
+    重排整块 tblPr，那几个值也就跟着丢了。
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tbl_pr = table._tbl.tblPr
+    existing = tbl_pr.find(qn("w:tblCellMar"))
+    if existing is not None:
+        tbl_pr.remove(existing)
+    margins = OxmlElement("w:tblCellMar")
+    # w:tblCellMar 里的顺序是 上、左、下、右。
+    for side, value in (("top", 0), ("left", horizontal_twips), ("bottom", 0), ("right", horizontal_twips)):
+        node = OxmlElement("w:" + side)
+        node.set(qn("w:w"), str(value))
+        node.set(qn("w:type"), "dxa")
+        margins.append(node)
+    tbl_pr.insert_element_before(margins, "w:tblLook", "w:tblCaption", "w:tblDescription")
+
+
+def _set_table_indent(table, left_mm, nested=False, cell_margin_twips=0):
     """把表格的左边缘挪到离版心左缘 ``left_mm`` 毫米的位置。
 
     ``w:tblInd`` 是表格相对左边距的缩进，``w:jc`` 必须写成 left ——
@@ -1897,11 +1956,18 @@ def _set_table_indent(table, left_mm, nested=False):
     Word 却把它摆在 178 毫米版心的正中间（差 56.9 毫米）。
 
     但 ``w:tblInd`` 量到的是**第一格文字的左缘**，不是表格边框的左缘 ——
-    边框还要再往左退一个单元格左边距。Word 默认给每格留 108 twips
-    （1.905 毫米）的左右内边距，``_write_table`` 没有覆盖 ``w:tblCellMar``，
-    所以这个默认值一直在。实测（Word 16.0 实测 PDF）：写 ``tblInd=264``
-    （= 4.66 毫米）时边框只落在离版心左缘 2.65 毫米处，正好差这 1.905 毫米。
-    不补这一格，题干表差 2 毫米、答案表也差 2 毫米 —— 看着像对了，其实没对。
+    边框还要再往左退一个单元格左边距。真 Word 16 实测（_probe76.py：
+    八张 40 毫米的表，w:tblCellMar 的左右从 0 一路排到 216 twips，
+    每张格里放左对齐/居中/右对齐三段探针，导 PDF 量原始 pt）：
+
+      · 第一格**文字左缘** = 版心左缘 + tblInd + 0.3pt，**与单元格边距无关**
+        （tblInd=0 时八张表的左对齐那一段 x0 恒为 45.650pt，一动不动）；
+      · 表格**边框中心** = 版心左缘 + tblInd − 单元格左边距；
+      · **内容盒宽度** = 列宽 − 2 × 单元格左边距 − 0.3pt。
+
+    所以要让边框落在 ``left_mm``，tblInd 必须写成「目标位置 + 这张表实际写进去的
+    单元格左边距」（普通表 168 twips、dense 表 108 twips），而不是拍一个常数 ——
+    补错了表就整体偏出去：第一格文字会离开它该在的位置。
 
     **嵌套在格子里的表是另一条规矩**：真 Word 实测（2026-11-17，_probe57.py，
     同一格里摆 5 张 tblInd = 0/200/400/848/1200 twips 的嵌套表，导 PDF 量边框）：
@@ -1920,11 +1986,11 @@ def _set_table_indent(table, left_mm, nested=False):
     indent = OxmlElement("w:tblInd")
     indent.set(qn("w:type"), "dxa")
     # 主文档里的表：tblInd 量到第一格文字的左缘，边框还要再往左退一个单元格
-    # 左边距，所以把那 108 twips 加回去（否则边框比目标位置偏左 1.905 毫米）。
+    # 左边距，所以把「这张表实际写进去的那个边距」加回去。
     # 嵌套表：tblInd 就是边框位置，一个 twips 都不用补。
     twips = int(round(float(left_mm) * 1440 / 25.4))
     if not nested:
-        twips += WORD_TABLE_CELL_MARGIN_LEFT_TWIPS
+        twips += cell_margin_twips
     indent.set(qn("w:w"), str(twips))
     # 元素顺序是硬要求：w:tblInd 排在 w:jc 之后、w:tblBorders 之前。
     tbl_pr.insert_element_before(
@@ -2073,6 +2139,12 @@ def _write_table(
         column.width = Mm(value)
     # 光写 w:gridCol 不够，Word 会按自己的规矩把表重排成等宽。
     _set_table_widths(table, widths)
+    # 单元格的左右内边距照抄预览：普通表 .7em、dense 表 .45em。
+    # Word 默认 108 twips，普通表每侧少 60 twips，内容盒比预览宽 2.1 毫米 ——
+    # 格子里的字折行位置就跟着错（真 Word 实测：11.005 毫米那一列，
+    # 预览内容盒 4.82 毫米，Word 7.09 毫米）。
+    cell_margin_twips = _table_cell_margin_twips(size, width >= PREVIEW_TABLE_DENSE_COLUMNS)
+    _set_table_cell_margins(table, cell_margin_twips)
     # 表格的左边缘该落在哪儿：优先用预览量出来的实测位置；
     # 量不到（没渲染过预览、或题被拆到跨页续片里）就按预览的排版规则算。
     #
@@ -2094,7 +2166,7 @@ def _write_table(
             body_width = column_width
         offset = column_left + max(0.0, (body_width - preview_width) / 2)
     if offset is not None:
-        _set_table_indent(table, offset, nested=nested)
+        _set_table_indent(table, offset, nested=nested, cell_margin_twips=cell_margin_twips)
     for r, c, cell in placements:
         target = table.cell(r, c)
         target.text = ""
@@ -2133,7 +2205,7 @@ def _write_table(
             height, "w:tblHeader", "w:tblCellSpacing", "w:jc", "w:hidden", "w:ins", "w:del", "w:trPrChange"
         )
         for cell in row.cells:
-            _cell_vertical_padding(cell, padding_y)
+            _cell_vertical_padding(cell, padding_y, cell_margin_twips)
         if index == 0 and head_row:
             _mark_repeat_header(trpr)
 
@@ -2362,7 +2434,11 @@ PREVIEW_STEM_COLUMN_GAP_EM = 0.35
 # 题干表预览在离版心左缘 4.66 毫米处，写 tblInd=264（4.66 毫米）后
 # Word 的边框却落在 2.65 毫米处，差的正是这 1.905 毫米；答案表同样差 1.905。
 # 写 tblInd 时必须把它加回去，否则「看着贴左了，其实还差 2 毫米」。
-WORD_TABLE_CELL_MARGIN_LEFT_TWIPS = 108
+#
+# 但补多少要看这张表**实际写进去**的单元格左边距：第五十七轮起，Word 这边
+# 不再用 Word 默认的 108，而是照抄预览（普通表 .7em = 168 twips、dense 表
+# .45em = 108 twips，见 _table_cell_margin_twips），所以补偿也跟着变 ——
+# 补的是那张表的边距，不是某个写死的常数。
 # 选项列数不再照抄 styles.css 那条 "@container qpaper (max-width: 680px) {
 # .qb-options.cols-4 -> two columns }"。
 #
