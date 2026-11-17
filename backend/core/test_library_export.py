@@ -1787,9 +1787,7 @@ class LibraryExportTests(ExportFixture, TestCase):
                                 f"has no gap ({column_mm[position]} vs {row[position]})",
                             )
                     # 图宽 + 列间 gap；靠右不再在两端各多塞一截。
-                    self.assertLessEqual(
-                        sum(column_mm), 178, f"{label} line {number}: the row runs off the page"
-                    )
+                    self.assertLessEqual(sum(column_mm), 178, f"{label} line {number}: the row runs off the page")
 
         # Two pictures too wide to share a row get one paragraph each — the
         # preview wraps them too, and neither side may shrink them to force a
@@ -2058,14 +2056,14 @@ class LibraryExportTests(ExportFixture, TestCase):
                 self.assertAlmostEqual(slack, 0.0, delta=0.05, msg="first column is picture-only when right-aligned")
             else:
                 self.assertGreater(
-                    slack,
-                    1.5,
-                    f"column {position + 1} ({column_mm} mm) has no room for its {picture_mm} mm picture",
+                    slack, 1.5, f"column {position + 1} ({column_mm} mm) has no room for its {picture_mm} mm picture"
                 )
         self.assertEqual(table.find("w:tblPr/w:jc", NS).get(f"{{{NS['w']}}}val"), "right")
         self.assertLessEqual(sum(columns_mm), 178)
         # 178.56 + 147.84 + 134.4 px 图 + 两个 14px gap = 488.8 px ≈ 129.3 mm。
-        self.assertAlmostEqual(sum(columns_mm), 129.3, delta=0.2, msg="the row must be the same width as the preview row")
+        self.assertAlmostEqual(
+            sum(columns_mm), 129.3, delta=0.2, msg="the row must be the same width as the preview row"
+        )
 
         # Centring only means something with these three in place. Word pads each
         # cell by 1.9mm a side, which measured 4mm of rightward drift, and it

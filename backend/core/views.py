@@ -3801,9 +3801,9 @@ def library_withdraw_batch(request):
         if not Paper.objects.filter(pk=document_id).exists():
             return _error("题库里已经没有这份资料")
         rows = list(
-            PublishedQuestion.objects.filter(
-                paper_id=document_id, status=PublishedQuestion.Status.PUBLISHED
-            ).order_by("number", "id")
+            PublishedQuestion.objects.filter(paper_id=document_id, status=PublishedQuestion.Status.PUBLISHED).order_by(
+                "number", "id"
+            )
         )
         withdrawn = []
         with transaction.atomic():
@@ -3844,9 +3844,7 @@ def library_withdraw_batch(request):
             withdrawn.append(value)
     # 必须带 ok:true。Eagle 工作台用 data.ok 判断成败；缺了这一字段时
     # HTTP 200 也会被前端当成「下架试题失败」，题其实已经撤了，用户却以为没动。
-    return JsonResponse(
-        {"ok": True, "withdrawn": withdrawn, "withdrawn_count": len(withdrawn), "skipped": skipped}
-    )
+    return JsonResponse({"ok": True, "withdrawn": withdrawn, "withdrawn_count": len(withdrawn), "skipped": skipped})
 
 
 # ---------------------------------------------------------------- 功能开关与题库任务

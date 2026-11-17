@@ -139,12 +139,16 @@ class LibraryWithdrawBatchTests(TestCase):
     def test_document_id_with_no_live_rows_still_succeeds(self):
         paper = Paper.objects.create(filename="空卷.pdf", kind="pdf", sha256="e" * 64)
         self.publication(paper=paper, status="withdrawn")
-        body = Client().post(
-            "/api/library/withdraw-batch",
-            {"document_id": str(paper.id)},
-            content_type="application/json",
-            HTTP_X_QB_REQUEST="1",
-        ).json()
+        body = (
+            Client()
+            .post(
+                "/api/library/withdraw-batch",
+                {"document_id": str(paper.id)},
+                content_type="application/json",
+                HTTP_X_QB_REQUEST="1",
+            )
+            .json()
+        )
         self.assertEqual(body["withdrawn_count"], 0)
         self.assertEqual(body["withdrawn"], [])
 

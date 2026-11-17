@@ -217,12 +217,7 @@ class OneNoteLinkTests(TestCase):
 
     def test_open_page_returns_immediately_by_default(self):
         """默认打开接口立刻返回，不堵在 COM 上。"""
-        self.item.extras = {
-            "onenote": {
-                "url": "onenote:https://d.docs.live.net/fake/page-3",
-                "page_id": "{page-3}",
-            }
-        }
+        self.item.extras = {"onenote": {"url": "onenote:https://d.docs.live.net/fake/page-3", "page_id": "{page-3}"}}
         self.item.save(update_fields=["extras"])
         called = threading.Event()
 

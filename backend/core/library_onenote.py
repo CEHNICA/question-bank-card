@@ -487,13 +487,7 @@ def _backfill_page_image(publication_id: str, page_id: str, section_id: str, tit
         return
     try:
         page_xml = build_page_xml(publication, title, png)
-        call_bridge(
-            "create_xml",
-            timeout_seconds=40,
-            sectionId=section_id,
-            pageXml=page_xml,
-            pageId=page_id,
-        )
+        call_bridge("create_xml", timeout_seconds=40, sectionId=section_id, pageXml=page_xml, pageId=page_id)
     except Exception:
         logger.exception("OneNote 后台补题面图失败 publication=%s page=%s", publication_id, page_id)
 
@@ -596,11 +590,7 @@ def create_or_sync_page(publication: PublishedQuestion) -> dict[str, Any]:
     _nb_id, sec_id, nb_name, sec_name = resolve_target_section()
     title = _page_title(publication)
 
-    threading.Thread(
-        target=_ensure_protocol_background,
-        name="onenote-protocol-register",
-        daemon=True,
-    ).start()
+    threading.Thread(target=_ensure_protocol_background, name="onenote-protocol-register", daemon=True).start()
 
     # 只吃缓存，绝不在建页热路径里启动无头浏览器。
     png = cached_question_image(publication)
@@ -646,10 +636,7 @@ def create_or_sync_page(publication: PublishedQuestion) -> dict[str, Any]:
     if link:
         shell_open_onenote(link)
     threading.Thread(
-        target=_refine_open,
-        args=(page_id, None),
-        name=f"onenote-create-open-{publication.pk}",
-        daemon=True,
+        target=_refine_open, args=(page_id, None), name=f"onenote-create-open-{publication.pk}", daemon=True
     ).start()
     if need_backfill:
         threading.Thread(
@@ -699,10 +686,7 @@ def open_page(publication: PublishedQuestion, *, wait: bool = False) -> dict[str
         return {"ok": True, "opened": True, "focused": True, "onenote": record, "deferred": False}
 
     threading.Thread(
-        target=_refine_open,
-        args=(page_id, url),
-        name=f"onenote-open-{publication.pk}",
-        daemon=True,
+        target=_refine_open, args=(page_id, url), name=f"onenote-open-{publication.pk}", daemon=True
     ).start()
     return {"ok": True, "opened": True, "focused": False, "onenote": record, "deferred": True}
 
