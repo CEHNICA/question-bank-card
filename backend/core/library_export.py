@@ -1484,6 +1484,10 @@ PREVIEW_PAGE_HEIGHT_MM = 210
 # 从左往右排，加上间距塞不下正文栏就换下一行。一 CSS 像素是 1/96 英寸，14px 即 3.70mm。
 PREVIEW_PX_PER_INCH = 96
 PREVIEW_FIGURE_GAP_PX = 14
+# Word 单元格里能放东西的宽度 = 列宽 - 左右单元格边距。
+# Word 默认左右各 108 twips = 1.905 毫米（导出没有改这个默认值，
+# Word 16 实测：44.5 毫米的列，净宽 40.69 毫米）。
+WORD_CELL_MARGIN_MM = 1.9
 # 选项列数不再照抄 styles.css 那条 "@container qpaper (max-width: 680px) {
 # .qb-options.cols-4 -> two columns }"。
 #
@@ -1643,7 +1647,19 @@ def _figure_widths_for_slot(pictures, slot, settings=None, measured=None):
     return [min(width, measured[index]) if index < len(measured) else width for index, width in enumerate(widths)]
 
 
-def _write_images(document, item, slot, lines=None, settings=None, measured=None):
+def _option_cell_usable_mm(columns, text_width_mm=PREVIEW_TEXT_WIDTH_MM):
+    """选项表格里，一格最多能放多宽的东西（毫米）。
+
+    Word 不会自动缩图：图比格子宽，就直接压到隔壁列上。
+    选项表按正文宽平均分栏，每格再扣掉 Word 默认的左右单元格边距。
+    实测（Word 16）：4 栏时列宽 44.5 毫米、净宽 40.69 毫米；
+    没有这条收口时，一张 169 毫米的图会压出 128 毫米，把后面的列全盖掉。
+    """
+    columns = max(1, int(columns or 1))
+    return text_width_mm / columns - 2 * WORD_CELL_MARGIN_MM
+
+
+def _write_images(document, item, slot, lines=None, settings=None, measured=None, max_width_mm=None):
     from docx.shared import Mm
 
     pictures = [image for image in item["images"] if image["slot"] == slot]
@@ -1651,13 +1667,28 @@ def _write_images(document, item, slot, lines=None, settings=None, measured=None
         return
     align = (settings or {}).get("align", "center")
     widths = _figure_widths_for_slot(pictures, slot, settings, measured)
+    # 格子有上限：图比格子宽就压到隔壁列上（选项表就是这种情况）。
+    if max_width_mm is not None:
+        widths = [min(width, max_width_mm) for width in widths]
     if slot != "body" and lines is None:
-        lines = _figure_row_lines(pictures, settings=settings, widths=widths)
+        lines = _figure_row_lines(
+            pictures,
+            text_width_mm=PREVIEW_TEXT_WIDTH_MM if max_width_mm is None else max_width_mm,
+            settings=settings,
+            widths=widths,
+        )
     # Only a line that actually holds two or more diagrams needs a table. When
     # every line holds one, they are lone figures and a single aligned
     # paragraph says so with less machinery than a one-column table.
     if lines and max(lines) > 1:
-        _write_figure_rows(document, pictures, lines, align, widths)
+        _write_figure_rows(
+            document,
+            pictures,
+            lines,
+            align,
+            widths,
+            text_width_mm=PREVIEW_TEXT_WIDTH_MM if max_width_mm is None else max_width_mm,
+        )
         return
     for index, image in enumerate(pictures):
         width, height = image["size"]
@@ -1684,7 +1715,7 @@ def _write_images(document, item, slot, lines=None, settings=None, measured=None
         paragraph.paragraph_format.keep_together = True
 
 
-def _write_figure_rows(document, pictures, lines, align="center", widths=None):
+def _write_figure_rows(document, pictures, lines, align="center", widths=None, text_width_mm=PREVIEW_TEXT_WIDTH_MM):
     """One table per preview line, separated so Word keeps them apart."""
     widths = list(widths or _figure_widths(pictures))
     start = 0
@@ -1696,7 +1727,9 @@ def _write_figure_rows(document, pictures, lines, align="center", widths=None):
             # which would drag the second line's columns back to the first line's
             # width. The paragraph is 1pt tall and carries the preview's row gap.
             _figure_row_separator(document)
-        _write_figure_line(document, chunk, align=align, widths=widths[start - count : start])
+        _write_figure_line(
+            document, chunk, text_width_mm=text_width_mm, align=align, widths=widths[start - count : start]
+        )
     return start
 
 
@@ -2046,8 +2079,11 @@ def _write_compact_options(document, item, size, columns, *, text_width_mm=178, 
     ]
     table = document.add_table(rows=(len(letters) + columns - 1) // columns, cols=columns)
     table.autofit = False
+    column_mm = text_width_mm / columns
     for column in table.columns:
-        column.width = Mm(text_width_mm / columns)
+        column.width = Mm(column_mm)
+    # 选项里的图最多只能占满自己那一格：Word 不会缩图，画超了就压到隔壁列上。
+    usable_mm = _option_cell_usable_mm(columns, text_width_mm)
     borders = OxmlElement("w:tblBorders")
     for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
         border = OxmlElement("w:" + side)
@@ -2066,8 +2102,11 @@ def _write_compact_options(document, item, size, columns, *, text_width_mm=178, 
         blocks = item["fields"].get(f"options.{letter}", [])
         _write_segments(paragraph, blocks[0]["segments"] if blocks else [], size)
         paragraph.paragraph_format.line_spacing = LINE_SPACING
-        # 选项里的图在预览里被选项栏宽收口过，Word 照实测宽度排。
-        _write_images(cell, item, letter, measured=(figures or {}).get("measured", {}).get(letter))
+        # 选项里的图在预览里被选项栏宽收口过，Word 照实测宽度排；
+        # 就算没有实测值（老前端、预览没量到），也不能超过这一格的净宽。
+        _write_images(
+            cell, item, letter, measured=(figures or {}).get("measured", {}).get(letter), max_width_mm=usable_mm
+        )
     for row in table.rows:
         row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
 
