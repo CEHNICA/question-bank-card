@@ -29,11 +29,7 @@ class LibraryTrashTests(TestCase):
     # ---- 造数据 ----
     def make_paper(self, *, filename="月考卷.pdf", archived=False, material_type="exam"):
         return Paper.objects.create(
-            filename=filename,
-            kind="pdf",
-            sha256="c" * 64,
-            material_type=material_type,
-            archived=archived,
+            filename=filename, kind="pdf", sha256="c" * 64, material_type=material_type, archived=archived
         )
 
     def make_publication(self, *, paper=None, question=None, number=1, status="published", section="", version=1):
@@ -73,10 +69,7 @@ class LibraryTrashTests(TestCase):
 
     def post(self, url, payload=None):
         return self.client.post(
-            url,
-            payload if payload is not None else {},
-            content_type="application/json",
-            HTTP_X_QB_REQUEST="1",
+            url, payload if payload is not None else {}, content_type="application/json", HTTP_X_QB_REQUEST="1"
         )
 
     # ---- 1. 端点存在 ----
@@ -219,17 +212,13 @@ class LibraryTrashTests(TestCase):
         self.assertEqual(self.client.get("/api/library/trash").status_code, 403)
         self.assertEqual(
             self.client.post(
-                "/api/library/restore-batch",
-                {"ids": [str(publication.id)]},
-                content_type="application/json",
+                "/api/library/restore-batch", {"ids": [str(publication.id)]}, content_type="application/json"
             ).status_code,
             403,
         )
         self.assertEqual(
             self.client.post(
-                "/api/library/purge-batch",
-                {"ids": [str(publication.id)]},
-                content_type="application/json",
+                "/api/library/purge-batch", {"ids": [str(publication.id)]}, content_type="application/json"
             ).status_code,
             403,
         )

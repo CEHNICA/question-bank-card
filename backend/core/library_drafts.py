@@ -292,9 +292,11 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
         raise DraftError("单题配图实测宽度的题目编号不正确：" + str(error)) from None
     if len(measured_keys) != len(measured):
         raise DraftError("单题配图实测宽度的题目编号不能重复")
-    if selected is not None and (
-        set(keys) | set(space_keys) | set(figure_keys) | set(breaks) | set(column_keys) | set(measured_keys)
-    ) - selected:
+    if (
+        selected is not None
+        and (set(keys) | set(space_keys) | set(figure_keys) | set(breaks) | set(column_keys) | set(measured_keys))
+        - selected
+    ):
         raise DraftError("单题排版和另起页只能指定当前选中的题目")
     result["option_overrides"] = dict(zip(keys, overrides.values()))
     result["answer_space_overrides"] = dict(zip(space_keys, normalized_spaces))

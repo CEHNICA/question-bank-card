@@ -76,56 +76,52 @@ class CombinedAnswerLayoutTests(ExportFixture, TestCase):
     # ── inline：答案跟题后 ────────────────────────────────────────
     def test_inline_answers_follow_their_own_question(self):
         first, second, third = self.papers()
-        xml = self.export(
-            [first, second, third],
-            {"document": "combined", "answers": True, "answer_layout": "inline"},
-        )
+        xml = self.export([first, second, third], {"document": "combined", "answers": True, "answer_layout": "inline"})
         paragraphs = paragraph_texts(xml)
         text = "".join(paragraphs)
-        self.assertNotIn("参考答案与解析", text,
-                         "合卷 inline 布局不该出现卷末附录：答案要跟题后，"
-                         "卷末再堆一遍等于同一份答案印两遍")
-        self.assertFalse(xml.findall(".//w:br[@w:type='page']", NS),
-                         "合卷 inline 布局不该插分页符：答案跟题后，插页会把题和答案拆开")
+        self.assertNotIn(
+            "参考答案与解析", text, "合卷 inline 布局不该出现卷末附录：答案要跟题后，卷末再堆一遍等于同一份答案印两遍"
+        )
+        self.assertFalse(
+            xml.findall(".//w:br[@w:type='page']", NS), "合卷 inline 布局不该插分页符：答案跟题后，插页会把题和答案拆开"
+        )
         positions = answer_positions(paragraphs)
-        self.assertEqual(len(positions), 2,
-                         "两题有答案就该写两段答案，实际 %d 段" % len(positions))
-        self.assertEqual([row["after"] for row in positions], ["1", "2"],
-                         "答案段没有紧跟在各自题号后面：%s" % [row["after"] for row in positions])
+        self.assertEqual(len(positions), 2, "两题有答案就该写两段答案，实际 %d 段" % len(positions))
+        self.assertEqual(
+            [row["after"] for row in positions],
+            ["1", "2"],
+            "答案段没有紧跟在各自题号后面：%s" % [row["after"] for row in positions],
+        )
         self.assertIn("甲卷第一题答案", positions[0]["text"])
         self.assertIn("甲卷第二题答案", positions[1]["text"])
-        self.assertNotIn("原卷未提供答案", text,
-                         "没答案的题不该写一段空答案：学生看到的是「这题没答案」，"
-                         "而不是一段空白")
+        self.assertNotIn(
+            "原卷未提供答案", text, "没答案的题不该写一段空答案：学生看到的是「这题没答案」，而不是一段空白"
+        )
 
     # ── appendix：答案在卷末 ──────────────────────────────────────
     def test_appendix_answers_are_collected_at_the_end(self):
         first, second, third = self.papers()
         xml = self.export(
-            [first, second, third],
-            {"document": "combined", "answers": True, "answer_layout": "appendix"},
+            [first, second, third], {"document": "combined", "answers": True, "answer_layout": "appendix"}
         )
         paragraphs = paragraph_texts(xml)
         text = "".join(paragraphs)
-        self.assertIn("参考答案与解析", text,
-                      "合卷 appendix 布局要把答案收进卷末附录：现在没有附录，"
-                      "老师拿到的卷子上找不到答案")
+        self.assertIn(
+            "参考答案与解析", text, "合卷 appendix 布局要把答案收进卷末附录：现在没有附录，老师拿到的卷子上找不到答案"
+        )
         positions = answer_positions(paragraphs)
         self.assertEqual(len(positions), 3, "三题都该在附录里有一段答案")
         for row in positions:
-            self.assertEqual(row["after"], "3",
-                             "附录里的答案不该紧跟某一题（那是 inline 布局）：%s" % row["after"])
+            self.assertEqual(row["after"], "3", "附录里的答案不该紧跟某一题（那是 inline 布局）：%s" % row["after"])
 
     # ── 两种布局互相独立：inline 不能带出 appendix ──────────────
     def test_inline_layout_is_not_silently_treated_as_appendix(self):
         first, second, third = self.papers()
         inline = self.export(
-            [first, second, third],
-            {"document": "combined", "answers": True, "answer_layout": "inline"},
+            [first, second, third], {"document": "combined", "answers": True, "answer_layout": "inline"}
         )
         appendix = self.export(
-            [first, second, third],
-            {"document": "combined", "answers": True, "answer_layout": "appendix"},
+            [first, second, third], {"document": "combined", "answers": True, "answer_layout": "appendix"}
         )
         inline_text = "".join(paragraph_texts(inline))
         appendix_text = "".join(paragraph_texts(appendix))
@@ -135,14 +131,10 @@ class CombinedAnswerLayoutTests(ExportFixture, TestCase):
     # ── 答案卷：只有答案，没有题干 ───────────────────────────────
     def test_answers_document_prints_answers_without_the_stems(self):
         first, second, third = self.papers()
-        xml = self.export(
-            [first, second, third],
-            {"document": "answers", "answer_layout": "appendix"},
-        )
+        xml = self.export([first, second, third], {"document": "answers", "answer_layout": "appendix"})
         text = "".join(paragraph_texts(xml))
         self.assertIn("甲卷第一题答案", text)
-        self.assertNotIn("甲卷第一题题干", text,
-                         "答案卷里印了题干：老师要的是答案页，不是把题再印一遍")
+        self.assertNotIn("甲卷第一题题干", text, "答案卷里印了题干：老师要的是答案页，不是把题再印一遍")
 
 
 class PrintOptionAnswerLayoutTests(TestCase):

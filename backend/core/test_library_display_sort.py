@@ -35,13 +35,7 @@ from core.models import Paper, PublishedQuestion, Question
 
 def _make_publication(paper, number, *, stem, when=None):
     """造一道在库题。when 用来固定 published_at（模型上是 auto_now_add）。"""
-    question = Question.objects.create(
-        paper=paper,
-        number=number,
-        question_type="fill_blank",
-        stem=stem,
-        options={},
-    )
+    question = Question.objects.create(paper=paper, number=number, question_type="fill_blank", stem=stem, options={})
     publication = PublishedQuestion.objects.create(
         question=question,
         paper=paper,
@@ -88,35 +82,27 @@ class DisplaySortTests(TestCase):
         """同号时入库时间新的在前 —— 前端稳定排序时就是这个顺序。"""
         import datetime
 
-        base = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+        base = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
         _make_publication(self.paper, 1, stem="1 号", when=base)
         _make_publication(self.paper, 1, stem="1 号新", when=base + datetime.timedelta(days=1))
         _make_publication(self.paper, 2, stem="2 号", when=base)
 
         payload = self.get("/api/library?bulk=1&limit=10&sort=display")
         stems = [item["content"]["stem"] for item in payload["items"]]
-        self.assertEqual(
-            stems,
-            ["1 号新", "1 号", "2 号"],
-            "display 排序要是：题号升序 → 同号新的在前",
-        )
+        self.assertEqual(stems, ["1 号新", "1 号", "2 号"], "display 排序要是：题号升序 → 同号新的在前")
 
     def test_display_sorts_the_whole_library_in_one_go(self):
         """display 跟 number 的差别只在同号时的次级键：跨资料同号不该被拆开。"""
         import datetime
 
-        base = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+        base = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
         other = Paper.objects.create(filename="月考卷二.pdf", kind="pdf", sha256="h" * 64)
         _make_publication(self.paper, 1, stem="甲卷 1", when=base)
         _make_publication(other, 1, stem="乙卷 1", when=base + datetime.timedelta(days=1))
 
         payload = self.get("/api/library?bulk=1&limit=10&sort=display")
         stems = [item["content"]["stem"] for item in payload["items"]]
-        self.assertEqual(
-            stems,
-            ["乙卷 1", "甲卷 1"],
-            "同号时新的在前，不按资料名拆开",
-        )
+        self.assertEqual(stems, ["乙卷 1", "甲卷 1"], "同号时新的在前，不按资料名拆开")
 
 
 class BatchPickKeepsResultsIdenticalTests(TestCase):
@@ -140,7 +126,12 @@ class BatchPickKeepsResultsIdenticalTests(TestCase):
         self.assertEqual(len(ids), 5, "首批要给出 5 道题")
         self.assertEqual(
             ids,
-            [str(pk) for pk in library_browse.library_rows({}).order_by(*library_browse.SORTS["display"])[:5].values_list("id", flat=True)],
+            [
+                str(pk)
+                for pk in library_browse.library_rows({})
+                .order_by(*library_browse.SORTS["display"])[:5]
+                .values_list("id", flat=True)
+            ],
             "取批的结果必须跟按 display 排序后直接切片一致",
         )
 
@@ -185,10 +176,7 @@ class WantedIdsPathStillWorksTests(TestCase):
     def setUp(self):
         self.client = Client()
         self.paper = Paper.objects.create(filename="月考卷.pdf", kind="pdf", sha256="j" * 64)
-        self.publications = [
-            _make_publication(self.paper, number, stem=f"第 {number} 题")
-            for number in range(1, 6)
-        ]
+        self.publications = [_make_publication(self.paper, number, stem=f"第 {number} 题") for number in range(1, 6)]
 
     def get(self, query):
         response = self.client.get(query)

@@ -1106,10 +1106,7 @@ def papers(request):
                 return _error("归档列表的位置不正确")
             rows = list(Paper.objects.filter(archived=True).order_by("-created_at", "-id")[offset : offset + 201])
             return JsonResponse(
-                {
-                    "papers": [build(p) for p in rows[:200]],
-                    "next_offset": offset + 200 if len(rows) > 200 else None,
-                }
+                {"papers": [build(p) for p in rows[:200]], "next_offset": offset + 200 if len(rows) > 200 else None}
             )
         include_archived = request.GET.get("archived") == "1"
         queryset = Paper.objects.all() if include_archived else Paper.objects.filter(archived=False)

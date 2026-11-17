@@ -900,8 +900,7 @@ def chat(
                 )
             except TruncationError:
                 raise TruncationError(
-                    "答案过长，两次生成都被长度上限截断，结果未保存；"
-                    "请缩短题干或减少配图后重试。"
+                    "答案过长，两次生成都被长度上限截断，结果未保存；请缩短题干或减少配图后重试。"
                 ) from None
         if _needs_reasoning_evidence(config) and not evidence["thinking"]:
             raise ConnectionError("本次响应未返回所选思考内容，结果未保存；请核对模型思考配置。")

@@ -20,12 +20,7 @@ OPTIONS = {"A": "1", "B": "2", "C": "3", "D": "4"}
 
 
 def item(question_id=QUESTION, options=None):
-    return {
-        "id": question_id,
-        "content": {"options": dict(options or OPTIONS)},
-        "fields": {},
-        "images": [],
-    }
+    return {"id": question_id, "content": {"options": dict(options or OPTIONS)}, "fields": {}, "images": []}
 
 
 def options_for(**extra):
@@ -39,36 +34,25 @@ class MeasuredOptionColumnsTests(SimpleTestCase):
         # 没有实测值时，四个短选项自己会排成四栏。
         self.assertEqual(library_export._option_columns(item(), options_for()), 4)
         # 预览量出两栏，就照两栏排 —— 文件跟屏幕一样。
-        self.assertEqual(
-            library_export._option_columns(item(), options_for(option_columns={QUESTION: 2})), 2
-        )
+        self.assertEqual(library_export._option_columns(item(), options_for(option_columns={QUESTION: 2})), 2)
 
     def test_measured_columns_may_ask_for_one_or_five(self):
-        self.assertEqual(
-            library_export._option_columns(item(), options_for(option_columns={QUESTION: 1})), 1
-        )
+        self.assertEqual(library_export._option_columns(item(), options_for(option_columns={QUESTION: 1})), 1)
         five = {"A": "1", "B": "2", "C": "3", "D": "4", "E": "5"}
         self.assertEqual(
-            library_export._option_columns(item(options=five), options_for(option_columns={QUESTION: 5})),
-            5,
+            library_export._option_columns(item(options=five), options_for(option_columns={QUESTION: 5})), 5
         )
 
     def test_out_of_range_measurements_fall_back_to_the_estimate(self):
         for value in (0, 6, "2", True, None):
-            self.assertEqual(
-                library_export._option_columns(item(), options_for(option_columns={QUESTION: value})), 4
-            )
+            self.assertEqual(library_export._option_columns(item(), options_for(option_columns={QUESTION: value})), 4)
 
     def test_a_measurement_for_another_question_is_not_used(self):
-        self.assertEqual(
-            library_export._option_columns(item(), options_for(option_columns={OTHER: 2})), 4
-        )
+        self.assertEqual(library_export._option_columns(item(), options_for(option_columns={OTHER: 2})), 4)
 
     def test_vertical_layout_still_wins_over_the_measurement(self):
         self.assertEqual(
-            library_export._option_columns(
-                item(), options_for(option_layout="vertical", option_columns={QUESTION: 4})
-            ),
+            library_export._option_columns(item(), options_for(option_layout="vertical", option_columns={QUESTION: 4})),
             1,
         )
 

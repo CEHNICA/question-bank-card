@@ -53,11 +53,7 @@ class TrashPayloadStaysCheapTests(TestCase):
         self.client = Client()
         self.paper = _paper_with_fat_columns()
         question = Question.objects.create(
-            paper=self.paper,
-            number=1,
-            question_type="fill_blank",
-            stem="第 1 题",
-            options={},
+            paper=self.paper, number=1, question_type="fill_blank", stem="第 1 题", options={}
         )
         self.publication = PublishedQuestion.objects.create(
             question=question,
@@ -162,11 +158,7 @@ class BulkLibraryListTests(TestCase):
         with CaptureQueriesContext(connection) as bulk:
             payload = self.get("/api/library?bulk=1&limit=1000")
         self.assertNotIn("facets", payload, "批量模式不算 facets")
-        self.assertLess(
-            len(bulk.captured_queries),
-            len(normal.captured_queries),
-            "批量请求的查库次数必须比普通请求少",
-        )
+        self.assertLess(len(bulk.captured_queries), len(normal.captured_queries), "批量请求的查库次数必须比普通请求少")
 
     def test_bulk_and_normal_agree_on_the_same_questions(self):
         """两种模式给回来的题目必须一模一样。"""
@@ -174,8 +166,4 @@ class BulkLibraryListTests(TestCase):
         bulk = self.get("/api/library?bulk=1&limit=1000")
         first_of_bulk = bulk["items"][0]
         self.assertEqual(normal["items"][0]["id"], first_of_bulk["id"], "第一道题要对得上")
-        self.assertEqual(
-            normal["items"][0]["content"],
-            first_of_bulk["content"],
-            "题面内容不能因为换了模式就变了",
-        )
+        self.assertEqual(normal["items"][0]["content"], first_of_bulk["content"], "题面内容不能因为换了模式就变了")

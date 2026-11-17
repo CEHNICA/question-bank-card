@@ -21,19 +21,14 @@ WINDOWS_DPAPI_TRANSFORM = service.credential_settings.store._transform
 
 
 def protected_test_bytes(data, *, protect):
-    return (
-        b"test-dpapi:" + data if protect else data.removeprefix(b"test-dpapi:")
-    )
+    return b"test-dpapi:" + data if protect else data.removeprefix(b"test-dpapi:")
 
 
 def response(finish_reason="stop", text="【答案】2【图示】2", model="minimax-offline-pro"):
     payload = {
         "model": model,
         "choices": [
-            {
-                "finish_reason": finish_reason,
-                "message": {"content": text, "reasoning_content": "offline reasoning"},
-            }
+            {"finish_reason": finish_reason, "message": {"content": text, "reasoning_content": "offline reasoning"}}
         ],
     }
     item = mock.Mock(status_code=200)
@@ -57,9 +52,7 @@ class TruncationResilienceTests(SimpleTestCase):
         )
         environment.start()
         self.addCleanup(environment.stop)
-        transform = mock.patch.object(
-            service.credential_settings.store, "_transform", side_effect=protected_test_bytes
-        )
+        transform = mock.patch.object(service.credential_settings.store, "_transform", side_effect=protected_test_bytes)
         transform.start()
         self.addCleanup(transform.stop)
         self.network = mock.patch.object(service.requests, "post").start()
@@ -67,11 +60,7 @@ class TruncationResilienceTests(SimpleTestCase):
 
     def configure_verified(self):
         service.save(
-            {
-                "mode": "api",
-                "provider": "minimax",
-                "key": {"action": "replace", "value": "offline-minimax-key"},
-            }
+            {"mode": "api", "provider": "minimax", "key": {"action": "replace", "value": "offline-minimax-key"}}
         )
         self.network.side_effect = None
         self.network.return_value = response()
@@ -117,19 +106,12 @@ class TruncationResilienceTests(SimpleTestCase):
         with self.assertRaises(service.ConnectionError):
             service.chat("题干", [], kind=None, max_tokens=2000)
 
-        self.assertFalse(
-            service.public_status()["api_ready"],
-            "真的连不上服务时仍必须让用户重新做一次连接测试",
-        )
+        self.assertFalse(service.public_status()["api_ready"], "真的连不上服务时仍必须让用户重新做一次连接测试")
 
     def test_the_connection_probe_still_rejects_a_truncated_answer(self):
         # 探针本身被截断＝没验成，仍然算未验证（这条不能被上面的修复带偏）。
         service.save(
-            {
-                "mode": "api",
-                "provider": "minimax",
-                "key": {"action": "replace", "value": "offline-minimax-key"},
-            }
+            {"mode": "api", "provider": "minimax", "key": {"action": "replace", "value": "offline-minimax-key"}}
         )
         self.network.side_effect = None
         self.network.return_value = response(finish_reason="length")

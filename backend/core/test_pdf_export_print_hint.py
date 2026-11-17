@@ -42,11 +42,7 @@ _ITEMS = [
         "stem": r"下列各式中，属于最简二次根式的是（ ）",
         "options": {"A": r"$\sqrt{12}$", "B": r"$\sqrt{\frac{3}{2}}$", "C": r"$\sqrt{8}$", "D": r"$\sqrt{0.5}$"},
     },
-    {
-        "type": "fill_blank",
-        "stem": r"已知 $f(x)=x^2-2x+3$，则 $f(1)=$____。",
-        "options": {},
-    },
+    {"type": "fill_blank", "stem": r"已知 $f(x)=x^2-2x+3$，则 $f(1)=$____。", "options": {}},
 ]
 
 _OPTIONS = {
@@ -87,25 +83,33 @@ class PdfExportPrintHintTests(SimpleTestCase):
     # ── 1. 静态：PDF 文档里必须有抑制规则 ──────────────────────────
     def test_pdf_document_suppresses_the_library_page_hint(self):
         document = pdf._html_document(self.items(), "导出体检", dict(_OPTIONS))
-        self.assertIn("body:not(.printing)::after", document,
-                      "PDF 文档里找不到抑制规则：题库页那句「没有可打印的内容」"
-                      "会被 printToPDF 当成真内容印在最后一页，页数校验随即失败，"
-                      "PDF 导出整条链路走不通")
+        self.assertIn(
+            "body:not(.printing)::after",
+            document,
+            "PDF 文档里找不到抑制规则：题库页那句「没有可打印的内容」"
+            "会被 printToPDF 当成真内容印在最后一页，页数校验随即失败，"
+            "PDF 导出整条链路走不通",
+        )
         match = re.search(r"body:not\(\.printing\)::after\{([^}]*)\}", document)
         self.assertIsNotNone(match, "尺子自检：抑制规则写法变了，这条断言要重写")
-        self.assertIn("content:none", match.group(1).replace(" ", ""),
-                      "抑制规则里没有 content:none：指引照样会被渲染出来")
+        self.assertIn(
+            "content:none", match.group(1).replace(" ", ""), "抑制规则里没有 content:none：指引照样会被渲染出来"
+        )
 
     # ── 2. 静态：题库页的指引本身必须还在 ─────────────────────────
     def test_library_page_hint_is_still_there_for_ctrl_p(self):
-        from django.conf import settings
         from pathlib import Path
 
+        from django.conf import settings
+
         css = (Path(settings.FRONTEND_ROOT) / "library.css").read_text(encoding="utf-8")
-        self.assertIn(HINT, css,
-                      "题库页那句指引被删了：用户在题库页直接按 Ctrl+P 时，"
-                      "整页题库界面（目录树、「加入试题篮」、「看答案▾」）会被原样印出来，"
-                      "实测十几页全是废纸，一道题都不能用")
+        self.assertIn(
+            HINT,
+            css,
+            "题库页那句指引被删了：用户在题库页直接按 Ctrl+P 时，"
+            "整页题库界面（目录树、「加入试题篮」、「看答案▾」）会被原样印出来，"
+            "实测十几页全是废纸，一道题都不能用",
+        )
 
     # ── 3. 端到端：真渲染一份 PDF，页数自洽且不含指引 ─────────────
     def test_rendered_pdf_has_no_hint_page(self):
@@ -117,9 +121,7 @@ class PdfExportPrintHintTests(SimpleTestCase):
         except Exception as error:  # noqa: BLE001
             self.fail("PDF 渲染直接失败（页数校验顶爆）：" + str(error))
         with pymupdf.open(stream=data, filetype="pdf") as result:
-            self.assertEqual(result.page_count, pages,
-                             "页数对不上：排版器算的页数和真正印出来的页数不一致")
+            self.assertEqual(result.page_count, pages, "页数对不上：排版器算的页数和真正印出来的页数不一致")
             text = "\n".join(page.get_text() for page in result)
-        self.assertNotIn(HINT, text,
-                         "导出的 PDF 里印着题库页的指引：那一句被当成卷子内容排进了纸里")
+        self.assertNotIn(HINT, text, "导出的 PDF 里印着题库页的指引：那一句被当成卷子内容排进了纸里")
         self.assertIn("最简二次根式", text, "尺子自检：PDF 里连题干都没有，渲染路径变了")

@@ -47,9 +47,7 @@ class TrashSummaryModeTests(TestCase):
             )
 
     def summary(self, **kwargs):
-        return self.client.get(
-            "/api/library/trash?summary=1", HTTP_X_QB_REQUEST="1", **kwargs
-        )
+        return self.client.get("/api/library/trash?summary=1", HTTP_X_QB_REQUEST="1", **kwargs)
 
     def full(self, **kwargs):
         return self.client.get("/api/library/trash", HTTP_X_QB_REQUEST="1", **kwargs)
@@ -121,11 +119,5 @@ class TrashSummaryDoesNotBreakTheFullModeTests(TestCase):
     def test_summary_flag_is_only_honoured_when_exactly_one(self):
         """?summary=0 / ?summary=yes 不许被当成摘要 —— 那会让面板拿到空明细。"""
         for flag in ("0", "no", "true", "yes", ""):
-            body = self.client.get(
-                f"/api/library/trash?summary={flag}", HTTP_X_QB_REQUEST="1"
-            ).json()
-            self.assertIn(
-                "archived_papers",
-                body,
-                f"summary={flag!r} 不是摘要模式，必须照旧给全量明细",
-            )
+            body = self.client.get(f"/api/library/trash?summary={flag}", HTTP_X_QB_REQUEST="1").json()
+            self.assertIn("archived_papers", body, f"summary={flag!r} 不是摘要模式，必须照旧给全量明细")

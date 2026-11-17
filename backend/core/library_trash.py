@@ -66,9 +66,7 @@ def _paper_names(paper_ids) -> dict:
     if not paper_ids:
         return {}
     names = {}
-    for pk, task_name, filename in Paper.objects.filter(pk__in=paper_ids).values_list(
-        "pk", "task_name", "filename"
-    ):
+    for pk, task_name, filename in Paper.objects.filter(pk__in=paper_ids).values_list("pk", "task_name", "filename"):
         names[str(pk)] = (task_name or "").strip() or (filename or "")
     return names
 
@@ -161,14 +159,7 @@ def _withdrawn_question_rows() -> list[dict]:
     # extras 一个字段都用不上，别读。
     publications = list(
         PublishedQuestion.objects.filter(status=PublishedQuestion.Status.WITHDRAWN).only(
-            "id",
-            "number",
-            "question_type",
-            "paper_id",
-            "source_filename",
-            "published_at",
-            "withdrawn_at",
-            "content",
+            "id", "number", "question_type", "paper_id", "source_filename", "published_at", "withdrawn_at", "content"
         )
     )
     names = _paper_names({item.paper_id for item in publications if item.paper_id})
@@ -201,9 +192,7 @@ def trash_summary_payload() -> dict:
     return {
         "counts": {
             "papers": Paper.objects.filter(archived=True).count(),
-            "questions": PublishedQuestion.objects.filter(
-                status=PublishedQuestion.Status.WITHDRAWN
-            ).count(),
+            "questions": PublishedQuestion.objects.filter(status=PublishedQuestion.Status.WITHDRAWN).count(),
         }
     }
 
@@ -307,11 +296,7 @@ def restore_batch_view(request):
         return failure
     result = _run_batch(ids, _restore_one)
     return _ok(
-        {
-            "restored": result["restored"],
-            "restored_count": len(result["restored"]),
-            "skipped": result["skipped"],
-        }
+        {"restored": result["restored"], "restored_count": len(result["restored"]), "skipped": result["skipped"]}
     )
 
 
@@ -327,13 +312,7 @@ def purge_batch_view(request):
     if failure is not None:
         return failure
     result = _run_batch(ids, _purge_one)
-    return _ok(
-        {
-            "purged": result["purged"],
-            "purged_count": len(result["purged"]),
-            "skipped": result["skipped"],
-        }
-    )
+    return _ok({"purged": result["purged"], "purged_count": len(result["purged"]), "skipped": result["skipped"]})
 
 
 @csrf_exempt

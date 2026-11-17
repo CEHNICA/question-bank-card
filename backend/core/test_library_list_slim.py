@@ -32,13 +32,7 @@ import json
 
 from django.test import Client, TestCase
 
-from core.models import (
-    LibraryTag,
-    LibraryTagAssignment,
-    Paper,
-    PublishedQuestion,
-    Question,
-)
+from core.models import LibraryTag, LibraryTagAssignment, Paper, PublishedQuestion, Question
 
 
 def _dumps(payload) -> int:
@@ -131,9 +125,7 @@ class SlimLibraryListTests(TestCase):
         assignments = slim["tag_assignments"]
         self.assertEqual(len(assignments), 1)
         row = assignments[0]
-        self.assertEqual(
-            set(row["tag"]), {"id", "name", "kind", "color"}, "标签芯片只认这四样"
-        )
+        self.assertEqual(set(row["tag"]), {"id", "name", "kind", "color"}, "标签芯片只认这四样")
         self.assertEqual(row["tag"]["name"], "勾股定理")
         self.assertEqual(set(row), {"tag", "source", "needs_review"}, "AI 那几摊理由列表不读")
 
@@ -192,8 +184,4 @@ class SlimLibraryListTests(TestCase):
         slim_len = _dumps(self.get("/api/library?bulk=1&limit=1000&slim=1"))
         # 真库 810 道题：明文 1.44 MB → 瘦身掉 content.review、content.source_group
         # 和标签上的 AI 理由，大约省掉三分之一。
-        self.assertLess(
-            slim_len,
-            full_len * 0.75,
-            f"slim 模式的意义就是别把胖字段传出去（{full_len} → {slim_len}）",
-        )
+        self.assertLess(slim_len, full_len * 0.75, f"slim 模式的意义就是别把胖字段传出去（{full_len} → {slim_len}）")

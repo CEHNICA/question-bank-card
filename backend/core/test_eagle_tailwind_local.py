@@ -1,4 +1,5 @@
 """Eagle 工作台的 Tailwind 必须本地化：不再依赖外网 CDN，样式随前端走。"""
+
 from pathlib import Path
 
 from django.test import SimpleTestCase
