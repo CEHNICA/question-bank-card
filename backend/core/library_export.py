@@ -133,6 +133,15 @@ QUESTION_GAP_PT = 8
 #     .print-section line-height: 1.5   （16px 字号 → 24px 行盒 = 18 磅）
 #     .print-title   继承 body 的 1.5  （24px 字号 → 36px 行盒 = 27 磅）
 PREVIEW_TABLE_LINE_HEIGHT_EM = 1.6
+# .qb-table td, .qb-table th { height: 2.1em; padding: .2em .7em; }
+#
+# Chrome 实测（2026-11-17，12pt 字号）：单元格 height 33.59px = 2.1em，
+# 上下内边距各 3.2px = .2em，行与行之间 33.59px（= 25.2 磅）。
+# Word 这边原来只写 1.6em 的行距、上下一点白都不留，每一行比预览矮 5.4 磅
+# （实测 19.8 vs 25.2），一张四行的表就差出 7.5 毫米 —— 纸上那几行挤成一团，
+# 屏幕上明明是松开的。
+PREVIEW_TABLE_CELL_HEIGHT_EM = 2.1
+PREVIEW_TABLE_CELL_PADDING_Y_EM = 0.2
 PREVIEW_SECTION_LINE_HEIGHT_PT = 18
 PREVIEW_TITLE_LINE_HEIGHT_PT = 27
 # .print-answer-row 的上下外边距：6px = 4.5 磅（每个答案块上下各一圈）。
@@ -1703,6 +1712,34 @@ def _mark_repeat_header(trpr):
     trpr.insert_element_before(header, "w:tblCellSpacing", "w:jc", "w:hidden", "w:ins", "w:del", "w:trPrChange")
 
 
+def _cell_vertical_padding(cell, twips_value):
+    """给单元格留出上下白，并把文字垂直居中（照抄 .qb-table td 的 padding）。
+
+    预览里单元格上下各 .2em 的白，文字在这块白里居中；Word 默认上下不留白、
+    文字贴顶。写 w:tcMar（上下）+ w:vAlign（居中）才跟预览一样。
+    """
+    from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tc_pr = cell._tc.get_or_add_tcPr()
+    margin = tc_pr.find(qn("w:tcMar"))
+    if margin is None:
+        margin = OxmlElement("w:tcMar")
+        tc_pr.insert_element_before(margin, "w:textDirection", "w:tcFitText", "w:vAlign", "w:hideMark")
+    for side in ("w:top", "w:bottom"):
+        existing = margin.find(qn(side))
+        if existing is not None:
+            margin.remove(existing)
+    # w:tcMar 里的顺序是 上、左、下、右。
+    for side in ("w:top", "w:bottom"):
+        element = OxmlElement(side)
+        element.set(qn("w:w"), str(twips_value))
+        element.set(qn("w:type"), "dxa")
+        margin.append(element)
+    cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+
+
 def _write_table(document, rows, size, where, text_width_mm=None):
     from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.oxml import OxmlElement
@@ -1763,10 +1800,28 @@ def _write_table(document, rows, size, where, text_width_mm=None):
     # 首行整行都是表头格时，把它标成「表头行」：表格跨页时 Word 会把这一行
     # 在每一页的顶端重复一遍。
     head_row = bool(rows) and all(cell["header"] for cell in rows[0])
+    # 预览里每一行都是 2.1em 高、上下各留 .2em 的白（Chrome 实测 25.2 磅/行）。
+    # Word 这边照抄：文字垂直居中，上下边距 .2em。
+    #
+    # 行高那个数要减掉边距：Word 的 w:trHeight 量的是「内容区」最低高度，单元格
+    # 边距算在它外面（实测：trHeight 25.2 磅 + 上下 2.4 磅 = 行高 30.6 磅）；
+    # Chrome 的 height 2.1em 是「整行」的高度（实测 25.5 磅）。所以这里写
+    # 2.1em − 2×.2em = 1.7em，行高才跟预览一样是 25.2 磅。
+    row_height = int(round(size * (PREVIEW_TABLE_CELL_HEIGHT_EM - 2 * PREVIEW_TABLE_CELL_PADDING_Y_EM) * 20))
+    padding_y = int(round(size * PREVIEW_TABLE_CELL_PADDING_Y_EM * 20))
     for index, row in enumerate(table.rows):
         trpr = row._tr.get_or_add_trPr()
         avoid = OxmlElement("w:cantSplit")
         trpr.append(avoid)
+        height = OxmlElement("w:trHeight")
+        height.set(qn("w:hRule"), "atLeast")
+        height.set(qn("w:val"), str(row_height))
+        # w:trPr 里 trHeight 排在 cantSplit 之后、tblHeader 之前。
+        trpr.insert_element_before(
+            height, "w:tblHeader", "w:tblCellSpacing", "w:jc", "w:hidden", "w:ins", "w:del", "w:trPrChange"
+        )
+        for cell in row.cells:
+            _cell_vertical_padding(cell, padding_y)
         if index == 0 and head_row:
             _mark_repeat_header(trpr)
 
@@ -2778,8 +2833,11 @@ def _unit_height(elements, size):
             total += _paragraph_measure(element, size)
         elif element.tag == qn("w:tbl"):
             columns = max(1, len(element.findall(qn("w:tblGrid") + "/" + qn("w:gridCol"))))
+            # 表格的行高有下限：预览里每行 2.1em（12pt 字号 = 25.2 磅），
+            # 算分页的时候不能只按文字高度算，否则 Word 会以为表格比实际矮。
+            floor = size * PREVIEW_TABLE_CELL_HEIGHT_EM * 25.4 / 72
             for row in element.findall(qn("w:tr")):
-                total += max(
+                content = max(
                     (
                         sum(
                             _paragraph_measure(paragraph, size, 178 / columns - 4)
@@ -2789,6 +2847,7 @@ def _unit_height(elements, size):
                     ),
                     default=0,
                 )
+                total += max(content, floor)
     return total
 
 
