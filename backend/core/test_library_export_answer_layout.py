@@ -53,7 +53,7 @@ def answer_positions(paragraphs):
             else:
                 last_number = head
             continue
-        if "【答案解析】" in text:
+        if "答案：" in text:
             out.append({"after": last_number, "number": None, "text": text})
     return out
 

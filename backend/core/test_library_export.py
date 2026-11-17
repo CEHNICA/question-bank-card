@@ -340,8 +340,8 @@ class LibraryExportTests(ExportFixture, TestCase):
         xml = document_xml(response.content)
         text = "".join(xml.itertext())
         self.assertIn("参考答案与解析", text)
-        self.assertIn("1.（原卷未提供答案）", text)
-        self.assertIn("2. 原卷结果二", text)
+        self.assertIn("1. （原卷未提供答案解析）", text)
+        self.assertIn("2. 答案：原卷结果二", text)
         self.assertIn("原卷仅有解析三", text)
         self.assertEqual(len(xml.findall(".//w:br[@w:type='page']", NS)), 1)
 
@@ -403,7 +403,7 @@ class LibraryExportTests(ExportFixture, TestCase):
         result = self.post(self.payload([pub], print_options={"document": "combined", "ai_answers": True}))
         text = "".join(document_xml(result.content).itertext())
         self.assertIn("AI合成参考", text)
-        self.assertIn("AI 参考 · 未核对", text)
+        self.assertIn("AI 参考，未核对", text)
         pub.refresh_from_db()
         self.assertEqual(pub.content["answer"], "")
 

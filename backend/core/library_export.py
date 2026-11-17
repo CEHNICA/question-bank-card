@@ -53,6 +53,13 @@ GROUPS = (
     ("free_response", "解答题"),
 )
 FIELDS = {"stem", "answer", "analysis", "origin", *(f"options.{key}" for key in "ABCDE")}
+# 答案文本的口径必须和预览、PDF 逐字一致。预览走 frontend/library-solutions.js，
+# PDF 走 backend/core/library_pdf.py 里的同一份模板，两边本来就对齐；Word 是唯一
+# 偏离的一方（标题多一个「 · 答案解析」、占位符少一半、答案没有「答案：」标签、
+# inline 多一个「【答案解析】」前缀、AI 标记用的是「·」）。老师对着预览和导出的
+# 卷子找不同，一眼就能看出来，所以这里一律跟预览走。
+EMPTY_SOLUTION_TEXT = "（原卷未提供答案解析）"
+AI_REFERENCE_NOTE = "（AI 参考，未核对）"
 # KaTeX 把重音写成 mover 的第二个 <mo>。只有这张表里的字形能转成 OMML 的原生
 # <m:acc>；落在表外的（\overline 的 U+203E、\acute 的 U+02CA、\grave 的 U+02CB）
 # 会让整份 Word 导不出来 —— 高考卷里 \overline 极常见，缺一个就废掉一整卷。
@@ -1866,25 +1873,32 @@ def _write_solution_image(document, image):
 
 def _write_solution(document, item, size, label):
     selected, images = item["selected"], item.get("solution_images", [])
-    if not str(selected.get("answer") or "").strip() and not str(selected.get("analysis") or "").strip() and not images:
-        _font(document.add_paragraph().add_run(label + "（原卷未提供答案）"), size)
+    # 题号和 AI 标记只出现一次：要么跟在答案前面，要么（没有答案正文时）自己占一段，
+    # 跟预览里 .print-answer-row 的结构一一对应。
+    head = label + (AI_REFERENCE_NOTE if item.get("ai") else "")
+    has_answer = bool(str(selected.get("answer") or "").strip())
+    has_analysis = bool(str(selected.get("analysis") or "").strip())
+    if not has_answer and not has_analysis and not images:
+        _font(document.add_paragraph().add_run(head + EMPTY_SOLUTION_TEXT), size)
         return
-    if str(selected.get("answer") or "").strip():
-        _write_field(document, item["fields"]["answer"], size, prefix=label + " ", where=item["where"])
-    else:
-        _font(document.add_paragraph().add_run(label + " 解析："), size)
+    parts = _analysis_parts(item["fields"].get("analysis", []))
+    if has_answer:
+        _write_field(document, item["fields"]["answer"], size, prefix=head + "答案：", where=item["where"])
+    elif not parts:
+        # 只有答案配图、没有解析正文时，题号不能丢；预览里这一行只有题号和图。
+        _font(document.add_paragraph().add_run(head), size)
     for image in images:
         if image["position"] == "before":
             _write_solution_image(document, image)
-    parts = _analysis_parts(item["fields"].get("analysis", []))
     for index, blocks in enumerate(parts):
-        _write_field(
-            document,
-            blocks,
-            size,
-            prefix="解析：" if index == 0 and selected.get("answer") else "",
-            where=item["where"],
-        )
+        # 「解析：」标签跟预览一样，只在确有解析正文时出现，且只出现在第一段前面。
+        if index == 0 and has_answer:
+            prefix = "解析："
+        elif index == 0:
+            prefix = head + "解析："
+        else:
+            prefix = ""
+        _write_field(document, blocks, size, prefix=prefix, where=item["where"])
         for image in images:
             if image["position"] == "paragraph" and image["paragraph"] == index:
                 _write_solution_image(document, image)
@@ -2189,7 +2203,7 @@ def _pagination(document, start, mode, size):
             continue
         plain = "".join(node.text or "" for node in element.findall(".//" + qn("w:t"))).strip()
         next_element = elements[index + 1]
-        lead_only = bool(re.fullmatch(r"\d+\.(?:（AI 参考 · 未核对）)?\s*", plain))
+        lead_only = bool(re.fullmatch(r"\d+\.(?:（AI 参考，未核对）)?\s*", plain))
         next_visual = next_element.tag == qn("w:tbl") or bool(next_element.findall(".//" + qn("w:drawing")))
         formula_width = sum(_math_extent(node)[0] for node in element.findall(".//" + qn("m:oMath")))
         width_mm = (_text_em(plain) + formula_width) * size * 25.4 / 72
@@ -2260,7 +2274,7 @@ def _document(captured, title, options, mode):
     heading = document.add_paragraph()
     heading.alignment = 1
     heading.paragraph_format.keep_with_next = True
-    _font(heading.add_run(title + (" · 答案解析" if mode == "answers" else "")), size + 6, True)
+    _font(heading.add_run(title), size + 6, True)
     if options["student_info"] and mode != "answers":
         from docx.enum.text import WD_ALIGN_PARAGRAPH
 
@@ -2352,7 +2366,7 @@ def _document(captured, title, options, mode):
             if inline_answers and _has_selected_answers([item]):
                 # A long solution may cross pages; never keep it with the entire
                 # question or add student writing space to a teacher copy.
-                _write_solution(document, item, size, "【答案解析】" + ("（AI 参考 · 未核对）" if item["ai"] else ""))
+                _write_solution(document, item, size, "")
                 _question_gap(document)
             if number > 1 and item["id"] in options["question_breaks"]:
                 if item is group[0] and section_title is not None:
@@ -2367,7 +2381,9 @@ def _document(captured, title, options, mode):
         _font(answer_heading.add_run("参考答案与解析"), size + 1, True)
         for number, item in numbered:
             unit_start = len(document._element.body) - 1
-            label = f"{number}." + ("（AI 参考 · 未核对）" if item["ai"] else "")
+            # 题号后面留一个空格：预览里题号和正文是分开的两栏，Word 是同一段，
+            # 挤在一起读起来像「2.答案：」。
+            label = f"{number}. "
             _write_solution(document, item, size, label)
             _question_gap(document)
             # Even keep-whole-question mode must allow a long solution to flow.

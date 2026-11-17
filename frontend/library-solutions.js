@@ -117,7 +117,14 @@
         QB.renderTypeset(body, value.answer, { trackSource: true, sourceOffset: 0 });
         answer.append(body);
       } else {
-        const body = node("span"); QB.renderTypeset(body, value.answer); answer.append(body);
+        // 选择题的答案就是一串字母（"A" / "AB"），不是公式。项目里早就有这条规矩：
+        // exam-export.js 导出时对 /^\s*[A-E]{1,5}\s*$/ 的答案走 literal 分支
+        // （"choice answers stay upright text"），Word 里的答案因此是正体。
+        // 预览原来把 "A" 交给公式排版，渲染成斜体的 KaTeX 公式 —— 老师看到的字母
+        // 形状跟导出来的不一样。预览和 PDF 共用这一个 render，所以这里改一处就够。
+        const source = text(value.answer).trim();
+        if (/^[A-E]{1,5}$/.test(source)) answer.append(node("span", "", source));
+        else { const body = node("span"); QB.renderTypeset(body, value.answer); answer.append(body); }
       }
       container.append(answer);
     }
