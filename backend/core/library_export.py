@@ -1840,7 +1840,7 @@ def _cell_vertical_padding(cell, twips_value):
     cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
 
 
-def _set_table_indent(table, left_mm):
+def _set_table_indent(table, left_mm, nested=False):
     """把表格的左边缘挪到离版心左缘 ``left_mm`` 毫米的位置。
 
     ``w:tblInd`` 是表格相对左边距的缩进，``w:jc`` 必须写成 left ——
@@ -1854,6 +1854,13 @@ def _set_table_indent(table, left_mm):
     所以这个默认值一直在。实测（Word 16.0 实测 PDF）：写 ``tblInd=264``
     （= 4.66 毫米）时边框只落在离版心左缘 2.65 毫米处，正好差这 1.905 毫米。
     不补这一格，题干表差 2 毫米、答案表也差 2 毫米 —— 看着像对了，其实没对。
+
+    **嵌套在格子里的表是另一条规矩**：真 Word 实测（2026-11-17，_probe57.py，
+    同一格里摆 5 张 tblInd = 0/200/400/848/1200 twips 的嵌套表，导 PDF 量边框）：
+    缩进 0 时嵌套表的边框正好落在**格子左缘**（53.075 毫米 = B 栏格子左缘），
+    缩进 200 twips 时边框落在 56.684（差 3.609 毫米 ≈ 3.528 + 0.08）。
+    也就是说嵌套表的 ``w:tblInd`` 直接就是**边框**的位置，没有那 1.905 毫米的
+    补偿。补偿加错方向，选项里的表就会偏右 2 毫米（实测 70.026 vs 预览 67.924）。
     """
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
@@ -1864,9 +1871,12 @@ def _set_table_indent(table, left_mm):
         tbl_pr.remove(existing)
     indent = OxmlElement("w:tblInd")
     indent.set(qn("w:type"), "dxa")
-    # tblInd 量到第一格文字的左缘，边框还要再往左退一个单元格左边距，
-    # 所以这里要把那 108 twips 加回去（否则边框比目标位置偏左 1.905 毫米）。
-    twips = int(round(float(left_mm) * 1440 / 25.4)) + WORD_TABLE_CELL_MARGIN_LEFT_TWIPS
+    # 主文档里的表：tblInd 量到第一格文字的左缘，边框还要再往左退一个单元格
+    # 左边距，所以把那 108 twips 加回去（否则边框比目标位置偏左 1.905 毫米）。
+    # 嵌套表：tblInd 就是边框位置，一个 twips 都不用补。
+    twips = int(round(float(left_mm) * 1440 / 25.4))
+    if not nested:
+        twips += WORD_TABLE_CELL_MARGIN_LEFT_TWIPS
     indent.set(qn("w:w"), str(twips))
     # 元素顺序是硬要求：w:tblInd 排在 w:jc 之后、w:tblBorders 之前。
     tbl_pr.insert_element_before(
@@ -1964,6 +1974,10 @@ def _write_table(
     from docx.oxml.ns import qn
     from docx.shared import Mm, Pt
 
+    # 嵌套在格子里的表，w:tblInd 的解释跟主文档里的表不一样（见 _set_table_indent）：
+    # 嵌套表的 tblInd 直接就是边框位置，没有那 1.905 毫米的单元格边距补偿。
+    nested = getattr(container, "_tc", None) is not None
+
     # 下面两个循环都要用 "column" 这个名字（网格列号、python-docx 的列对象），
     # 会把形参 column 覆盖掉 —— 形参先另存一份，落位时用它。
     column_box = column
@@ -2032,7 +2046,7 @@ def _write_table(
             body_width = column_width
         offset = column_left + max(0.0, (body_width - preview_width) / 2)
     if offset is not None:
-        _set_table_indent(table, offset)
+        _set_table_indent(table, offset, nested=nested)
     for r, c, cell in placements:
         target = table.cell(r, c)
         target.text = ""
@@ -2543,13 +2557,33 @@ def _option_cell_usable_mm(columns, text_width_mm=PREVIEW_TEXT_WIDTH_MM, size=12
     return _option_column_width_mm(columns, text_width_mm) - _option_label_indent_mm(letter, size)
 
 
-def _write_images(document, item, slot, lines=None, settings=None, measured=None, max_width_mm=None):
+def _write_images(
+    document,
+    item,
+    slot,
+    lines=None,
+    settings=None,
+    measured=None,
+    max_width_mm=None,
+    indent_mm=None,
+    align_override=None,
+):
+    """写这个位置上的图。
+
+    ``indent_mm`` 是图所在段落的左缩进（毫米）。选项里的图在预览里被钉在
+    **正文列**（``.qb-option .qb-figure { grid-column: 2 }``），所以要往右挪出
+    「标签宽 + 标签与正文之间的间隙」，让图落在正文列的左缘上。
+
+    ``align_override`` 强制对齐方式。题干配图默认靠右（``.qb-figures`` 是
+    ``justify-content: flex-end``），但选项里的图是正文列里的一个网格格子，
+    贴着列的**左**缘 —— 沿用「靠右」会把图推到整格的右边，偏 8.46 毫米。
+    """
     from docx.shared import Mm
 
     pictures = [image for image in item["images"] if image["slot"] == slot]
     if not pictures:
         return
-    align = (settings or {}).get("align") or "right"
+    align = align_override or (settings or {}).get("align") or "right"
     if align not in ("left", "center", "right"):
         align = "right"
     widths = _figure_widths_for_slot(pictures, slot, settings, measured)
@@ -2585,6 +2619,9 @@ def _write_images(document, item, slot, lines=None, settings=None, measured=None
         # choice, not a licence to print them larger than the screen shows.
         paper = widths[index]
         paragraph = document.add_paragraph()
+        # 图所在的段落要落在正文列上：往右挪出「标签 + 间隙」那么远。
+        if indent_mm is not None:
+            paragraph.paragraph_format.left_indent = Mm(indent_mm)
         # A lone stem figure still belongs to a .qb-figures row, and that row is
         # centred — measured in the app, a single 188px picture sits with 242px of
         # space on each side. Left alone, Word parks it against the margin, which
@@ -3152,6 +3189,9 @@ def _write_compact_options(document, item, size, columns, *, text_width_mm=178, 
         # 正文列的宽按这一格的标签算（预览里标签列是 auto，各行自己算宽：
         # 「A.」比「B.」宽，A 那一行的正文列就比 B 窄）。
         usable_mm = _option_cell_usable_mm(columns, text_width_mm, size, letter)
+        # 正文列离栏左缘多远 = 标签宽 + 标签与正文之间的间隙（预览的 .qb-option
+        # 两列网格）。选项里的图和表都要落在这条线上。
+        label_offset_mm = _option_label_indent_mm(letter, size)
         # 一个选项的内容可能不止一段，还可能带着一张表（预览里选项里也能排表）。
         #
         # 原来这里只写 blocks[0]：选项以表开头时直接 KeyError('segments') 崩掉，
@@ -3171,14 +3211,32 @@ def _write_compact_options(document, item, size, columns, *, text_width_mm=178, 
             first_paragraph=paragraph,
             # 标签和正文之间留出预览里那 0.3em，正文从这儿开始，
             # 折行也折回这一列（预览里正文是一个独立的列）。
-            first_paragraph_tab_mm=_option_label_indent_mm(letter, size),
+            first_paragraph_tab_mm=label_offset_mm,
             # 最后一栏右边没有下一栏了，不用让出间隙。
             right_indent_mm=0 if column_index == columns - 1 else OPTION_COLUMN_GAP_MM,
+            # 选项里的表在预览里是在**正文列**里居中（.qb-table { margin: 0 auto }），
+            # 不是在整格里居中 —— 整格比正文列宽 13.6 毫米（栏宽 + 栏间间隙），
+            # 居中的话表会偏右 3.4 毫米（Chrome 实测 71.296 vs 67.924）。
+            # 这一列的左缘是相对**格子**说的：格子的左缘就是栏左缘。
+            table_column=(label_offset_mm, usable_mm),
+            table_column_shrinks=False,
         )
         # 选项里的图在预览里被选项栏宽收口过，Word 照实测宽度排；
         # 就算没有实测值（老前端、预览没量到），也不能超过正文那一列的宽。
+        #
+        # 位置：预览里 ``.qb-option .qb-figure { grid-column: 2 }`` 把图钉在正文列，
+        # 所以图要往右挪出「标签 + 间隙」，且是**左**对齐（不是题干配图那种靠右）。
+        # 预览里选项里的几张图是网格里各自一行的格子 —— 一张一行，不是并排。
+        option_pictures = [image for image in item["images"] if image["slot"] == letter]
         _write_images(
-            cell, item, letter, measured=(figures or {}).get("measured", {}).get(letter), max_width_mm=usable_mm
+            cell,
+            item,
+            letter,
+            lines=[1] * len(option_pictures) if option_pictures else None,
+            measured=(figures or {}).get("measured", {}).get(letter),
+            max_width_mm=usable_mm,
+            indent_mm=label_offset_mm,
+            align_override="left",
         )
     for row in table.rows:
         row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
