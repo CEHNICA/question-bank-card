@@ -2170,7 +2170,9 @@ class LibraryExportTests(ExportFixture, TestCase):
                 self.assertEqual(response.status_code, 200)
                 line = None
                 for paragraph in tree_paras(document_xml(response.content)):
-                    if "姓名：" in "".join(paragraph.itertext()):
+                    # 找「姓名」两个字，不带冒号：这一行现在的文字跟预览逐字相同，
+                    # 而预览里本来就没有冒号（见 core.test_word_student_info）。
+                    if "姓名" in "".join(paragraph.itertext()):
                         line = paragraph
                         break
                 if not student_info:

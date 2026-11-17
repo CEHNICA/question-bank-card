@@ -170,6 +170,22 @@ PREVIEW_LATIN_FONT = "Times New Roman"
 # 差 4.3 毫米）。w:spacing 的单位是 1/20 磅，而且 Word 把它量化到 0.5 磅一档
 # （实测 25/26/27/28 都落在同一档），30 是最接近预览的那个（181.42 磅）。
 PREVIEW_TITLE_LETTER_SPACING = 30
+# .print-info（frontend/library.css:929）：居中；margin 12px 0 22px；14px；#333。
+# Chrome 实测（_probe93.py）：这一行是 **界面字体**（Microsoft YaHei UI），不是卷面
+# 字体 —— .print-info 不在 .qb-question 里，拿不到 --content-font。
+# Word 这边原来写的是「姓名：____________    班级：____________    得分：____________」：
+# 多了三个冒号、分隔符是四个半角空格、得分后是 12 个下划线（预览是 8 个），
+# 字号也用了正文 12 磅（16px，预览是 14px），颜色纯黑（预览是 #333）。
+# 更要命的是上下那 12px / 22px 的外边距没写：预览里姓名行下面才轮到第一题，
+# Word 里贴紧标题，整页从这一行往下**整体上移 7.3 毫米**（实测差 7.31）。
+PREVIEW_INFO_FONT_SIZE_PT = 10.5
+PREVIEW_INFO_COLOR = "333333"
+PREVIEW_INFO_EAST_ASIA = "Microsoft YaHei"
+PREVIEW_INFO_LATIN = "Microsoft YaHei UI"
+PREVIEW_INFO_SPACE_BEFORE_PT = 9.0  # 12px
+PREVIEW_INFO_SPACE_AFTER_PT = 16.5  # 22px
+PREVIEW_INFO_LINE_HEIGHT_PT = 15.75  # 21px 行盒（14px × 1.5）
+PREVIEW_STUDENT_INFO_TEXT = "姓名 ____________　班级 ____________　得分 ________"
 # 有效排版、但 Word 的公式模型表达不了的公式。不再让一条这样的公式废掉整卷：
 # 交上去让本机浏览器渲染成图片，警告里点名第几题哪个位置。
 _UNSUPPORTED = object()
@@ -1030,17 +1046,18 @@ def _recheck(captured, options, use_ai):
                 _fail(item["where"], "导出期间解析图片发生变化，请重新打开组卷", 409)
 
 
-def _font(run, size, bold=False, east_asia="宋体", latin=None, letter_spacing=None):
+def _font(run, size, bold=False, east_asia="宋体", latin=None, letter_spacing=None, color=None):
     """把这个 run 的字体规格写成预览里的那一套。
 
     预览的 --content-font 是 "Times New Roman", …, "SimSun", "宋体", serif：
     西文走 Times New Roman，中文走宋体。Word 这边原来西文写的是 Cambria ——
     数字和字母的宽度跟屏幕上对不上（导出来的卷子里同一个 "1." 比预览窄）。
     ``letter_spacing`` 是字符间距（1/20 磅），对应 CSS 的 letter-spacing。
+    ``color`` 是十六进制颜色（不带 #），对应 CSS 的 color。
     """
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
-    from docx.shared import Pt
+    from docx.shared import Pt, RGBColor
 
     if latin is None:
         latin = PREVIEW_LATIN_FONT
@@ -1049,6 +1066,10 @@ def _font(run, size, bold=False, east_asia="宋体", latin=None, letter_spacing=
     run.bold = bold
     rpr = run._element.get_or_add_rPr()
     rpr.get_or_add_rFonts().set(qn("w:eastAsia"), east_asia)
+    if color:
+        # 交给 python-docx 写 w:color —— 它知道 OOXML 里 w:color 的确切次序
+        # （排在 w:spacing 之前），自己插容易插错位置，Word 打开就报文件损坏。
+        run.font.color.rgb = RGBColor.from_string(color)
     if letter_spacing:
         node = OxmlElement("w:spacing")
         node.set(qn("w:val"), str(int(letter_spacing)))
@@ -3721,6 +3742,7 @@ def _document(captured, title, options, mode):
     _line_spacing(heading, PREVIEW_TITLE_LINE_HEIGHT_PT)
     if options["student_info"] and mode != "answers":
         from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.shared import Pt
 
         info = document.add_paragraph()
         # 预览里这一行是居中的（.print-info 的 text-align: center），PDF 也跟着
@@ -3728,7 +3750,19 @@ def _document(captured, title, options, mode):
         # 导出来却贴着左页边 —— 整张卷子上只有这一行对不上，一眼就能看出来。
         info.alignment = WD_ALIGN_PARAGRAPH.CENTER
         info.paragraph_format.keep_with_next = True
-        _font(info.add_run("姓名：____________    班级：____________    得分：____________"), size)
+        # 字、字号、颜色、字体、上下外边距、行高全部照抄 .print-info（Chrome 实测
+        # 见 _probe93.py）。少了上下那 12px / 22px，卷子从这一行往下整体上移
+        # 7.3 毫米 —— 预览和导出的题号根本不在一条横线上。
+        info.paragraph_format.space_before = Pt(PREVIEW_INFO_SPACE_BEFORE_PT)
+        info.paragraph_format.space_after = Pt(PREVIEW_INFO_SPACE_AFTER_PT)
+        _line_spacing(info, PREVIEW_INFO_LINE_HEIGHT_PT)
+        _font(
+            info.add_run(PREVIEW_STUDENT_INFO_TEXT),
+            PREVIEW_INFO_FONT_SIZE_PT,
+            east_asia=PREVIEW_INFO_EAST_ASIA,
+            latin=PREVIEW_INFO_LATIN,
+            color=PREVIEW_INFO_COLOR,
+        )
     numbered, number = [], 0
     # 预览量出来的表格位置：题目编号 → 位置 → 离版心左缘多少毫米。
     # 表格在预览里的横向位置不是定值（题干正文越长，表在那一列里越靠中间），
