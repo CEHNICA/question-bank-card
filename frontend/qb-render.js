@@ -826,13 +826,19 @@
     return node;
   }
 
+  // 宽表在卷子上没法横向拖动（卡片预览能拖，纸上不能），所以列多的表
+  // 额外挂一个类：打印流里让它的格子能换行、列宽收在版心里。
+  // 少了这一步，一张 13 列以上的表会把整份卷子撑到纸外 —— Chrome 只能
+  // 把整卷缩到 87% 印出来（实测），全卷的字都变小，表格本身还冲出纸面。
+  const DENSE_TABLE_COLUMNS = 13;
+
   function renderTable(doc, table, marks, { trackSource = false } = {}, baseOffset = 0) {
     const wrap = doc.createElement("span");
     wrap.className = "qb-table-wrap";
     if (trackSource) previewSource(wrap, baseOffset + table.start, baseOffset + table.end, "table");
     const element = doc.createElement("table");
-    element.className = "qb-table";
     const width = Math.max(...table.rows.map((row) => row.reduce((sum, cell) => sum + (cell.colspan || 1), 0)));
+    element.className = width >= DENSE_TABLE_COLUMNS ? "qb-table qb-table-dense" : "qb-table";
     table.rows.forEach((row, rowIndex) => {
       const tr = doc.createElement("tr");
       let used = 0;

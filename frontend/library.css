@@ -910,6 +910,18 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .print-flow .qb-analysis, .exam-page .qb-analysis { line-height: 1.35; }
 .print-flow .qb-figure img, .exam-page .qb-figure img { max-width: 100%; max-height: none; height: auto; }
 .print-flow .katex, .print-flow .katex-html, .print-flow .qb-math-display-group { white-space: normal; }
+/* 卷子上的表格：格子必须能换行。
+   卡片预览保持 nowrap（能横向拖着看），但纸上没有横向拖动：一张宽表把
+   版心撑破之后，Chrome 只能把整份卷子缩到 87% 印出来 —— 全卷的字都变小，
+   表格自己还冲出纸面（实测 13 列表右边缘跑到 209.86mm，纸宽只有 210mm）。
+   换行之后浏览器能把列压回版心（实测 20 列 220mm -> 166mm）。 */
+.print-flow .qb-table td, .print-flow .qb-table th,
+.exam-page-body .qb-table td, .exam-page-body .qb-table th { white-space: normal; word-break: normal; }
+/* 列多的表连最小列宽和内边距一起收，否则每列还占着 11mm，17 列就又撑破了。 */
+.print-flow .qb-table-dense td, .print-flow .qb-table-dense th,
+.exam-page-body .qb-table-dense td, .exam-page-body .qb-table-dense th {
+  min-width: 0; padding: .15em .45em; overflow-wrap: break-word;
+}
 .print-flow .katex, .exam-page .katex { font-size: var(--print-math-size, 1.02em); }
 .print-flow .qb-analysis .katex, .exam-page .qb-analysis .katex,
 .print-flow .print-answer-row .katex, .exam-page .print-answer-row .katex { font-size: var(--print-math-size, 1.21em); }
