@@ -203,6 +203,29 @@ PREVIEW_FOOTER_EAST_ASIA = "Microsoft YaHei"
 PREVIEW_FOOTER_LATIN = "Microsoft YaHei"
 PREVIEW_FOOTER_LINE_HEIGHT_PT = 10.5  # 14px 行盒（10px × 1.4）
 
+# 页首那一段外边距（第六十二轮标定）。
+#
+# 预览的版心是 .exam-page { padding: 18mm 16mm }，页里第一个元素是 .print-section
+# （margin: 12px 0 6px）。.exam-page-body 是 flex 容器，外边距不塌陷，
+# 所以**页首那 12px 是照算的**：18 + 3.175 = 21.175mm 才是标题行盒的上沿
+# （Chrome 实测：标题元素上沿离版心顶正好 3.175mm，见 _probe97.py）。
+#
+# Word 这边同一段写了 space_before = Pt(9)（就是那 12px），但 **Word 不吃页首的
+# 段前距**：硬分页（w:br type=page）、段前分页（w:pageBreakBefore）都不算，
+# 连兼容开关 w:suppressSpBfAfterPgBrk=0（顺序放对以后）也实测无效 —— 五种写法
+# 真 Word 渲染对照见 _probe97.py / _probe98.py：
+#     现状 19.317mm   段前分页 19.741mm   兼容开关 19.317/19.741mm
+#     预览 22.180mm（差 2.863mm）
+#
+# 补法：页首垫一个「固定行距 9 磅」的空行，把那 12px 补回来
+# （实测 22.492mm，与预览差 0.312mm —— 那是 SimHei 在 Chrome 与 Word 里
+#  ascent 度量不同带来的行内残差，跟页脚那 0.227mm 一个量级）。
+PREVIEW_PAGE_TOP_SPACE_PT = 9.0  # 12px
+PREVIEW_PAGE_TOP_LINE_TWIPS = 180  # 9 磅 = 180 twips（固定行距）
+
+# .print-section 的 margin-top 12px（= 9 磅）。大题标题、答案区标题的段前距都是它。
+PREVIEW_SECTION_SPACE_BEFORE_PT = 9.0
+
 # 有效排版、但 Word 的公式模型表达不了的公式。不再让一条这样的公式废掉整卷：
 # 交上去让本机浏览器渲染成图片，警告里点名第几题哪个位置。
 _UNSUPPORTED = object()
@@ -3691,6 +3714,32 @@ def _question_page_break(document, start):
         first.get_or_add_pPr().append(OxmlElement("w:pageBreakBefore"))
 
 
+def _page_top_space(document, points=PREVIEW_PAGE_TOP_SPACE_PT):
+    """在页首补回预览那一段外边距（.print-section 的 margin-top 12px）。
+
+    Word 不吃页首的段前距 —— 硬分页、段前分页都不算，兼容开关
+    ``w:suppressSpBfAfterPgBrk=0`` 也实测无效（见 PREVIEW_PAGE_TOP_SPACE_PT
+    上面的对照表）。唯一靠得住的办法是在页首垫一个**固定行距**的空行：
+    行盒高度就是那 9 磅（180 twips），跟字号无关（实测 1 磅字号和 12 磅字号
+    落点完全一样），纸上只多 3.175 毫米白，跟预览里那 12px 一模一样。
+
+    这个空行是**正文里的一个空段落**：正文里多一行空白，但纸上多出来的
+    就是预览里页首那 12px —— 位置对得上就说明排版对上了。
+    """
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
+
+    paragraph = document.add_paragraph()
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
+    # 字号压到 1 磅：万一固定行距被忽略，也不至于撑出一个 12 磅的行盒。
+    paragraph.add_run("").font.size = Pt(1)
+    spacing = paragraph._p.get_or_add_pPr().get_or_add_spacing()
+    spacing.set(qn("w:line"), str(PREVIEW_PAGE_TOP_LINE_TWIPS))
+    spacing.set(qn("w:lineRule"), "exact")
+    return paragraph
+
+
 def _footer_style(document):
     """把页脚样式改成预览的那一套。
 
@@ -3863,7 +3912,7 @@ def _document(captured, title, options, mode):
             )
             # .print-section { margin: 12px 0 6px; line-height: 1.5 } → 18 磅行盒。
             _line_spacing(section_title, PREVIEW_SECTION_LINE_HEIGHT_PT)
-            section_title.paragraph_format.space_before = Pt(9)
+            section_title.paragraph_format.space_before = Pt(PREVIEW_SECTION_SPACE_BEFORE_PT)
             section_title.paragraph_format.space_after = Pt(PREVIEW_ANSWER_ROW_MARGIN_PT)
         for item in group:
             number += 1
@@ -4018,6 +4067,12 @@ def _document(captured, title, options, mode):
     if mode != "questions" and not inline_answers:
         if mode == "combined":
             document.add_page_break()
+            # 答案区从新页页首开始：预览里页首那 12px 是**算进去**的
+            # （.exam-page-body 是 flex 容器，外边距不塌陷），Word 不吃页首的
+            # 段前距 —— 硬分页、段前分页、兼容开关都试过，一个都不管用。
+            # 所以这里垫一个固定行距 9 磅的空行把那 12px 补回来，
+            # 标题自己的段前距就得让位（否则补两次，实测会多出 3.175 毫米）。
+            _page_top_space(document)
         answer_heading = document.add_paragraph()
         answer_heading.paragraph_format.keep_with_next = True
         _font(
@@ -4028,7 +4083,10 @@ def _document(captured, title, options, mode):
         )
         # .print-section { margin: 12px 0 6px; line-height: 1.5 } → 18 磅行盒。
         _line_spacing(answer_heading, PREVIEW_SECTION_LINE_HEIGHT_PT)
-        answer_heading.paragraph_format.space_before = Pt(9)
+        # 段前距 12px：合卷模式下这一份已经由页首那个空行补上了（Word 页首不吃
+        # 段前距，写在这里只会跟空行叠加）；答案卷里标题跟在卷名后面、不在页首，
+        # 预览的 margin-top 照算，这边就照写。
+        answer_heading.paragraph_format.space_before = Pt(0 if mode == "combined" else PREVIEW_SECTION_SPACE_BEFORE_PT)
         answer_heading.paragraph_format.space_after = Pt(PREVIEW_ANSWER_ROW_MARGIN_PT)
         for index, (number, item) in enumerate(numbered):
             unit_start = len(document._element.body) - 1
