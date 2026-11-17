@@ -90,3 +90,18 @@ assert.ok(
   !/catch \(e\) \{\s*\}/.test(trashBody),
   "回收站读失败不许静默吞掉 —— 静默失败时面板装作是空的，用户以为没删过东西"
 );
+
+// ---- 7. 下架试题不能把「没带 ok 字段的成功」当成失败 ----
+const moveQStart = js.indexOf("async function moveQuestionsToTrash(");
+assert.ok(moveQStart > 0, "moveQuestionsToTrash 必须存在");
+const moveQBody = js.slice(moveQStart, js.indexOf("\n    function ", moveQStart + 10));
+assert.match(
+  moveQBody,
+  /data\.ok\s*===\s*false/,
+  "只把显式 ok:false 当失败；旧后端按 ids 成功时不带 ok，!data.ok 会误报「下架试题失败」"
+);
+assert.doesNotMatch(
+  moveQBody,
+  /!resp\.ok\s*\|\|\s*!data\.ok/,
+  "不许再用 !data.ok —— 那正是「移入回收站失败：下架试题失败」的根因"
+);

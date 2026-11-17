@@ -96,9 +96,15 @@ assert.match(js, /\/eagle\?q=\$\{encodeURIComponent\(q\.publication\.id\)\}/, "�
 // 1.25.44：全部入库以后不再摆「开始审核」，只留「全部处理完 · 下一份」。
 assert.match(js, /stage === 3 && !allSettled\) actions\.append\(button\("开始审核"/, "全部做完时不再摆「开始审核」");
 
-// 录入页与题库拆开：左侧只显示待录入；全部入库后自动归档收起。
-assert.match(js, /function paperNeedsEntry\(paper\)/, "录入列表有待录入判定");
-assert.match(js, /function retireCompletedPaper\(paperId/, "全部入库后收起已完成试卷");
-assert.match(js, /sweepCompletedEntryPapers\(/, "刷新列表时清掉已入库试卷");
-assert.match(js, /retireCurrentPaperIfComplete\(/, "正在看的已完成卷也会归档");
-assert.match(js, /没有待录入的试卷/, "空列表文案对准录入职责");
+// 录入页与题库拆开：左侧展示未归档卷；入库完成不自动归档，由人自行归档收起。
+assert.match(js, /function paperNeedsEntry\(paper\)/, "仍保留待录入判定（进度 / 下一份）");
+assert.match(
+  js,
+  /function entryPaperList\(papers = state\.papers\) \{\s*\/\/[^\n]*\s*return papers;/,
+  "未归档卷全部留在列表，不因入库完自动隐藏"
+);
+assert.doesNotMatch(js, /function retireCompletedPaper\(/, "不再有入库后自动归档");
+assert.doesNotMatch(js, /sweepCompletedEntryPapers\(/, "刷新列表不再清扫已入库试卷");
+assert.doesNotMatch(js, /retireCurrentPaperIfComplete\(/, "正在看的已完成卷也不再自动归档");
+assert.match(js, /没有未归档的试卷/, "空列表文案对准未归档职责");
+assert.match(js, /button\("归档任务"/, "做完后提供人手归档入口");

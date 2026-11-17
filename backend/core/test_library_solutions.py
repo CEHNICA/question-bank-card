@@ -309,7 +309,8 @@ class LibrarySolutionTests(TransactionTestCase):
         payload = self.payload(solutions=old["solutions"], layout=old["print_options"]["answer_layout"])
         data, *_ = library_export.export(payload)
         text = "".join(document_xml(data).xpath("//w:t/text()", namespaces=NS))
-        self.assertIn("原卷 B", text)
+        # 「原卷 B」里的空格紧挨着汉字，预览里已经没了，Word 照预览排。
+        self.assertIn("原卷B", text)
         self.assertNotIn("后补的 C", text)
         with mock.patch.object(library_pdf, "_render", return_value=(b"offline", 1)) as render:
             library_pdf.export({**payload, "format": "pdf"})

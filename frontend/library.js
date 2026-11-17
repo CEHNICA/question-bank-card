@@ -5303,6 +5303,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
     const document = ["questions", "answers", "combined"].includes(options.document)
       ? options.document
       : "answers" in options ? (options.answers ? "combined" : "questions") : "questions";
+    const figureAlign = ["left", "center", "right"].includes(options.figure_align) ? options.figure_align : "right";
     return {
       answers: document !== "questions", origin: options.origin === true, ai_answers: options.ai_answers === true,
       answer_layout: options.answer_layout === "appendix" ? "appendix" : "inline",
@@ -5316,6 +5317,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
       option_layout: ["auto", "four", "two", "vertical"].includes(options.option_layout) ? options.option_layout : "auto",
       option_overrides: Object.fromEntries(Object.entries(options.option_overrides || {}).filter(([, value]) => ["auto", "four", "two", "vertical"].includes(value))),
       question_breaks: Array.isArray(options.question_breaks) ? [...new Set(options.question_breaks.filter(id => typeof id === "string"))] : [],
+      figure_align: figureAlign,
       figure_overrides: normalizeFigureOverrides(options.figure_overrides)
     };
   }
@@ -5351,7 +5353,8 @@ $("selectedViewCount").textContent = String(state.basket.length);
         }
       });
       if (Object.keys(widths).length) entry.width = widths;
-      if (FIGURE_POSITIONS.includes(setting.align) && setting.align !== "center") entry.align = setting.align;
+      // 单题显式位置都留下（含居中）；缺省跟随全卷 figure_align（默认靠右）。
+      if (FIGURE_POSITIONS.includes(setting.align)) entry.align = setting.align;
       const breaks = [...new Set((Array.isArray(setting.breaks) ? setting.breaks : [])
         .map(Number).filter(index => Number.isInteger(index) && index > 0))].sort((a, b) => a - b);
       if (breaks.length) entry.breaks = breaks;
@@ -5423,6 +5426,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
       font_size: $("printFontSize").value, answer_space: normalizePrintSpace($("printAnswerSpace").value) ?? "auto",
       student_info: $("printStudentInfo").checked,
       pagination: $("printPagination").value, option_layout: $("printOptionLayout").value,
+      figure_align: "right",
       option_overrides: Object.fromEntries(Object.entries(printState.optionOverrides || {}).filter(([id]) => !state.basket || state.basket.includes(id))),
       answer_space_overrides: Object.fromEntries(Object.entries(printState.answerSpaceOverrides || {}).filter(([id]) => !state.basket || state.basket.includes(id))),
       figure_overrides: Object.fromEntries(Object.entries(printState.figureOverrides || {}).filter(([id]) => !state.basket || state.basket.includes(id))),
@@ -7899,10 +7903,8 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
       }
     });
   }
-  // 标签地图深链：Eagle 页左下角那个「📒 展开标签地图」在新标签页打开
-  // /library?tag_map=1（带标签时是 ?tag_map=<标签 id>）。
-  // 这个参数以前根本没人消费 —— 点过去只是普通题库页，
-  // 入口看着能用，落到地上是空的。现在直接开标签管理面板的地图视图。
+  // 标签地图深链：经典库认 ?tag_map=1 / ?tag_map=<标签 id>，直接开标签管理的地图视图。
+  // Eagle 侧栏已不再放「展开标签地图」按钮；本参数仍给书签 / 旧链接用。
   const tagMapParam = params.get("tag_map");
   if (tagMapParam) {
     void openTagManager({ view: "map", tagId: tagMapParam === "1" ? undefined : tagMapParam });

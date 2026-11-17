@@ -46,6 +46,8 @@ PRINT_DEFAULTS = {
     "question_breaks": [],
     "answer_layout": "inline",
     "answer_space_overrides": {},
+    # 全卷配图整行默认位置；单题 figure_overrides.align 可覆盖。靠右更贴卷面习惯。
+    "figure_align": "right",
     "figure_overrides": {},
 }
 # 留白（answer_space）有两种形态：
@@ -157,9 +159,8 @@ def _figure_overrides(value):
     the unit the number box in the preview asks for and the unit Word writes, so
     "60" in the preview and "60" on the page are the same width.
 
-    ``align: "center"`` is the default, so an untouched row records nothing: a
-    question left at every default drops out of the map entirely instead of being
-    rewritten on every autosave.
+    整行位置缺省跟随全卷 ``figure_align``（默认靠右）。单题显式选了靠左 / 居中 /
+    靠右才写入 ``align``；没动过位置的题不记这一项。
     """
     if not isinstance(value, dict) or len(value) > 500:
         raise DraftError("配图调整最多 500 题")
@@ -167,8 +168,8 @@ def _figure_overrides(value):
     for question, setting in value.items():
         if not isinstance(setting, dict) or set(setting) - {"width", "align", "breaks"}:
             raise DraftError("配图调整只能包含图的大小、整行位置和从哪张图换行")
-        align = setting.get("align", "center")
-        if align not in FIGURE_ALIGNMENTS:
+        align = setting.get("align")
+        if align is not None and align not in FIGURE_ALIGNMENTS:
             raise DraftError("配图整行位置只能选靠左、居中或靠右")
         widths = setting.get("width", {})
         if not isinstance(widths, dict) or len(widths) > FIGURE_MAX_PER_QUESTION:
@@ -190,7 +191,7 @@ def _figure_overrides(value):
         entry = {}
         if clean_widths:
             entry["width"] = dict(sorted(clean_widths.items()))
-        if align != "center":
+        if align in FIGURE_ALIGNMENTS:
             entry["align"] = align
         if clean_breaks:
             entry["breaks"] = clean_breaks
@@ -216,7 +217,11 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
         raise DraftError("选项排版只能选 auto、four、two、vertical")
     if "answer_layout" in value and value["answer_layout"] not in ("inline", "appendix"):
         raise DraftError("答案位置只能选 inline 或 appendix")
+    if "figure_align" in value and value["figure_align"] not in FIGURE_ALIGNMENTS:
+        raise DraftError("配图整行位置只能选靠左、居中或靠右")
     result = {**deepcopy(PRINT_DEFAULTS), **deepcopy(defaults or {}), **deepcopy(value)}
+    if result.get("figure_align") not in FIGURE_ALIGNMENTS:
+        result["figure_align"] = "right"
     if "document" not in value and "answers" in value:
         result["document"] = "combined" if value["answers"] else "questions"
     result["answers"] = result["document"] != "questions"

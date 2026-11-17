@@ -5,6 +5,8 @@ from __future__ import annotations
 import io
 import json
 import os
+import threading
+import time
 import xml.etree.ElementTree as ET
 from unittest.mock import patch
 
@@ -26,6 +28,7 @@ class OneNoteLinkTests(TestCase):
     """测试 OneNote 创建、打开、手动绑定与解绑逻辑。"""
 
     def setUp(self):
+        library_onenote.clear_section_cache()
         self.item = PublishedQuestion.objects.create(
             source_filename="2026年高三模拟考.pdf",
             number=15,
@@ -42,14 +45,14 @@ class OneNoteLinkTests(TestCase):
             extras={},
         )
 
-    @patch("core.tiyouju_protocol.ensure_registered", return_value=True)
-    @patch("core.library_onenote.render_question_image", side_effect=lambda _pub: _sample_png_bytes())
+    @patch("core.library_onenote._backfill_page_image")
+    @patch("core.library_onenote.shell_open_onenote", return_value=True)
+    @patch("core.library_onenote.cached_question_image", return_value=None)
     @patch("core.library_onenote.call_bridge")
-    def test_create_or_sync_page_success(self, mock_call, _mock_render, _mock_reg):
-        """测试自动创建 OneNote 答题页并成功写入 extras。"""
+    def test_create_or_sync_page_success(self, mock_call, _mock_cache, mock_shell, mock_backfill):
+        """建页热路径不渲染题面图：先文字页打开，图丢后台补。"""
         captured_params = {}
 
-        # 模拟桥接返回值
         def fake_call(op, **params):
             if op == "list":
                 return {"notebooks": [{"id": "{nb-1}", "name": "math", "sections": 1, "pages": 10}]}
@@ -59,17 +62,21 @@ class OneNoteLinkTests(TestCase):
                 captured_params.update(params)
                 return {"id": "{page-999}", "link": "onenote:https://d.docs.live.net/fake/math/page-999"}
             if op == "navigate":
-                return {"id": params.get("id"), "navigated": True}
+                return {"id": params.get("id"), "navigated": True, "focused": True}
             return {}
 
         mock_call.side_effect = fake_call
 
         record = library_onenote.create_or_sync_page(self.item)
+        mock_shell.assert_called_once()
         self.assertEqual(record["page_id"], "{page-999}")
+        self.assertRegex(record["title"], r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
         self.assertIn("onenote:", record["url"])
-        self.assertIn("<one:Image", captured_params.get("pageXml", ""))
+        self.assertNotIn("<one:Image", captured_params.get("pageXml", ""))
         self.assertIn(f"tiyouju://question/{self.item.pk}", captured_params.get("pageXml", ""))
         self.assertNotIn("pageId", captured_params)
+        time.sleep(0.05)
+        mock_backfill.assert_called()
 
         # 检查数据库是否正确持久化
         refreshed = PublishedQuestion.objects.get(pk=self.item.pk)
@@ -81,30 +88,25 @@ class OneNoteLinkTests(TestCase):
         self.assertIsNotNone(json_data["onenote"])
         self.assertEqual(json_data["onenote"]["page_id"], "{page-999}")
 
-    @patch("core.tiyouju_protocol.ensure_registered", return_value=True)
-    @patch("core.library_onenote.render_question_image", side_effect=lambda _pub: _sample_png_bytes())
+    @patch("core.library_onenote.open_page")
+    @patch("core.library_onenote.shell_open_onenote", return_value=True)
     @patch("core.library_onenote.call_bridge")
-    def test_resync_passes_existing_page_id(self, mock_call, _mock_render, _mock_reg):
-        """重新同步已关联题目时，应将原 page_id 传入 create_xml 原地更新，避免重复建页。"""
-        self.item.extras = {"onenote": {"page_id": "{page-old}", "url": "onenote:old"}}
+    def test_existing_link_opens_without_recreate(self, mock_call, mock_shell, mock_open):
+        """已有 OneNote 关联时再点创建接口：只打开，绝不 create_xml 覆盖原页。"""
+        self.item.extras = {
+            "onenote": {
+                "page_id": "{page-old}",
+                "url": "onenote:https://d.docs.live.net/fake/old",
+                "title": "2026-11-15 12:00:00",
+            }
+        }
         self.item.save(update_fields=["extras"])
-        captured_params = {}
-
-        def fake_call(op, **params):
-            if op == "list":
-                return {"notebooks": [{"id": "{nb-1}", "name": "math"}]}
-            if op == "hierarchy":
-                return {"xml": '<one:Section name="做题解答" ID="{sec-1}"/>'}
-            if op == "create_xml":
-                captured_params.update(params)
-                return {"id": "{page-old}", "link": "onenote:updated"}
-            return {}
-
-        mock_call.side_effect = fake_call
 
         record = library_onenote.create_or_sync_page(self.item)
-        self.assertEqual(captured_params.get("pageId"), "{page-old}")
         self.assertEqual(record["page_id"], "{page-old}")
+        mock_shell.assert_called_once_with("onenote:https://d.docs.live.net/fake/old")
+        mock_open.assert_called_once()
+        mock_call.assert_not_called()
 
     def test_latex_to_plain_and_build_page_xml(self):
         """验证纯文本兜底去 LaTeX 符号转换与 XML 拼装结果。"""
@@ -115,10 +117,11 @@ class OneNoteLinkTests(TestCase):
         self.assertIn("(1)/(2)", plain)
 
         title = library_onenote._page_title(self.item)
-        self.assertEqual(title, "第 15 题 · 2026年高三模拟考")
+        self.assertRegex(title, r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
         self.assertNotIn("[题有据]", title)
 
-        xml_with_img = library_onenote.build_page_xml(self.item, title, _sample_png_bytes(1600, 400))
+        page_title = "2026-11-15 15:54:32"
+        xml_with_img = library_onenote.build_page_xml(self.item, page_title, _sample_png_bytes(1600, 400))
         self.assertIn('<one:Image format="png">', xml_with_img)
         self.assertIn("<one:Data>", xml_with_img)
         self.assertIn(f"tiyouju://question/{self.item.pk}", xml_with_img)
@@ -126,14 +129,13 @@ class OneNoteLinkTests(TestCase):
         self.assertNotIn("shadingColor", xml_with_img)
         self.assertNotIn("<one:Table", xml_with_img)
         self.assertNotIn("我的解答", xml_with_img)
-        self.assertIn("第 15 题 · 2026年高三模拟考", xml_with_img)
-        self.assertEqual(xml_with_img.count("2026年高三模拟考"), 1)
+        self.assertIn(page_title, xml_with_img)
         self.assertIn("在题有据中打开此题", xml_with_img)
         ET.fromstring(xml_with_img)
 
         self.item.source_filename = "微信图片_2025-10-10_000922_951 等 4 张照片"
-        self.assertEqual(library_onenote._page_title(self.item), "第 15 题")
-        photo_xml = library_onenote.build_page_xml(self.item, "第 15 题", None)
+        self.assertRegex(library_onenote._page_title(self.item), r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+        photo_xml = library_onenote.build_page_xml(self.item, "2026-11-15 15:54:32", None)
         self.assertNotIn("微信图片", photo_xml)
         self.item.source_filename = "2026年高三模拟考.pdf"
 
@@ -176,8 +178,9 @@ class OneNoteLinkTests(TestCase):
         self.assertEqual(pending["q"], qid)
         self.assertIsNone(tiyouju_protocol.consume_deep_link())
 
+    @patch("core.library_onenote.shell_open_onenote", return_value=False)
     @patch("core.library_onenote.call_bridge")
-    def test_open_page_calls_navigate(self, mock_call):
+    def test_open_page_calls_navigate(self, mock_call, _mock_shell):
         """测试打开已关联 OneNote 页面时触发 navigate。"""
         self.item.extras = {
             "onenote": {
@@ -188,11 +191,49 @@ class OneNoteLinkTests(TestCase):
         }
         self.item.save(update_fields=["extras"])
 
-        mock_call.return_value = {"id": "{page-1}", "navigated": True}
+        mock_call.return_value = {"id": "{page-1}", "navigated": True, "focused": True}
 
-        result = library_onenote.open_page(self.item)
+        result = library_onenote.open_page(self.item, wait=True)
         self.assertTrue(result["ok"])
-        mock_call.assert_called_with("navigate", id="{page-1}")
+        mock_call.assert_called_with("navigate", id="{page-1}", timeout_seconds=12)
+        _mock_shell.assert_not_called()
+
+    @patch("core.library_onenote.shell_open_onenote", return_value=True)
+    @patch("core.library_onenote.call_bridge")
+    def test_open_page_shell_opens_when_not_focused(self, mock_call, mock_shell):
+        """COM 切了页但没抢到前台时，再用协议链接补一次。"""
+        self.item.extras = {
+            "onenote": {
+                "url": "onenote:https://d.docs.live.net/fake/page-2",
+                "page_id": "{page-2}",
+                "title": "已关联笔记",
+            }
+        }
+        self.item.save(update_fields=["extras"])
+        mock_call.return_value = {"id": "{page-2}", "navigated": True, "focused": False}
+
+        library_onenote._refine_open("{page-2}", "onenote:https://d.docs.live.net/fake/page-2")
+        mock_shell.assert_called_once_with("onenote:https://d.docs.live.net/fake/page-2")
+
+    def test_open_page_returns_immediately_by_default(self):
+        """默认打开接口立刻返回，不堵在 COM 上。"""
+        self.item.extras = {
+            "onenote": {
+                "url": "onenote:https://d.docs.live.net/fake/page-3",
+                "page_id": "{page-3}",
+            }
+        }
+        self.item.save(update_fields=["extras"])
+        called = threading.Event()
+
+        def mark(*_args, **_kwargs):
+            called.set()
+
+        with patch("core.library_onenote._refine_open", side_effect=mark):
+            result = library_onenote.open_page(self.item)
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["deferred"])
+        self.assertTrue(called.wait(1.0))
 
     def test_open_page_unlinked_raises_error(self):
         """未关联题目调用 open_page 应抛出 OneNoteError。"""

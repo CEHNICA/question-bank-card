@@ -1058,7 +1058,9 @@ class LibraryExportTests(ExportFixture, TestCase):
             )
         )
         text = "".join(document_xml(response.content).itertext())
-        for part in ("题干开头", "(1) 保留答题线________", "(2) 保留第二小问"):
+        # 「(1) 保留…」里的空格在预览里就没有了（预览删掉紧挨汉字的空格），
+        # Word 照预览排，纸上印的也是「(1)保留…」。
+        for part in ("题干开头", "(1)保留答题线________", "(2)保留第二小问"):
             self.assertIn(part, text)
 
     def test_compact_binds_only_short_caption_to_picture(self):
@@ -1109,7 +1111,9 @@ class LibraryExportTests(ExportFixture, TestCase):
         prose = next(
             paragraph
             for paragraph in xml.find("w:body", NS).findall("w:p", NS)
-            if "第 1 段合成材料" in "".join(paragraph.itertext())
+            # 预览里「第 1 段」的空格已经没了（紧挨汉字的空格预览要删），
+            # Word 照预览排，所以这儿找的也是删过空格的写法。
+            if "第1段合成材料" in "".join(paragraph.itertext())
         )
         self.assertEqual(prose.find("w:pPr/w:keepNext", NS).get(f"{{{NS['w']}}}val"), "0")
         self.assertEqual(prose.find("w:pPr/w:keepLines", NS).get(f"{{{NS['w']}}}val"), "0")
@@ -1492,7 +1496,8 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertEqual(result.status_code, 200)
         xml = document_xml(result.content)
         self.assertTrue(xml.findall(".//w:vMerge", NS))
-        self.assertIn("& 丙", "".join(xml.itertext()))
+        # 「& 丙」里那个空格紧挨着汉字，预览里已经没了，Word 跟预览一致。
+        self.assertIn("&丙", "".join(xml.itertext()))
 
     def test_table_span_out_of_bounds_and_embedded_image_are_rejected(self):
         for raw in (

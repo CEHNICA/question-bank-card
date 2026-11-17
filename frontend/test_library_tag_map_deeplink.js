@@ -1,16 +1,6 @@
 "use strict";
-// 标签地图深链：Eagle 页那个「📒 展开标签地图」按钮以前是条死链。
-//
-// 实测（Playwright，390px 与 1440px 两档）：
-//   打开 /library?tag_map=1 —— 页面 DOM 与完全不带参数的 /library 一模一样，
-//   .tag-map-workspace 根本没渲染（false）。按钮 title 写着「在经典题库页
-//   打开标签地图」，实际落到地上是普通题库页。
-//   原因：?tag_map= 这个参数全仓没有任何代码消费过。
-//
-// 要求：
-//   1. 经典库页要认 ?tag_map=，直接开标签管理面板的地图视图；
-//   2. ?tag_map=1 表示「不指定标签」，?tag_map=<标签 id> 表示聚焦到那个标签；
-//   3. Eagle 页那边仍然要带这个参数（那边已经带上了，别改坏）。
+// 标签地图深链：经典库页仍认 ?tag_map=，直接开标签管理面板的地图视图。
+// Eagle 侧栏已不再放「展开标签地图」入口；旧 openTagMapFromTree 改为打开 ≡ 菜单同款标签管理。
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -38,18 +28,21 @@ test("标签地图深链要真的能落到标签地图上", async (t) => {
     );
   });
 
-  await t.test("3. Eagle 页那个按钮仍然带这个参数", () => {
-    assert.ok(
-      /function openTagMapFromTree\(tagId\)/.test(eagleHtml),
-      "Eagle 页要有 openTagMapFromTree"
+  await t.test("3. Eagle 不再用侧栏按钮跳经典库地图，旧入口改走标签管理", () => {
+    assert.doesNotMatch(
+      eagleHtml,
+      /展开标签地图/,
+      "Eagle 侧栏不得再显示「展开标签地图」"
     );
-    assert.ok(
-      /'\?tag_map=' \+ encodeURIComponent/.test(eagleHtml),
-      "Eagle 页要拼出 ?tag_map= 参数"
+    assert.match(
+      eagleHtml,
+      /function openTagMapFromTree\(tagId\)\s*\{[\s\S]*?openTagManagerModal\(\);/,
+      "旧 openTagMapFromTree 应改开标签管理中心"
     );
-    assert.ok(
-      /window\.open\(base \+ '\/library' \+ qs, '_blank', 'noopener'\)/.test(eagleHtml),
-      "Eagle 页要在新标签页打开经典库页"
+    assert.doesNotMatch(
+      eagleHtml,
+      /function openTagMapFromTree\(tagId\)\s*\{[\s\S]*?window\.open\(base \+ '\/library'/,
+      "Eagle 不得再新开 /library?tag_map= 跳经典库地图"
     );
   });
 });

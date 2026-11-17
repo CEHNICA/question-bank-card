@@ -376,7 +376,7 @@ class LibraryBrowseDraftTests(TestCase):
         kept = self.mutate("put", url, {"revision": 1, "ids": [str(second.id)]}).json()["draft"]
         self.assertEqual(kept["print_options"]["figure_overrides"], {}, "题被移出卷子，它的配图设置也不留")
 
-        # 没改动的题不该占位置：默认的居中不算调整。
+        # 全卷默认靠右后，单题显式选居中是真正的覆盖，必须留下。
         self.mutate(
             "put",
             url,
@@ -387,7 +387,12 @@ class LibraryBrowseDraftTests(TestCase):
             },
         )
         quiet = self.client.get(url).json()["draft"]
-        self.assertEqual(quiet["print_options"]["figure_overrides"], {}, "选了跟默认一样的居中，就当没动过")
+        self.assertEqual(
+            quiet["print_options"]["figure_overrides"],
+            {str(first.id): {"align": "center"}},
+            "单题显式居中要留下，不能当成没动过",
+        )
+        self.assertEqual(quiet["print_options"].get("figure_align"), "right", "全卷配图默认靠右")
 
     def test_bad_figure_adjustments_are_refused_with_readable_words(self):
         selected, other = self.publication(), self.publication()

@@ -946,6 +946,12 @@ const QBCutReading = (() => {
       && !suggestion.error && String(suggestion.stem || "").trim());
   }
 
+  function hasCurrentReadingFailure(q) {
+    const suggestion = q.ocr_suggestion;
+    return Boolean(q && q.body_mode === "source_image" && suggestion
+      && suggestion.revision === q.content_revision && String(suggestion.error || "").trim());
+  }
+
   // 1.26.47：这道题还能不能让 AI 识读 —— 后端给的判定，页面照着做。
   // 撤回过的入库记录、已经有字的题，前端自己看不出来，只能听后端的。
   function cutReadingGuard(q) {
@@ -955,14 +961,24 @@ const QBCutReading = (() => {
 
   function cutReadingSummary(questions = []) {
     const saved = questions.filter((q) => q.body_mode === "source_image" && q.regions?.length);
-    const pending = questions.filter((q) => q.ocr_pending
+    const pendingList = questions.filter((q) => q.ocr_pending
       && (q.body_mode === "source_image" || (q.body_mode === "text" && q.processing_mode === "manual")));
     const eligible = saved.filter((q) => !q.ocr_pending && !q.approved && !q.publication
       && !hasCurrentReading(q) && !cutReadingGuard(q).blocked);
-    return { saved: saved.length, pending: pending.length,
+    const failedCards = saved.filter((q) => !q.ocr_pending && hasCurrentReadingFailure(q));
+    const failedRetry = failedCards.filter((q) => !q.approved && !q.publication && !cutReadingGuard(q).blocked);
+    const done = saved.filter((q) => Boolean(q.approved) || Boolean(q.publication) || hasCurrentReading(q)).length;
+    return {
+      saved: saved.length,
+      pending: pendingList.length,
+      done,
+      failed: failedCards.length,
+      failedIds: failedRetry.map((q) => q.id),
+      remaining: eligible.length,
       eligibleIds: eligible.map((q) => q.id),
       revisions: Object.fromEntries(eligible.map((q) => [String(q.id), q.content_revision])),
-      stage: pending.length || eligible.length ? 2 : questions.length ? 3 : 1 };
+      stage: pendingList.length || eligible.length ? 2 : questions.length ? 3 : 1,
+    };
   }
 
   function cutReadingRequest(questions, questionIds = null, revision = null) {
@@ -976,7 +992,7 @@ const QBCutReading = (() => {
     return Boolean(paper && !paper.demo && ["ready", "failed", "reading"].includes(paper.status)
       && (summary.saved || summary.pending || ["manual", "native"].includes(paper.parse_mode)));
   }
-  return { hasCurrentReading, cutReadingGuard, cutReadingSummary, cutReadingRequest, showCutReadingStage };
+  return { hasCurrentReading, hasCurrentReadingFailure, cutReadingGuard, cutReadingSummary, cutReadingRequest, showCutReadingStage };
 })();
 
 if (typeof module !== "undefined" && module.exports) {
@@ -1023,7 +1039,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     rendered: new Map(), editing: new Set(), expanded: new Set(), pollTimer: null, listTimer: null,
     // autoExpanded：J/K 跳过去时自动展开的已通过题，离开时收回；手动展开的不在里面。
     autoExpanded: new Set(), autoExpand: readPref("qb-auto-expand", "1") === "1",
-    current: null, lens: readPref("qb-lens", "1") === "1", focus: readPref("qb-focus", "1") === "1", followHold: false,
+    current: null, lens: readPref("qb-lens", "1") === "1", focus: false, followHold: false,
     deleteBusy: false, trashBusy: false, approveAllBusy: false,
     cropDraftAttention: new Map(),
     // 入库进行中：{ paperId, done, total }，按钮上显示进度。
@@ -1393,6 +1409,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (s.app_version) $("aboutVersion").textContent = `题有据 ${s.app_version}`;
     renderSettingsModels();
     renderServiceReadiness();
+    // 密钥刚配好时，识读卷头要立刻按 live readiness 重画，别继续灰着「没 Key」。
+    if (state.paper) renderCutReadingStage();
     return true;
   }
 
@@ -1462,9 +1480,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return bar;
   }
 
-  // 录入页只管还没做完的卷：待核查、处理中、失败、还没切出题的都留着。
-  // 全部通过并入库之后归题库管，不再占左侧列表。
-  // 回收站题卡不单独卡住录入列表——做完就能收起，回收站跟着卷一起走。
+  // 这份卷是否还有录入活（待核查 / 处理中 / 还没切题）。
+  // 只用来标进度和找「下一份」；列表本身展示全部未归档卷，入库完也不自动收起——
+  // 归档交给人自己点。
   function paperNeedsEntry(paper) {
     if (!paper || paper.archived) return false;
     if (paper.demo) return true;
@@ -1480,7 +1498,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   function entryPaperList(papers = state.papers) {
-    return papers.filter((paper) => paperNeedsEntry(paper) || paper.id === state.paperId);
+    // /api/papers 默认已排除 archived；入库完成的卷也留在列表里，等人归档。
+    return papers;
   }
 
   function renderPaperList() {
@@ -1493,7 +1512,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("paperCount").textContent = visible.length ? String(visible.length) : "";
     if (!visible.length) {
       if (chapterNav) chapterNav.hidden = true;
-      list.append(el("li", "side-empty", "没有待录入的试卷"));
+      list.append(el("li", "side-empty", "没有未归档的试卷"));
       return;
     }
     let mountedNav = false;
@@ -1562,91 +1581,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (menu?.open) menu.open = false;
   }
 
-  const retiringPaperIds = new Set();
-
-  // 详情页已经判定「全部处理完」时，把列表口径也改成 done，避免还按旧 todo 卡住。
-  function markPaperEntryComplete(paper, c = counts()) {
-    if (!paper) return;
-    paper.counts = {
-      ...(paper.counts || {}),
-      total: c.all,
-      todo: 0,
-      waiting: 0,
-      done: c.all,
-      approved: Math.max(Number(paper.counts?.approved) || 0, c.approved || 0),
-      settled: Math.max(Number(paper.counts?.settled) || 0, c.approved || 0)
-    };
-  }
-
-  // 录入做完的卷自动归档：题库里已有题，录入页不再管。
-  async function retireCompletedPaper(paperId, { announce = false } = {}) {
-    if (!paperId || retiringPaperIds.has(paperId)) return false;
-    const paper = state.papers.find((item) => item.id === paperId)
-      || (state.paper?.id === paperId ? state.paper : null);
-    if (!paper || paper.demo) return false;
-    if (paperNeedsEntry(paper)) return false;
-    if (ACTIVE_STATUS.has(paper.status)) return false;
-    retiringPaperIds.add(paperId);
-    const displayName = paperDisplayName(paper);
-    const oldIndex = state.papers.findIndex((item) => item.id === paperId);
-    const wasCurrent = state.paperId === paperId;
-    try {
-      await api(`/api/papers/${paperId}/archive`, { method: "POST", body: {} });
-      state.papers = state.papers.filter((item) => item.id !== paperId);
-      finishedUnseen.delete(paperId);
-      if (wasCurrent) {
-        const next = state.papers.find((item) => paperNeedsEntry(item))
-          || state.papers[Math.min(Math.max(oldIndex, 0), Math.max(0, state.papers.length - 1))]
-          || null;
-        await clearPaperSelection();
-        if (next) await selectPaper(next.id);
-        else renderPaperList();
-        if (announce) {
-          toast(`「${displayName}」已全部入库，已从录入列表收起；题库里的题还在，可从「已归档的试卷」找回原卷`,
-            "success", { label: "撤销归档", onClick: () => restoreArchivedPaper(paperId) });
-        }
-      } else {
-        renderPaperList();
-      }
-      return true;
-    } catch (error) {
-      if (announce) toast(error.message, "error");
-      return false;
-    } finally {
-      retiringPaperIds.delete(paperId);
-    }
-  }
-
-  function sweepCompletedEntryPapers({ includeCurrent = false } = {}) {
-    const ids = state.papers
-      .filter((paper) => (includeCurrent || paper.id !== state.paperId)
-        && !paperNeedsEntry(paper)
-        && !paper.demo
-        && !ACTIVE_STATUS.has(paper.status))
-      .map((paper) => paper.id);
-    ids.forEach((id) => {
-      void retireCompletedPaper(id, { announce: includeCurrent && id === state.paperId });
-    });
-  }
-
-  const retireAttemptedIds = new Set();
-
-  function retireCurrentPaperIfComplete() {
-    const paper = state.paper;
-    if (!paper || paper.archived || paper.demo) return false;
-    const c = counts();
-    if (!paperComplete(c)) return false;
-    if (retireAttemptedIds.has(paper.id) || retiringPaperIds.has(paper.id)) return false;
-    markPaperEntryComplete(paper, c);
-    const listed = state.papers.find((item) => item.id === paper.id);
-    if (listed) markPaperEntryComplete(listed, c);
-    retireAttemptedIds.add(paper.id);
-    void retireCompletedPaper(paper.id, { announce: true }).then((ok) => {
-      if (!ok) retireAttemptedIds.delete(paper.id);
-    });
-    return true;
-  }
-
   function noteFinishedPapers(previous, papers) {
     QBNotify.justFinished(previous, papers, state.paperId).forEach((paper) => {
       finishedUnseen.add(paper.id);
@@ -1668,7 +1602,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }
       noteFinishedPapers(previous, state.papers);
       renderPaperList();
-      sweepCompletedEntryPapers();
     } catch (error) {
       toast(error.message, "error");
     }
@@ -1919,22 +1852,21 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function renderDoneBanner(c) {
     const banner = $("doneBanner");
     const done = paperComplete(c);
-    // 做完就收起；归档进行中时这条横幅只短暂提示。
-    banner.hidden = !done || retiringPaperIds.has(state.paperId);
+    // 全部入库后只提示；是否归档由人自己点，不再自动收起。
+    banner.hidden = !done;
     if (banner.hidden || !done) return;
     const trash = Math.max(0, Number(state.paper?.trash_count) || 0);
     const text = el("span");
     text.append(icon("check"), document.createTextNode(
       trash
-        ? `全部 ${c.all} 题已处理完（回收站另有 ${trash} 张题卡，会跟着卷一起收起）。`
-        : `全部 ${c.all} 题已处理完，正在从录入列表收起…`
+        ? `全部 ${c.all} 题已处理完（回收站另有 ${trash} 张题卡；归档时会跟着卷一起收起）。`
+        : `全部 ${c.all} 题已处理完。需要时再归档，从录入列表收起。`
     ));
     banner.replaceChildren(text);
     const actions = el("span", "done-actions");
-    actions.append(button("立刻收起", "primary", () => {
-      markPaperEntryComplete(state.paper, c);
-      void retireCompletedPaper(state.paperId, { announce: true });
-    }, "归档并离开录入列表"));
+    actions.append(button("归档任务", "primary", () => {
+      void archivePaper();
+    }, "归档后从录入列表收起；题库里的题还在"));
     {
       const link = el("a", "done-library-link", "去题库");
       link.href = "/eagle";
@@ -1967,10 +1899,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("paperName").textContent = paperDisplayName(paper);
     $("renameNudge").hidden = !looksLikeFileName(paperDisplayName(paper));
     const c = counts();
-    // 正在看的这份若已全部处理完，当场归档——以前会因为“当前卷跳过清扫”一直挂着。
-    if (paperComplete(c) && !paper.archived && !paper.demo) {
-      retireCurrentPaperIfComplete();
-    }
     const statusText = $("paperStatus");
     const isProcessing = ACTIVE_STATUS.has(paper.status);
     const processing = isProcessing ? QBProgress.processingPresentation(paper) : null;
@@ -2171,17 +2099,62 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         chapter.approved >= chapter.total ? `✓ ${chapter.total}` : `${chapter.approved}/${chapter.total}`);
       btn.append(titleSpan, badge);
       btn.addEventListener("click", () => {
-        const targetId = chapter.firstTodoId !== null ? chapter.firstTodoId : chapter.firstId;
-        const targetQ = (state.questions || []).find((q) => q.id === targetId);
-        // 若当前筛选条件隐藏了目标题，先切换到「全部」确保点击目录必达
-        if (targetQ && typeof visible === "function" && !visible(targetQ) && state.filter !== "all") {
+        // 优先定位本章节在当前筛选下第一张可见的题；若本章节全部被筛选隐藏，则切回「全部」定位章节首题
+        const firstVisible = (state.questions || []).find(
+          (q) => !q.trashed && chapter.questionIds.has(q.id) && (typeof visible !== "function" || visible(q))
+        );
+        const targetId = firstVisible ? firstVisible.id : chapter.firstId;
+        if (!firstVisible && state.filter !== "all") {
           setFilter("all");
         }
-        requestAnimationFrame(() => setCurrent(targetId, { scroll: true, focus: true }));
+        jumpToChapterQuestion(targetId);
       });
       item.append(btn);
       return item;
     }));
+  }
+
+  let pendingChapterJumpId = null;
+
+  /**
+   * 稳定滚动并暴露目标题卡至吸顶工具栏正下方（兼容长卷分批渲染与 content-visibility: auto 高度估算偏差）
+   * @param {number} targetId 目标题目 ID
+   */
+  function jumpToChapterQuestion(targetId) {
+    if (targetId === null || targetId === undefined) return;
+    pendingChapterJumpId = targetId;
+    setCurrent(targetId, { scroll: false, focus: false, hold: true });
+    let settleLeft = 4;
+    let waitFrames = 90;
+    const alignStep = () => {
+      if (pendingChapterJumpId !== targetId) return;
+      const card = document.querySelector(`.card[data-id="${targetId}"]`);
+      if (!card) {
+        if (waitFrames > 0) {
+          waitFrames -= 1;
+          requestAnimationFrame(alignStep);
+        }
+        return;
+      }
+      card.classList.add("is-current");
+      // 首次用 instant 贴近目标位置，随后多帧按 viewTop() 精确微调，避免 content-visibility 重排漂移
+      const desiredTop = (typeof viewTop === "function" ? viewTop() : 96) + 12;
+      if (settleLeft === 4) {
+        card.scrollIntoView({ block: "start", behavior: "instant" });
+      }
+      const delta = card.getBoundingClientRect().top - desiredTop;
+      if (Math.abs(delta) > 2) {
+        window.scrollBy({ top: delta, behavior: "instant" });
+      }
+      if (settleLeft > 0) {
+        settleLeft -= 1;
+        requestAnimationFrame(alignStep);
+      } else {
+        pendingChapterJumpId = null;
+        card.focus?.({ preventScroll: true });
+      }
+    };
+    requestAnimationFrame(alignStep);
   }
 
   /**
@@ -2217,12 +2190,57 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     renderCutReadingStage();
   }
 
+  // 题卡上的 reader_not_configured 只用来写失败摘要；能不能点批量按钮只看 live readiness。
+  // 以前信任陈旧 suggestion 会在密钥配好后仍锁死「识读未完成题目」。
+  function latestReaderConfigFailure() {
+    let latest = null;
+    for (const question of state.questions || []) {
+      const suggestion = question.ocr_suggestion;
+      if (!suggestion || suggestion.error_kind !== "reader_not_configured") continue;
+      if (suggestion.revision !== question.content_revision) continue;
+      if (!latest || Number(suggestion.revision || 0) >= Number(latest.revision || 0)) latest = suggestion;
+    }
+    return latest;
+  }
+
+  function renderCutReadingProgress(summary, { allSettled = false, stage = 2 } = {}) {
+    const panel = $("cutReadingProgress");
+    if (!panel) return;
+    if (allSettled || stage === 1 || !summary.saved) {
+      panel.hidden = true;
+      panel.replaceChildren();
+      return;
+    }
+    const total = summary.saved;
+    const unread = Math.max(0, total - summary.done - summary.pending - summary.failed);
+    const completed = Math.min(total, summary.done);
+    const percent = total ? Math.round((completed / total) * 100) : 0;
+    panel.hidden = false;
+    panel.replaceChildren();
+    const meter = el("div", "cut-reading-meter");
+    meter.setAttribute("role", "progressbar");
+    meter.setAttribute("aria-valuemin", "0");
+    meter.setAttribute("aria-valuemax", String(total));
+    meter.setAttribute("aria-valuenow", String(completed));
+    meter.setAttribute("aria-label", `识读进度 ${completed}/${total}`);
+    const bar = el("span", "cut-reading-meter-bar");
+    bar.style.width = `${percent}%`;
+    meter.append(bar);
+    const text = el("p", "cut-reading-progress-text",
+      `已识读 ${summary.done} · 进行中 ${summary.pending} · 失败 ${summary.failed} · 待识读 ${unread}（共 ${total}）`);
+    panel.append(meter, text);
+  }
+
   function renderCutReadingStage() {
     const paper = state.paper;
     const host = $("cutReadingStage");
     const summary = QBCutReading.cutReadingSummary(state.questions);
     host.hidden = !QBCutReading.showCutReadingStage(paper, summary);
-    if (host.hidden) return;
+    if (host.hidden) {
+      const progress = $("cutReadingProgress");
+      if (progress) { progress.hidden = true; progress.replaceChildren(); }
+      return;
+    }
     if (summary.pending) cutReadingErrors.delete(paper.id);
     if (!summary.pending) cutReadingStopErrors.delete(paper.id);
     const stage = directImageReview.has(paper.id) && !summary.pending ? 3 : summary.stage;
@@ -2239,32 +2257,46 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }));
     $("cutReadingTitle").textContent = allSettled ? "这份卷子的题都已入库"
       : stage === 1 ? "先切出每道题"
-      : summary.pending ? `${summary.pending} 道题正在 AI 识读`
-        : stage === 2 ? `${summary.eligibleIds.length} 道题尚未识读` : "对照原卷核对文字和配图，审核后入库";
+      : summary.pending ? (summary.saved
+        ? `正在识读：已完成 ${summary.done} / ${summary.saved}`
+        : `${summary.pending} 道题正在 AI 识读`)
+        : summary.failed && stage === 2 ? `${summary.failed} 道识读失败，可重试`
+          : stage === 2 ? `${summary.eligibleIds.length} 道题尚未识读`
+            : "对照原卷核对文字和配图，审核后入库";
     $("cutReadingDetail").textContent = allSettled
-      ? "录入已完成，这份卷会从左侧列表收起。要继续从原卷补题，先恢复归档或用「继续切题与校正」；要看已入库的题，去题库工作台。"
+      ? "录入已完成。卷还留在左侧列表，需要时再自行归档；要继续从原卷补题用「继续切题与校正」，要看已入库的题去题库工作台。"
       : stage === 1
       ? "框出完整题目，跨页或跨栏可以添加多个片段。切题只保存原图范围，不调用 AI。"
       : summary.pending ? "AI 直接读取已保存的题目范围，无需重新框选。识读成功后文字会显示在原图旁，接着核对配图并审核。"
         : stage === 2 ? "题目范围已保存，尚未提交识读。你可以主动识读未完成题目，也可以直接原图审核或继续切题与校正。"
           : "检查文字是否完整、题型及配图是否正确。读错可改字或重读这题；标签与参考答案仍默认关闭。";
+    renderCutReadingProgress(summary, { allSettled, stage });
     const actions = $("cutReadingActions");
     actions.replaceChildren();
+    const notReady = readerUnavailable();
+    const configFailure = latestReaderConfigFailure();
     if (stage === 1) {
       const cut = button(manualSwitches.has(paper.id) ? "正在准备原卷…" : "切题与校正", "primary", openManualCut,
         "在同一原卷画布中补题、调框和改题号；完成后由你选择识读或直接审核");
       cut.disabled = manualSwitches.has(paper.id) || aiCutContinuations.has(paper.id);
       actions.append(cut);
-    } else if (summary.eligibleIds.length) {
-      const notReady = readerUnavailable();
-      const read = button(`识读未完成题目（${summary.eligibleIds.length} 题）`, "primary", () => readCutQuestions());
+    } else if (summary.eligibleIds.length && !summary.pending) {
+      const retryFailed = summary.failedIds.length > 0;
+      const readIds = retryFailed ? summary.failedIds : null;
+      const readLabel = retryFailed
+        ? `重新识读失败题目（${summary.failedIds.length}）`
+        : `识读未完成题目（${summary.eligibleIds.length} 题）`;
+      const read = button(readLabel, "primary", () => readCutQuestions(readIds));
       read.disabled = paperReadSubmissionPending(paper.id) || paper.status !== "ready" || Boolean(notReady);
       if (paper.status !== "ready") read.title = "请先继续手工整理或重试恢复这份资料，再开始 AI 识读。";
       if (notReady) {
-        // 和题卡上的「AI 识读这题」同一套做法：不让你点进一次注定失败的请求，
-        // 直接把原因写进这块面板自己的红条，并放出去配置的链接。
         cutReadingErrors.set(state.paperId, readerUnavailableSentence(notReady));
         read.title = "先在“设置 → API 配置”里填好密钥，再回来识读。";
+      } else if (configFailure) {
+        cutReadingErrors.set(state.paperId, "先前因未配置失败的题目现可重试。");
+        read.title = "密钥已就绪，可重新提交识读。";
+      } else if (cutReadingErrors.get(state.paperId) && /API\s*Key|没有配置|未配置/.test(cutReadingErrors.get(state.paperId))) {
+        cutReadingErrors.delete(state.paperId);
       }
       if (cutReadingRequests.has(paper.id)) read.textContent = "正在提交识读……";
       actions.append(read);
@@ -2287,9 +2319,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const error = stopError || cutReadingErrors.get(paper.id);
     $("cutReadingError").hidden = !error;
     $("cutReadingError").textContent = error || "";
+    $("cutReadingError").classList.toggle("cut-reading-hint", Boolean(error) && !stopError && !notReady && Boolean(configFailure));
     // 「API Key」也算要人动手去配：readerUnavailableSentence 说的是「还没有 API Key」，
     // 原来那条正则只认「配置/密钥」连用，会把这个链接藏掉。
-    $("cutReadingSettings").hidden = !error || Boolean(stopError)
+    $("cutReadingSettings").hidden = !error || Boolean(stopError) || !notReady
       || !/(配置.*(?:读题|看图)|(?:读题|看图).*(?:配置|密钥)|API\s*Key|去“?设置)/i.test(error);
   }
 
@@ -2632,8 +2665,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       R.fitOptions(container);
       const currentShown = state.current !== null && shown.some((q) => q.id === state.current);
       markReading();
-      // Opening, collapsing or filtering moves cards: pick the card being read again.
-      if (state.focus) requestAnimationFrame(currentShown ? markReading : followReading);
+      if (pendingChapterJumpId !== null && shown.some((q) => q.id === pendingChapterJumpId)) {
+        jumpToChapterQuestion(pendingChapterJumpId);
+      } else if (state.focus) {
+        // Opening, collapsing or filtering moves cards: pick the card being read again.
+        requestAnimationFrame(currentShown ? markReading : followReading);
+      }
     };
     // 分批画：一批画完就把主线程还给浏览器，下一批再接着画。
     // 分批的规矩（每批多大、每批之间让不让出主线程、新的一轮来了旧的怎么收手）
@@ -2857,15 +2894,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     else event.currentTarget.blur();
   }
 
-  function setFocus(on) {
-    state.focus = on;
-    writePref("qb-focus", on ? "1" : "0");
-    $("focusToggle").setAttribute("aria-pressed", String(on));
-    if ($("settingsFocus")) $("settingsFocus").checked = on;
-    $("cards").classList.toggle("focus-mode", on);
-    const card = state.current !== null ? $("cards").querySelector(`.card[data-id="${state.current}"]`) : null;
-    if (on && !(card && onScreen(card))) followReading();
-    markReading();
+  function setFocus() {
+    state.focus = false;
+    $("cards")?.classList?.remove("focus-mode", "reading");
   }
 
   // 全屏审核：收起顶栏、试卷列表和试卷信息，窗口也尽量铺满屏幕。浏览器不让
@@ -2905,11 +2936,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     reviewStateSaveTimer = window.setTimeout(() => { reviewStateSaveTimer = 0; saveReviewState(); }, 180);
   }, { passive: true });
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") saveReviewState(); });
-  window.addEventListener("scroll", () => {
-    if (!state.focus || followFrame) return;
-    followFrame = requestAnimationFrame(() => { followFrame = 0; followReading(); });
-  }, { passive: true });
-  $("focusToggle").addEventListener("click", (event) => { setFocus(!state.focus); releaseToggleFocus(event); });
 
   // 键盘移动：当前卡还在屏幕里就从它往前/往后走一张；
   // 已经滚走了，就先落到屏幕里最上面那张。
@@ -3108,7 +3134,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         if (!event.repeat) focusNextReview();
         break;
       case "l": event.preventDefault(); setLens(!state.lens); toast(state.lens ? "放大镜已打开" : "放大镜已关闭"); break;
-      case "z": event.preventDefault(); setFocus(!state.focus); toast(state.focus ? "专注已打开：其余题暗下来" : "专注已关闭"); break;
       case "1": case "2": case "3": case "4":
         event.preventDefault(); setFilter(FILTERS[Number(key) - 1].key); break;
       case "Escape":
@@ -3353,7 +3378,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function setEntrySidebarCollapsed(collapsed) {
     const next = Boolean(collapsed);
     document.documentElement.classList.toggle("entry-sidebar-collapsed", next);
-    $("entrySidebarToggle")?.setAttribute("aria-pressed", String(next));
+    const toggle = $("entrySidebarToggle");
+    if (toggle) {
+      toggle.setAttribute("aria-pressed", String(next));
+      const label = next ? "展开待录列表" : "收起待录列表";
+      toggle.setAttribute("aria-label", label);
+      toggle.title = `${label}（快捷键 [）`;
+    }
     writePref("qb-entry-sidebar-collapsed", next ? "1" : "0");
   }
 
@@ -3397,6 +3428,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (event.key === "[" && !event.ctrlKey && !event.metaKey && !event.altKey) {
       const active = document.activeElement;
       if (active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable)) return;
+      if (window.location.pathname === "/settings") return;
       if (document.querySelector("dialog[open]") || document.documentElement.classList.contains("review-fullscreen")) return;
       event.preventDefault();
       setEntrySidebarCollapsed(!document.documentElement.classList.contains("entry-sidebar-collapsed"));
@@ -4693,13 +4725,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         const left = c.todo;
         teach({ type: "approve", number: q.number });
         if (!left) {
-          const retired = await retireCompletedPaper(state.paperId, { announce: true });
-          if (!retired) {
-            toast(confirming ? `已确认第 ${q.number} 题（原来是 ${agentLabel(q)} 通过）`
-              : "本卷已全部通过并入库",
-              "success", { label: "撤销", onClick: () => revokeQuestion(fresh, { advance: false }) });
-            if (advance) focusNext(q);
-          }
+          toast(confirming ? `已确认第 ${q.number} 题（原来是 ${agentLabel(q)} 通过）`
+            : "本卷已全部通过并入库",
+            "success", { label: "撤销", onClick: () => revokeQuestion(fresh, { advance: false }) });
+          if (advance) focusNext(q);
           return true;
         }
         toast(confirming ? `已确认第 ${q.number} 题（原来是 ${agentLabel(q)} 通过）`
@@ -4795,8 +4824,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         problems: data.problems || [],
         skipped: data.skipped || []
       });
-      const retired = await retireCompletedPaper(paperId, { announce: true });
-      if (!retired) toast(`已入库 ${Number(data.approved) || 0} 道`, "success");
+      toast(`已入库 ${Number(data.approved) || 0} 道`, "success");
     } catch (error) {
       toast(error.message, "error");
     } finally {
@@ -6037,7 +6065,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     void loadFeatureSwitches();
     renderSettingsModels();
     $("settingsLens").checked = state.lens;
-    $("settingsFocus").checked = state.focus;
     $("settingsAutoExpand").checked = state.autoExpand;
     if (!modelFormDirty) showModelSaveResult("");
     syncSettingsRoute();
@@ -6052,7 +6079,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   });
   document.addEventListener("library-ai-settings-saved", () => { void loadFeatureSwitches(); });
   $("settingsLens").addEventListener("change", (event) => setLens(event.target.checked));
-  $("settingsFocus").addEventListener("change", (event) => setFocus(event.target.checked));
   $("settingsAutoExpand").addEventListener("change", (event) => {
     state.autoExpand = event.target.checked;
     writePref("qb-auto-expand", state.autoExpand ? "1" : "0");
@@ -10320,6 +10346,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       document.title = "题有据 · 共用设置";
       document.querySelector(".layout").hidden = true;
       $("settingsHome").hidden = false;
+      // 设置页没有待录侧栏；共用录入页顶栏时把收起按钮藏掉，避免空壳开关。
+      if ($("entrySidebarToggle")) $("entrySidebarToggle").hidden = true;
       document.querySelectorAll(".topnav a").forEach((link) => {
         const active = new URL(link.href, window.location.href).pathname === "/settings";
         link.classList.toggle("active", active);

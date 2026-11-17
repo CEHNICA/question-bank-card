@@ -119,14 +119,38 @@ test("a late continuation response cannot replace a newly selected paper or its 
   assert.equal(h.context.aiBusy.size, 0);
 });
 test("both first-step and later quiet manual stage buttons obey continuation busy state", () => {
-  const stage = source.slice(source.indexOf("  function renderCutReadingStage()"), source.indexOf("  function openManualCut()"));
+  const stage = source.slice(source.indexOf("  function latestReaderConfigFailure()"), source.indexOf("  function openManualCut()"));
   for (const stageNumber of [1, 3]) {
-    const nodes = new Map(), node = () => ({ dataset: {}, children: [], append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; }, setAttribute() {} });
-    const context = { state: { paper: paper(), questions: [] }, QBCutReading: { showCutReadingStage: App.showCutReadingStage, cutReadingSummary: () => ({ stage: stageNumber, saved: 1, pending: 0, eligibleIds: [] }) },
-      cutReadingErrors: new Map(), cutReadingStopErrors: new Map(), directImageReview: new Set(), cutReadingRequests: new Set(), cutReadingStops: new Set(),
+    const nodes = new Map();
+    const node = () => {
+      const classes = new Set();
+      return {
+        dataset: {}, children: [], style: {}, textContent: "",
+        append(...items) { this.children.push(...items); },
+        replaceChildren(...items) { this.children = items; },
+        setAttribute() {},
+        classList: {
+          add(name) { classes.add(name); }, remove(name) { classes.delete(name); },
+          toggle(name, force) { const add = force ?? !classes.has(name); if (add) classes.add(name); else classes.delete(name); },
+        },
+      };
+    };
+    const context = {
+      state: { paper: paper(), questions: [] },
+      QBCutReading: {
+        showCutReadingStage: App.showCutReadingStage,
+        cutReadingSummary: () => ({
+          stage: stageNumber, saved: 1, pending: 0, done: 1, failed: 0, failedIds: [], remaining: 0, eligibleIds: [],
+        }),
+      },
+      cutReadingErrors: new Map(), cutReadingStopErrors: new Map(), directImageReview: new Set(),
+      cutReadingRequests: new Set(), cutReadingStops: new Set(),
       manualSwitches: new Set(), aiCutContinuations: new Set(["paper"]), paperReadSubmissionPending: () => false,
-      $: id => { if (!nodes.has(id)) nodes.set(id, node()); return nodes.get(id); }, document: { createTextNode: text => text }, el: node,
-      button: label => ({ ...node(), label }), openManualCut() {}, focusCutReview() {}, readCutQuestions() {}, stopCutReading() {} };
+      readerUnavailable: () => null, readerUnavailableSentence: () => "not ready",
+      $: id => { if (!nodes.has(id)) nodes.set(id, node()); return nodes.get(id); },
+      document: { createTextNode: text => text }, el: node,
+      button: label => ({ ...node(), label }), openManualCut() {}, focusCutReview() {}, readCutQuestions() {}, stopCutReading() {},
+    };
     vm.runInNewContext(stage, context); context.renderCutReadingStage();
     const manualButton = () => nodes.get("cutReadingActions").children.find(button => /切题与校正|正在准备原卷/.test(button.label));
     assert.equal(manualButton().disabled, true, `Cutting stage ${stageNumber} must disable its manual button`);

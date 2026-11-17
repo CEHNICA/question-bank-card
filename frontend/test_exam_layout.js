@@ -1,9 +1,9 @@
 "use strict";
 const assert = require("node:assert/strict");
 const layout = require("./exam-layout.js");
-assert.deepEqual(layout.normalize(), { pagination: "compact", option_layout: "auto", option_overrides: {}, answer_space: "none", answer_space_overrides: {}, question_breaks: [], figure_overrides: {} });
+assert.deepEqual(layout.normalize(), { pagination: "compact", option_layout: "auto", option_overrides: {}, answer_space: "none", answer_space_overrides: {}, question_breaks: [], figure_align: "right", figure_overrides: {} });
 assert.deepEqual(layout.normalize({ pagination: "keep", option_layout: "four", option_overrides: { a: "two", b: "no" }, question_breaks: ["a", "a", 3] }),
-  { pagination: "keep", option_layout: "four", option_overrides: { a: "two" }, answer_space: "none", answer_space_overrides: {}, question_breaks: ["a"], figure_overrides: {} });
+  { pagination: "keep", option_layout: "four", option_overrides: { a: "two" }, answer_space: "none", answer_space_overrides: {}, question_breaks: ["a"], figure_align: "right", figure_overrides: {} });
 assert.equal(layout.keepWhole(900, layout.BODY_HEIGHT, "compact"), false);
 assert.equal(layout.keepWhole(900, layout.BODY_HEIGHT, "keep"), true);
 assert.equal(layout.keepWhole(1200, layout.BODY_HEIGHT, "keep"), false, "An oversized question must be allowed to continue instead of creating an empty sheet");
@@ -75,7 +75,7 @@ function figureRowFixture(count, id = "q1") {
 {
   const { work, row } = figureRowFixture(3);
   layout.applyFigureOverrides(work, layout.normalize({ figure_overrides: { q1: { width: { 0: 60, 2: 35.5 }, align: "left" } } }));
-  assert.equal(row.style.justifyContent, "left", "老师选了靠左，这一行就得靠左");
+  assert.equal(row.style.justifyContent, "flex-start", "老师选了靠左，这一行就得靠左");
   assert.deepEqual(row.pictures.map(picture => picture.image.dataset.figureWidth), ["60", undefined, "35.5"],
     "只改老师动过的那几张，没动过的留空走原来的默认大小");
   assert.equal(row.style.rowGap, undefined, "不换行就不要碰行距：flex 自己的换行间距不能被改坏");
@@ -92,12 +92,21 @@ function figureRowFixture(count, id = "q1") {
 }
 {
   const { work, row } = figureRowFixture(2);
-  layout.applyFigureOverrides(work, layout.normalize({ figure_overrides: { other: { align: "right", width: { 0: 99 } } } }));
-  assert.equal(row.style.justifyContent, undefined, "别的题的调整不能落到这道题上");
-  assert.equal(row.pictures[0].image.dataset.figureWidth, undefined);
+  layout.applyFigureOverrides(work, layout.normalize({ figure_overrides: { other: { align: "left", width: { 0: 99 } } } }));
+  assert.equal(row.style.justifyContent, "flex-end", "没单独设位置时跟随全卷默认靠右");
+  assert.equal(row.pictures[0].image.dataset.figureWidth, undefined, "别的题的图宽不能落到这道题上");
 }
-assert.deepEqual(layout.normalize({ figure_overrides: { a: { align: "center" }, b: { width: { "-1": 20, x: 20 } }, c: { width: { 0: -5 }, align: "top" } } }).figure_overrides, {},
-  "没改动的、序号不对的、宽度为负的、位置不认识的，一律不留下记录");
+{
+  const { work, row } = figureRowFixture(2);
+  layout.applyFigureOverrides(work, layout.normalize({ figure_align: "center", figure_overrides: {} }));
+  assert.equal(row.style.justifyContent, "center", "全卷改成居中时，预览整行也要居中");
+}
+assert.deepEqual(
+  layout.normalize({ figure_overrides: { a: { align: "center" }, b: { width: { "-1": 20, x: 20 } }, c: { width: { 0: -5 }, align: "top" } } }).figure_overrides,
+  { a: { align: "center" } },
+  "单题显式居中留下；序号不对、宽度为负、位置不认识的丢掉"
+);
+assert.equal(layout.normalize({}).figure_align, "right", "全卷配图默认靠右");
 console.log("A figure row follows the teacher's width, position and line breaks: OK");
 assert.rejects(layout.paginate(null), /缺少/).then(() => console.log("A4 layout options and pagination boundaries: OK"));
 

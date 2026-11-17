@@ -2169,11 +2169,25 @@ def paper_read_cut_questions(request, paper_id):
         for question in candidates:
             # Same invalidation as a single reread, once per newly queued card.
             # Keep the ordered regions, body, manual figures and review evidence.
+            # Drop a failed ocr_suggestion immediately so the stage progress flips
+            # from「失败」to「进行中」before the worker writes back.
             question.content_revision += 1
             question.reread_requested = True
             question.ocr_pending = True
+            question.ocr_suggestion = {}
+            if question.error:
+                question.error = ""
             question.updated_at = now
-            question.save(update_fields=["content_revision", "reread_requested", "ocr_pending", "updated_at"])
+            question.save(
+                update_fields=[
+                    "content_revision",
+                    "reread_requested",
+                    "ocr_pending",
+                    "ocr_suggestion",
+                    "error",
+                    "updated_at",
+                ]
+            )
             queued_ids.append(question.pk)
             question_revisions[str(question.pk)] = question.content_revision
     message = (
@@ -3186,6 +3200,11 @@ def question_action(request, question_id, action: str):
                 question.state = Question.State.WAITING
             question.reread_requested = True
             question.ocr_pending = source_images.is_image(question) or question.processing_mode == "manual"
+            # Align with bulk read-cut-questions: a new attempt voids the previous
+            # failed suggestion so the UI no longer counts this card as「失败」.
+            question.ocr_suggestion = {}
+            if question.error:
+                question.error = ""
         elif action == "figure-table":
             # A crop MinerU read as a table becomes a text table in the stem.
             index = payload.get("figure")
@@ -3760,6 +3779,10 @@ def library_withdraw_batch(request):
     1.12.6 之前只有单题撤回，清一份 25 题的卷要点 25 下。这里一个事务里逐条
     撤回并逐条回报结果：哪几条撤了、哪几条没撤、为什么没撤。不静默吞掉，
     否则用户会以为 25 道全撤了，其实有几道根本没动。
+
+    也可传 document_id：按资料把该卷全部已上架题一并撤下。删资料进回收站必须
+    走这条，不能只靠前端当前已加载的题列表——首屏分页没载完时会漏撤，资料进了
+    回收站，题还挂在正式题库里。
     """
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
@@ -3768,8 +3791,37 @@ def library_withdraw_batch(request):
         return rejected
     from . import library_browse
 
+    body = _body(request) or {}
+    document_raw = body.get("document_id") or body.get("document")
+    if document_raw not in (None, ""):
+        try:
+            document_id = uuid.UUID(str(document_raw))
+        except (TypeError, ValueError, AttributeError):
+            return _error("资料编号格式不正确")
+        if not Paper.objects.filter(pk=document_id).exists():
+            return _error("题库里已经没有这份资料")
+        rows = list(
+            PublishedQuestion.objects.filter(
+                paper_id=document_id, status=PublishedQuestion.Status.PUBLISHED
+            ).order_by("number", "id")
+        )
+        withdrawn = []
+        with transaction.atomic():
+            for publication in rows:
+                library.withdraw(publication)
+                withdrawn.append(str(publication.pk))
+        return JsonResponse(
+            {
+                "ok": True,
+                "document_id": str(document_id),
+                "withdrawn": withdrawn,
+                "withdrawn_count": len(withdrawn),
+                "skipped": [],
+            }
+        )
+
     try:
-        ids = library_browse.normalize_ids((_body(request) or {}).get("ids"))
+        ids = library_browse.normalize_ids(body.get("ids"))
     except library_browse.BrowseError as error:
         return _error(str(error))
     if not ids:
@@ -3790,7 +3842,11 @@ def library_withdraw_batch(request):
                 continue
             library.withdraw(publication)
             withdrawn.append(value)
-    return JsonResponse({"withdrawn": withdrawn, "withdrawn_count": len(withdrawn), "skipped": skipped})
+    # 必须带 ok:true。Eagle 工作台用 data.ok 判断成败；缺了这一字段时
+    # HTTP 200 也会被前端当成「下架试题失败」，题其实已经撤了，用户却以为没动。
+    return JsonResponse(
+        {"ok": True, "withdrawn": withdrawn, "withdrawn_count": len(withdrawn), "skipped": skipped}
+    )
 
 
 # ---------------------------------------------------------------- 功能开关与题库任务

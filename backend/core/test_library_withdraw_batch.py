@@ -55,6 +55,7 @@ class LibraryWithdrawBatchTests(TestCase):
         response = self.batch([row.id for row in rows])
         self.assertEqual(response.status_code, 200, response.content)
         body = response.json()
+        self.assertTrue(body.get("ok"), "按 ids 撤回也必须带 ok:true，否则 Eagle 会把成功当成「下架试题失败」")
         self.assertEqual(body["withdrawn_count"], 25)
         self.assertEqual(body["skipped"], [])
         self.assertEqual(PublishedQuestion.objects.filter(status="published").count(), 0)
@@ -108,6 +109,62 @@ class LibraryWithdrawBatchTests(TestCase):
         self.assertEqual(before, 3)
         self.batch([row.id for row in rows])
         self.assertEqual(Client().get("/api/library", HTTP_X_QB_REQUEST="1").json()["total"], 0)
+
+    def test_document_id_withdraws_every_published_row_for_that_paper(self):
+        """删资料进回收站不能只撤前端已加载的 id——按资料扫全部 published。"""
+        paper = Paper.objects.create(filename="原图题体检卷.png", kind="image", sha256="c" * 64)
+        other = Paper.objects.create(filename="别的卷.pdf", kind="pdf", sha256="d" * 64)
+        live = [self.publication(paper=paper) for _ in range(3)]
+        already = self.publication(paper=paper, status="withdrawn")
+        keep = self.publication(paper=other)
+        response = Client().post(
+            "/api/library/withdraw-batch",
+            {"document_id": str(paper.id)},
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        body = response.json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["document_id"], str(paper.id))
+        self.assertEqual(body["withdrawn_count"], 3)
+        self.assertEqual(set(body["withdrawn"]), {str(row.id) for row in live})
+        self.assertEqual(body["skipped"], [])
+        self.assertEqual(
+            set(PublishedQuestion.objects.filter(paper=paper, status="withdrawn").values_list("pk", flat=True)),
+            {already.id, *(row.id for row in live)},
+        )
+        self.assertEqual(PublishedQuestion.objects.get(pk=keep.id).status, "published")
+
+    def test_document_id_with_no_live_rows_still_succeeds(self):
+        paper = Paper.objects.create(filename="空卷.pdf", kind="pdf", sha256="e" * 64)
+        self.publication(paper=paper, status="withdrawn")
+        body = Client().post(
+            "/api/library/withdraw-batch",
+            {"document_id": str(paper.id)},
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        ).json()
+        self.assertEqual(body["withdrawn_count"], 0)
+        self.assertEqual(body["withdrawn"], [])
+
+    def test_document_id_rejects_unknown_or_bad_ids(self):
+        missing = Client().post(
+            "/api/library/withdraw-batch",
+            {"document_id": "00000000-0000-4000-8000-000000000000"},
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
+        self.assertEqual(missing.status_code, 400)
+        self.assertIn("没有这份资料", missing.json()["error"])
+        bad = Client().post(
+            "/api/library/withdraw-batch",
+            {"document_id": "not-a-uuid"},
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
+        self.assertEqual(bad.status_code, 400)
+        self.assertIn("格式", bad.json()["error"])
 
 
 def library_browse_max():

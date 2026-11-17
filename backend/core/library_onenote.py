@@ -11,6 +11,8 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -26,9 +28,9 @@ logger = logging.getLogger("core.onenote")
 
 PS_EXE = "powershell.exe"
 
-# 优先查找破甲目录下的 on.ps1，若不存在则回退至 core 内部备用脚本
-DEFAULT_BRIDGE_PATH = Path(r"C:\Users\17321\Documents\破甲\onenote\on.ps1")
-FALLBACK_BRIDGE_PATH = Path(__file__).resolve().parent / "onenote_bridge.ps1"
+# 安装包 / 源码自带的桥接脚本优先；可用环境变量或破甲目录 on.ps1 覆盖。
+BUNDLED_BRIDGE_PATH = Path(__file__).resolve().parent / "onenote_bridge.ps1"
+LEGACY_BRIDGE_PATH = Path(r"C:\Users\17321\Documents\破甲\onenote\on.ps1")
 
 
 class OneNoteError(Exception):
@@ -37,11 +39,44 @@ class OneNoteError(Exception):
 
 def get_bridge_script() -> Path:
     """获取 PowerShell COM 桥接脚本路径。"""
-    if DEFAULT_BRIDGE_PATH.is_file():
-        return DEFAULT_BRIDGE_PATH
-    if FALLBACK_BRIDGE_PATH.is_file():
-        return FALLBACK_BRIDGE_PATH
+    override = (os.environ.get("TIYOUJU_ONENOTE_BRIDGE") or "").strip()
+    if override:
+        path = Path(override)
+        if path.is_file():
+            return path
+    if BUNDLED_BRIDGE_PATH.is_file():
+        return BUNDLED_BRIDGE_PATH
+    if LEGACY_BRIDGE_PATH.is_file():
+        return LEGACY_BRIDGE_PATH
     raise OneNoteError("未找到 OneNote PowerShell 桥接脚本，请检查配置文件。")
+
+
+def shell_open_onenote(url: str) -> bool:
+    """用系统协议打开 onenote: 链接。优先 os.startfile（少起一个 cmd）。"""
+    href = (url or "").strip()
+    if not href:
+        return False
+    try:
+        if os.name == "nt":
+            os.startfile(href)  # type: ignore[attr-defined]
+            return True
+        os.startfile(href)  # type: ignore[attr-defined]
+        return True
+    except OSError as exc:
+        logger.warning("shell open onenote failed: %s", exc)
+        if os.name == "nt":
+            try:
+                flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                subprocess.Popen(
+                    ["cmd", "/c", "start", "", href],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=flags,
+                )
+                return True
+            except OSError as nested:
+                logger.warning("cmd start onenote also failed: %s", nested)
+        return False
 
 
 def call_bridge(op: str, timeout_seconds: int = 15, **params: Any) -> Any:
@@ -107,6 +142,21 @@ def call_bridge(op: str, timeout_seconds: int = 15, **params: Any) -> Any:
     return resp.get("data")
 
 
+# 建页时 list/hierarchy 很贵；短时缓存目标分区，连续建页少等一整轮 COM。
+_SECTION_CACHE: tuple[str, str, str, str] | None = None
+_SECTION_CACHE_AT = 0.0
+_SECTION_CACHE_TTL = 300.0
+_SECTION_CACHE_LOCK = threading.Lock()
+
+
+def clear_section_cache() -> None:
+    """测试或笔记本变更后丢掉分区缓存。"""
+    global _SECTION_CACHE, _SECTION_CACHE_AT
+    with _SECTION_CACHE_LOCK:
+        _SECTION_CACHE = None
+        _SECTION_CACHE_AT = 0.0
+
+
 def resolve_target_section() -> tuple[str, str, str, str]:
     """寻找适合存放做题记录的笔记本与分区。
 
@@ -118,6 +168,12 @@ def resolve_target_section() -> tuple[str, str, str, str]:
     Returns:
         (notebook_id, section_id, notebook_name, section_name)
     """
+    global _SECTION_CACHE, _SECTION_CACHE_AT
+    now = time.monotonic()
+    with _SECTION_CACHE_LOCK:
+        if _SECTION_CACHE is not None and (now - _SECTION_CACHE_AT) < _SECTION_CACHE_TTL:
+            return _SECTION_CACHE
+
     data = call_bridge("list")
     notebooks = data.get("notebooks") or []
     if not notebooks:
@@ -198,7 +254,11 @@ def resolve_target_section() -> tuple[str, str, str, str]:
     if target_sec_id is None or target_sec_name is None:
         target_sec_name, target_sec_id = valid_sections[0]
 
-    return str(nb_id), str(target_sec_id), str(nb_name), str(target_sec_name)
+    result = (str(nb_id), str(target_sec_id), str(nb_name), str(target_sec_name))
+    with _SECTION_CACHE_LOCK:
+        _SECTION_CACHE = result
+        _SECTION_CACHE_AT = time.monotonic()
+    return result
 
 
 def _display_source_name(name: str) -> str:
@@ -223,15 +283,9 @@ def _cite_source(name: str) -> str:
     return text
 
 
-def _page_title(publication: PublishedQuestion) -> str:
-    """OneNote 页标题。大标题只留题号；出处像样时才附在后面。"""
-    number = publication.number
-    head = f"第 {number} 题" if number else "题目"
-    content = publication.content or {}
-    cite = _cite_source(publication.source_filename or "") or _cite_source(str(content.get("origin") or ""))
-    if not cite:
-        return head
-    return f"{head} · {cite}" if number else cite
+def _page_title(_publication: PublishedQuestion | None = None) -> str:
+    """OneNote 页标题：按创建时间命名，列表里最好认、最好排。"""
+    return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def format_question_body(publication: PublishedQuestion) -> tuple[str, str]:
@@ -363,11 +417,8 @@ def latex_to_plain(text: str) -> str:
     return result
 
 
-def render_question_image(publication: PublishedQuestion) -> bytes | None:
-    """复用「复制题目图片」的无头浏览器管线，把题面（含公式与配图）渲染成 PNG。
-
-    渲染失败只记日志并返回 None，由调用方退回文字版，不让建页整体失败。
-    """
+def cached_question_image(publication: PublishedQuestion) -> bytes | None:
+    """只读已有题面图缓存，绝不启动无头浏览器。"""
     from . import library_clipboard as clip
 
     cache_file = clip._cache_path(publication, mode="combined")
@@ -375,8 +426,22 @@ def render_question_image(publication: PublishedQuestion) -> bytes | None:
         if cache_file.is_file() and cache_file.stat().st_size > 0:
             return cache_file.read_bytes()
     except OSError:
-        pass
+        return None
+    return None
 
+
+def render_question_image(publication: PublishedQuestion) -> bytes | None:
+    """复用「复制题目图片」的无头浏览器管线，把题面（含公式与配图）渲染成 PNG。
+
+    渲染失败只记日志并返回 None，由调用方退回文字版，不让建页整体失败。
+    """
+    from . import library_clipboard as clip
+
+    cached = cached_question_image(publication)
+    if cached is not None:
+        return cached
+
+    cache_file = clip._cache_path(publication, mode="combined")
     try:
         payload, _figures = clip._collect(publication, mode="combined")
     except clip.ClipboardError as err:
@@ -400,6 +465,37 @@ def render_question_image(publication: PublishedQuestion) -> bytes | None:
     except OSError:
         pass
     return png
+
+
+def _ensure_protocol_background() -> None:
+    try:
+        from . import tiyouju_protocol
+
+        tiyouju_protocol.ensure_registered()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("tiyouju:// 协议注册失败: %s", exc)
+
+
+def _backfill_page_image(publication_id: str, page_id: str, section_id: str, title: str) -> None:
+    """建页已经打开后，后台再补题面图，避免无头渲染拖住首次打开。"""
+    try:
+        publication = PublishedQuestion.objects.get(pk=publication_id)
+    except PublishedQuestion.DoesNotExist:
+        return
+    png = render_question_image(publication)
+    if not png:
+        return
+    try:
+        page_xml = build_page_xml(publication, title, png)
+        call_bridge(
+            "create_xml",
+            timeout_seconds=40,
+            sectionId=section_id,
+            pageXml=page_xml,
+            pageId=page_id,
+        )
+    except Exception:
+        logger.exception("OneNote 后台补题面图失败 publication=%s page=%s", publication_id, page_id)
 
 
 def _cdata(html_text: str) -> str:
@@ -481,50 +577,48 @@ def build_page_xml(publication: PublishedQuestion, title: str, png: bytes | None
 
 
 def create_or_sync_page(publication: PublishedQuestion) -> dict[str, Any]:
-    """在 OneNote 中为该题目创建答题页（题面图 + 回跳链接），并保存关联。
+    """在 OneNote 中为该题目创建答题页并尽快打开。
 
-    Returns:
-        包含 onenote 信息的字典
+    已有关联则只打开，绝不 create_xml 覆盖原页（手写会没）。
+    首次建页：有缓存才同步塞图；否则先文字页打开，题面图后台补。
     """
-    _nb_id, sec_id, nb_name, sec_name = resolve_target_section()
-    title, _text = format_question_body(publication)
-
-    # 回跳链接依赖本机协议注册；注册失败不影响建页
-    try:
-        from . import tiyouju_protocol
-
-        tiyouju_protocol.ensure_registered()
-    except Exception as exc:  # noqa: BLE001 - 注册失败只影响回跳，不应阻断建页
-        logger.warning("tiyouju:// 协议注册失败: %s", exc)
-
-    png = render_question_image(publication)
-    page_xml = build_page_xml(publication, title, png)
     existing_onenote = (publication.extras or {}).get("onenote") or {}
-    existing_page_id = str(existing_onenote.get("page_id") or "").strip()
+    if isinstance(existing_onenote, dict):
+        existing_page_id = str(existing_onenote.get("page_id") or "").strip()
+        existing_url = str(existing_onenote.get("url") or "").strip()
+        if existing_page_id or existing_url:
+            # 之后再点「去 OneNote」= 打开，不是重建。
+            if existing_url:
+                shell_open_onenote(existing_url)
+            open_page(publication)
+            return dict(existing_onenote)
+
+    _nb_id, sec_id, nb_name, sec_name = resolve_target_section()
+    title = _page_title(publication)
+
+    threading.Thread(
+        target=_ensure_protocol_background,
+        name="onenote-protocol-register",
+        daemon=True,
+    ).start()
+
+    # 只吃缓存，绝不在建页热路径里启动无头浏览器。
+    png = cached_question_image(publication)
+    need_backfill = png is None
+    page_xml = build_page_xml(publication, title, png)
 
     bridge_params: dict[str, Any] = {"sectionId": sec_id, "pageXml": page_xml}
-    if existing_page_id:
-        bridge_params["pageId"] = existing_page_id
 
     data = call_bridge("create_xml", timeout_seconds=40, **bridge_params)
     page_id = data.get("id")
     if not page_id:
         raise OneNoteError("OneNote 未能返回新建页面的 ID。")
 
-    # 获取深度链接
     link = data.get("link")
     if not link:
         link_data = call_bridge("hyperlink", id=page_id)
         link = link_data.get("link", "")
 
-    # 仅在未取得 onenote: 协议链接时由后台尝试 navigate；正常由真实桌面浏览器统一拉起，避免隔离桌面或并发冲突
-    if not link:
-        try:
-            call_bridge("navigate", id=page_id)
-        except Exception as exc:
-            logger.info("Navigate to page %s returned note: %s", page_id, exc)
-
-    # 记录到 publication.extras 中
     onenote_record = {
         "url": link,
         "page_id": page_id,
@@ -534,7 +628,6 @@ def create_or_sync_page(publication: PublishedQuestion) -> dict[str, Any]:
         "updated_at": datetime.now(UTC).isoformat(),
     }
 
-    # 旧题 content 可能缺 source_filename；补上再写 extras，避免关联写失败后「题有据里看不见笔记」。
     content = dict(publication.content or {})
     if not str(content.get("source_filename") or "").strip():
         content["source_filename"] = publication.source_filename or ""
@@ -547,15 +640,50 @@ def create_or_sync_page(publication: PublishedQuestion) -> dict[str, Any]:
         library.save_extras(publication, extras)
     except Exception:
         logger.exception("OneNote 页面已建好，但写入题库关联失败 publication=%s", publication.pk)
-        # 最后兜底：只改 extras，不碰 search_text，至少让前端能看到关联。
         publication.extras = extras
         publication.save(update_fields=["extras"])
+
+    if link:
+        shell_open_onenote(link)
+    threading.Thread(
+        target=_refine_open,
+        args=(page_id, None),
+        name=f"onenote-create-open-{publication.pk}",
+        daemon=True,
+    ).start()
+    if need_backfill:
+        threading.Thread(
+            target=_backfill_page_image,
+            args=(str(publication.pk), str(page_id), str(sec_id), title),
+            name=f"onenote-backfill-{publication.pk}",
+            daemon=True,
+        ).start()
 
     return onenote_record
 
 
-def open_page(publication: PublishedQuestion) -> dict[str, Any]:
-    """在 OneNote 中打开并聚焦到本题已关联的解答页。"""
+def _refine_open(page_id: str | None, url: str | None) -> None:
+    """后台精修：COM 切页 + 置前。不挡前端点击返回。"""
+    navigated = False
+    focused = False
+    if page_id:
+        try:
+            data = call_bridge("navigate", id=str(page_id), timeout_seconds=12)
+            navigated = True
+            if isinstance(data, dict):
+                focused = bool(data.get("focused"))
+        except Exception as exc:
+            logger.warning("Failed to navigate by page_id=%s: %s", page_id, exc)
+    if url and (not navigated or not focused):
+        shell_open_onenote(str(url))
+
+
+def open_page(publication: PublishedQuestion, *, wait: bool = False) -> dict[str, Any]:
+    """打开已关联解答页。
+
+    默认最快路径：立刻返回，COM 置前丢后台线程。前端应先用协议链接唤起。
+    wait=True 时同步执行（测试用）。
+    """
     extras = publication.extras or {}
     record = extras.get("onenote")
     if not record or not isinstance(record, dict):
@@ -563,19 +691,20 @@ def open_page(publication: PublishedQuestion) -> dict[str, Any]:
 
     page_id = record.get("page_id")
     url = record.get("url")
-
-    navigated = False
-    if page_id:
-        try:
-            call_bridge("navigate", id=page_id)
-            navigated = True
-        except Exception as exc:
-            logger.warning("Failed to navigate by page_id=%s: %s", page_id, exc)
-
-    if not navigated and not url:
+    if not page_id and not url:
         raise OneNoteError("无法定位到该页面，链接或页面标识已丢失。")
 
-    return {"ok": True, "opened": navigated, "onenote": record}
+    if wait:
+        _refine_open(page_id, url)
+        return {"ok": True, "opened": True, "focused": True, "onenote": record, "deferred": False}
+
+    threading.Thread(
+        target=_refine_open,
+        args=(page_id, url),
+        name=f"onenote-open-{publication.pk}",
+        daemon=True,
+    ).start()
+    return {"ok": True, "opened": True, "focused": False, "onenote": record, "deferred": True}
 
 
 # ---------------- API Views ----------------

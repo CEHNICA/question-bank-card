@@ -8,8 +8,12 @@ const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
 const appJs = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 
 describe("录入题目页（/）重设计契约检查", () => {
-  it("index.html 包含侧栏折叠、章节目录与显式试卷操作按钮，且保留原有 #paperMenu 结构", () => {
-    assert.match(html, /id="entrySidebarToggle"/);
+  it("index.html 包含纯图标侧栏折叠、章节目录、右上角题库工作台+设置与显式试卷操作按钮，并已移除聚光灯模式按钮", () => {
+    assert.match(html, /id="entrySidebarToggle"[^>]*aria-label="收起待录列表"/);
+    assert.doesNotMatch(html, /id="entrySidebarToggle"[\s\S]*?>试卷栏</);
+    assert.doesNotMatch(html, /id="focusToggle"/);
+    assert.doesNotMatch(html, /id="settingsFocus"/);
+    assert.match(html, /class="review-top-actions review-top-actions-end[\s\S]*?id="reviewReturnLibrary"[\s\S]*?id="settingsButton"/);
     assert.match(html, /id="entryChapterNav"[^>]*hidden/);
     assert.match(html, /id="entryChapterToggle"/);
     assert.match(html, /id="entryChapterList"/);
@@ -37,6 +41,8 @@ describe("录入题目页（/）重设计契约检查", () => {
 
   it("app.js 挂载试卷操作按钮、侧栏折叠及对应试卷下挂载多章节导航", () => {
     assert.match(appJs, /function\s+renderEntryChapterNav\s*\(/);
+    assert.match(appJs, /function\s+jumpToChapterQuestion\s*\(/);
+    assert.match(appJs, /pendingChapterJumpId/);
     assert.match(appJs, /function\s+syncActiveChapterNav\s*\(/);
     assert.match(appJs, /function\s+setEntrySidebarCollapsed\s*\(/);
     assert.match(appJs, /if\s*\(isActive\s*&&\s*chapterNav\)\s*\{[\s\S]*?item\.append\(chapterNav\)/);

@@ -2545,7 +2545,7 @@ class FrontendCacheTests(TestCase):
     """
 
     def test_pages_are_rechecked_and_carry_an_asset_version(self):
-        for path in ("/", "/library"):
+        for path in ("/", "/library", "/eagle-print-preview.html"):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 200, path)
             self.assertEqual(response["Cache-Control"], "no-cache", path)

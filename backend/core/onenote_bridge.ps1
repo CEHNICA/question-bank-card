@@ -49,21 +49,74 @@ function Reset-OneNoteCrashFlags {
 }
 
 function Get-OneNote {
+  param([switch]$Quick)
   Reset-OneNoteCrashFlags
-  # Clear stale headless /hyperlink instances (no visible window) that block COM registration with 0x80080005
-  try {
-    $stale = Get-CimInstance Win32_Process -Filter "Name='ONENOTE.EXE'" -ErrorAction SilentlyContinue |
-      Where-Object { $_.CommandLine -like '*/hyperlink*' }
-    foreach ($procInfo in $stale) {
-      $p = Get-Process -Id $procInfo.ProcessId -ErrorAction SilentlyContinue
-      if ($p -and $p.MainWindowHandle -eq [IntPtr]::Zero -and ((Get-Date) - $p.StartTime).TotalSeconds -gt 8) {
-        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+  # Clear stale headless /hyperlink instances (no visible window) that block COM registration with 0x80080005.
+  # Skip on navigate/hyperlink: Win32_Process CIM scan is slow and open-path needs to feel instant.
+  if (-not $Quick) {
+    try {
+      $stale = Get-CimInstance Win32_Process -Filter "Name='ONENOTE.EXE'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*/hyperlink*' }
+      foreach ($procInfo in $stale) {
+        $p = Get-Process -Id $procInfo.ProcessId -ErrorAction SilentlyContinue
+        if ($p -and $p.MainWindowHandle -eq [IntPtr]::Zero -and ((Get-Date) - $p.StartTime).TotalSeconds -gt 8) {
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+        }
       }
-    }
-  } catch {}
-  Reset-OneNoteCrashFlags
+    } catch {}
+    Reset-OneNoteCrashFlags
+  }
   try { return New-Object -ComObject OneNote.Application }
   catch { return New-Object -ComObject ONENOTE.Application }
+}
+
+function Show-OneNoteForeground {
+  # NavigateTo alone often only flashes the taskbar: the bridge process has no
+  # foreground rights. Restore + AttachThreadInput + SetForegroundWindow.
+  try {
+    Add-Type -Namespace TiYouJuOneNote -Name Native -MemberDefinition @"
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+[DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+[DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+[DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+"@ -ErrorAction SilentlyContinue
+  } catch {}
+
+  $targets = @(Get-Process -Name 'ONENOTE','OneNote' -ErrorAction SilentlyContinue |
+    Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero } |
+    Sort-Object StartTime -Descending)
+  if (-not $targets) { return $false }
+
+  $hwnd = $targets[0].MainWindowHandle
+  $SW_RESTORE = 9
+  try {
+    if ([TiYouJuOneNote.Native]::IsIconic($hwnd)) {
+      [void][TiYouJuOneNote.Native]::ShowWindowAsync($hwnd, $SW_RESTORE)
+      Start-Sleep -Milliseconds 60
+    }
+    $fg = [TiYouJuOneNote.Native]::GetForegroundWindow()
+    $fgPid = [uint32]0
+    $fgTid = [TiYouJuOneNote.Native]::GetWindowThreadProcessId($fg, [ref]$fgPid)
+    $curTid = [TiYouJuOneNote.Native]::GetCurrentThreadId()
+    $attached = $false
+    if ($fgTid -ne 0 -and $fgTid -ne $curTid) {
+      $attached = [TiYouJuOneNote.Native]::AttachThreadInput($curTid, $fgTid, $true)
+    }
+    # Fake Alt key: unlocks SetForegroundWindow under Windows focus rules.
+    [TiYouJuOneNote.Native]::keybd_event([byte]0x12, [byte]0, [uint32]0, [UIntPtr]::Zero)
+    [TiYouJuOneNote.Native]::keybd_event([byte]0x12, [byte]0, [uint32]2, [UIntPtr]::Zero)
+    [void][TiYouJuOneNote.Native]::BringWindowToTop($hwnd)
+    $ok = [TiYouJuOneNote.Native]::SetForegroundWindow($hwnd)
+    if ($attached) { [void][TiYouJuOneNote.Native]::AttachThreadInput($curTid, $fgTid, $false) }
+    return [bool]$ok
+  } catch {
+    return $false
+  }
 }
 
 function Get-Hierarchy([object]$one, [string]$hid, [int]$scope) {
@@ -373,7 +426,8 @@ if ($params -and $params.includeScratch) { $script:IncludeScratch = $true }
 
 $exitCode = 0
 try {
-  $one = Get-OneNote
+  $quickCom = ($op -eq 'navigate' -or $op -eq 'hyperlink')
+  $one = Get-OneNote -Quick:$quickCom
 
   switch ($op) {
 
@@ -678,7 +732,9 @@ try {
 
     'navigate' {
       [void]$one.NavigateTo([string]$params.id)
-      $data = [ordered]@{ id = [string]$params.id; navigated = $true }
+      $focused = $false
+      try { $focused = [bool](Show-OneNoteForeground) } catch { $focused = $false }
+      $data = [ordered]@{ id = [string]$params.id; navigated = $true; focused = $focused }
     }
 
     'hyperlink' {

@@ -59,7 +59,7 @@ assert.equal(controls.printDocument.value, "combined");
 
 state.features.ai_answer = true;
 sandbox.applyPrintOptions({ document: "answers", answers: false, font_size: 16, answer_space: "large", student_info: false, ai_answers: true });
-assert.deepEqual(plain(sandbox.currentPrintOptions()), { answers: true, origin: false, ai_answers: true, answer_layout: "appendix", document: "answers", font_size: 16, answer_space: 60, answer_space_overrides: {}, student_info: false, pagination: "compact", option_layout: "auto", option_overrides: {}, figure_overrides: {}, question_breaks: [] });
+assert.deepEqual(plain(sandbox.currentPrintOptions()), { answers: true, origin: false, ai_answers: true, answer_layout: "appendix", document: "answers", font_size: 16, answer_space: 60, answer_space_overrides: {}, student_info: false, pagination: "compact", option_layout: "auto", option_overrides: {}, figure_align: "right", figure_overrides: {}, question_breaks: [] });
 assert.equal(controls.printAnswerLayout.value, "appendix", "A draft saved before answer positions existed keeps its original appendix layout");
 sandbox.applyPrintOptions({ document: "combined", answer_layout: "inline", answer_space: "large" });
 assert.equal(sandbox.currentPrintOptions().answer_layout, "inline");
@@ -100,7 +100,9 @@ sandbox.applyPrintOptions({ document: "questions", figure_overrides: {
 } });
 assert.deepEqual(plain(sandbox.currentPrintOptions()).figure_overrides, {
   "1EF667E5-0000-0000-0000-000000000001": { width: { 0: 60.6 }, align: "left", breaks: [1, 2] },
-}, "只留下改过的那道题：宽到超出版心的、对不上位置的、跟默认一样的，都不算改过");
+  "1EF667E5-0000-0000-0000-000000000002": { align: "center" },
+}, "宽到超出版心、对不上位置的丢掉；单题显式居中要留下（全卷默认已是靠右）");
+assert.equal(sandbox.currentPrintOptions().figure_align, "right", "经典题库不设全卷开关，引擎仍默认靠右");
 assert.deepEqual(plain(sandbox.normalizePrintOptions({ figure_overrides: {
   a: { width: { 0: 0, 1: 4.9, 2: 178, 3: 178.1, x: 40, "-1": 40, 4: "宽一点" }, breaks: [0, 3, 2, 3, -1, 1.5] },
   b: "nonsense", c: null,

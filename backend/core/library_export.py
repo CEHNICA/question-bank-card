@@ -1346,10 +1346,143 @@ def _field_label(name):
     return f"选项 {name[-1]}" if name.startswith("options.") else _FIELD_LABELS.get(name, "正文")
 
 
+# 预览（frontend/qb-render.js 的 tidyText）把「汉字旁边的空格」删掉：
+# 「一周计划生产 700 辆自行车」在屏幕上印成「一周计划生产700辆自行车」。
+# Word 这边原来一个字不动地照抄原文，纸上就比屏幕宽一截 —— 真 Word 实测
+# 同一行预览 96.0 磅、Word 100.91 磅，其中 2.98 磅就是那个空格。
+# 真题库里这样的空格有 1000 多处（题干 673、解析 333、题源 3）。
+#
+# 这里照预览的规矩来，但只管纯文字：公式、填空线旁边的空格留着 ——
+# 预览那边是 .qb-math { margin: 0 .12em } 留的缝，Word 没有这个外边距，
+# 那个空格就是缝。删了公式就贴到汉字上了。
+def _is_cjk(char):
+    """跟预览的 tidyText 用同一套范围：\u3000-\u303f、\uff00-\uffef、\u4e00-\u9fff。"""
+    if not char:
+        return False
+    code = ord(char)
+    return 0x3000 <= code <= 0x303F or 0xFF00 <= code <= 0xFFEF or 0x4E00 <= code <= 0x9FFF
+
+
+def _word_text(raw, before="", after=""):
+    """按预览的规矩排一段纯文字。
+
+    预览的 tidyText 先把连续空格并成一个、去掉换行前后的空格，再删掉紧挨
+    汉字的空格。Word 原来照抄原文，于是纸上多出一截空格。
+
+    ``before`` / ``after`` 是紧挨着的上一段 / 下一段的**文字**（公式、填空线、
+    图片不算文字）。只有两边都是文字时，空格才夹在文字中间、才轮到汉字
+    那一侧说话；有一边不是文字时，空格留着。
+    """
+    if not raw:
+        return raw
+    value = re.sub(r"[ \t\u00a0]+", " ", raw)
+    value = re.sub(r" ?\n ?", "\n", value)
+    out = []
+    index = 0
+    length = len(value)
+    while index < length:
+        char = value[index]
+        if char != " ":
+            out.append(char)
+            index += 1
+            continue
+        end = index
+        while end < length and value[end] == " ":
+            end += 1
+        left = value[index - 1] if index > 0 else before
+        right = value[end] if end < length else after
+        left_is_text = index > 0 or bool(before)
+        right_is_text = end < length or bool(after)
+        if left_is_text and right_is_text and (_is_cjk(left) or _is_cjk(right)):
+            index = end
+            continue
+        out.append(value[index:end])
+        index = end
+    return "".join(out)
+
+
+def _neighbour_text(segments, index, step):
+    """紧挨着的上一段 / 下一段的文字；不是文字（公式、填空线、图片）就空。"""
+    position = index + step
+    while 0 <= position < len(segments):
+        neighbour = segments[position]
+        kind = neighbour.get("type")
+        if kind == "text":
+            raw = neighbour.get("raw") or ""
+            if not raw or raw[-1].isspace() or raw[0].isspace():
+                return ""
+            return raw[-1] if step < 0 else raw[0]
+        if kind == "delimiter":
+            position += step
+            continue
+        return ""
+    return ""
+
+
+def _disable_cjk_auto_spacing(document):
+    """关掉 Word 的「自动调整中文与西文的间距」。
+
+    Word 默认在汉字和西文/数字之间塞 1/4 汉字宽（12 磅时实测 2.98 磅）的
+    空隙，预览那边（Chrome）没有这条规矩 —— 实测同一行「答案：答案是42。」，
+    预览 96.0 磅，Word 103.91 磅，差的就是这 2.98 磅。
+
+    顺带一提：Word 里就算原文里写了空格，这 2.98 磅的自动间距会让位给空格
+    （实测「答案是 42。」和「答案是42。」在 Word 里一样宽），所以只删空格
+    是改不动行宽的 —— 得连这条自动间距一起关。
+
+    这两个属性在 pPr 里有固定位置：排在 w:topLinePunct 之后、w:spacing 之前。
+    位置放错 Word 直接忽略（曾经就因为这个以为关不掉）。
+    """
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import qn
+
+    # pPr 里这两个属性后面的兄弟（OOXML 规定的顺序）。python-docx 的
+    # CT_PPr._tag_seq 在类体末尾被 del 掉了，只能自己写一份。
+    after_dn = (
+        "w:bidi",
+        "w:adjustRightInd",
+        "w:snapToGrid",
+        "w:spacing",
+        "w:ind",
+        "w:contextualSpacing",
+        "w:mirrorIndents",
+        "w:suppressOverlap",
+        "w:jc",
+        "w:textDirection",
+        "w:textAlignment",
+        "w:textboxTightWrap",
+        "w:outlineLvl",
+        "w:divId",
+        "w:cnfStyle",
+        "w:rPr",
+        "w:sectPr",
+        "w:pPrChange",
+    )
+    successors = {"w:autoSpaceDE": ("w:autoSpaceDN",) + after_dn, "w:autoSpaceDN": after_dn}
+    namespace = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+
+    def apply(paragraph_element):
+        properties = paragraph_element.get_or_add_pPr()
+        for tag, after in successors.items():
+            for old in properties.findall(qn(tag)):
+                properties.remove(old)
+            properties.insert_element_before(parse_xml(f'<{tag} {namespace} w:val="0"/>'), *after)
+
+    for paragraph in document.element.body.iter(qn("w:p")):
+        apply(paragraph)
+    # 页脚页眉里也有汉字和数字挨着（「第 1 页 共 2 页」），一样要关。
+    for part in document.part.package.iter_parts():
+        element = getattr(part, "element", None)
+        if element is None or element.tag not in (qn("w:hdr"), qn("w:ftr")):
+            continue
+        for paragraph in element.iter(qn("w:p")):
+            apply(paragraph)
+
+
 def _write_segments(paragraph, segments, size, bold=False):
     from docx.shared import Mm
 
-    for segment in segments:
+    for index, segment in enumerate(segments):
         kind = segment["type"]
         if kind == "math":
             picture = segment.get("picture")
@@ -1376,6 +1509,11 @@ def _write_segments(paragraph, segments, size, bold=False):
                 if kind == "parallelogram"
                 else segment["raw"]
             )
+            if kind == "text":
+                # 汉字旁边的空格按预览的规矩删掉（公式、填空线旁边的留着）。
+                shown = _word_text(
+                    segment["raw"], _neighbour_text(segments, index, -1), _neighbour_text(segments, index, 1)
+                )
             _font(paragraph.add_run(shown), size, bold)
 
 
@@ -1824,7 +1962,9 @@ def _figure_settings(options, item):
     reach the layout maths.
     """
     settings = (options.get("figure_overrides") or {}).get(item["id"]) or {}
-    default_align = "center"
+    default_align = (
+        options.get("figure_align") if options.get("figure_align") in ("left", "center", "right") else "right"
+    )
     if not isinstance(settings, dict):
         return {"width": {}, "breaks": [], "align": default_align}
     widths = {}
@@ -1944,7 +2084,7 @@ def _write_images(document, item, slot, lines=None, settings=None, measured=None
     pictures = [image for image in item["images"] if image["slot"] == slot]
     if not pictures:
         return
-    align = (settings or {}).get("align", "center")
+    align = (settings or {}).get("align") or "right"
     if align not in ("left", "center", "right"):
         align = "right"
     widths = _figure_widths_for_slot(pictures, slot, settings, measured)
@@ -2935,6 +3075,7 @@ def _document(captured, title, options, mode):
             # Even keep-whole-question mode must allow a long solution to flow.
             _pagination(document, unit_start, "compact", size)
     _write_footer(document, len(captured))
+    _disable_cjk_auto_spacing(document)
     stream = io.BytesIO()
     document.save(stream)
     return stream.getvalue()

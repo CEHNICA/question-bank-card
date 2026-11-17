@@ -234,6 +234,28 @@ class CutQuestionReadingTests(TestCase):
         question.refresh_from_db()
         self.assertEqual(question.content_revision, 2)
 
+    def test_requeue_clears_failed_ocr_suggestion_immediately(self):
+        question = self.cut(
+            content_revision=2,
+            ocr_suggestion={
+                "revision": 2,
+                "error": "本机还没有配置任何看图读题服务：所选的“MiniMax”没有 API Key，也没有其他已配置的服务。",
+                "error_kind": "reader_not_configured",
+                "error_service": "minimax_m3",
+                "error_service_label": "MiniMax",
+                "state": "red",
+            },
+            error="",
+        )
+        result = self.post({"question_ids": [question.pk], "revisions": {str(question.pk): 2}, "revision": 0})
+        self.assertEqual(result.status_code, 200, result.content)
+        self.assertEqual(result.json()["queued_ids"], [question.pk])
+        question.refresh_from_db()
+        self.assertTrue(question.ocr_pending and question.reread_requested)
+        self.assertEqual(question.content_revision, 3)
+        self.assertEqual(question.ocr_suggestion, {})
+        self.assertEqual(question.error, "")
+
     def test_request_guard_and_in_progress_paper_cannot_start_batch(self):
         self.cut()
         self.assertEqual(self.client.get(self.url).status_code, 405)

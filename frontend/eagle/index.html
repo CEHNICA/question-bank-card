@@ -347,10 +347,6 @@
          用 class 钩子 .eagle-tree-action-btn 定位：Tailwind 是本地预编译产物，
          新增 utility class 不会生效，只能靠钩子写自定义规则。 */
       #folderTreeContainer .eagle-tree-action-btn { min-width: 32px; min-height: 32px; }
-      /* 侧栏底栏两个入口按钮（展开标签地图 / 管理）只有 28px 高 → 抬到 32px。
-         按 title 定位，不依赖容器结构。 */
-      button[title="在经典题库页打开标签地图（浏览不写库）"],
-      button[title="打开标签管理中心"] { min-height: 32px; }
     }
     /* 浅灰小字看不清（对比度，不是窄屏问题，所有宽度都要修）：
        Tailwind 的 text-slate-400 在白底上只有 2.56:1，WCAG AA 要 4.5:1。
@@ -494,7 +490,7 @@
     .qb-bracket { display: inline-block; min-width: 2.2em; letter-spacing: 0.2em; white-space: pre; text-align: center; color: #334155; }
     .qb-parallelogram-symbol { display: inline-block; margin: 0 0.08em; color: currentColor; font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", "Arial Unicode MS", sans-serif; }
     .qb-parallelogram-symbol.is-display { display: block; text-align: center; margin-block: 0.3em; }
-    .qb-figures { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 12px; margin: 0.6rem 0 0.2rem; }
+    .qb-figures { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; margin: 0.6rem 0 0.2rem; }
     .qb-figure { margin: 0; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px; background: #ffffff; }
     .qb-figure img { display: block; max-width: min(100%, 300px); max-height: 210px; object-fit: contain; cursor: zoom-in; border-radius: 4px; }
     .qb-option .qb-figure { grid-column: 2; }
@@ -529,7 +525,7 @@
 
     /* ---- 快速审题模态框 (Quick Look) 排版与附图约束 ---- */
     #quickLookModal .ql-question-body { font-size: 15px; line-height: 1.85; color: #0f172a; }
-    #quickLookModal .ql-question-body .qb-figures { margin: 0.85rem 0; justify-content: center; }
+    #quickLookModal .ql-question-body .qb-figures { margin: 0.85rem 0; justify-content: flex-end; }
     #quickLookModal .ql-question-body .qb-fig,
     #quickLookModal .ql-fig-card { border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 0.35rem; background: #ffffff; max-width: 100%; }
     #quickLookModal .ql-question-body img,
@@ -595,17 +591,17 @@
   <!-- ================= 主体工作区 ================= -->
   <div class="flex-1 flex overflow-hidden">
 
-    <!-- ================= 1. 左侧栏：智能文件夹与教材目录 ================= -->
-    <!-- ================= 1. 左侧栏：Eagle 式统一文件夹树（卷 / 知识点 / 方法同树） ================= -->
-    <aside id="leftFolderSidebar" class="w-64 bg-[#fafafa] border-r border-slate-200/80 flex flex-col shrink-0">
+    <!-- ================= 1. 左侧栏：文件夹树（含标签特殊文件夹） ================= -->
+    <!-- 标签管理只走左上角 ≡ 主菜单；侧栏底栏不再放「标签地图 / 管理」入口。 -->
+    <aside id="leftFolderSidebar" class="w-64 bg-[#fafafa] border-r border-slate-200/80 flex flex-col shrink-0 min-h-0">
       <div id="leftSidebarHead" class="px-2 py-1.5 border-b border-slate-200/60 shrink-0">
         <div class="flex items-center gap-1.5">
           <button id="btnEagleAppMenu" type="button" onclick="toggleEagleAppMainMenu(event)" class="w-6 h-6 rounded-md flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 text-sm font-bold cursor-pointer transition-colors shrink-0" title="打开应用主菜单">≡</button>
           <input
             id="treeSearchInput"
             type="text"
-            placeholder="搜索文件夹…"
             aria-label="搜索文件夹与标签"
+            placeholder="搜索文件夹 / 标签…"
             oninput="handleTreeSearch(this.value)"
             class="flex-1 min-w-0 h-6 text-[11px] px-2 rounded border border-slate-200 bg-white placeholder-slate-400 focus:border-emerald-500 outline-none transition-colors"
           >
@@ -621,8 +617,16 @@
         </select>
       </div>
 
-      <div id="folderTreeContainer" class="flex-1 overflow-y-auto px-1.5 py-2 text-xs" oncontextmenu="handleFolderTreeBlankContextMenu(event)">
+      <div id="folderTreeContainer" class="flex-1 min-h-0 overflow-y-auto px-1.5 py-2 text-xs" oncontextmenu="handleFolderTreeBlankContextMenu(event)">
         <div class="py-2 text-center text-[11px] text-slate-400">正在载入题库文件夹树...</div>
+      </div>
+
+      <!-- 兼容旧脚本取节点；底栏可见入口已撤，标签管理只在 ≡ 主菜单 -->
+      <div id="knowledgePanel" class="hidden" aria-hidden="true">
+        <button type="button" id="knowledgeModeTree"></button>
+        <button type="button" id="knowledgeModeFreq"></button>
+        <input id="knowledgeSearchInput" type="text" tabindex="-1">
+        <div id="knowledgePanelBody"></div>
       </div>
 
       <!-- 兼容占位：旧版侧栏元素已并入文件夹树，保留 id 防止旧脚本取不到节点报错 -->
@@ -1147,11 +1151,39 @@
   <!-- ================= Eagle 风格右键菜单 (文件夹与排序) ================= -->
   <div 
     id="eagleContextMenu" 
-    class="fixed z-[9999] hidden min-w-[220px] max-w-[280px] max-h-[calc(100vh-24px)] overflow-y-auto rounded-lg border border-slate-200/90 bg-white/95 backdrop-blur-md shadow-2xl py-1 text-xs text-slate-700 select-none transition-all duration-75"
+    class="fixed z-[9999] hidden min-w-[220px] max-w-[280px] rounded-lg border border-slate-200/90 bg-white/95 backdrop-blur-md shadow-2xl py-1 text-xs text-slate-700 select-none transition-all duration-75"
     onclick="event.stopPropagation()"
   >
-    <!-- 内容由 renderEagleContextMenu() 动态挂载 -->
+    <!-- 内容由 renderEagleContextMenu() 动态挂载；overflow 必须可见，排序飞出子菜单才不会被裁掉 -->
   </div>
+  <style>
+    /* 右键菜单：排序方式悬停再展开，避免一长串选项把菜单撑开 */
+    #eagleContextMenu .eagle-menu-flyout-host { position: relative; }
+    #eagleContextMenu .eagle-menu-flyout-host > .eagle-menu-flyout-trigger {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px; padding: 6px 10px; border-radius: 6px; cursor: default;
+      color: #334155;
+    }
+    #eagleContextMenu .eagle-menu-flyout-host:hover > .eagle-menu-flyout-trigger,
+    #eagleContextMenu .eagle-menu-flyout-host:focus-within > .eagle-menu-flyout-trigger {
+      background: #f1f5f9;
+    }
+    #eagleContextMenu .eagle-menu-flyout {
+      display: none; position: absolute; left: calc(100% - 2px); top: -4px;
+      min-width: 210px; max-width: 260px; padding: 4px;
+      border-radius: 8px; border: 1px solid rgba(226, 232, 240, 0.95);
+      background: rgba(255, 255, 255, 0.98); box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+      z-index: 2;
+    }
+    #eagleContextMenu .eagle-menu-flyout.open-left {
+      left: auto; right: calc(100% - 2px);
+    }
+    #eagleContextMenu .eagle-menu-flyout-host:hover > .eagle-menu-flyout,
+    #eagleContextMenu .eagle-menu-flyout-host:focus-within > .eagle-menu-flyout,
+    #eagleContextMenu .eagle-menu-flyout.force-open {
+      display: block;
+    }
+  </style>
 
   <!-- ================= Eagle 左上角 ≡ 应用主菜单：去做题 / 专项视图 / 回收站 / 界面，底栏固定「设置」 ================= -->
   <div
@@ -1166,10 +1198,6 @@
     </a>
     <button type="button" onclick="openSolutionEditor(); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
       <span>✎ 答案解析编辑器</span>
-    </button>
-    <button type="button" onclick="openTagManagerModal(); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
-      <span>🔖 标签管理中心</span>
-      <span id="menuBadgeTagCount" class="font-mono text-[10px] text-slate-400">0</span>
     </button>
     <div class="my-1 border-t border-slate-100"></div>
 
@@ -1196,6 +1224,10 @@
     <button type="button" data-menu-node="smart:recent" onclick="applyFolderNode('smart:recent'); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
       <span>🕑 最近浏览</span>
       <span id="menuBadgeRecent" class="font-mono text-[10px] text-slate-400">0</span>
+    </button>
+    <button type="button" onclick="openTagManagerModal(); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
+      <span>🔖 标签管理中心</span>
+      <span id="menuBadgeTagCount" class="font-mono text-[10px] text-slate-400">0</span>
     </button>
     <div class="my-1 border-t border-slate-100"></div>
 
@@ -1481,6 +1513,14 @@
                   <option value="four">一行四个</option>
                   <option value="two">两行两个</option>
                   <option value="vertical">四个选项竖排</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-slate-600 mb-1" for="exportFigureAlign">配图整行位置</label>
+                <select id="exportFigureAlign" onchange="onExportOptionsChanged()" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none" title="题干配图整行默认靠哪一边">
+                  <option value="right" selected>靠右（默认）</option>
+                  <option value="center">居中</option>
+                  <option value="left">靠左</option>
                 </select>
               </div>
               <div>
@@ -2249,7 +2289,8 @@
         node.type === 'userfolder' ||
         node.type === 'custom' ||
         node.type === 'paper' ||
-        node.type === 'book'
+        node.type === 'book' ||
+        node.type === 'tag'
       );
       if (!renamable) return;
       const labelEl = document.querySelector('[data-tree-label="' + String(nodeId).replace(/"/g, '\\"') + '"]');
@@ -2303,6 +2344,14 @@
         } else if (node.type === 'paper' || node.type === 'book') {
           await commitRenamePaper(node.paperId, next, oldName);
           renderFolderTree();
+        } else if (node.type === 'tag') {
+          const ok = await mutateCatalogue({
+            action: 'update_tag',
+            tag_id: node.tagId,
+            name: next
+          });
+          if (ok) showToast('已重命名为「' + next + '」', 'success');
+          else renderFolderTree();
         }
       };
       input.addEventListener('keydown', (evt) => {
@@ -2807,8 +2856,8 @@
      * 将原始题干中的显示数学公式 ($$...$$, \\[...\\]) 规范化为单行行内公式 ($...$)
      * 防止在紧凑速览模式和试题篮列表中破坏单行排版或导致断句截断
      */
-    function getCleanInlineStem(raw) {
-      if (!raw) return '题目内容';
+    function getCleanInlineStem(raw, fallback) {
+      if (!raw) return (fallback || '题目内容');
       let s = String(raw)
         .replace(/\$\$([\s\S]*?)\$\$/g, '$$$1$$')
         .replace(/\\\[([\s\S]*?)\\\]/g, '$$$1$$')
@@ -2816,6 +2865,18 @@
         .replace(/[\r\n]+/g, ' ')
         .trim();
       return escapeHtml(s);
+    }
+
+    /**
+     * 单行速览用的题干占位：原图题没有文字题干，写「题目内容」等于骗人，
+     * 直接说明这是原卷裁片题、共几段。
+     */
+    function inlineStemPreview(q) {
+      if (q && q.isSourceImage) {
+        const n = Array.isArray(q.questionImages) ? q.questionImages.length : 0;
+        return n > 0 ? `原图题 · 原卷裁片 ${n} 段` : '原图题 · 原卷裁片';
+      }
+      return getCleanInlineStem(q ? q.rawStem : '');
     }
 
     /**
@@ -2864,7 +2925,7 @@
         formattedStem = qImages.map(img => {
           const imgUrl = (img.url && img.url.startsWith('/') && API_BASE) ? (API_BASE + img.url) : (img.url || '');
           return `
-            <div class="my-2 text-center">
+            <div class="my-2 text-right">
               <img src="${imgUrl}" class="max-h-64 max-w-full inline-block rounded border border-slate-200 bg-white p-1" />
             </div>
           `;
@@ -2873,7 +2934,7 @@
         formattedStem += stemFigures.map(f => {
           const imgUrl = (f.url && f.url.startsWith('/') && API_BASE) ? (API_BASE + f.url) : (f.url || '');
           return `
-            <div class="my-3 text-center">
+            <div class="my-3 text-right">
               <img src="${imgUrl}" alt="第 ${qNum} 题配图" class="max-h-56 max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs cursor-zoom-in" onclick="event.stopPropagation(); previewImageModal('${imgUrl}', '第 ${qNum} 题 配图')" />
             </div>
           `;
@@ -2976,6 +3037,10 @@
       const rawStem = c.stem || c.question || '';
       const rawOptions = (c.options && typeof c.options === 'object') ? c.options : {};
       const rawFigures = Array.isArray(c.figures) ? c.figures : [];
+      // 原图题（body_mode='source_image'）没有文字题干，正文全靠原卷裁片。
+      // 少了这一段，题目在卡片里就是一片空白 —— 题干空、figures 也空。
+      const rawQuestionImages = Array.isArray(c.question_images) ? c.question_images : [];
+      const isSourceImage = c.body_mode === 'source_image' || (rawQuestionImages.length > 0 && !String(rawStem || '').trim());
       const rawAnswer = String(c.answer || '').trim();
       const rawAnalysis = String(c.analysis || '').trim();
       const aiAnswerObj = item.ai_answer || (item.extras && item.extras.ai_answer) || null;
@@ -2996,7 +3061,16 @@
         formattedStem += stemFigures.map(f => {
           const imgUrl = (f.url && f.url.startsWith('/') && API_BASE) ? (API_BASE + f.url) : (f.url || f.file || '');
           if (!imgUrl) return '';
-          return `<div class="my-3 text-center"><img src="${imgUrl}" alt="第 ${qNum} 题配图" class="max-h-56 max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs cursor-zoom-in hover:shadow-xs transition-shadow" onclick="event.stopPropagation(); previewImageModal('${imgUrl}', '第 ${qNum} 题 题干配图')" title="点击查看高分辨率原图" /></div>`;
+          return `<div class="my-3 text-right"><img src="${imgUrl}" alt="第 ${qNum} 题配图" class="max-h-56 max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs cursor-zoom-in hover:shadow-xs transition-shadow" onclick="event.stopPropagation(); previewImageModal('${imgUrl}', '第 ${qNum} 题 题干配图')" title="点击查看高分辨率原图" /></div>`;
+        }).join('');
+      }
+      // 原图题的正文：把原卷裁片逐段贴出来。裁片本身就是题目，缺了它卡片就是空的。
+      if (rawQuestionImages.length > 0) {
+        formattedStem += rawQuestionImages.map((img, idx) => {
+          const imgUrl = (img.url && img.url.startsWith('/') && API_BASE) ? (API_BASE + img.url) : (img.url || '');
+          if (!imgUrl) return '';
+          const pageHint = Number.isInteger(img.page_idx) ? ` · 原卷第 ${img.page_idx + 1} 页` : '';
+          return `<div class="my-2 text-right"><img src="${escapeHtml(imgUrl)}" alt="原图题第 ${idx + 1} 段${escapeHtml(pageHint)}" loading="lazy" class="max-h-64 max-w-full inline-block rounded border border-slate-200 bg-white p-1" /></div>`;
         }).join('');
       }
       const optionsHtml = renderAdaptiveOptionsHtml(rawOptions, optionFiguresMap, qNum);
@@ -3027,6 +3101,8 @@
       return {
         id: String(item.id || `q_${idx}`),
         questionNumber: qNum,
+        isSourceImage,
+        questionImages: rawQuestionImages,
         // 原卷题号与页码要单独留着：questionNumber 会在没有印刷题号时退回列表
         // 序号，那不是题号。定位模块（QBQuestionLocator）认的是这两个字段。
         number: (item.number !== undefined && item.number !== null) ? item.number : null,
@@ -3586,126 +3662,36 @@
 
       const targetPaper = paperId ? papersData.find(p => p.id === paperId) : null;
 
-      let menuHtml = `
-        <div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-          <span>排序方式</span>
-          <span class="text-[9px] text-slate-400 font-normal">Eagle 模式</span>
-        </div>
-
-        <div class="space-y-0.5">
-          <div 
-            onclick="setPaperSortMode('time_desc')" 
-            class="flex items-center justify-between px-2.5 py-1.5 rounded cursor-pointer transition-colors ${currentPaperSort === 'time_desc' ? 'bg-emerald-50 text-emerald-800 font-semibold' : 'text-slate-700 hover:bg-slate-100'}"
-          >
-            <div class="flex items-center gap-2">
-              <span class="text-xs">🕒</span>
-              <span>按创建时间 (新→旧)</span>
-            </div>
-            ${currentPaperSort === 'time_desc' ? '<span class="text-emerald-600 font-bold text-xs">✓</span>' : ''}
-          </div>
-
-          <div 
-            onclick="setPaperSortMode('time_asc')" 
-            class="flex items-center justify-between px-2.5 py-1.5 rounded cursor-pointer transition-colors ${currentPaperSort === 'time_asc' ? 'bg-emerald-50 text-emerald-800 font-semibold' : 'text-slate-700 hover:bg-slate-100'}"
-          >
-            <div class="flex items-center gap-2">
-              <span class="text-xs">📅</span>
-              <span>按创建时间 (旧→新)</span>
-            </div>
-            ${currentPaperSort === 'time_asc' ? '<span class="text-emerald-600 font-bold text-xs">✓</span>' : ''}
-          </div>
-
-          <div 
-            onclick="setPaperSortMode('name')" 
-            class="flex items-center justify-between px-2.5 py-1.5 rounded cursor-pointer transition-colors ${currentPaperSort === 'name' ? 'bg-emerald-50 text-emerald-800 font-semibold' : 'text-slate-700 hover:bg-slate-100'}"
-          >
-            <div class="flex items-center gap-2">
-              <span class="text-xs">🔤</span>
-              <span>按名称升序 (A-Z)</span>
-            </div>
-            ${currentPaperSort === 'name' ? '<span class="text-emerald-600 font-bold text-xs">✓</span>' : ''}
-          </div>
-
-          <div 
-            onclick="setPaperSortMode('count_desc')" 
-            class="flex items-center justify-between px-2.5 py-1.5 rounded cursor-pointer transition-colors ${currentPaperSort === 'count_desc' ? 'bg-emerald-50 text-emerald-800 font-semibold' : 'text-slate-700 hover:bg-slate-100'}"
-          >
-            <div class="flex items-center gap-2">
-              <span class="text-xs">📊</span>
-              <span>按包含试题数 (多到少)</span>
-            </div>
-            ${currentPaperSort === 'count_desc' ? '<span class="text-emerald-600 font-bold text-xs">✓</span>' : ''}
-          </div>
-        </div>
-      `;
+      // 排序与次要动作收进悬停飞出，主菜单只留高频项。
+      let menuHtml = treeSortMenuBlock();
 
       if (targetPaper) {
-        menuHtml += `
-          <div class="my-1.5 border-t border-slate-100"></div>
-          <div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider truncate">
-            项目: ${escapeHtml(targetPaper.name)}
-          </div>
-          <div class="space-y-0.5">
-            <div 
-              onclick="startRenamePaper('${targetPaper.id}'); hideEagleContextMenu();" 
-              class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
-            >
-              <span>✏️</span>
-              <span>重命名此入库项目 (或双击)</span>
-            </div>
-            <div 
-              onclick="copyPaperNameToClipboard('${targetPaper.id}'); hideEagleContextMenu();" 
-              class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
-            >
-              <span>📋</span>
-              <span>复制项目完整名称</span>
-            </div>
-            <div 
-              onclick="filterByPaper('${targetPaper.id}'); hideEagleContextMenu();" 
-              class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
-            >
-              <span>🔍</span>
-              <span>仅查看该项目的试题 (${targetPaper.total} 题)</span>
-            </div>
-            <div 
-              onclick="openOriginalPaperModal('${targetPaper.id}', 0, '${escapeHtml(targetPaper.name)}'); hideEagleContextMenu();" 
-              class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
-            >
-              <span>📄</span>
-              <span>查看原卷扫描核验件</span>
-            </div>
-            <div 
-              onclick="createUserFolder('${(targetPaper.materialType === 'book' ? 'book:' : 'paper:') + targetPaper.id}')" 
-              class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
-            >
-              <span>➕</span>
-              <span>在此文件夹下新建子文件夹</span>
-            </div>
-            <div class="my-1 border-t border-slate-100"></div>
-            <div 
-              onclick="confirmDeletePaper('${targetPaper.id}'); hideEagleContextMenu();" 
-              class="flex items-center gap-2 px-2.5 py-1.5 rounded text-rose-600 hover:bg-rose-50 cursor-pointer transition-colors font-medium"
-            >
-              <span>🗑️</span>
-              <span>删除（移入回收站）...</span>
-            </div>
-          </div>
-        `;
+        const parentKey = (targetPaper.materialType === 'book' ? 'book:' : 'paper:') + targetPaper.id;
+        const moreFlyout = eagleMenuFlyout({
+          icon: '⋯',
+          title: '更多',
+          itemsHtml: [
+            treeMenuItem('📋', '复制项目完整名称', `copyPaperNameToClipboard('${targetPaper.id}'); hideEagleContextMenu();`),
+            treeMenuItem('🔍', `仅查看该项目的试题 (${targetPaper.total} 题)`, `filterByPaper('${targetPaper.id}'); hideEagleContextMenu();`),
+            treeMenuItem('➕', '在此文件夹下新建子文件夹', `createUserFolder('${parentKey}')`)
+          ].join('')
+        });
+        menuHtml += treeMenuDivider();
+        menuHtml += treeMenuHeader('项目: ' + escapeHtml(targetPaper.name));
+        menuHtml += '<div class="space-y-0.5">';
+        menuHtml += treeMenuItem('✏️', '重命名此入库项目 (或双击)', `startRenamePaper('${targetPaper.id}'); hideEagleContextMenu();`);
+        menuHtml += treeMenuItem('📄', '查看原卷扫描核验件', `openOriginalPaperModal('${targetPaper.id}', 0, '${escapeHtml(targetPaper.name)}'); hideEagleContextMenu();`);
+        menuHtml += moreFlyout;
+        menuHtml += treeMenuDivider();
+        menuHtml += '<div data-ctx-item="1" onclick="confirmDeletePaper(\'' + targetPaper.id + '\'); hideEagleContextMenu();" class="flex items-center gap-2 px-2.5 py-1.5 rounded text-rose-600 hover:bg-rose-50 cursor-pointer transition-colors font-medium"><span class="shrink-0">🗑️</span><span class="truncate">删除（移入回收站）...</span></div>';
+        menuHtml += '</div>';
       }
 
-      menuHtml += `
-        <div class="my-1.5 border-t border-slate-100"></div>
-        <div 
-          onclick="refreshPapersData(); hideEagleContextMenu();" 
-          class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
-        >
-          <span>🔄</span>
-          <span>刷新项目数据</span>
-        </div>
-      `;
+      menuHtml += treeMenuDivider();
+      menuHtml += treeMenuItem('🔄', '刷新项目数据', 'refreshPapersData(); hideEagleContextMenu();');
 
       menuEl.innerHTML = menuHtml;
-      positionEagleContextMenu(menuEl, e, 240, 320);
+      positionEagleContextMenu(menuEl, e, 240, 280);
     }
 
     function hideEagleContextMenu() {
@@ -3755,10 +3741,8 @@
     let oneNoteBusyToken = 0;
 
     const ONE_NOTE_CREATE_STEPS = [
-      { title: '正在操作 OneNote', detail: '正在准备这道题' },
-      { title: '正在操作 OneNote', detail: '正在生成题面图片' },
-      { title: '正在操作 OneNote', detail: '正在写入并排版' },
-      { title: '正在操作 OneNote', detail: '正在打开笔记' },
+      { title: '正在操作 OneNote', detail: '正在建页并打开' },
+      { title: '正在操作 OneNote', detail: '马上好' },
     ];
     const ONE_NOTE_OPEN_STEPS = [
       { title: '正在操作 OneNote', detail: '正在打开这道题的笔记' },
@@ -3853,28 +3837,26 @@
         return;
       }
       if (oneNoteBusyBlocked()) return;
+
+      // 最快路径：有协议链接就当场唤起，不转圈、不等 COM。置前丢后台。
+      if (q.onenote.url) {
+        launchOneNoteUrl(q.onenote.url);
+        showToast('正在打开 OneNote…', 'info');
+        fetch(`${API_BASE}/api/library/${qid}/onenote/open`, { method: 'POST' }).catch(() => {});
+        return;
+      }
+
       const token = showOneNoteBusy(qid, ONE_NOTE_OPEN_STEPS);
       try {
-        // 优先 COM 定位（OneNote 已开时最快，且不碰题有据窗口）
-        if (q.onenote.page_id) {
-          const resp = await fetch(`${API_BASE}/api/library/${qid}/onenote/open`, { method: 'POST' });
-          const data = await resp.json().catch(() => ({}));
-          if (data.ok && data.opened) {
-            showToast('已在 OneNote 中打开', 'success');
-            return;
-          }
-        }
-        if (q.onenote.url && launchOneNoteUrl(q.onenote.url)) {
-          showToast('正在打开 OneNote…', 'info');
+        const resp = await fetch(`${API_BASE}/api/library/${qid}/onenote/open`, { method: 'POST' });
+        const data = await resp.json().catch(() => ({}));
+        if (data.ok) {
+          showToast('已在 OneNote 中打开', 'success');
           return;
         }
         showToast('未能唤起 OneNote', 'error');
       } catch (_) {
-        if (q.onenote.url && launchOneNoteUrl(q.onenote.url)) {
-          showToast('正在打开 OneNote…', 'info');
-        } else {
-          showToast('打开 OneNote 失败，请确认 OneNote 已启动', 'error');
-        }
+        showToast('打开 OneNote 失败，请确认 OneNote 已启动', 'error');
       } finally {
         hideOneNoteBusy(token);
       }
@@ -3883,6 +3865,7 @@
     async function createOneNotePage(qid) {
       const q = questionsData.find(item => item.id === qid);
       if (!q) return;
+      // 已关联：只打开原页，绝不再走创建（避免盖掉手写）。
       if (hasQuestionOneNote(q)) {
         await openOneNotePage(qid);
         return;
@@ -3898,7 +3881,7 @@
         }
         q.onenote = data.onenote;
         refreshOneNoteFilterAndCounts();
-        showToast('OneNote 答题页已写好，正在打开。', 'success');
+        showToast('已打开 OneNote', 'success');
         if (data.onenote && data.onenote.url) {
           launchOneNoteUrl(data.onenote.url);
         }
@@ -3964,9 +3947,18 @@
       if (!menuEl) return;
       const kw = String(rawKw || '').trim().toLowerCase();
       menuEl.querySelectorAll('[data-ctx-item]').forEach(el => {
+        // 飞出触发条本身不按字面隐藏；看子项有没有命中。
+        if (el.classList.contains('eagle-menu-flyout-trigger')) return;
         const txt = (el.innerText || el.textContent || '').toLowerCase();
         if (!kw || txt.includes(kw)) el.classList.remove('hidden');
         else el.classList.add('hidden');
+      });
+      menuEl.querySelectorAll('[data-ctx-flyout]').forEach(host => {
+        const items = Array.from(host.querySelectorAll('.eagle-menu-flyout [data-ctx-item]'));
+        const any = !kw || items.some(el => !el.classList.contains('hidden'));
+        host.classList.toggle('hidden', !any);
+        const flyout = host.querySelector('.eagle-menu-flyout');
+        if (flyout) flyout.classList.toggle('force-open', Boolean(kw) && any);
       });
       menuEl.querySelectorAll('[data-ctx-sep]').forEach(el => {
         if (kw) el.classList.add('hidden');
@@ -3980,16 +3972,22 @@
         ['difficulty', '\u2B50', '评分由高到低'],
         ['year', '\u{1F4C5}', '最新年份优先']
       ];
-      let html = '<div data-ctx-sep="1" class="px-2 py-0.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">题目排序</div>';
+      const current = (modes.find(([mode]) => mode === filterState.sortBy) || modes[0])[2];
+      let itemsHtml = '';
       modes.forEach(([mode, icon, label]) => {
         const active = filterState.sortBy === mode;
         const cls = active
           ? 'bg-emerald-50 text-emerald-800 font-semibold'
           : 'text-slate-700 hover:bg-slate-100';
         const check = active ? '<span class="text-emerald-600 font-bold text-xs">\u2713</span>' : '';
-        html += `<div data-ctx-item="1" onclick="handleSortChange('${mode}')" class="flex items-center justify-between px-2.5 py-1.5 rounded cursor-pointer transition-colors ${cls}"><div class="flex items-center gap-2"><span class="text-sm">${icon}</span><span>${label}</span></div>${check}</div>`;
+        itemsHtml += `<div data-ctx-item="1" onclick="handleSortChange('${mode}')" class="flex items-center justify-between px-2.5 py-1.5 rounded cursor-pointer transition-colors ${cls}"><div class="flex items-center gap-2 min-w-0"><span class="text-sm shrink-0">${icon}</span><span class="truncate">${label}</span></div>${check}</div>`;
       });
-      return html;
+      return eagleMenuFlyout({
+        icon: '\u2195\uFE0F',
+        title: '题目排序',
+        current,
+        itemsHtml
+      });
     }
 
     function handleQuestionListBlankContextMenu(e) {
@@ -4026,6 +4024,57 @@
       // OneNote 打开、写名字、贴标签、加文件夹——避免和界面按钮重复。
       const hasOneNote = hasQuestionOneNote(q);
       const hasCopiedTags = Array.isArray(copiedQuestionTags) && copiedQuestionTags.length > 0;
+
+      const copyFlyout = eagleMenuFlyout({
+        icon: '📋',
+        title: '复制',
+        itemsHtml: `
+          <div data-ctx-item="1" onclick="copyQuestionImage('${q.id}'); hideEagleContextMenu();" class="flex items-center justify-between px-2.5 py-1.5 rounded text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 cursor-pointer transition-colors" title="将题目与公式排版为高清图片写入剪贴板">
+            <div class="flex items-center gap-2 min-w-0"><span class="text-sm shrink-0">📷</span><span class="truncate font-medium">复制题目图片</span></div>
+            <kbd class="text-[10px] text-slate-400 font-mono shrink-0">Ctrl+Shift+C</kbd>
+          </div>
+          <div data-ctx-item="1" onclick="copyQuestionText('${q.id}', 'markdown'); hideEagleContextMenu();" class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">
+            <span class="text-sm shrink-0">📋</span><span class="truncate">复制题目 Markdown</span>
+          </div>
+          <div data-ctx-item="1" onclick="copyQuestionText('${q.id}', 'with_solution'); hideEagleContextMenu();" class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">
+            <span class="text-sm shrink-0">📝</span><span class="truncate">复制题干 + 参考解析</span>
+          </div>
+          <div data-ctx-item="1" onclick="copyQuestionTags('${q.id}'); hideEagleContextMenu();" class="flex items-center justify-between px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">
+            <div class="flex items-center gap-2 min-w-0"><span class="text-sm shrink-0">🔖</span><span class="truncate">复制标签</span></div>
+            <kbd class="text-[10px] text-slate-400 font-mono shrink-0">Ctrl+Alt+C</kbd>
+          </div>
+          <div data-ctx-item="1" onclick="pasteQuestionTags(['${q.id}']); hideEagleContextMenu();" class="flex items-center justify-between px-2.5 py-1.5 rounded ${hasCopiedTags ? 'text-slate-700 hover:bg-slate-100 cursor-pointer' : 'text-slate-300 cursor-not-allowed'} transition-colors" title="${hasCopiedTags ? '粘贴已复制的 ' + copiedQuestionTags.length + ' 个标签' : '请先在任意题目上复制标签'}">
+            <div class="flex items-center gap-2 min-w-0"><span class="text-sm shrink-0">📌</span><span class="truncate">粘贴标签${hasCopiedTags ? ' (' + copiedQuestionTags.length + ')' : ''}</span></div>
+            <kbd class="text-[10px] text-slate-400 font-mono shrink-0">Ctrl+Alt+V</kbd>
+          </div>
+        `
+      });
+
+      const moreFlyout = eagleMenuFlyout({
+        icon: '⋯',
+        title: '更多',
+        itemsHtml: `
+          <div data-ctx-item="1" onclick="openQuickLookModal('${q.id}'); hideEagleContextMenu();" class="flex items-center justify-between px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">
+            <div class="flex items-center gap-2 min-w-0"><span class="text-sm shrink-0">🔍</span><span class="truncate">全屏快速审题</span></div>
+            <kbd class="text-[10px] text-slate-400 font-mono shrink-0">Space</kbd>
+          </div>
+          <div data-ctx-item="1" onclick="locateQuestionFolderInTree('${q.id}'); hideEagleContextMenu();" class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">
+            <span class="text-sm shrink-0">📍</span><span class="truncate">定位到所属文件夹</span>
+          </div>
+          <div data-ctx-item="1" onclick="openSolutionEditor(['${q.id}']); hideEagleContextMenu();" class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">
+            <span class="text-sm shrink-0">🧠</span><span class="truncate">答案解析深度编辑器</span>
+          </div>
+          <div data-ctx-item="1" onclick="openEditQuestionModal('${q.id}'); hideEagleContextMenu();" class="flex items-center justify-between px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">
+            <div class="flex items-center gap-2 min-w-0"><span class="text-sm shrink-0">✏️</span><span class="truncate">编辑题目与选项</span></div>
+            <kbd class="text-[10px] text-slate-400 font-mono shrink-0">E</kbd>
+          </div>
+          ${filterState.userFolderId ? `
+          <div data-ctx-item="1" onclick="removeQuestionsFromUserFolder(['${q.id}'], '${filterState.userFolderId}'); hideEagleContextMenu();" class="flex items-center gap-2 px-2.5 py-1.5 rounded text-rose-600 hover:bg-rose-50 cursor-pointer transition-colors">
+            <span class="text-sm shrink-0">📤</span><span class="truncate">从当前文件夹移出</span>
+          </div>
+          ` : ''}
+        `
+      });
 
       const menuHtml = `
         <div class="px-3 py-1.5 text-[11px] font-bold text-slate-700 border-b border-slate-100 flex items-center justify-between bg-slate-50/80 rounded-t-lg">
@@ -4071,127 +4120,9 @@
           </div>
           `}
           <div data-ctx-sep="1" class="my-1 border-t border-slate-100"></div>
-
-          <div data-ctx-sep="1" class="px-2 py-0.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">复制</div>
-          <div 
-            data-ctx-item="1"
-            onclick="copyQuestionImage('${q.id}'); hideEagleContextMenu();" 
-            class="flex items-center justify-between px-2.5 py-1.5 rounded text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 cursor-pointer transition-colors group"
-            title="将题目与公式排版为高清图片写入剪贴板"
-          >
-            <div class="flex items-center gap-2">
-              <span class="text-sm">📷</span>
-              <span class="font-medium">复制题目图片</span>
-            </div>
-            <kbd class="text-[10px] text-slate-400 group-hover:text-emerald-700 font-mono">Ctrl+Shift+C</kbd>
-          </div>
-
-          <div 
-            data-ctx-item="1"
-            onclick="copyQuestionText('${q.id}', 'markdown'); hideEagleContextMenu();" 
-            class="flex items-center justify-between px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
-          >
-            <div class="flex items-center gap-2">
-              <span class="text-sm">📋</span>
-              <span>复制题目 Markdown</span>
-            </div>
-          </div>
-
-          <div 
-            data-ctx-item="1"
-            onclick="copyQuestionText('${q.id}', 'with_solution'); hideEagleContextMenu();" 
-            class="flex items-center justify-between px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
-          >
-            <div class="flex items-center gap-2">
-              <span class="text-sm">📝</span>
-              <span>复制题干 + 参考解析</span>
-            </div>
-          </div>
-
-          <div data-ctx-sep="1" class="my-1 border-t border-slate-100"></div>
-
-          <div data-ctx-sep="1" class="px-2 py-0.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">更多</div>
-          <div 
-            data-ctx-item="1"
-            onclick="openQuickLookModal('${q.id}'); hideEagleContextMenu();" 
-            class="flex items-center justify-between px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors group"
-          >
-            <div class="flex items-center gap-2">
-              <span class="text-sm">🔍</span>
-              <span>全屏快速审题</span>
-            </div>
-            <kbd class="text-[10px] text-slate-400 font-mono">Space</kbd>
-          </div>
-
-          <div 
-            data-ctx-item="1"
-            onclick="locateQuestionFolderInTree('${q.id}'); hideEagleContextMenu();" 
-            class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
-          >
-            <span class="text-sm">📍</span>
-            <span>定位到所属文件夹</span>
-          </div>
-
-          <div 
-            data-ctx-item="1"
-            onclick="openSolutionEditor(['${q.id}']); hideEagleContextMenu();" 
-            class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
-          >
-            <span class="text-sm">🧠</span>
-            <span>答案解析深度编辑器</span>
-          </div>
-
-          <div 
-            data-ctx-item="1"
-            onclick="openEditQuestionModal('${q.id}'); hideEagleContextMenu();" 
-            class="flex items-center justify-between px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors group"
-          >
-            <div class="flex items-center gap-2">
-              <span class="text-sm">✏️</span>
-              <span>编辑题目与选项</span>
-            </div>
-            <kbd class="text-[10px] text-slate-400 font-mono">E</kbd>
-          </div>
-
-          ${filterState.userFolderId ? `
-          <div 
-            data-ctx-item="1"
-            onclick="removeQuestionsFromUserFolder(['${q.id}'], '${filterState.userFolderId}'); hideEagleContextMenu();" 
-            class="flex items-center gap-2 px-2.5 py-1.5 rounded text-rose-600 hover:bg-rose-50 cursor-pointer transition-colors"
-          >
-            <span class="text-sm">📤</span>
-            <span>从当前文件夹移出</span>
-          </div>
-          ` : ''}
-
-          <div 
-            data-ctx-item="1"
-            onclick="copyQuestionTags('${q.id}'); hideEagleContextMenu();" 
-            class="flex items-center justify-between px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors"
-          >
-            <div class="flex items-center gap-2">
-              <span class="text-sm">🔖</span>
-              <span>复制标签</span>
-            </div>
-            <kbd class="text-[10px] text-slate-400 font-mono">Ctrl+Alt+C</kbd>
-          </div>
-
-          <div 
-            data-ctx-item="1"
-            onclick="pasteQuestionTags(['${q.id}']); hideEagleContextMenu();" 
-            class="flex items-center justify-between px-2.5 py-1.5 rounded ${hasCopiedTags ? 'text-slate-700 hover:bg-slate-100 cursor-pointer' : 'text-slate-300 cursor-not-allowed'} transition-colors"
-            title="${hasCopiedTags ? '粘贴已复制的 ' + copiedQuestionTags.length + ' 个标签' : '请先在任意题目上复制标签'}"
-          >
-            <div class="flex items-center gap-2">
-              <span class="text-sm">📌</span>
-              <span>粘贴标签${hasCopiedTags ? ' (' + copiedQuestionTags.length + ')' : ''}</span>
-            </div>
-            <kbd class="text-[10px] text-slate-400 font-mono">Ctrl+Alt+V</kbd>
-          </div>
-
-          <div data-ctx-sep="1" class="my-1 border-t border-slate-100"></div>
+          ${copyFlyout}
+          ${moreFlyout}
           ${questionSortMenuBlock()}
-
           <div data-ctx-sep="1" class="my-1 border-t border-slate-100"></div>
           <div 
             data-ctx-item="1"
@@ -4208,7 +4139,7 @@
       `;
 
       menuEl.innerHTML = menuHtml;
-      positionEagleContextMenu(menuEl, e, 270, 420);
+      positionEagleContextMenu(menuEl, e, 270, 360);
     }
 
     // ---- 左栏文件夹树右键菜单 ----
@@ -4219,7 +4150,7 @@
     }
 
     function treeMenuItem(icon, label, onclick) {
-      return '<div onclick="' + onclick + '" class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">' +
+      return '<div data-ctx-item="1" onclick="' + onclick + '" class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">' +
         '<span class="shrink-0">' + icon + '</span><span class="truncate">' + label + '</span></div>';
     }
 
@@ -4294,7 +4225,7 @@
       writeExpandedFolderNodes();
       renderFolderTree();
       hideEagleContextMenu();
-      showToast('已展开全部文件夹', 'success');
+      showToast('已全部展开', 'success');
     }
 
     function collapseAllFolderNodes() {
@@ -4302,7 +4233,7 @@
       writeExpandedFolderNodes();
       renderFolderTree();
       hideEagleContextMenu();
-      showToast('已收起全部文件夹', 'success');
+      showToast('已全部收起', 'success');
     }
 
     function toggleExpandCollapseAllFolders() {
@@ -4315,12 +4246,13 @@
         folderNodeRegistry.forEach(node => {
           if (node.children && node.children.length) folderTreeState.expanded.add(node.id);
         });
-        showToast('已展开全部子文件夹', 'info');
+        showToast('已全部展开', 'info');
       } else {
         folderTreeState.expanded.clear();
         folderTreeState.expanded.add('section:folders');
         folderTreeState.expanded.add('section:custom');
-        showToast('已收起全部子文件夹', 'info');
+        folderTreeState.expanded.add('section:tags');
+        showToast('已全部收起', 'info');
       }
       writeExpandedFolderNodes();
       renderFolderTree();
@@ -4760,25 +4692,78 @@
       confirmDeleteCustomSmartFolder(customId);
     }
 
-    function treeSortMenuBlock() {
-      const modes = [
+    function treeExpandCollapseLabels(kind) {
+      // 标签树说「子标签」；文件夹树才说「子文件夹」。别混用。
+      if (kind === 'tags') {
+        return { expand: '展开全部子标签', collapse: '收起全部子标签' };
+      }
+      if (kind === 'custom') {
+        return { expand: '展开全部', collapse: '收起全部' };
+      }
+      return { expand: '展开全部子文件夹', collapse: '收起全部子文件夹' };
+    }
+
+    function treeSortModeOptions() {
+      return [
         ['time_desc', '\u{1F552}', '按创建时间 (新\u2192旧)'],
         ['time_asc', '\u{1F4C5}', '按创建时间 (旧\u2192新)'],
         ['name', '\u{1F520}', '按名称升序 (A-Z)'],
         ['count_desc', '\u{1F4CA}', '按包含试题数 (多到少)']
       ];
-      let html = '<div class="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">排序方式</div>';
-      html += '<div class="space-y-0.5">';
+    }
+
+    function treeSortCurrentLabel() {
+      const hit = treeSortModeOptions().find(([mode]) => mode === currentPaperSort);
+      return hit ? hit[2] : '排序方式';
+    }
+
+    function eagleMenuFlyout({ icon, title, current, itemsHtml }) {
+      // 全站右键共用：主菜单只留一行，选项悬停再飞出。
+      return (
+        '<div class="eagle-menu-flyout-host" data-ctx-flyout="1" onmouseenter="orientEagleMenuFlyout(this)">' +
+          '<div class="eagle-menu-flyout-trigger" tabindex="0" data-ctx-item="1">' +
+            '<div class="flex items-center gap-2 min-w-0">' +
+              (icon ? `<span class="shrink-0">${icon}</span>` : '') +
+              `<span class="truncate">${escapeHtml(title || '')}</span>` +
+            '</div>' +
+            '<span class="flex items-center gap-1 shrink-0 text-[10px] text-slate-400">' +
+              (current ? `<span class="max-w-[7.5rem] truncate">${escapeHtml(current)}</span>` : '') +
+              '<span aria-hidden="true">\u25B8</span>' +
+            '</span>' +
+          '</div>' +
+          `<div class="eagle-menu-flyout space-y-0.5">${itemsHtml || ''}</div>` +
+        '</div>'
+      );
+    }
+
+    function treeSortMenuBlock() {
+      const modes = treeSortModeOptions();
+      let itemsHtml = '';
       modes.forEach(([mode, icon, label]) => {
         const active = currentPaperSort === mode;
         const cls = active
           ? 'bg-emerald-50 text-emerald-800 font-semibold'
           : 'text-slate-700 hover:bg-slate-100';
         const check = active ? '<span class="text-emerald-600 font-bold text-xs">\u2713</span>' : '';
-        html += `<div onclick="setPaperSortMode('${mode}')" class="flex items-center justify-between px-2 py-1.5 rounded cursor-pointer transition-colors ${cls}"><div class="flex items-center gap-2"><span class="text-xs">${icon}</span><span>${label}</span></div>${check}</div>`;
+        itemsHtml += `<div data-ctx-item="1" onclick="setPaperSortMode('${mode}')" class="flex items-center justify-between px-2.5 py-1.5 rounded cursor-pointer transition-colors ${cls}"><div class="flex items-center gap-2 min-w-0"><span class="text-xs shrink-0">${icon}</span><span class="truncate">${label}</span></div>${check}</div>`;
       });
-      html += '</div>';
-      return html;
+      return eagleMenuFlyout({
+        icon: '\u2195\uFE0F',
+        title: '排序方式',
+        current: treeSortCurrentLabel(),
+        itemsHtml
+      });
+    }
+
+    function orientEagleMenuFlyout(host) {
+      const flyout = host && host.querySelector('.eagle-menu-flyout');
+      if (!flyout) return;
+      flyout.classList.remove('open-left');
+      const rect = host.getBoundingClientRect();
+      const need = 220;
+      if (rect.right + need > window.innerWidth - 8) {
+        flyout.classList.add('open-left');
+      }
     }
 
     function handleFolderTreeBlankContextMenu(e) {
@@ -4830,56 +4815,87 @@
         }
         html += '</div>';
       } else if (node.type === 'tag') {
+        const safeTagId = escapeInlineJsArg(node.tagId);
+        let filterItems = '';
+        if (treeTagHasOwnQuestions(node)) {
+          filterItems += treeMenuItem('\u{1F516}', '在标签筛选中选中它', "treeTagToFilter('" + nodeId + "','select')");
+        }
+        filterItems += treeMenuItem('\u{1F6AB}', '从当前结果排除（含子标签）', "treeTagToFilter('" + nodeId + "','exclude')");
+        const manageFlyout = eagleMenuFlyout({
+          icon: '\u2699\uFE0F',
+          title: '管理',
+          itemsHtml: [
+            treeMenuItem('\u{1F517}', '设为多父…', "promptAddParentForTag('" + safeTagId + "')"),
+            treeMenuItem('\u{1F4CB}', '复制标签名', "copyTreeNodeLabel('" + nodeId + "')")
+          ].join('')
+        });
+        const filterFlyout = eagleMenuFlyout({
+          icon: '\u{1F50D}',
+          title: '筛选',
+          itemsHtml: filterItems
+        });
         html += treeMenuHeader('标签：' + escapeHtml(node.label));
         html += '<div class="space-y-0.5">';
         html += treeMenuItem('\u{1F4C2}', '只看该标签（含子标签）', "applyFolderNode('" + nodeId + "'); hideEagleContextMenu();");
-        if (treeTagHasOwnQuestions(node)) {
-          html += treeMenuItem('\u{1F516}', '在标签筛选中选中它', "treeTagToFilter('" + nodeId + "','select')");
-        }
-        html += treeMenuItem('\u{1F6AB}', '从当前结果排除（含子标签）', "treeTagToFilter('" + nodeId + "','exclude')");
-        html += treeMenuItem('\u{1F4CB}', '复制标签名', "copyTreeNodeLabel('" + nodeId + "')");
+        html += treeMenuItem('\u{2795}', '新建子标签', "promptCreateTreeTag('" + safeTagId + "', '" + escapeInlineJsArg(node.tagKind || '') + "')");
+        html += treeMenuItem('\u{270F}\u{FE0F}', '重命名', "beginInlineTreeRename('" + nodeId + "')");
+        html += filterFlyout;
+        html += manageFlyout;
+        html += treeMenuItem('\u{1F5D1}\u{FE0F}', '删除标签…', "confirmDeleteTreeTag('" + safeTagId + "')");
         html += '</div>';
       } else if (node.type === 'userfolder') {
         const ufDepth = getFolderParentDepth(node.folderId, readUserFolders(), false);
+        const moreItems = [];
+        if (ufDepth < MAX_FOLDER_DEPTH) {
+          moreItems.push(treeMenuItem('\u{2795}', '新建子文件夹', "createUserFolder('" + escapeInlineJsArg(node.folderId) + "')"));
+        }
+        moreItems.push(treeMenuItem('\u{1F4E6}', '移动到...', "openFolderPickerForMove('user', '" + escapeInlineJsArg(node.folderId) + "')"));
         html += treeMenuHeader('文件夹：' + escapeHtml(node.label));
         html += '<div class="space-y-0.5">';
         html += treeMenuItem('\u{1F441}', '查看此文件夹', "applyFolderNode('" + nodeId + "'); hideEagleContextMenu();");
-        if (ufDepth < MAX_FOLDER_DEPTH) {
-          html += treeMenuItem('\u{2795}', '新建子文件夹', "createUserFolder('" + escapeInlineJsArg(node.folderId) + "')");
-        } else {
+        html += treeMenuItem('\u{270F}\u{FE0F}', '重命名', "renameUserFolder('" + escapeInlineJsArg(node.folderId) + "')");
+        if (ufDepth >= MAX_FOLDER_DEPTH) {
           html += `<div class="flex items-center gap-2 px-2 py-1 text-[11px] text-slate-400 cursor-not-allowed select-none"><span>🚫</span><span>已达最多 ${MAX_FOLDER_DEPTH} 层上限</span></div>`;
         }
-        html += treeMenuItem('\u{270F}\u{FE0F}', '重命名', "renameUserFolder('" + escapeInlineJsArg(node.folderId) + "')");
-        html += treeMenuItem('\u{1F4E6}', '移动到...', "openFolderPickerForMove('user', '" + escapeInlineJsArg(node.folderId) + "')");
+        html += eagleMenuFlyout({ icon: '\u22EF', title: '更多', itemsHtml: moreItems.join('') });
         html += treeMenuItem('\u{1F5D1}\u{FE0F}', '删除（移入回收站）...', "hideEagleContextMenu(); confirmDeleteUserFolder('" + escapeInlineJsArg(node.folderId) + "')");
         html += '</div>';
       } else if (node.type === 'custom') {
         const csfDepth = getFolderParentDepth(node.customId, readCustomSmartFolders(), true);
+        const moreItems = [];
+        if (csfDepth < MAX_FOLDER_DEPTH) {
+          moreItems.push(treeMenuItem('\u{2795}', '新建子智能文件夹（保存当前筛选）', "saveCurrentAsSmartFolder('" + escapeInlineJsArg(node.customId) + "')"));
+        }
+        moreItems.push(treeMenuItem('\u{1F4BE}', '用当前筛选条件覆盖', "overwriteCustomSmartFolder('" + escapeInlineJsArg(node.customId) + "')"));
+        moreItems.push(treeMenuItem('\u{1F4E6}', '移动到...', "openFolderPickerForMove('custom', '" + escapeInlineJsArg(node.customId) + "')"));
         html += treeMenuHeader('智能文件夹：' + escapeHtml(node.label));
         html += '<div class="space-y-0.5">';
         html += treeMenuItem('\u{1F441}', '设为当前视图', "applyFolderNode('" + nodeId + "'); hideEagleContextMenu();");
-        if (csfDepth < MAX_FOLDER_DEPTH) {
-          html += treeMenuItem('\u{2795}', '新建子智能文件夹（保存当前筛选）', "saveCurrentAsSmartFolder('" + escapeInlineJsArg(node.customId) + "')");
-        } else {
+        html += treeMenuItem('\u{270F}\u{FE0F}', '重命名此智能文件夹', "renameCustomSmartFolder('" + escapeInlineJsArg(node.customId) + "')");
+        if (csfDepth >= MAX_FOLDER_DEPTH) {
           html += `<div class="flex items-center gap-2 px-2 py-1 text-[11px] text-slate-400 cursor-not-allowed select-none"><span>🚫</span><span>已达最多 ${MAX_FOLDER_DEPTH} 层上限</span></div>`;
         }
-        html += treeMenuItem('\u{1F4BE}', '用当前筛选条件覆盖', "overwriteCustomSmartFolder('" + escapeInlineJsArg(node.customId) + "')");
-        html += treeMenuItem('\u{270F}\u{FE0F}', '重命名此智能文件夹', "renameCustomSmartFolder('" + escapeInlineJsArg(node.customId) + "')");
-        html += treeMenuItem('\u{1F4E6}', '移动到...', "openFolderPickerForMove('custom', '" + escapeInlineJsArg(node.customId) + "')");
+        html += eagleMenuFlyout({ icon: '\u22EF', title: '更多', itemsHtml: moreItems.join('') });
         html += treeMenuItem('\u{1F5D1}\u{FE0F}', '删除（移入回收站）...', "hideEagleContextMenu(); confirmDeleteCustomSmartFolder('" + escapeInlineJsArg(node.customId) + "')");
         html += '</div>';
       } else if (node.type === 'section') {
+        const expandKind = node.sectionKind === 'tags' ? 'tags'
+          : (node.sectionKind === 'custom' ? 'custom' : 'folders');
+        const expandLabels = treeExpandCollapseLabels(expandKind);
         html += treeMenuHeader('分组：' + escapeHtml(node.label));
         html += '<div class="space-y-0.5">';
         if (node.sectionKind === 'folders') {
           html += treeMenuItem('\u{2795}', '新建根文件夹', 'createUserFolder(null)');
         } else if (node.sectionKind === 'custom') {
           html += treeMenuItem('\u{2795}', '保存当前筛选为智能文件夹', 'saveCurrentAsSmartFolder(null)');
+        } else if (node.sectionKind === 'tags') {
+          html += treeMenuItem('\u{2795}', '新建顶级标签', 'promptCreateTreeTag(null, null)');
+          html += treeMenuItem('\u{1F4CB}', '打开标签管理', 'openTagManagerModal(); hideEagleContextMenu();');
         }
-        html += treeMenuItem('\u{1F4C2}', '展开全部子文件夹', 'expandAllFolderNodes()');
-        html += treeMenuItem('\u{1F4C1}', '收起全部子文件夹', 'collapseAllFolderNodes()');
+        html += treeMenuItem('\u{1F4C2}', expandLabels.expand, 'expandAllFolderNodes()');
+        html += treeMenuItem('\u{1F4C1}', expandLabels.collapse, 'collapseAllFolderNodes()');
         html += '</div>';
-        if (node.sectionKind === 'folders' || node.sectionKind === 'papers' || node.sectionKind === 'books') {
+        if (node.sectionKind === 'folders' || node.sectionKind === 'papers' || node.sectionKind === 'books' || node.sectionKind === 'tags') {
           html += treeMenuDivider();
           html += treeSortMenuBlock();
         }
@@ -4889,15 +4905,21 @@
         html += treeMenuItem('\u{1F441}', '设为当前视图', "applyFolderNode('" + nodeId + "'); hideEagleContextMenu();");
         html += '</div>';
       } else {
-        html += treeMenuHeader('文件夹：' + escapeHtml(node.label));
+        const groupIsTags = node.id === 'group:knowledge' || node.id === 'group:method';
+        const expandLabels = treeExpandCollapseLabels(groupIsTags ? 'tags' : 'folders');
+        html += treeMenuHeader((groupIsTags ? '标签分组：' : '文件夹：') + escapeHtml(node.label));
         html += '<div class="space-y-0.5">';
         if (node.id === 'group:papers' || node.id === 'group:books') {
           html += treeMenuItem('\u{2795}', '新建子文件夹', "createUserFolder('" + escapeInlineJsArg(node.id) + "')");
         }
-        html += treeMenuItem('\u{1F4C2}', '展开全部子文件夹', 'expandAllFolderNodes()');
-        html += treeMenuItem('\u{1F4C1}', '收起全部子文件夹', 'collapseAllFolderNodes()');
+        if (groupIsTags) {
+          const kind = node.id === 'group:method' ? 'method' : 'knowledge';
+          html += treeMenuItem('\u{2795}', '新建顶级' + (kind === 'method' ? '方法' : '知识点') + '标签', "promptCreateTreeTag(null, '" + kind + "')");
+        }
+        html += treeMenuItem('\u{1F4C2}', expandLabels.expand, 'expandAllFolderNodes()');
+        html += treeMenuItem('\u{1F4C1}', expandLabels.collapse, 'collapseAllFolderNodes()');
         html += '</div>';
-        if (node.id === 'group:papers' || node.id === 'group:books') {
+        if (node.id === 'group:papers' || node.id === 'group:books' || groupIsTags) {
           html += treeMenuDivider();
           html += treeSortMenuBlock();
         }
@@ -5356,8 +5378,9 @@
         }
       }
       if (ft.length) {
-        const qIds = (q.tags || []).map(t => t.id);
-        if (ft.some(id => qIds.includes(id))) return true;
+        // 与标签树角标一致：只认正式标签，不含 needsReview 候选
+        const qIds = (q.tags || []).filter(t => t && !t.needsReview).map(t => String(t.id));
+        if (ft.some(id => qIds.includes(String(id)))) return true;
       }
       if (fs.length && folderSectionMatchesForSpec(q, spec)) return true;
       return false;
@@ -5813,8 +5836,8 @@
             ${qName ? `<span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200/80 font-bold text-[11px] shrink-0 max-w-[160px] truncate" title="题目名称：${escapeHtml(qName)}">${escapeHtml(qName)}</span>` : ''}
             <span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 text-slate-700 font-medium shrink-0 whitespace-nowrap">${escapeHtml(q.questionType)}</span>
             <span class="q-difficulty-stars text-amber-500 font-bold shrink-0 text-[11px] whitespace-nowrap transition-transform inline-block">${q.difficultyStars > 0 ? '★'.repeat(q.difficultyStars) : ''}</span>
-            <div class="truncate text-slate-700 font-serif flex-1 min-w-0 leading-normal text-xs" title="${escapeHtml((q.rawStem || '').replace(/\n+/g, ' '))}">
-              ${getCleanInlineStem(q.rawStem)}
+            <div class="truncate text-slate-700 font-serif flex-1 min-w-0 leading-normal text-xs" title="${q.isSourceImage ? '原图题：正文是原卷裁片' : escapeHtml((q.rawStem || '').replace(/\n+/g, ' '))}">
+              ${inlineStemPreview(q)}
             </div>
           </div>
 
@@ -7717,10 +7740,13 @@
     // 预览框懒加载：第一次打开预览时把 src 填上。
     // 预览页自己带一整套排版资源（styles.css / library.css / exam-layout.js …），
     // 首屏用不上，别让它们跟题库数据抢带宽。
+    // 预览 HTML 由后端 _page 注入 ?v= 指纹；这里只负责第一次挂上 src。
+    // 父页硬刷新后 iframe 会回到空 src，自然拿到新指纹，不会卡在一周缓存的旧排版脚本上。
     function ensurePreviewFrameLoaded() {
       const frame = document.getElementById('eaglePreviewFrame');
       if (!frame) return null;
       if (!frame.getAttribute('src') && frame.dataset.src) {
+        previewState.ready = false;
         frame.setAttribute('src', frame.dataset.src);
       }
       return frame;
@@ -7847,7 +7873,7 @@
                 <span class="text-slate-400 font-medium">· ${escapeHtml(q.questionType)}</span>
                 <span class="text-amber-500 font-bold">${q.difficultyStars > 0 ? '★'.repeat(q.difficultyStars) : ''}</span>
               </div>
-              <p class="truncate text-slate-600 text-xs font-serif min-w-0" title="${escapeHtml((q.rawStem || '').replace(/\n+/g, ' '))}">${getCleanInlineStem(q.rawStem)}</p>
+              <p class="truncate text-slate-600 text-xs font-serif min-w-0" title="${q.isSourceImage ? '原图题：正文是原卷裁片' : escapeHtml((q.rawStem || '').replace(/\n+/g, ' '))}">${inlineStemPreview(q)}</p>
             </div>
           </div>
           <div class="flex items-center gap-1 shrink-0">
@@ -7933,6 +7959,8 @@
       }
       const pagination = document.getElementById('exportPagination')?.value || 'compact';
       const optionLayout = document.getElementById('exportOptionLayout')?.value || 'auto';
+      const figureAlignRaw = document.getElementById('exportFigureAlign')?.value || 'right';
+      const figureAlign = ['left', 'center', 'right'].includes(figureAlignRaw) ? figureAlignRaw : 'right';
       const mode = ['questions', 'answers', 'combined'].includes(documentMode) ? documentMode : 'questions';
       return {
         answers: mode !== 'questions',
@@ -7945,6 +7973,7 @@
         student_info: document.getElementById('exportStudentInfo')?.checked !== false,
         pagination: pagination === 'keep' ? 'keep' : 'compact',
         option_layout: ['auto', 'four', 'two', 'vertical'].includes(optionLayout) ? optionLayout : 'auto',
+        figure_align: figureAlign,
         option_overrides: Object.assign({}, exportPreviewOverrides.option_overrides),
         answer_space_overrides: Object.assign({}, exportPreviewOverrides.answer_space_overrides),
         figure_overrides: Object.assign({}, exportPreviewOverrides.figure_overrides),
@@ -9884,6 +9913,24 @@
           const item = byId.get(curId);
           curId = item ? (item.parentId || null) : null;
         }
+      } else if (nodeId.startsWith('tag:') || nodeId === 'group:knowledge' || nodeId === 'group:method' || nodeId === 'section:tags') {
+        folderTreeState.expanded.add('section:tags');
+        if (nodeId === 'group:knowledge' || nodeId === 'group:method') {
+          folderTreeState.expanded.add(nodeId);
+        } else if (nodeId.startsWith('tag:')) {
+          const tagId = nodeId.slice(4);
+          const byId = new Map(tagCatalogue.map(t => [String(t.id), t]));
+          const walkParents = (id, seen) => {
+            if (!id || seen.has(id)) return;
+            seen.add(id);
+            folderTreeState.expanded.add('tag:' + id);
+            const tag = byId.get(String(id));
+            if (!tag) return;
+            folderTreeState.expanded.add(tag.kind === 'method' ? 'group:method' : 'group:knowledge');
+            (tag.parent_ids || []).forEach(pid => walkParents(pid, seen));
+          };
+          walkParents(tagId, new Set());
+        }
       }
       writeExpandedFolderNodes();
     }
@@ -9934,13 +9981,27 @@
       return false;
     }
 
-    function buildTagTreeNodes(kind) {
-      const pool = tagCatalogue.filter(t => t.kind === kind);
+    /** 统计某组标签下「去重后的正式题数」（不含 needsReview；对齐目录 subtree_count）。 */
+    function countQuestionsForTagIdSet(tagIds) {
+      const set = new Set((tagIds || []).map(String).filter(Boolean));
+      if (!set.size) return 0;
+      let n = 0;
+      for (const q of questionsData) {
+        const tags = q && Array.isArray(q.tags) ? q.tags : [];
+        if (tags.some(t => t && !t.needsReview && set.has(String(t.id)))) n += 1;
+      }
+      return n;
+    }
+
+    /** @param {{ includeEmpty?: boolean }} [opts] includeEmpty：主树标签区要显示零题标签，便于建层级 */
+    function buildTagTreeNodes(kind, opts) {
+      const includeEmpty = !!(opts && opts.includeEmpty);
+      const pool = tagCatalogue.filter(t => t.kind === kind && t.active !== false);
       if (!pool.length) return [];
-      const byId = new Map(pool.map(t => [t.id, t]));
+      const byId = new Map(pool.map(t => [String(t.id), t]));
       const childMap = new Map();
       pool.forEach(t => {
-        const parents = (t.parent_ids || []).filter(pid => byId.has(pid));
+        const parents = (t.parent_ids || []).map(String).filter(pid => byId.has(pid));
         if (!parents.length) {
           if (!childMap.has('__root__')) childMap.set('__root__', []);
           childMap.get('__root__').push(t);
@@ -9951,24 +10012,405 @@
           });
         }
       });
+
+      // 先收集每个节点的子孙 id（含自己），计数用去重题数，禁止把子节点 count 相加（多父级会翻倍）
+      const descendantCache = new Map();
+      const collectDesc = (tagId) => {
+        const key = String(tagId);
+        if (descendantCache.has(key)) return descendantCache.get(key);
+        const out = [key];
+        (childMap.get(key) || []).forEach(child => {
+          out.push.apply(out, collectDesc(child.id));
+        });
+        // 同一题挂多个子孙时 id 会重复，后面用 Set 去重
+        const uniq = Array.from(new Set(out));
+        descendantCache.set(key, uniq);
+        return uniq;
+      };
+
+      const questionsReady = Array.isArray(questionsData) && questionsData.length > 0;
       const build = (t) => {
-        const kids = (childMap.get(t.id) || []).map(build).filter(Boolean);
-        const kidsCount = kids.reduce((s, k) => s + k.count, 0);
-        const count = Math.max(t.subtree_count || 0, kidsCount);
-        if (!count) return null;               // 空节点不渲染
+        const tid = String(t.id);
+        const kids = sortFolderTreeNodes(
+          (childMap.get(tid) || []).map(build).filter(Boolean)
+        );
+        const descIds = collectDesc(tid);
+        // 目录投影 subtree_count = 点选浏览能刷出的题数；题库已加载时再与本机列表对齐取大，避免投影滞后
+        const apiCount = Math.max(t.subtree_count || 0, t.count || 0, t.direct_count || 0);
+        const liveCount = questionsReady ? countQuestionsForTagIdSet(descIds) : 0;
+        const count = Math.max(apiCount, liveCount);
+        if (!count && !includeEmpty) return null;
         return {
-          id: 'tag:' + t.id,
+          id: 'tag:' + tid,
           type: 'tag',
           label: t.name,
           icon: kind === 'method' ? '\u{1F9E9}' : '\u{1F3F7}',
-          tagId: t.id,
+          tagId: tid,
+          tagKind: kind,
           count,
+          // 无 created_at 时时间排序会退回按名称，与文件夹缺时间字段时行为一致
+          createdAtMs: 0,
+          createdLabel: '',
           children: kids
         };
       };
-      const roots = (childMap.get('__root__') || []).map(build).filter(Boolean);
-      roots.sort((a, b) => b.count - a.count || String(a.label).localeCompare(String(b.label), 'zh-CN'));
-      return roots;
+      return sortFolderTreeNodes(
+        (childMap.get('__root__') || []).map(build).filter(Boolean)
+      );
+    }
+
+    const knowledgePanelState = {
+      mode: 'tree', // tree | freq
+      search: '',
+      methodsCollapsed: true
+    };
+
+    function setKnowledgePanelMode(mode) {
+      knowledgePanelState.mode = mode === 'freq' ? 'freq' : 'tree';
+      const treeBtn = document.getElementById('knowledgeModeTree');
+      const freqBtn = document.getElementById('knowledgeModeFreq');
+      if (treeBtn && freqBtn) {
+        const isTree = knowledgePanelState.mode === 'tree';
+        treeBtn.setAttribute('aria-selected', isTree ? 'true' : 'false');
+        freqBtn.setAttribute('aria-selected', isTree ? 'false' : 'true');
+        treeBtn.className = isTree
+          ? 'px-1.5 py-0.5 rounded text-[10px] font-semibold text-emerald-800 bg-white shadow-xs cursor-pointer'
+          : 'px-1.5 py-0.5 rounded text-[10px] font-medium text-slate-500 hover:text-slate-700 cursor-pointer';
+        freqBtn.className = !isTree
+          ? 'px-1.5 py-0.5 rounded text-[10px] font-semibold text-emerald-800 bg-white shadow-xs cursor-pointer'
+          : 'px-1.5 py-0.5 rounded text-[10px] font-medium text-slate-500 hover:text-slate-700 cursor-pointer';
+      }
+      renderKnowledgePanel();
+    }
+
+    function handleKnowledgeSearch(val) {
+      knowledgePanelState.search = (val || '').trim().toLowerCase();
+      renderKnowledgePanel();
+    }
+
+    function toggleKnowledgeMethodsSection() {
+      knowledgePanelState.methodsCollapsed = !knowledgePanelState.methodsCollapsed;
+      renderKnowledgePanel();
+    }
+
+    function registerKnowledgeTagNodes(nodes) {
+      const walk = (n) => {
+        if (!n) return;
+        folderNodeRegistry.set(n.id, n);
+        (n.children || []).forEach(walk);
+      };
+      (nodes || []).forEach(walk);
+    }
+
+    function knowledgeNodeMatchesSearch(node, kw) {
+      if (!kw) return true;
+      if (String(node.label || '').toLowerCase().includes(kw)) return true;
+      const tag = tagCatalogue.find(t => t.id === node.tagId);
+      if (tag && matchTagByQuery(tag, kw)) return true;
+      return (node.children || []).some(c => knowledgeNodeMatchesSearch(c, kw));
+    }
+
+    function renderKnowledgeTreeNode(node, depth, kw) {
+      if (!knowledgeNodeMatchesSearch(node, kw)) return '';
+      folderNodeRegistry.set(node.id, node);
+      const hasKids = !!(node.children && node.children.length);
+      const isExpanded = kw ? true : folderTreeState.expanded.has(node.id);
+      const isActive = folderTreeState.activeId === node.id;
+      const safeNodeId = escapeInlineJsArg(node.id);
+      const isMethod = node.tagKind === 'method';
+      let kidsHtml = '';
+      if (hasKids && (isExpanded || kw)) {
+        const kidParts = node.children.map(c => renderKnowledgeTreeNode(c, depth + 1, kw)).filter(Boolean);
+        if (kidParts.length) {
+          kidsHtml = '<div class="ml-2 border-l border-slate-100 pl-0.5 space-y-0.5">' + kidParts.join('') + '</div>';
+        }
+      }
+      const arrow = hasKids
+        ? '<span onclick="event.stopPropagation(); toggleFolderNode(\'' + safeNodeId + '\')" class="w-3 h-3 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 cursor-pointer select-none shrink-0">' + (isExpanded ? '▾' : '▸') + '</span>'
+        : '<span class="w-3 inline-block shrink-0"></span>';
+      const countCls = isActive
+        ? (isMethod ? 'text-violet-700' : 'text-emerald-700')
+        : (node.count ? 'text-slate-400' : 'text-slate-300');
+      const rowCls = isActive
+        ? (isMethod ? 'bg-violet-50 text-violet-900 font-semibold' : 'bg-emerald-50 text-emerald-900 font-semibold')
+        : 'text-slate-600 hover:bg-slate-100';
+      return '<div id="ftree-' + escapeHtml(node.id) + '" class="flex items-center justify-between rounded-md px-1 py-0.5 transition-colors ' + rowCls + '" style="padding-left:' + (2 + depth * 10) + 'px"' +
+        ' oncontextmenu="handleFolderTreeContextMenu(event, \'' + safeNodeId + '\')">' +
+        '<div class="flex items-center gap-0.5 min-w-0 cursor-pointer flex-1" onclick="applyFolderNode(\'' + safeNodeId + '\')">' +
+        arrow +
+        '<span class="text-[10px] shrink-0 opacity-80">' + node.icon + '</span>' +
+        '<span class="truncate text-[11px]">' + escapeHtml(node.label) + '</span>' +
+        '</div>' +
+        '<span class="font-mono text-[10px] shrink-0 ml-1 ' + countCls + '">' + (node.count || 0) + '</span>' +
+        '</div>' + kidsHtml;
+    }
+
+    function renderKnowledgeFreqChips(kind, kw) {
+      const pool = tagCatalogue.filter(t => t.kind === kind && t.active !== false);
+      const scored = pool.map(t => {
+        const count = t.count || t.subtree_count || 0;
+        return { tag: t, count, rank: (t.favorite ? 0 : 1) + (count ? 0 : 2) };
+      }).filter(item => !kw || matchTagByQuery(item.tag, kw));
+      scored.sort((a, b) => {
+        if (a.rank !== b.rank) return a.rank - b.rank;
+        if (a.count !== b.count) return b.count - a.count;
+        return String(a.tag.name || '').localeCompare(String(b.tag.name || ''), 'zh-CN');
+      });
+      const list = scored.slice(0, kw ? 60 : 36);
+      if (!list.length) return '<div class="text-[10px] text-slate-400 px-1 py-1">暂无常用' + (kind === 'method' ? '方法' : '考点') + '</div>';
+      const chipTone = kind === 'method'
+        ? 'border-violet-200 bg-violet-50 text-violet-800 hover:bg-violet-100'
+        : 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100';
+      const activeTone = kind === 'method'
+        ? 'border-violet-400 bg-violet-100 text-violet-950 ring-1 ring-violet-300'
+        : 'border-emerald-400 bg-emerald-100 text-emerald-950 ring-1 ring-emerald-300';
+      return '<div class="flex flex-wrap gap-1 px-0.5">' + list.map(item => {
+        const nodeId = 'tag:' + item.tag.id;
+        const isActive = folderTreeState.activeId === nodeId;
+        return '<button type="button" onclick="applyFolderNode(\'' + escapeInlineJsArg(nodeId) + '\')" class="inline-flex items-center gap-1 max-w-full px-1.5 py-0.5 rounded-md border text-[10px] font-medium cursor-pointer transition-colors ' +
+          (isActive ? activeTone : chipTone) + '" title="' + escapeHtml(item.tag.name) + '">' +
+          '<span class="truncate">' + escapeHtml(item.tag.name) + '</span>' +
+          '<span class="font-mono opacity-70 shrink-0">' + item.count + '</span>' +
+          '</button>';
+      }).join('') + '</div>';
+    }
+
+    /** 标签已并入主文件夹树；侧栏底栏已撤，此函数保留为空操作以免旧调用报错。 */
+    function renderKnowledgePanel() {
+      return;
+    }
+
+    /** 兼容旧调用：Eagle 侧栏不再提供标签地图入口，改走 ≡ 菜单的标签管理中心。 */
+    function openTagMapFromTree(tagId) {
+      hideEagleContextMenu();
+      openTagManagerModal();
+      void tagId;
+    }
+
+    function promptCreateTreeTag(parentId, kindHint) {
+      hideEagleContextMenu();
+      let kind = kindHint;
+      if (!kind && parentId) {
+        const parent = tagCatalogue.find(t => String(t.id) === String(parentId));
+        kind = parent ? parent.kind : '';
+      }
+      if (!kind) {
+        const pick = window.prompt('新建标签类型：输入「知识点」或「方法」', '知识点');
+        if (pick === null) return;
+        const raw = String(pick || '').trim();
+        kind = (raw === '方法' || raw === '解题方法' || raw === 'method') ? 'method' : 'knowledge';
+      }
+      if (kind !== 'method' && kind !== 'knowledge') kind = 'knowledge';
+      const name = window.prompt(parentId ? '子标签名称：' : '顶级标签名称：', '');
+      if (!name || !String(name).trim()) return;
+      const payload = {
+        action: 'create_tag',
+        name: String(name).trim(),
+        kind,
+        levels: ['高中'],
+        aliases: [],
+        description: '',
+        color: '',
+        parent_ids: parentId ? [parentId] : [],
+        related_method_ids: []
+      };
+      mutateCatalogue(payload).then(ok => {
+        if (!ok) return;
+        showToast('已新建标签「' + String(name).trim() + '」', 'success');
+        if (parentId) {
+          folderTreeState.expanded.add('section:tags');
+          folderTreeState.expanded.add(kind === 'method' ? 'group:method' : 'group:knowledge');
+          folderTreeState.expanded.add('tag:' + parentId);
+          writeExpandedFolderNodes();
+          renderFolderTree();
+        }
+      });
+    }
+
+    async function promptAddParentForTag(tagId) {
+      hideEagleContextMenu();
+      const tag = tagCatalogue.find(t => String(t.id) === String(tagId));
+      if (!tag) { showToast('标签不存在，请刷新后重试', 'error'); return; }
+      const name = window.prompt('额外挂到哪个父标签下？（输入完整名称，同类型）', '');
+      if (!name || !String(name).trim()) return;
+      const parent = tagCatalogue.find(t =>
+        t.kind === tag.kind && t.active !== false && String(t.name) === String(name).trim()
+      );
+      if (!parent) { showToast('找不到同类型父标签「' + String(name).trim() + '」', 'error'); return; }
+      if (String(parent.id) === String(tagId)) { showToast('不能把自己设为父级', 'error'); return; }
+      if ((tag.parent_ids || []).map(String).includes(String(parent.id))) {
+        showToast('已经挂在该父级下', 'info');
+        return;
+      }
+      const ok = await mutateCatalogue({
+        action: 'add_parent',
+        tag_id: tagId,
+        parent_id: parent.id
+      });
+      if (ok) showToast('已增加父级「' + parent.name + '」（可撤销）', 'success');
+    }
+
+    async function confirmDeleteTreeTag(tagId) {
+      hideEagleContextMenu();
+      const tag = tagCatalogue.find(t => String(t.id) === String(tagId));
+      if (!tag) { showToast('标签不存在，请刷新后重试', 'error'); return; }
+      try {
+        const impactRes = await fetch(
+          `${API_BASE}/api/library/tags/impact?action=delete_tag&tag_id=${encodeURIComponent(tagId)}`,
+          { headers: { 'X-QB-Request': '1', 'Referer': window.location.href } }
+        );
+        if (!impactRes.ok) {
+          const txt = await impactRes.text();
+          showToast(`无法预览删除影响(${impactRes.status})：${txt.slice(0, 120)}`, 'error');
+          return;
+        }
+        const impact = await impactRes.json();
+        const qCount = impact.question_count || 0;
+        const hCount = impact.historical_count || 0;
+        const okConfirm = window.confirm(
+          `删除标签「${tag.name}」？\n当前正式题 ${qCount} 道、历史 ${hCount} 道会失去此标签。\n此操作可撤销。`
+        );
+        if (!okConfirm) return;
+        const ok = await mutateCatalogue({
+          action: 'delete_tag',
+          tag_id: tagId,
+          impact_token: impact.token,
+          confirmed: true,
+          revision: typeof impact.revision === 'number' ? impact.revision : tagCatalogueRevision
+        });
+        if (ok) showToast('已删除标签「' + tag.name + '」（可撤销）', 'success');
+      } catch (e) {
+        showToast('删除失败：' + e.message, 'error');
+      }
+    }
+
+    function isTagDescendantOf(ancestorId, maybeDescendantId) {
+      if (!ancestorId || !maybeDescendantId) return false;
+      if (String(ancestorId) === String(maybeDescendantId)) return true;
+      const byId = new Map(tagCatalogue.map(t => [String(t.id), t]));
+      const queue = [String(ancestorId)];
+      const visited = new Set();
+      while (queue.length) {
+        const cur = queue.shift();
+        if (visited.has(cur)) continue;
+        visited.add(cur);
+        const node = byId.get(cur);
+        for (const cid of (node && node.child_ids) || []) {
+          const id = String(cid);
+          if (id === String(maybeDescendantId)) return true;
+          queue.push(id);
+        }
+      }
+      return false;
+    }
+
+    async function assignTagToQuestions(tagId, qids) {
+      const ids = Array.from(new Set((qids || []).map(String))).filter(Boolean);
+      if (!tagId || !ids.length) return false;
+      const tag = tagCatalogue.find(t => String(t.id) === String(tagId));
+      if (!tag) { showToast('标签不存在，请刷新后重试', 'error'); return false; }
+      const expected = {};
+      const missing = [];
+      ids.forEach(id => {
+        const q = questionsData.find(x => String(x.id) === id);
+        if (!q) { missing.push(id); return; }
+        expected[id] = typeof q.tagRevision === 'number' ? q.tagRevision : 0;
+      });
+      if (missing.length) {
+        showToast('有题目未加载到前端，请刷新后重试', 'error');
+        return false;
+      }
+      const payload = {
+        publication_ids: ids,
+        add: [String(tagId)],
+        remove: [],
+        scopes: { [String(tagId)]: { whole: true } },
+        expected_revisions: expected,
+        request_id: makeRequestId('eagle-tag-drop')
+      };
+      try {
+        const res = await fetch(`${API_BASE}/api/library/tags/assignments/batch`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-QB-Request': '1',
+            'Referer': window.location.href
+          },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+          const txt = await res.text();
+          showToast(`贴标失败(${res.status})：${txt.slice(0, 140)}`, 'error');
+          return false;
+        }
+        const data = await res.json().catch(() => ({}));
+        const revisions = data.revisions || {};
+        for (const id of ids) {
+          const q = questionsData.find(x => String(x.id) === id);
+          if (!q) continue;
+          if (typeof revisions[id] === 'number') q.tagRevision = revisions[id];
+          await refreshQuestionFromServer(q);
+        }
+        await reloadTagCatalogue();
+        renderRightInspector();
+        applyFilters();
+        renderFolderTree();
+        showToast(`已给 ${ids.length} 道题贴上「${tag.name}」（可撤销）`, 'success');
+        return true;
+      } catch (e) {
+        showToast('贴标失败：' + e.message, 'error');
+        return false;
+      }
+    }
+
+    async function reparentTagByDrop(tagId, toParentId, addOnly) {
+      if (!tagId || !toParentId || String(tagId) === String(toParentId)) return false;
+      if (isTagDescendantOf(tagId, toParentId)) {
+        showToast('不能把父标签拖进自己的子标签里', 'error');
+        return false;
+      }
+      const tag = tagCatalogue.find(t => String(t.id) === String(tagId));
+      const parent = tagCatalogue.find(t => String(t.id) === String(toParentId));
+      if (!tag || !parent) { showToast('标签不存在，请刷新后重试', 'error'); return false; }
+      if (tag.kind !== parent.kind) {
+        showToast('只能挂到同类型标签下（知识点 / 方法）', 'error');
+        return false;
+      }
+      if (addOnly) {
+        if ((tag.parent_ids || []).map(String).includes(String(toParentId))) {
+          showToast('已经挂在该父级下', 'info');
+          return true;
+        }
+        const ok = await mutateCatalogue({
+          action: 'add_parent',
+          tag_id: tagId,
+          parent_id: toParentId
+        });
+        if (ok) showToast('已增加父级「' + parent.name + '」（多父级，可撤销）', 'success');
+        return ok;
+      }
+      const parents = (tag.parent_ids || []).map(String);
+      if (parents.includes(String(toParentId)) && parents.length === 1) {
+        showToast('已在该父级下', 'info');
+        return true;
+      }
+      if (!parents.length) {
+        const ok = await mutateCatalogue({
+          action: 'set_parents',
+          tag_id: tagId,
+          parent_ids: [toParentId]
+        });
+        if (ok) showToast('已挂到「' + parent.name + '」下（可撤销）', 'success');
+        return ok;
+      }
+      const ok = await mutateCatalogue({
+        action: 'move_parent',
+        tag_id: tagId,
+        from_parent_id: parents[0],
+        to_parent_id: toParentId
+      });
+      if (ok) showToast('已改归属到「' + parent.name + '」（可撤销）', 'success');
+      return ok;
     }
 
     /** 统一取出节点/资料的创建时间（毫秒）；缺省时尽量从 id 回填，保证时间排序可用。 */
@@ -11060,7 +11502,68 @@
         children: []
       });
 
-      // NOTE: OneNote / 未分类 / 待补充考点标签 / AI核对 / 随机模式 / 标签管理 / 回收站
+      // 标签紧挨「最近浏览」：常用入口靠上，别沉到文件夹后面。
+      // 分区/分组/标签节点右侧数字一律 = 正式贴题的去重题数（与点选浏览一致）
+      const knowTags = buildTagTreeNodes('knowledge', { includeEmpty: true });
+      const methTags = buildTagTreeNodes('method', { includeEmpty: true });
+      const knowTagIds = tagCatalogue.filter(t => t.kind === 'knowledge' && t.active !== false).map(t => t.id);
+      const methTagIds = tagCatalogue.filter(t => t.kind === 'method' && t.active !== false).map(t => t.id);
+      const knowQuestionCount = countQuestionsForTagIdSet(knowTagIds);
+      const methQuestionCount = countQuestionsForTagIdSet(methTagIds);
+      const tagSectionChildren = sortFolderTreeNodes([
+        {
+          id: 'group:knowledge',
+          type: 'group',
+          label: '知识点',
+          icon: '\u{1F3F7}',
+          count: knowQuestionCount,
+          tagKind: 'knowledge',
+          createdAtMs: 0,
+          createdLabel: '已贴题 ' + knowQuestionCount + ' 道 · 考点标签 ' + knowTagIds.length + ' 个',
+          children: knowTags.length ? knowTags : [{
+            id: 'hint:empty_knowledge',
+            type: 'hint',
+            hintAction: 'create_tag_knowledge',
+            label: '点击 + 新建知识点标签',
+            icon: '＋',
+            count: 0,
+            children: []
+          }]
+        },
+        {
+          id: 'group:method',
+          type: 'group',
+          label: '解题方法',
+          icon: '\u{1F9E9}',
+          count: methQuestionCount,
+          tagKind: 'method',
+          createdAtMs: 0,
+          createdLabel: '已贴题 ' + methQuestionCount + ' 道 · 方法标签 ' + methTagIds.length + ' 个',
+          children: methTags.length ? methTags : [{
+            id: 'hint:empty_method',
+            type: 'hint',
+            hintAction: 'create_tag_method',
+            label: '点击 + 新建方法标签',
+            icon: '＋',
+            count: 0,
+            children: []
+          }]
+        }
+      ]);
+      roots.push({
+        id: 'section:tags',
+        type: 'section',
+        sectionKind: 'tags',
+        label: '标签',
+        icon: '\u{1F4D3}',
+        count: countQuestionsForTagIdSet(knowTagIds.concat(methTagIds)),
+        actionLabel: '+',
+        actionTitle: '新建顶级标签（考点 ' + knowTagIds.length + ' · 方法 ' + methTagIds.length + '）',
+        actionCall: 'event.stopPropagation(); promptCreateTreeTag(null, null)',
+        children: tagSectionChildren
+      });
+
+      // NOTE: OneNote / 未分类 / 待补充考点标签 / AI核对 / 随机模式 / 标签管理中心 / 回收站
       // 已统一折叠收纳至左上角 ≡ 应用主菜单 (#eagleAppMainMenu)，避免左侧边栏冗长与功能重复。
 
       // 🔖 智能文件夹（动态筛选条件保存）
@@ -11142,35 +11645,6 @@
         }]
       });
 
-      // 🏷️ 标签与考点（知识点 / 解题方法）
-      const tagChildren = [];
-      const know = buildTagTreeNodes('knowledge');
-      if (know.length) {
-        tagChildren.push({
-          id: 'group:knowledge', type: 'group', label: '知识点', icon: '\u{1F3F7}',
-          count: know.reduce((s, p) => s + p.count, 0), children: know
-        });
-      }
-      const meth = buildTagTreeNodes('method');
-      if (meth.length) {
-        tagChildren.push({
-          id: 'group:method', type: 'group', label: '解题方法', icon: '\u{1F9E9}',
-          count: meth.reduce((s, p) => s + p.count, 0), children: meth
-        });
-      }
-      if (tagChildren.length) {
-        roots.push({
-          id: 'section:tags',
-          type: 'section',
-          sectionKind: 'tags',
-          label: '标签与考点',
-          icon: '🏷️',
-          count: questionsData.length,
-          folderCount: Array.isArray(tagCatalogue) ? tagCatalogue.length : 0,
-          children: tagChildren
-        });
-      }
-
       return roots;
     }
 
@@ -11198,7 +11672,11 @@
 
       if (node.type === 'hint') {
         if (kw) return '';
-        const act = node.hintAction === 'create_uf' ? 'createUserFolder(null)' : 'saveCurrentAsSmartFolder(null)';
+        let act = 'saveCurrentAsSmartFolder(null)';
+        if (node.hintAction === 'create_uf') act = 'createUserFolder(null)';
+        else if (node.hintAction === 'create_tag_knowledge') act = "promptCreateTreeTag(null, 'knowledge')";
+        else if (node.hintAction === 'create_tag_method') act = "promptCreateTreeTag(null, 'method')";
+        else if (node.hintAction === 'create_csf') act = 'saveCurrentAsSmartFolder(null)';
         return `<div onclick="${act}" class="flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] text-slate-400 hover:text-emerald-700 hover:bg-slate-100/80 cursor-pointer select-none" style="padding-left:${4 + depth * 11}px"><span class="opacity-70">${node.icon}</span><span class="truncate">${escapeHtml(node.label)}</span></div>`;
       }
 
@@ -11266,12 +11744,13 @@
         ? '<span onclick="event.stopPropagation(); toggleFolderNode(\'' + safeNodeId + '\')" class="w-3 h-3 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 cursor-pointer select-none shrink-0">' + (isExpanded ? '▾' : '▸') + '</span>'
         : '<span class="w-3 inline-block shrink-0"></span>';
 
-      const canDragFolder = (node.type === 'userfolder' || node.type === 'custom');
+      const canDragFolder = (node.type === 'userfolder' || node.type === 'custom' || node.type === 'tag');
       const canAcceptDrop = (
         node.type === 'userfolder' ||
         node.type === 'custom' ||
         node.type === 'paper' ||
         node.type === 'book' ||
+        node.type === 'tag' ||
         (node.type === 'group' && (node.id === 'group:papers' || node.id === 'group:books'))
       );
       const dragAttr = canDragFolder
@@ -11283,23 +11762,42 @@
       const countDisplay = (node.count === '' || node.count === null || node.count === undefined) ? '' : node.count;
       const timeTip = node.createdLabel
         ? ` title="${escapeHtml(node.label)} · ${escapeHtml(node.createdLabel)}"`
-        : ` title="${escapeHtml(node.label || '')}"`;
+        : (node.type === 'tag'
+          ? ` title="${escapeHtml(node.label || '')}（拖题贴标；拖标签改归属，Alt=多父）"`
+          : ` title="${escapeHtml(node.label || '')}"`);
+      const isMethodTag = node.type === 'tag' && node.tagKind === 'method';
+      const activeCls = isActive
+        ? (isMethodTag ? 'bg-violet-50 text-violet-900 font-semibold' : 'bg-emerald-50 text-emerald-900 font-semibold')
+        : 'text-slate-600 hover:bg-slate-100';
+      const countCls = isActive
+        ? (isMethodTag ? 'text-violet-700' : 'text-emerald-700')
+        : 'text-slate-400';
+      let tagDot = '';
+      if (node.type === 'tag' && node.tagId) {
+        const meta = tagCatalogue.find(t => String(t.id) === String(node.tagId));
+        if (meta && meta.color) {
+          tagDot = '<span class="w-1.5 h-1.5 rounded-full shrink-0 ring-1 ring-black/5" style="background:' + escapeHtml(meta.color) + '"></span>';
+        } else {
+          tagDot = '<span class="w-1.5 h-1.5 rounded-full shrink-0 ' + (isMethodTag ? 'bg-violet-400' : 'bg-emerald-400') + '"></span>';
+        }
+      }
 
       return '<div id="ftree-' + escapeHtml(node.id) + '" class="flex items-center justify-between rounded-md px-1.5 py-1 transition-colors ' +
-        (isActive ? 'bg-emerald-50 text-emerald-900 font-semibold' : 'text-slate-600 hover:bg-slate-100') +
+        activeCls +
         '" style="padding-left:' + (4 + depth * 11) + 'px"' +
         dragAttr + dropAttr + timeTip +
         ' oncontextmenu="handleFolderTreeContextMenu(event, \'' + safeNodeId + '\')">' +
         '<div class="flex items-center gap-1 min-w-0 cursor-pointer flex-1" onclick="applyFolderNode(\'' + safeNodeId + '\')"' +
-        ((node.type === 'paper' || node.type === 'book' || node.type === 'userfolder' || node.type === 'custom')
+        ((node.type === 'paper' || node.type === 'book' || node.type === 'userfolder' || node.type === 'custom' || node.type === 'tag')
           ? ' ondblclick="event.stopPropagation(); beginInlineTreeRename(\'' + safeNodeId + '\')"'
           : '') +
         '>' +
         arrow +
+        tagDot +
         '<span class="text-[11px] shrink-0">' + node.icon + '</span>' +
         '<span class="truncate text-[11px]" data-tree-label="' + safeNodeId + '">' + escapeHtml(node.label) + '</span>' +
         '</div>' +
-        '<span class="font-mono text-[10px] shrink-0 ml-1 ' + (isActive ? 'text-emerald-700' : 'text-slate-400') + '">' + countDisplay + '</span>' +
+        '<span class="font-mono text-[10px] shrink-0 ml-1 ' + countCls + '">' + countDisplay + '</span>' +
         '</div>' + kidsHtml;
     }
 
@@ -11354,8 +11852,13 @@
     function handleFolderDragStart(e, nodeId) {
       e.stopPropagation();
       const node = folderNodeRegistry.get(nodeId);
-      if (!node || (node.type !== 'userfolder' && node.type !== 'custom')) return;
-      const payload = { kind: 'folder', nodeId, folderType: node.type, itemId: node.folderId || node.customId };
+      if (!node || (node.type !== 'userfolder' && node.type !== 'custom' && node.type !== 'tag')) return;
+      const payload = {
+        kind: 'folder',
+        nodeId,
+        folderType: node.type,
+        itemId: node.type === 'tag' ? node.tagId : (node.folderId || node.customId)
+      };
       window.__eagleDragPayload = payload;
       try {
         if (e && e.dataTransfer) {
@@ -11368,9 +11871,18 @@
     function canAcceptFolderDrop(payload, targetNode) {
       if (!payload || !targetNode) return false;
       if (payload.kind === 'questions') {
-        return targetNode.type === 'userfolder' || targetNode.type === 'paper' || targetNode.type === 'book';
+        return targetNode.type === 'userfolder' || targetNode.type === 'paper' || targetNode.type === 'book' || targetNode.type === 'tag';
       }
       if (payload.kind === 'folder') {
+        if (payload.folderType === 'tag') {
+          if (targetNode.type !== 'tag' || !targetNode.tagId) return false;
+          if (String(targetNode.tagId) === String(payload.itemId)) return false;
+          if (isTagDescendantOf(payload.itemId, targetNode.tagId)) return false;
+          const src = tagCatalogue.find(t => String(t.id) === String(payload.itemId));
+          const dst = tagCatalogue.find(t => String(t.id) === String(targetNode.tagId));
+          if (!src || !dst || src.kind !== dst.kind) return false;
+          return true;
+        }
         if (payload.folderType === 'userfolder') {
           const list = readUserFolders();
           let targetParentId = null;
@@ -11415,9 +11927,17 @@
       if (!canAcceptFolderDrop(payload, targetNode)) return;
       e.preventDefault();
       if (e.dataTransfer) {
-        e.dataTransfer.dropEffect = payload.kind === 'questions' ? 'copy' : 'move';
+        if (payload.kind === 'questions') e.dataTransfer.dropEffect = 'copy';
+        else if (payload.folderType === 'tag' && e.altKey) e.dataTransfer.dropEffect = 'copy';
+        else e.dataTransfer.dropEffect = 'move';
       }
-      if (el) el.classList.add('ring-2', 'ring-emerald-400', 'bg-emerald-50/80');
+      if (el) {
+        el.classList.add('ring-2', 'ring-emerald-400', 'bg-emerald-50/80');
+        if (payload.folderType === 'tag' && e.altKey) {
+          el.classList.add('ring-violet-400');
+          el.classList.remove('ring-emerald-400');
+        }
+      }
     }
 
     function handleFolderDragLeave(el) {
@@ -11438,9 +11958,14 @@
           addQuestionsToUserFolder(payload.ids, targetNode.folderId);
         } else if (targetNode.type === 'paper' || targetNode.type === 'book') {
           addQuestionsToFolderTarget(payload.ids, targetNode.id);
+        } else if (targetNode.type === 'tag') {
+          assignTagToQuestions(targetNode.tagId, payload.ids);
         }
       } else if (payload.kind === 'folder') {
-        if (payload.folderType === 'userfolder') {
+        if (payload.folderType === 'tag') {
+          const addOnly = !!(e && e.altKey);
+          reparentTagByDrop(payload.itemId, targetNode.tagId, addOnly);
+        } else if (payload.folderType === 'userfolder') {
           let newParentId = null;
           if (targetNode.type === 'userfolder') newParentId = targetNode.folderId;
           else if (isSystemFolderParentId(targetNode.id)) newParentId = targetNode.id;
@@ -11657,6 +12182,8 @@
       if (node.type === 'hint') {
         if (node.hintAction === 'create_uf') createUserFolder(null);
         else if (node.hintAction === 'create_csf') saveCurrentAsSmartFolder(null);
+        else if (node.hintAction === 'create_tag_knowledge') promptCreateTreeTag(null, 'knowledge');
+        else if (node.hintAction === 'create_tag_method') promptCreateTreeTag(null, 'method');
         return;
       }
       if (node.type === 'trash') {
@@ -11698,6 +12225,7 @@
         }
       } else if (node.type === 'tag') {
         filterState.folderTagIds = collectTagIds(node);
+        expandFolderAncestors(nodeId);
         folderTreeState.expanded.add(nodeId);
         writeExpandedFolderNodes();
       } else if (node.type === 'bookchapter') {
@@ -11965,12 +12493,13 @@
     function confirmDeletePaper(paperId) {
       const p = papersData.find(x => x.id === paperId);
       if (!p) return;
-      const liveQs = questionsData.filter(q => q.documentId === paperId);
+      // 用资料侧栏的已入库数，不看 questionsData：首屏分页没载完时，内存里只有一部分题。
+      const liveCount = Math.max(0, Number(p.published) || 0);
       const mountedSubfolders = readUserFolders().filter(u => u.parentId === ('paper:' + paperId) || u.parentId === ('book:' + paperId));
       const impacts = [
         `将归档资料项目「${p.name}」（从左侧目录中隐藏）`,
-        liveQs.length > 0
-          ? `该资料下有 ${liveQs.length} 道已发布试题，将一并从正式题库下架至回收站`
+        liveCount > 0
+          ? `该资料下有 ${liveCount} 道已发布试题，将一并从正式题库下架至回收站`
           : '该资料当前无已发布试题'
       ];
       if (mountedSubfolders.length > 0) {
@@ -12073,17 +12602,22 @@
 
     async function movePaperToTrash(paperId) {
       const p = papersData.find(x => x.id === paperId);
-      const liveQids = questionsData.filter(q => q.documentId === paperId).map(q => q.id);
       try {
-        if (liveQids.length) {
-          const wResp = await fetch('/api/library/withdraw-batch', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
-            body: JSON.stringify({ ids: liveQids })
-          });
-          if (!wResp.ok) throw new Error('下架试卷题目失败');
+        // 按资料整批下架：后端按 paper_id 扫全部 published，不依赖本页 questionsData。
+        // 以前只撤内存里已加载的 id，首屏分页没载完就会漏题——资料进了回收站，题还挂着。
+        const wResp = await fetch('/api/library/withdraw-batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
+          body: JSON.stringify({ document_id: paperId })
+        });
+        const wData = await wResp.json().catch(() => ({}));
+        if (!wResp.ok || (wData && wData.ok === false)) {
+          throw new Error((wData && wData.error) || '下架试卷题目失败');
+        }
+        const withdrawnIds = Array.isArray(wData.withdrawn) ? wData.withdrawn.map(String) : [];
+        if (withdrawnIds.length) {
           const qMap = readPaperTrashQidsMap();
-          qMap[paperId] = liveQids;
+          qMap[paperId] = withdrawnIds;
           writePaperTrashQidsMap(qMap);
         }
         const aResp = await fetch(`/api/papers/${paperId}/archive`, { method: 'POST', headers: { 'X-QB-Request': '1' } });
@@ -12114,8 +12648,12 @@
           headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
           body: JSON.stringify({ ids: qids })
         });
-        const data = await resp.json();
-        if (!resp.ok || !data.ok) throw new Error((data && data.error) || '下架试题失败');
+        const data = await resp.json().catch(() => ({}));
+        // 只把显式 ok:false 或非 2xx 当失败。旧后端按 ids 撤回成功时不带 ok 字段，
+        // 用 !data.ok 会把真成功误报成「下架试题失败」。
+        if (!resp.ok || (data && data.ok === false)) {
+          throw new Error((data && data.error) || '下架试题失败');
+        }
         selectedQuestionIds.clear();
         if (typeof updateBatchActionBar === 'function') updateBatchActionBar();
         await loadInitialLibraryData();
@@ -12123,7 +12661,12 @@
         renderFolderTree();
         renderInlineActiveChips();
         applyFilters();
-        showToast(`已将 ${data.withdrawn_count || qids.length} 道试题移入回收站`, 'info');
+        const skipped = Array.isArray(data.skipped) ? data.skipped : [];
+        const done = data.withdrawn_count ?? (Array.isArray(data.withdrawn) ? data.withdrawn.length : qids.length);
+        const skippedText = skipped.length
+          ? `；${skipped.length} 道没撤成（${[...new Set(skipped.map((row) => row.reason))].join('、')}）`
+          : '';
+        showToast(`已将 ${done} 道试题移入回收站${skippedText}`, skipped.length ? 'error' : 'info');
       } catch (e) {
         showToast('移入回收站失败：' + (e.message || e), 'error');
       }
@@ -12187,9 +12730,13 @@
         const resp = await fetch(`/api/papers/${paperId}/restore`, { method: 'POST', headers: { 'X-QB-Request': '1' } });
         if (!resp.ok) throw new Error('恢复资料失败');
         const qMap = readPaperTrashQidsMap();
-        const recordedIds = Array.isArray(qMap[paperId]) ? qMap[paperId] : [];
-        const withdrawnSet = new Set((libraryTrashCache.withdrawnQuestions || []).map(q => q.id));
-        const idsToRestore = recordedIds.filter(id => withdrawnSet.has(id));
+        const recordedIds = Array.isArray(qMap[paperId]) ? qMap[paperId].map(String) : [];
+        // 以回收站里该资料名下全部下架题为准，不只信本地记录——旧版漏撤修好后，
+        // 恢复时仍要把这卷在回收站里的题一并放回。
+        const fromTrash = (libraryTrashCache.withdrawnQuestions || [])
+          .filter(q => String(q.documentId || q.document_id || '') === String(paperId))
+          .map(q => String(q.id));
+        const idsToRestore = Array.from(new Set([...recordedIds, ...fromTrash]));
         if (idsToRestore.length) {
           await fetch('/api/library/restore-batch', {
             method: 'POST',
@@ -12430,8 +12977,8 @@
           { key: 'all', label: `全部 (${total})` },
           { key: 'folders', label: `📁 文件夹 (${local.folders.length})` },
           { key: 'smartFolders', label: `🔖 智能文件夹 (${local.smartFolders.length})` },
-          { key: 'papers', label: `📄 试卷/教材 (${papers.length})` },
-          { key: 'questions', label: `📝 试题 (${qs.length})` }
+          { key: 'papers', label: `📄 试卷/教材 (${paperCount})` },
+          { key: 'questions', label: `📝 试题 (${questionCount})` }
         ];
         tabsEl.innerHTML = tabs.map(t => {
           const active = activeRecycleTab === t.key;
@@ -12799,13 +13346,14 @@
         `;
       }
 
-      // 智能视图已由下方 smartFilter 芯片表达，不再叠画「文件夹: …」
+      // 智能视图已由下方 smartFilter 芯片表达，不再叠画范围芯片
       const folderCoveredBySmart = folderNode && folderNode.type === 'smart' && Boolean(filterState.smartFilter);
       if (folderNode && folderTreeState.activeId !== 'all' && !folderCoveredBySmart) {
-        const folderFull = folderNode.pathLabel || folderNode.label || '文件夹';
+        const folderFull = folderNode.pathLabel || folderNode.label || '';
+        // 不写「文件夹:」前缀：标签/试卷/自建夹都只显示名称本身
         html += `
           <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-900 border border-indigo-200 text-xs" title="${escapeHtml(folderFull)}">
-            <span>文件夹: ${escapeHtml(shortFilterLabel(folderFull))}</span>
+            <span>${escapeHtml(shortFilterLabel(folderFull))}</span>
             <button onclick="clearActiveFolderScope()" class="text-indigo-700 hover:text-indigo-950 font-bold ml-0.5 cursor-pointer">×</button>
           </span>
         `;
@@ -13336,9 +13884,13 @@
     }
 
     async function mutateCatalogue(payload) {
-      const body = Object.assign({ revision: tagCatalogueRevision }, payload);
+      const body = Object.assign({
+        revision: tagCatalogueRevision,
+        request_id: makeRequestId('eagle-catalogue')
+      }, payload || {});
+      if (!body.request_id) body.request_id = makeRequestId('eagle-catalogue');
       try {
-        const res = await fetch(`${API_BASE}/api/library/tags`, {
+        let res = await fetch(`${API_BASE}/api/library/tags`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -13347,6 +13899,23 @@
           },
           body: JSON.stringify(body)
         });
+        // 目录乐观锁过期：拉新 revision 后自动重试一次
+        if (res.status === 409) {
+          const fresh = await reloadTagCatalogue();
+          if (fresh && typeof fresh.revision === 'number') {
+            body.revision = fresh.revision;
+            body.request_id = makeRequestId('eagle-catalogue');
+            res = await fetch(`${API_BASE}/api/library/tags`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-QB-Request': '1',
+                'Referer': window.location.href
+              },
+              body: JSON.stringify(body)
+            });
+          }
+        }
         if (!res.ok) {
           const txt = await res.text();
           showToast(`操作失败(${res.status})：${txt.slice(0, 140)}`, 'error');

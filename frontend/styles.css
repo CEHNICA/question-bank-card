@@ -145,6 +145,10 @@ kbd, .kbd { display: inline-grid; place-items: center; min-width: 20px; height: 
   grid-column: 1;
   justify-self: start;
 }
+/* 设置页会藏掉侧栏折叠开关；子项全 hidden 时整块也不占位（优先级盖过上面的 display:flex）。 */
+.review-topbar > .review-top-actions-start:not(:has(> :not([hidden]))) {
+  display: none;
+}
 .review-topbar > .review-top-actions-end {
   grid-column: 3;
   justify-self: end;
@@ -438,8 +442,13 @@ body.drawer-open { overflow: hidden; }
 .cut-reading-steps .done b { color: var(--accent); border-color: var(--accent); }
 .cut-reading-stage h3 { margin: 0; font-size: 17px; line-height: 1.5; }
 .cut-reading-stage > p { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
+.cut-reading-progress { margin-top: 8px; }
+.cut-reading-meter { height: 6px; border-radius: 999px; background: var(--bg-sunken, #e2e8f0); overflow: hidden; }
+.cut-reading-meter-bar { display: block; height: 100%; width: 0; background: var(--accent); border-radius: inherit; transition: width .2s ease; }
+.cut-reading-progress-text { margin: 6px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
 .cut-reading-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .cut-reading-stage .cut-reading-error { color: var(--red); overflow-wrap: anywhere; }
+.cut-reading-stage .cut-reading-error.cut-reading-hint { color: var(--muted); }
 .cut-reading-stage > a { display: inline-block; margin-top: 6px; font-size: 13px; }
 
 .review-meter { position: relative; display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 9px 14px; border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-sm); }
@@ -1639,7 +1648,9 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .qb-option-label { flex: none; }
 .qb-option-body { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .qb-option .qb-figure { grid-column: 2; }
-.qb-figures { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin: .6em 0 .2em; }
+/* 预览/导出排版默认靠右（flex-end）；单题或全卷选项可改。 */
+.qb-figures { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 14px; margin: .6em 0 .2em; }
+.print-flow .qb-figures, .print-paper .qb-figures, .exam-source .qb-figures { justify-content: flex-end; }
 .qb-figure { margin: 0; }
 .qb-question-images { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .qb-question-image { margin: 0; min-width: 0; max-width: 100%; break-inside: avoid; }
@@ -3185,34 +3196,47 @@ kbd {
    录入题目工作台（/）现代排版、章节速跳、紧凑切题流水线与核对卡优化
    ========================================================================== */
 
-/* 顶栏左侧折叠侧栏按钮 */
+/* 顶栏左侧折叠边栏纯图标按钮与导航分隔线（避免与「题库工作台」混淆为页签） */
 .entry-sidebar-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 32px;
-  padding: 0 10px;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
   border-radius: 8px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #475569;
-  font-size: 12.5px;
-  font-weight: 600;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #64748b;
   transition: background .15s, border-color .15s, color .15s;
 }
 .entry-sidebar-toggle .icon {
-  width: 15px;
-  height: 15px;
+  width: 17px;
+  height: 17px;
+  transition: transform .15s ease;
 }
 .entry-sidebar-toggle:hover {
-  background: #ffffff;
+  background: #f1f5f9;
   color: #0f172a;
-  border-color: #cbd5e1;
 }
 .entry-sidebar-toggle[aria-pressed="true"] {
   background: #ecfdf5;
   color: #047857;
   border-color: #a7f3d0;
+}
+.entry-sidebar-toggle[aria-pressed="true"] .icon {
+  transform: scaleX(-1);
+}
+.review-top-actions-end .review-topnav {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.review-top-actions-end .review-nav-primary {
+  transition: background .15s, border-color .15s;
+}
+.review-top-actions-end .review-nav-primary:hover {
+  background: #d1fae5 !important;
+  border-color: #6ee7b7;
 }
 
 /* 可收起左侧边栏：收起时主工作区获得额外 272px 横向审题空间 */
@@ -3399,9 +3423,14 @@ kbd {
   grid-template-areas:
     "steps actions"
     "title actions"
-    "detail actions";
+    "detail actions"
+    "progress actions";
   align-items: center;
   gap: 2px 16px;
+}
+.cut-reading-stage .cut-reading-progress {
+  grid-area: progress;
+  margin-top: 2px;
 }
 .cut-reading-stage .cut-reading-steps {
   grid-area: steps;
@@ -3445,6 +3474,7 @@ kbd {
       "steps"
       "title"
       "detail"
+      "progress"
       "actions";
     gap: 4px;
   }

@@ -52,6 +52,13 @@ assert.doesNotMatch(js, /（本机安装）/);
 
 // 两页进入一个常规设置页；API 配置只有一个外层分区和入口。
 // 1.25.29：菜单项前面加了图标，所以「>设置</a>」中间允许有 svg。
+// 设置与录入共用顶栏，但设置页没有待录侧栏——进 /settings 时必须把折叠开关藏掉。
+assert.match(js, /if \(\$\("entrySidebarToggle"\)\) \$\("entrySidebarToggle"\)\.hidden = true/,
+  "settings route hides the entry sidebar toggle");
+assert.match(css, /\.review-topbar > \.review-top-actions-start:not\(:has\(> :not\(\[hidden\]\)\)\) \{[\s\S]*?display:\s*none/,
+  "empty left topbar actions collapse on settings");
+assert.match(js, /event\.key === "\["[\s\S]*?pathname === "\/settings"\) return;[\s\S]*?setEntrySidebarCollapsed/,
+  "[ shortcut does not toggle a missing sidebar on settings");
 assert.match(html, /id="settingsButton"[^>]*href="\/settings"[^>]*>[\s\S]*?设置<\/a>/);
 assert.match(libraryHtml, /href="\/settings">[\s\S]*?设置<\/a>/);
 assert.doesNotMatch(libraryHtml, /data-library-ai-settings/);
@@ -195,7 +202,8 @@ assert.doesNotMatch(html, /id="settingsTask"/);
 assert.match(html, /<details class="menu paper-menu paper-context-menu" id="paperMenu">[\s\S]*?id="settingsRename"[\s\S]*?id="settingsTaskNotes"[\s\S]*?id="settingsArchive"[\s\S]*?id="settingsDelete"/);
 assert.match(html, /id="paperMenuTrigger"/, "录入页试卷操作入口挂在 paperMenuTrigger");
 assert.match(js, /function openPaperContextMenu\(/, "试卷操作改走右键菜单");
-assert.match(js, /function retireCurrentPaperIfComplete\(/, "看完的当前卷会当场归档收起");
+assert.doesNotMatch(js, /function retireCurrentPaperIfComplete\(/, "看完的当前卷不再自动归档收起");
+assert.match(js, /button\("归档任务"/, "做完后由人手点归档");
 
 // 1.13.1：题库里还有活题才拦删除，撤回完就应该能删。
 // 提示必须给出路（先去题库撤回），不能只丢一句“不能删除”让人反复试。

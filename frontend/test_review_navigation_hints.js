@@ -129,7 +129,7 @@ assert.doesNotMatch(tourSteps, /publishButton/, "The tour never points to an obs
 // depends on the previous stage's hidden flag, so an initial/polled render cannot
 // accidentally produce two primary crop buttons.
 const { node, el } = require("./credential-test-dom.js");
-const stageCode = source.slice(source.indexOf("  function renderCutReadingStage()"), source.indexOf("  function openManualCut()"));
+const stageCode = source.slice(source.indexOf("  function latestReaderConfigFailure()"), source.indexOf("  function openManualCut()"));
 const emptyStart = source.indexOf("    if (!shown.length) {");
 const emptyCode = source.slice(emptyStart, source.indexOf("    R.fitOptions(container);", emptyStart));
 function cutting(paper, questions = []) {
@@ -141,6 +141,7 @@ function cutting(paper, questions = []) {
     ACTIVE_STATUS: new Set(["queued", "parsing", "segmenting", "reading"]), container, shown: [], el,
     directImageReview: new Set(), cutReadingErrors: new Map(), cutReadingStopErrors: new Map(), cutReadingRequests: new Set(), cutReadingStops: new Set(),
     manualSwitches: new Set(), aiCutContinuations: new Set(), paperReadSubmissionPending: () => false,
+    readerUnavailable: () => null, readerUnavailableSentence: () => "not ready",
     openManualCut() {}, focusCutReview() {}, readCutQuestions() {}, stopCutReading() {}, document: { createTextNode: text => text },
     button(label, className, callback) { const result = node("", "button", label); result.className = className; result.callback = callback; return result; } };
   vm.runInNewContext(stageCode, context);

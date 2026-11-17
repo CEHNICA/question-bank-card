@@ -33,7 +33,8 @@
         .map(Number).filter(value => Number.isInteger(value) && value >= 0))].sort((a, b) => a - b);
       const entry = {};
       if (Object.keys(widths).length) entry.width = widths;
-      if (positions.has(setting.align) && setting.align !== "center") entry.align = setting.align;
+      // 单题显式选了位置就留下（含居中）；缺省跟随全卷 figure_align。
+      if (positions.has(setting.align)) entry.align = setting.align;
       if (breaks.length) entry.breaks = breaks;
       if (Object.keys(entry).length) result[id] = entry;
     }
@@ -62,6 +63,7 @@
         .map(([id, value]) => [id, normalizeSpace(value)])
         .filter(([, value]) => value !== null)),
       question_breaks: Array.isArray(options.question_breaks) ? [...new Set(options.question_breaks.filter(value => typeof value === "string"))] : [],
+      figure_align: positions.has(options.figure_align) ? options.figure_align : "right",
       figure_overrides: figureSettings(options.figure_overrides)
     };
   }
@@ -265,13 +267,16 @@
   // 3.70mm 的小段落（同样是 14px），两边必须一样，所以这里插入的占位空隙也按 14px 算。
   const FIGURE_GAP_PX = 14;
   function applyFigureOverrides(work, options) {
-    const overrides = options.figure_overrides || {};
+    const normalized = normalize(options);
+    const overrides = normalized.figure_overrides || {};
+    const defaultAlign = normalized.figure_align || "right";
     work.querySelectorAll(".print-question").forEach(question => {
-      const setting = overrides[question.dataset.questionId];
-      if (!setting) return;
+      const setting = overrides[question.dataset.questionId] || {};
       const row = question.querySelector(".qb-figures");
       if (!row) return;
-      if (setting.align) row.style.justifyContent = setting.align;
+      const align = positions.has(setting.align) ? setting.align : defaultAlign;
+      // flex 要用 flex-start/flex-end；裸写 left/right 在部分引擎上不生效，预览会一直像居中。
+      row.style.justifyContent = align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center";
       const figures = Array.from(row.children).filter(child => child.classList.contains("qb-figure"));
       figures.forEach((figure, index) => {
         const millimetres = setting.width ? setting.width[index] : 0;

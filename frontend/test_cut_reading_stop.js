@@ -59,15 +59,27 @@ function scenario() {
 
   // A manually cut supplement can belong to an otherwise cloud-parsed paper.
   // Its normal text rereading still needs a visible stop action.
-  const stage = js.slice(js.indexOf("  function renderCutReadingStage("), js.indexOf("  function openManualCut("));
+  const stage = js.slice(js.indexOf("  function latestReaderConfigFailure("), js.indexOf("  function openManualCut("));
   const stageNodes = new Map(), buttons = [];
-  const node = () => ({ hidden: false, dataset: {}, children: [], append(...items) { this.children.push(...items); },
-    replaceChildren(...items) { this.children = items; }, setAttribute() {} });
+  const node = () => {
+    const classes = new Set();
+    return {
+      hidden: false, dataset: {}, children: [], style: {}, textContent: "",
+      append(...items) { this.children.push(...items); },
+      replaceChildren(...items) { this.children = items; },
+      setAttribute() {},
+      classList: {
+        add(name) { classes.add(name); }, remove(name) { classes.delete(name); },
+        toggle(name, force) { const add = force ?? !classes.has(name); if (add) classes.add(name); else classes.delete(name); },
+      },
+    };
+  };
   const stageContext = { state: { paper: { id: "manual-text", parse_mode: "mineru", status: "ready" },
     questions: [{ ...manualText.questions[0], ocr_pending: true }] }, QBCutReading: Cut,
     cutReadingErrors: new Map(), cutReadingStopErrors: new Map(), directImageReview: new Set(),
     cutReadingRequests: new Set(), cutReadingStops: new Set(), paperReadSubmissionPending: () => false,
     manualSwitches: new Set(), aiCutContinuations: new Set(),
+    readerUnavailable: () => null, readerUnavailableSentence: () => "not ready",
     $: (id) => { if (!stageNodes.has(id)) stageNodes.set(id, node()); return stageNodes.get(id); },
     document: { createTextNode: (text) => text }, el: () => node(),
     button: (label) => { buttons.push(label); return node(); }, stopCutReading() {}, openManualCut() {}, focusCutReview() {}, readCutQuestions() {} };
@@ -75,7 +87,7 @@ function scenario() {
   assert.equal(stageNodes.get("cutReadingStage").hidden, false);
   assert.match(stageNodes.get("cutReadingTitle").textContent, /1 道题正在 AI 识读/);
   assert.ok(buttons.includes("停止识读"));
-  assert.ok(!buttons.some((label) => /识读未完成题目/.test(label)), "Text rereading must not produce a duplicate batch reading action");
+  assert.ok(!buttons.some((label) => /识读未完成题目|重新识读失败题目/.test(label)), "Text rereading must not produce a duplicate batch reading action");
 
   const failure = scenario();
   failure.context.api = async () => { throw new Error("Offline"); };

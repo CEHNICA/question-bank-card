@@ -406,9 +406,9 @@ assertInMedia(
 // ---- ⑧ 第六轮：左栏抽屉展开态的小触摸目标 --------------------------------
 //
 // 390px 实测（窄屏下左栏是 position:fixed 的浮层，展开后盖住中栏）：
-//   · 文件夹树分组标题行的三个「+」按钮是 w-4 h-4 = 16×16 —— 手机上根本点不准；
-//   · 侧栏底栏「展开标签地图 / 管理」两个入口只有 28px 高。
+//   · 文件夹树分组标题行的三个「+」按钮是 w-4 h-4 = 16×16 —— 手机上根本点不准。
 // → 窄屏抬到 32px（宽屏零变化）。
+// 侧栏底栏「展开标签地图 / 管理」已撤，标签管理只走 ≡ 主菜单，不再测底栏触摸目标。
 //
 // 注意：Tailwind 是本地预编译产物（/eagle/tailwind.css），
 // 新增 utility class 不会生效，只能靠 class 钩子写自定义 CSS 规则 ——
@@ -419,16 +419,6 @@ assertInMedia(
   /#folderTreeContainer\s+\.eagle-tree-action-btn\s*\{[^}]*min-width:\s*32px[^}]*min-height:\s*32px/,
   "文件夹树「+」按钮窄屏抬到 32×32"
 );
-assertInMedia(
-  "max-width: 640px",
-  /button\[title="在经典题库页打开标签地图（浏览不写库）"\][^{]*\{[^}]*min-height:\s*32px/,
-  "侧栏底栏「展开标签地图」按钮窄屏抬到 32px"
-);
-assertInMedia(
-  "max-width: 640px",
-  /button\[title="打开标签管理中心"\][^{]*\{[^}]*min-height:\s*32px/,
-  "侧栏底栏「管理」按钮窄屏抬到 32px"
-);
 
 // HTML 里必须有这个 class 钩子，否则 CSS 定位不到
 assert.match(
@@ -437,14 +427,20 @@ assert.match(
   "文件夹树「+」按钮缺少 class 钩子 eagle-tree-action-btn"
 );
 
-// 宽屏不得有残留：这两个选择器只允许出现在窄屏媒体查询里
+// 宽屏不得有残留：该选择器只允许出现在窄屏媒体查询里
 assert.ok(
   !wideRules.includes(".eagle-tree-action-btn"),
   ".eagle-tree-action-btn 只允许出现在窄屏媒体查询里，宽屏不得有残留规则"
 );
-assert.ok(
-  !wideRules.includes('button[title="打开标签管理中心"]'),
-  'button[title="打开标签管理中心"] 只允许出现在窄屏媒体查询里，宽屏不得有残留规则'
+assert.doesNotMatch(
+  html,
+  /title="在经典题库页打开标签地图（浏览不写库）"/,
+  "侧栏不得再残留标签地图底栏按钮"
+);
+assert.doesNotMatch(
+  html,
+  /title="打开标签管理中心"/,
+  "侧栏不得再残留「管理」底栏按钮"
 );
 
 console.log(
