@@ -148,6 +148,35 @@ PREVIEW_TITLE_LINE_HEIGHT_PT = 27
 PREVIEW_ANSWER_ROW_MARGIN_PT = 4.5
 # .solution-paragraph（解析正文）的上下外边距：3pt。
 PREVIEW_SOLUTION_PARAGRAPH_MARGIN_PT = 3
+#
+# 上面两个数是**照抄预览**的，但预览和 Word 的**行盒模型**不一样，
+# 照抄完还得补一段距离，不然纸上还是对不上。
+#
+# Chrome（预览，基准）把多出来的行距**一半放上、一半放下** —— 字顶在行盒里
+# 居中（实测：标题行盒 18 磅 → 字顶偏移 3.0 磅；答案行盒 16.2 磅 → 1.5 磅）。
+# Word 把多出来的空间**全放在基线上方**，字顶几乎贴着行盒顶。
+#
+# 于是两段挨着时，「上一段的字顶 → 下一段的字顶」这段距离，Word 比预览短。
+# 真 Word 实测（Chrome DOM 见 _probe100.py，真 Word 见 _probe103.py）：
+#
+#     预览  标题字顶 → 答案字顶    24.84 磅
+#     Word  同上                    20.46 磅
+#     差                            4.38 磅
+#
+# 这 4.38 磅里有 0.885 磅是**标题自己**的字顶残差（SimHei 在 Chrome 是
+# Type3、在 Word 是 CID，ascent 度量不同），补不了；真正要补的是净差
+# 3.5 磅。实测：补 3.0 → 答案偏 −0.190 毫米，补 3.5 → 偏 +0.018 毫米，
+# 补 4.0 → 偏 +0.233 毫米 —— 3.5 最准。
+#
+# **只有行盒高度不同的接缝要补**：答案 → 解析这两行盒一样高（都是 16.2 磅），
+# 实测只差 0.24 磅，不用补。
+WORD_LINE_BOX_LEADING_COMPENSATION_PT = 3.5
+#
+# 解析正文那一段还要单独补 1.5 磅：预览里解析正文所在的那一行，行盒被行内
+# 公式**撑高**了（行盒顶离上一行底 3 磅，字顶却比行盒顶还高 1.52 磅 ——
+# Chrome 把撑出来的高度放在了字顶上面）。Word 的公式是行内对象，行盒不会
+# 撑成那个形状，实测差 1.5 磅（0.53 毫米）。
+PREVIEW_SOLUTION_LINE_BOX_COMPENSATION_PT = 1.5
 # .solution-figure（解析配图）的上下外边距：6px = 4.5pt。
 PREVIEW_SOLUTION_FIGURE_MARGIN_PT = 4.5
 # 字体规格（字号 / 字重 / 字体族）也照抄预览，Word 这边不许自己另定一套：
@@ -3267,7 +3296,13 @@ def _write_solution(document, item, size, label, lead_space_pt=0.0, table_lefts=
             where=item["where"],
             indent_mm=indent,
             text_width_mm=column,
-            space_before_pt=_space_before(PREVIEW_SOLUTION_PARAGRAPH_MARGIN_PT),
+            # 紧跟「解析：」标签的那一段要补 1.5 磅（Chrome 的行盒被行内公式
+            # 撑高，字顶比 Word 高）。后面的解析段不补 —— 预览里那些段之间
+            # 的间距是折叠后的 3 磅，补了就多一截。
+            space_before_pt=_space_before(
+                PREVIEW_SOLUTION_PARAGRAPH_MARGIN_PT
+                + (PREVIEW_SOLUTION_LINE_BOX_COMPENSATION_PT if index == 0 else 0.0)
+            ),
             space_after_pt=PREVIEW_SOLUTION_PARAGRAPH_MARGIN_PT,
             table_lefts=(
                 analysis_offsets[sum(part_tables[:index]) : sum(part_tables[: index + 1])]
@@ -4100,7 +4135,13 @@ def _document(captured, title, options, mode):
                 item,
                 size,
                 label,
-                lead_space_pt=PREVIEW_ANSWER_ROW_MARGIN_PT if index == 0 else 0.0,
+                # 预览的 .print-answer-row 上外边距是 6px = 4.5 磅，这边照抄；
+                # 再补 3.5 磅 —— Chrome 和 Word 的行盒模型不同，标题行盒
+                # 18 磅、答案行盒 16.2 磅，两行挨着时字顶距离 Word 比预览短
+                # 3.5 磅（详见 WORD_LINE_BOX_LEADING_COMPENSATION_PT）。
+                lead_space_pt=(
+                    PREVIEW_ANSWER_ROW_MARGIN_PT + WORD_LINE_BOX_LEADING_COMPENSATION_PT if index == 0 else 0.0
+                ),
                 table_lefts={
                     "answer": (measured_tables.get(item["id"]) or {}).get("answer"),
                     "analysis": (measured_tables.get(item["id"]) or {}).get("analysis"),
