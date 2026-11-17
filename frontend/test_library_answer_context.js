@@ -12,6 +12,7 @@ const context = { state, printState, ui: { sheet: { open: true } },
   $: id => { assert.equal(id, "answerEditorDialog"); return dialog; },
   requestAnimationFrame: fn => { frames.push(fn); },
   render: () => { counts.list++; }, renderPrint: () => { counts.print++; }, markDraftDirty: () => { counts.dirty++; },
+  savePaperContext() {},
   syncPrintAnswers() {}, syncExportButtons() {}, currentPrintOptions: () => ({ document: "combined" }), printAnswerContent: item => item.solution,
   toast() {}, node() {}, QB: {}, confirmDialog() {},
   window: { requestIdleCallback: fn => idle.push(fn), LibraryAnswerEditor: { create: options => { callback = options.onSaved; return {

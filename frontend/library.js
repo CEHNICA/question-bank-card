@@ -207,6 +207,112 @@
     document.body.classList.add("library-basket-seen");
   }
 
+  // 组卷上下文：刷新一下页面，攒了一半的卷子不能只剩一篮子题。
+  //
+  // 篮子里的题号存在本机（qb-basket），可是标题、打印设置和「正在编辑哪份草稿」
+  // 以前只活在内存里 —— 刷新一次全丢。再点「保存草稿」时 state.draft 是空的，
+  // 于是按默认值另开一份，原来那份一动不动：老师以为在改旧卷子，
+  // 实际存进去的是一份设置全默认的新卷子。
+  //
+  // 跟篮子放在同一个作用域里，恢复时一起回来。草稿还在不在由后台核对，
+  // 不在了就退回「新建」，不假装还在编辑一份已经不存在的草稿。
+  const PAPER_CONTEXT_KEY = "qb-paper-context";
+  // 恢复没做完之前不许回写：初始化时 saveBasket() 会先跑一趟，
+  // 那时候还没把草稿编号读回来，回写等于把刚要恢复的东西抹掉。
+  let paperContextRestoring = true;
+
+  function loadPaperContext() {
+    try {
+      const value = JSON.parse(window.localStorage.getItem(PAPER_CONTEXT_KEY) || "null");
+      if (!value || typeof value !== "object") return null;
+      return {
+        draftId: typeof value.draftId === "string" && value.draftId ? value.draftId : null,
+        revision: Number.isInteger(value.revision) ? value.revision : null,
+        title: typeof value.title === "string" ? value.title : "",
+        options: value.options && typeof value.options === "object" ? value.options : null,
+        solutions: value.solutions && typeof value.solutions === "object" ? value.solutions : null,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function savePaperContext() {
+    if (paperContextRestoring) return;
+    if (!state.basket.length) {
+      // 篮子空了，这份卷子也就没了 —— 别把上一份的现场留在本机。
+      try { window.localStorage.removeItem(PAPER_CONTEXT_KEY); } catch { /* 存不住就只在本页有效 */ }
+      return;
+    }
+    const context = {
+      draftId: state.draft?.id || null,
+      revision: Number.isInteger(state.draft?.revision) ? state.draft.revision : null,
+      title: ui.printTitle?.value?.trim() || "",
+      options: currentPrintOptions(),
+      solutions: solutions.fixedSelections(printState.solutions, state.basket),
+    };
+    try { window.localStorage.setItem(PAPER_CONTEXT_KEY, JSON.stringify(context)); } catch { /* 存不住就只在本页有效 */ }
+  }
+
+  // 把上次的现场放回原处。第一句到最后一个 await 之前全是同步的，
+  // 所以调用方一走完，界面就已经是恢复后的样子了。
+  function restorePaperContext() {
+    // 锁必须一定放开：中途抛了异常也得放开，不然之后现场永远存不上，
+    // 而且存的还是恢复之前那份 —— 老师看到的还是「刷新就没了」。
+    try {
+      const context = loadPaperContext();
+      if (!context || !state.basket.length) return;
+      if (context.title) ui.printTitle.value = context.title;
+      if (context.options) applyPrintOptions(context.options);
+      if (context.solutions) printState.solutions = solutions.draftSelections(context.solutions, state.basket);
+      if (context.draftId) {
+        state.draft = {
+          id: context.draftId,
+          revision: context.revision ?? 1,
+          title: context.title || "练习",
+          ids: [...state.basket],
+          print_options: context.options || {},
+          solutions: context.solutions || {},
+        };
+        // 恢复回来的现场就是「没改过」的样子：不该一进来就催老师保存。
+        state.draftBaseline = draftSignature();
+        markDraftDirty();
+        void verifyRestoredDraft(context.draftId, context.revision);
+      } else {
+        markDraftDirty();
+      }
+    } finally {
+      paperContextRestoring = false;
+      savePaperContext();
+    }
+  }
+
+  // 后台核对这份草稿还在不在、别处有没有改过。读不到就先按本地的来，
+  // 真要保存时后端还有一道版本号关卡。
+  async function verifyRestoredDraft(draftId, knownRevision) {
+    try {
+      const response = await fetch(`/api/library/drafts/${encodeURIComponent(draftId)}`, { cache: "no-store" });
+      if (response.status === 404) {
+        if (state.draft?.id !== draftId) return;
+        state.draft = null;
+        state.draftBaseline = null;
+        markDraftDirty();
+        toast("上次编辑的组卷草稿已经不在了，这份卷子会存成新草稿", "error");
+        savePaperContext();
+        return;
+      }
+      if (!response.ok) return;
+      const body = await response.json().catch(() => null);
+      const current = body?.draft;
+      if (!current || state.draft?.id !== draftId) return;
+      state.draft.revision = current.revision;
+      if (Number.isInteger(knownRevision) && current.revision !== knownRevision) {
+        toast("这份草稿在另一个窗口改过，已按你本机的设置继续编辑", "error");
+      }
+      savePaperContext();
+    } catch { /* 读不到就先按本地的来 */ }
+  }
+
   function saveBasket() {
     prunePrintChoices();
     try { window.localStorage.setItem("qb-basket", JSON.stringify(state.basket)); } catch { /* 浏览器禁止存储时，试题篮只在本页有效 */ }
@@ -219,6 +325,7 @@
     else if (state.draftBaseline !== null) state.draftBaseline = draftSignature();
     renderBasket();
     syncSelection();
+    savePaperContext();
     void refreshBasket();
   }
 
@@ -5118,6 +5225,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
           printState.solutions[item.id] = solution.id; printState.solutionRecords.set(solution.id, solution);
           const chosen = printState.items.find(value => value.id === item.id); if (chosen) { chosen.solution = solution; chosen.solution_revision = solution.id; }
           markDraftDirty();
+          savePaperContext();
           if (ui.sheet.open && currentPrintOptions().document !== "questions") {
             // Until the deferred answer rows are laid out, old visible pages
             // must not be printed/exported as if they contain the saved edit.
@@ -5491,6 +5599,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
     printState.missing = missing;
     syncDroppedQuestions();
     renderPrint(items);
+    savePaperContext();
     await printState.layoutPromise;
   }
 
@@ -5553,6 +5662,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
         $("draftSaveStatus").textContent = `已保存“${body.draft.title}” · ${body.draft.ids.length} 题${state.draftDirty ? " · 后续改动尚未保存" : body.draft.validity?.valid === false ? " · 有选题需要处理" : ""}`;
         syncDraftButtons();
       }
+      savePaperContext();
       toast("组卷草稿已保存", "success");
     } catch (error) { toast(error.message || "草稿未保存", "error"); $("draftSaveStatus").textContent = error.message || "草稿未保存"; }
     finally { state.draftSaving = false; $("saveDraft").disabled = $("saveDraftAs").disabled = false; }
@@ -5605,6 +5715,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
             ui.printTitle.value = current.title;
             applyPrintOptions(current.print_options);
             state.draftBaseline = draftSignature();
+            savePaperContext();
             $("draftSaveStatus").textContent = `正在编辑“${current.title}”`;
             syncDraftButtons();
             dialog.close();
@@ -5620,7 +5731,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
             const response = await fetch(`/api/library/drafts/${encodeURIComponent(draft.id)}`, { method: "DELETE", headers: { "Content-Type": "application/json", "X-QB-Request": "1" }, body: "{}" });
             const body = await response.json().catch(() => { throw new Error("草稿删除失败"); });
             if (!response.ok) throw new Error(body.error || "草稿删除失败");
-            if (state.draft?.id === draft.id) { state.draft = null; markDraftDirty(); }
+            if (state.draft?.id === draft.id) { state.draft = null; markDraftDirty(); savePaperContext(); }
             await openDrafts();
           } catch (error) { toast(error.message || "草稿删除失败", "error"); }
         });
@@ -6694,10 +6805,10 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
   $("closePrint").addEventListener("click", closePrint);
   $("clearBasket").addEventListener("click", () => { state.basket = []; saveBasket(); closePrint(); render(); });
   let printTitleTimer;
-  ui.printTitle.addEventListener("input", () => { markDraftDirty(); clearTimeout(printTitleTimer); printTitleTimer = setTimeout(() => renderPrint(printState.items), 160); });
-  ui.printAnswers.addEventListener("change", () => { $("printDocument").value = ui.printAnswers.checked ? "combined" : "questions"; markDraftDirty(); renderPrint(printState.items); });
+  ui.printTitle.addEventListener("input", () => { markDraftDirty(); savePaperContext(); clearTimeout(printTitleTimer); printTitleTimer = setTimeout(() => renderPrint(printState.items), 160); });
+  ui.printAnswers.addEventListener("change", () => { $("printDocument").value = ui.printAnswers.checked ? "combined" : "questions"; markDraftDirty(); savePaperContext(); renderPrint(printState.items); });
   [$("printDocument"), $("printAnswerLayout"), $("printPagination"), $("printOptionLayout"), $("printFontSize"), $("printAnswerSpace"), $("printStudentInfo"), ui.printOrigin, ui.printAi].forEach((control) => {
-    control.addEventListener("change", () => { markDraftDirty(); $("printExportStatus").hidden = true; renderPrint(printState.items); });
+    control.addEventListener("change", () => { markDraftDirty(); savePaperContext(); $("printExportStatus").hidden = true; renderPrint(printState.items); });
   });
   ui.sheet.addEventListener("cancel", (event) => { event.preventDefault(); closePrint(); });
   ui.sheet.addEventListener("keydown", (event) => {
@@ -7714,6 +7825,8 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
   saveBasket();
   applyDirectoryWidth();
   load();
+  // 刷新之后接着改：把上次的标题、打印设置和正在编辑的草稿接回来。
+  restorePaperContext();
   // 1.25.58：目录默认开在左栏；关过一次就记住不再自动开。
   // 1.26.55：≤1099px 时目录面板不是左栏，而是 position:fixed、z-index:57 的
   // 左侧浮层（宽 300px），整块压在卡片列表上 —— 卡片列表窄屏下从 x=16 开始。

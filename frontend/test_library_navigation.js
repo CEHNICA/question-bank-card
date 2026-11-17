@@ -16,7 +16,7 @@ function harness() {
     currentPrintOptions: () => ({ ...options }), solutions: require("./library-solutions.js"),
     confirmDialog: details => { confirms.push(details); return typeof answer === "function" ? answer(details) : Promise.resolve(answer); },
     toast: (...value) => notices.push(value), syncExportButtons() {}, node() {},
-    prunePrintChoices() {}, renderBasket() {}, syncSelection() {}, refreshBasket() {},
+    prunePrintChoices() {}, renderBasket() {}, syncSelection() {}, refreshBasket() {}, savePaperContext() {},
     batchItems: async ids => ({ items: ids.map(id => ({ id, number: 1 })), missing: [] }),
     resolvePrintSolutions: async items => { for (const item of items) printState.solutions[item.id] ||= "origin"; },
     renderPrint: items => { printState.items = items; printState.layoutPromise = Promise.resolve(); },
