@@ -2315,9 +2315,27 @@ def _question_page_break(document, start):
         first.get_or_add_pPr().append(OxmlElement("w:pageBreakBefore"))
 
 
+def _write_footer(document, count):
+    """页脚：共 N 题 · 第 <PAGE> 页。
+
+    页码必须是域（fldSimple PAGE），不能是写死的数字 —— 域的结果是 Word
+    打开时才算出来的，写死的话整份卷子都印「第 1 页」。
+    单独抽出来，是为了能单独盯住它（见 test_library_export_footer.py）。
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    footer = document.sections[0].footer.paragraphs[0]
+    footer.alignment = 2
+    _font(footer.add_run(f"共 {count} 题 · 第 "), 9)
+    field = OxmlElement("w:fldSimple")
+    field.set(qn("w:instr"), "PAGE")
+    footer._p.append(field)
+    _font(footer.add_run(" 页"), 9)
+
+
 def _document(captured, title, options, mode):
     from docx import Document
-    from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     from docx.shared import Mm, Pt
 
@@ -2460,13 +2478,7 @@ def _document(captured, title, options, mode):
             _question_gap(document)
             # Even keep-whole-question mode must allow a long solution to flow.
             _pagination(document, unit_start, "compact", size)
-    footer = section.footer.paragraphs[0]
-    footer.alignment = 2
-    _font(footer.add_run(f"共 {len(captured)} 题 · 第 "), 9)
-    field = OxmlElement("w:fldSimple")
-    field.set(qn("w:instr"), "PAGE")
-    footer._p.append(field)
-    _font(footer.add_run(" 页"), 9)
+    _write_footer(document, len(captured))
     stream = io.BytesIO()
     document.save(stream)
     return stream.getvalue()
