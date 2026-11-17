@@ -57,10 +57,7 @@ def shell_open_onenote(url: str) -> bool:
     if not href:
         return False
     try:
-        if os.name == "nt":
-            os.startfile(href)  # type: ignore[attr-defined]
-            return True
-        os.startfile(href)  # type: ignore[attr-defined]
+        os.startfile(href)
         return True
     except OSError as exc:
         logger.warning("shell open onenote failed: %s", exc)
