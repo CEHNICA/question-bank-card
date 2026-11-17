@@ -141,6 +141,26 @@ PREVIEW_ANSWER_ROW_MARGIN_PT = 4.5
 PREVIEW_SOLUTION_PARAGRAPH_MARGIN_PT = 3
 # .solution-figure（解析配图）的上下外边距：6px = 4.5pt。
 PREVIEW_SOLUTION_FIGURE_MARGIN_PT = 4.5
+# 字体规格（字号 / 字重 / 字体族）也照抄预览，Word 这边不许自己另定一套：
+#     .print-title    { font-size: 24px; font-family: var(--content-font) }
+#         → 24px = 18 磅；--content-font 的西文首选是 Times New Roman
+#     .print-section  { font-size: 16px; font-family: "SimHei","Microsoft YaHei",sans-serif }
+#         → 16px = 12 磅；中文走黑体
+#     .qb-number      { font-weight: 700 }    → 题号是粗的
+#     .solution-label { font-weight: 600 }    → 答案/解析标签是半粗
+#
+# 两个标题的字号在预览里是写死的 px，不跟 --exam-font-size 走；Word 这边原来
+# 用 size + 6 / size + 1（字号选项一变就跟预览分家：预览 18 磅，Word 19.2 磅），
+# 所以改成定值。字重上 Word 只有「粗 / 不粗」两档，半粗的 600 只能落到粗（700）。
+PREVIEW_TITLE_FONT_SIZE_PT = 18.0
+PREVIEW_SECTION_FONT_SIZE_PT = 12.0
+PREVIEW_SECTION_EAST_ASIA = "黑体"
+PREVIEW_LATIN_FONT = "Times New Roman"
+# .print-title { letter-spacing: .12em } —— 预览的标题是「散开」排的，Word 这边
+# 原来一点字距都没有，同一个标题在纸上窄了一大截（实测 167.02 磅 vs 179.28 磅，
+# 差 4.3 毫米）。w:spacing 的单位是 1/20 磅，而且 Word 把它量化到 0.5 磅一档
+# （实测 25/26/27/28 都落在同一档），30 是最接近预览的那个（181.42 磅）。
+PREVIEW_TITLE_LETTER_SPACING = 30
 # 有效排版、但 Word 的公式模型表达不了的公式。不再让一条这样的公式废掉整卷：
 # 交上去让本机浏览器渲染成图片，警告里点名第几题哪个位置。
 _UNSUPPORTED = object()
@@ -1001,15 +1021,50 @@ def _recheck(captured, options, use_ai):
                 _fail(item["where"], "导出期间解析图片发生变化，请重新打开组卷", 409)
 
 
-def _font(run, size, bold=False):
+def _font(run, size, bold=False, east_asia="宋体", latin=None, letter_spacing=None):
+    """把这个 run 的字体规格写成预览里的那一套。
+
+    预览的 --content-font 是 "Times New Roman", …, "SimSun", "宋体", serif：
+    西文走 Times New Roman，中文走宋体。Word 这边原来西文写的是 Cambria ——
+    数字和字母的宽度跟屏幕上对不上（导出来的卷子里同一个 "1." 比预览窄）。
+    ``letter_spacing`` 是字符间距（1/20 磅），对应 CSS 的 letter-spacing。
+    """
+    from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     from docx.shared import Pt
 
-    run.font.name = "Cambria"
+    if latin is None:
+        latin = PREVIEW_LATIN_FONT
+    run.font.name = latin
     run.font.size = Pt(size)
     run.bold = bold
-    run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "宋体")
+    rpr = run._element.get_or_add_rPr()
+    rpr.get_or_add_rFonts().set(qn("w:eastAsia"), east_asia)
+    if letter_spacing:
+        node = OxmlElement("w:spacing")
+        node.set(qn("w:val"), str(int(letter_spacing)))
+        # w:spacing 在 w:rPr 里必须排在 w:sz 前面（OOXML 的次序是硬要求）。
+        size_node = rpr.find(qn("w:sz"))
+        if size_node is None:
+            rpr.append(node)
+        else:
+            size_node.addprevious(node)
     return run
+
+
+def _write_prefix(paragraph, prefix, size):
+    """写一串「前缀 run」。
+
+    prefix 可以是一整段文字，也可以是 [(文字, 是否加粗), …]。预览里题号是粗的
+    （.qb-number { font-weight: 700 }），跟在题号后面的说明文字不是粗的 ——
+    一股脑写成一个 run 就只能全粗或全不粗，只能拆开写。
+    """
+    if isinstance(prefix, str):
+        prefix = [(prefix, False)]
+    for text, bold in prefix:
+        if text:
+            _font(paragraph.add_run(text), size, bold=bold)
+    return paragraph
 
 
 def _line_spacing(paragraph, points):
@@ -1617,7 +1672,7 @@ def _write_field(
     paragraph = None
     if prefix:
         paragraph = _new_paragraph()
-        _font(paragraph.add_run(prefix), size)
+        _write_prefix(paragraph, prefix, size)
     if lead_segments:
         paragraph = paragraph or _new_paragraph()
         _write_segments(paragraph, lead_segments, size)
@@ -2191,7 +2246,9 @@ def _write_solution(document, item, size, label, lead_space_pt=0.0):
     number = label.strip()
     note = AI_REFERENCE_NOTE if item.get("ai") else ""
     # 题号只出现一次：要么顶格单独占一段，要么跟在正文前面（用制表符接到右列）。
-    head = f"{number}\t{note}" if number else note
+    # 预览里题号是 <strong>（粗），AI 备注是 .print-ai-note（常规），所以拆成
+    # 几个 run 写，不能一股脑塞进一个 run。
+    head_runs = [(number, True), ("\t", True), (note, False)] if number else [(note, False)]
     lead = lead_space_pt or 0.0
     # 预览里的外边距会折叠（相邻两块取大的那个），Word 不会 —— Word 是段后距加段前距。
     # 所以这里记着上一块留下的下外边距，下一段只补差值：折叠后该有的空白，
@@ -2225,7 +2282,7 @@ def _write_solution(document, item, size, label, lead_space_pt=0.0):
             if hanging:
                 fmt.first_line_indent = Mm(-indent)
                 fmt.tab_stops.add_tab_stop(Mm(indent))
-        _font(paragraph.add_run(text), size)
+        _write_prefix(paragraph, text, size)
         _line_spacing(paragraph, size * LINE_SPACING)
         paragraph.paragraph_format.space_before = Pt(_space_before(top, first))
         paragraph.paragraph_format.space_after = Pt(bottom)
@@ -2248,7 +2305,7 @@ def _write_solution(document, item, size, label, lead_space_pt=0.0):
     has_answer = bool(str(selected.get("answer") or "").strip())
     has_analysis = bool(str(selected.get("analysis") or "").strip())
     if not has_answer and not has_analysis and not images:
-        _paragraph(head + EMPTY_SOLUTION_TEXT, hanging=bool(number), first=True)
+        _paragraph(head_runs + [(EMPTY_SOLUTION_TEXT, False)], hanging=bool(number), first=True)
         _close_block()
         return
     parts = _analysis_parts(item["fields"].get("analysis", []))
@@ -2257,7 +2314,8 @@ def _write_solution(document, item, size, label, lead_space_pt=0.0):
             document,
             item["fields"]["answer"],
             size,
-            prefix=head + "答案：",
+            # 「答案：」标签在预览里是 .solution-label（font-weight: 600，半粗）。
+            prefix=head_runs + [("答案：", True)],
             where=item["where"],
             indent_mm=indent,
             hanging=bool(number),
@@ -2270,7 +2328,7 @@ def _write_solution(document, item, size, label, lead_space_pt=0.0):
         pending[0] = 0.0
     elif not parts:
         # 只有答案配图、没有解析正文时，题号不能丢；预览里这一行只有题号和图。
-        _paragraph(head, hanging=bool(number), first=True)
+        _paragraph(head_runs, hanging=bool(number), first=True)
     for image in images:
         if image["position"] == "before":
             _image(image)
@@ -2280,9 +2338,9 @@ def _write_solution(document, item, size, label, lead_space_pt=0.0):
         # 一行了 —— 结构就不一样，段前段后也没法照抄。
         if index == 0:
             if has_answer:
-                _paragraph("解析：")
+                _paragraph([("解析：", True)])
             else:
-                _paragraph(head + "解析：", hanging=bool(number))
+                _paragraph(head_runs + [("解析：", True)], hanging=bool(number))
         written = _write_field(
             document,
             blocks,
@@ -2718,18 +2776,19 @@ def _document(captured, title, options, mode):
     _page_setup(document)
     size = options["font_size"]
     normal = document.styles["Normal"]
-    normal.font.name, normal.font.size = "Cambria", Pt(size)
+    normal.font.name, normal.font.size = PREVIEW_LATIN_FONT, Pt(size)
     _line_spacing(normal, size * LINE_SPACING)
     normal.paragraph_format.space_after = Pt(PARAGRAPH_GAP_PT)
     normal.paragraph_format.widow_control = True
     normal._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "宋体")
     # Word math defaults, including editable equations, follow the selected size.
     default = document.styles["Default Paragraph Font"]
-    default.font.name, default.font.size = "Cambria", Pt(size)
+    default.font.name, default.font.size = PREVIEW_LATIN_FONT, Pt(size)
     heading = document.add_paragraph()
     heading.alignment = 1
     heading.paragraph_format.keep_with_next = True
-    _font(heading.add_run(title), size + 6, True)
+    # .print-title 的字号是写死的 24px（18 磅），不跟字号选项走。
+    _font(heading.add_run(title), PREVIEW_TITLE_FONT_SIZE_PT, True, letter_spacing=PREVIEW_TITLE_LETTER_SPACING)
     # .print-title 继承 body 的 line-height: 1.5 → 24px 字号 = 36px 行盒 = 27 磅。
     _line_spacing(heading, PREVIEW_TITLE_LINE_HEIGHT_PT)
     if options["student_info"] and mode != "answers":
@@ -2748,7 +2807,12 @@ def _document(captured, title, options, mode):
         if mode != "answers":
             section_title = document.add_paragraph()
             section_title.paragraph_format.keep_with_next = True
-            _font(section_title.add_run(_section_heading(group, index, name)), size + 1, True)
+            _font(
+                section_title.add_run(_section_heading(group, index, name)),
+                PREVIEW_SECTION_FONT_SIZE_PT,
+                True,
+                east_asia=PREVIEW_SECTION_EAST_ASIA,
+            )
             # .print-section { margin: 12px 0 6px; line-height: 1.5 } → 18 磅行盒。
             _line_spacing(section_title, PREVIEW_SECTION_LINE_HEIGHT_PT)
             section_title.paragraph_format.space_before = Pt(9)
@@ -2759,7 +2823,9 @@ def _document(captured, title, options, mode):
             if mode == "answers":
                 continue
             unit_start = len(document._element.body) - 1
-            prefix = f"{number}. "
+            # 题号在预览里是粗的（.qb-number { font-weight: 700 }），Word 这边
+            # 原来写成一个普通 run，纸上就是常规 —— 一眼能看出粗细不一样。
+            prefix = [(f"{number}. ", True)]
             lead_segments = None
             if "origin" in item["fields"]:
                 origin_blocks = item["fields"]["origin"]
@@ -2770,7 +2836,9 @@ def _document(captured, title, options, mode):
                         {"type": "text", "raw": "）"},
                     ]
                 else:
-                    _write_field(document, origin_blocks, size, prefix=prefix + "（题源）", where=item["where"])
+                    _write_field(
+                        document, origin_blocks, size, prefix=prefix + [("（题源）", False)], where=item["where"]
+                    )
                     prefix = ""
             image_body = item["content"].get("body_mode", "text") == "source_image"
             _write_field(
@@ -2843,7 +2911,12 @@ def _document(captured, title, options, mode):
             document.add_page_break()
         answer_heading = document.add_paragraph()
         answer_heading.paragraph_format.keep_with_next = True
-        _font(answer_heading.add_run("参考答案与解析"), size + 1, True)
+        _font(
+            answer_heading.add_run("参考答案与解析"),
+            PREVIEW_SECTION_FONT_SIZE_PT,
+            True,
+            east_asia=PREVIEW_SECTION_EAST_ASIA,
+        )
         # .print-section { margin: 12px 0 6px; line-height: 1.5 } → 18 磅行盒。
         _line_spacing(answer_heading, PREVIEW_SECTION_LINE_HEIGHT_PT)
         answer_heading.paragraph_format.space_before = Pt(9)
