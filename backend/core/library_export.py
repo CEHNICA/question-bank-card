@@ -186,6 +186,23 @@ PREVIEW_INFO_SPACE_BEFORE_PT = 9.0  # 12px
 PREVIEW_INFO_SPACE_AFTER_PT = 16.5  # 22px
 PREVIEW_INFO_LINE_HEIGHT_PT = 15.75  # 21px 行盒（14px × 1.5）
 PREVIEW_STUDENT_INFO_TEXT = "姓名 ____________　班级 ____________　得分 ________"
+
+# 预览的页脚（frontend/exam-layout.js:463）：
+#     `第 ${index + 1} 页 / 共 ${pages.length} 页${countText ? ' · ' + countText : ''}`
+# countText 来自 `.print-footer`（library.js:5986 的 `共 ${number} 题`）。
+# 样式 frontend/library.css:901：
+#     .exam-page-number { position:absolute; bottom:8mm; left:16mm; right:16mm;
+#                         text-align:center; color:#666; font:10px/1.4 "Microsoft YaHei" }
+# 真实预览 PDF 实测：字号 7.5 磅、颜色 #666666、字体 MicrosoftYaHei、文字底距页底 8.187mm。
+#
+# Word 侧原来写的是「共 N 题 · 第 {PAGE} 页」：页码和题数**顺序反了**、
+# 分隔符反了、**没有总页数**、字号 9 磅（预览 7.5）、纯黑、右对齐（预览居中）。
+PREVIEW_FOOTER_FONT_SIZE_PT = 7.5
+PREVIEW_FOOTER_COLOR = "666666"
+PREVIEW_FOOTER_EAST_ASIA = "Microsoft YaHei"
+PREVIEW_FOOTER_LATIN = "Microsoft YaHei"
+PREVIEW_FOOTER_LINE_HEIGHT_PT = 10.5  # 14px 行盒（10px × 1.4）
+
 # 有效排版、但 Word 的公式模型表达不了的公式。不再让一条这样的公式废掉整卷：
 # 交上去让本机浏览器渲染成图片，警告里点名第几题哪个位置。
 _UNSUPPORTED = object()
@@ -3674,23 +3691,88 @@ def _question_page_break(document, start):
         first.get_or_add_pPr().append(OxmlElement("w:pageBreakBefore"))
 
 
-def _write_footer(document, count):
-    """页脚：共 N 题 · 第 <PAGE> 页。
+def _footer_style(document):
+    """把页脚样式改成预览的那一套。
 
-    页码必须是域（fldSimple PAGE），不能是写死的数字 —— 域的结果是 Word
-    打开时才算出来的，写死的话整份卷子都印「第 1 页」。
-    单独抽出来，是为了能单独盯住它（见 test_library_export_footer.py）。
+    **域结果的格式取自段落样式，不是域里的 run。** 实测（真 Word 渲染，
+    _probe96.py 五个变体对照）：
+
+      - fldSimple 里放带格式的 run      → 无效，域结果还是正文 12 磅黑
+      - 段落标记 pPr/rPr 带格式          → 无效
+      - 三段式域（fldChar）+ 带格式结果  → 无效
+      - 改 Footer 样式                    → **有效**，整行连域结果都对了
+
+    所以域里那个 run 带不带格式都无所谓，但样式必须改 —— 不改的话，
+    页码和总页数这两个数字会比预览大一圈、还是纯黑。
+    """
+    from docx.oxml.ns import qn
+    from docx.shared import Pt, RGBColor
+
+    style = document.styles["Footer"]
+    style.font.size = Pt(PREVIEW_FOOTER_FONT_SIZE_PT)
+    style.font.name = PREVIEW_FOOTER_LATIN
+    style.font.color.rgb = RGBColor.from_string(PREVIEW_FOOTER_COLOR)
+    rpr = style.element.get_or_add_rPr()
+    rpr.get_or_add_rFonts().set(qn("w:eastAsia"), PREVIEW_FOOTER_EAST_ASIA)
+    return style
+
+
+def _footer_field(footer, instr):
+    """页脚里的域（PAGE / NUMPAGES）。
+
+    域自带一个带格式的 run —— Word 更新域时按域里 run 的格式重排，
+    域里没有 run 就退回段落默认格式（正文 12 磅纯黑），字号和颜色全丢。
+
+    run 是先用 python-docx 造好再搬进域里的：w:color 之类由 python-docx
+    写才不会插错 OOXML 次序（自己插容易插错位置，Word 打开就报文件损坏）。
     """
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
-    footer = document.sections[0].footer.paragraphs[0]
-    footer.alignment = 2
-    _font(footer.add_run(f"共 {count} 题 · 第 "), 9)
     field = OxmlElement("w:fldSimple")
-    field.set(qn("w:instr"), "PAGE")
+    field.set(qn("w:instr"), instr)
+    run = footer.add_run("1")  # 域的缓存结果；Word 打开/打印时按 PAGE/NUMPAGES 重算
+    _font(
+        run,
+        PREVIEW_FOOTER_FONT_SIZE_PT,
+        east_asia=PREVIEW_FOOTER_EAST_ASIA,
+        latin=PREVIEW_FOOTER_LATIN,
+        color=PREVIEW_FOOTER_COLOR,
+    )
+    field.append(run._r)  # lxml 的 append 是移动：run 从段落里进到域里
     footer._p.append(field)
-    _font(footer.add_run(" 页"), 9)
+    return field
+
+
+def _write_footer(document, count):
+    """页脚：第 <PAGE> 页 / 共 <NUMPAGES> 页 · 共 N 题。
+
+    文字照抄预览（frontend/exam-layout.js:463）。
+
+    页码必须是域（fldSimple PAGE），不能是写死的数字 —— 域的结果是 Word
+    打开时才算出来的，写死的话整份卷子都印「第 1 页」。
+    总页数同理用 NUMPAGES 域：预览分完页才知道有几页，写死的话分页一变就错。
+    单独抽出来，是为了能单独盯住它（见 test_library_export_footer.py）。
+    """
+    _footer_style(document)
+    footer = document.sections[0].footer.paragraphs[0]
+    footer.alignment = 1  # 预览 .exam-page-number 是 text-align:center
+    _line_spacing(footer, PREVIEW_FOOTER_LINE_HEIGHT_PT)
+
+    def text(value):
+        _font(
+            footer.add_run(value),
+            PREVIEW_FOOTER_FONT_SIZE_PT,
+            east_asia=PREVIEW_FOOTER_EAST_ASIA,
+            latin=PREVIEW_FOOTER_LATIN,
+            color=PREVIEW_FOOTER_COLOR,
+        )
+
+    text("第 ")
+    _footer_field(footer, "PAGE")
+    text(" 页 / 共 ")
+    _footer_field(footer, "NUMPAGES")
+    text(f" 页 · 共 {count} 题")
 
 
 def _page_setup(document):

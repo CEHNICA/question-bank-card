@@ -1,4 +1,4 @@
-"""导出 Word 的页脚：题数、页码域、对齐、字号。
+"""导出 Word 的页脚：题数、页码域、位置。
 
 页脚是用域（PAGE）写的 —— python-docx 只写域代码，不写域的结果，
 域的结果是 Word 打开时才算出来的。所以这里锁的是「写对了没有」，
@@ -7,6 +7,10 @@
 
 2026-11-16 实测：真实产物里页脚是「共 9 题 · 第 1 页」「共 9 题 · 第 2 页」，
 Word 报 2 页，PDF 也是 2 页，页脚底 285.55 毫米 / 页高 296.97 毫米。
+
+2026-11-17 起，页脚的文字顺序、字号、颜色、字体、对齐改成照抄打印预览
+（预览是「第 1 页 / 共 2 页 · 共 1 题」），那部分守护挪到
+test_word_footer_preview.py；这里只留题数、页码域、位置这些与预览无关的。
 """
 
 import io
@@ -85,21 +89,8 @@ class FooterTests(SimpleTestCase):
         from docx.oxml.ns import qn
 
         paragraph = footer_paragraph(build(count=2))
-        fields = paragraph._p.findall(qn("w:fldSimple"))
-        self.assertEqual(len(fields), 1, "页脚里应当正好有一个域")
-        self.assertEqual(fields[0].get(qn("w:instr")), "PAGE")
-
-    def test_the_footer_is_right_aligned(self):
-        """页脚贴着右页边，和预览一致。"""
-        paragraph = footer_paragraph(build(count=2))
-        self.assertEqual(int(paragraph.alignment), 2, "页脚应当右对齐")
-
-    def test_the_footer_is_small_print(self):
-        """页脚是 9 号字，比正文小一号，别跟正文抢眼。"""
-        paragraph = footer_paragraph(build(count=2))
-        sizes = [run.font.size.pt for run in paragraph.runs if run.font.size is not None]
-        self.assertTrue(sizes, "页脚里的文字没有字号")
-        self.assertEqual(set(sizes), {9.0})
+        fields = [f.get(qn("w:instr")) for f in paragraph._p.findall(qn("w:fldSimple"))]
+        self.assertEqual(fields.count("PAGE"), 1, "页脚里应当正好有一个 PAGE 域")
 
     def test_the_footer_sits_below_the_text_area(self):
         """页脚离页面底边 8 毫米，不能跑到正文区里。"""
