@@ -229,7 +229,7 @@ test("兜底：调用方没给实测值时，导出模块自己量一份", () =>
   const blocks = [fakeBlock({ id: "q1", stem: [fakeImage(672.8)], columns: 4 })];
   CURRENT_SCALE = 1;
   const options = { document: "questions" };
-  const out = runExport(["measureOptionColumns", "measureFigureWidths", "fillMeasured"],
+  const out = runExport(["measureOptionColumns", "measureFigureWidths", "measureTableOffsets", "fillMeasured"],
     { options, paper: fakePaper(blocks, "1") },
     "globalThis.__out = fillMeasured(options, paper);");
   assert.deepEqual(plain(out.option_columns), { q1: 4 }, "没人给实测栏数时没有自己量：Word 只能自己猜");
@@ -241,7 +241,7 @@ test("兜底：调用方自己量过的实测值不许被覆盖", () => {
   const blocks = [fakeBlock({ id: "q1", stem: [fakeImage(672.8)], columns: 4 })];
   CURRENT_SCALE = 1;
   const options = { option_columns: { q1: 2 }, measured_figure_widths: { q1: { stem: [12.5] } } };
-  const out = runExport(["measureOptionColumns", "measureFigureWidths", "fillMeasured"],
+  const out = runExport(["measureOptionColumns", "measureFigureWidths", "measureTableOffsets", "fillMeasured"],
     { options, paper: fakePaper(blocks, "1") },
     "globalThis.__out = fillMeasured(options, paper);");
   assert.deepEqual(out.option_columns, { q1: 2 }, "调用方给的实测栏数被覆盖了");
@@ -251,11 +251,12 @@ test("兜底：调用方自己量过的实测值不许被覆盖", () => {
 // ── 8. 没有预览时不动手 ────────────────────────────────────────────
 test("兜底：眼前没有排好版的预览时，什么都不该往请求里塞", () => {
   const options = { document: "questions" };
-  const out = runExport(["measureOptionColumns", "measureFigureWidths", "fillMeasured"],
+  const out = runExport(["measureOptionColumns", "measureFigureWidths", "measureTableOffsets", "fillMeasured"],
     { options, paper: null },
     "globalThis.__out = fillMeasured(options, null);");
   assert.equal(out.option_columns, undefined, "没有预览却塞了栏数：后端会拿到一份来路不明的值");
   assert.equal(out.measured_figure_widths, undefined, "没有预览却塞了图宽");
+  assert.equal(out.measured_table_offsets, undefined, "没有预览却塞了表格位置");
 });
 
 // ── 9. 找预览：同源 iframe 里那张纸 ────────────────────────────────
