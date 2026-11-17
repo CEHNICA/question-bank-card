@@ -1299,7 +1299,14 @@ class LibraryExportTests(ExportFixture, TestCase):
         breaks = [paragraph for paragraph in paragraphs if paragraph.find("w:pPr/w:pageBreakBefore", NS) is not None]
         self.assertEqual(len(breaks), 2)
         self.assertTrue("".join(breaks[0].itertext()).startswith("2."))
-        self.assertIn("解答题", "".join(breaks[1].itertext()))
+        # 第二组的分页现在由**标题前面的垫行**承担：Word 不吃页首的段前距，
+        # 分页写在标题自己身上会让标题比预览高 2.291 毫米
+        # （机制与标定见 core.test_word_section_page_top）。
+        # 这里断言的是页面上看到的结果 —— 分页之后紧接着就是大题标题，
+        # 不是「分页写在标题身上」这种实现细节。
+        self.assertEqual("".join(breaks[1].itertext()).strip(), "")
+        heading_index = paragraphs.index(breaks[1])
+        self.assertIn("解答题", "".join(paragraphs[heading_index + 1].itertext()))
         answer_index = next(
             index for index, paragraph in enumerate(paragraphs) if "参考答案与解析" in "".join(paragraph.itertext())
         )

@@ -255,6 +255,28 @@ PREVIEW_PAGE_TOP_LINE_TWIPS = 180  # 9 磅 = 180 twips（固定行距）
 # .print-section 的 margin-top 12px（= 9 磅）。大题标题、答案区标题的段前距都是它。
 PREVIEW_SECTION_SPACE_BEFORE_PT = 9.0
 
+# 大题标题落在**页首**时的垫行高度（不是 9 磅，见下面）。
+#
+# 预览（Chrome DOM 实测 _probe106.py，纸面真值 _probe105.py）：
+#     版心顶 → 大题标题字顶 = 12px（9 磅 margin-top）+ 行内字顶偏移
+# Word：
+#     版心顶 → 大题标题字顶 = 只剩行内字顶偏移（页首的段前距被吃掉）
+#
+# 差在两处：
+#   1. 页首不吃段前距 → 预览那 9 磅（3.175 毫米）整段丢失；
+#   2. SimHei 在 Chrome 是 Type3、在 Word 是 CID，ascent 度量不同，
+#      Word 的字顶比 Chrome 低一点点。
+#
+# 垫行高度是实测标定出来的（真 Word 六档对照 _probe108/_probe109.py）：
+#     128 / 134 twips → 21.646mm（残差 −0.386mm）
+#     140 / 146 twips → 21.857mm（残差 −0.175mm）
+#     150 / 152 twips → 22.069mm（残差 +0.037mm）  ← 预览 22.032mm
+#
+# Word 把「固定行距」量化到 0.6 磅一档（同一档里写多少都一样），
+# 所以取最好那一档的**中间值**：7.8 磅 = 156 twips，落在 [150, 162] 这一档正中，
+# 以后字体度量再动一点也不会掉出档。
+PREVIEW_SECTION_PAGE_TOP_LINE_TWIPS = 156
+
 # 有效排版、但 Word 的公式模型表达不了的公式。不再让一条这样的公式废掉整卷：
 # 交上去让本机浏览器渲染成图片，警告里点名第几题哪个位置。
 _UNSUPPORTED = object()
@@ -3775,6 +3797,37 @@ def _page_top_space(document, points=PREVIEW_PAGE_TOP_SPACE_PT):
     return paragraph
 
 
+def _section_page_top_space(document, twips=None):
+    """大题标题落在页首时：分页 + 垫一行，把预览页首那 12px 补回来。
+
+    原来这里是把 ``w:pageBreakBefore`` 写在标题自己身上 —— 页首的段前距
+    Word 照样不吃（见 PREVIEW_PAGE_TOP_SPACE_PT 上面的对照表），标题比预览
+    高 2.291 毫米。
+
+    现在改成：分页写在**垫行**身上，标题跟着垫行走，标题自己的段前距归零
+    （它在页首，写了也是白写；不归零就跟垫行叠加）。
+
+    垫行的高度不是预览那 9 磅，而是 7.8 磅（156 twips）—— Word 把「固定行距」
+    量化到 0.6 磅一档，实测六档里 150/152 落在最好的一档，取那档的中间值，
+    见 PREVIEW_SECTION_PAGE_TOP_LINE_TWIPS 的说明。
+    """
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
+
+    if twips is None:
+        twips = PREVIEW_SECTION_PAGE_TOP_LINE_TWIPS
+    paragraph = document.add_paragraph()
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
+    # 字号压到 1 磅：万一固定行距被忽略，也不至于撑出一个 12 磅的行盒。
+    paragraph.add_run("").font.size = Pt(1)
+    spacing = paragraph._p.get_or_add_pPr().get_or_add_spacing()
+    spacing.set(qn("w:line"), str(twips))
+    spacing.set(qn("w:lineRule"), "exact")
+    paragraph.paragraph_format.page_break_before = True
+    return paragraph
+
+
 def _footer_style(document):
     """把页脚样式改成预览的那一套。
 
@@ -3936,7 +3989,17 @@ def _document(captured, title, options, mode):
     measured_tables = options.get("measured_table_offsets") or {}
     for index, (name, group) in enumerate(_ordered(captured)):
         section_title = None
+        # 这一组的第一题被设成「每题分页」时，预览里**整组的大题标题跟着它**
+        # 落到新页页首：大题标题在预览的排版器里是 pending 的，题一分页，
+        # 它就跟到新页的第一块（实测 _probe106.py：第 2 页第一个孩子就是它）。
+        #
+        # Word 这边原来把分页写在标题自己身上（page_break_before），页首的段前距
+        # 照样被 Word 吃掉，标题比预览高 2.291 毫米（实测 _probe105.py）。
+        # 现在改成：组开头先垫一个带分页的垫行，标题跟着它，段前距归零。
+        group_starts_page = mode != "answers" and number > 0 and group[0]["id"] in options["question_breaks"]
         if mode != "answers":
+            if group_starts_page:
+                _section_page_top_space(document)
             section_title = document.add_paragraph()
             section_title.paragraph_format.keep_with_next = True
             _font(
@@ -3947,7 +4010,11 @@ def _document(captured, title, options, mode):
             )
             # .print-section { margin: 12px 0 6px; line-height: 1.5 } → 18 磅行盒。
             _line_spacing(section_title, PREVIEW_SECTION_LINE_HEIGHT_PT)
-            section_title.paragraph_format.space_before = Pt(PREVIEW_SECTION_SPACE_BEFORE_PT)
+            # 段前距 12px：标题在页首时 Word 不吃段前距，那 12px 已经由垫行
+            # 补回来了，这里再写一遍就补两次。
+            section_title.paragraph_format.space_before = Pt(
+                0 if group_starts_page else PREVIEW_SECTION_SPACE_BEFORE_PT
+            )
             section_title.paragraph_format.space_after = Pt(PREVIEW_ANSWER_ROW_MARGIN_PT)
         for item in group:
             number += 1
@@ -4096,7 +4163,9 @@ def _document(captured, title, options, mode):
                 _question_gap(document)
             if number > 1 and item["id"] in options["question_breaks"]:
                 if item is group[0] and section_title is not None:
-                    section_title.paragraph_format.page_break_before = True
+                    # 这一组的分页已经在组开头处理了（垫行 + 标题），
+                    # 这里再写一次就多一个空页。
+                    pass
                 else:
                     _question_page_break(document, unit_start)
     if mode != "questions" and not inline_answers:
