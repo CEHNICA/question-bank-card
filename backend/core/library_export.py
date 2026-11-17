@@ -1662,9 +1662,11 @@ def _write_images(document, item, slot, lines=None, settings=None, measured=None
     for index, image in enumerate(pictures):
         width, height = image["size"]
         # One figure per line keeps the same 150 dpi natural size the preview
-        # uses. A scanned page ("body") may be taller, because the preview
-        # stacks those vertically instead of feeding them into the figure row.
-        paper = widths[index] if slot != "body" else _figure_paper_size(image["size"], PREVIEW_TEXT_WIDTH_MM, 235)[0]
+        # uses. A scanned page ("body") gets no special allowance: the preview
+        # caps every picture at one page height, and the reason those pictures
+        # stack vertically instead of sitting in a figure row is a layout
+        # choice, not a licence to print them larger than the screen shows.
+        paper = widths[index]
         paragraph = document.add_paragraph()
         # A lone stem figure still belongs to a .qb-figures row, and that row is
         # centred — measured in the app, a single 188px picture sits with 242px of
