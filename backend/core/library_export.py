@@ -1474,7 +1474,7 @@ def _mark_repeat_header(trpr):
     trpr.insert_element_before(header, "w:tblCellSpacing", "w:jc", "w:hidden", "w:ins", "w:del", "w:trPrChange")
 
 
-def _write_table(document, rows, size, where):
+def _write_table(document, rows, size, where, text_width_mm=None):
     from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
@@ -1512,7 +1512,7 @@ def _write_table(document, rows, size, where):
     for r, c, cell in placements:
         if cell["rowspan"] > 1 or cell["colspan"] > 1:
             table.cell(r, c).merge(table.cell(r + cell["rowspan"] - 1, c + cell["colspan"] - 1))
-    widths = _table_column_widths(placements, width, size)
+    widths = _table_column_widths(placements, width, size, 178.0 if text_width_mm is None else text_width_mm)
     for column, value in zip(table.columns, widths):
         column.width = Mm(value)
     # 光写 w:gridCol 不够，Word 会按自己的规矩把表重排成等宽。
@@ -1536,19 +1536,37 @@ def _write_table(document, rows, size, where):
             _mark_repeat_header(trpr)
 
 
-def _write_field(document, blocks, size, prefix="", where="", lead_segments=None):
-    from docx.shared import Pt
+def _write_field(
+    document, blocks, size, prefix="", where="", lead_segments=None, indent_mm=None, hanging=False, text_width_mm=None
+):
+    """Write one field (题干预览里的一个字段块) into the document.
+
+    ``indent_mm`` 把这一段挪到答案正文列里（预览里那一列缩在题号右边）；
+    ``hanging`` 让首行顶格放题号、后续行缩进，跟预览的两栏网格一致；
+    ``text_width_mm`` 是这一列的净宽，里面的表格不能比它宽。
+    """
+    from docx.shared import Mm, Pt
+
+    def _new_paragraph():
+        paragraph = document.add_paragraph()
+        if indent_mm:
+            fmt = paragraph.paragraph_format
+            fmt.left_indent = Mm(indent_mm)
+            if hanging:
+                fmt.first_line_indent = Mm(-indent_mm)
+                fmt.tab_stops.add_tab_stop(Mm(indent_mm))
+        return paragraph
 
     paragraph = None
     if prefix:
-        paragraph = document.add_paragraph()
+        paragraph = _new_paragraph()
         _font(paragraph.add_run(prefix), size)
     if lead_segments:
-        paragraph = paragraph or document.add_paragraph()
+        paragraph = paragraph or _new_paragraph()
         _write_segments(paragraph, lead_segments, size)
     for block in blocks:
         if block["type"] == "table":
-            _write_table(document, block["rows"], size, where)
+            _write_table(document, block["rows"], size, where, text_width_mm=text_width_mm)
             paragraph = None
         else:
             display_group = None
@@ -1566,7 +1584,7 @@ def _write_field(document, blocks, size, prefix="", where="", lead_segments=None
                 parts = re.split(r"\r\n|[\r\n]", segment["raw"]) if segment["type"] == "text" else [None]
                 for index, part in enumerate(parts):
                     if part is None or (part and (paragraph is not None or part.strip())):
-                        paragraph = paragraph or document.add_paragraph()
+                        paragraph = paragraph or _new_paragraph()
                         if group is not None:
                             paragraph.alignment = 1
                         _write_segments(paragraph, [{**segment, "raw": part} if part is not None else segment], size)
@@ -1602,6 +1620,18 @@ PREVIEW_FIGURE_GAP_PX = 14
 # Word 默认左右各 108 twips = 1.905 毫米（导出没有改这个默认值，
 # Word 16 实测：44.5 毫米的列，净宽 40.69 毫米）。
 WORD_CELL_MARGIN_MM = 1.9
+# 预览里答案块是「题号列 + 正文列」两栏网格：
+#     .print-answer-row { display: grid; grid-template-columns: 2.4em minmax(0, 1fr); gap: 4px; }
+# 老师核对的是屏幕：题干顶格，答案正文和解析配图缩在题号右边（实测缩进 11.22mm）。
+# Word 当年把「1. 答案：……」整句顶格写，解析配图也从版心左缘开始 —— 纸上和屏幕上
+# 对不上（2026-11-17 实测：预览缩进 11.22mm，Word 0mm；解析图预览宽 166.78mm，
+# Word 168mm）。
+#
+# 下面两个常量把那条两栏网格抄过来：题号列宽 2.4em，列间隙 4 个 CSS 像素。
+# em 相对答案行的字号（12pt = 16px），所以缩进随字号变，跟预览一致。
+PREVIEW_ANSWER_NUMBER_COLUMN_EM = 2.4
+PREVIEW_ANSWER_COLUMN_GAP_PX = 4
+PREVIEW_PX_TO_MM = 25.4 / 96
 # 选项列数不再照抄 styles.css 那条 "@container qpaper (max-width: 680px) {
 # .qb-options.cols-4 -> two columns }"。
 #
@@ -1619,6 +1649,21 @@ WORD_CELL_MARGIN_MM = 1.9
 # preview keeps five columns and lets the images shrink to ~82px, while Word
 # refuses to shrink content to hold a column count (it warns instead), so it
 # lays those out in two columns. Left alone on purpose.
+
+
+def _answer_block_indent_mm(size):
+    """答案正文列相对版心左边缘的缩进（毫米）。
+
+    与 ``.print-answer-row`` 的两栏网格逐字对应：2.4em 的题号列 + 4px 的列间隙。
+    字号是磅，1pt = 96/72 个 CSS 像素。
+    """
+    font_px = size * 96 / 72
+    return (PREVIEW_ANSWER_NUMBER_COLUMN_EM * font_px + PREVIEW_ANSWER_COLUMN_GAP_PX) * PREVIEW_PX_TO_MM
+
+
+def _answer_block_text_width_mm(size):
+    """答案正文列的净宽（毫米）：版心宽度减去题号列和列间隙。"""
+    return PREVIEW_TEXT_WIDTH_MM - _answer_block_indent_mm(size)
 
 
 def _figure_paper_size(
@@ -2021,41 +2066,84 @@ def _analysis_parts(blocks):
     return parts
 
 
-def _write_solution_image(document, image):
+def _write_solution_image(document, image, indent_mm=0.0, text_width_mm=None):
     from docx.shared import Mm
 
     width, height = image["size"]
-    # 解析配图在预览里是跟着 exam-layout 一起缩的：宽度不超过正文净宽（178mm），
-    # 高度不超过一页版心（210mm）。Word 这里当年自己留了一条 235mm 的高度上限，
-    # 于是同一张高瘦的解析图在屏幕上是 96.9mm、在 Word 里印成 101.6mm
-    # （400x500 那张更明显：预览 168mm，Word 178mm）—— 老师核对的是屏幕，
-    # 拿到手的文件却比屏幕上大了一圈。跟正文截图那条 235mm 一样，是遗留的排法
-    # 理由被当成了尺寸上限。这里直接引用预览那两个常量，两条路线只留一个口径。
-    scale = min(float(image["display_width"]) / width, PREVIEW_TEXT_WIDTH_MM / width, PREVIEW_PAGE_HEIGHT_MM / height)
+    px_per_mm = 96 / 25.4
+    column_mm = PREVIEW_TEXT_WIDTH_MM if text_width_mm is None else text_width_mm
+    # 预览那边是两步：exam-layout.js 的 imageScale 先按 150dpi 自然尺寸等比缩，
+    # 宽高各自取整到 CSS 像素；再由 .solution-figure img 的 max-width:100% 把宽度
+    # 收进所在的那一列 —— 高度不动。逐字抄过来，Word 上的图才跟屏幕上那张
+    # 一样大、一样宽（预览实测 166.69 × 210.08 毫米，Word 以前是 168 × 210）。
+    scale = min(
+        float(image["display_width"]) * px_per_mm / width,
+        PREVIEW_TEXT_WIDTH_MM * px_per_mm / width,
+        PREVIEW_PAGE_HEIGHT_MM * px_per_mm / height,
+    )
+    box_width_px = round(width * scale)
+    box_height_px = round(height * scale)
+    box_width_px = min(box_width_px, round(column_mm * px_per_mm))
     paragraph = document.add_paragraph()
-    paragraph.add_run().add_picture(io.BytesIO(image["bytes"]), width=Mm(width * scale), height=Mm(height * scale))
+    if indent_mm:
+        paragraph.paragraph_format.left_indent = Mm(indent_mm)
+    paragraph.add_run().add_picture(
+        io.BytesIO(image["bytes"]), width=Mm(box_width_px * 25.4 / 96), height=Mm(box_height_px * 25.4 / 96)
+    )
     paragraph.paragraph_format.keep_together = True
 
 
 def _write_solution(document, item, size, label):
+    from docx.shared import Mm
+
     selected, images = item["selected"], item.get("solution_images", [])
+    # 预览里答案块是「题号列 + 正文列」两栏网格：题号顶格，答案正文和解析配图
+    # 缩在右边那一列（实测缩进 11.22mm、净宽 166.78mm）。Word 当年把
+    # 「1. 答案：……」整句顶格写 —— 纸上和屏幕上对不上。
+    # 这里照抄那两栏：题号用悬挂缩进顶格，正文用制表符接到右边那一列。
+    indent = _answer_block_indent_mm(size)
+    column = _answer_block_text_width_mm(size)
+    number = label.strip()
+    note = AI_REFERENCE_NOTE if item.get("ai") else ""
+    # 题号只出现一次：要么顶格单独占一段，要么跟在正文前面（用制表符接到右列）。
+    head = f"{number}\t{note}" if number else note
+
+    def _head_paragraph(text):
+        paragraph = document.add_paragraph()
+        if indent:
+            fmt = paragraph.paragraph_format
+            fmt.left_indent = Mm(indent)
+            if number:
+                fmt.first_line_indent = Mm(-indent)
+                fmt.tab_stops.add_tab_stop(Mm(indent))
+        _font(paragraph.add_run(text), size)
+        return paragraph
+
     # 题号和 AI 标记只出现一次：要么跟在答案前面，要么（没有答案正文时）自己占一段，
     # 跟预览里 .print-answer-row 的结构一一对应。
-    head = label + (AI_REFERENCE_NOTE if item.get("ai") else "")
     has_answer = bool(str(selected.get("answer") or "").strip())
     has_analysis = bool(str(selected.get("analysis") or "").strip())
     if not has_answer and not has_analysis and not images:
-        _font(document.add_paragraph().add_run(head + EMPTY_SOLUTION_TEXT), size)
+        _head_paragraph(head + EMPTY_SOLUTION_TEXT)
         return
     parts = _analysis_parts(item["fields"].get("analysis", []))
     if has_answer:
-        _write_field(document, item["fields"]["answer"], size, prefix=head + "答案：", where=item["where"])
+        _write_field(
+            document,
+            item["fields"]["answer"],
+            size,
+            prefix=head + "答案：",
+            where=item["where"],
+            indent_mm=indent,
+            hanging=bool(number),
+            text_width_mm=column,
+        )
     elif not parts:
         # 只有答案配图、没有解析正文时，题号不能丢；预览里这一行只有题号和图。
-        _font(document.add_paragraph().add_run(head), size)
+        _head_paragraph(head)
     for image in images:
         if image["position"] == "before":
-            _write_solution_image(document, image)
+            _write_solution_image(document, image, indent_mm=indent, text_width_mm=column)
     for index, blocks in enumerate(parts):
         # 「解析：」标签跟预览一样，只在确有解析正文时出现，且只出现在第一段前面。
         if index == 0 and has_answer:
@@ -2064,13 +2152,22 @@ def _write_solution(document, item, size, label):
             prefix = head + "解析："
         else:
             prefix = ""
-        _write_field(document, blocks, size, prefix=prefix, where=item["where"])
+        _write_field(
+            document,
+            blocks,
+            size,
+            prefix=prefix,
+            where=item["where"],
+            indent_mm=indent,
+            hanging=index == 0 and not has_answer and bool(number),
+            text_width_mm=column,
+        )
         for image in images:
             if image["position"] == "paragraph" and image["paragraph"] == index:
-                _write_solution_image(document, image)
+                _write_solution_image(document, image, indent_mm=indent, text_width_mm=column)
     for image in images:
         if image["position"] == "after" or (image["position"] == "paragraph" and image["paragraph"] >= len(parts)):
-            _write_solution_image(document, image)
+            _write_solution_image(document, image, indent_mm=indent, text_width_mm=column)
 
 
 def _text_em(value):

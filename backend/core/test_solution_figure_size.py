@@ -85,16 +85,25 @@ def _exported_sizes_mm(size, display_width):
     return sizes
 
 
-def _preview_rule(size, display_width):
-    """预览（exam-layout）那条规则算出来的宽高（毫米）。
+def _preview_box_mm(size, display_width):
+    """预览里那张解析配图在纸面上的宽高（毫米）。
 
-    这里的 178 / 210 是**预览那边写死的字面值**，故意不引用
+    预览是两步：exam-layout.js 的 imageScale 先按 150dpi 自然尺寸等比缩，
+    宽高各自取整到 CSS 像素；再由 .solution-figure img 的 max-width:100%
+    把宽度收进答案正文那一列 —— 高度不动。
+
+    这里的 178 / 210 / 166.78 是**预览那边写死的字面值**，故意不引用
     ``library_export`` 里的常量：常量正是反向变体要动的地方，判据若跟着它
     一起变，这条测试就会自己把自己放绿（尺子的自指漏洞，2026-11-17 实测踩过）。
+    166.78 = 版心 178 减去答案块题号列那一栏（2.4em + 4px 间隙）。
     """
     width, height = size
-    target = min(display_width, 178.0, 210.0 * width / height)
-    return target, target * height / width
+    px_per_mm = 96 / 25.4
+    scale = min(display_width * px_per_mm / width, 178 * px_per_mm / width, 210 * px_per_mm / height)
+    box_width_px = round(width * scale)
+    box_height_px = round(height * scale)
+    box_width_px = min(box_width_px, round(166.78 * px_per_mm))
+    return box_width_px * 25.4 / 96, box_height_px * 25.4 / 96
 
 
 class SolutionFigureSizeTests(SimpleTestCase):
@@ -103,27 +112,37 @@ class SolutionFigureSizeTests(SimpleTestCase):
             with self.subTest(size=size, display_width=display_width):
                 sizes = _exported_sizes_mm(size, display_width)
                 self.assertEqual(len(sizes), 1, "导出件里应当只有那张解析配图")
-                expected = _preview_rule(size, display_width)
+                expected = _preview_box_mm(size, display_width)
                 self.assertAlmostEqual(sizes[0][0], expected[0], delta=0.02)
                 self.assertAlmostEqual(sizes[0][1], expected[1], delta=0.02)
 
     def test_a_tall_solution_figure_stops_at_one_page_body(self):
         sizes = _exported_sizes_mm((300, 2001), 50.8)
-        self.assertAlmostEqual(sizes[0][0], 31.484, places=2)
-        self.assertAlmostEqual(sizes[0][1], 210.0, delta=0.05)
+        self.assertAlmostEqual(sizes[0][0], 31.48, delta=0.02)
+        self.assertAlmostEqual(sizes[0][1], 210.08, delta=0.05)
 
-    def test_a_solution_figure_wider_than_the_page_is_capped_by_its_height(self):
-        # 老师把显示宽度手填成 178mm，但这张图高宽比 0.8 —— 高度先到顶，宽度只能到 168mm。
+    def test_a_solution_figure_is_capped_by_the_answer_column_width(self):
+        # 老师把显示宽度手填成 178mm，但这张图高宽比 0.8 —— 高度先到顶，
+        # 宽度再被答案正文那一栏（净宽 166.78mm）收进去。
         sizes = _exported_sizes_mm((400, 500), 178.0)
-        self.assertAlmostEqual(sizes[0][0], 168.0, delta=0.05)
-        self.assertAlmostEqual(sizes[0][1], 210.0, delta=0.05)
+        self.assertAlmostEqual(sizes[0][0], 166.69, delta=0.05)
+        self.assertAlmostEqual(sizes[0][1], 210.08, delta=0.05)
 
     def test_no_solution_figure_is_taller_than_the_preview_page_body(self):
-        # 判据是预览那边写死的 210mm，不引用被测模块的常量（见 _preview_rule 的说明）。
+        # 判据是预览那边写死的 210mm，不引用被测模块的常量（见 _preview_box_mm 的说明）。
+        # 预览实测高度是 210.08 毫米 —— exam-layout 把高度取整到 CSS 像素（794px），
+        # 换算回毫米就比 210 多一点点，所以容差留到 210.1。
         for size, display_width in CASES:
             with self.subTest(size=size, display_width=display_width):
                 sizes = _exported_sizes_mm(size, display_width)
-                self.assertLessEqual(sizes[0][1], 210.0 + 0.05)
+                self.assertLessEqual(sizes[0][1], 210.1)
+
+    def test_no_solution_figure_is_wider_than_the_answer_column(self):
+        # 解析配图在答案正文那一栏里，宽度不能超过那一栏的净宽。
+        for size, display_width in CASES:
+            with self.subTest(size=size, display_width=display_width):
+                sizes = _exported_sizes_mm(size, display_width)
+                self.assertLessEqual(sizes[0][0], 166.78)
 
     def test_a_tall_solution_figure_is_not_stretched_to_the_taller_allowance(self):
         # 235mm 那条遗留上限：预览到 210 就收手，Word 不能再往上放。

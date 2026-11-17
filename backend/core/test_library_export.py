@@ -340,8 +340,9 @@ class LibraryExportTests(ExportFixture, TestCase):
         xml = document_xml(response.content)
         text = "".join(xml.itertext())
         self.assertIn("参考答案与解析", text)
-        self.assertIn("1. （原卷未提供答案解析）", text)
-        self.assertIn("2. 答案：原卷结果二", text)
+        # 题号与后面的内容之间是制表符（预览里答案块那一栏），断言只锁顺序。
+        self.assertRegex(text, r"1\.\s*（原卷未提供答案解析）")
+        self.assertRegex(text, r"2\.\s*答案：原卷结果二")
         self.assertIn("原卷仅有解析三", text)
         self.assertEqual(len(xml.findall(".//w:br[@w:type='page']", NS)), 1)
 

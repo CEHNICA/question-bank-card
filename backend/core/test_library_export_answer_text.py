@@ -62,16 +62,21 @@ class AnswerTextParityTests(ExportFixture, TestCase):
         answered = self.publication(stem="离线合成题干甲", answer="原卷答案")
         blank = self.publication(stem="离线合成题干乙")
         result = self.export([answered, blank], {"document": "combined"})
-        text = "".join(paragraphs(result.content))
-        self.assertIn("2. （原卷未提供答案解析）", text)
-        self.assertNotIn("（原卷未提供答案）", text)
+        texts = paragraphs(result.content)
+        # 题号和占位句之间现在是制表符（预览里那一栏），所以只锁语义不锁分隔符。
+        self.assertTrue(any(text.startswith("2.") and "（原卷未提供答案解析）" in text for text in texts), texts)
+        self.assertNotIn("（原卷未提供答案）", "".join(texts))
 
     def test_answer_and_analysis_carry_the_same_labels_as_the_preview(self):
         """D3：答案前面有「答案：」，解析前面有「解析：」，跟预览里的 strong 标签一样。"""
         pub = self.publication(stem="离线合成题干", answer="原卷答案", analysis="原卷解析")
         result = self.export([pub], {"document": "answers"})
         texts = paragraphs(result.content)
-        self.assertIn("1. 答案：原卷答案", texts, "答案正文前面必须有「答案：」标签：%s" % texts)
+        # 题号和「答案：」之间是制表符（答案块那一栏），断言只锁顺序和标签。
+        self.assertTrue(
+            any(text.startswith("1.") and "答案：原卷答案" in text for text in texts),
+            "答案正文前面必须有「答案：」标签：%s" % texts,
+        )
         self.assertIn("解析：原卷解析", texts, "解析正文前面必须有「解析：」标签：%s" % texts)
 
     def test_analysis_without_an_answer_still_gets_one_label_only(self):
@@ -80,7 +85,7 @@ class AnswerTextParityTests(ExportFixture, TestCase):
         result = self.export([pub], {"document": "answers"})
         texts = paragraphs(result.content)
         self.assertEqual(sum(text.startswith("1.") for text in texts), 1, "题号只该出现一次：%s" % texts)
-        self.assertTrue(any(text.startswith("1. 解析：原卷仅有解析") for text in texts), texts)
+        self.assertTrue(any(text.startswith("1.") and "解析：原卷仅有解析" in text for text in texts), texts)
 
     def test_inline_answer_has_no_prefix_and_no_question_number(self):
         """D4：inline 的答案紧跟题目，不带「【答案解析】」，也不重复题号。"""
