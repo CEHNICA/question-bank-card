@@ -16,9 +16,13 @@ UPLOAD_STAGING_MIN_AGE_SECONDS = 600
 # 删除任务时先把卷子目录改名成这个，再删数据库记录、最后删文件。
 DELETE_STAGING_PREFIX = ".deleting-"
 DELETE_STAGING_MIN_AGE_SECONDS = 600
-# 复制题目图片和排版截图留下的系统临时目录前缀与过期时间
-CLIPBOARD_TEMP_PREFIXES = ("tiyouju-clip-", "tiyouju-shot-")
-CLIPBOARD_TEMP_MIN_AGE_SECONDS = 3600
+# 复制题目图片、排版截图、导出 PDF 留下的系统临时目录前缀与过期时间。
+# ``tiyouju-pdf-*`` 是导出 PDF（以及 Word 里的公式图片）时用的浏览器 profile，
+# 一次就是 6 MB 上下。它以前不在这个名单里：导出中途被掐断（程序被关、
+# 清理撞上 Windows 文件占用）留下的目录，永远没人回收 —— 实测能攒下十几个，
+# 几十 MB 就这么占着老师的临时盘。所以这里把它一并纳入启动清扫。
+SYSTEM_TEMP_PREFIXES = ("tiyouju-clip-", "tiyouju-shot-", "tiyouju-pdf-")
+SYSTEM_TEMP_MIN_AGE_SECONDS = 3600
 
 
 def discard_interrupted_uploads() -> list[str]:
@@ -94,13 +98,16 @@ def discard_interrupted_deletes() -> list[str]:
     return removed
 
 
-def discard_stale_clipboard_temps() -> list[str]:
-    """清理遗留的剪贴板与出图临时文件目录。
+def discard_stale_system_temps() -> list[str]:
+    """清理遗留的系统临时目录（剪贴板出图、排版截图、PDF 排版 profile）。
 
-    老师每次点「复制题目图片」或导出 PDF 截图时，系统会在系统临时目录下
-    创建 ``tiyouju-clip-*`` 与 ``tiyouju-shot-*`` 目录。
+    老师每次点「复制题目图片」「导出 PDF 截图」或导出 PDF，系统会在系统临时
+    目录下创建 ``tiyouju-clip-*``、``tiyouju-shot-*`` 与 ``tiyouju-pdf-*`` 目录。
     Office 等外部程序需要通过 ``file:///`` 路径读取剪贴板图片，因此新目录需保留一段时间；
     超过 1 小时未变动的历史临时目录在启动时安全清理，防止长时间运行填满系统临时盘。
+
+    年龄看的是目录里最新的那个文件，而不是目录自身 —— 正在导出的 PDF profile
+    一直在写文件，看目录自身的时间会把它当成陈旧目录，连正在用的也一起删掉。
     """
     removed: list[str] = []
     temp_dir = Path(tempfile.gettempdir())
@@ -108,18 +115,18 @@ def discard_stale_clipboard_temps() -> list[str]:
         return removed
     now = time.time()
     for entry in temp_dir.iterdir():
-        if not any(entry.name.startswith(p) for p in CLIPBOARD_TEMP_PREFIXES) or not entry.is_dir():
+        if not any(entry.name.startswith(p) for p in SYSTEM_TEMP_PREFIXES) or not entry.is_dir():
             continue
         try:
-            if now - _newest_mtime(entry) < CLIPBOARD_TEMP_MIN_AGE_SECONDS:
+            if now - _newest_mtime(entry) < SYSTEM_TEMP_MIN_AGE_SECONDS:
                 continue
             shutil.rmtree(entry)
         except OSError as exc:
-            logger.warning("清理残留的剪贴板临时目录 %s 失败：%s", entry, exc)
+            logger.warning("清理残留的系统临时目录 %s 失败：%s", entry, exc)
             continue
         removed.append(entry.name)
     if removed:
-        logger.info("已清理 %d 个残留的剪贴板出图临时目录：%s", len(removed), "、".join(removed))
+        logger.info("已清理 %d 个残留的系统临时目录：%s", len(removed), "、".join(removed))
     return removed
 
 
@@ -175,7 +182,7 @@ class CoreConfig(AppConfig):
         # 1.26.50：判定结果存到磁盘复用 —— 第二次打开软件不用再解析几千道题
         # 的 JSON 字段（冷启动那一遍要 3.9 秒）。接不上也不影响软件能用。
         verdict_cache.install()
-        for sweep in (discard_interrupted_uploads, discard_interrupted_deletes, discard_stale_clipboard_temps):
+        for sweep in (discard_interrupted_uploads, discard_interrupted_deletes, discard_stale_system_temps):
             try:
                 sweep()
             except Exception as exc:  # 清理失败绝不能挡住软件启动。

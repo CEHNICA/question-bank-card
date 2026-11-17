@@ -446,6 +446,8 @@ class PdfCleanupTests(SimpleTestCase):
         client.call.side_effect = call
         with ExitStack() as stack:
             stack.enter_context(mock.patch.object(pdf.tempfile, "TemporaryDirectory", return_value=directory))
+            # 清理失败会重试几次（文件被占用是常态），这里把等待去掉，测试别拖时间。
+            stack.enter_context(mock.patch.object(pdf, "CLEANUP_BACKOFF_SECONDS", (0, 0)))
             stack.enter_context(mock.patch.object(pdf, "os", SimpleNamespace(name="nt")))
             stack.enter_context(mock.patch.object(pdf.subprocess, "CREATE_NO_WINDOW", 0x08000000, create=True))
             stack.enter_context(mock.patch.object(pdf, "_browser_path", return_value=Path("synthetic-fixed-browser")))

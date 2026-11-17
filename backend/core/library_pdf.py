@@ -205,16 +205,45 @@ def _cleanup_warning(stage, error):
         pass
 
 
+# Windows 上文件句柄是异步释放的：浏览器主进程退出之后，后台工具进程
+# （Crashpad、Safe Browsing 那些）还可能再活一小会儿，profile 里的文件就还锁着。
+# shutil.rmtree 撞上一个删不掉的文件就整棵放弃 —— 一次导出 6 MB 的浏览器
+# profile 就这么留在系统临时盘里。实测（Windows，文件被打开时删不掉）：
+#   PermissionError [WinError 32] 另一个程序正在使用此文件
+# 第一次失败通常只是「还没松手」，所以这里隔一会儿重试几次再放弃。
+CLEANUP_ATTEMPTS = 3
+CLEANUP_BACKOFF_SECONDS = (0.2, 0.6)
+
+
+def _cleanup_directory(directory):
+    """删掉这次导出用的临时目录；文件还锁着就隔一会儿再试。
+
+    ``TemporaryDirectory.cleanup()`` 第一次失败之后再调一次仍然有效：
+    它先 ``detach()`` 掉退出时的兜底清理，再按目录是否还在决定要不要重删，
+    所以第二次调用会真的重新走一遍删除。重试能把「句柄还没释放」救回来。
+
+    返回 True 表示删干净了；False 表示仍然删不掉（目录留给启动清扫回收）。
+    """
+    for attempt in range(CLEANUP_ATTEMPTS):
+        try:
+            directory.cleanup()
+            return True
+        except Exception as error:
+            if attempt + 1 >= CLEANUP_ATTEMPTS:
+                _cleanup_warning("temporary_directory", error)
+                return False
+            delays = CLEANUP_BACKOFF_SECONDS
+            time.sleep(delays[attempt] if attempt < len(delays) else 0)
+    return False
+
+
 @contextmanager
 def _temporary_directory():
     directory = tempfile.TemporaryDirectory(prefix="tiyouju-pdf-")
     try:
         yield directory.name
     finally:
-        try:
-            directory.cleanup()
-        except Exception as error:
-            _cleanup_warning("temporary_directory", error)
+        _cleanup_directory(directory)
 
 
 def _cleanup_browser(client, process):
