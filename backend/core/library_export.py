@@ -1875,7 +1875,7 @@ def _set_table_indent(table, left_mm):
 
 
 def _write_table(
-    document,
+    container,
     rows,
     size,
     where,
@@ -1886,6 +1886,9 @@ def _write_table(
     field_text_width_mm=None,
 ):
     """写一张表。
+
+    ``container`` 是正文（Document）或一个 Word 单元格（_Cell）——
+    两种都有 ``add_table``，选项里的表要嵌在自己的格子里。
 
     ``left_mm`` 是预览量出来的表格左边缘位置（离版心左缘多少毫米）；
     ``column`` 是这张表所在那一列的 (左缘, 宽度)，没有实测值时退回到按预览的排版规则算。
@@ -1927,7 +1930,7 @@ def _write_table(
             width = max(width, column)
     if width < 1:
         _fail(where, "表格没有可导出的单元格")
-    table = document.add_table(rows=len(rows), cols=width)
+    table = container.add_table(rows=len(rows), cols=width)
     table.style = "Table Grid"
     table.autofit = False
     # 横向位置：预览量出来的位置说了算，实在量不到才退回到「在这一列里居中」。
@@ -2016,7 +2019,7 @@ def _write_table(
 
 
 def _write_field(
-    document,
+    container,
     blocks,
     size,
     prefix="",
@@ -2030,8 +2033,16 @@ def _write_field(
     table_lefts=None,
     table_column=None,
     table_column_shrinks=False,
+    first_paragraph=None,
 ):
     """Write one field (题干预览里的一个字段块) into the document.
+
+    ``container`` 是正文（Document）或一个 Word 单元格（_Cell）——
+    两种都有 ``add_paragraph``。选项里的内容要排进选项格子里，
+    用的就是这一套（多栏排版时一个选项可能不止一段、还可能带一张表）。
+
+    ``first_paragraph`` 是已经建好的第一个段落：调用方先把「A. 」这样的题号
+    写进去了，正文要接着往下写，不能另起一段（预览里题号和选项正文在同一格里）。
 
     ``indent_mm`` 把这一段挪到答案正文列里（预览里那一列缩在题号右边）；
     ``hanging`` 让首行顶格放题号、后续行缩进，跟预览的两栏网格一致；
@@ -2056,8 +2067,31 @@ def _write_field(
     # 整列缩到表宽，表于是贴左 —— 要算准位置就得知道正文有多宽。
     field_text_width = _field_max_text_width_mm(blocks, size, extra_segments=lead_segments)
 
+    # 调用方先写好的那个段落（选项里的「A.」）只有在这一段是**普通行内文字**时
+    # 才能接着写：
+    #   · 行间公式要自己起一段 —— 预览里公式另起一行，单栏排版也是另起一段；
+    #     抢来写会让多栏和单栏排出来的样子不一样。
+    #   · 那个段落在格子里物理上排在最前面，抢来写后面的内容会打乱顺序。
+    # 第一块是表的时候同理：表是独立的一块，题号自己占一段（单栏排版就是这样）。
+    if first_paragraph is not None:
+        head = blocks[0] if blocks else None
+        reusable = False
+        if head is not None and head.get("type") == "text":
+            segments = head.get("segments") or []
+            if segments:
+                first_segment = segments[0]
+                group = first_segment.get("displayGroup") or ("display" if first_segment.get("display") else None)
+                reusable = group is None
+        if not reusable:
+            first_paragraph = None
+
     def _new_paragraph():
-        paragraph = document.add_paragraph()
+        nonlocal first_paragraph
+        if first_paragraph is not None:
+            paragraph = first_paragraph
+            first_paragraph = None
+        else:
+            paragraph = container.add_paragraph()
         if indent_mm:
             fmt = paragraph.paragraph_format
             fmt.left_indent = Mm(indent_mm)
@@ -2078,7 +2112,7 @@ def _write_field(
         if block["type"] == "table":
             left = offsets[table_index] if offsets is not None else None
             _write_table(
-                document,
+                container,
                 block["rows"],
                 size,
                 where,
@@ -2966,8 +3000,25 @@ def _write_compact_options(document, item, size, columns, *, text_width_mm=178, 
         paragraph = cell.paragraphs[0]
         _font(paragraph.add_run(letter + ". "), size)
         blocks = item["fields"].get(f"options.{letter}", [])
-        _write_segments(paragraph, blocks[0]["segments"] if blocks else [], size)
         _line_spacing(paragraph, size * LINE_SPACING)
+        # 一个选项的内容可能不止一段，还可能带着一张表（预览里选项里也能排表）。
+        #
+        # 原来这里只写 blocks[0]：选项以表开头时直接 KeyError('segments') 崩掉，
+        # 整份 Word 导出失败；表排在第二块时更阴险 —— 整张表被静默丢掉，
+        # 纸上的选项少了一截，而 PDF 路线那边好好地排着表。
+        # 这条路不是理论上的：一张窄表（| x | / | 1 |）的前端实测栏数就是 2，
+        # auto 布局下老师什么都不用选，Word 就崩（实测 2026-11-17）。
+        #
+        # 现在多栏和单栏走同一套块处理（_write_field），内容不会少。
+        _write_field(
+            cell,
+            blocks,
+            size,
+            where=item.get("where", ""),
+            # 表格不能比这一格还宽：Word 不会缩表，超了就压到隔壁列上。
+            text_width_mm=usable_mm,
+            first_paragraph=paragraph,
+        )
         # 选项里的图在预览里被选项栏宽收口过，Word 照实测宽度排；
         # 就算没有实测值（老前端、预览没量到），也不能超过这一格的净宽。
         _write_images(
