@@ -63,7 +63,7 @@ assert.deepEqual(plain(sandbox.currentPrintOptions()), { answers: true, origin: 
 assert.equal(controls.printAnswerLayout.value, "appendix", "A draft saved before answer positions existed keeps its original appendix layout");
 sandbox.applyPrintOptions({ document: "combined", answer_layout: "inline", answer_space: "large" });
 assert.equal(sandbox.currentPrintOptions().answer_layout, "inline");
-assert.equal(sandbox.currentPrintOptions().answer_space, 0, "An inline teacher paper never inserts student writing space");
+assert.equal(sandbox.currentPrintOptions().answer_space, 60, "The payload carries the teacher's own writing space; whether an inline paper drops it is the renderer's job");
 assert.equal(sandbox.normalizePrintOptions({ font_size: 6, answer_space: "custom", document: "invalid" }).font_size, 12);
 assert.equal(controls.printPagination.value, "compact", "Old drafts use the paper-saving default");
 sandbox.applyPrintOptions({ pagination: "keep", option_layout: "vertical", option_overrides: { a: "vertical", b: "auto", bad: "invalid" }, answer_space: "small", answer_space_overrides: { a: "none", b: "large", bad: "invalid" }, figure_overrides: { a: { width: { 0: 60 }, align: "left" }, b: { align: "right" } }, question_breaks: ["b", "b"] });

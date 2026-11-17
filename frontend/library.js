@@ -5414,7 +5414,13 @@ $("selectedViewCount").textContent = String(state.basket.length);
       document: $("printDocument").value, origin: ui.printOrigin.checked,
       answer_layout: $("printAnswerLayout").value,
       ai_answers: Boolean(state.features.ai_answer && ui.printAi.checked),
-      font_size: $("printFontSize").value, answer_space: $("printDocument").value === "combined" && $("printAnswerLayout").value === "inline" ? 0 : (normalizePrintSpace($("printAnswerSpace").value) ?? "auto"),
+      // 留白只送「用户设的值」，不在这儿替渲染端做判断。
+      // 「合卷＋逐题紧跟 ⇒ 题后不留白」是一条渲染期规则：预览（ExamLayout.answerSpace）、
+      // PDF（library_pdf.py）和 Word（_document 的 inline_answers）三边各自都会判一次。
+      // 前端提前把留白压成 0，等于把「这一份文件里答案紧跟在题后」当成了「所有文件都紧跟」——
+      // 「分别导出题目卷与答案卷」里那份题目卷根本没有答案紧跟，留白却也没了：
+      // 同一份题目卷，答题空间取决于一个跟它无关的下拉值，少了 22 毫米。
+      font_size: $("printFontSize").value, answer_space: normalizePrintSpace($("printAnswerSpace").value) ?? "auto",
       student_info: $("printStudentInfo").checked,
       pagination: $("printPagination").value, option_layout: $("printOptionLayout").value,
       option_overrides: Object.fromEntries(Object.entries(printState.optionOverrides || {}).filter(([id]) => !state.basket || state.basket.includes(id))),
