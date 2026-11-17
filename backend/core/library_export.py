@@ -2025,7 +2025,13 @@ def _write_solution_image(document, image):
     from docx.shared import Mm
 
     width, height = image["size"]
-    scale = min(float(image["display_width"]) / width, 235 / height)
+    # 解析配图在预览里是跟着 exam-layout 一起缩的：宽度不超过正文净宽（178mm），
+    # 高度不超过一页版心（210mm）。Word 这里当年自己留了一条 235mm 的高度上限，
+    # 于是同一张高瘦的解析图在屏幕上是 96.9mm、在 Word 里印成 101.6mm
+    # （400x500 那张更明显：预览 168mm，Word 178mm）—— 老师核对的是屏幕，
+    # 拿到手的文件却比屏幕上大了一圈。跟正文截图那条 235mm 一样，是遗留的排法
+    # 理由被当成了尺寸上限。这里直接引用预览那两个常量，两条路线只留一个口径。
+    scale = min(float(image["display_width"]) / width, PREVIEW_TEXT_WIDTH_MM / width, PREVIEW_PAGE_HEIGHT_MM / height)
     paragraph = document.add_paragraph()
     paragraph.add_run().add_picture(io.BytesIO(image["bytes"]), width=Mm(width * scale), height=Mm(height * scale))
     paragraph.paragraph_format.keep_together = True
