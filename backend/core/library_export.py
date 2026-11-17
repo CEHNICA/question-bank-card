@@ -513,6 +513,11 @@ def _math(segment, where, *, word_math=True):
             AssertionError,
             IndexError,
             KeyError,
+            # mathml2omml 0.0.2 里 Math 继承的 InferredMRowElement 没有
+            # is_space_like，遇到嵌套 <math> 时它会抛 AttributeError。
+            # 那是第三方库对输入结构的意见，不是这份卷子的内容坏了 ——
+            # 漏掉它就等于让一个公式把整份卷子带走。
+            AttributeError,
             etree.XMLSyntaxError,
             xml.sax.SAXException,
         ):
@@ -529,6 +534,7 @@ def _math(segment, where, *, word_math=True):
         AssertionError,
         IndexError,
         KeyError,
+        AttributeError,
         etree.XMLSyntaxError,
         xml.sax.SAXException,
     ):
@@ -1554,12 +1560,20 @@ def _figure_settings(options, item):
     # 没有这份实测值，Word 就照 150dpi 自然尺寸排，纸上比屏幕上大了一圈。
     measured = (options.get("measured_figure_widths") or {}).get(item["id"]) or {}
     measured = {
-        slot: [float(value) for value in values if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0]
+        slot: [
+            float(value)
+            for value in values
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+        ]
         for slot, values in measured.items()
         if isinstance(values, list)
     }
-    return {"width": widths, "breaks": breaks, "align": align if align in ("left", "center", "right") else "center",
-            "measured": measured}
+    return {
+        "width": widths,
+        "breaks": breaks,
+        "align": align if align in ("left", "center", "right") else "center",
+        "measured": measured,
+    }
 
 
 def _figure_widths(images, text_width_mm=PREVIEW_TEXT_WIDTH_MM, settings=None):
@@ -1626,10 +1640,7 @@ def _figure_widths_for_slot(pictures, slot, settings=None, measured=None):
     measured = list(measured or [])
     if not measured or slot == "body":
         return widths
-    return [
-        min(width, measured[index]) if index < len(measured) else width
-        for index, width in enumerate(widths)
-    ]
+    return [min(width, measured[index]) if index < len(measured) else width for index, width in enumerate(widths)]
 
 
 def _write_images(document, item, slot, lines=None, settings=None, measured=None):
@@ -2040,7 +2051,12 @@ def _write_compact_options(document, item, size, columns, *, text_width_mm=178, 
         border = OxmlElement("w:" + side)
         border.set(qn("w:val"), "nil")
         borders.append(border)
-    table._tbl.tblPr.append(borders)
+    # w:tblPr is a fixed sequence: borders belong between w:jc and w:tblLayout.
+    # Appending them at the end puts them after w:tblLook, which is not a valid
+    # document — the same trap _write_figure_line already avoids.
+    table._tbl.tblPr.insert_element_before(
+        borders, "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription"
+    )
     for index, letter in enumerate(letters):
         cell = table.cell(index // columns, index % columns)
         paragraph = cell.paragraphs[0]
@@ -2088,13 +2104,34 @@ def _section_heading(group, index, name) -> str:
     return f"{prefix}、{name}"
 
 
+def _paragraph_flag(props, name, value):
+    """写 w:keepNext / w:keepLines / w:widowControl，按 w:pPr 的固定顺序插入。
+
+    w:pPr 是一条固定 sequence：keepNext、keepLines 排在最前，widowControl 紧随，
+    spacing 和 jc 都在它们后面。直接 append 会把这些开关塞到 pPr 末尾，
+    产出的就不再是合法文档 —— Word 打开时会自己重排（它宽容），但别的排版
+    工具未必，可能把这些开关连同「整题同页」一起丢掉。
+
+    python-docx 自己知道这条顺序（它的 ZeroOrOne 会按 successors 插入），
+    所以这里用它，而不是手写一张后继元素表。
+    """
+    from docx.oxml.ns import qn
+
+    existing = props.find(qn(name))
+    if existing is not None:
+        # 已经存在的那个位置可能是错的，先摘掉再重新按顺序放回去。
+        props.remove(existing)
+    node = getattr(props, "get_or_add_" + name.split(":")[1])()
+    node.set(qn("w:val"), "1" if value else "0")
+    return node
+
+
 def _keep_unit(document, start):
     """Keep a question together when it fits; Word may split an over-page item.
 
     Cell paragraphs also carry keepNext so a short table and its following
     diagram/options stay with the stem. The final paragraph releases the chain.
     """
-    from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
     elements = list(document._element.body)[start:-1]  # last child is sectPr
@@ -2107,12 +2144,8 @@ def _keep_unit(document, start):
     for index, paragraph in enumerate(paragraphs):
         props = paragraph.get_or_add_pPr()
         for name in ("w:keepNext", "w:keepLines"):
-            existing = props.find(qn(name))
-            if existing is not None:
-                props.remove(existing)
-            node = OxmlElement(name)
-            node.set(qn("w:val"), "0" if name == "w:keepNext" and index == len(paragraphs) - 1 else "1")
-            props.append(node)
+            value = not (name == "w:keepNext" and index == len(paragraphs) - 1)
+            _paragraph_flag(props, name, value)
     # A final table releases every cell in its final physical row, otherwise a
     # neighbouring cell's keepNext can accidentally chain the following question.
     if elements and elements[-1].tag == qn("w:tbl"):
@@ -2170,7 +2203,6 @@ def _unit_height(elements, size):
 
 def _pagination(document, start, mode, size):
     """Compact flows at paragraph/row boundaries; short keep-mode items bind."""
-    from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
     elements = list(document._element.body)[start:-1]
@@ -2188,12 +2220,7 @@ def _pagination(document, start, mode, size):
                 or (bool(paragraph.findall(".//" + qn("m:oMath"))) and not plain.strip("▱"))
             )
             for name, value in (("w:keepNext", False), ("w:keepLines", atomic), ("w:widowControl", True)):
-                existing = props.find(qn(name))
-                if existing is not None:
-                    props.remove(existing)
-                node = OxmlElement(name)
-                node.set(qn("w:val"), "1" if value else "0")
-                props.append(node)
+                _paragraph_flag(props, name, value)
     # An isolated number/origin lead must stay with the start of its actual stem.
     # Only a one-line caption stays with the immediately following diagram/table.
     # A normal multi-line stem must remain breakable in compact mode; plain-text
@@ -2332,12 +2359,16 @@ def _document(captured, title, options, mode):
                 stem_figures = [image for image in item["images"] if image["slot"] == "stem"]
                 stem_measured = figures["measured"].get("stem")
                 _write_images(
-                    document, item, "stem",
+                    document,
+                    item,
+                    "stem",
                     _figure_row_lines(
-                        stem_figures, settings=figures,
+                        stem_figures,
+                        settings=figures,
                         widths=_figure_widths_for_slot(stem_figures, "stem", figures, stem_measured),
                     ),
-                    settings=figures, measured=stem_measured,
+                    settings=figures,
+                    measured=stem_measured,
                 )
             columns = _option_columns(item, options) if not image_body else 1
             if columns > 1:
@@ -2449,8 +2480,10 @@ def export(payload, *, warnings=None):
             # 预览量过栏数时，文件照屏幕排，屏幕上已经提示过降级，这里不再重复；
             # 没有实测值（老前端、PDF 路径）才由 Word 自己决定，这时必须说清楚。
             measured = (options.get("option_columns") or {}).get(item["id"])
-            if type(measured) is not int and wanted > actual and (
-                item["content"].get("options") or any(image["slot"] in "ABCDE" for image in item["images"])
+            if (
+                type(measured) is not int
+                and wanted > actual
+                and (item["content"].get("options") or any(image["slot"] in "ABCDE" for image in item["images"]))
             ):
                 warnings.append(
                     f"第 {number} 题选项较宽，Word 已使用{'两列' if actual == 2 else '竖排'}，内容和配图完整保留。"
