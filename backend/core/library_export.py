@@ -1544,6 +1544,12 @@ PREVIEW_TABLE_BORDER_MM = 25.4 / 96.0  # 1 像素
 PREVIEW_TABLE_DENSE_COLUMNS = 13
 PREVIEW_TABLE_DENSE_CELL_PADDING_X_EM = 0.45
 
+# 表格的边框照抄预览：``border: 1px solid var(--paper-ink)``，
+# ``--paper-ink: #161816``（frontend/styles.css:17 与 1690）。
+# 1 CSS 像素 = 0.75 磅，w:sz 的单位是 1/8 磅 → 6。
+PREVIEW_TABLE_BORDER_COLOR = "161816"
+PREVIEW_TABLE_BORDER_SZ = 6
+
 # 预览正文字体（Times New Roman）里那些**窄**字符的字宽。
 # 全角汉字和全角标点都是 1 个字宽；ASCII 的标点符号多数不到半个字宽，
 # 按 0.5 算会高估：「零售收入/万元」实际 6.278 个字宽，
@@ -1947,6 +1953,49 @@ def _set_table_cell_margins(table, horizontal_twips):
     tbl_pr.insert_element_before(margins, "w:tblLook", "w:tblCaption", "w:tblDescription")
 
 
+def _set_table_borders(table):
+    """把表格的边框照抄打印预览：0.75 磅、#161816 的实线。
+
+    预览（frontend/styles.css:1690）：``.qb-table td, .qb-table th
+    { border: 1px solid var(--paper-ink) }``，``--paper-ink: #161816``
+    （styles.css:17）。Chrome 实测（_probe82.py）每一格四边都是
+    ``1px solid rgb(22, 24, 22)``。
+
+    1 CSS 像素 = 1/96 英寸 = 0.75 磅，而 ``w:sz`` 的单位是 1/8 磅 → 6。
+
+    不写的话就走 Table Grid 样式的默认：0.5 磅（sz=4）纯黑 auto —— 细一档
+    的黑框，跟预览那张纸不是一回事。
+
+    **纸上的实际线宽是 0.6 磅，不是 0.75**：真 Word 一次排四张表（sz=4/6/8/12），
+    导 PDF 量竖边框矩形（_probe84.py）—— sz=4、6、8 在纸上**全都是** 0.600 磅，
+    sz=12 才是 1.2 磅。也就是 Word 在 0.25~1 磅之间只给 0.6 磅这一档，
+    sz=6 已经是能拿到的最近值（差 0.15 磅 = 0.05 毫米，肉眼看不出来）。
+
+    六边都要写：外框四条（top/left/bottom/right）加内部两条
+    （insideH/insideV），少一条就少一道线。
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tbl_pr = table._tbl.tblPr
+    existing = tbl_pr.find(qn("w:tblBorders"))
+    if existing is not None:
+        tbl_pr.remove(existing)
+    borders = OxmlElement("w:tblBorders")
+    # w:tblBorders 里的顺序是 上、左、下、右、内部横线、内部竖线。
+    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        node = OxmlElement("w:" + side)
+        node.set(qn("w:val"), "single")
+        node.set(qn("w:sz"), str(PREVIEW_TABLE_BORDER_SZ))
+        node.set(qn("w:space"), "0")
+        node.set(qn("w:color"), PREVIEW_TABLE_BORDER_COLOR)
+        borders.append(node)
+    # w:tblBorders 在 w:tblPr 里排在 w:tblInd 之后、w:shd 之前。
+    tbl_pr.insert_element_before(
+        borders, "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription"
+    )
+
+
 def _set_table_indent(table, left_mm, nested=False, cell_margin_twips=0):
     """把表格的左边缘挪到离版心左缘 ``left_mm`` 毫米的位置。
 
@@ -2146,6 +2195,8 @@ def _write_table(
     # 预览内容盒 4.82 毫米，Word 7.09 毫米）。
     cell_margin_twips = _table_cell_margin_twips(size, width >= PREVIEW_TABLE_DENSE_COLUMNS)
     _set_table_cell_margins(table, cell_margin_twips)
+    # 边框照抄预览：0.75 磅、#161816 的实线（不是 Table Grid 的 0.5 磅纯黑）。
+    _set_table_borders(table)
     # 表格的左边缘该落在哪儿：优先用预览量出来的实测位置；
     # 量不到（没渲染过预览、或题被拆到跨页续片里）就按预览的排版规则算。
     #
@@ -2171,7 +2222,8 @@ def _write_table(
     for r, c, cell in placements:
         target = table.cell(r, c)
         target.text = ""
-        _write_segments(target.paragraphs[0], cell["segments"], size, cell["header"])
+        # 预览里 th 和 td 是同一条规则（font-weight: 400），表头**不加粗**。
+        _write_segments(target.paragraphs[0], cell["segments"], size, False)
         # 预览里表格是 .qb-table { line-height: 1.6 }，单元格没有外边距。
         # Word 这边跟着走：行高用 1.6em，段后距清零（Normal 样式默认留 3 磅，
         # 不清的话每一行都白胖 3 磅）。
@@ -2189,10 +2241,14 @@ def _write_table(
         # 上的位置（题干表靠左、答案表在正文列里居中），w:pPr/w:jc 管的才是
         # 格子里的文字。
         cell_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        if cell["header"]:
-            shade = OxmlElement("w:shd")
-            shade.set(qn("w:fill"), "F1F5F3")
-            target._tc.get_or_add_tcPr().append(shade)
+        # 预览里表头**没有底色**：``.qb-table td, .qb-table th`` 只写边框和
+        # 内边距，底色是透明的（Chrome 实测 rgba(0, 0, 0, 0)，_probe82.py）。
+        # Word 这边原来给表头涂了 F1F5F3 浅绿底 —— 导出后表头一块绿，跟预览
+        # 那张白纸完全不是一回事，所以这里不涂。
+        # 预览里表头**没有底色**：``.qb-table td, .qb-table th`` 只写边框和
+        # 内边距，底色是透明的（Chrome 实测 rgba(0, 0, 0, 0)，_probe82.py）。
+        # Word 这边原来给表头涂了 F1F5F3 浅绿底 —— 导出后表头一块绿，跟预览
+        # 那张白纸完全不是一回事，所以这里不涂。
     # 首行整行都是表头格时，把它标成「表头行」：表格跨页时 Word 会把这一行
     # 在每一页的顶端重复一遍。
     head_row = bool(rows) and all(cell["header"] for cell in rows[0])
