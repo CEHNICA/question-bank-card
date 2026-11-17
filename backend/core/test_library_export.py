@@ -1391,10 +1391,14 @@ class LibraryExportTests(ExportFixture, TestCase):
             max(widths[1:]) * 1.8,
             f"表头列只有 {widths[0]:.1f}mm，数字列 {max(widths[1:]):.1f}mm，没按内容分",
         )
-        # 「12」两个数字是 5.02mm，Word 标称的两侧内边距是 3.8mm。
-        # 正好卡在 8.82mm 上就会断成两行——实测就是，所以数字列必须留出余量。
+        # 这张表 13 列，预览里走 dense（qb-table-dense）：没有 2.6em 下限，
+        # 左右内边距收成 0.45em。Chrome 实测两数字那几列是 8.30 毫米。
+        # 「12」两个数字是 4.23 毫米（数字 0.5 个字宽 × 2），加上 dense 的
+        # 内边距 3.81 毫米和 1 像素边框 —— 正好卡在这条线上，数字列要是
+        # 再窄一点就断成两行。
+        need = 2 * 0.5 * 12 * 25.4 / 72 + 0.9 * 12 * 25.4 / 72 + 25.4 / 96
         self.assertGreaterEqual(
-            max(widths[1:]), 2 * 0.6 * 12 * 25.4 / 72 + 3.8 + 0.8, f"数字列只有 {max(widths[1:]):.2f}mm，放不下两个数字"
+            max(widths[1:]), need - 25.4 / 1440, f"数字列只有 {max(widths[1:]):.2f}mm，放不下两个数字"
         )
 
     def test_a_table_wider_than_the_page_is_scaled_back_inside_it(self):
@@ -1434,10 +1438,11 @@ class LibraryExportTests(ExportFixture, TestCase):
         """版心放不下时，被挤的只该是本来就超宽的那几列。
 
         九上「根据图象，填写下表」那张五列表（性质 二次函数 / 开口方向 / 对称轴 /
-        顶点坐标 / 取哪些值时…）需求合计 195.2mm，超版心 17.2mm。按比例全体缩到
-        0.912，「开口方向」本该 21.93mm 只剩 20.00mm，扣掉 Word 单元格左右各
-        1.9mm 只余 16.2mm，而四个字实测 16.99mm——差 0.79mm，表头就印成
-        「开口方 / 向」两行。需求本来放得下的三列全被陪着缩窄了。
+        顶点坐标 / 取哪些值时…）按预览的列宽模型算，需求合计 180.2mm，超版心
+        2.2mm。按比例全体缩到 0.988，需求本来放得下的四列全被陪着缩窄了。
+
+        判据用预览那套独立字面值（2.6em 下限 / 1.4em 内边距 / 1 像素边框），
+        不引用被测模块的常量 —— 免得尺子跟着实现一起跑偏。
         """
         raw = (
             "| 性质 二次函数 | 开口方向 | 对称轴 | 顶点坐标 | 取哪些值时，x的值随y值的增大而增大 |\n"
@@ -1447,17 +1452,15 @@ class LibraryExportTests(ExportFixture, TestCase):
         )
         widths = self.column_widths_mm(self.table_export(raw))
 
-        # 「开口方向」四个字：12pt 汉字一个 1em = 4.23mm，加上留白。
+        # 「开口方向」四个字：12pt 汉字一个 1em = 4.23mm，
+        # 加上预览里 .7em 的左右内边距和 1 像素边框。
         # docx 的列宽存在 twip 里（1 twip = 0.0176mm），比下来会少 0.008mm。
         tolerance = 25.4 / 1440
+        need = 4 * 12 * 25.4 / 72 + 1.4 * 12 * 25.4 / 72 + 25.4 / 96
         self.assertGreaterEqual(
-            widths[1],
-            4 * 12 * 25.4 / 72 + export.CELL_PADDING_MM - tolerance,
-            f"「开口方向」列只有 {widths[1]:.2f}mm，表头会被顶成「开口方 / 向」两行",
+            widths[1], need - tolerance, f"「开口方向」列只有 {widths[1]:.2f}mm，表头会被顶成「开口方 / 向」两行"
         )
-        self.assertGreaterEqual(
-            widths[3], 4 * 12 * 25.4 / 72 + export.CELL_PADDING_MM - tolerance, f"「顶点坐标」列只有 {widths[3]:.2f}mm"
-        )
+        self.assertGreaterEqual(widths[3], need - tolerance, f"「顶点坐标」列只有 {widths[3]:.2f}mm")
         self.assertLessEqual(sum(widths), 178.5)
 
     def test_squeezing_a_wide_table_wraps_fewer_cells_than_scaling_every_column(self):

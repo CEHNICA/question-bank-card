@@ -1526,37 +1526,57 @@ def _write_segments(paragraph, segments, size, bold=False):
             _font(paragraph.add_run(shown), size, bold)
 
 
-# Word 标称单元格左右各留 0.19cm，合起来 3.8mm。实测按 3.8 算仍然会差一点：
-# 「二次项系数」五个字要 21.17mm，列宽算出来 24.9mm，减去 3.8 只剩 21.1mm，
-# 就差 0.07mm 被顶成两行。留到 5mm，一列多 1.2mm，十三列的表也还有富余。
-CELL_PADDING_MM = 5.0
-# 一列最少给多少。跟预览里 `.qb-table td { min-width: 2.6em }` 一个量级，
-# 免得内容窄的时候挤成一条看不见的缝。
-COLUMN_FLOOR_MM = 8.0
+# 预览里 .qb-table 的规矩（frontend/styles.css，1690 行）：
+#   .qb-table td { min-width: 2.6em; padding: .2em .7em; border: 1px solid }
+#   全局 box-sizing: border-box
+# 所以一列的**边框盒**宽度 = max(2.6em, 文字宽 + 1.4em 内边距 + 1 像素边框)。
+#
+# 这三个数是照抄预览的，不是估的：12 磅正文里 2.6em = 11.007 毫米，
+# Chrome 实测两列的 | x | y | 表每列正好 11.005 毫米（整表 22.275）。
+PREVIEW_TABLE_MIN_COLUMN_EM = 2.6
+PREVIEW_TABLE_CELL_PADDING_X_EM = 0.7
+PREVIEW_TABLE_BORDER_MM = 25.4 / 96.0  # 1 像素
+
+# 列数达到这个数，预览就给表格挂 ``qb-table-dense``（qb-render.js 的
+# ``DENSE_TABLE_COLUMNS = 13``）：最小列宽放开、内边距收成 ``.15em .45em``。
+# 导出这边必须跟着换模型 —— 不然十三列的表每列还占 11 毫米，
+# 整张表比预览宽 54 毫米（预览实测 111.32 毫米，模型算出来 165.8 毫米）。
+PREVIEW_TABLE_DENSE_COLUMNS = 13
+PREVIEW_TABLE_DENSE_CELL_PADDING_X_EM = 0.45
+
+# 预览正文字体（Times New Roman）里那些**窄**字符的字宽。
+# 全角汉字和全角标点都是 1 个字宽；ASCII 的标点符号多数不到半个字宽，
+# 按 0.5 算会高估：「零售收入/万元」实际 6.278 个字宽，
+# 按「斜杠 0.5」算成了 6.5，dense 表的表头列因此宽了 0.94 毫米。
+# 数值是 Chrome 实测（_probe69.py，在真实 .qb-stem-body 里量 20 个重复字符）。
+PREVIEW_NARROW_CHAR_EM = {
+    "/": 0.2778,
+    "\\": 0.2778,
+    "(": 0.3330,
+    ")": 0.3330,
+    "[": 0.3330,
+    "]": 0.3330,
+    "{": 0.4800,
+    "}": 0.4800,
+    "<": 0.5640,
+    ">": 0.5640,
+    "-": 0.3330,
+    "=": 0.5640,
+    "+": 0.5640,
+    "\u00d7": 0.5640,
+    "\u00f7": 0.5488,
+    "%": 0.8330,
+    "\u00b7": 0.3330,
+    "\u201c": 0.4438,
+    "\u201d": 0.4438,
+    "\u2018": 0.2625,
+    "\u2019": 0.2625,
+}
 
 
 def _WIDE_CHAR(ch):
     """中日韩字符和全角标点按一个字宽算，其余按半个字宽。"""
     return "\u2e80" <= ch <= "\u9fff" or "\uff00" <= ch <= "\uffef"
-
-
-def _cell_width_mm(cell, size):
-    """这一格大概要占多宽（毫米）。
-
-    系数是量出来的，不是猜的：12pt 正文里一个汉字 4.23mm、数字 2.51mm，
-    也就是 1 em = 4.23mm、数字 0.6 em。取 0.6 是宁可高估一点——
-    差 0.3mm 就够把「12」顶到换行（实测 8.3mm 的格子放不下 5.02mm 的「12」）。
-
-    公式段按 LaTeX 去命令后估：`\\tan\\theta` 当 4 个字符算，量出来 8.26mm。
-    """
-    em = 0.0
-    for segment in cell["segments"]:
-        if segment.get("type") == "math":
-            stripped = re.sub(r"\\[a-zA-Z]+", "ab", segment.get("latex") or "")
-            em += max(1.0, len(stripped) * 0.6)
-        else:
-            em += sum(1.0 if _WIDE_CHAR(ch) else 0.6 for ch in segment.get("raw") or "")
-    return em * size * 25.4 / 72.0 + CELL_PADDING_MM
 
 
 def _preview_char_em(ch):
@@ -1570,6 +1590,9 @@ def _preview_char_em(ch):
         return 1.0
     if ch == " ":
         return 0.25
+    narrow = PREVIEW_NARROW_CHAR_EM.get(ch)
+    if narrow is not None:
+        return narrow
     if ch.isupper():
         return 0.72
     return 0.5
@@ -1616,7 +1639,8 @@ def _field_max_text_width_mm(blocks, size, extra_segments=None):
 def _cell_content_mm(cell, size):
     """这一格里的**文字**有多宽（毫米），不含单元格内边距。
 
-    与 ``_cell_width_mm`` 用同一套字宽系数，但不去掉那 5 毫米的内边距 ——
+    这是**预览**里的文字宽度：字宽系数是照预览量的（汉字 1 个、数字 0.5、
+    大写字母 0.72、小写 0.5、空格 0.25），不含单元格内边距。
     预览里（``styles.css`` 全局 ``box-sizing: border-box``）单元格的内边距是
     ``.7em`` 两侧，最小宽度 ``2.6em`` 是一起算的，所以这里单独留一份。
     """
@@ -1630,8 +1654,8 @@ def _cell_content_mm(cell, size):
     return em * size * 25.4 / 72.0
 
 
-def _preview_table_width_mm(placements, width, size):
-    """这张表在**预览**里有多宽（毫米）。
+def _preview_column_widths(placements, width, size):
+    """预览里**每一列**的边框盒宽度（毫米）。
 
     预览的 ``.qb-table`` 是 ``table-layout: auto``，列宽按内容分，
     每格还有 ``min-width: 2.6em`` 和 ``.7em`` 的左右内边距
@@ -1642,36 +1666,57 @@ def _preview_table_width_mm(placements, width, size):
       · 表宽 = 各列边框盒之和 + 左右外边框（各半像素，合起来 1 像素）。
 
     拿「年份 | 产量（辆） | 备注」这张三列表验：56.92 毫米（实测 56.9185）。
-    拿「甲 | 乙」那张两列表验：22.27 毫米（实测 22.2746）。
+    拿「甲 | 乙」那张两列表验：每列 11.005 毫米、整表 22.275 毫米（实测）。
 
-    表宽决定它在一列里居中时落在哪儿，所以兜底落位必须按预览的宽算，
-    不能拿 Word 自己的列宽（那边内边距是 1.9 毫米）来算。
+    列数 >= 13 的表在预览里挂 ``qb-table-dense``（qb-render.js 的
+    ``DENSE_TABLE_COLUMNS = 13``）：最小列宽放开、内边距收成 ``.15em .45em``，
+    所以那种表的每列 = 文字宽 + 0.9em + 1 像素，**没有 2.6em 下限**。
+    实测那张十三列表：表头列 30.646、数字列 6.185、整表 111.319 毫米。
+
+    Word 这边画出来的列距就等于写进去的 ``w:gridCol``（真 Word 16 实测：
+    写 8.008 毫米，纸上是 8.052；写 11.005，纸上是 11.016），
+    所以这一列宽可以直接当 Word 的列宽用，不需要补偿。
     """
     em_mm = size * 25.4 / 72.0
-    border_mm = 25.4 / 96.0  # 1 像素
     need = [0.0] * width
     for _, column, cell in placements:
         span = min(max(1, cell["colspan"]), width - column)
         share = _cell_content_mm(cell, size) / span
         for offset in range(span):
             need[column + offset] = max(need[column + offset], share)
-    total = sum(max(2.6 * em_mm, need[index] + 1.4 * em_mm + border_mm) for index in range(width))
-    return total + border_mm
+    if width >= PREVIEW_TABLE_DENSE_COLUMNS:
+        # dense 表（列数 >= 13）：没有最小列宽，内边距也收窄。
+        floor = 0.0
+        padding = 2 * PREVIEW_TABLE_DENSE_CELL_PADDING_X_EM * em_mm
+    else:
+        floor = PREVIEW_TABLE_MIN_COLUMN_EM * em_mm
+        padding = 2 * PREVIEW_TABLE_CELL_PADDING_X_EM * em_mm
+    return [max(floor, need[index] + padding + PREVIEW_TABLE_BORDER_MM) for index in range(width)]
+
+
+def _preview_table_width_mm(placements, width, size):
+    """这张表在**预览**里有多宽（毫米）。
+
+    表宽决定它在一列里居中时落在哪儿，所以兜底落位必须按预览的宽算，
+    不能拿 Word 自己的列宽（那边内边距是 1.9 毫米）来算。
+    """
+    return sum(_preview_column_widths(placements, width, size)) + PREVIEW_TABLE_BORDER_MM
 
 
 def _fair_widths(need, budget):
     """版心放不下时，先让每一列都够用，实在放不下的几列再一起挤。
 
     按比例全体缩小是错的：九上「根据图象，填写下表」那张五列表（性质/二次函数、
-    开口方向、对称轴、顶点坐标、取哪些值时……）需求合计 195.2mm，超版心 17.2mm。
-    按比例缩到 0.912 之后，「开口方向」本该 21.93mm 只剩 20.00mm，扣掉 Word 单元格
-    左右各 1.9mm 只余 16.2mm，而四个字实测 16.99mm——差 0.79mm，表头就被顶成
-    「开口方 / 向」两行。同一张表里需求本来就放得下的三列，全被陪着缩窄了。
+    开口方向、对称轴、顶点坐标、取哪些值时……）按预览的列宽模型算，需求合计
+    180.2mm，超版心 2.2mm。按比例缩到 0.988 之后，「开口方向」本该 23.12mm
+    只剩 22.85mm，扣掉 Word 单元格左右各 1.9mm 只余 19.0mm，而四个字实测
+    16.99mm——虽然这一列还塞得下，别的表就会把表头顶成「开口方 / 向」两行。
+    同一张表里需求本来就放得下的几列，全被陪着缩窄了。
 
     这里按水位线分：需求不超过水位的列照需求给，剩下的列一律给水位线，水位由
-    「未分到水位的列的需求之和」摊平得出。对五列表算出来是
-    ``[48.18, 21.93, 17.70, 21.93, 68.26]``——需求放得下的四列全都拿到完整需求，
-    只有最后那列（需求 85.43mm，本来就超出版心）被挤；按比例缩放则是四列一起折行。
+    「未分到水位的列的需求之和」摊平得出。对上面那张五列表算出来是
+    ``[32.65, 23.12, 18.89, 23.12, 80.22]``——需求放得下的四列全都拿到完整需求，
+    只有最后那列（需求 82.39mm，本来就超出版心）被挤；按比例缩放则是四列一起缩。
 
     水位线取的是「能让总和凑齐版心的最低水位」，所以能让多少列保持完整需求就让
     多少列保持——**折行的格子数最少**，这才是换掉按比例的理由（按比例并不逐列
@@ -1693,18 +1738,21 @@ def _fair_widths(need, budget):
 
 
 def _table_column_widths(placements, width, size, text_width_mm=178.0):
-    """按内容分列宽，跟预览里那张表一样（`.qb-table` 是 table-layout:auto，不写死列宽）。
+    """按预览的列宽模型分列宽（`.qb-table` 是 table-layout:auto，不写死列宽）。
 
     早先每列都 `Mm(178 / width)`：13 列的表每列只剩 13.7mm，「零售收入/万元」
     七个字被挤成五行，整张表凭空长高一倍——同一份内容在 PDF 路线里是一行。
     真库 27 个表格里 11 个会这样，九上第 1 题（#1282）最典型。
+
+    接着换成了 ``max(8.0, 内容 + 5.0)`` 这套 Word 味的估法：窄表被 8 毫米的
+    下限卡住，而预览里同样的表每列是 11.005 毫米（2.6em 下限）——两边每列
+    差 3 毫米，纸上一眼就看出表比预览窄。
+
+    现在直接用预览那套（``_preview_column_widths``）：每列
+    ``max(2.6em, 文字宽 + 1.4em 内边距 + 1 像素边框)``，Word 画出来的列距
+    就等于 ``w:gridCol``，不需要任何补偿。
     """
-    need = [COLUMN_FLOOR_MM] * width
-    for _, column, cell in placements:
-        span = min(max(1, cell["colspan"]), width - column)
-        share = _cell_width_mm(cell, size) / span
-        for offset in range(span):
-            need[column + offset] = max(need[column + offset], share)
+    need = _preview_column_widths(placements, width, size)
     total = sum(need)
     if total <= text_width_mm:
         # 内容窄就照内容的宽度印，别硬撑满——预览里那张表也是这么收着的。
