@@ -41,8 +41,8 @@ UninstallDisplayName={#MyAppName}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
-CloseApplications=yes
-CloseApplicationsFilter={#MyAppExeName}
+CloseApplications=force
+CloseApplicationsFilter={#MyAppExeName},tiyouju.exe
 RestartApplications=no
 SetupLogging=yes
 UsePreviousAppDir=yes
@@ -104,3 +104,30 @@ Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+procedure StopRunningAppProcesses();
+var
+  ResultCode: Integer;
+begin
+  Exec(
+    ExpandConstant('{sys}\taskkill.exe'),
+    '/F /T /IM {#MyAppExeName} /IM tiyouju.exe',
+    '',
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode
+  );
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  StopRunningAppProcesses();
+  Result := True;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopRunningAppProcesses();
+  Result := '';
+end;

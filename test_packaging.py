@@ -232,6 +232,9 @@ class DistributionLicenseTests(unittest.TestCase):
         self.assertIn('Type: files; Name: "{userprograms}\\{#MyLegacyAppName}\\{#MyLegacyAppName}.lnk"', installer)
         self.assertIn('Type: dirifempty; Name: "{userprograms}\\{#MyLegacyAppName}"', installer)
         self.assertNotIn('Type: filesandordirs; Name: "{userprograms}\\{#MyLegacyAppName}"', installer)
+        self.assertIn("CloseApplications=force", installer)
+        self.assertIn("taskkill.exe", installer)
+        self.assertIn("function PrepareToInstall", installer)
 
 
 class Utf8ChildProcessTests(unittest.TestCase):
