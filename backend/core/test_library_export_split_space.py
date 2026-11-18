@@ -30,15 +30,19 @@ TWIPS_PER_MM = 1440 / 25.4
 
 
 def writing_space(tree, stem):
-    """题干后面那块答题留白的 w:after（twips）；没有留白返回 None。"""
+    """题干后面那块答题留白的高度（twips）；没有留白返回 None。
+
+    第六十九轮起，留白是**固定行高的空段**（w:lineRule="exact"），
+    高度写在 w:line 上；w:after 是它后面的题块间距（8 磅），不是留白高度。
+    """
     paragraphs = tree.find("w:body", NS).findall("w:p", NS)
     index = next(i for i, p in enumerate(paragraphs) if stem in "".join(p.itertext()))
     for paragraph in paragraphs[index + 1 :]:
         if "".join(paragraph.itertext()).strip():
             break
         spacing = paragraph.find("w:pPr/w:spacing", NS)
-        if spacing is not None and spacing.get(f"{{{NS['w']}}}after"):
-            return int(spacing.get(f"{{{NS['w']}}}after"))
+        if spacing is not None and spacing.get(f"{{{NS['w']}}}lineRule") == "exact":
+            return int(spacing.get(f"{{{NS['w']}}}line"))
     return None
 
 
