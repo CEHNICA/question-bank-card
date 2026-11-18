@@ -1722,7 +1722,7 @@ def paper_confirm_structure(request, paper_id):
 def paper_archive(request, paper_id):
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
-    rejected = _guard(request, json_body=False)
+    rejected = _guard(request)
     if rejected:
         return rejected
     paper = get_object_or_404(Paper, pk=paper_id)
@@ -1739,7 +1739,7 @@ def paper_restore(request, paper_id):
     """Restore visibility only: reviewed cards, snapshots and processing state stay intact."""
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
-    rejected = _guard(request, json_body=False)
+    rejected = _guard(request)
     if rejected:
         return rejected
     paper = get_object_or_404(Paper, pk=paper_id)
@@ -3764,7 +3764,7 @@ def library_crop(request, publication_id):
 def library_withdraw(request, publication_id):
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
-    rejected = _guard(request, json_body=False)
+    rejected = _guard(request)
     if rejected:
         return rejected
     publication = get_object_or_404(PublishedQuestion, pk=publication_id)

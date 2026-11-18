@@ -229,16 +229,47 @@ class LibraryTrashTests(TestCase):
         self.assertEqual(self.client.get("/api/library/restore-batch", HTTP_X_QB_REQUEST="1").status_code, 405)
         self.assertEqual(self.client.get("/api/library/purge-batch", HTTP_X_QB_REQUEST="1").status_code, 405)
 
-    def test_bodyless_recycle_endpoints_accept_plain_post_without_json_content_type(self):
-        """无请求体的归档、恢复、撤回和彻底删除接口不应因为缺少 application/json 返回 415。"""
+    def test_single_recycle_endpoints_accept_empty_json_post_with_guard(self):
+        """单条归档、恢复、撤回和彻底删除接口在携带 JSON 请求头与空对象时均正常执行并保持 415 守卫。"""
         live = self.make_publication(status="published")
         paper = live.paper
         paper.status = Paper.Status.READY
         paper.save(update_fields=["status"])
 
-        self.assertEqual(self.client.post(f"/api/papers/{paper.id}/archive", HTTP_X_QB_REQUEST="1").status_code, 200)
-        self.assertEqual(self.client.post(f"/api/papers/{paper.id}/restore", HTTP_X_QB_REQUEST="1").status_code, 200)
-        self.assertEqual(self.client.post(f"/api/library/{live.id}/withdraw", HTTP_X_QB_REQUEST="1").status_code, 200)
-        self.assertEqual(self.client.post(f"/api/library/{live.id}/restore", HTTP_X_QB_REQUEST="1").status_code, 200)
-        self.assertEqual(self.client.post(f"/api/library/{live.id}/withdraw", HTTP_X_QB_REQUEST="1").status_code, 200)
-        self.assertEqual(self.client.post(f"/api/library/{live.id}/purge", HTTP_X_QB_REQUEST="1").status_code, 200)
+        self.assertEqual(self.client.post(f"/api/papers/{paper.id}/archive", HTTP_X_QB_REQUEST="1").status_code, 415)
+        self.assertEqual(
+            self.client.post(
+                f"/api/papers/{paper.id}/archive", data="{}", content_type="application/json", HTTP_X_QB_REQUEST="1"
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/api/papers/{paper.id}/restore", data="{}", content_type="application/json", HTTP_X_QB_REQUEST="1"
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/api/library/{live.id}/withdraw", data="{}", content_type="application/json", HTTP_X_QB_REQUEST="1"
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/api/library/{live.id}/restore", data="{}", content_type="application/json", HTTP_X_QB_REQUEST="1"
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/api/library/{live.id}/withdraw", data="{}", content_type="application/json", HTTP_X_QB_REQUEST="1"
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/api/library/{live.id}/purge", data="{}", content_type="application/json", HTTP_X_QB_REQUEST="1"
+            ).status_code,
+            200,
+        )
