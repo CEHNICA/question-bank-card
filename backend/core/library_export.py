@@ -177,6 +177,16 @@ WORD_LINE_BOX_LEADING_COMPENSATION_PT = 3.5
 # Chrome 把撑出来的高度放在了字顶上面）。Word 的公式是行内对象，行盒不会
 # 撑成那个形状，实测差 1.5 磅（0.53 毫米）。
 PREVIEW_SOLUTION_LINE_BOX_COMPENSATION_PT = 1.5
+# 答题留白切成多段时的单段高度上限（twips）。1140 twips = 57 磅 = 20.1 毫米：
+# 一段一行，Word 没法在段内断开，只能整段挪到下一页。
+#
+# 这个上限**不是随便取的**：预览里留白块往下切的时候有一条阈值
+# （frontend/exam-layout.js 的 writingSpace：MIN_WRITABLE = 76px = 20.1 毫米）——
+# 页底剩下的空间不足 20.1 毫米，就**整块**把留白推到下一页，不留碎片
+# （碎片在纸上看不见，却会逼着下一页顶上一行「第 N 题答题区（续）」）。
+# Word 的单行段是「放不下就整段走」，阈值就等于段高，所以段高取 20.1 毫米，
+# Word 的「整段走」阈值就跟预览的 MIN_WRITABLE 对上了。
+ANSWER_SPACE_SLICE_TWIPS = 1140
 # .solution-figure（解析配图）的上下外边距：6px = 4.5pt。
 PREVIEW_SOLUTION_FIGURE_MARGIN_PT = 4.5
 # 字体规格（字号 / 字重 / 字体族）也照抄预览，Word 这边不许自己另定一套：
@@ -3805,7 +3815,7 @@ def _pagination(document, start, mode, size):
 
 
 def _write_answer_space(document, millimetres):
-    """写出答题留白块。
+    """写出答题留白块（**可跨页断开**）。
 
     预览里留白是紧贴上一块、上下没有外边距的一个固定高度块
     （frontend/library.css 的 .print-answer-space），题目块的下外边距
@@ -3818,8 +3828,19 @@ def _write_answer_space(document, millimetres):
     这里改成**固定行高**（w:lineRule="exact"）的空段，行盒高度就是留白高度；
     同时把上一段的段后距归零，让留白真正贴住上一块（预览里 .print-answer-space
     的上下外边距都是 0）。
+
+    第七十轮：**留白必须能断开**。预览的留白是可切的
+    （frontend/exam-layout.js 的 writingSpace：页底放不下的那几毫米留白
+    挪到下一页，续页顶部还打一行「第 N 题答题区（续）」）。
+    Word 原来把 30 毫米留白写成**一整块**固定行高空段 —— 固定行高的段落
+    不可断开，放不下就整题推到下一页，于是 Word 每页比预览少装一题，
+    分页点逐页漂：40 题对照卷实测，预览每页首题 1,7,14,20,27,33,40，
+    Word 是 1,7,13,19,25,31,37，7 页里 5 页对不上。
+
+    修法：把留白切成若干个**单行**固定行高段。单行段落 Word 无法在段内断开，
+    只能整段挪到下一页 —— 于是「页底放得下几毫米就留几毫米、放不下就整段走」
+    的行为跟预览一致了。
     """
-    from docx.enum.text import WD_LINE_SPACING
     from docx.oxml.ns import qn
     from docx.shared import Pt
     from docx.text.paragraph import Paragraph
@@ -3829,13 +3850,21 @@ def _write_answer_space(document, millimetres):
     if previous is not None and previous.tag == qn("w:p"):
         Paragraph(previous, document).paragraph_format.space_after = Pt(0)
 
-    paragraph = document.add_paragraph()
-    fmt = paragraph.paragraph_format
-    fmt.line_spacing = Pt(millimetres * 72 / 25.4)
-    fmt.line_spacing_rule = WD_LINE_SPACING.EXACTLY
-    fmt.space_before = Pt(0)
-    fmt.space_after = Pt(0)
-    return paragraph
+    # 高度守恒：按 twips 整数切，最后一段拿余数，总高与请求一致。
+    remaining = int(round(millimetres * 1440 / 25.4))
+    paragraphs = []
+    while remaining > 0:
+        take = min(remaining, ANSWER_SPACE_SLICE_TWIPS)
+        remaining -= take
+        paragraph = document.add_paragraph()
+        fmt = paragraph.paragraph_format
+        fmt.space_before = Pt(0)
+        fmt.space_after = Pt(0)
+        spacing = paragraph._p.get_or_add_pPr().get_or_add_spacing()
+        spacing.set(qn("w:line"), str(take))
+        spacing.set(qn("w:lineRule"), "exact")
+        paragraphs.append(paragraph)
+    return paragraphs
 
 
 def _question_gap(document):

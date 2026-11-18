@@ -90,6 +90,58 @@ def tree_paras(tree):
     return tree.find("w:body", NS).findall("w:p", NS)
 
 
+def writing_space_twips(paragraphs, start):
+    """The writing space that follows paragraph ``start``, in twips.
+
+    第六十九轮起，留白是**固定行高的空段**（w:lineRule="exact"），高度写在
+    w:line 上；w:after 是它后面的题块间距（8 磅），不是留白高度。
+
+    第七十轮起，留白不再是一整块 —— 它是若干个**单行**固定行高段：预览的留白
+    本来就可切（frontend/exam-layout.js 的 writingSpace 会把页底放不下的那几毫米
+    挪到下一页），Word 原来写成一整块，放不下就整题推到下一页，于是每页比预览
+    少装一题、分页点逐页漂（40 题对照卷：预览每页首题 1,7,14,20,27,33,40，
+    Word 1,7,13,19,25,31,37，7 页里 5 页对不上）。
+
+    业务语义没变：**一组连续留白段的总高**还是老师要的毫米数，所以尺子量总高。
+    """
+    total = 0
+    for paragraph in paragraphs[start + 1 :]:
+        if "".join(paragraph.itertext()).strip():
+            break
+        spacing = paragraph.find("w:pPr/w:spacing", NS)
+        if spacing is None or spacing.get(f"{{{NS['w']}}}lineRule") != "exact":
+            break
+        total += int(spacing.get(f"{{{NS['w']}}}line"))
+    return total
+
+
+def writing_space_groups(tree):
+    """每一组连续留白段的总高（毫米），按出现顺序。
+
+    一组 = 连续的一段固定行高空段（第七十轮起留白切成多段，见
+    :func:`writing_space_twips`）。业务语义：每组对应一道题的答题留白。
+    """
+    groups = []
+    current = 0
+    for paragraph in tree_paras(tree):
+        spacing = paragraph.find("w:pPr/w:spacing", NS)
+        is_space = (
+            spacing is not None
+            and spacing.get(f"{{{NS['w']}}}lineRule") == "exact"
+            and spacing.get(f"{{{NS['w']}}}line")
+            and not "".join(paragraph.itertext()).strip()
+        )
+        if is_space:
+            current += int(spacing.get(f"{{{NS['w']}}}line"))
+            continue
+        if current:
+            groups.append(current * 25.4 / 1440)
+            current = 0
+    if current:
+        groups.append(current * 25.4 / 1440)
+    return groups
+
+
 class ExportFixture:
     """Publication/payload/post helpers, shared with the opt-in browser module.
 
@@ -236,12 +288,9 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertLess(text.index("选择题"), text.index("解答题"))
         self.assertEqual(len(xml.findall(".//a:blip", NS)), 1)
         # 答题留白是**固定行高的空段**（第六十九轮起）：高度写在 w:line 上，
-        # w:lineRule="exact"。这里要的是 60 毫米那一块。
-        spaces = [
-            int(node.get(f"{{{NS['w']}}}line")) * 25.4 / 1440
-            for node in xml.findall(".//w:spacing[@w:lineRule='exact']", NS)
-            if node.get(f"{{{NS['w']}}}line")
-        ]
+        # w:lineRule="exact"。第七十轮起它切成若干单行段（可跨页断开），
+        # 所以量的是**一组连续留白段的总高**。
+        spaces = writing_space_groups(xml)
         self.assertTrue(any(abs(value - 60) < 0.2 for value in spaces), f"没有 60 毫米的答题留白：{spaces}")
         with zipfile.ZipFile(io.BytesIO(result.content)) as archive:
             self.assertEqual(len([name for name in archive.namelist() if name.startswith("word/media/")]), 1)
@@ -982,14 +1031,14 @@ class LibraryExportTests(ExportFixture, TestCase):
         for paragraph in question:
             self.assertEqual(paragraph.find("w:pPr/w:keepLines", NS).get(f"{{{NS['w']}}}val"), "0")
             self.assertEqual(paragraph.find("w:pPr/w:keepNext", NS).get(f"{{{NS['w']}}}val"), "0")
-        # 智能档下解答题有 30 毫米答题空间：这段空白单独占一段，是固定行高的空段，
-        # 题间距落在它之后，题干最后一段不再顶着那 8 磅。
+        # 智能档下解答题有 30 毫米答题空间：这段空白单独占一段（第七十轮起
+        # 切成若干单行段，可跨页断开），题间距落在它之后，题干最后一段不再顶着那 8 磅。
         blank = paragraphs[paragraphs.index(question[-1]) + 1]
         self.assertEqual("".join(blank.itertext()).strip(), "")
         spacing = blank.find("w:pPr/w:spacing", NS)
         self.assertEqual(spacing.get(f"{{{NS['w']}}}lineRule"), "exact")
-        line = int(spacing.get(f"{{{NS['w']}}}line"))
-        self.assertAlmostEqual(line * 25.4 / 1440, 30, delta=0.2)
+        total = writing_space_twips(paragraphs, paragraphs.index(question[-1]))
+        self.assertAlmostEqual(total * 25.4 / 1440, 30, delta=0.2)
 
     def test_compact_protects_display_formula_and_picture_without_locking_long_prose(self):
         formula = math_field(r"\frac{a}{b}", "<mfrac><mi>a</mi><mi>b</mi></mfrac>", display=True)
@@ -1051,16 +1100,20 @@ class LibraryExportTests(ExportFixture, TestCase):
         response = self.post(payload)
         self.assertEqual(response.status_code, 200, response.content[:200])
         paragraphs = document_xml(response.content).find("w:body", NS).findall("w:p", NS)
-        question = paragraphs[2:]  # title, section heading
-        self.assertEqual(len(question), 5)
-        # 最后一段是解答题的答题空白（智能档 30 毫米），它是故意留的空段。
-        writing_space = question[-1]
-        self.assertEqual("".join(writing_space.itertext()).strip(), "")
-        spacing = writing_space.find("w:pPr/w:spacing", NS)
-        self.assertEqual(spacing.get(f"{{{NS['w']}}}lineRule"), "exact")
-        line = int(spacing.get(f"{{{NS['w']}}}line"))
-        self.assertAlmostEqual(line * 25.4 / 1440, 30, delta=0.2)
-        question = question[:-1]
+        body = paragraphs[2:]  # title, section heading
+        # 末尾是解答题的答题空白（智能档 30 毫米）。第七十轮起留白切成若干单行段
+        # （这样页底放不下的那几毫米能挪到下一页），先找到第一段留白，再把它和
+        # 后面连续的留白段一起量总高。
+        first_space = next(
+            index
+            for index, paragraph in enumerate(body)
+            if paragraph.find("w:pPr/w:spacing", NS) is not None
+            and paragraph.find("w:pPr/w:spacing", NS).get(f"{{{NS['w']}}}lineRule") == "exact"
+        )
+        total = writing_space_twips(body, first_space - 1)
+        self.assertAlmostEqual(total * 25.4 / 1440, 30, delta=0.2)
+        question = body[:first_space]
+        self.assertEqual(len(question), 4)
         self.assertEqual(sum(paragraph.find("m:oMath", NS) is not None for paragraph in question), 1)
         self.assertFalse(
             any(
@@ -1164,18 +1217,13 @@ class LibraryExportTests(ExportFixture, TestCase):
 
             第六十九轮起，留白是**固定行高的空段**（w:lineRule="exact"），
             高度写在 w:line 上；w:after 是它后面的题块间距（8 磅），不是留白高度。
+            第七十轮起留白切成若干单行段，这里量一组连续留白段的**总高**。
             """
             response = self.post(self.payload([first, second], print_options=print_options))
             self.assertEqual(response.status_code, 200)
             paragraphs = document_xml(response.content).find("w:body", NS).findall("w:p", NS)
             index = next(i for i, p in enumerate(paragraphs) if stem in "".join(p.itertext()))
-            for paragraph in paragraphs[index + 1 :]:
-                if "".join(paragraph.itertext()).strip():
-                    break
-                spacing = paragraph.find("w:pPr/w:spacing", NS)
-                if spacing is not None and spacing.get(f"{{{NS['w']}}}lineRule") == "exact":
-                    return int(spacing.get(f"{{{NS['w']}}}line"))
-            return None
+            return writing_space_twips(paragraphs, index) or None
 
         none = {"document": "questions", "answer_space": 0}
         large = {"document": "questions", "answer_space": 60}
@@ -1201,18 +1249,14 @@ class LibraryExportTests(ExportFixture, TestCase):
 
             第六十九轮起，留白是**固定行高的空段**（w:lineRule="exact"），
             高度写在 w:line 上；w:after 是它后面的题块间距（8 磅），不是留白高度。
+            第七十轮起留白切成若干单行段，这里量一组连续留白段的**总高**。
             """
             response = self.post(self.payload([answer, choice], print_options=print_options))
             self.assertEqual(response.status_code, 200, response.content[:300])
             paragraphs = document_xml(response.content).find("w:body", NS).findall("w:p", NS)
             index = next(i for i, p in enumerate(paragraphs) if stem in "".join(p.itertext()))
-            for paragraph in paragraphs[index + 1 :]:
-                if "".join(paragraph.itertext()).strip():
-                    break
-                spacing = paragraph.find("w:pPr/w:spacing", NS)
-                if spacing is not None and spacing.get(f"{{{NS['w']}}}lineRule") == "exact":
-                    return int(spacing.get(f"{{{NS['w']}}}line")) * 25.4 / 1440
-            return None
+            total = writing_space_twips(paragraphs, index)
+            return total * 25.4 / 1440 if total else None
 
         # 任意毫米：预览里填 25，卷子上就是 25 毫米。
         self.assertAlmostEqual(
