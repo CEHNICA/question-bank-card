@@ -131,7 +131,7 @@
               <p>为同一道题添加多个片段；翻到下一页后点“再加一块”。调整已有题时直接单击题框，拖边角改大小、拖题号标签移动；双击题框可回到对应审核卡。</p>
             </details>
             <details class="teaching-help"><summary>补充或修改答案</summary>
-              <p>在“答案解析”中填写答案和步骤，右边实时预览，保存后用于出卷。需要 AI 帮忙时只勾选本次题目；生成失败可到“设置 → 服务与密钥”检查答题服务。旧初稿保留在折叠历史中，主视图使用你保存的版本。</p>
+              <p>在“答案解析”中填写答案和步骤，右边实时预览，保存后用于出卷。需要 AI 帮忙时只勾选本次题目；生成失败可到“设置 → API 配置”检查答题服务。旧初稿保留在折叠历史中，主视图使用你保存的版本。</p>
             </details>
             <details class="teaching-help"><summary>读题一直没结果，或服务不可用</summary>
               <p>等待时可停止任务并打开“切题与校正”，原卷和已保存题目会保留。完成切题后，再由你选择 AI 识读或直接原图审核。</p>
@@ -229,7 +229,8 @@
         <h2>切题 · 录入 · 入库</h2>
         <p>从左侧上传试卷或照片。录入通过后题目进入题库；做完的卷会从这里收起，不再跟题库混在一起。</p>
         <div class="empty-learning">
-          <button id="emptyAutomaticGuide" class="button primary" type="button">自动切题入门</button>
+          <button id="emptyUploadButton" class="button primary" type="button">选择文件或照片上传</button>
+          <button id="emptyAutomaticGuide" class="button" type="button">自动切题入门</button>
           <button id="emptyLearn" class="button" type="button">手工练习（不用密钥）</button>
           <a class="button quiet" href="/eagle">先去题库看看</a>
         </div>
@@ -843,7 +844,7 @@
     <div class="dialog-head"><div><h3 id="automaticGuideTitle">自动切题入门</h3><p class="hint">这是操作流程说明。手工示例没有经过 MinerU 或 AI 处理。</p></div><button class="button quiet" type="button" data-close>关闭</button></div>
     <ol class="automatic-guide-steps">
       <li><b>1</b><div><strong>导入资料</strong><p>上传 PDF、Word 或照片。原卷先保存在本机，程序先尝试在本机自动切题。</p></div></li>
-      <li><b>2</b><div><strong>需要时允许 MinerU 云处理</strong><p>先在“设置 → 服务与密钥”填写 MinerU。导入时明确允许本次云处理，选择“允许使用已配置服务”；本机无法切题时才会提交。发起前查看发送范围和费用提示，服务不可用时可重试或改用手工切题。</p></div></li>
+      <li><b>2</b><div><strong>需要时允许 MinerU 云处理</strong><p>先在“设置 → API 配置”填写 MinerU。导入时明确允许本次云处理，选择“允许使用已配置服务”；本机无法切题时才会提交。发起前查看发送范围和费用提示，服务不可用时可重试或改用手工切题。</p></div></li>
       <li><b>3</b><div><strong>核对后通过</strong><p>对照原卷检查题干、选项和配图，改好错漏后勾选通过，题目自动进入正式题库。</p></div></li>
       <li><b>4</b><div><strong>选题、预览、导出</strong><p>在正式题库把题目加入试题篮，打开组卷预览，再导出 PDF 或 Word。</p></div></li>
     </ol>

@@ -19,7 +19,12 @@
 
 要让当前豆包补知识点或参考答案，可以明确让它通过附带的 CLI/MCP 工具完成后交回题库。**这条助手流程不需要豆包 API。** 两项默认关闭，明确需要时再启用；只有聊天能力时由你导入结果。网页中的生成按钮使用已配置的独立 API。[给助手的操作说明](AGENTS.md)
 
-当前发布版本为 **2.0.2**（`2.0.x` 热修复版），可从 [GitHub Releases](https://github.com/CEHNICA/question-bank-card/releases/tag/v2.0.2) 下载（[2.0.2 说明](docs/release-notes-v2.0.2.md) · [2.0.0 完整升级说明](docs/release-notes-v2.0.0.md) · [更新记录](CHANGELOG.md)）。
+当前发布版本为 **2.0.3**（`2.0.x` 持续优化版），可从 [GitHub Releases](https://github.com/CEHNICA/question-bank-card/releases/tag/v2.0.3) 下载（[2.0.3 说明](docs/release-notes-v2.0.3.md) · [2.0.0 完整升级说明](docs/release-notes-v2.0.0.md) · [更新记录](CHANGELOG.md)）。
+
+### 2.0.3 优化内容
+
+- 录题界面空状态新增「选择文件或照片上传」主入口，多照片合并弹窗支持直接前移、后移调序和单张移除。
+- 修复窄窗口（`<=760px`）下左侧试卷栏/章节目录与设置页「API 配置」卡片横向溢出的布局缺陷，并统一帮助文案与原卷答案层提示。
 
 ### 2.0.2 修复内容
 

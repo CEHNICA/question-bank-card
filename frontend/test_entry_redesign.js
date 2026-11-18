@@ -52,4 +52,16 @@ describe("录入题目页（/）重设计契约检查", () => {
     assert.match(appJs, /renderEntryChapterNav\(\);/);
     assert.match(appJs, /syncActiveChapterNav\(id\)/);
   });
+
+  it("空状态直达上传、多照片弹窗支持调序与移除、窄屏不溢出且帮助文案与 API 配置一致", () => {
+    assert.match(html, /id="emptyUploadButton"[^>]*class="button primary"[^>]*>选择文件或照片上传<\/button>/);
+    assert.doesNotMatch(html, /设置 → 服务与密钥/);
+    assert.match(appJs, /\$\("emptyUploadButton"\)\?\.addEventListener\("click"/);
+    assert.match(appJs, /function\s+movePendingPhoto\s*\(/);
+    assert.match(appJs, /function\s+removePendingPhoto\s*\(/);
+    assert.match(appJs, /function\s+clearStaleReviewPaper\s*\(/);
+    assert.match(css, /\.paper-item,\s*\.paper-link,\s*\.entry-chapter-nav\s*\{\s*min-width:\s*0;\s*max-width:\s*100%;\s*\}/);
+    const apiCss = fs.readFileSync(path.join(__dirname, "api-redesign.css"), "utf8");
+    assert.match(apiCss, /@media\s*\(max-width:\s*760px\)/);
+  });
 });

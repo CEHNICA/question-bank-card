@@ -117,3 +117,47 @@
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
 }
 .settings-credential-host #credentialUi .credential-actions .settings-save-result { flex: 1 1 100%; order: -1; margin: 0; }
+
+/* 窄屏适配：取消 200px 左侧留白与绝对定位头部，防止表单及输入框横向撑出屏幕。 */
+@media (max-width: 760px) {
+  .settings-credential-host,
+  #credentialUi,
+  #credentialUi .credential-panel,
+  #credentialUi .credential-vision-step,
+  #credentialUi .library-ai-mount {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  #credentialUi .credential-service {
+    padding: 14px;
+    gap: 10px;
+    min-width: 0;
+    max-width: 100%;
+  }
+  #credentialUi .credential-service-head {
+    position: static;
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+  #credentialUi .credential-service input,
+  #credentialUi .credential-service select,
+  #credentialUi .library-ai-mount input,
+  #credentialUi .library-ai-mount select {
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+  #credentialUi .provider-picker {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  #credentialUi .credential-connection-actions {
+    flex-wrap: wrap;
+  }
+}

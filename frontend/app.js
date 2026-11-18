@@ -1099,6 +1099,20 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return id ? (saved.papers?.[id] ? { ...saved.papers[id], paperId: id } : null) : null;
   }
 
+  function clearStaleReviewPaper(paperId) {
+    if (!paperId) return;
+    try {
+      const saved = storedReviewContexts();
+      if (saved.papers && Object.prototype.hasOwnProperty.call(saved.papers, paperId)) {
+        delete saved.papers[paperId];
+      }
+      if (saved.activePaperId === paperId) {
+        saved.activePaperId = null;
+      }
+      window.sessionStorage.setItem(REVIEW_STATE_KEY, JSON.stringify(saved));
+    } catch { /* 浏览器禁止存储时忽略 */ }
+  }
+
   function restoreReviewState(saved) {
     if (!saved) return;
     (Array.isArray(saved.expanded) ? saved.expanded : [])
@@ -6575,7 +6589,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       optionBox.append(row);
     });
     const extra = el("details", "extra");
-    extra.append(el("summary", "", "答案与解析（可选，原卷没有就留空）"));
+    extra.append(el("summary", "", "原卷参考答案与解析（可选；入库后可在题库工作台单独编辑正式解析）"));
     if ((q.answer || "").trim() || (q.analysis || "").trim()) extra.open = true;
     const answer = el("input");
     answer.value = q.answer || "";
@@ -9376,24 +9390,67 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     resolve?.(false);
   });
 
-  function openPhotoDialog(files, { policy = Object.freeze({ parseMode: "auto", allowCloud: false }), materialType = selectedMaterialType() } = {}) {
-    photoUpload.urls.forEach((url) => URL.revokeObjectURL(url));
+  function movePendingPhoto(index, delta) {
+    const target = index + delta;
+    if (target < 0 || target >= photoUpload.files.length) return;
+    const files = [...photoUpload.files];
+    const urls = [...photoUpload.urls];
+    [files[index], files[target]] = [files[target], files[index]];
+    [urls[index], urls[target]] = [urls[target], urls[index]];
     photoUpload.files = files;
-    photoUpload.policy = policy;
-    photoUpload.materialType = materialType;
-    photoUpload.urls = files.map((file) => URL.createObjectURL(file));
-    $("photoHint").textContent = `这些照片按下列顺序合成一份试卷。${policy.allowCloud ? "本次已允许使用已配置的云服务；无法自动切出的题可以从原卷补齐。" : "本次仅在本机保存，可从原卷选取题目；不会自动调用 AI。"}`;
-    $("photoTitle").textContent = files.length > 1 ? `上传 ${files.length} 张照片` : "上传 1 张照片";
-    $("photoUpload").textContent = files.length > 1 ? `上传（${files.length} 张合成一份试卷）` : "上传";
-    $("photoUpload").disabled = false;
+    photoUpload.urls = urls;
+    renderPhotoDialogList();
+  }
+
+  function removePendingPhoto(index) {
+    if (index < 0 || index >= photoUpload.files.length) return;
+    const [removedUrl] = photoUpload.urls.splice(index, 1);
+    if (removedUrl) URL.revokeObjectURL(removedUrl);
+    photoUpload.files.splice(index, 1);
+    if (!photoUpload.files.length) {
+      $("photoDialog").close();
+      return;
+    }
+    renderPhotoDialogList();
+  }
+
+  function renderPhotoDialogList() {
+    const files = photoUpload.files;
+    const count = files.length;
+    $("photoTitle").textContent = count > 1 ? `上传 ${count} 张照片` : "上传 1 张照片";
+    $("photoUpload").textContent = count > 1 ? `上传（${count} 张合成一份试卷）` : "上传";
+    $("photoUpload").disabled = !count;
+    const last = count - 1;
     $("photoList").replaceChildren(...files.map((file, index) => {
       const item = el("li", "photo-item");
       const image = el("img");
       image.src = photoUpload.urls[index];
       image.alt = file.name;
-      item.append(image, el("span", "photo-name", file.name));
+      const head = el("div", "order-head");
+      head.append(el("strong", "", `第 ${index + 1} 页`), el("span", "photo-name", file.name));
+      const tools = el("div", "order-tools");
+      if (count > 1) {
+        const up = button("← 前移", "small", () => movePendingPhoto(index, -1), "在合成试卷中排到前一页");
+        up.disabled = index === 0;
+        const down = button("后移 →", "small", () => movePendingPhoto(index, 1), "在合成试卷中排到后一页");
+        down.disabled = index === last;
+        tools.append(up, down);
+      }
+      const remove = button("移除", "small quiet", () => removePendingPhoto(index), "从本次上传列表中去掉这张照片");
+      tools.append(remove);
+      item.append(image, head, tools);
       return item;
     }));
+  }
+
+  function openPhotoDialog(files, { policy = Object.freeze({ parseMode: "auto", allowCloud: false }), materialType = selectedMaterialType() } = {}) {
+    photoUpload.urls.forEach((url) => URL.revokeObjectURL(url));
+    photoUpload.files = [...files];
+    photoUpload.policy = policy;
+    photoUpload.materialType = materialType;
+    photoUpload.urls = photoUpload.files.map((file) => URL.createObjectURL(file));
+    $("photoHint").textContent = `这些照片按下列顺序合成一份试卷，可直接前移、后移或移除误选照片。${policy.allowCloud ? "本次已允许使用已配置的云服务；无法自动切出的题可以从原卷补齐。" : "本次仅在本机保存，可从原卷选取题目；不会自动调用 AI。"}`;
+    renderPhotoDialogList();
     if (!$("photoDialog").open) $("photoDialog").showModal();
   }
 
@@ -10294,12 +10351,20 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
   $("settingsAutomaticGuide").addEventListener("click", openAutomaticGuide);
   $("emptyAutomaticGuide").addEventListener("click", openAutomaticGuide);
+  $("emptyUploadButton")?.addEventListener("click", () => {
+    if ($("fileInput").disabled) {
+      toast(state.status?.ready_reason || "当前暂不可上传资料", "error");
+      return;
+    }
+    $("fileInput").click();
+  });
   $("automaticGuideImport").addEventListener("click", async () => {
     $("automaticGuideDialog").close();
     if (window.location.pathname === "/settings") { await leaveFor("/#dropZone"); return; }
     if (!(await discardEdits())) return;
     $("dropZone").scrollIntoView({ block: "center", behavior: "smooth" });
     $("dropZone").focus({ preventScroll: true });
+    if (!$("fileInput").disabled) $("fileInput").click();
   });
 
   $("teachShow").addEventListener("click", showLesson);
@@ -10412,8 +10477,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
           await selectPaper(saved.paperId);
           opened = true;
         } catch (error) {
-          // 卷被删了或打不开：退回第一份，不能卡在空白页。
-          toast(error.message || "上一段的试卷已打不开，已回到第一份", "error");
+          // 旧卷已被彻底删除时顺手清理失效现场，避免反复触发 404；库内仍有其他试卷时提示回退。
+          clearStaleReviewPaper(saved.paperId);
+          if (state.papers.length) toast(error.message || "上一段的试卷已打不开，已回到第一份", "error");
         }
       }
       if (!opened && state.papers.length) await selectPaper(state.papers[0].id);

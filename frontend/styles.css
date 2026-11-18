@@ -1561,9 +1561,10 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
   .topnav { justify-self: center; }
   .topnav a { padding: 6px 12px; }
   .layout { grid-template-columns: 1fr; }
-  .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 12px; }
-  .paper-list { grid-auto-flow: column; grid-auto-columns: minmax(200px, 72%); overflow-x: auto; gap: 6px; padding-bottom: 4px; scroll-snap-type: x mandatory; }
-  .paper-link { border-color: var(--line); scroll-snap-align: start; }
+  .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 12px; min-width: 0; overflow: hidden; }
+  .paper-list { grid-auto-flow: row; grid-template-columns: minmax(0, 1fr); max-height: 240px; overflow-y: auto; overflow-x: hidden; gap: 6px; padding-bottom: 4px; }
+  .paper-item, .paper-link, .entry-chapter-nav { min-width: 0; max-width: 100%; }
+  .paper-link { border-color: var(--line); }
   .side-footer { border-top: 0; padding-top: 0; }
   .toolbar { position: static; margin-top: 12px; }
   .paper-actions { width: 100%; }
