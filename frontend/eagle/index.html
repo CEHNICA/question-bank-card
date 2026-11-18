@@ -3949,20 +3949,6 @@
       await createOneNotePage(qid);
     }
 
-    function launchOneNoteUrl(url) {
-      // 绝不能 window.location.href = onenote:... —— 那会把题有据自己的窗口整页跳走，回不来。
-      const href = String(url || '').trim();
-      if (!href) return false;
-      const anchor = document.createElement('a');
-      anchor.href = href;
-      anchor.target = '_blank';
-      anchor.rel = 'noopener noreferrer';
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      return true;
-    }
-
     async function openOneNotePage(qid) {
       const q = questionsData.find(item => item.id === qid);
       if (!q || !q.onenote || (!q.onenote.url && !q.onenote.page_id)) {
@@ -3971,27 +3957,17 @@
       }
       if (oneNoteBusyBlocked()) return;
 
-      // 最快路径：有协议链接就当场唤起，不转圈、不等 COM。置前丢后台。
-      if (q.onenote.url) {
-        launchOneNoteUrl(q.onenote.url);
-        showToast('正在打开 OneNote…', 'info');
-        fetch(`${API_BASE}/api/library/${qid}/onenote/open`, { method: 'POST' }).catch(() => {});
-        return;
-      }
-
-      const token = showOneNoteBusy(qid, ONE_NOTE_OPEN_STEPS);
+      // 统一交由本机后端通过 COM / 系统协议直接唤起 OneNote，不在前端点击 <a target="_blank">，
+      // 避免 Edge/Chrome 应用窗口(--app)模式弹出多余的空白浏览器窗口。
+      showToast('正在打开 OneNote…', 'info');
       try {
         const resp = await fetch(`${API_BASE}/api/library/${qid}/onenote/open`, { method: 'POST' });
         const data = await resp.json().catch(() => ({}));
-        if (data.ok) {
-          showToast('已在 OneNote 中打开', 'success');
-          return;
+        if (!data.ok) {
+          showToast(data.error || '未能唤起 OneNote', 'error');
         }
-        showToast('未能唤起 OneNote', 'error');
       } catch (_) {
         showToast('打开 OneNote 失败，请确认 OneNote 已启动', 'error');
-      } finally {
-        hideOneNoteBusy(token);
       }
     }
 
@@ -4015,9 +3991,6 @@
         q.onenote = data.onenote;
         refreshOneNoteFilterAndCounts();
         showToast('已打开 OneNote', 'success');
-        if (data.onenote && data.onenote.url) {
-          launchOneNoteUrl(data.onenote.url);
-        }
       } catch (err) {
         showToast('创建 OneNote 页面异常: ' + err.message, 'error');
       } finally {

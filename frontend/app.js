@@ -960,14 +960,26 @@ const QBCutReading = (() => {
   }
 
   function cutReadingSummary(questions = []) {
-    const saved = questions.filter((q) => q.body_mode === "source_image" && q.regions?.length);
+    const imageSaved = questions.filter((q) => q.body_mode === "source_image" && q.regions?.length);
+    // NOTE: 后端识读成功后会把题卡直接转为 text/manual，若仍有原图裁片在识读或待识读，
+    // 需要把已转文字的切题卡片一并计入分母和已完成数，避免分母缩水且已完成恒为 0。
+    const manualText = imageSaved.length
+      ? questions.filter((q) => q.body_mode === "text" && q.processing_mode === "manual" && q.regions?.length)
+      : [];
+    const saved = [...imageSaved, ...manualText];
     const pendingList = questions.filter((q) => q.ocr_pending
       && (q.body_mode === "source_image" || (q.body_mode === "text" && q.processing_mode === "manual")));
-    const eligible = saved.filter((q) => !q.ocr_pending && !q.approved && !q.publication
+    const eligible = imageSaved.filter((q) => !q.ocr_pending && !q.approved && !q.publication
       && !hasCurrentReading(q) && !cutReadingGuard(q).blocked);
-    const failedCards = saved.filter((q) => !q.ocr_pending && hasCurrentReadingFailure(q));
+    const failedCards = imageSaved.filter((q) => !q.ocr_pending && hasCurrentReadingFailure(q));
     const failedRetry = failedCards.filter((q) => !q.approved && !q.publication && !cutReadingGuard(q).blocked);
-    const done = saved.filter((q) => Boolean(q.approved) || Boolean(q.publication) || hasCurrentReading(q)).length;
+    const done = imageSaved.filter((q) => !q.ocr_pending && (
+      Boolean(q.approved)
+      || Boolean(q.publication)
+      || hasCurrentReading(q)
+      || (!hasCurrentReadingFailure(q) && cutReadingGuard(q).blocked)
+    )).length
+      + manualText.filter((q) => !q.ocr_pending).length;
     return {
       saved: saved.length,
       pending: pendingList.length,
@@ -2504,8 +2516,49 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         method: "POST", signal, body
       }), { timeoutMs: 30000 });
       if (state.paperId !== paperId) return;
+      let queued = Number(data.queued || 0);
+      let message = data.message || "";
+      if (!queued && Array.isArray(data.skipped)) {
+        // NOTE: 兼容未重启的旧版后端进程——旧版 read-cut-questions 未按 status='published' 过滤，
+        // 会把仅有撤回记录的原图题误判跳过；对这部分候选改走已对齐 cut_guard 的单题 reread。
+        const selected = new Set(body.question_ids);
+        const fallbackIds = data.skipped
+          .filter((item) => item && item.reason === "已审核或有入库记录，已保留" && selected.has(item.id))
+          .map((item) => item.id);
+        if (fallbackIds.length) {
+          let fallbackQueued = 0;
+          try {
+            for (const id of fallbackIds) {
+              if (state.paperId !== paperId) return;
+              for (let attempt = 1; ; attempt += 1) {
+                try {
+                  await QBRegionWait.boundedRequest((signal) => api(`/api/questions/${id}/reread`, {
+                    method: "POST", signal, body: { revision: body.revisions[String(id)] }
+                  }), { timeoutMs: 30000 });
+                  fallbackQueued += 1;
+                  break;
+                } catch (fallbackError) {
+                  if (fallbackError?.status === 409) break;
+                  // NOTE: 逐题兜底可能与后台 worker 写库并发撞上 SQLite 锁返回 500，退避重试避免整批中断
+                  if (attempt > 3) throw fallbackError;
+                  if (typeof setTimeout === "function") {
+                    await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
+                  }
+                  if (state.paperId !== paperId) return;
+                }
+              }
+            }
+          } catch (fallbackError) {
+            if (fallbackQueued && state.paperId === paperId) void refreshPaper();
+            throw fallbackError;
+          }
+          if (state.paperId !== paperId) return;
+          queued = fallbackQueued;
+          if (queued) message = `已提交 ${queued} 道已切题目，识读完成后可直接审核。`;
+        }
+      }
       await refreshPaper();
-      toast(data.message || (data.queued ? `已提交 ${data.queued} 道题识读，文字显示后请核对并审核` : "没有需要新识读的题目"), data.queued ? "success" : "");
+      toast(message || (queued ? `已提交 ${queued} 道题识读，文字显示后请核对并审核` : "没有需要新识读的题目"), queued ? "success" : "");
     } catch (error) {
       if (state.paperId !== paperId) return;
       const message = error.name === "TimeoutError" ? "识读提交结果尚未确认，请稍后查看题卡。保存的范围与原图都保留。" : error.message;

@@ -85,6 +85,54 @@ assert.match(js, /if \(state\.paper\) renderCutReadingStage\(\)/, "Saving creden
   assert.equal(requests.length, 1, "Batch reading waits while a single submission is in flight");
   context.questionReadingRequests.clear();
 
+  // 兼容未重启的旧后端：批量接口误将带撤回记录的题目跳过时，自动回退逐题调用 reread；
+  // 遇到 SQLite 锁冲突导致的 500 临时错误应退避重试而非直接中断整批。
+  const fallbackRequests = [];
+  const fallbackToasts = [];
+  let q1Attempts = 0;
+  const fallbackContext = {
+    ...context,
+    setTimeout: (fn) => fn(),
+    toast: (message, kind) => fallbackToasts.push({ message, kind }),
+    api: async (url, options) => {
+      fallbackRequests.push({ url, body: JSON.parse(JSON.stringify(options.body)) });
+      if (url.endsWith("/read-cut-questions")) {
+        return {
+          queued: 0,
+          skipped: [
+            { id: 1, reason: "已审核或有入库记录，已保留" },
+            { id: 4, reason: "已审核或有入库记录，已保留" },
+            { id: 5, reason: "已有人工修改的文字，已保留" },
+          ],
+          message: "没有新的题目需要识读；可直接查看、审核已有结果。",
+        };
+      }
+      if (url === "/api/questions/1/reread") {
+        q1Attempts += 1;
+        if (q1Attempts === 1) {
+          const err = new Error("Internal Server Error");
+          err.status = 500;
+          throw err;
+        }
+        return { question: { id: 1 } };
+      }
+      if (url === "/api/questions/4/reread") {
+        const err = new Error("已保留");
+        err.status = 409;
+        throw err;
+      }
+      return { question: { id: 1 } };
+    },
+  };
+  await vm.runInNewContext(handler + "\nreadCutQuestions([1, 4, 5]);", fallbackContext);
+  assert.deepEqual(fallbackRequests, [
+    { url: "/api/papers/paper-test/read-cut-questions", body: { question_ids: [1, 4, 5], revisions: { 1: 4, 4: 4, 5: 4 }, revision: 5 } },
+    { url: "/api/questions/1/reread", body: { revision: 4 } },
+    { url: "/api/questions/1/reread", body: { revision: 4 } },
+    { url: "/api/questions/4/reread", body: { revision: 4 } },
+  ]);
+  assert.deepEqual(fallbackToasts, [{ message: "已提交 1 道已切题目，识读完成后可直接审核。", kind: "success" }]);
+
   const single = js.slice(js.indexOf("  async function rereadQuestion("), js.indexOf("  function updatePaperFromResponse("));
   context.questionById = (id) => qs.find((q) => q.id === id);
   context.applyQuestion = () => {};
@@ -172,6 +220,48 @@ assert.match(js, /if \(state\.paper\) renderCutReadingStage\(\)/, "Saving creden
   assert.ok(blocked);
   assert.equal(blocked.disabled, true, "Live unreadiness still disables the batch button");
   assert.match(blockedContext.cutReadingErrors.get("unlock-paper"), /还没有 API Key/);
+
+  // 批量识读进行中，已完成的题目会被后端 _cut_to_text 转为 text/manual：
+  // 此时分母 saved 必须保持总题数不变，done 计入已转文字题卡，标题显示「正在识读：已完成 X / Total」。
+  const mixedBatch = [
+    source(21, { body_mode: "text", processing_mode: "manual", stem: "已完成第 1 题" }),
+    source(22, { body_mode: "text", processing_mode: "manual", stem: "已完成第 2 题", approved: true }),
+    source(23, { ocr_pending: true }),
+    source(24),
+  ];
+  const mixedSummary = Cut.cutReadingSummary(mixedBatch);
+  assert.equal(mixedSummary.saved, 4, "总题数应包含已转文字的切题卡片");
+  assert.equal(mixedSummary.done, 2, "已转文字且不在识读中的题卡应计入已完成数");
+  assert.equal(mixedSummary.pending, 1);
+  assert.equal(mixedSummary.remaining, 1);
+  assert.deepEqual(mixedSummary.eligibleIds, [24], "已转文字的题卡不应重复进入待识读候选");
+  const mixedNodes = new Map();
+  const mixedContext = {
+    ...unlockContext,
+    state: {
+      paperId: "mixed-paper",
+      paper: { id: "mixed-paper", parse_mode: "manual", status: "ready" },
+      questions: mixedBatch,
+      status: { reader_readiness: { ready: true, label: "MiniMax-M3" } },
+    },
+    cutReadingErrors: new Map(),
+    $: (id) => { if (!mixedNodes.has(id)) mixedNodes.set(id, stageNode()); return mixedNodes.get(id); },
+    button: (label) => { const item = stageNode(); item.label = label; item.disabled = false; return item; },
+  };
+  vm.runInNewContext(stage + "\nrenderCutReadingStage();", mixedContext);
+  assert.equal(mixedNodes.get("cutReadingTitle").textContent, "正在识读：已完成 2 / 4");
+
+  // 带 manual_text 护栏的原图题不进入待识读候选，必须计入 done，使「待识读」与标题未识读数一致。
+  const guardedBatch = [
+    source(31, { body_mode: "text", processing_mode: "manual", stem: "已识读" }),
+    source(32, { cut_reading_guard: { blocked: true, reason: "manual_text" } }),
+    source(33),
+  ];
+  const guardedSummary = Cut.cutReadingSummary(guardedBatch);
+  assert.equal(guardedSummary.saved, 3);
+  assert.equal(guardedSummary.done, 2);
+  assert.equal(guardedSummary.remaining, 1);
+  assert.equal(guardedSummary.saved - guardedSummary.done - guardedSummary.pending - guardedSummary.failed, guardedSummary.remaining);
 
   console.log("Saved-cut reading eligibility, normal review, subset contract and submission guards: OK");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

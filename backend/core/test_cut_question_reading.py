@@ -19,7 +19,7 @@ from . import (
     test_manual_intake_review as manual_review,
     views,
 )
-from .models import Question
+from .models import PublishedQuestion, Question
 
 
 class CutQuestionReadingTests(TestCase):
@@ -127,6 +127,44 @@ class CutQuestionReadingTests(TestCase):
         self.assertEqual(Question.objects.values().get(pk=question.pk), before)
         publication.refresh_from_db()
         self.assertEqual(publication.content, published)
+
+    def test_withdrawn_or_superseded_publication_does_not_block_batch_reading(self):
+        """已撤回或已被新版替代的入库记录不在题库中生效，不应拦截批量识读。"""
+        withdrawn = self.cut(1)
+        superseded = self.cut(2)
+        live = self.cut(3)
+        for index, (question, status) in enumerate(
+            (
+                (withdrawn, PublishedQuestion.Status.WITHDRAWN),
+                (superseded, PublishedQuestion.Status.SUPERSEDED),
+                (live, PublishedQuestion.Status.PUBLISHED),
+            ),
+            start=1,
+        ):
+            PublishedQuestion.objects.create(
+                question=question,
+                paper=self.original,
+                source_filename="review-original.pdf",
+                number=index,
+                question_type="free_response",
+                version=1,
+                status=status,
+                content={"stem": "入库时保存的题面"},
+                content_hash="a" * 64,
+            )
+
+        result = self.post({"question_ids": []})
+        self.assertEqual(result.status_code, 200, result.content)
+        payload = result.json()
+        self.assertEqual(payload["queued"], 2)
+        self.assertEqual(payload["queued_ids"], [withdrawn.pk, superseded.pk])
+        self.assertEqual([item["id"] for item in payload["skipped"]], [live.pk])
+
+        for question in (withdrawn, superseded):
+            question.refresh_from_db()
+            self.assertTrue(question.ocr_pending and question.reread_requested)
+        live.refresh_from_db()
+        self.assertFalse(live.ocr_pending or live.reread_requested)
 
     def test_no_reader_fails_without_queue_and_no_repeated_background_work(self):
         question = self.cut()

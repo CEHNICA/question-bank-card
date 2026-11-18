@@ -2149,7 +2149,9 @@ def paper_read_cut_questions(request, paper_id):
         if converted_ids:
             questions = list(query.order_by("number", "id"))
         published_ids = set(
-            PublishedQuestion.objects.filter(question_id__in=selected_ids).values_list("question_id", flat=True)
+            PublishedQuestion.objects.filter(
+                question_id__in=selected_ids, status=PublishedQuestion.Status.PUBLISHED
+            ).values_list("question_id", flat=True)
         )
         candidates = []
         for question in questions:

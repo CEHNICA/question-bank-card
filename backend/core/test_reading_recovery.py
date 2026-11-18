@@ -136,6 +136,65 @@ class ReadingRecoveryTests(_ReadingFixture):
         self.assertFalse(question.ocr_pending, "失败的题卡要放出来")
         self.assertTrue(str(question.error or ""), "要有一句说清原因的话")
 
+    def test_unstarted_questions_in_interrupted_batch_keep_queue_flag_for_resume(self):
+        """整批识读中途退出重开时，只有正在读的那几道会被释放，还没轮到的题继续留在队列中自动续跑。"""
+        paper = self.paper()
+        questions = [
+            Question.objects.create(
+                paper=paper,
+                number=number,
+                body_mode="source_image",
+                processing_mode="manual",
+                question_type="free_response",
+                state=Question.State.YELLOW,
+                regions=[{"page_idx": 0, "bbox": [50, 50, 900, 420]}],
+                ocr_pending=True,
+                reread_requested=True,
+            )
+            for number in (1, 2, 3)
+        ]
+        q1, q2, q3 = questions
+
+        def read_until_exit(snapshot, _store):
+            if snapshot["id"] == q1.pk:
+                return {
+                    "stem": "第 1 题已识读完成",
+                    "options": {},
+                    "question_type": "free_response",
+                    "figures": [],
+                    "flags": [],
+                    "state": Question.State.GREEN,
+                }
+            raise SystemExit("simulated exit")
+
+        with (
+            mock.patch.object(pipeline, "ThreadPoolExecutor", manual_review.ImmediateExecutor),
+            mock.patch.object(pipeline, "close_old_connections"),
+            mock.patch.object(pipeline, "_reader_parallelism", return_value=1),
+            mock.patch.object(pipeline.readers, "assistant_mode", return_value=False),
+            mock.patch.object(pipeline, "read_card", side_effect=read_until_exit),
+        ):
+            with self.assertRaises(SystemExit):
+                pipeline.read_questions(paper, questions)
+
+        q1.refresh_from_db()
+        q2.refresh_from_db()
+        q3.refresh_from_db()
+        self.assertEqual(q1.body_mode, "text")
+        self.assertFalse(q1.ocr_pending or q1.reread_requested)
+        # 第 2 题已提交执行，属于中断瞬间在跑的请求；第 3 题尚未轮到，必须保留排队标记
+        self.assertTrue(q2.ocr_pending and not q2.reread_requested)
+        self.assertTrue(q3.ocr_pending and q3.reread_requested)
+
+        released = pipeline.recover_interrupted_readings()
+        self.assertEqual(released, 1)
+        q2.refresh_from_db()
+        q3.refresh_from_db()
+        self.assertFalse(q2.ocr_pending or q2.reread_requested)
+        self.assertTrue(str(q2.error or ""))
+        self.assertTrue(q3.ocr_pending and q3.reread_requested)
+        self.assertEqual(q3.error, "")
+
 
 class WorkerStartupRecoveryTests(_ReadingFixture):
     def test_the_worker_releases_stuck_questions_when_it_starts(self):

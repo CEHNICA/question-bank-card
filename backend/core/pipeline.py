@@ -5615,9 +5615,13 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
             if regions and segment.center_in_regions(int(item["page_idx"]), item["bbox"], regions)
         ]
     for question in questions:
-        update: dict[str, Any] = {"reread_requested": False}
+        update: dict[str, Any] = {}
         if question.body_mode == "source_image" or question.processing_mode == "manual":
+            # NOTE: 仅在任务真正从待提交队列取出并交给线程池执行时才清除 reread_requested，
+            # 避免中途退出程序重开后，启动恢复逻辑把未开始的排队题全当作卡死题释放标红。
             update["ocr_pending"] = True
+        else:
+            update["reread_requested"] = False
         if question.body_mode != "source_image":
             update.update(state=Question.State.READING, approved=False, approved_at=None, approved_content_hash="")
         Question.objects.filter(pk=question.pk, content_revision=question.content_revision).update(**update)
@@ -5747,6 +5751,15 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
     # A bounded window lets us cancel every not-yet-started card immediately;
     # jobs that were already running are allowed to finish but are not written
     # after the pause signal, so they remain safely resumable as READING.
+    def _submit_snapshot(pool: ThreadPoolExecutor, snapshot: dict):
+        if snapshot["body_mode"] == "source_image" or snapshot["processing_mode"] == "manual":
+            _write_reading_result(
+                lambda: Question.objects.filter(
+                    pk=snapshot["id"], content_revision=snapshot["content_revision"], reread_requested=True
+                ).update(reread_requested=False)
+            )
+        return pool.submit(contextvars.copy_context().run, work, snapshot)
+
     quota_error: readers.ReaderQuotaExhausted | None = None
     snapshot_iter = iter(snapshots)
     unsubmitted = len(snapshots)
@@ -5754,7 +5767,7 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
         with ThreadPoolExecutor(max_workers=workers) as pool:
             pending = set()
             for _ in range(min(workers, len(snapshots))):
-                pending.add(pool.submit(contextvars.copy_context().run, work, next(snapshot_iter)))
+                pending.add(_submit_snapshot(pool, next(snapshot_iter)))
                 unsubmitted -= 1
             _set_backlog(paper.pk, unsubmitted)
             while pending:
@@ -5782,21 +5795,21 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
                         snapshot = next(snapshot_iter)
                     except StopIteration:
                         break
-                    pending.add(pool.submit(contextvars.copy_context().run, work, snapshot))
+                    pending.add(_submit_snapshot(pool, snapshot))
                     unsubmitted -= 1
                 _set_backlog(paper.pk, unsubmitted)
     finally:
         _set_backlog(paper.pk, None)
     if not _run_current(paper.pk, revision):
         return
-    assign_foreign_figures(paper, foreign)
-    distribute_figure_rows(paper)
-    audit_figure_claims(paper, revision=revision)
+    _write_reading_result(lambda: assign_foreign_figures(paper, foreign))
+    _write_reading_result(lambda: distribute_figure_rows(paper))
+    _write_reading_result(lambda: audit_figure_claims(paper, revision=revision))
     if verify_geometric_figures(paper, revision=revision):
         # 撤掉一张图会解开也可能改写归属，冲突清单必须按剩下的图重算，
         # 否则这一轮留给用户看的还是撤图之前那份。
-        audit_figure_claims(paper, revision=revision)
-    reconcile_geometric_figure_flags(paper)
+        _write_reading_result(lambda: audit_figure_claims(paper, revision=revision))
+    _write_reading_result(lambda: reconcile_geometric_figure_flags(paper))
     if quota_error is not None:
         for snapshot in snapshots:
             if snapshot["body_mode"] == "source_image":
@@ -5804,8 +5817,13 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
                     pk=snapshot["id"], content_revision=snapshot["content_revision"], ocr_pending=True
                 ).update(
                     ocr_pending=False,
+                    reread_requested=False,
                     ocr_suggestion={"revision": snapshot["content_revision"], "error": str(quota_error)[:280]},
                 )
+            elif snapshot["processing_mode"] == "manual":
+                Question.objects.filter(
+                    pk=snapshot["id"], content_revision=snapshot["content_revision"], reread_requested=True
+                ).update(reread_requested=False)
         raise quota_error
 
 
