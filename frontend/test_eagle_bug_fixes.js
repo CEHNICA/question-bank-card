@@ -141,7 +141,7 @@ test('Eagle 7大核心Bug修复综合验证套件', async (t) => {
     assert.ok(content.includes('function openQuestionContextMenu(e, qid)'), '应包含 openQuestionContextMenu 函数');
     assert.ok(content.includes('复制题目图片'), '右键菜单应包含复制题目图片选项');
     assert.ok(content.includes('全屏快速审题'), '右键菜单应包含全屏快速审题选项');
-    assert.ok(content.includes('编辑题目与选项'), '右键菜单应包含编辑题目选项');
+    assert.ok(content.includes('修改与校订题目'), '右键菜单应包含编辑题目选项');
     // 核验证据在题卡按钮上，右键不再重复
     assert.ok(content.includes('核验证据'), '题卡应保留核验证据入口');
     assert.ok(!content.includes('核验证据 (原卷扫描件)'), '右键不应再重复核验证据');

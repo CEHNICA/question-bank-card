@@ -212,6 +212,42 @@ class LibraryBrowseDraftTests(TestCase):
         self.assertEqual(answered["facets"]["answers"], {"yes": 1, "no": 1})
         self.assertNotIn("free_response", answered["facets"]["types"])
 
+    def test_facets_and_tag_exists_filtering_handle_whitespace_and_tag_modes(self):
+        from . import pipeline, segment
+        from .models import LibraryTag, LibraryTagAssignment
+
+        tag_a = LibraryTag.objects.create(name="虚构标签甲", kind=LibraryTag.Kind.KNOWLEDGE)
+        tag_b = LibraryTag.objects.create(name="虚构标签乙", kind=LibraryTag.Kind.KNOWLEDGE)
+        q1 = self.publication(answer="   ", review="human")
+        q2 = self.publication(paper=q1.paper, answer="42", review="ai")
+        LibraryTagAssignment.objects.create(publication=q1, tag=tag_a)
+        LibraryTagAssignment.objects.create(publication=q2, tag=tag_a)
+        LibraryTagAssignment.objects.create(publication=q2, tag=tag_b)
+
+        body = self.client.get("/api/library", {"tag_all": f"{tag_a.id},{tag_b.id}"}).json()
+        self.assertEqual([item["id"] for item in body["items"]], [str(q2.id)])
+        self.assertEqual(body["facets"]["answers"], {"yes": 1, "no": 0})
+        self.assertEqual(body["presence"]["review_ai"], 1)
+        self.assertEqual(body["presence"]["answer_missing"], 0)
+        self.assertEqual(self.client.get("/api/library").json()["facets"]["answers"], {"yes": 1, "no": 1})
+
+        excluded = self.client.get("/api/library", {"tag_any": str(tag_a.id), "tag_not": str(tag_b.id)}).json()
+        self.assertEqual([item["id"] for item in excluded["items"]], [str(q1.id)])
+
+        # Guarded None-safety paths in pipeline and segment
+        self.assertEqual(pipeline._resegment_item_json({}, None)["number"], None)
+        self.assertIsNone(segment._book_block_position({"page_idx": 0, "bbox": None}))
+        self.assertEqual(
+            segment._recover_book_gap_questions(
+                [
+                    segment.BookMarker(kind="exercise_start", page=0, x=0, y=10, seq=1, text="1", number=None),
+                    segment.BookMarker(kind="exercise_start", page=0, x=0, y=50, seq=5, text="3", number=3),
+                ],
+                [],
+            ),
+            [],
+        )
+
     def test_search_review_and_exact_tags_still_filter_the_library(self):
         tagged = self.publication(stem="虚构题：集合 $A$", tags=["集合间的基本关系"], review="ai")
         self.publication(stem="另一道题", tags=["集合"])

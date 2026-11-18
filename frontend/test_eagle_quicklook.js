@@ -64,7 +64,7 @@ test('quickLook 脚本仅渲染已确认标签且保留完整结构化排版与�
     'function renderQuickLookStem',
     'function renderQuickLookSolution',
     'function renderQuickLookMeta',
-    'function openSolutionEditorFromQuickLook',
+    'function openEditFromQuickLook',
     'function openPaperFromQuickLook',
     'function triggerQuickLookAiAnalysis',
   ];

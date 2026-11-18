@@ -91,7 +91,7 @@ test("窄屏下两个浮层不许互相盖死", async (t) => {
 
   await t.test("4. 抽屉的 z-index 必须高于属性浮层", () => {
     const narrow = mediaBlock(767);
-    const drawer = narrow.match(/#leftFolderSidebar:not\(\.collapsed\) \{[\s\S]{0,400}?\}/);
+    const drawer = narrow.match(/#leftFolderSidebar:not\(\.collapsed\) \{[\s\S]{0,600}?\}/);
     assert.ok(drawer, "应能找到窄屏抽屉的样式");
     const z = drawer[0].match(/z-index:\s*(\d+)/);
     assert.ok(z, "窄屏抽屉要写死 z-index");

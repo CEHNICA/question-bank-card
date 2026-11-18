@@ -84,15 +84,17 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
       const title = node("h3", "", "答案解析"); title.id = "answerEditorTitle";
       const place = node("p", "answer-editor-place");
       heading.append(title, place);
-      const back = node("button", "button button-quiet", "返回"); back.type = "button"; back.addEventListener("click", closeEditor);
+      const back = node("button", "button button-quiet answer-editor-back", "关闭"); back.type = "button"; back.addEventListener("click", closeEditor);
       const status = node("p", "answer-editor-status"); status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
       const syncLabel = node("label", "answer-sync"); const sync = node("input"); sync.type = "checkbox"; sync.id = "answerEditorSync";
       syncLabel.append(sync, document.createTextNode("同时保存到题库"));
       // 1.25.38：题库里的题本来就存到题库，那个勾是灰的还勾着，看着像坏了。
-      // 这种情况换成一句说明。
+      // 说明改挂到保存按钮 title，不再单独占一行。
       const syncNote = node("p", "answer-sync-note", "保存后，出卷和题库都用这一版"); syncNote.hidden = true;
-      const save = node("button", "button button-primary", "保存答案解析"); save.type = "button"; save.id = "answerEditorSave"; save.addEventListener("click", saveCurrent);
-      bar.append(back, heading, status, syncLabel, syncNote, save);
+      const save = node("button", "button button-primary", "保存"); save.type = "button"; save.id = "answerEditorSave"; save.addEventListener("click", saveCurrent);
+      // 单题时 AI 收进顶栏，不再占第二条空条。
+      const barAi = node("div", "answer-bar-ai"); barAi.hidden = true;
+      bar.append(back, heading, status, barAi, syncLabel, syncNote, save);
 
       const strip = node("div", "answer-editor-strip");
       const pickMissing = node("button", "button button-small", "勾选缺解析的题"); pickMissing.type = "button";
@@ -102,7 +104,7 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
       list.title = "点题号切题；要 AI 补解析时，只勾选本次要处理的题。";
       const aiStatus = node("p", "helper answer-ai-status"); aiStatus.setAttribute("role", "status"); aiStatus.setAttribute("aria-live", "polite");
       const aiTools = node("div", "answer-ai-tools");
-      const checkAi = node("button", "button button-small", "刷新生成结果"); checkAi.type = "button"; checkAi.id = "answerEditorCheckAi"; checkAi.addEventListener("click", refreshAiResults);
+      const checkAi = node("button", "button button-quiet button-small", "刷新结果"); checkAi.type = "button"; checkAi.id = "answerEditorCheckAi"; checkAi.addEventListener("click", refreshAiResults);
       checkAi.title = "查询本次生成的进度和结果，不会重新生成、核对答案或覆盖正在编辑的文字。初稿保存后才用于出卷。";
       const cancelAi = node("button", "button button-quiet button-small", "取消所选任务"); cancelAi.type = "button"; cancelAi.id = "answerEditorCancelAi"; cancelAi.addEventListener("click", cancelSelected);
       aiTools.append(checkAi, cancelAi);
@@ -111,11 +113,11 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
       aiRow.append(pickMissing, ai, aiTools, aiStatus, apiNote);
       strip.append(list, aiRow);
       const question = node("details", "answer-question"); question.open = true;
-      question.append(node("summary", "", "原卷本题"));
+      question.append(node("summary", "", "本题"));
       const questionBody = node("div", "paper"); question.append(questionBody);
       question.addEventListener("toggle", () => { if (question.open && current) QB.renderQuestion(questionBody, current.item.content, { showNumber: false, showAnswer: "none" }); });
       const sourceArea = node("section", "answer-editor-source");
-      sourceArea.setAttribute("aria-label", "原卷本题");
+      sourceArea.setAttribute("aria-label", "本题");
       sourceArea.append(question);
       // 1.13.5：题面一改，原来存的那份解析就被挪到一边「待核对」。挪走的东西
       // 必须给条回来的路 —— 改前改后界面上能点的东西一模一样，等于老师白填了一遍。
@@ -155,23 +157,25 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
       const versionsSummary = node("summary", "");
       const versionsBody = node("div", "answer-version-list");
       versions.append(versionsSummary, versionsBody);
-      const answerLabel = node("label", "", "答案结果");
+      const answerLabel = node("label", "", "答案");
       const answer = node("textarea"); answer.id = "answerEditorResult"; answer.rows = 2; answer.placeholder = "如 B，或 x＝3"; answerLabel.append(answer);
-      const analysisLabel = node("label", "", "解析过程");
-      const analysis = node("textarea"); analysis.id = "answerEditorAnalysis"; analysis.rows = 8; analysis.placeholder = "写出解题步骤。公式可写 $\\frac{1}{2}$；空一行分段。"; analysisLabel.append(analysis);
+      const analysisLabel = node("label", "", "解析");
+      const analysis = node("textarea"); analysis.id = "answerEditorAnalysis"; analysis.rows = 10; analysis.placeholder = "写出解题步骤。公式可写 $\\frac{1}{2}$；空一行分段。"; analysisLabel.append(analysis);
       // 1.25.40：照「录题 → 改字」那一页 —— 左边源码、右边它印出来的样子，一行一对。
       // 答案对答案、解析对解析，同一行顶部对齐；宽屏不再是一个大预览配两个滚动条。
-      const pairHint = node("p", "answer-editor-pair-hint", "右边是印出来的样子；绿线是当前输入位置，选中文字时预览会标出对应范围。");
+      // 原先那句「右边是印出来的样子」常驻占一整行，改成预览区 title。
       const answerPreviewBody = node("div", "paper answer-editor-preview");
       const analysisPreviewBody = node("div", "paper answer-editor-preview");
-      const answerPreviewCell = node("div", "answer-editor-preview-cell"); answerPreviewCell.append(answerPreviewBody);
-      const analysisPreviewCell = node("div", "answer-editor-preview-cell"); analysisPreviewCell.append(analysisPreviewBody);
+      const answerPreviewCell = node("div", "answer-editor-preview-cell"); answerPreviewCell.title = "打印预览；绿线是当前输入位置"; answerPreviewCell.append(answerPreviewBody);
+      const analysisPreviewCell = node("div", "answer-editor-preview-cell"); analysisPreviewCell.title = "打印预览；选中文字时会标出对应范围"; analysisPreviewCell.append(analysisPreviewBody);
       const imageTools = node("div", "answer-image-tools");
-      const uploadLabel = node("label", "button button-small", "上传解析图");
+      const uploadLabel = node("label", "button button-quiet button-small", "上传图");
       const upload = node("input"); upload.type = "file"; upload.accept = "image/png,image/jpeg,image/webp"; upload.multiple = true; upload.hidden = true;
       upload.addEventListener("change", async () => { await uploadFiles(Array.from(upload.files || [])); upload.value = ""; }); uploadLabel.append(upload);
-      const cropToggle = node("button", "button button-small", "从原卷裁图"); cropToggle.type = "button"; cropToggle.addEventListener("click", openCrop);
-      imageTools.append(uploadLabel, cropToggle, node("span", "helper", "也可直接粘贴图片"));
+      uploadLabel.title = "也可直接粘贴图片";
+      const cropToggle = node("button", "button button-quiet button-small", "原卷裁图"); cropToggle.type = "button"; cropToggle.addEventListener("click", openCrop);
+      cropToggle.title = "从原卷框选解析图；也可直接粘贴图片";
+      imageTools.append(uploadLabel, cropToggle);
       const figures = node("div", "answer-image-list");
       const crop = node("section", "answer-crop", null); crop.hidden = true;
       const cropBar = node("div", "answer-image-tools");
@@ -194,7 +198,7 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
       const cropBox = node("div", "answer-crop-box"); cropBox.hidden = true;
       cropSurface.append(cropImage, cropBox); cropScroll.append(cropSurface, cropHint); crop.append(cropBar, cropScroll);
       const aiDraft = node("details", "answer-ai-draft"); aiDraft.hidden = true; aiDraft.append(node("summary", "", "AI 初稿（当前编辑内容已保留）")); const aiPreview = node("div", "paper"); aiDraft.append(aiPreview);
-      const origin = node("details", "answer-origin"); origin.append(node("summary", "", "原卷答案解析")); const originBody = node("div", "paper");
+      const origin = node("details", "answer-origin"); origin.append(node("summary", "", "原卷解析")); const originBody = node("div", "paper");
       origin.addEventListener("toggle", () => { if (origin.open && current) S.render(originBody, current.origin, { node, QB, empty: "原卷未提供答案解析。" }); });
       // 「查看已保存的解析版本」这个下拉删掉了：它挂在「原卷」那块折叠面板底部，
       // 展开才看得见，可它切的是整个编辑区，和「原卷」不是一回事，两件事挤在一处
@@ -202,11 +206,11 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
       // 1.25.40：三区改成「题目整行 + 两对（输入 | 预览）」。
       const workspace = node("div", "answer-editor-workspace");
       const toolsCell = node("div", "answer-editor-tools-cell");
-      toolsCell.append(setAside, versions, imageTools, figures, crop);
-      workspace.append(sourceArea, pairHint, answerLabel, answerPreviewCell,
-        analysisLabel, analysisPreviewCell, toolsCell, origin, aiDraft);
+      toolsCell.append(imageTools, figures, crop, setAside, versions, origin, aiDraft);
+      workspace.append(sourceArea, answerLabel, answerPreviewCell,
+        analysisLabel, analysisPreviewCell, toolsCell);
       dialog.append(bar, strip, workspace); document.body.append(dialog);
-      controls = { syncLabel, syncNote, place, list, pickMissing, ai, aiStatus, checkAi, cancelAi, apiNote, status, question, questionBody, answer, analysis, figures, previewAnswer: answerPreviewBody, previewAnalysis: analysisPreviewBody, origin, originBody, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview, setAside, setAsideTitle, setAsideBody, restore, versions, versionsSummary, versionsBody };
+      controls = { syncLabel, syncNote, place, list, strip, barAi, aiRow, pickMissing, ai, aiTools, aiStatus, checkAi, cancelAi, apiNote, status, question, questionBody, answer, analysis, figures, previewAnswer: answerPreviewBody, previewAnalysis: analysisPreviewBody, origin, originBody, sync, save, upload, cropToggle, crop, pages, cropSave, cropImage, cropBox, cropSurface, cropScroll, cropHint, hintToggle, aiDraft, aiPreview, setAside, setAsideTitle, setAsideBody, restore, versions, versionsSummary, versionsBody };
       for (const input of [answer, analysis]) input.addEventListener("input", () => { if (!current) return; current.value.answer = answer.value; current.value.analysis = analysis.value; current.dirty = true; fitFields(); paintAiFieldHint(); schedulePreview(); });
       root.addEventListener?.("resize", () => { if (dialog.open) fitFields(); });
       // Display caret and selection, the same idea as the review 改字 editor.
@@ -251,25 +255,47 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
         if (!event.ctrlKey) return; event.preventDefault(); cropZoom = Math.max(.5, Math.min(4, cropZoom * Math.exp(-event.deltaY * .002))); cropSurface.style.width = `${cropZoom * 100}%`;
       }, { passive: false });
     }
+    function placeAiChrome() {
+      // 单题：整条题号带没用，AI 收进顶栏；多题：AI 仍跟题号带走。
+      if (singleMode) {
+        controls.strip.hidden = true;
+        controls.barAi.hidden = false;
+        if (controls.ai.parentNode !== controls.barAi) {
+          controls.barAi.replaceChildren(controls.ai, controls.aiTools, controls.aiStatus, controls.apiNote);
+        }
+      } else {
+        controls.strip.hidden = false;
+        controls.barAi.hidden = true;
+        if (controls.ai.parentNode !== controls.aiRow) {
+          controls.aiRow.replaceChildren(controls.pickMissing, controls.ai, controls.aiTools, controls.aiStatus, controls.apiNote);
+        }
+      }
+    }
     function setBusy() {
       const busy = loading || saving || uploading;
       controls.save.disabled = busy || !current || pendingSaves.has(current?.item.id); controls.answer.disabled = busy; controls.analysis.disabled = busy;
       controls.sync.disabled = busy || scope === "library"; controls.upload.disabled = busy; controls.cropToggle.disabled = busy || !current?.item.document_id;
       controls.restore.disabled = busy || !current?.setAside;
       const ready = apiSettings?.api_ready === true;
+      const hasJobs = jobs.size > 0 || polling || queueing || selectedActiveJobs().length > 0;
       controls.ai.hidden = !ready;
       controls.pickMissing.hidden = !ready || singleMode;
       controls.list.hidden = singleMode;
       // 单题时 AI 是次要动作，名字也直说作用于哪一道。
-      controls.ai.textContent = singleMode ? "AI 补这一题" : "AI 补充所选题";
-      controls.ai.className = singleMode ? "button button-small" : "button button-primary button-small";
+      controls.ai.textContent = singleMode ? "AI 补解析" : "AI 补充所选题";
+      controls.ai.className = singleMode ? "button button-quiet button-small" : "button button-primary button-small";
       controls.ai.disabled = busy || queueing || checkingApi || !selection.size;
       controls.checkAi.disabled = polling || checkingApi; controls.cancelAi.disabled = cancelling || !selectedActiveJobs().length;
       controls.cancelAi.hidden = !selectedActiveJobs().length;
+      // 「刷新结果」只在真有任务可查时出现，避免空按钮占地方。
+      controls.checkAi.hidden = !hasJobs;
       // API 配好了的时候，这句话是一句解释，挂在 AI 按钮上；没配好的时候它是唯一
-      // 告诉你「要去设置里做点什么」的地方，必须留在明面上。
+      // 告诉你「要去设置里做点什么」的地方，必须留在明面上。单题未配置时不占顶栏。
       if (ready) { controls.ai.title = "仅通过已配置的 API 生成所选题，不改变标签与自动生成开关。"; controls.apiNote.textContent = ""; controls.apiNote.hidden = true; }
-      else { controls.ai.title = ""; controls.apiNote.hidden = false; controls.apiNote.textContent = checkingApi ? "正在读取答题 API 设置…" : apiSettingsError || "尚未配置并测试答题 API。请到“设置 → API 配置”配置并测试；可先手工编辑，返回后点“刷新生成结果”。"; }
+      else if (singleMode) { controls.ai.title = ""; controls.apiNote.textContent = ""; controls.apiNote.hidden = true; }
+      else { controls.ai.title = ""; controls.apiNote.hidden = false; controls.apiNote.textContent = checkingApi ? "正在读取答题 API 设置…" : apiSettingsError || "尚未配置并测试答题 API。请到“设置 → API 配置”配置并测试；可先手工编辑，返回后点“刷新结果”。"; }
+      placeAiChrome();
+      if (singleMode) controls.barAi.hidden = controls.ai.hidden && controls.checkAi.hidden && controls.apiNote.hidden;
       for (const row of controls.list.children) { const checkbox = row.querySelectorAll?.("input")[0]; if (checkbox) checkbox.hidden = !ready; }
       for (const row of controls.figures.children) for (const input of row.querySelectorAll?.("input, select, button") || []) input.disabled = busy || input.dataset?.unavailable === "1";
     }
@@ -284,9 +310,13 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
       // 1.25.38：只打开一道题时，不再摆一排「选哪几题」的控件 —— 题号带、
       // 「勾选缺解析的题」和「AI 补充所选题」都是批量用的，单题时只会让人误会。
       singleMode = items.length <= 1;
+      dialog.classList.toggle("is-single", singleMode);
       controls.list.hidden = singleMode;
       controls.syncLabel.hidden = scope === "library";
-      controls.syncNote.hidden = scope !== "library";
+      controls.syncNote.hidden = true;
+      controls.save.title = scope === "library" ? "保存后，出卷和题库都用这一版" : "保存后用于当前组卷；需要同步题库时勾选左边选项";
+      controls.save.textContent = "保存";
+      placeAiChrome();
       // 这一轮会先打开哪一道题，先定下来，后面两处都要用同一个答案。
       const item = items.find(item => item.id === options.focus) || items.find(item => S.completeness(item) !== "ready") || items[0];
       // 勾选框是给 AI 补解析挑题的。以前进来还得再点一下眼前这道题才勾上，
@@ -491,15 +521,15 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
         ? "已填入现有 AI 参考初稿，尚未核对；检查并保存后才用于出卷。"
         : current.ai_stale ? (current.ai_error || "现有 AI 参考答案对应的题面已变化，未自动填入；请重新生成。") : "";
       // 1.25.81：保存按钮跟着 AI 状态换名字 —— 题目里已经填好了 AI 参考初稿、老师还没改过，
-      // 按钮变成「采纳 AI 解析并保存」，让老师一眼看出点了之后 AI 字就成正式解析；
-      // 改了字或没 AI 时回到「保存答案解析」。
+      // 按钮变成「采纳并保存」，让老师一眼看出点了之后 AI 字就成正式解析；
+      // 改了字或没 AI 时回到短「保存」。
       const aiUntouched = (current.ai_fields || []).length > 0
         && String(current.initialAi?.answer || "") === String(current.value.answer || "")
         && String(current.initialAi?.analysis || "") === String(current.value.analysis || "");
-      controls.save.textContent = aiUntouched ? "采纳 AI 解析并保存" : "保存答案解析";
+      controls.save.textContent = aiUntouched ? "采纳并保存" : "保存";
       controls.save.title = aiUntouched
         ? "当前答案与解析就是初版的 AI 参考答案；点这一下后正式入库。"
-        : "把编辑区里的当前文字保存为本题的解析。";
+        : (scope === "library" ? "保存后，出卷和题库都用这一版" : "把编辑区里的当前文字保存为本题的解析。");
     }
     function renderFigures() {
       controls.figures.replaceChildren();

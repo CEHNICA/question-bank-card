@@ -80,7 +80,7 @@ assert.match(tagMgrCss, /tag-directory-tree-count\.is-empty/, "空章节的题�
 assert.match(answerJs, /paintAiFieldHint/, "AI 参考答案自动填进答案 / 解析时给两道视觉提示");
 assert.match(answerJs, /is-ai-suggested/, "AI 自动填的两个字段加 is-ai-suggested 类，老师改过一个字符就自动消");
 assert.match(css, /#answerEditorResult\.is-ai-suggested/, "AI 初稿角标和浅底色到位");
-assert.match(answerJs, /采纳 AI 解析并保存/, "答案编辑器保存按钮在老师没改字时换名字 — 直接说「采纳 AI」");
+assert.match(answerJs, /采纳并保存/, "答案编辑器保存按钮在老师没改字时换名字 — 直接说「采纳并保存」");
 assert.match(answerJs, /aiUntouched/, "按钮换名字的依据是 AI 字段没被老师改过");
 assert.match(js, /solutions\.completeness\(candidate\)\s*===\s*"missing"/, "答完一道题，编辑器自动跳到当前可见列表里下一道没答案的题");
 assert.match(js, /is-chapter/, "目录里的章根（深度 0）加粗，子标签弱化，让层级一眼能分");

@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 
 from django.db import models
-from django.db.models import Count, F
+from django.db.models import Count, Exists, F, Max, Min, OuterRef
 from django.http import HttpResponseNotAllowed
 from django.views.decorators.csrf import csrf_exempt
 
@@ -113,22 +113,34 @@ def library_rows(params, *, omit: str = ""):
         if all_ids:
             for tag_id in all_ids:
                 rows = rows.filter(
-                    tag_assignments__tag_id__in=descendant_ids([tag_id], context=context),
-                    tag_assignments__needs_review=False,
+                    Exists(
+                        LibraryTagAssignment.objects.filter(
+                            publication_id=OuterRef("pk"),
+                            tag_id__in=descendant_ids([tag_id], context=context),
+                            needs_review=False,
+                        )
+                    )
                 )
         if any_ids:
             rows = rows.filter(
-                tag_assignments__tag_id__in=descendant_ids(any_ids, context=context),
-                tag_assignments__needs_review=False,
-            ).distinct()
-        if excluded:
-            rows = rows.exclude(
-                tag_assignments__in=LibraryTagAssignment.objects.filter(
-                    tag_id__in=descendant_ids(excluded, context=context), needs_review=False
+                Exists(
+                    LibraryTagAssignment.objects.filter(
+                        publication_id=OuterRef("pk"),
+                        tag_id__in=descendant_ids(any_ids, context=context),
+                        needs_review=False,
+                    )
                 )
             )
-        if all_ids:
-            rows = rows.distinct()
+        if excluded:
+            rows = rows.exclude(
+                Exists(
+                    LibraryTagAssignment.objects.filter(
+                        publication_id=OuterRef("pk"),
+                        tag_id__in=descendant_ids(excluded, context=context),
+                        needs_review=False,
+                    )
+                )
+            )
         legacy = params.get("tag", "").strip()
         if legacy:
             rows = rows.filter(tags_text__contains=library.tags_text([legacy]))
@@ -147,9 +159,56 @@ def library_rows(params, *, omit: str = ""):
     return rows
 
 
+def _active_facets(params) -> set[str]:
+    """Identify which facet filters are actually active so inactive facets share one base query."""
+    active: set[str] = set()
+    if str(params.get("document", "")).strip():
+        active.add("document")
+    if str(params.get("type", "")).strip():
+        active.add("type")
+    if str(params.get("review", "")).strip() in library.APPROVAL_SOURCES:
+        active.add("review")
+    if str(params.get("answer", "")).strip() in {"yes", "no"}:
+        active.add("answer")
+    if (
+        str(params.get("tag", "")).strip()
+        or params.get("untagged_knowledge") == "true"
+        or params.get("tag_review") == "true"
+    ):
+        active.add("tag")
+    else:
+        for key in ("tag_all", "tag_any", "tag_not"):
+            raw = params.get(key, "")
+            values = raw if isinstance(raw, list) else str(raw or "").split(",")
+            for value in values:
+                try:
+                    uuid.UUID(str(value))
+                except (ValueError, TypeError, AttributeError):
+                    continue
+                active.add("tag")
+                break
+            if "tag" in active:
+                break
+    return active
+
+
 def facet_counts(params) -> dict:
-    sources, types, reviews, answers, tags = {}, {}, {"human": 0, "ai": 0}, {"yes": 0, "no": 0}, {}
-    for row in library_rows(params, omit="document").values("paper_id", "source_filename", "published_at"):
+    sources: dict[str, dict] = {}
+    types: dict[str, int] = {}
+    reviews = {"human": 0, "ai": 0}
+    answers = {"yes": 0, "no": 0}
+    tags: dict[str, dict] = {}
+    active = _active_facets(params)
+    base_rows = library_rows(params)
+
+    def rows_for(facet: str):
+        return library_rows(params, omit=facet) if facet in active else base_rows
+
+    for row in (
+        rows_for("document")
+        .values("paper_id", "source_filename")
+        .annotate(count=Count("id"), first_published_at=Min("published_at"), last_published_at=Max("published_at"))
+    ):
         key = str(row["paper_id"]) if row["paper_id"] else ""
         entry = sources.setdefault(
             key,
@@ -157,43 +216,60 @@ def facet_counts(params) -> dict:
                 "document_id": key or None,
                 "filename": row["source_filename"],
                 "count": 0,
-                "first_published_at": row["published_at"],
-                "last_published_at": row["published_at"],
+                "first_published_at": row["first_published_at"],
+                "last_published_at": row["last_published_at"],
             },
         )
-        entry["count"] += 1
-        if row["published_at"] and (
-            not entry["first_published_at"] or row["published_at"] < entry["first_published_at"]
+        entry["count"] += row["count"]
+        if row["first_published_at"] and (
+            not entry["first_published_at"] or row["first_published_at"] < entry["first_published_at"]
         ):
-            entry["first_published_at"] = row["published_at"]
-        if row["published_at"] and (not entry["last_published_at"] or row["published_at"] > entry["last_published_at"]):
-            entry["last_published_at"] = row["published_at"]
-    for kind in library_rows(params, omit="type").values_list("question_type", flat=True):
-        types[kind] = types.get(kind, 0) + 1
-    for source in library_rows(params, omit="review").values_list("review_source", flat=True):
-        key = source if source in reviews else "human"
-        reviews[key] += 1
-    for value in library_rows(params, omit="answer").values_list("content__answer", flat=True):
-        answers["yes" if str(value or "").strip() else "no"] += 1
+            entry["first_published_at"] = row["first_published_at"]
+        if row["last_published_at"] and (
+            not entry["last_published_at"] or row["last_published_at"] > entry["last_published_at"]
+        ):
+            entry["last_published_at"] = row["last_published_at"]
+
+    for row in rows_for("type").values("question_type").annotate(count=Count("id")):
+        types[row["question_type"]] = row["count"]
+
+    for row in rows_for("review").values("review_source").annotate(count=Count("id")):
+        key = row["review_source"] if row["review_source"] in reviews else "human"
+        reviews[key] += row["count"]
+
+    answer_rows = rows_for("answer")
+    missing_answer = models.Q(content__answer="") | models.Q(content__answer__isnull=True)
+    total_answers = answer_rows.count()
+    yes_answers = sum(
+        1
+        for value in answer_rows.exclude(missing_answer).values_list("content__answer", flat=True)
+        if str(value or "").strip()
+    )
+    answers["yes"] = yes_answers
+    answers["no"] = total_answers - yes_answers
+
     from .library_tagging import descendant_ids, relation_context
     from .models import LibraryTag
 
     context = relation_context()
-    publications_by_tag = {}
+    publications_by_tag: dict[str, set[str]] = {}
     for tag_id, publication_id in LibraryTagAssignment.objects.filter(
-        publication__in=library_rows(params, omit="tag"), needs_review=False
+        publication__in=rows_for("tag"), needs_review=False
     ).values_list("tag_id", "publication_id"):
         publications_by_tag.setdefault(str(tag_id), set()).add(str(publication_id))
-    for tag in LibraryTag.objects.all():
-        key, matching = str(tag.pk), set()
+    for tag_pk, tag_name in LibraryTag.objects.values_list("pk", "name"):
+        key = str(tag_pk)
+        if key not in publications_by_tag and not context.get(key, {}).get("children"):
+            continue
+        matching: set[str] = set()
         for child in descendant_ids([key], context=context):
-            matching.update(publications_by_tag.get(child, set()))
+            matching.update(publications_by_tag.get(child, ()))
         if matching:
             tags[key] = {
                 "id": key,
-                "tag": tag.name,
+                "tag": tag_name,
                 "count": len(matching),
-                "direct_count": len(publications_by_tag.get(key, set())),
+                "direct_count": len(publications_by_tag.get(key, ())),
                 "subtree_count": len(matching),
             }
     return {
@@ -244,7 +320,7 @@ def serialize_items(publications, *, slim: bool = False) -> list[dict]:
     ids = [item.id for item in publications]
     waiting = library_jobs.pending_kinds(ids)
     failed = library_jobs.last_errors(ids)
-    details = {}
+    details: dict[str, list[dict]] = {}
     for row in LibraryJob.objects.filter(publication_id__in=ids, status__in=library_jobs.ACTIVE).values(
         "publication_id", "kind", "executor", "status"
     ):
@@ -275,7 +351,7 @@ def resolve_ids(ids: list[str], *, include_items: bool = True) -> dict:
         for item in found.values()
         if item.status == PublishedQuestion.Status.SUPERSEDED and item.question_id
     }
-    replacements = {}
+    replacements: dict[int, str] = {}
     if superseded_questions:
         for item in (
             PublishedQuestion.objects.filter(
@@ -486,9 +562,12 @@ def dimension_presence() -> dict:
     missing = models.Q(content__answer="") | models.Q(content__answer__isnull=True)
     from .models import LibraryTagAssignment
 
+    counts = papers.aggregate(
+        review_ai=Count("id", filter=models.Q(review_source="ai")), answer_missing=Count("id", filter=missing)
+    )
     return {
-        "review_ai": papers.filter(review_source="ai").count(),
-        "answer_missing": papers.filter(missing).count(),
+        "review_ai": counts["review_ai"],
+        "answer_missing": counts["answer_missing"],
         "tags": (LibraryTagAssignment.objects.filter(needs_review=False).values("tag_id").distinct().count()),
     }
 

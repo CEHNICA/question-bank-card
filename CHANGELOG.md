@@ -3,6 +3,16 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.0.0
+
+**Eagle 题库工作台、统一答案解析编辑器与底层性能／稳定性全面升级**
+
+- **合流 `1.26.56`–`1.26.59` 全量工作台与导出体系**：包含 Eagle 题库工作台、A4 打印预览与 Word/PDF 排版保真对齐、OneNote 关联与回跳、统一回收站与整份下架、列表瘦身批量加载（`bulk=1`/`slim=1`）。
+- **Eagle 界面缩放与单题答案编辑器统一**：合入界面整体缩放调节（`A−`/`100%`/`A+`）、`eagle-solution-editor.js` 单题桥接以及统一精简后的 `LibraryAnswerEditor` 交互与独立样式（`library-answer-editor.css`）。
+- **题库检索索引与分面查询提速**：新增迁移 `0033_publishedquestion_browse_indexes`，为 `PublishedQuestion` 与 `LibraryTagAssignment` 建立 6 个高频复合索引；`library_browse.py` 的多标签筛选改用 `Exists` 子查询，`facet_counts` 改用 SQL 聚合与激活维度复用。
+- **切题与流水线空值安全收口**：清理 `pipeline.py`、`segment.py`、`library_browse.py` 中的空值下标与类型隐患，并将三者正式纳入 `mypy` 类型检查门禁。
+
+
 ## 1.26.58
 
 **任务栏图标改回 TUG**

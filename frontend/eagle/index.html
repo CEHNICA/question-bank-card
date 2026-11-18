@@ -470,7 +470,7 @@
     .qb-preview-empty-field { margin: 8px 0 0; color: #94a3b8; font-style: italic; }
 
     /* ---- 既有排版渲染语义样式（适配 #editLivePreviewBox） ---- */
-    .qb-question { font-size: 14px; line-height: 1.8; color: #1e293b; }
+    .qb-question { font-size: 13.5px; line-height: 1.8; color: #1e293b; }
     .qb-stem { display: flex; gap: 0.35em; margin-bottom: 0.75rem; }
     .qb-number { flex: none; font-weight: 700; }
     .qb-stem-body { white-space: pre-wrap; min-width: 0; overflow-wrap: anywhere; }
@@ -569,8 +569,37 @@
       border-top-color: #6d28d9;
       animation: onenoteSpin 0.7s linear infinite;
     }
-    @keyframes onenoteSpin { to { transform: rotate(360deg); } }
+
+    /* 界面缩放：用 zoom 统一放大字号、按钮与间距（含 Tailwind 的 px 字号） */
+    #eagleUiScaleMenuRow input[type="range"] {
+      accent-color: #059669;
+    }
+
+    /*
+      菜单栏原先大量 10–11px，题面却是 14–15px，一眼看去差一截。
+      菜单抬到约 12.5–13px，题面收到 13.5px，读起来更齐，仍保留题面略大一点。
+    */
+    .eagle-chrome .text-\[10px\] { font-size: 12px !important; }
+    .eagle-chrome .text-\[11px\] { font-size: 12.5px !important; }
+    .eagle-chrome .text-xs { font-size: 13px !important; }
+    .eagle-q-stem {
+      font-size: 13.5px;
+      line-height: 1.7;
+    }
   </style>
+  <script>
+    // 尽早套上上次的界面缩放，避免先出小字再猛跳一下。
+    (function () {
+      try {
+        var raw = localStorage.getItem('eagle_ui_scale_v1');
+        var n = raw == null || raw === '' ? 1 : Number(raw);
+        if (!Number.isFinite(n)) n = 1;
+        n = Math.min(1.5, Math.max(0.9, Math.round(n * 20) / 20));
+        document.documentElement.style.zoom = String(n);
+        document.documentElement.dataset.eagleUiScale = String(n);
+      } catch (_) { /* ignore */ }
+    })();
+  </script>
 </head>
 <body class="bg-[#f8fafc] text-slate-800 antialiased h-screen flex flex-col overflow-hidden select-none">
 
@@ -593,7 +622,7 @@
 
     <!-- ================= 1. 左侧栏：文件夹树（含标签特殊文件夹） ================= -->
     <!-- 标签管理只走左上角 ≡ 主菜单；侧栏底栏不再放「标签地图 / 管理」入口。 -->
-    <aside id="leftFolderSidebar" class="w-64 bg-[#fafafa] border-r border-slate-200/80 flex flex-col shrink-0 min-h-0">
+    <aside id="leftFolderSidebar" class="eagle-chrome w-64 bg-[#fafafa] border-r border-slate-200/80 flex flex-col shrink-0 min-h-0">
       <div id="leftSidebarHead" class="px-2 py-1.5 border-b border-slate-200/60 shrink-0">
         <div class="flex items-center gap-1.5">
           <button id="btnEagleAppMenu" type="button" onclick="toggleEagleAppMainMenu(event)" class="w-6 h-6 rounded-md flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 text-sm font-bold cursor-pointer transition-colors shrink-0" title="打开应用主菜单">≡</button>
@@ -661,7 +690,7 @@
     <main class="flex-1 flex flex-col min-w-0 bg-[#f8fafc] overflow-hidden">
 
       <!-- ================= Eagle 合并工具栏：筛选 + 全选/排序 一行；点「筛选」才展开胶囊 ================= -->
-      <div class="bg-white border-b border-slate-200/80 shrink-0 z-30 relative">
+      <div class="eagle-chrome bg-white border-b border-slate-200/80 shrink-0 z-30 relative">
         <div class="min-h-9 px-3 flex items-center justify-between gap-2 py-1 eagle-toolbar-row">
           <div class="flex items-center gap-1.5 min-w-0 flex-1 eagle-toolbar-left">
             <button
@@ -716,6 +745,12 @@
           </div>
 
           <div class="flex items-center gap-2 text-[11px] text-slate-500 shrink-0 whitespace-nowrap eagle-toolbar-right">
+            <div class="inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50/80 px-0.5 py-0.5" title="调整整个界面大小（字号、按钮、间距一起变）">
+              <button type="button" onclick="bumpEagleUiScale(-0.05)" class="w-5 h-5 inline-flex items-center justify-center rounded text-slate-600 hover:bg-white hover:text-slate-900 cursor-pointer" aria-label="缩小界面" title="缩小界面（Ctrl+-）">A−</button>
+              <button type="button" id="eagleUiScaleBadge" onclick="resetEagleUiScale()" class="min-w-[2.4rem] px-0.5 h-5 text-[10px] font-semibold text-slate-700 hover:bg-white rounded cursor-pointer" title="点一下恢复 100%">100%</button>
+              <button type="button" onclick="bumpEagleUiScale(0.05)" class="w-5 h-5 inline-flex items-center justify-center rounded text-slate-600 hover:bg-white hover:text-slate-900 cursor-pointer" aria-label="放大界面" title="放大界面（Ctrl+=）">A+</button>
+            </div>
+            <span class="text-slate-300">|</span>
             <button
               onclick="openBasketExportModal()"
               class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md transition-all"
@@ -908,7 +943,7 @@
     </main>
 
     <!-- ================= 3. 右侧栏：Eagle 风格属性与打标检查器 ================= -->
-    <aside id="rightInspectorPane" class="w-72 bg-white border-l border-slate-200/80 flex flex-col shrink-0">
+    <aside id="rightInspectorPane" class="eagle-chrome w-72 bg-white border-l border-slate-200/80 flex flex-col shrink-0">
       
       <div class="h-10 px-3 border-b border-slate-200/70 flex items-center gap-1.5 justify-between shrink-0">
         <div id="inspectorHead" class="flex items-center gap-2 min-w-0 flex-1">
@@ -1151,7 +1186,7 @@
   <!-- ================= Eagle 风格右键菜单 (文件夹与排序) ================= -->
   <div 
     id="eagleContextMenu" 
-    class="fixed z-[9999] hidden min-w-[220px] max-w-[280px] rounded-lg border border-slate-200/90 bg-white/95 backdrop-blur-md shadow-2xl py-1 text-xs text-slate-700 select-none transition-all duration-75"
+    class="eagle-chrome fixed z-[9999] hidden min-w-[220px] max-w-[280px] rounded-lg border border-slate-200/90 bg-white/95 backdrop-blur-md shadow-2xl py-1 text-xs text-slate-700 select-none transition-all duration-75"
     onclick="event.stopPropagation()"
   >
     <!-- 内容由 renderEagleContextMenu() 动态挂载；overflow 必须可见，排序飞出子菜单才不会被裁掉 -->
@@ -1188,7 +1223,7 @@
   <!-- ================= Eagle 左上角 ≡ 应用主菜单：去做题 / 专项视图 / 回收站 / 界面，底栏固定「设置」 ================= -->
   <div
     id="eagleAppMainMenu"
-    class="hidden fixed left-3 top-[92px] z-[9998] w-64 max-h-[82vh] overflow-y-auto rounded-xl border border-slate-200/90 bg-white/95 backdrop-blur-md shadow-2xl py-1.5 text-xs text-slate-700 select-none"
+    class="eagle-chrome hidden fixed left-3 top-[92px] z-[9998] w-64 max-h-[82vh] overflow-y-auto rounded-xl border border-slate-200/90 bg-white/95 backdrop-blur-md shadow-2xl py-1.5 text-xs text-slate-700 select-none"
     onclick="event.stopPropagation()"
   >
     <div class="px-3 py-1 text-[10px] font-bold text-slate-400 tracking-wider">去做题</div>
@@ -1196,9 +1231,6 @@
       <span>📄 录入题目</span>
       <span class="text-[10px] text-slate-400">切题 · 入库</span>
     </a>
-    <button type="button" onclick="openSolutionEditor(); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
-      <span>✎ 答案解析编辑器</span>
-    </button>
     <div class="my-1 border-t border-slate-100"></div>
 
     <div class="px-3 py-1 text-[10px] font-bold text-slate-400 tracking-wider">专项视图</div>
@@ -1242,6 +1274,31 @@
     <div class="my-1 border-t border-slate-100"></div>
 
     <div class="px-3 py-1 text-[10px] font-bold text-slate-400 tracking-wider">界面</div>
+    <div id="eagleUiScaleMenuRow" class="px-3 py-2" onclick="event.stopPropagation()">
+      <div class="flex items-center justify-between gap-2 mb-1.5">
+        <span class="text-slate-700 font-medium">界面大小</span>
+        <span id="eagleUiScaleMenuLabel" class="font-mono text-[10px] text-emerald-700">100%</span>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <button type="button" onclick="bumpEagleUiScale(-0.05)" class="w-6 h-6 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 cursor-pointer" title="缩小" aria-label="缩小界面">−</button>
+        <input
+          id="eagleUiScaleRange"
+          type="range"
+          min="90"
+          max="150"
+          step="5"
+          value="100"
+          oninput="setEagleUiScale(Number(this.value) / 100)"
+          class="flex-1 min-w-0 h-1.5 cursor-pointer"
+          aria-label="界面缩放百分比"
+        >
+        <button type="button" onclick="bumpEagleUiScale(0.05)" class="w-6 h-6 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 cursor-pointer" title="放大" aria-label="放大界面">+</button>
+      </div>
+      <div class="mt-1.5 flex items-center justify-between text-[10px] text-slate-400">
+        <span>90%–150%，会记住</span>
+        <button type="button" onclick="resetEagleUiScale()" class="text-emerald-700 hover:underline cursor-pointer">恢复 100%</button>
+      </div>
+    </div>
     <button type="button" onclick="toggleLeftSidebar(); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
       <span>◫ 折叠 / 展开左栏</span>
     </button>
@@ -1772,9 +1829,6 @@
           <button type="button" id="qlPaperBtn" onclick="openPaperFromQuickLook()" class="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer flex items-center gap-1" title="查看原卷裁切区域">
             <span>📄 原卷</span>
           </button>
-          <button type="button" onclick="openSolutionEditorFromQuickLook()" class="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 rounded-md text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer flex items-center gap-1" title="编辑图文正式答案与解析">
-            <span>✎ 解析</span>
-          </button>
           <button type="button" onclick="openEditFromQuickLook()" class="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer flex items-center gap-1" title="修改题干与选项 (快捷键: E)">
             <span>✏️ 编辑</span>
           </button>
@@ -1899,6 +1953,14 @@
             <span class="text-slate-600">专注浏览（收起左右栏）</span>
             <kbd class="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 font-mono shadow-2xs font-bold">Tab</kbd>
           </div>
+          <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
+            <span class="text-slate-600">放大 / 缩小界面</span>
+            <kbd class="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 font-mono shadow-2xs font-bold">Ctrl + = / −</kbd>
+          </div>
+          <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
+            <span class="text-slate-600">恢复界面 100%</span>
+            <kbd class="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 font-mono shadow-2xs font-bold">Ctrl + 0</kbd>
+          </div>
         </div>
       </div>
     </div>
@@ -2021,9 +2083,66 @@
     // ================= Eagle：最近浏览 / TAB 专注 / 内联改名 / 时间筛选 =================
     const EAGLE_RECENT_KEY = 'eagle_recent_questions_v1';
     const EAGLE_RECENT_MAX = 30;
+    const EAGLE_UI_SCALE_KEY = 'eagle_ui_scale_v1';
+    const EAGLE_UI_SCALE_MIN = 0.9;
+    const EAGLE_UI_SCALE_MAX = 1.5;
+    const EAGLE_UI_SCALE_STEP = 0.05;
+    const EAGLE_UI_SCALE_DEFAULT = 1;
 
     let focusMode = false;
     let focusModeSaved = { leftCollapsed: false, rightCollapsed: false, rightForceOpen: false };
+
+    function clampEagleUiScale(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return EAGLE_UI_SCALE_DEFAULT;
+      const stepped = Math.round(n / EAGLE_UI_SCALE_STEP) * EAGLE_UI_SCALE_STEP;
+      return Math.min(EAGLE_UI_SCALE_MAX, Math.max(EAGLE_UI_SCALE_MIN, Number(stepped.toFixed(2))));
+    }
+
+    function readEagleUiScale() {
+      try {
+        const raw = localStorage.getItem(EAGLE_UI_SCALE_KEY);
+        if (raw == null || raw === '') return EAGLE_UI_SCALE_DEFAULT;
+        return clampEagleUiScale(raw);
+      } catch (_) {
+        return EAGLE_UI_SCALE_DEFAULT;
+      }
+    }
+
+    function syncEagleUiScaleControls(scale) {
+      const pct = `${Math.round(scale * 100)}%`;
+      const badge = document.getElementById('eagleUiScaleBadge');
+      if (badge) badge.textContent = pct;
+      const label = document.getElementById('eagleUiScaleMenuLabel');
+      if (label) label.textContent = pct;
+      const range = document.getElementById('eagleUiScaleRange');
+      if (range) range.value = String(Math.round(scale * 100));
+    }
+
+    function setEagleUiScale(value, { toast = false } = {}) {
+      const next = clampEagleUiScale(value);
+      document.documentElement.style.zoom = String(next);
+      document.documentElement.dataset.eagleUiScale = String(next);
+      try {
+        localStorage.setItem(EAGLE_UI_SCALE_KEY, String(next));
+      } catch (_) { /* ignore */ }
+      syncEagleUiScaleControls(next);
+      if (toast && typeof showToast === 'function') {
+        showToast(`界面大小 ${Math.round(next * 100)}%`, 'info');
+      }
+      return next;
+    }
+
+    function bumpEagleUiScale(delta, opts) {
+      return setEagleUiScale(readEagleUiScale() + Number(delta || 0), opts);
+    }
+
+    function resetEagleUiScale(opts) {
+      return setEagleUiScale(EAGLE_UI_SCALE_DEFAULT, opts);
+    }
+
+    // 控件晚于首屏脚本出现时，把当前缩放同步到按钮/滑块上。
+    setEagleUiScale(readEagleUiScale());
 
     function readRecentQuestions() {
       try {
@@ -4061,13 +4180,6 @@
           <div data-ctx-item="1" onclick="locateQuestionFolderInTree('${q.id}'); hideEagleContextMenu();" class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">
             <span class="text-sm shrink-0">📍</span><span class="truncate">定位到所属文件夹</span>
           </div>
-          <div data-ctx-item="1" onclick="openSolutionEditor(['${q.id}']); hideEagleContextMenu();" class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">
-            <span class="text-sm shrink-0">🧠</span><span class="truncate">答案解析深度编辑器</span>
-          </div>
-          <div data-ctx-item="1" onclick="openEditQuestionModal('${q.id}'); hideEagleContextMenu();" class="flex items-center justify-between px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">
-            <div class="flex items-center gap-2 min-w-0"><span class="text-sm shrink-0">✏️</span><span class="truncate">编辑题目与选项</span></div>
-            <kbd class="text-[10px] text-slate-400 font-mono shrink-0">E</kbd>
-          </div>
           ${filterState.userFolderId ? `
           <div data-ctx-item="1" onclick="removeQuestionsFromUserFolder(['${q.id}'], '${filterState.userFolderId}'); hideEagleContextMenu();" class="flex items-center gap-2 px-2.5 py-1.5 rounded text-rose-600 hover:bg-rose-50 cursor-pointer transition-colors">
             <span class="text-sm shrink-0">📤</span><span class="truncate">从当前文件夹移出</span>
@@ -4095,6 +4207,19 @@
         </div>
 
         <div class="p-1 space-y-0.5">
+          <div
+            data-ctx-item="1"
+            onclick="openEditQuestionModal('${q.id}'); hideEagleContextMenu();"
+            class="flex items-center justify-between px-2.5 py-1.5 rounded text-slate-800 hover:bg-emerald-50 cursor-pointer transition-colors font-semibold"
+            title="修改题干、答案与解析"
+          >
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="text-sm shrink-0">✏️</span>
+              <span class="truncate">修改与校订题目</span>
+            </div>
+            <kbd class="text-[10px] text-slate-400 font-mono shrink-0">E</kbd>
+          </div>
+          <div data-ctx-sep="1" class="my-1 border-t border-slate-100"></div>
           ${!hasOneNote ? `
           <div 
             data-ctx-item="1"
@@ -5734,7 +5859,7 @@
           </div>
 
           <!-- 题干与选项正文 (KaTeX 排版优雅呈现) -->
-          <div class="text-slate-800 text-sm leading-relaxed overflow-x-auto">
+          <div class="eagle-q-stem text-slate-800 leading-relaxed overflow-x-auto">
             ${sanitizeMathHtml(q.content)}
           </div>
 
@@ -5964,6 +6089,9 @@
     const AI_POLL_TIMEOUT_MS = 300000;
     const AI_QUEUE_SLOW_WARN_MS = 15000;
     const AI_RUNNING_SLOW_WARN_MS = 60000;
+    // 排队/生成超过这个时间仍没结果，就不当「进行中」了——否则右栏会一直转圈、
+    // 「重新生成」按钮也被锁死（真机上见过卡了将近两天的 queued）。
+    const AI_TAG_STALE_MS = AI_POLL_TIMEOUT_MS;
 
     // 追踪每道题的 AI 标签建议生成进度（用于在右栏卡片实时显示阶段与已耗时）
     const aiTagJobStateByQuestion = new Map();
@@ -5989,12 +6117,38 @@
      * @param {Object} q 题目对象
      * @returns {Object|null} 进度对象或 null
      */
+    function tagSuggestionAgeMs(suggestion) {
+      if (!suggestion) return 0;
+      const createdAt = Date.parse(suggestion.created_at || '') || 0;
+      const updatedAt = Date.parse(suggestion.updated_at || '') || createdAt;
+      const anchor = suggestion.status === 'running' ? updatedAt : createdAt;
+      if (!anchor) return 0;
+      return Math.max(0, Date.now() - anchor);
+    }
+
+    function isTagSuggestionStale(suggestion) {
+      if (!suggestion) return false;
+      if (suggestion.status !== 'queued' && suggestion.status !== 'running') return false;
+      return tagSuggestionAgeMs(suggestion) >= AI_TAG_STALE_MS;
+    }
+
     function resolveTagSuggestionProgress(q) {
       if (!q || !q.id) return null;
+      // 轮询超时后进了暂停集合：不要再拿后端 queued 冒充「正在进行」。
+      if (aiTagPollingPausedQuestions.has(q.id)) return null;
       const active = aiTagJobStateByQuestion.get(q.id);
-      if (active) return active;
+      if (active) {
+        const age = Math.max(0, Date.now() - (active.startedAt || active.queuedAt || Date.now()));
+        if (age >= AI_TAG_STALE_MS) {
+          aiTagJobStateByQuestion.delete(q.id);
+          aiTagPollingPausedQuestions.add(q.id);
+          return null;
+        }
+        return active;
+      }
       const suggestion = q.tagSuggestion;
       if (!suggestion || (suggestion.status !== 'queued' && suggestion.status !== 'running')) return null;
+      if (isTagSuggestionStale(suggestion)) return null;
       const createdAt = Date.parse(suggestion.created_at || '') || Date.now();
       const updatedAt = Date.parse(suggestion.updated_at || '') || createdAt;
       return {
@@ -6014,10 +6168,10 @@
      */
     function getAiTagStatusHintText(status, elapsedMs) {
       if (status === 'queued' && elapsedMs >= AI_QUEUE_SLOW_WARN_MS) {
-        return '排队超过 15 秒未开始，可能后台工作者（run_worker）未启动或前方排队较多';
+        return '排队有点久。可稍等，或点「重新生成建议」再试一次。';
       }
       if (status === 'running' && elapsedMs >= AI_RUNNING_SLOW_WARN_MS) {
-        return '模型仍在推理生成中，思考型模型可能需要 1~3 分钟，请稍候';
+        return '还在生成中，复杂题可能要一两分钟。';
       }
       return '';
     }
@@ -6077,6 +6231,11 @@
       if (aiTagJobStateByQuestion.has(q.id) || aiTagPollingPausedQuestions.has(q.id)) return;
       const suggestion = q.tagSuggestion;
       if (!suggestion || (suggestion.status !== 'queued' && suggestion.status !== 'running')) return;
+      // 已经过期的旧队列不要自动续轮询，否则一打开题库又空转五分钟。
+      if (isTagSuggestionStale(suggestion)) {
+        aiTagPollingPausedQuestions.add(q.id);
+        return;
+      }
       const createdAt = Date.parse(suggestion.created_at || '') || Date.now();
       const updatedAt = Date.parse(suggestion.updated_at || '') || createdAt;
       aiTagJobStateByQuestion.set(q.id, {
@@ -7301,7 +7460,7 @@
         <section class="rounded-xl border border-slate-200 bg-white p-4 sm:p-5 space-y-2.5 shadow-2xs">
           <div class="flex items-center justify-between gap-2 pb-2 border-b border-slate-100">
             <span class="text-xs font-bold text-slate-700">原卷参考答案与解析</span>
-            ${!saved ? `<button type="button" onclick="openSolutionEditorFromQuickLook()" class="text-[11px] font-medium text-emerald-700 hover:text-emerald-900 whitespace-nowrap cursor-pointer">转为正式解析 →</button>` : ''}
+            ${!saved ? `<button type="button" onclick="openEditFromQuickLook()" class="text-[11px] font-medium text-emerald-700 hover:text-emerald-900 whitespace-nowrap cursor-pointer">转为正式解析 →</button>` : ''}
           </div>
           ${q.rawAnswer ? `
             <div class="flex items-baseline gap-2">
@@ -7341,7 +7500,7 @@
           <section class="rounded-xl border border-emerald-200 bg-emerald-50/45 p-4 sm:p-5 space-y-3 shadow-2xs">
             <div class="flex items-center justify-between gap-2 pb-2 border-b border-emerald-200/60">
               <span class="text-xs font-bold text-emerald-900 flex items-center gap-1.5"><span>✓</span><span>正式答案与解析</span></span>
-              <button type="button" onclick="openSolutionEditorFromQuickLook()" class="text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 whitespace-nowrap cursor-pointer">✎ 编辑正式解析</button>
+              <button type="button" onclick="openEditFromQuickLook()" class="text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 whitespace-nowrap cursor-pointer">✎ 编辑正式解析</button>
             </div>
             ${saved.answer ? `
               <div class="flex items-baseline gap-2">
@@ -7399,7 +7558,7 @@
             <div class="flex items-center gap-2 shrink-0">
               ${readFailed
                 ? `<button type="button" onclick="retryReadQuestionDetail('${safeQid}')" class="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-amber-800 border border-amber-200 text-xs font-medium whitespace-nowrap cursor-pointer">↻ 重新读取</button>`
-                : `<button type="button" onclick="openSolutionEditorFromQuickLook()" class="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium whitespace-nowrap cursor-pointer">✎ 录入正式解析</button>`}
+                : `<button type="button" onclick="openEditFromQuickLook()" class="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium whitespace-nowrap cursor-pointer">✎ 录入正式解析</button>`}
               <button type="button" onclick="triggerQuickLookAiAnalysis()" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold whitespace-nowrap cursor-pointer shadow-2xs">⚡ AI 生成解析</button>
             </div>
           </section>
@@ -7533,16 +7692,6 @@
       if (!q) return;
       closeQuickLookModal();
       openEditQuestionModal(q.id);
-    }
-
-    /**
-     * 从快速审题一键跳转正式答案解析编辑器
-     */
-    function openSolutionEditorFromQuickLook() {
-      const q = filteredQuestions[quickLookQuestionIndex];
-      if (!q) return;
-      closeQuickLookModal();
-      openSolutionEditor([q.id]);
     }
 
     /**
@@ -9189,6 +9338,8 @@
         } else if (failedSuggestion) {
           const failMsg = (suggestion.message || '').trim();
           parts.push(`<span class="text-[10px] text-rose-700/90 leading-snug" title="${escapeHtml(failMsg)}">上次生成没成功${failMsg ? '：' + escapeHtml(failMsg.slice(0, 60)) : ''}</span>`);
+        } else if (suggestion && (suggestion.status === 'queued' || suggestion.status === 'running') && (aiTagPollingPausedQuestions.has(activeQ.id) || isTagSuggestionStale(suggestion))) {
+          parts.push(`<span class="text-[10px] text-amber-800 leading-snug">上次排队没有出结果 · 可点下方重新生成</span>`);
         } else if (suggestion && suggestion.status === 'stale') {
           parts.push(`<span class="text-[10px] text-amber-700/80">这批建议已过期 · 可点下方重新生成</span>`);
         } else if (suggestion && suggestion.status === 'accepted') {
@@ -14110,6 +14261,26 @@
           return;
         }
 
+        // Ctrl+= / Ctrl+- / Ctrl+0：放大、缩小、恢复整个界面（输入框里也能用）
+        if (e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
+          const key = e.key;
+          if (key === '=' || key === '+' || e.code === 'NumpadAdd') {
+            e.preventDefault();
+            bumpEagleUiScale(EAGLE_UI_SCALE_STEP, { toast: true });
+            return;
+          }
+          if (key === '-' || key === '_' || e.code === 'NumpadSubtract') {
+            e.preventDefault();
+            bumpEagleUiScale(-EAGLE_UI_SCALE_STEP, { toast: true });
+            return;
+          }
+          if (key === '0' || e.code === 'Numpad0') {
+            e.preventDefault();
+            resetEagleUiScale({ toast: true });
+            return;
+          }
+        }
+
         if (isTyping) return;
 
         // Ctrl+Shift+C: 复制当前聚焦试题为图片 (原题库经典高价值快捷键)
@@ -14309,6 +14480,32 @@
     window.clearDateFilter = clearDateFilter;
     window.toggleFilterPanel = toggleFilterPanel;
     window.syncFilterPanelUI = syncFilterPanelUI;
+    Object.defineProperty(window, 'questionsData', { configurable: true, get: () => questionsData });
+    Object.defineProperty(window, 'filteredQuestions', { configurable: true, get: () => filteredQuestions });
+    Object.defineProperty(window, 'currentActiveQuestionId', {
+      configurable: true,
+      get: () => currentActiveQuestionId,
+      set: (value) => { currentActiveQuestionId = value; }
+    });
+    window.showToast = showToast;
+    window.refreshQuestionSolution = refreshQuestionSolution;
+    window.renderQuestions = typeof renderQuestions === 'function' ? renderQuestions : undefined;
+    function openSolutionEditorFromMenu() {
+      const id = currentActiveQuestionId
+        || (filteredQuestions[0] && filteredQuestions[0].id)
+        || (questionsData[0] && questionsData[0].id)
+        || '';
+      if (!id) {
+        showToast('当前列表没有题目，先打开一份资料或筛出题目', 'error');
+        return;
+      }
+      if (typeof window.openSolutionEditor !== 'function') {
+        showToast('答案解析编辑器脚本还没加载，请刷新页面后再试', 'error');
+        return;
+      }
+      window.openSolutionEditor([id]);
+    }
+    window.openSolutionEditorFromMenu = openSolutionEditorFromMenu;
     window.addEventListener('DOMContentLoaded', init);
   </script>
   <!-- ================= B5：答案解析编辑器（双栏实时预览 / 完整题面对照 / 原卷裁图 / AI 初稿对照） ================= -->
@@ -14359,7 +14556,6 @@
   </div>
 
   <!-- B5：答案解析编辑器本体（双栏实时预览 / 完整题面对照 / 原卷裁图 / AI 初稿对照） -->
-  <script src="/eagle-solution-editor.js?v=b5-20261115e"></script>
   <!-- 禁用非输入区域的浏览器原生上下文菜单，保留文本框的复制粘贴功能 -->
   <script src="/browser-interactions.js" defer></script>
 </body>

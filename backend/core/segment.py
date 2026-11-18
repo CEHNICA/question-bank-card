@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 from . import qtypes
 
@@ -741,6 +742,8 @@ def _book_number(value: str) -> int | None:
 
 def _book_block_position(block: dict) -> tuple[int, float, float] | None:
     bbox = block.get("bbox")
+    if not isinstance(bbox, (list, tuple)) or len(bbox) < 2:
+        return None
     try:
         return int(block["page_idx"]), float(bbox[0]), float(bbox[1])
     except (KeyError, TypeError, ValueError, IndexError):
@@ -804,7 +807,7 @@ def _raw_book_markers(blocks: list[dict]) -> list[BookMarker]:
         # referenced problem number is the stable local identity.  A question
         # mark is mandatory so the worked explanation that follows is not
         # promoted as another card.
-        previous_block, next_block = neighbours.get(seq, (None, None))
+        previous_block, next_block = neighbours.get(seq, (None, None)) if seq is not None else (None, None)
         previous_text = str((previous_block or {}).get("text") or "").replace("**", "").strip()
         next_text = str((next_block or {}).get("text") or "").replace("**", "").strip()
         context_panel = bool(
@@ -897,9 +900,9 @@ def _raw_book_markers(blocks: list[dict]) -> list[BookMarker]:
 
         example = BOOK_EXAMPLE_RE.match(plain)
         if example:
-            number = _book_number(example.group(1))
+            example_number = _book_number(example.group(1))
             remainder = example.group(2).lstrip()
-            if number is not None and not BOOK_EXAMPLE_REFERENCE_RE.match(remainder):
+            if example_number is not None and not BOOK_EXAMPLE_REFERENCE_RE.match(remainder):
                 markers.append(
                     BookMarker(
                         kind="example_start",
@@ -908,13 +911,13 @@ def _raw_book_markers(blocks: list[dict]) -> list[BookMarker]:
                         y=y,
                         seq=seq,
                         text=text,
-                        number=number,
+                        number=example_number,
                         question_shaped=True,
                     )
                 )
             else:
                 markers.append(
-                    BookMarker(kind="example_reference", page=page, x=x, y=y, seq=seq, text=text, number=number)
+                    BookMarker(kind="example_reference", page=page, x=x, y=y, seq=seq, text=text, number=example_number)
                 )
             continue
 
@@ -995,7 +998,11 @@ def _raw_book_markers(blocks: list[dict]) -> list[BookMarker]:
     # only this named workflow shape and require an actual question mark; broad
     # promotion of arbitrary unnumbered prose would create many false cards.
     marker_seqs = sorted(marker.seq for marker in markers if isinstance(marker.seq, int))
-    block_by_seq = {block.get("seq"): block for block in blocks if isinstance(block.get("seq"), int)}
+    block_by_seq: dict[int, dict] = {}
+    for block in blocks:
+        block_seq = block.get("seq")
+        if isinstance(block_seq, int):
+            block_by_seq[block_seq] = block
     recovered_context: list[BookMarker] = []
     for marker in markers:
         numbered = BOOK_NUMBERED_RE.match(marker.text.replace("**", "").strip())
@@ -1069,12 +1076,13 @@ def _column_markers(blocks: list[dict]) -> list[BookMarker]:
     for block in blocks:
         if block.get("type") in NON_CONTENT | FIGURE_TYPES | {"equation"}:
             continue
-        if not isinstance(block.get("seq"), int) or _book_block_position(block) is None:
+        position = _book_block_position(block)
+        if not isinstance(block.get("seq"), int) or position is None:
             continue
         text = str(block.get("text") or "").strip()
         if not text or not BOOK_COLUMN_BOUNDARY_RE.match(text.replace("**", "").strip()):
             continue
-        page, x, y = _book_block_position(block)
+        page, x, y = position
         markers.append(BookMarker(kind="column_header", page=page, x=x, y=y, seq=block["seq"], text=text))
     return markers
 
@@ -1103,6 +1111,8 @@ def _recover_book_gap_questions(markers: list[BookMarker], blocks: list[dict]) -
         if not (
             isinstance(previous.seq, int)
             and isinstance(following.seq, int)
+            and previous.number is not None
+            and following.number is not None
             and previous.page == following.page
             and previous.col == following.col
             and following.number == previous.number + 2
@@ -1453,6 +1463,8 @@ def chapter_label(index: dict, seq: int | None) -> str | None:
 
 def _block_key(layout: Layout, block: dict) -> tuple[int, int, float] | None:
     bbox = block.get("bbox")
+    if not isinstance(bbox, (list, tuple)) or len(bbox) < 3:
+        return None
     try:
         page = int(block["page_idx"])
         x = (float(bbox[0]) + float(bbox[2])) / 2
@@ -1671,7 +1683,7 @@ def numbering_scopes(pages: list[dict], blocks: list[dict]) -> list[dict]:
             and (current.number in seen or current.number <= 3)
         )
         following = reliable[index + 1] if index + 1 < len(reliable) else None
-        if restart and following is not None and maximum < following.number <= maximum + 3:
+        if restart and maximum is not None and following is not None and maximum < following.number <= maximum + 3:
             # “17. … 2. S=4，求 AE … 18. …”: a sub-question that lost its
             # parentheses, while the numbering carries straight on.  Skip it.
             continue
@@ -1802,14 +1814,13 @@ def book_numbering_scopes(pages: list[dict], blocks: list[dict]) -> list[dict]:
             if following is not None
             else last_page
         )
+        next_effective = effective_starts[index + 1] if index + 1 < len(effective_starts) else None
         scopes.append(
             {
                 "sequence": index,
                 "pages": list(range(page_start, page_end + 1)),
                 "seq_start": None if index == 0 else effective_starts[index],
-                "seq_end": (effective_starts[index + 1] - 1)
-                if following is not None and isinstance(effective_starts[index + 1], int)
-                else None,
+                "seq_end": (next_effective - 1) if following is not None and isinstance(next_effective, int) else None,
                 "scope_anchor_seq": first.anchor_seq,
                 "first_number": first.number,
                 "start_page": first.page,
@@ -2373,7 +2384,7 @@ def build_questions(layout: Layout, starts: list[Start], blocks: list[dict], *, 
         for heading in headings:
             if (heading["page"], heading["col"], heading["y"]) < here:
                 section = heading["text"]
-        figure_blocks = [
+        figure_blocks: list[dict[str, Any]] = [
             {"seq": block.get("seq"), "page_idx": int(block["page_idx"]), "bbox": list(block["bbox"])}
             for block in figures
             if figure_in_regions(int(block["page_idx"]), block["bbox"], regions)
@@ -2408,7 +2419,7 @@ def build_questions(layout: Layout, starts: list[Start], blocks: list[dict], *, 
                     block
                     for block in figures
                     if overlaps_regions(int(block["page_idx"]), block["bbox"], full_regions)
-                    and int(block["page_idx"]) <= stop[0] + 1
+                    and (stop is None or int(block["page_idx"]) <= stop[0] + 1)
                     and not center_in_regions(int(block["page_idx"]), block["bbox"], regions)
                     and not (block["bbox"][1] >= 945 and block["bbox"][3] - block["bbox"][1] <= 60)
                     and (block["bbox"][2] - block["bbox"][0]) >= 80
@@ -2509,17 +2520,20 @@ def _captioned_book_visual_owners(questions: list[dict], blocks: list[dict]) -> 
         )
         targets: list[dict]
         if local_match is not None:
-            number = local_match.group(1)
+            caption_number = local_match.group(1)
             targets = [
                 question
                 for question in questions
                 if re.search(
-                    rf"(?:如|见)?\s*图\s*[（(]\s*{re.escape(number)}\s*[)）]", str(question.get("source_marker") or "")
+                    rf"(?:如|见)?\s*图\s*[（(]\s*{re.escape(caption_number)}\s*[)）]",
+                    str(question.get("source_marker") or ""),
                 )
             ]
+        elif question_match is not None:
+            target_number = int(question_match.group(1))
+            targets = [question for question in questions if question.get("number") == target_number]
         else:
-            number = int(question_match.group(1))
-            targets = [question for question in questions if question.get("number") == number]
+            continue
         if not targets:
             continue
         caption_position = page * 1000 + float(box[1])
@@ -2684,7 +2698,7 @@ def build_book_questions(layout: Layout, starts: list[Start], blocks: list[dict]
                 question["regions"] = _exclude_foreign_visual_from_regions(
                     question.get("regions") or [], {"page_idx": int(visual["page_idx"]), "bbox": list(visual["bbox"])}
                 )
-            candidate = {
+            candidate: dict[str, Any] = {
                 "seq": sequence,
                 "page_idx": int(visual["page_idx"]),
                 "bbox": list(visual["bbox"]),

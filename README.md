@@ -19,7 +19,14 @@
 
 要让当前豆包补知识点或参考答案，可以明确让它通过附带的 CLI/MCP 工具完成后交回题库。**这条助手流程不需要豆包 API。** 两项默认关闭，明确需要时再启用；只有聊天能力时由你导入结果。网页中的生成按钮使用已配置的独立 API。[给助手的操作说明](AGENTS.md)
 
-当前发布版本为 **1.26.51**，可从 [GitHub Releases](https://github.com/CEHNICA/question-bank-card/releases/tag/v1.26.51) 下载。
+当前发布版本为 **2.0.0**，可从 [GitHub Releases](https://github.com/CEHNICA/question-bank-card/releases/tag/v2.0.0) 下载（[2.0.0 单版说明](docs/release-notes-v2.0.0.md)）。
+
+### 2.0.0 重点升级
+
+- **Eagle 级题库工作台（`/eagle`）**：左侧教材与智能文件夹树、顶部多维筛选胶囊、右侧属性与打标检查器、快速审题弹窗与全局界面缩放（`A−`/`100%`/`A+`），支持批量选题、统一回收站与整份下架。
+- **统一答案解析编辑器与 OneNote 联动**：Eagle 单题解析桥接统一 `LibraryAnswerEditor`；支持在 OneNote 中创建做题页、一键拉起定位与深链回跳。
+- **Word / PDF 导出保真对齐**：A4 预览与导出 Word/PDF 共用统一排版规格（字体、选项栏宽、答案双栏节奏、跨页表头与内嵌字体守护）。
+- **题库索引提速与底层安全加固**：新增 `PublishedQuestion` / `LibraryTagAssignment` 6 个高频复合索引（升级首次启动自动迁移）、`Exists` 子查询与 `facet_counts` SQL 聚合优化，同时收口 `pipeline` / `segment` 空值安全并纳入 `mypy` 门禁。
 
 从 1.25.3 到 1.25.25 这一段，做的都是同一件事：**把软件当成人用的，一屏一屏走一遍**。走到哪儿发现哪儿看不懂、说不清、不受控，就改哪儿。
 

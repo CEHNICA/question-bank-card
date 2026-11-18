@@ -1,0 +1,240 @@
+/* 答案解析编辑器专用样式。
+ * library.html 与 Eagle 共用。Eagle 不整页加载 library.css / styles.css，
+ * 所以这里自带对话框作用域下的令牌和按钮，避免污染 Eagle 主界面。
+ */
+.answer-editor-dialog {
+  --bg: #f4f3ee;
+  --bg-sunken: #ebe9e2;
+  --surface: #ffffff;
+  --surface-2: #faf9f5;
+  --line: #e5e2d9;
+  --line-strong: #d2cec2;
+  --ink: #1f2320;
+  --ink-2: #4a4e49;
+  --ink-3: #5d6b63;
+  --muted: #7b7e76;
+  --faint: #a5a79e;
+  --accent: #1f6b5f;
+  --accent-hover: #175a4f;
+  --accent-soft: #e4f1ec;
+  --accent-ring: rgba(31, 107, 95, .26);
+  --accent-dark: #174f46;
+  --green-bar: #9fd4b3;
+  --amber: #93590b;
+  --amber-soft: #fbf3e2;
+  --amber-line: #ecd3a2;
+  --amber-bar: #dfa33a;
+  --red: #b3412e;
+  --violet: #6b54a0;
+  --radius: 9px;
+  --ui-font: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", Consolas, "Microsoft YaHei", monospace;
+  color: var(--ink);
+  font-family: var(--ui-font);
+  box-sizing: border-box;
+}
+.answer-editor-dialog *,
+.answer-editor-dialog *::before,
+.answer-editor-dialog *::after { box-sizing: border-box; }
+.answer-editor-dialog .helper { color: var(--muted); font-size: 12.5px; line-height: 1.55; margin: 6px 0 0; }
+.answer-editor-dialog .eyebrow { margin: 0 0 3px; font-size: 11.5px; font-weight: 700; letter-spacing: .08em; color: var(--muted); }
+.answer-editor-dialog .button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 6px 14px;
+  border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink);
+  font-size: 13.5px; font-weight: 500; line-height: 1.2; text-decoration: none; white-space: nowrap;
+  box-shadow: none; cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+.answer-editor-dialog .button:hover:not(:disabled) { border-color: #bdb8aa; background: var(--surface-2); }
+.answer-editor-dialog .button:disabled { cursor: not-allowed; opacity: .45; }
+.answer-editor-dialog .button.primary,
+.answer-editor-dialog .button.button-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.answer-editor-dialog .button.primary:hover:not(:disabled),
+.answer-editor-dialog .button.button-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.answer-editor-dialog .button.small,
+.answer-editor-dialog .button.button-small { min-height: 28px; padding: 4px 10px; font-size: 12.5px; border-radius: 8px; }
+.answer-editor-dialog .button.quiet,
+.answer-editor-dialog .button.button-quiet { border-color: transparent; background: none; box-shadow: none; color: var(--ink-2); }
+.answer-editor-dialog .button.quiet:hover:not(:disabled),
+.answer-editor-dialog .button.button-quiet:hover:not(:disabled) { background: var(--bg-sunken); border-color: transparent; color: var(--ink); }
+.answer-editor-dialog .paper { min-width: 0; }
+@keyframes pulse { 50% { opacity: .35; } }
+
+.solution-label { font-weight: 600; }
+.solution-paragraph { margin: 3pt 0; }
+.solution-figure { margin: 6pt 0; max-width: 100%; break-inside: avoid; }
+.solution-figure img { display: block; max-width: 100%; height: auto; }
+/* 1.12.7：答案解析改成全屏。顶栏一条横排操作栏（返回、题号进度、存题库、保存），
+   第二条是横排题号带和 AI 按钮；正文三块 —— 左上原卷本题、左下编辑区、右边整列
+   预览。原来左边那条 230px 的题号侧栏和底部钉住的保存条都取消了：侧栏吃掉了本该
+   给编辑区的宽度，底部那条又正好压住光标所在的那一行。 */
+.answer-editor-dialog { width: 100vw; max-width: none; height: 100dvh; max-height: none; padding: 0;
+  border: 0; border-radius: 0; background: var(--bg); }
+.answer-editor-dialog[open] { display: grid; grid-template-rows: auto auto minmax(0, 1fr); }
+/* 单题：没有题号带，顶栏直接接正文。 */
+.answer-editor-dialog.is-single[open] { grid-template-rows: auto minmax(0, 1fr); }
+.answer-editor-dialog.is-single .answer-editor-strip[hidden] { display: none; }
+.answer-editor-dialog::backdrop { background: rgba(24, 42, 38, .5); }
+.answer-editor-bar { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap;
+  padding: 10px 22px; background: var(--surface); border-bottom: 1px solid var(--line); }
+/* 标题和「第 N 题 / 共 M 题」并成一行。原来的四行（眉标、标题、题号、说明）
+   把这条操作栏撑到 133px，正文被压到视口的四分之一以下。 */
+.answer-editor-heading { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.answer-editor-heading .eyebrow { margin: 0; font-size: 11px; letter-spacing: .08em; color: var(--muted); }
+.answer-editor-heading h3 { margin: 0; font-size: 16px; line-height: 1.3; color: var(--ink); white-space: nowrap; font-weight: 650; }
+.answer-editor-heading .helper { margin: 0; }
+.answer-editor-place { margin: 0; font-size: 13px; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.answer-editor-bar > .answer-editor-status { flex: 1 1 12em; min-width: 0; }
+.answer-editor-bar > .answer-sync, .answer-editor-bar > .button-primary, .answer-editor-bar > .answer-bar-ai { flex: none; }
+.answer-bar-ai { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.answer-bar-ai[hidden] { display: none; }
+.answer-bar-ai > .answer-ai-status { flex: 0 1 18em; margin: 0; padding: 4px 8px; }
+.answer-editor-strip { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap;
+  padding: 6px 22px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.answer-editor-strip[hidden] { display: none; }
+.answer-editor-strip > .helper { flex: 0 1 auto; margin: 0; max-width: 26em; }
+.answer-editor-list { display: flex; gap: 6px; flex: 0 1 auto; max-width: 46%; min-width: 0; overflow-x: auto;
+  padding: 2px 2px 5px; scrollbar-width: thin; }
+.answer-ai-row { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; flex: 1 1 auto; min-width: 0; }
+.answer-ai-row > .answer-ai-status { flex: 1 1 18em; min-width: 0; margin: 0; }
+.answer-ai-row > .answer-api-note { flex: 0 1 30em; margin: 0; }
+.answer-editor-dialog .helper { color: var(--ink-2); }
+.answer-ai-status { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+/* 状态行只在真有话说的时候才占地方。 */
+.answer-ai-status:empty, .answer-api-note:empty { display: none; }
+.answer-ai-tools { display: flex; gap: 7px; }
+.answer-ai-tools > [hidden], .answer-task-details[hidden] { display: none; }
+.answer-api-settings { text-align: center; color: var(--accent-dark); border-color: #9cc2b5; background: #f8fcf8; }
+.answer-api-note { font-size: 12px; line-height: 1.6; }
+.answer-task-details { margin: 10px 0; color: var(--ink-2); }
+.answer-task-details summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.answer-task-details textarea { width: 100%; margin-top: 8px; padding: 8px; box-sizing: border-box; font: 12px/1.6 var(--ui-font); color: var(--ink); background: #fff; border: 1px solid var(--line-strong); border-radius: 7px; resize: vertical; }
+/* 题号带：一格一个题号加一个状态点。完整说明放在 title 里，鼠标停上去才说全。 */
+.answer-list-row { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 5px;
+  flex: none; border: 1px solid var(--line); background: var(--surface); border-radius: 9px; padding: 3px 9px 3px 6px; }
+.answer-list-row.active { background: var(--accent-soft); border-color: var(--accent); }
+.answer-list-row:has(> input[hidden]) { grid-template-columns: minmax(0, 1fr); padding-left: 9px; }
+.answer-list-question { display: flex; align-items: center; gap: 6px; border: 0; background: transparent;
+  color: var(--ink); padding: 3px 1px; white-space: nowrap; cursor: pointer; }
+.answer-list-question strong { font-size: 13px; font-weight: 600; }
+.answer-list-question > .answer-quality, .answer-list-question > .answer-job-state,
+.answer-list-question > .answer-job-error, .answer-list-question > .answer-job-deadline { display: none; }
+.answer-list-question::after { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.answer-list-row[data-state="missing"] .answer-list-question::after { background: var(--amber-bar); }
+.answer-list-row[data-state="result_only"] .answer-list-question::after { background: var(--violet); }
+.answer-list-row[data-state="ready"] .answer-list-question::after { background: var(--green-bar); }
+.answer-list-row[data-state="review"] .answer-list-question::after, .answer-list-row[data-state="failed"] .answer-list-question::after { background: var(--red); }
+.answer-list-row[data-state="working"] .answer-list-question::after { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+/* 必须写 animation: none：全局那条 reduced-motion 只压 animation-duration，
+   不压 animation-iteration-count，infinite 动画会以 0.01ms 的周期一直转。
+   这条要 !important：上面那条状态选择器带了属性选择器，不加会被它盖住。 */
+@media (prefers-reduced-motion: reduce) {
+  .answer-list-row[data-state="working"] .answer-list-question::after { animation: none !important; }
+}
+.answer-list-row.active .answer-list-question::after { outline: 2px solid var(--accent); outline-offset: 2px; }
+.answer-editor-status { margin: 0; color: var(--ink-2); font-size: 12.5px; line-height: 1.5; }
+.answer-question, .answer-origin { padding: 12px 14px; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); }
+.answer-question > summary, .answer-origin > summary { cursor: pointer; color: var(--ink-2); font-size: 13px; font-weight: 600; }
+/* 1.25.40：照「录题 → 改字」那一页 —— 左源码、右预览，一行一对。
+   题目横跨整行在最上面；答案/解析各自和自己的预览同一行。 */
+.answer-editor-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-auto-rows: auto; gap: 12px 22px; align-content: start; min-height: 0; overflow-y: auto;
+  padding: 18px 28px 40px; background: linear-gradient(180deg, #f7f6f1 0%, var(--surface-2) 48px); }
+.answer-editor-workspace > .answer-editor-source { grid-column: 1 / -1; min-width: 0; padding: 10px 14px 12px;
+  border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.answer-editor-workspace > .answer-editor-source .answer-question { padding: 0; border: 0; border-radius: 0; background: transparent; }
+.answer-editor-workspace > .answer-editor-source .answer-question > summary { color: var(--ink); font-size: 13.5px; }
+.answer-editor-pair-hint { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.answer-editor-workspace > label { display: grid; gap: 7px; align-content: start; min-width: 0;
+  font-weight: 600; font-size: 13px; letter-spacing: .02em; color: var(--ink-3); }
+.answer-editor-workspace > label textarea { width: 100%; resize: vertical; font: 15px/1.7 var(--mono);
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: #fff;
+  color: var(--ink); box-sizing: border-box; }
+.answer-editor-workspace > label textarea::placeholder { color: var(--muted); }
+.answer-editor-workspace > label textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.answer-editor-preview-cell { min-width: 0; padding: 14px 16px; border: 1px solid var(--line);
+  border-radius: 10px; background: #fff; box-shadow: 0 1px 0 rgba(31, 35, 32, .03); }
+.answer-editor-preview-cell .answer-editor-preview { margin: 0; padding: 0; border: 0; min-height: 48px; }
+.answer-editor-tools-cell { grid-column: 1 / -1; min-width: 0; display: grid; gap: 10px; align-content: start;
+  padding-top: 4px; border-top: 1px solid var(--line); margin-top: 4px; }
+.answer-editor-tools-cell > .answer-set-aside { margin: 0; }
+.answer-editor-tools-cell > .answer-origin,
+.answer-editor-tools-cell > .answer-versions,
+.answer-editor-tools-cell > .answer-ai-draft { margin: 0; }
+.answer-ai-draft { grid-column: 1 / -1; }
+.answer-sync-note { margin: 0; color: var(--muted); font-size: 12px; }
+.answer-sync-note[hidden] { display: none; }
+.answer-image-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 0; }
+.answer-image-list { display: grid; gap: 10px; }
+.answer-image-row { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.answer-image-row > img { width: 112px; max-height: 120px; object-fit: contain; }
+.answer-image-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.answer-image-fields label { font-size: 12px; display: flex; align-items: center; gap: 6px; }
+.answer-image-fields input { width: 74px; }
+.answer-image-fields select { max-width: 155px; }
+.answer-image-fields .answer-image-tools { flex-basis: 100%; margin: 0; }
+.answer-editor-preview, .answer-origin > .paper, .answer-ai-draft > .paper { padding: 16px; margin: 8px 0 16px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+/* The display caret and selection are absolutely positioned inside the preview,
+   so the preview itself has to be their containing block. Without this they
+   resolve against the sticky column and land in the wrong place. */
+.answer-editor-preview { position: relative; }
+.answer-origin { margin: 0; }
+.answer-origin select { max-width: 100%; }
+/* 窄窗口：一行放不下两栏，变成「输入在上、预览在下」，仍是一对一对。 */
+@media (max-width: 1080px) {
+  .answer-editor-workspace { grid-template-columns: minmax(0, 1fr); }
+}
+/* 1.13.5：题面改过之后被搁置的那份解析。用琥珀底和一条侧边线标成「旁的一栏」，
+   别让它看起来像当前编辑区里的内容 —— 填回来要点按钮，不会自动生效。 */
+.answer-set-aside { margin: 12px 0 0; padding: 12px 14px; border: 1px solid var(--amber-line);
+  border-left: 3px solid var(--amber); border-radius: var(--radius); background: var(--amber-soft); }
+.answer-set-aside > strong { display: block; font-size: 13px; }
+.answer-set-aside > .helper { margin: 4px 0 0; }
+.answer-set-aside > .paper { padding: 12px; margin: 8px 0; border: 1px solid var(--line);
+  border-radius: 9px; background: #fff; }
+.answer-set-aside > .answer-image-tools { margin: 0; }
+/* 1.25.98：一份解析攒了几版，这里把它们摆出来。刻意不做成下拉、也不做成切换器
+   —— 1.11.5 那个「版本下拉」被删掉就是因为它切的是整个编辑区，老师会以为下面的
+   字也跟着换。现在是一块只读清单：点「看内容」才展开，点「填回编辑区」才把
+   那一版放进编辑区，还要自己保存。 */
+.answer-versions { margin: 12px 0 0; padding: 10px 14px; border: 1px solid var(--line);
+  border-radius: var(--radius); background: #fbfcfd; }
+.answer-versions > summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
+.answer-version-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.answer-version { padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: #fff; }
+.answer-version.current { border-color: var(--line); background: #f4fbf7; }
+.answer-version-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.answer-version-head > strong { font-size: 13px; }
+.answer-version-body { margin: 8px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; }
+.answer-version > .answer-image-tools { margin: 8px 0 0; }
+.answer-sync { font-size: 13px; display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
+.answer-sync[hidden] { display: none; }
+.answer-ai-draft { padding: 12px; background: var(--amber-soft); border-radius: 9px; }
+/* 1.25.80：答案 / 解析两个框在有 AI 参考答案自动填进来时给一道浅底色 + 角落小角标；
+   老师改过一个字符之后自动消，恢复普通样式。 */
+#answerEditorResult, #answerEditorAnalysis { position: relative; }
+#answerEditorResult.is-ai-suggested,
+#answerEditorAnalysis.is-ai-suggested { background: linear-gradient(180deg, #fff7e6 0%, #fffaf0 100%); box-shadow: inset 0 0 0 1px #f4d59c; }
+#answerEditorResult.is-ai-suggested::after,
+#answerEditorAnalysis.is-ai-suggested::after { content: "AI 初稿"; position: absolute; top: 6px; right: 10px; padding: 1px 7px; border-radius: 99px; background: #f4d59c; color: #6a4a14; font-size: 10.5px; font-weight: 600; pointer-events: none; }
+.answer-crop { border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.answer-crop-scroll { position: relative; max-height: 420px; overflow: auto; }
+.answer-crop-guidance { position: absolute; top: 8px; right: 8px; left: 8px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; pointer-events: none; }
+.answer-crop-guidance > span { padding: 8px 10px; background: rgba(232, 244, 239, .95); border: 1px solid var(--accent); border-radius: 7px; }
+.answer-crop-guidance > button { pointer-events: auto; background: var(--surface); }
+.answer-crop-guidance[hidden] { display: none; }
+.answer-crop-hint-switch { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3); }
+.answer-crop-surface { position: relative; width: 100%; touch-action: none; }
+.answer-crop-surface > img { display: block; width: 100%; user-select: none; }
+.answer-crop-box { position: absolute; border: 2px solid var(--accent); background: rgba(29, 107, 94, .12); pointer-events: none; box-sizing: border-box; }
+@media (max-width: 1100px) {
+  /* 1.12.7：窄屏退回单列，从上往下是顶栏、题号带、原卷本题、编辑区、预览，整栏滚动。 */
+  .answer-editor-workspace { display: block; overflow-y: auto; }
+  .answer-editor-input-column { display: block; border-right: 0; }
+  .answer-editor-source { max-height: 30dvh; }
+  .answer-editor-edit { overflow: visible; }
+  .answer-editor-preview-column { overflow: visible; border-left: 0; border-top: 1px solid var(--line); }
+  .answer-editor-strip > .helper { display: none; }
+}
+@media (max-width: 700px) {
+  .answer-editor-bar, .answer-editor-strip { padding: 8px 12px; }
+  .answer-editor-bar > .answer-editor-status { flex-basis: 100%; order: 5; }
+  .answer-editor-source, .answer-editor-edit, .answer-editor-preview-column { padding-left: 12px; padding-right: 12px; }
+}

@@ -16,6 +16,7 @@ from collections import OrderedDict, defaultdict
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 from django.conf import settings
 from django.db import close_old_connections, connection, transaction
@@ -243,9 +244,11 @@ def _content_kind_review_flag(
         for result in readings
         if str(result.get("content_kind") or "unknown") != "unknown"
     }
-    expected_kind = {Question.SourceKind.EXAMPLE: "example", Question.SourceKind.EXERCISE: "exercise"}.get(source_kind)
+    expected_kind = {str(Question.SourceKind.EXAMPLE): "example", str(Question.SourceKind.EXERCISE): "exercise"}.get(
+        source_kind
+    )
     non_question_kinds = {"prose", "heading"}
-    if _source_kind_has_question_support(
+    if expected_kind is not None and _source_kind_has_question_support(
         expected_kind=expected_kind, stem=stem, options=options, kind=kind, readings=readings
     ):
         content_kinds = {expected_kind}
@@ -545,9 +548,9 @@ class PageStore:
                 return self.memory[page_idx]
             target = self.path(page_idx)
             if target.is_file():
-                image = Image.open(target)
-                image.load()
-                image = image.convert("RGB")
+                opened = Image.open(target)
+                opened.load()
+                image: Image.Image = opened.convert("RGB")
             else:
                 source, kind = render_source(self.paper)
                 image = imaging.render_source_page(source, kind, page_idx)
@@ -832,14 +835,14 @@ def _replan_oversized_pending_chunks(paper: Paper, chunks: list[ImportChunk]) ->
         offset = max(chunk.sequence for chunk in chunks) + len(revised) + 1
         for chunk in chunks:
             ImportChunk.objects.filter(pk=chunk.pk).update(sequence=chunk.sequence + offset)
-        for sequence, (chunk, values) in enumerate(revised, start=1):
+        for sequence, (target_chunk, values) in enumerate(revised, start=1):
             values["sequence"] = sequence
-            if chunk is None:
+            if target_chunk is None:
                 ImportChunk.objects.create(paper=paper, **values)
             else:
                 for name, value in values.items():
-                    setattr(chunk, name, value)
-                chunk.save(update_fields=list(values))
+                    setattr(target_chunk, name, value)
+                target_chunk.save(update_fields=list(values))
         import_planning.validate_chunk_coverage(
             list(paper.import_chunks.order_by("sequence")), expected_start=1, expected_end=len(paper.pages)
         )
@@ -1110,7 +1113,8 @@ def _book_group_names(source_groups: list, paper: Paper, blocks: list[dict] | No
     for scope in source_groups:
         anchor = scope.get("scope_anchor_seq") if isinstance(scope, dict) else None
         label = segment.chapter_label(index, anchor) if type(anchor) is int else None
-        name = BOOK_GROUP_KIND.get(scope.get("source_kind") if isinstance(scope, dict) else None)
+        source_kind = scope.get("source_kind") if isinstance(scope, dict) else None
+        name = BOOK_GROUP_KIND.get(source_kind) if isinstance(source_kind, str) else None
         if label and name:
             label = f"{label} · {name}"
         labels.append(label)
@@ -1676,7 +1680,7 @@ def reorder_photo_pages(paper: Paper, order: list[int]) -> None:
             if isinstance(source_pages, list) and len(source_pages) == len(old_pages):
                 source_by_old_page = dict(zip(old_pages, source_pages))
                 metadata["source_pages"] = [
-                    source_by_old_page[old_page] for old_page in sorted(old_pages, key=mapping.get)
+                    source_by_old_page[old_page] for old_page in sorted(old_pages, key=lambda p: mapping[p])
                 ]
             for key in ("seq_start", "seq_end"):
                 old_seq = metadata.get(key)
@@ -1736,9 +1740,11 @@ def _snap_to_gap(image: Image.Image, row: int, band_height: float) -> int:
         return row
     strip = gray.crop((0, top, image.width, bottom + 1)).resize((max(1, image.width // 4), bottom - top + 1))
     pixels = strip.load()
+    if pixels is None:
+        return row
     best_row, best_ink = row, None
     for y in range(strip.height):
-        ink = sum(1 for x in range(strip.width) if pixels[x, y] < 150)
+        ink = sum(1 for x in range(strip.width) if isinstance(val := pixels[x, y], (int, float)) and val < 150)
         # 同样空时取更靠近题号的一行
         if best_ink is None or ink < best_ink or (ink == best_ink and abs(top + y - row) < abs(best_row - row)):
             best_row, best_ink = top + y, ink
@@ -1828,7 +1834,7 @@ def locate_missing(
     paper: Paper,
     layout,
     starts: list[segment.Start],
-    store: PageStore,
+    store: PageStore | ReadOnlyPageStore,
     blocks: list[dict] | None = None,
     unresolved: list[tuple[int, int]] | None = None,
 ) -> list[str]:
@@ -2092,18 +2098,18 @@ def _fail_when_nothing_was_cut(paper: Paper, revision: int, *, reason: str = "")
 def _normalise_source_kind(item: dict) -> str:
     raw = item.get("source_kind") or (item.get("start") or {}).get("source_kind")
     if (item.get("start") or {}).get("source") == "manual":
-        return Question.SourceKind.MANUAL
+        return str(Question.SourceKind.MANUAL)
     if raw in {
         Question.SourceKind.EXAMPLE,
         Question.SourceKind.EXERCISE,
         Question.SourceKind.MANUAL,
         Question.SourceKind.UNKNOWN,
     }:
-        return raw
+        return str(raw)
     # The generic exam path calls ordinary starts ``question``; the persisted
     # schema deliberately uses ``unknown`` so future classifiers can improve it
     # without pretending an inference was certain.
-    return Question.SourceKind.UNKNOWN
+    return str(Question.SourceKind.UNKNOWN)
 
 
 def _source_anchor(item: dict) -> int | None:
@@ -2277,7 +2283,8 @@ def _regions_contained_in(old: list[dict], new: list[dict], *, tolerance: float 
 def _solution_only_shortening(question: Question, item: dict, blocks: list[dict]) -> bool:
     """Whether an example can be shortened locally without another AI read."""
 
-    metadata = item.get("segmentation") if isinstance(item.get("segmentation"), dict) else {}
+    metadata_raw = item.get("segmentation")
+    metadata = metadata_raw if isinstance(metadata_raw, dict) else {}
     boundary_seq = metadata.get("solution_boundary_seq")
     if not (
         item.get("source_kind") == Question.SourceKind.EXAMPLE
@@ -2356,7 +2363,8 @@ def _remap_trimmed_reading(reading: object, *, old_candidates: list[dict], new_c
     # genuine remaining cue is rediscovered below by the deterministic figure
     # policy, while image-choice completeness is checked from the kept options.
     result["missing_figure"] = False
-    options = result.get("options") if isinstance(result.get("options"), dict) else {}
+    options_raw = result.get("options")
+    options = options_raw if isinstance(options_raw, dict) else {}
     result["unclear"] = "[?]" in result["stem"] or any("[?]" in str(value) for value in options.values())
     return result
 
@@ -2665,12 +2673,18 @@ def _resegment_item_json(item: dict, question: Question | None = None, *, reason
     group = item.get("group") if item else getattr(question, "group", None)
     return {
         "question_id": question.pk if question is not None else None,
-        "number": item.get("number") if item else question.number,
+        "number": item.get("number") if item else (question.number if question is not None else None),
         "group_id": group.pk if group is not None else None,
         "group": group.title if group is not None else "",
-        "source_kind": item.get("source_kind") if item else question.source_kind,
-        "source_anchor_seq": item.get("source_anchor_seq") if item else question.source_anchor_seq,
-        "pages": pages if item else sorted({region["page_idx"] + 1 for region in question.regions or []}),
+        "source_kind": item.get("source_kind") if item else (question.source_kind if question is not None else ""),
+        "source_anchor_seq": item.get("source_anchor_seq")
+        if item
+        else (question.source_anchor_seq if question is not None else None),
+        "pages": pages
+        if item
+        else sorted({region["page_idx"] + 1 for region in (question.regions or [])})
+        if question is not None
+        else [],
         "reason": reason,
     }
 
@@ -3671,9 +3685,11 @@ def trim_book_example_solutions_locally(paper: Paper) -> dict[str, int]:
         )
         by_anchor: dict[int, list[Question]] = defaultdict(list)
         for question in active:
-            by_anchor[question.source_anchor_seq].append(question)
+            if question.source_anchor_seq is not None:
+                by_anchor[question.source_anchor_seq].append(question)
         for item in examples:
-            matches = by_anchor.get(item.get("source_anchor_seq"), [])
+            anchor_seq = item.get("source_anchor_seq")
+            matches = by_anchor.get(anchor_seq, []) if isinstance(anchor_seq, int) else []
             if len(matches) != 1:
                 counts["unsafe"] += 1
                 continue
@@ -3731,6 +3747,8 @@ def _region_position(regions: list[dict] | None) -> float:
         return 1e30
     first = regions[0] if isinstance(regions[0], dict) else {}
     bbox = first.get("bbox") if isinstance(first, dict) else None
+    if not isinstance(bbox, (list, tuple)) or len(bbox) < 2:
+        return 1e30
     page = first.get("page_idx", 0) if isinstance(first, dict) else 0
     try:
         x, y = float(bbox[0]), float(bbox[1])
@@ -3910,7 +3928,8 @@ def mineru_draft(blocks: list[dict], table_html: dict[int, str], regions: list[d
     for block in _reading_order(blocks, regions):
         kind = block.get("type")
         if kind == "table":
-            html = table_html.get(block.get("seq"))
+            seq = block.get("seq")
+            html = table_html.get(seq) if isinstance(seq, int) else None
             text = tables.to_text(html) if html else ""
         elif kind == "equation":
             formula = " ".join(str(block.get("text") or "").replace("$$", " ").split())
@@ -4219,7 +4238,9 @@ def _option_gaps(options: dict, figures: list[dict]) -> list[str]:
     option, and the card still went green.  Option images count as present.
     """
     letters = {key for key, value in (options or {}).items() if key in _OPTION_LETTERS and str(value or "").strip()}
-    letters |= {figure.get("slot") for figure in figures or [] if figure.get("slot") in _OPTION_LETTERS}
+    letters |= {
+        slot for figure in figures or [] if isinstance(slot := figure.get("slot"), str) and slot in _OPTION_LETTERS
+    }
     if not letters:
         return []
     last = _OPTION_LETTERS.index(max(letters))
@@ -4236,7 +4257,9 @@ def _surplus_options(options: dict, figures: list[dict]) -> list[str]:
     can answer correctly.  Option images count as present, like ``_option_gaps``.
     """
     letters = {key for key, value in (options or {}).items() if key in _OPTION_LETTERS and str(value or "").strip()}
-    letters |= {figure.get("slot") for figure in figures or [] if figure.get("slot") in _OPTION_LETTERS}
+    letters |= {
+        slot for figure in figures or [] if isinstance(slot := figure.get("slot"), str) and slot in _OPTION_LETTERS
+    }
     return sorted(letter for letter in letters if letter > "D")
 
 
@@ -4265,7 +4288,9 @@ def _section_choice_without_options(section: str, options: dict, figures: list[d
     if not _CHOICE_SECTION.search(section or ""):
         return False
     letters = {key for key, value in (options or {}).items() if key in _OPTION_LETTERS and str(value or "").strip()}
-    letters |= {figure.get("slot") for figure in figures or [] if figure.get("slot") in _OPTION_LETTERS}
+    letters |= {
+        slot for figure in figures or [] if isinstance(slot := figure.get("slot"), str) and slot in _OPTION_LETTERS
+    }
     return not letters
 
 
@@ -4753,18 +4778,18 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     figure_source = a or {}
     a_text = _without_inferred_figure_text(a, figure_source)
     b_text = _without_inferred_figure_text(b, figure_source)
-    normalized_results = [result for result in (a_text, b_text) if result]
+    normalized_results = [result for result in (a_text, b_text) if result is not None]
     if not double_read:
         # Deliberate single reading is neither a failed second reading nor
         # cross-engine agreement, even when stored OCR happens to match.
-        final, source = a_text, "single"
-    elif a and not b and "b" not in errors and textnorm.witness_agrees(a_text, witness):
+        final, source = a_text or {}, "single"
+    elif a_text is not None and b_text is None and "b" not in errors and textnorm.witness_agrees(a_text, witness):
         # Cross-engine agreement: the vision reading and MinerU's OCR match.
         final, source = a_text, "witness"
         # Kept as audit evidence and shown in the reading history; it has no
         # ``stem`` so no code path mistakes it for a vision transcription.
         update["read_b"] = {"engine": "MinerU", "witness": witness[:4000], "skipped": "witness"}
-    elif a and b and same_reading(a_text, b_text):
+    elif a_text is not None and b_text is not None and same_reading(a_text, b_text):
         final, source = a_text, "agree"
         final, source = _settle_objections(
             final,
@@ -4780,8 +4805,8 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
             blocks=snapshot.get("witness_blocks"),
         )
     elif (
-        a
-        and b
+        a_text is not None
+        and b_text is not None
         and (textnorm.witness_agrees(b_text, witness) or textnorm.witness_choice(a_text, b_text, witness) is not None)
     ):
         # MinerU (a different engine) settles the disagreement.  An arbiter
@@ -4805,7 +4830,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
             figure_source=figure_source,
             blocks=snapshot.get("witness_blocks"),
         )
-    elif a and b:
+    elif a_text is not None and b_text is not None:
         try:
             arbiter = readers.arbiter_engine(primary, checker)
             if arbiter is None:
@@ -4822,7 +4847,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
             )
             c = _without_echoed_number(c, number, (a_text, b_text))
             update["read_c"] = c
-            c_text = _without_inferred_figure_text(c, figure_source)
+            c_text = _without_inferred_figure_text(c, figure_source) or {}
             normalized_results.append(c_text)
             if same_reading(c_text, a_text):
                 final, source = a_text, "majority"
@@ -4858,7 +4883,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
             update["read_c"] = {"error": str(error)}
             flags.append("两次识读不一致，裁决失败，请展开识读记录核对")
     else:
-        final = a_text or b_text
+        final = a_text or b_text or {}
         source = "single"
         flags.append(f"只有一次识读成功（另一次：{errors.get('b') or errors.get('a')}）")
 
@@ -4908,7 +4933,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     # used to stop prose/title candidates from silently becoming green cards.
     content_readings = [result for result in (a, b, update.get("read_c")) if isinstance(result, dict)]
     if content_flag := _content_kind_review_flag(
-        source_kind=source_kind,
+        source_kind=str(source_kind),
         stem=str(final.get("stem") or ""),
         options=final.get("options") or {},
         kind=str(final.get("type") or snapshot.get("question_type") or "unknown"),
@@ -5118,17 +5143,17 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     if printed and (solution := textnorm.printed_solution_in_stem(printed, final.get("stem") or "")):
         # 印刷解答跟在题后面，学生做卷子时答案就摆在眼前。
         flags.append(f"题干里混进了印刷的解答（{solution}…），它可能属于别的题；请对照原书确认该不该留在这里")
-    if (merged := textnorm.merged_question_number(final.get("stem"), number)) is not None:
+    if (merged := textnorm.merged_question_number(str(final.get("stem") or ""), number)) is not None:
         # 两道题并成一张卡时，卡上只有一道题号、却是绿的。只提示，不替用户拆。
         flags.append(
             f"题干里还印着第 {merged} 题的题号，这张卡可能是两道题并成了一道；请对照原卷确认，必要时在这里把它拆成两道"
         )
     elif snapshot.get("is_book") and (
-        extra := textnorm.printed_question_numbers(snapshot.get("witness") or "", number)
+        extra_numbers := textnorm.printed_question_numbers(str(snapshot.get("witness") or ""), number)
     ):
         # 另一种形状：卡上只有一道题，题号也对得上，范围却罩住了后面几道题 ——
         # 书上印着，库里却没有它们的卡（八下习题 7.1 的第 2 题就是这样没的）。
-        listed = "、".join(str(value) for value in extra)
+        listed = "、".join(str(value) for value in extra_numbers)
         flags.append(f"这张卡的范围里还印着第 {listed} 题的题号，卡上只有这一道；请对照原书确认那几道题是不是漏进来了")
     if missing := textnorm.missing_sub_questions(final.get("stem") or "", snapshot.get("witness_blocks")):
         # 小问在整段正文里跳号，而那些号在本题范围内确实印着内容：切题吞了一道小问。
@@ -5184,11 +5209,11 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     # 「$\frac{5\sqrt{34}}{34}=1\times\fra…」），照抄等于把乱码印上答案卷，
     # 所以那里只提示，不替人抄。
     printed_answer = ""
-    printed = printed_answers.marks(snapshot.get("witness_blocks") or [])
-    if printed and not str(snapshot.get("answer") or "").strip():
-        letter = printed_answers.choice_letter(printed, kind, qtypes.CHOICE_TYPES)
-        if letter:
-            printed_answer = letter
+    printed_marks = printed_answers.marks(snapshot.get("witness_blocks") or [])
+    if printed_marks and not str(snapshot.get("answer") or "").strip():
+        printed_letter = printed_answers.choice_letter(printed_marks, kind, qtypes.CHOICE_TYPES)
+        if printed_letter:
+            printed_answer = printed_letter
         else:
             flags.append(FLAG_PRINTED_ANSWER)
     switches = features.load()
@@ -5593,7 +5618,7 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
             if regions and segment.center_in_regions(int(item["page_idx"]), item["bbox"], regions)
         ]
     for question in questions:
-        update = {"reread_requested": False}
+        update: dict[str, Any] = {"reread_requested": False}
         if question.body_mode == "source_image" or question.processing_mode == "manual":
             update["ocr_pending"] = True
         if question.body_mode != "source_image":
@@ -5836,9 +5861,12 @@ def _row_targets(owner: Question, row: list[dict], by_key: dict) -> list[Questio
         return None
     count = len(row)
     for first in (owner.number - count + 1, owner.number):
-        targets = [by_key.get((owner.group_id, first + index)) for index in range(count)]
+        raw_targets = [by_key.get((owner.group_id, first + index)) for index in range(count)]
+        if any(item is None for item in raw_targets):
+            continue
+        targets = [item for item in raw_targets if item is not None]
         others = [item for item in targets if item is not owner]
-        if all(item is not None and _needs_row_figure(item) for item in others):
+        if all(_needs_row_figure(item) for item in others):
             return targets
     return None
 
@@ -6026,8 +6054,11 @@ def _resolve_figure_claim_winner(questions: list[Question], ledger: dict) -> lis
         for key in keys:
             contested.setdefault(key, []).append(int(owner_id))
     for key, owners in sorted(contested.items()):
-        claimants = [by_pk.get(int(pk)) for pk in owners]
-        if any(card is None or _figure_decision_protected(card) for card in claimants):
+        raw_claimants = [by_pk.get(int(pk)) for pk in owners]
+        if any(card is None for card in raw_claimants):
+            continue
+        claimants = [card for card in raw_claimants if card is not None]
+        if any(_figure_decision_protected(card) for card in claimants):
             continue
         if any(_figure_slot(card, key) != "stem" for card in claimants):
             # 有人把同一张图认作某个选项的图：这不是「谁要图谁留」能判的。
@@ -6430,7 +6461,9 @@ def verify_geometric_figures(paper: Paper, *, revision: int | None = None) -> in
             except readers.ReaderError:
                 verdict = None
             if verdict == {1}:
-                dropped.add(figure_claims.frame_key(figure))
+                key = figure_claims.frame_key(figure)
+                if key is not None:
+                    dropped.add(key)
         if not indexed:
             if not dropped:
                 continue
@@ -6469,7 +6502,7 @@ def verify_geometric_figures(paper: Paper, *, revision: int | None = None) -> in
                 for figure, position in indexed:
                     if position in (confirmed or set()):
                         key = figure_claims.frame_key(figure)
-                        if _figure_alone_says_handwritten(engine, store, figure):
+                        if key is not None and _figure_alone_says_handwritten(engine, store, figure):
                             dropped.add(key)
         if not dropped:
             continue

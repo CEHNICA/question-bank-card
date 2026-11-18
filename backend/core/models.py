@@ -407,6 +407,13 @@ class PublishedQuestion(models.Model):
     class Meta:
         ordering = ["-published_at"]
         constraints = [models.UniqueConstraint(fields=["question", "version"], name="unique_question_version")]
+        indexes = [
+            models.Index(fields=["status", "-published_at"], name="pubq_status_published_at"),
+            models.Index(fields=["status", "paper"], name="pubq_status_paper"),
+            models.Index(fields=["status", "question_type"], name="pubq_status_qtype"),
+            models.Index(fields=["status", "review_source"], name="pubq_status_review"),
+            models.Index(fields=["question", "status"], name="pubq_question_status"),
+        ]
 
 
 class LibraryJob(models.Model):
@@ -554,7 +561,10 @@ class LibraryTagAssignment(models.Model):
     class Meta:
         ordering = ["created_at", "id"]
         constraints = [models.UniqueConstraint(fields=["publication", "tag"], name="unique_publication_tag_assignment")]
-        indexes = [models.Index(fields=["publication", "needs_review"], name="tag_assignment_review")]
+        indexes = [
+            models.Index(fields=["publication", "needs_review"], name="tag_assignment_review"),
+            models.Index(fields=["needs_review", "tag", "publication"], name="tag_assign_review_tag_pub"),
+        ]
 
 
 class LibraryTagSuggestion(models.Model):

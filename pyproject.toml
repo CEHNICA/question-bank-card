@@ -134,7 +134,6 @@ module = [
   "core.import_planning",           # 1 条
   "core.intake",                    # 1 条
   "core.library_ai_settings",       # 5 条
-  "core.library_browse",            # 5 条
   "core.library_drafts",            # 4 条
   "core.library_jobs",              # 10 条
   "core.library_tagging",           # 19 条
@@ -145,13 +144,11 @@ module = [
   "core.mineru",                    # 9 条
   "core.native_pdf",                # 3 条
   "core.photos",                    # 9 条
-  "core.pipeline",                  # 71 条
   "core.preferences",               # 3 条
   "core.provider_catalog",          # 1 条
   "core.reader_test",               # 1 条
   "core.readers",                   # 12 条
   "core.region_reads",              # 9 条
-  "core.segment",                   # 23 条
   "core.textnorm",                  # 1 条
   "core.views",                     # 11 条
   "core.worker_lock",               # 3 条

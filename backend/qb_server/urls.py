@@ -61,6 +61,7 @@ urlpatterns = [
     path("library-toc.js", views.library_toc_script),
     path("library-solutions.js", views.library_solutions_script),
     path("library-answer-editor.js", views.library_answer_editor_script),
+    path("library-answer-editor.css", views._frontend("library-answer-editor.css", "text/css; charset=utf-8")),
     path("library-question-editor.js", views.library_question_editor_script),
     path("library-question-viewer.js", views.library_question_viewer_script),
     path("exam-export.js", views.exam_export_script),

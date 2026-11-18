@@ -93,14 +93,10 @@ it("尺子自检：三处关键函数必须找得到（否则下面的断言会�
   assert.ok(load.includes("quiet"), "load() 里没有 quiet 分支了，这条测试要跟着更新");
 
   const doc = bodyOf(eagle, "async function ensureDocumentQuestionsLoaded");
-  assert.ok(doc, "找不到 ensureDocumentQuestionsLoaded（结构变了？）");
+  assert.ok(doc, "找不到 ensureDocumentQuestionsLoaded");
   assert.ok(doc.includes("/api/library?document="), "按资料补拉的请求 URL 变了");
 
-  const draft = bodyOf(sol, "async function fetchAiDraft");
-  assert.ok(draft, "找不到 fetchAiDraft（结构变了？）");
-  assert.ok(draft.includes("/api/library/jobs?"), "AI 初稿的请求 URL 变了");
-
-  assert.ok(bodyOf(sol, "function columnHtml"), "找不到 columnHtml");
+  assert.ok(sol.includes("LibraryAnswerEditor"), "Eagle 答案编辑器应桥接到统一的 LibraryAnswerEditor");
 });
 
 it("D1：经典页 quiet 续拉遇到非 2xx 必须抛错，不能静默 break", () => {
@@ -157,45 +153,15 @@ it("D2：Eagle 加载失败必须弹 toast，不能只在列表底部留一句",
   );
 });
 
-it("D3：解析编辑器读 AI 初稿失败必须抛错，不能 return null", () => {
-  const draft = bodyOf(sol, "async function fetchAiDraft");
-  assert.ok(draft, "找不到 fetchAiDraft");
+it("D3：Eagle 答案编辑桥接使用 LibraryAnswerEditor，不再由多列模块吞掉读失败", () => {
+  const answerEditorPath = path.join(__dirname, "library-answer-editor.js");
+  const answerEditor = fs.readFileSync(answerEditorPath, "utf8");
   assert.ok(
-    /if\s*\(\s*!res\.ok\s*\)\s*throw/.test(draft),
-    "读初稿遇到非 2xx 必须 throw：return null 会和「确实没有初稿」混成一条路"
+    sol.includes("LibraryAnswerEditor.create") && sol.includes("window.openSolutionEditor"),
+    "eagle-solution-editor.js 应作为单题桥接入口委托给 LibraryAnswerEditor"
   );
   assert.ok(
-    !/if\s*\(\s*!res\.ok\s*\)\s*return\s+null/.test(draft),
-    "仍有 if (!res.ok) return null：读失败会被显示成「没有初稿」"
-  );
-});
-
-it("D3：读初稿失败必须把原因带到列状态里", () => {
-  const loadCol = bodyOf(sol, "async function loadColumn");
-  assert.ok(loadCol, "找不到 loadColumn");
-  assert.ok(
-    /col\.aiDraftError\s*=/.test(loadCol),
-    "loadColumn 必须把读取失败记到 col.aiDraftError，否则渲染层无从区分「读不到」"
-  );
-  assert.ok(
-    /draft\.error/.test(loadCol),
-    "loadColumn 必须把 fetchAiDraft 返回的错误写进 col.aiDraftError"
-  );
-});
-
-it("D3：渲染必须把「读不到」和「没有初稿」分开说", () => {
-  const html = bodyOf(sol, "function columnHtml");
-  assert.ok(html, "找不到 columnHtml");
-  assert.ok(
-    /const aiBox\s*=\s*col\.aiDraftError\s*\?/.test(html),
-    "AI 初稿那块必须先看 col.aiDraftError：读不到的时候不能显示「还没有 AI 初稿」"
-  );
-  assert.ok(
-    html.includes("AI 初稿没读到"),
-    "必须有「AI 初稿没读到」这句：老师看到「没有初稿」就会去排生成任务，白跑额度"
-  );
-  assert.ok(
-    html.includes("还没有 AI 初稿"),
-    "真正的空态文案要留着：确实没有初稿时还得这么写"
+    answerEditor.includes("本地编辑内容保留，稍后重新勾选可重试"),
+    "LibraryAnswerEditor 应显式展示查询失败原因并保留本地编辑"
   );
 });

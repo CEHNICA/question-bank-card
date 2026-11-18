@@ -296,7 +296,7 @@ def add_ruler(image: Image.Image, bands: int = 30) -> tuple[Image.Image, int]:
     return ruled, bands
 
 
-def band_to_page(layout: list[dict], band: int, bands: int, total_height: int) -> tuple[int, float] | None:
+def band_to_page(layout: list[dict], band: int | float, bands: int, total_height: int) -> tuple[int, float] | None:
     """把刻度编号（1 起）换回 (页码, 页面 y 坐标)。"""
     y_pixel = (band - 1) * total_height / bands
     for segment in layout:
