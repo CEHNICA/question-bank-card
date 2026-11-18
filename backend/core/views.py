@@ -866,6 +866,7 @@ from .system_views import (  # noqa: F401
     exam_layout_script,
     export_settings_script,
     favicon,
+    favicon_ico,
     health,
     index_page,
     katex_asset,

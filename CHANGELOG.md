@@ -3,6 +3,15 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.1.2
+
+**跨机 Edge 应用窗口任务栏图标加固、`/favicon.ico` 补齐与 OneNote 打开等待条恢复**
+
+- **桌面窗口任务栏独立应用标识与图标守护（`app_window.py`）**：为 Edge/Chrome `--app` 窗口通过 `SHGetPropertyStoreForWindow` 写入独立 `AppUserModelID` 与图标重启属性；缓存 `LoadImageW` 图标句柄并持续校验 `WM_GETICON`，防止冷启动超 2 秒或跨页跳转被浏览器覆盖回默认图标；进程定位改用原生 Win32 快照与 `NtQueryInformationProcess`，兼容长短路径与特殊目录字符，并增强 PowerShell 回退及 `shutil.which` 浏览器查找。
+- **全站 `/favicon.ico` 路由与品牌图标路径统一（`system_views.py`、`urls.py`、各 HTML 页）**：新增 `/favicon.ico`（映射 `assets/app.ico`），统一根路径图标声明与 `practice.html` 高清品牌图标。
+- **恢复打开 OneNote 笔记期间的等待进度条（`eagle/index.html`、`library_onenote.py`）**：`openOneNotePage` 重新接回 `showOneNoteBusy` 顶部进度条与按钮加载状态，后端 `/onenote/open?wait=1` 支持同步等待唤醒完成，避免进度条提前消失或无反馈。
+
+
 ## 2.1.1
 
 **高清图标与 DPI 适配、帮助系统同步更新、批量识读进度与断点续读修复**

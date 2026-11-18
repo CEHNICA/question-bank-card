@@ -667,27 +667,29 @@ def create_or_sync_page(publication: PublishedQuestion) -> dict[str, Any]:
     return onenote_record
 
 
-def _refine_open(page_id: str | None, url: str | None) -> None:
-    """后台精修：COM 切页 + 置前。不挡前端点击返回。"""
+def _refine_open(page_id: str | None, url: str | None) -> bool:
+    """COM 切页并置前；若 COM 失败或未置前，再通过系统协议补开一次，返回是否至少有一种方式生效。"""
     navigated = False
     focused = False
     if page_id:
         try:
             data = call_bridge("navigate", id=str(page_id), timeout_seconds=12)
-            navigated = True
+            navigated = bool(data.get("navigated", True)) if isinstance(data, dict) else True
             if isinstance(data, dict):
                 focused = bool(data.get("focused"))
         except Exception as exc:
             logger.warning("Failed to navigate by page_id=%s: %s", page_id, exc)
+    opened_by_shell = False
     if url and (not navigated or not focused):
-        shell_open_onenote(str(url))
+        opened_by_shell = bool(shell_open_onenote(str(url)))
+    return navigated or opened_by_shell
 
 
 def open_page(publication: PublishedQuestion, *, wait: bool = False) -> dict[str, Any]:
     """打开已关联解答页。
 
-    默认最快路径：立刻返回，COM 置前丢后台线程。前端应先用协议链接唤起。
-    wait=True 时同步执行（测试用）。
+    默认兼容立刻返回的异步路径；前端传入 wait=True 时同步完成 COM/协议唤起，
+    让打开过程中的等待条持续显示到实际唤起结束。
     """
     extras = publication.extras or {}
     record = extras.get("onenote")
@@ -700,7 +702,8 @@ def open_page(publication: PublishedQuestion, *, wait: bool = False) -> dict[str
         raise OneNoteError("无法定位到该页面，链接或页面标识已丢失。")
 
     if wait:
-        _refine_open(page_id, url)
+        if not _refine_open(page_id, url):
+            raise OneNoteError("未能唤起 OneNote，请确认桌面版 OneNote 已启动并打开对应笔记本。")
         return {"ok": True, "opened": True, "focused": True, "onenote": record, "deferred": False}
 
     threading.Thread(
@@ -737,7 +740,8 @@ def onenote_open_view(request: HttpRequest, publication_id: str) -> JsonResponse
 
     publication = get_object_or_404(PublishedQuestion, pk=publication_id)
     try:
-        result = open_page(publication)
+        wait = request.GET.get("wait") in {"1", "true", "yes"}
+        result = open_page(publication, wait=wait)
         return JsonResponse(result)
     except OneNoteError as err:
         return JsonResponse({"ok": False, "error": str(err)}, status=400)

@@ -116,6 +116,23 @@ library_styles = _frontend("library.css", "text/css; charset=utf-8")
 library_reading_styles = _frontend("library-reading.css", "text/css; charset=utf-8")
 favicon = _frontend("favicon.png", "image/png")
 app_icon_256 = _frontend("app-icon-256.png", "image/png")
+
+
+def favicon_ico(request):
+    """返回多尺寸 Windows 图标，避免 Edge/Chrome 应用窗口导航或冷启动时回退默认图标。"""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    ico_path = FRONTEND.parent / "assets" / "app.ico"
+    if not ico_path.is_file():
+        ico_path = Path(settings.BASE_DIR).parent / "assets" / "app.ico"
+    response = _file(ico_path, "image/x-icon")
+    response["Cache-Control"] = "public, max-age=604800"
+    etag = _etag_for(ico_path)
+    if etag:
+        response["ETag"] = etag
+    return response
+
+
 startup_hint_script = _frontend("startup-hint.js", "application/javascript; charset=utf-8")
 startup_hint_styles = _frontend("startup-hint.css", "text/css; charset=utf-8")
 

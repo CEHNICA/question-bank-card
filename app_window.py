@@ -25,6 +25,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -40,8 +41,10 @@ CONSOLE_LAUNCHER = ROOT / "启动题有据.cmd"
 LOG_FILE = launcher.RUNTIME / "launcher.log"
 APP_TITLE = "题有据"
 APP_SUBTITLE = "原卷可追溯的题库整理工具"
+APP_USER_MODEL_ID = "QuestionBank.CardReview"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 CREATE_NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
+_ICON_HANDLE_CACHE: dict[tuple[str, int, int], tuple[int, int]] = {}
 
 
 class NeedsConsole(Exception):
@@ -49,6 +52,7 @@ class NeedsConsole(Exception):
 
 
 # ---------------------------------------------------------------- 小工具
+
 
 def _message(text: str, *, error: bool = False) -> None:
     """没有控制台时用系统对话框提示。"""
@@ -75,9 +79,14 @@ def _run_step_hidden(args: list[str], label: str) -> None:
     if launcher.FROZEN:
         setup_env["QB_INTERNAL_LOG"] = str(launcher.RUNTIME / "setup.log")
     result = subprocess.run(
-        args, cwd=launcher.PROGRAM_ROOT if launcher.FROZEN else launcher.BACKEND,
-        env=setup_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, errors="replace", creationflags=CREATE_NO_WINDOW,
+        args,
+        cwd=launcher.PROGRAM_ROOT if launcher.FROZEN else launcher.BACKEND,
+        env=setup_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        errors="replace",
+        creationflags=CREATE_NO_WINDOW,
     )
     if result.returncode:
         raise RuntimeError(f"{label}失败：\n{result.stdout[-1800:]}")
@@ -102,17 +111,11 @@ def _saved_credentials() -> dict[str, object]:
         raise NeedsConsole(str(exc)) from exc
 
 
-def credentials_ready(
-    saved: dict[str, object] | None = None,
-    preferences: dict[str, str] | None = None,
-) -> bool:
+def credentials_ready(saved: dict[str, object] | None = None, preferences: dict[str, str] | None = None) -> bool:
     """不联网，只看 MinerU 与当前所选主读模型的凭据是否就绪。"""
     saved = _saved_credentials() if saved is None else saved
     preferences = launcher._model_preferences() if preferences is None else preferences
-    has_token = bool(
-        launcher._strip_bearer(os.environ.get("MINERU_TOKEN", ""))
-        or credential_pool(saved, "mineru")
-    )
+    has_token = bool(launcher._strip_bearer(os.environ.get("MINERU_TOKEN", "")) or credential_pool(saved, "mineru"))
     primary_name = preferences.get("primary_engine", "minimax_m3")
     # AI 助手读题不需要看图模型的密钥；其余情况下任何一家看图服务有密钥就能读题
     # （所选那家没有密钥时，后台按顺序换用有密钥的那家）。
@@ -163,13 +166,11 @@ def credential_pools_quietly() -> dict[str, list[str]]:
     """
 
     saved = _saved_credentials()
-    return {
-        service: credential_pool(saved, service)
-        for service in launcher.POOL_ENVIRONMENT_NAMES
-    }
+    return {service: credential_pool(saved, service) for service in launcher.POOL_ENVIRONMENT_NAMES}
 
 
 # ---------------------------------------------------------------- 浏览器应用窗口
+
 
 def browser_candidates() -> list[Path]:
     """Edge 优先（Windows 自带），其次 Chrome。"""
@@ -180,6 +181,10 @@ def browser_candidates() -> list[Path]:
     paths = [Path(b) / "Microsoft" / "Edge" / "Application" / "msedge.exe" for b in bases_edge if b]
     paths += [Path(b) / "Google" / "Chrome" / "Application" / "chrome.exe" for b in bases_chrome if b]
     paths += _registry_app_paths()
+    for exe in ("msedge", "chrome"):
+        located = shutil.which(exe)
+        if located:
+            paths.append(Path(located))
     for path in paths:
         if path.is_file() and path not in found:
             found.append(path)
@@ -209,9 +214,11 @@ def _registry_app_paths() -> list[Path]:
 
 def window_profile() -> Path:
     """应用窗口专用的浏览器配置目录：放在用户目录下，不进入题库数据、备份和打包。"""
-    base = launcher.USER_ROOT if launcher.FROZEN else Path(
-        os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local"
-    ) / "QuestionBankCard"
+    base = (
+        launcher.USER_ROOT
+        if launcher.FROZEN
+        else Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "QuestionBankCard"
+    )
     digest = hashlib.sha256(str(launcher.USER_ROOT).lower().encode("utf-8")).hexdigest()[:12]
     profile = base / f"browser-profile-{digest}"
     profile.mkdir(parents=True, exist_ok=True)
@@ -262,8 +269,14 @@ def _disable_profile_password_saving(profile: Path) -> bool:
             return True
         data.update(settings)
         preferences.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=preferences.parent,
-                                         prefix=".password-preferences-", suffix=".tmp", delete=False) as stream:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=preferences.parent,
+            prefix=".password-preferences-",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
             pending = Path(stream.name)
             json.dump(data, stream, ensure_ascii=False, separators=(",", ":"))
             stream.flush()
@@ -291,8 +304,12 @@ def window_command(browser: Path, url: str, profile: Path) -> list[str]:
     # 不传 --start-maximized / --window-size：这款 Edge 的 app 窗口会忽略它们，
     # 而写死一个尺寸在小屏笔记本上会超出屏幕。交给浏览器给默认大小，想铺满点□就是。
     return [
-        str(browser), f"--app={url}", f"--user-data-dir={profile}",
-        "--profile-directory=Default", "--no-first-run", "--no-default-browser-check",
+        str(browser),
+        f"--app={url}",
+        f"--user-data-dir={profile}",
+        "--profile-directory=Default",
+        "--no-first-run",
+        "--no-default-browser-check",
     ]
 
 
@@ -342,18 +359,168 @@ def _user32():
         return None
 
 
-def _browser_pids(profile: Path) -> set[int]:
-    """命令行里带着这个配置目录的浏览器进程号。窗口可能被交给一个已经在运行的
-    浏览器进程，不能只看自己 spawn 出来的那个 pid。"""
-    marker = str(profile).replace("'", "''")
-    script = ("Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | "
-              f"Where-Object {{ $_.CommandLine -like '*{marker}*' }} | ForEach-Object {{ $_.ProcessId }}")
+def _profile_markers(profile: Path) -> tuple[str, ...]:
+    """生成浏览器配置目录在命令行中的各种可能路径写法（含长短路径与正反斜杠）。"""
+    raw_variants = [str(profile), os.path.normpath(str(profile))]
+    if os.name == "nt":
+        with contextlib.suppress(Exception):
+            import ctypes
+
+            kernel32 = ctypes.windll.kernel32
+            for api_name in ("GetLongPathNameW", "GetShortPathNameW"):
+                fn = getattr(kernel32, api_name, None)
+                if fn is None:
+                    continue
+                buf = ctypes.create_unicode_buffer(1024)
+                length = fn(str(profile), buf, len(buf))
+                if length and length < len(buf) and buf.value:
+                    raw_variants.append(buf.value)
+    markers: list[str] = []
+    for variant in raw_variants:
+        for slash in (variant, variant.replace("\\", "/")):
+            lowered = slash.strip().lower()
+            if lowered and lowered not in markers:
+                markers.append(lowered)
+    return tuple(markers)
+
+
+def _command_matches_profile(command_line: str, markers: tuple[str, ...]) -> bool:
+    """判断浏览器进程命令行是否绑定到当前配置目录。"""
+    if not command_line or not markers:
+        return False
+    lowered = command_line.lower()
+    normalized = lowered.replace("/", "\\")
+    return any(marker in lowered or marker in normalized for marker in markers)
+
+
+def _browser_pids_win32(markers: tuple[str, ...]) -> tuple[bool, set[int]]:
+    """通过 Win32 进程快照与 NtQueryInformationProcess 快速查询目标浏览器 PID。"""
+    if os.name != "nt":
+        return False, set()
     try:
-        result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                                capture_output=True, text=True, timeout=20, creationflags=CREATE_NO_WINDOW)
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        ntdll = ctypes.WinDLL("ntdll", use_last_error=True)
+
+        class PROCESSENTRY32W(ctypes.Structure):
+            _fields_ = [
+                ("dwSize", wintypes.DWORD),
+                ("cntUsage", wintypes.DWORD),
+                ("th32ProcessID", wintypes.DWORD),
+                ("th32DefaultHeapID", ctypes.c_void_p),
+                ("th32ModuleID", wintypes.DWORD),
+                ("cntThreads", wintypes.DWORD),
+                ("th32ParentProcessID", wintypes.DWORD),
+                ("pcPriClassBase", ctypes.c_long),
+                ("dwFlags", wintypes.DWORD),
+                ("szExeFile", wintypes.WCHAR * 260),
+            ]
+
+        class UNICODE_STRING(ctypes.Structure):
+            _fields_ = [("Length", wintypes.USHORT), ("MaximumLength", wintypes.USHORT), ("Buffer", ctypes.c_void_p)]
+
+        kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+        kernel32.Process32FirstW.restype = wintypes.BOOL
+        kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+        kernel32.Process32NextW.restype = wintypes.BOOL
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        ntdll.NtQueryInformationProcess.argtypes = [
+            wintypes.HANDLE,
+            wintypes.ULONG,
+            ctypes.c_void_p,
+            wintypes.ULONG,
+            ctypes.POINTER(wintypes.ULONG),
+        ]
+        ntdll.NtQueryInformationProcess.restype = ctypes.c_long
+
+        TH32CS_SNAPPROCESS = 0x00000002
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        PROCESS_COMMAND_LINE_INFORMATION = 60
+        INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+        snap = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+        if not snap or snap == INVALID_HANDLE_VALUE:
+            return False, set()
+        pids: set[int] = set()
+        try:
+            entry = PROCESSENTRY32W()
+            entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+            ok = bool(kernel32.Process32FirstW(snap, ctypes.byref(entry)))
+            while ok:
+                if entry.szExeFile.lower() in ("msedge.exe", "chrome.exe"):
+                    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, entry.th32ProcessID)
+                    if handle:
+                        try:
+                            needed = wintypes.ULONG()
+                            buf_size = 8192
+                            buf = ctypes.create_string_buffer(buf_size)
+                            status = ntdll.NtQueryInformationProcess(
+                                handle, PROCESS_COMMAND_LINE_INFORMATION, buf, buf_size, ctypes.byref(needed)
+                            )
+                            if status != 0 and needed.value > buf_size:
+                                buf = ctypes.create_string_buffer(needed.value)
+                                status = ntdll.NtQueryInformationProcess(
+                                    handle,
+                                    PROCESS_COMMAND_LINE_INFORMATION,
+                                    buf,
+                                    ctypes.sizeof(buf),
+                                    ctypes.byref(needed),
+                                )
+                            if status == 0:
+                                us = UNICODE_STRING.from_buffer(buf)
+                                if us.Buffer and us.Length:
+                                    cmd = ctypes.wstring_at(us.Buffer, us.Length // 2)
+                                    if _command_matches_profile(cmd, markers):
+                                        pids.add(int(entry.th32ProcessID))
+                        finally:
+                            kernel32.CloseHandle(handle)
+                ok = bool(kernel32.Process32NextW(snap, ctypes.byref(entry)))
+        finally:
+            kernel32.CloseHandle(snap)
+        return True, pids
+    except Exception:  # noqa: BLE001 - Win32 进程枚举不可用时回退 PowerShell
+        return False, set()
+
+
+def _browser_pids_powershell(markers: tuple[str, ...]) -> set[int]:
+    """回退方案：使用 PowerShell 字面量匹配命令行中的配置目录。"""
+    conditions = " -or ".join(
+        "$_.CommandLine.IndexOf('" + m.replace("'", "''") + "', [StringComparison]::OrdinalIgnoreCase) -ge 0"
+        for m in markers
+    )
+    if not conditions:
+        return set()
+    script = (
+        "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | "
+        f"Where-Object {{ $_.CommandLine -and ({conditions}) }} | ForEach-Object {{ $_.ProcessId }}"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            creationflags=CREATE_NO_WINDOW,
+        )
     except (OSError, subprocess.TimeoutExpired):
         return set()
     return {int(line) for line in (result.stdout or "").split() if line.strip().isdigit()}
+
+
+def _browser_pids(profile: Path) -> set[int]:
+    """命令行里带着这个配置目录的浏览器进程号。窗口可能被交给一个已经在运行的
+    浏览器进程，不能只看自己 spawn 出来的那个 pid。"""
+    markers = _profile_markers(profile)
+    ok, pids = _browser_pids_win32(markers)
+    if ok:
+        return pids
+    return _browser_pids_powershell(markers)
 
 
 def _window_title(user32, handle) -> str:
@@ -460,13 +627,11 @@ def watch_window(profile: Path, interval: float = 0.5) -> None:
     # 1.25.52：窗口刚出现的头一两秒里，浏览器可能还在恢复上一次的最小化状态。
     # 找到窗口后过 2 秒再看一眼：如果它还是最小化的，就把它恢复出来。
     startup_check = 0.0
+    next_icon_check = 0.0
     while True:
-        # 定位窗口很贵：_app_window 要起一个 PowerShell 进程去查进程号。句柄缓存住，
-        # 只在它失效时才重找，而且重找之间留出间隔 —— 否则每轮 100ms 都去起一次
-        # PowerShell，点「最小化」得先等它排完队。
+        # 定位窗口：句柄缓存住，只在它失效时才重找，并留出退避间隔，避免抢占交互响应。
         if not _window_alive(user32, hwnd) and time.monotonic() >= next_lookup:
-            hwnd = _app_window(user32, profile,
-                               require_title=time.monotonic() < strict_until)
+            hwnd = _app_window(user32, profile, require_title=time.monotonic() < strict_until)
             # 1.25.52：上一次运行留下的窗口可能还是最小化状态（浏览器复用了
             # 旧窗口）。启动后要把它恢复出来，否则老师点桌面图标只看到任务栏。
             if hwnd:
@@ -479,24 +644,29 @@ def watch_window(profile: Path, interval: float = 0.5) -> None:
                     pass
                 if not startup_check:
                     startup_check = time.monotonic() + 2.0
-            next_lookup = time.monotonic() + (
-                _WINDOW_LOOKUP_BACKOFF if not hwnd else _WINDOW_LOOKUP_INTERVAL
-            )
+                next_icon_check = time.monotonic() + 1.0
+            next_lookup = time.monotonic() + (_WINDOW_LOOKUP_BACKOFF if not hwnd else _WINDOW_LOOKUP_INTERVAL)
         if not hwnd:
             if time.monotonic() > deadline:
                 return
             time.sleep(interval)
             continue
-        if startup_check and time.monotonic() >= startup_check:
+        now = time.monotonic()
+        if startup_check and now >= startup_check:
             startup_check = 0.0
             # 页面加载后浏览器可能又把图标改回默认，再刷一次 TUG。
             apply_window_icon(user32, hwnd)
+            next_icon_check = now + 1.0
             try:
                 if getattr(user32, "IsIconic", None) and user32.IsIconic(hwnd):
                     user32.ShowWindow(hwnd, _SW_RESTORE)
                     user32.SetForegroundWindow(hwnd)
             except Exception:  # noqa: BLE001
                 pass
+        elif now >= next_icon_check:
+            next_icon_check = now + 1.0
+            if _window_needs_icon_refresh(hwnd):
+                apply_window_icon(user32, hwnd)
         time.sleep(interval)
 
 
@@ -521,6 +691,195 @@ def _enable_dpi_awareness() -> None:
             ctypes.windll.user32.SetProcessDPIAware()
 
 
+def _load_window_icon_handles(ico: Path) -> tuple[int, int]:
+    """加载并缓存用于 WM_SETICON 的大小图标句柄，避免守护轮询重复创建 GDI 对象。"""
+    import ctypes
+    from ctypes import wintypes
+
+    dll = ctypes.WinDLL("user32", use_last_error=True)
+    IMAGE_ICON = 1
+    LR_LOADFROMFILE = 0x0010
+    LR_DEFAULTSIZE = 0x0040
+    SM_CXICON = 11
+    SM_CXSMICON = 49
+    big_size = int(dll.GetSystemMetrics(SM_CXICON) or 0)
+    small_size = int(dll.GetSystemMetrics(SM_CXSMICON) or 0)
+    key = (str(ico), big_size, small_size)
+    cached = _ICON_HANDLE_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    dll.LoadImageW.argtypes = [
+        wintypes.HINSTANCE,
+        wintypes.LPCWSTR,
+        wintypes.UINT,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.UINT,
+    ]
+    dll.LoadImageW.restype = wintypes.HANDLE
+    big_handle = (
+        dll.LoadImageW(None, str(ico), IMAGE_ICON, big_size, big_size, LR_LOADFROMFILE)
+        if big_size > 0
+        else dll.LoadImageW(None, str(ico), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE)
+    )
+    small_handle = (
+        dll.LoadImageW(None, str(ico), IMAGE_ICON, small_size, small_size, LR_LOADFROMFILE)
+        if small_size > 0
+        else big_handle
+    )
+    pair = (int(big_handle or 0), int(small_handle or big_handle or 0))
+    if pair[0] or pair[1]:
+        _ICON_HANDLE_CACHE[key] = pair
+    return pair
+
+
+def _send_window_message_timeout(hwnd: int, msg: int, wparam: int, lparam: int) -> tuple[bool, int]:
+    """使用 SendMessageTimeoutW 收发窗口消息，防止浏览器冷启动或繁忙时阻塞守护线程。"""
+    import ctypes
+    from ctypes import wintypes
+
+    dll = ctypes.WinDLL("user32", use_last_error=True)
+    SMTO_ABORTIFHUNG = 0x0002
+    dll.SendMessageTimeoutW.argtypes = [
+        wintypes.HWND,
+        wintypes.UINT,
+        wintypes.WPARAM,
+        wintypes.LPARAM,
+        wintypes.UINT,
+        wintypes.UINT,
+        ctypes.POINTER(ctypes.c_size_t),
+    ]
+    dll.SendMessageTimeoutW.restype = ctypes.c_ssize_t
+    result = ctypes.c_size_t(0)
+    ok = bool(dll.SendMessageTimeoutW(hwnd, msg, wparam, lparam, SMTO_ABORTIFHUNG, 200, ctypes.byref(result)))
+    return ok, int(result.value)
+
+
+def _apply_window_app_id(hwnd: int, ico: Path) -> None:
+    """为浏览器应用窗口写入独立 AppUserModelID 与图标资源，防止 Windows 11 任务栏归回 Edge 组。"""
+    if os.name != "nt" or not hwnd:
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class GUID(ctypes.Structure):
+            _fields_ = [
+                ("Data1", wintypes.DWORD),
+                ("Data2", wintypes.WORD),
+                ("Data3", wintypes.WORD),
+                ("Data4", ctypes.c_ubyte * 8),
+            ]
+
+        class PROPERTYKEY(ctypes.Structure):
+            _fields_ = [("fmtid", GUID), ("pid", wintypes.DWORD)]
+
+        class PROPVARIANT(ctypes.Structure):
+            _fields_ = [
+                ("vt", wintypes.WORD),
+                ("wReserved1", wintypes.WORD),
+                ("wReserved2", wintypes.WORD),
+                ("wReserved3", wintypes.WORD),
+                ("pwszVal", ctypes.c_void_p),
+                ("extra", ctypes.c_uint64),
+            ]
+
+        def _guid(raw: str) -> GUID:
+            parsed = uuid.UUID(raw)
+            return GUID(
+                parsed.time_low, parsed.time_mid, parsed.time_hi_version, (ctypes.c_ubyte * 8)(*parsed.bytes[8:])
+            )
+
+        ole32 = ctypes.WinDLL("ole32", use_last_error=True)
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+        ole32.CoInitializeEx.argtypes = [ctypes.c_void_p, wintypes.DWORD]
+        ole32.CoInitializeEx.restype = ctypes.c_long
+        ole32.CoTaskMemAlloc.argtypes = [ctypes.c_size_t]
+        ole32.CoTaskMemAlloc.restype = ctypes.c_void_p
+        ole32.PropVariantClear.argtypes = [ctypes.c_void_p]
+        ole32.PropVariantClear.restype = ctypes.c_long
+        shell32.SHGetPropertyStoreForWindow.argtypes = [
+            wintypes.HWND,
+            ctypes.POINTER(GUID),
+            ctypes.POINTER(ctypes.c_void_p),
+        ]
+        shell32.SHGetPropertyStoreForWindow.restype = ctypes.c_long
+
+        hr_co = int(ole32.CoInitializeEx(None, 2))
+        try:
+            iid_store = _guid("{886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99}")
+            fmtid_app = _guid("{9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}")
+            store_ptr = ctypes.c_void_p()
+            if shell32.SHGetPropertyStoreForWindow(hwnd, ctypes.byref(iid_store), ctypes.byref(store_ptr)) != 0:
+                return
+            if not store_ptr.value:
+                return
+            vtable = ctypes.cast(
+                ctypes.cast(store_ptr, ctypes.POINTER(ctypes.c_void_p))[0], ctypes.POINTER(ctypes.c_void_p)
+            )
+            release_fn = ctypes.WINFUNCTYPE(wintypes.ULONG, ctypes.c_void_p)(vtable[2])
+            set_value_fn = ctypes.WINFUNCTYPE(
+                ctypes.c_long, ctypes.c_void_p, ctypes.POINTER(PROPERTYKEY), ctypes.POINTER(PROPVARIANT)
+            )(vtable[6])
+            commit_fn = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p)(vtable[7])
+            try:
+                props: list[tuple[int, str]] = [(5, APP_USER_MODEL_ID), (4, APP_TITLE), (3, f"{ico},0")]
+                if getattr(launcher, "FROZEN", False) and Path(sys.executable).is_file():
+                    props.append((2, f'"{sys.executable}"'))
+                for pid, text in props:
+                    encoded = (text + "\0").encode("utf-16-le")
+                    mem = ole32.CoTaskMemAlloc(len(encoded))
+                    if not mem:
+                        continue
+                    ctypes.memmove(mem, encoded, len(encoded))
+                    pv = PROPVARIANT()
+                    pv.vt = 31  # VT_LPWSTR
+                    pv.pwszVal = mem
+                    pk = PROPERTYKEY(fmtid_app, pid)
+                    try:
+                        set_value_fn(store_ptr, ctypes.byref(pk), ctypes.byref(pv))
+                    finally:
+                        ole32.PropVariantClear(ctypes.byref(pv))
+                commit_fn(store_ptr)
+            finally:
+                release_fn(store_ptr)
+        finally:
+            if hr_co in (0, 1):
+                ole32.CoUninitialize()
+    except Exception:  # noqa: BLE001 - Shell 属性设置失败不能阻断主流程
+        pass
+
+
+def _window_needs_icon_refresh(hwnd: int) -> bool:
+    """检查窗口当前大小图标是否已被 Edge/Chrome 覆盖，需要在后台补刷。"""
+    if os.name != "nt" or not hwnd:
+        return False
+    ico = _window_icon_path()
+    if ico is None:
+        return False
+    expected = None
+    for (cached_path, _b, _s), pair in _ICON_HANDLE_CACHE.items():
+        if cached_path == str(ico):
+            expected = pair
+            break
+    if not expected:
+        return False
+    try:
+        WM_GETICON = 0x007F
+        ICON_SMALL = 0
+        ICON_BIG = 1
+        ok_big, cur_big = _send_window_message_timeout(hwnd, WM_GETICON, ICON_BIG, 0)
+        ok_small, cur_small = _send_window_message_timeout(hwnd, WM_GETICON, ICON_SMALL, 0)
+        if expected[0] and ok_big and cur_big != expected[0]:
+            return True
+        if expected[1] and ok_small and cur_small != expected[1]:
+            return True
+    except Exception:  # noqa: BLE001
+        return False
+    return False
+
+
 def apply_window_icon(user32, hwnd: int) -> None:
     """把 Edge/Chrome --app 窗口的任务栏图标换成题有据 TUG，而不是浏览器默认图标。"""
     if not hwnd or user32 is None:
@@ -529,51 +888,15 @@ def apply_window_icon(user32, hwnd: int) -> None:
     if ico is None:
         return
     try:
-        import ctypes
-        from ctypes import wintypes
-
-        # 单独拿一份 DLL 绑定，别改共享 user32 上 EnumWindows 等原型。
-        dll = ctypes.WinDLL("user32", use_last_error=True)
-        IMAGE_ICON = 1
-        LR_LOADFROMFILE = 0x0010
-        LR_DEFAULTSIZE = 0x0040
         WM_SETICON = 0x0080
         ICON_SMALL = 0
         ICON_BIG = 1
-        SM_CXICON = 11
-        SM_CXSMICON = 49
-        dll.LoadImageW.argtypes = [
-            wintypes.HINSTANCE,
-            wintypes.LPCWSTR,
-            wintypes.UINT,
-            ctypes.c_int,
-            ctypes.c_int,
-            wintypes.UINT,
-        ]
-        dll.LoadImageW.restype = wintypes.HANDLE
-        dll.SendMessageW.argtypes = [
-            wintypes.HWND,
-            wintypes.UINT,
-            wintypes.WPARAM,
-            wintypes.LPARAM,
-        ]
-        dll.SendMessageW.restype = ctypes.c_ssize_t
-        big_size = int(dll.GetSystemMetrics(SM_CXICON) or 0)
-        small_size = int(dll.GetSystemMetrics(SM_CXSMICON) or 0)
-        big_handle = (
-            dll.LoadImageW(None, str(ico), IMAGE_ICON, big_size, big_size, LR_LOADFROMFILE)
-            if big_size > 0
-            else dll.LoadImageW(None, str(ico), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE)
-        )
-        small_handle = (
-            dll.LoadImageW(None, str(ico), IMAGE_ICON, small_size, small_size, LR_LOADFROMFILE)
-            if small_size > 0
-            else big_handle
-        )
+        big_handle, small_handle = _load_window_icon_handles(ico)
         if big_handle:
-            dll.SendMessageW(hwnd, WM_SETICON, ICON_BIG, big_handle)
+            _send_window_message_timeout(hwnd, WM_SETICON, ICON_BIG, big_handle)
         if small_handle or big_handle:
-            dll.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small_handle or big_handle)
+            _send_window_message_timeout(hwnd, WM_SETICON, ICON_SMALL, small_handle or big_handle)
+        _apply_window_app_id(hwnd, ico)
     except Exception:  # noqa: BLE001 - 图标失败不能挡窗口
         pass
 
@@ -610,11 +933,18 @@ def focus_existing_window() -> bool:
 def _profile_still_open(profile: Path) -> bool:
     """应用窗口被交给已在运行的浏览器进程时，按命令行里的配置目录找它是否还开着。"""
     marker = str(profile).replace("'", "''")
-    script = ("$n = @(Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | "
-              f"Where-Object {{ $_.CommandLine -like '*{marker}*' }}).Count; Write-Output $n")
+    script = (
+        "$n = @(Get-CimInstance Win32_Process -Filter \"Name='msedge.exe' OR Name='chrome.exe'\" | "
+        f"Where-Object {{ $_.CommandLine -like '*{marker}*' }}).Count; Write-Output $n"
+    )
     try:
-        result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                                capture_output=True, text=True, timeout=20, creationflags=CREATE_NO_WINDOW)
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            creationflags=CREATE_NO_WINDOW,
+        )
         return int((result.stdout or "0").strip() or 0) > 0
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return False
@@ -636,8 +966,7 @@ def _wait_until_window_closed(web: subprocess.Popen, profile: Path, user32) -> s
         if web.poll() is not None:
             return _service_died(web)
         if time.monotonic() >= next_lookup:
-            hwnd = _app_window(user32, profile,
-                               require_title=time.monotonic() < strict_until)
+            hwnd = _app_window(user32, profile, require_title=time.monotonic() < strict_until)
             next_lookup = time.monotonic() + _WINDOW_LOOKUP_BACKOFF
         if hwnd:
             apply_window_icon(user32, hwnd)
@@ -695,9 +1024,12 @@ def _service_died(web: subprocess.Popen) -> str:
     退出码和当时的时间都写下来，下次再遇到就有据可查，不用再猜。
     """
     code = web.poll()
-    print(f"网页服务在窗口仍开着时退出（退出码 {code}）；"
-          f"如果是 0 多半是被人结束的，不是自己崩的。"
-          f"时间 {time.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
+    print(
+        f"网页服务在窗口仍开着时退出（退出码 {code}）；"
+        f"如果是 0 多半是被人结束的，不是自己崩的。"
+        f"时间 {time.strftime('%Y-%m-%d %H:%M:%S')}",
+        flush=True,
+    )
     return "service-died"
 
 
@@ -724,8 +1056,7 @@ def wait_for_reattached_window(window: subprocess.Popen | None) -> None:
     next_lookup = 0.0
     while not hwnd:
         if time.monotonic() >= next_lookup:
-            hwnd = _app_window(user32, window_profile(),
-                               require_title=time.monotonic() < strict_until)
+            hwnd = _app_window(user32, window_profile(), require_title=time.monotonic() < strict_until)
             next_lookup = time.monotonic() + _WINDOW_LOOKUP_BACKOFF
         if hwnd:
             break
@@ -754,6 +1085,7 @@ def _control_window(web: subprocess.Popen) -> None:
 
 
 # ---------------------------------------------------------------- 启动画面
+
 
 def _set_icon(root) -> None:
     ico = ASSETS / "app.ico"
@@ -830,9 +1162,18 @@ class Splash:
         style = ttk.Style(root)
         with contextlib.suppress(Exception):
             style.theme_use("clam")
-        style.configure("QB.Horizontal.TProgressbar", troughcolor="#eaede7", background="#1f6b5f", bordercolor="#eaede7",
-                        lightcolor="#1f6b5f", darkcolor="#1f6b5f", thickness=max(4, round(4 * scale)))
-        bar = ttk.Progressbar(frame, mode="indeterminate", length=round(260 * scale), style="QB.Horizontal.TProgressbar")
+        style.configure(
+            "QB.Horizontal.TProgressbar",
+            troughcolor="#eaede7",
+            background="#1f6b5f",
+            bordercolor="#eaede7",
+            lightcolor="#1f6b5f",
+            darkcolor="#1f6b5f",
+            thickness=max(4, round(4 * scale)),
+        )
+        bar = ttk.Progressbar(
+            frame, mode="indeterminate", length=round(260 * scale), style="QB.Horizontal.TProgressbar"
+        )
         bar.pack()
         bar.start(12)
 
@@ -857,6 +1198,7 @@ class Splash:
         if self.root is None:
             thread.join()
         else:
+
             def poll() -> None:
                 try:
                     while True:
@@ -880,6 +1222,7 @@ class Splash:
 
 # ---------------------------------------------------------------- 主流程
 
+
 def _hand_off_to_console(reason: str) -> int:
     print(f"转交命令行启动器：{reason}", flush=True)
     if not CONSOLE_LAUNCHER.is_file():
@@ -894,7 +1237,7 @@ def _set_app_id() -> None:
     with contextlib.suppress(Exception):
         import ctypes
 
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("QuestionBank.CardReview")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
 
 
 def _configure_credentials(*, first_run: bool, reason: str = "") -> bool:
@@ -1002,7 +1345,9 @@ def _main(arguments: list[str] | None = None) -> int:
         venv_window_python = launcher.PYTHON.with_name("pythonw.exe")
         if venv_window_python.is_file():
             # 用本目录自己的 Python 3.12 环境重新打开窗口版。
-            subprocess.Popen([str(venv_window_python), str(ROOT / "app_launcher.pyw")], cwd=ROOT, creationflags=CREATE_NO_WINDOW)
+            subprocess.Popen(
+                [str(venv_window_python), str(ROOT / "app_launcher.pyw")], cwd=ROOT, creationflags=CREATE_NO_WINDOW
+            )
             return 0
         return _hand_off_to_console(f"需要 Python 3.12（当前是 {sys.version_info.major}.{sys.version_info.minor}）")
     existing = launcher._running_instance()
@@ -1050,12 +1395,15 @@ def _main(arguments: list[str] | None = None) -> int:
                 return ("configure", str(exc))
             preferences = launcher._model_preferences()
             model_env = launcher.model_preference_environment(preferences)
-            base_env = launcher._child_environment({
-                key: value for key, value in os.environ.items()
-                if key.upper() not in launcher.SECRET_NAMES
-                and key.upper() not in launcher.MODEL_ENVIRONMENT_KEYS
-                and key.upper() not in launcher.CREDENTIAL_STATUS_NAMES
-            })
+            base_env = launcher._child_environment(
+                {
+                    key: value
+                    for key, value in os.environ.items()
+                    if key.upper() not in launcher.SECRET_NAMES
+                    and key.upper() not in launcher.MODEL_ENVIRONMENT_KEYS
+                    and key.upper() not in launcher.CREDENTIAL_STATUS_NAMES
+                }
+            )
             base_env.update(launcher._parallel_environment(base_env, credential_pools, preferences))
             # 模型角色和型号可供网页展示；三类密钥仍只交给后台工作者。
             web_env = dict(base_env)

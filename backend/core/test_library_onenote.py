@@ -339,3 +339,19 @@ class OneNoteLinkTests(TestCase):
             ):
                 resolved = library_onenote.get_bridge_script()
             self.assertEqual(resolved.resolve(), frozen_script.resolve())
+
+    def test_onenote_open_view_supports_synchronous_wait(self):
+        """前端传 wait=1 时，打开接口应同步等待唤起完成，避免等待进度条提前消失。"""
+        self.item.extras = {"onenote": {"url": "onenote:https://d.docs.live.net/fake/page-wait", "page_id": "{page-w}"}}
+        self.item.save(update_fields=["extras"])
+
+        with patch("core.library_onenote.open_page", return_value={"ok": True, "deferred": False}) as mock_open:
+            resp = self.client.post(f"/api/library/{self.item.id}/onenote/open?wait=1")
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()["deferred"])
+        mock_open.assert_called_once_with(self.item, wait=True)
+
+        with patch("core.library_onenote.open_page", return_value={"ok": True, "deferred": True}) as mock_open_async:
+            resp_default = self.client.post(f"/api/library/{self.item.id}/onenote/open")
+        self.assertEqual(resp_default.status_code, 200)
+        mock_open_async.assert_called_once_with(self.item, wait=False)

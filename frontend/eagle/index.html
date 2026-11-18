@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>题有据 · 题库工作台</title>
   <!-- 任务栏 / Edge --app 窗口图标：必须挂 favicon，否则掉成浏览器默认图标 -->
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=brand-tug-12658">
   <link rel="icon" type="image/png" href="/favicon.png?v=brand-tug-12658">
   <link rel="icon" type="image/png" sizes="256x256" href="/app-icon-256.png?v=brand-tug-12658">
   <link rel="apple-touch-icon" href="/app-icon-256.png?v=brand-tug-12658">
@@ -3923,6 +3924,7 @@
     ];
     const ONE_NOTE_OPEN_STEPS = [
       { title: '正在操作 OneNote', detail: '正在打开这道题的笔记' },
+      { title: '正在操作 OneNote', detail: '马上好' },
     ];
 
     function oneNoteBusyBlocked() {
@@ -4003,15 +4005,19 @@
 
       // 统一交由本机后端通过 COM / 系统协议直接唤起 OneNote，不在前端点击 <a target="_blank">，
       // 避免 Edge/Chrome 应用窗口(--app)模式弹出多余的空白浏览器窗口。
-      showToast('正在打开 OneNote…', 'info');
+      const token = showOneNoteBusy(qid, ONE_NOTE_OPEN_STEPS);
       try {
-        const resp = await fetch(`${API_BASE}/api/library/${qid}/onenote/open`, { method: 'POST' });
+        const resp = await fetch(`${API_BASE}/api/library/${qid}/onenote/open?wait=1`, { method: 'POST' });
         const data = await resp.json().catch(() => ({}));
-        if (!data.ok) {
-          showToast(data.error || '未能唤起 OneNote', 'error');
+        if (data.ok) {
+          showToast('已在 OneNote 中打开', 'success');
+          return;
         }
+        showToast(data.error || '未能唤起 OneNote', 'error');
       } catch (_) {
         showToast('打开 OneNote 失败，请确认 OneNote 已启动', 'error');
+      } finally {
+        hideOneNoteBusy(token);
       }
     }
 

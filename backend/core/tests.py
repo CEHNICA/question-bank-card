@@ -417,6 +417,12 @@ class StaticAssetTests(TestCase):
         self.assertEqual(response["Content-Type"], "image/png")
         self.assertTrue(b"".join(response.streaming_content).startswith(b"\x89PNG\r\n\x1a\n"))
 
+    def test_favicon_ico_is_served_as_ico(self):
+        response = self.client.get("/favicon.ico")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/x-icon")
+        self.assertTrue(b"".join(response.streaming_content).startswith(b"\x00\x00\x01\x00"))
+
     def test_app_icon_256_is_served_as_png(self):
         response = self.client.get("/app-icon-256.png")
         self.assertEqual(response.status_code, 200)
@@ -428,6 +434,7 @@ class StaticAssetTests(TestCase):
         self.assertEqual(response.status_code, 200)
         body = b"".join(response.streaming_content).decode("utf-8", errors="replace")
         self.assertIn('rel="icon"', body)
+        self.assertIn("/favicon.ico", body)
         self.assertIn("/favicon.png", body)
 
     def test_new_frontend_modules_are_served(self):

@@ -19,7 +19,12 @@
 
 要让当前豆包补知识点或参考答案，可以明确让它通过附带的 CLI/MCP 工具完成后交回题库。**这条助手流程不需要豆包 API。** 两项默认关闭，明确需要时再启用；只有聊天能力时由你导入结果。网页中的生成按钮使用已配置的独立 API。[给助手的操作说明](AGENTS.md)
 
-当前发布版本为 **2.1.1**（高分屏高清图标、帮助系统更新及批量识读断点续读升级版），可从 [GitHub Releases](https://github.com/CEHNICA/question-bank-card/releases/tag/v2.1.1) 下载（[2.1.1 说明](docs/release-notes-v2.1.1.md) · [2.1.0 说明](docs/release-notes-v2.1.0.md) · [2.0.0 完整升级说明](docs/release-notes-v2.0.0.md) · [更新记录](CHANGELOG.md)）。
+当前发布版本为 **2.1.2**（桌面端任务栏图标加固与 OneNote 打开等待条修复版），可从 [GitHub Releases](https://github.com/CEHNICA/question-bank-card/releases/tag/v2.1.2) 下载（[2.1.2 说明](docs/release-notes-v2.1.2.md) · [2.1.1 说明](docs/release-notes-v2.1.1.md) · [2.1.0 说明](docs/release-notes-v2.1.0.md) · [2.0.0 完整升级说明](docs/release-notes-v2.0.0.md) · [更新记录](CHANGELOG.md)）。
+
+### 2.1.2 修复与改进
+
+- **桌面应用窗口任务栏图标加固与 `/favicon.ico` 补齐**：通过 Win32 `SHGetPropertyStoreForWindow` 为 Edge/Chrome `--app` 窗口写入独立 `AppUserModelID` 与图标资源，任务栏守护线程持续检测并自动补刷被浏览器重置的图标，进程定位改用原生 Win32 快照并补全 `/favicon.ico` 路由，避免在另一台电脑冷启动或切换页面时显示成 Edge 默认图标。
+- **恢复打开 OneNote 笔记过程中的等待条**：在 Eagle 工作台打开已关联的 OneNote 笔记时重新显示顶部 `#onenoteBusyBar` 等待条与按钮加载态，并同步等待 COM/系统协议唤起完成后收起，防止提前闪退无提示。
 
 ### 2.1.1 修复与改进
 

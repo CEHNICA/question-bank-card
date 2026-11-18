@@ -43,9 +43,11 @@ class CredentialTests(unittest.TestCase):
         patcher = patch.dict(os.environ, {"MINERU_TOKEN": "", "MINIMAX_API_KEY": ""})
         patcher.start()
         self.addCleanup(patcher.stop)
-        preferences = patch.object(app_window.launcher, "_model_preferences", return_value={
-            "primary_engine": "minimax_m3", "checker_engine": "auto", "arbiter_engine": "primary",
-        })
+        preferences = patch.object(
+            app_window.launcher,
+            "_model_preferences",
+            return_value={"primary_engine": "minimax_m3", "checker_engine": "auto", "arbiter_engine": "primary"},
+        )
         preferences.start()
         self.addCleanup(preferences.stop)
 
@@ -56,21 +58,29 @@ class CredentialTests(unittest.TestCase):
         self.assertFalse(app_window.credentials_ready({"minimax_key": "k"}))
 
     def test_invalid_saved_token_goes_to_console(self):
-        with patch.object(app_window, "load_credentials", return_value={"mineru_token": "bad", "minimax_key": "k"}), \
-                patch.object(app_window.launcher, "_mineru_token_validity", return_value=False):
+        with (
+            patch.object(app_window, "load_credentials", return_value={"mineru_token": "bad", "minimax_key": "k"}),
+            patch.object(app_window.launcher, "_mineru_token_validity", return_value=False),
+        ):
             with self.assertRaises(app_window.NeedsConsole):
                 app_window.resolve_credentials_quietly()
 
     def test_invalid_environment_token_falls_back_to_saved(self):
         validity = {"env-bad": False, "saved-good": True}
-        with patch.dict(os.environ, {"MINERU_TOKEN": "Bearer env-bad"}), \
-                patch.object(app_window, "load_credentials", return_value={"mineru_token": "saved-good", "minimax_key": "k\\_1"}), \
-                patch.object(app_window.launcher, "_mineru_token_validity", side_effect=lambda t: validity[t]):
+        with (
+            patch.dict(os.environ, {"MINERU_TOKEN": "Bearer env-bad"}),
+            patch.object(
+                app_window, "load_credentials", return_value={"mineru_token": "saved-good", "minimax_key": "k\\_1"}
+            ),
+            patch.object(app_window.launcher, "_mineru_token_validity", side_effect=lambda t: validity[t]),
+        ):
             self.assertEqual(app_window.resolve_credentials_quietly(), (["saved-good"], ["k_1"]))
 
     def test_offline_check_does_not_block_start(self):
-        with patch.object(app_window, "load_credentials", return_value={"mineru_token": "tok", "minimax_key": "k"}), \
-                patch.object(app_window.launcher, "_mineru_token_validity", return_value=None):
+        with (
+            patch.object(app_window, "load_credentials", return_value={"mineru_token": "tok", "minimax_key": "k"}),
+            patch.object(app_window.launcher, "_mineru_token_validity", return_value=None),
+        ):
             self.assertEqual(app_window.resolve_credentials_quietly(), (["tok"], ["k"]))
 
     def test_invalid_saved_mineru_account_is_isolated_without_echoing_the_token(self):
@@ -80,8 +90,10 @@ class CredentialTests(unittest.TestCase):
             "minimax_key": "k",
             "minimax_keys": ["k"],
         }
-        with patch.object(app_window, "load_credentials", return_value=saved), \
-                patch.object(app_window.launcher, "_mineru_token_validity", side_effect=[True, False]):
+        with (
+            patch.object(app_window, "load_credentials", return_value=saved),
+            patch.object(app_window.launcher, "_mineru_token_validity", side_effect=[True, False]),
+        ):
             self.assertEqual(app_window.resolve_credentials_quietly(), (["good-one"], ["k"]))
 
     def test_all_invalid_saved_mineru_accounts_require_reconfiguration_without_echo(self):
@@ -90,22 +102,24 @@ class CredentialTests(unittest.TestCase):
             "mineru_tokens": ["private-bad-one", "private-bad-two"],
             "minimax_key": "k",
         }
-        with patch.object(app_window, "load_credentials", return_value=saved), \
-                patch.object(app_window.launcher, "_mineru_token_validity", return_value=False):
+        with (
+            patch.object(app_window, "load_credentials", return_value=saved),
+            patch.object(app_window.launcher, "_mineru_token_validity", return_value=False),
+        ):
             with self.assertRaises(app_window.NeedsConsole) as caught:
                 app_window.resolve_credentials_quietly()
         self.assertIn("均未通过", str(caught.exception))
         self.assertNotIn("private-bad", str(caught.exception))
 
     def test_minimax_only_in_environment_is_not_used_silently(self):
-        with patch.dict(os.environ, {"MINIMAX_API_KEY": "env-key"}), \
-                patch.object(app_window, "load_credentials", return_value={"mineru_token": "tok"}):
+        with (
+            patch.dict(os.environ, {"MINIMAX_API_KEY": "env-key"}),
+            patch.object(app_window, "load_credentials", return_value={"mineru_token": "tok"}),
+        ):
             self.assertFalse(app_window.credentials_ready())
 
     def test_siliconflow_only_saved_credentials_work_when_it_is_primary(self):
-        preferences = {
-            "primary_engine": "siliconflow_qwen3", "checker_engine": "auto", "arbiter_engine": "primary",
-        }
+        preferences = {"primary_engine": "siliconflow_qwen3", "checker_engine": "auto", "arbiter_engine": "primary"}
         saved = {"mineru_token": "tok", "minimax_key": "", "siliconflow_key": "sf"}
         self.assertTrue(app_window.credentials_ready(saved, preferences))
 
@@ -119,7 +133,11 @@ class WindowTests(unittest.TestCase):
             for exe in (edge, chrome):
                 exe.parent.mkdir(parents=True)
                 exe.write_bytes(b"")
-            env = {"PROGRAMFILES(X86)": str(base / "x86"), "PROGRAMFILES": str(base / "pf"), "LOCALAPPDATA": str(base / "local")}
+            env = {
+                "PROGRAMFILES(X86)": str(base / "x86"),
+                "PROGRAMFILES": str(base / "pf"),
+                "LOCALAPPDATA": str(base / "local"),
+            }
             with patch.dict(os.environ, env), patch.object(app_window, "_registry_app_paths", return_value=[]):
                 self.assertEqual(app_window.browser_candidates(), [edge, chrome])
                 profile = app_window.window_profile()
@@ -162,14 +180,17 @@ class WindowTests(unittest.TestCase):
             browser = Path(tmp) / "msedge.exe"
             browser.parent.mkdir(parents=True, exist_ok=True)
             browser.write_bytes(b"")
-            with patch.object(app_window, "browser_candidates", return_value=[browser]), \
-                 patch.object(app_window, "window_profile", return_value=Path(tmp) / "profile"), \
-                 patch.object(app_window.subprocess, "Popen", return_value=Mock()) as popen, \
-                 patch.object(app_window.threading, "Thread") as thread:
+            with (
+                patch.object(app_window, "browser_candidates", return_value=[browser]),
+                patch.object(app_window, "window_profile", return_value=Path(tmp) / "profile"),
+                patch.object(app_window.subprocess, "Popen", return_value=Mock()) as popen,
+                patch.object(app_window.threading, "Thread") as thread,
+            ):
                 app_window.open_window("http://127.0.0.1:8768")
             self.assertEqual(popen.call_args.args[0][1], "--app=http://127.0.0.1:8768")
             # 少了这个线程，页面右上角那两个按钮点了没反应，窗口就关不掉了。
             self.assertEqual(thread.call_args.kwargs["target"], app_window.watch_window)
+
     def test_the_app_window_is_picked_by_title_not_by_size(self):
         # 这些浏览器进程同时还开着「无法更新 Microsoft Edge」之类的小气泡窗、
         # 加载期的空白窗口，甚至还有一个比题有据窗口还大的临时窗口（上一次运行没
@@ -190,8 +211,12 @@ class WindowTests(unittest.TestCase):
             }
 
             class FakeRect(ctypes.Structure):
-                _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
-                            ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+                _fields_ = [
+                    ("left", ctypes.c_long),
+                    ("top", ctypes.c_long),
+                    ("right", ctypes.c_long),
+                    ("bottom", ctypes.c_long),
+                ]
 
             class FakeUser32:
                 def IsWindowVisible(self, handle):
@@ -222,8 +247,9 @@ class WindowTests(unittest.TestCase):
 
             fake = FakeUser32()
             with patch.object(app_window, "_browser_pids", return_value={7}):
-                self.assertEqual(app_window._app_window(fake, profile), 9012,
-                                 "按面积取会挑中那个 1600x1000 的空白临时窗")
+                self.assertEqual(
+                    app_window._app_window(fake, profile), 9012, "按面积取会挑中那个 1600x1000 的空白临时窗"
+                )
                 # 只认标题时，那个空白窗不算数：宁可等题有据窗口真正出现。
                 self.assertEqual(app_window._app_window(fake, profile, require_title=True), 9012)
                 # 题目窗口还没加载出标题（标题是网页给的），此时只认标题就找不到 ——
@@ -236,7 +262,7 @@ class WindowTests(unittest.TestCase):
         # 还有效却每一轮都重新定位，守护线程自己就被拖垮了。
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            alive = [False]                       # 上一次 IsWindow 的答案
+            alive = [False]  # 上一次 IsWindow 的答案
             found = []
             looked_up_while_alive = []
             # 窗口先活十轮再失效：这十轮里如果每轮都重新定位，就是一秒一轮的老毛病。
@@ -252,11 +278,13 @@ class WindowTests(unittest.TestCase):
                 return 4242 if len(found) <= 2 else 0
 
             clock = itertools.count(0, 1)
-            with patch.object(app_window.launcher, "DATA_ROOT", root), \
-                 patch.object(app_window, "_user32", return_value=fake_user32), \
-                 patch.object(app_window, "_app_window", side_effect=fake_app_window), \
-                 patch.object(app_window.time, "sleep") as sleep, \
-                 patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)):
+            with (
+                patch.object(app_window.launcher, "DATA_ROOT", root),
+                patch.object(app_window, "_user32", return_value=fake_user32),
+                patch.object(app_window, "_app_window", side_effect=fake_app_window),
+                patch.object(app_window.time, "sleep") as sleep,
+                patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)),
+            ):
                 app_window.watch_window(root)
 
             self.assertEqual(looked_up_while_alive, [], "句柄还有效时不该重新定位")
@@ -276,18 +304,18 @@ class WindowTests(unittest.TestCase):
         def advance(seconds):
             clock[0] += seconds
 
-        with patch.object(app_window, "_user32", Mock(return_value=fake_user32)), \
-             patch.object(app_window, "_app_window", lookup), \
-             patch.object(app_window, "_WINDOW_GRACE", 3.0), \
-             patch.object(app_window, "_WINDOW_LOOKUP_BACKOFF", 1.0), \
-             patch.object(app_window.time, "monotonic", lambda: clock[0]), \
-             patch.object(app_window.time, "sleep", Mock(side_effect=advance)):
+        with (
+            patch.object(app_window, "_user32", Mock(return_value=fake_user32)),
+            patch.object(app_window, "_app_window", lookup),
+            patch.object(app_window, "_WINDOW_GRACE", 3.0),
+            patch.object(app_window, "_WINDOW_LOOKUP_BACKOFF", 1.0),
+            patch.object(app_window.time, "monotonic", lambda: clock[0]),
+            patch.object(app_window.time, "sleep", Mock(side_effect=advance)),
+        ):
             app_window.watch_window(Path("profile"), interval=0.1)
         # 3 秒宽限、1 秒退避 → 最多查四次。每一轮都查的话是三十一次。
-        self.assertLessEqual(lookup.call_count, 5,
-                             "窗口还没出现时，不该每一轮都去重新定位一次")
-        self.assertGreaterEqual(lookup.call_count, 3,
-                                "宽限期内还是要隔一会儿就找一次，别彻底不找")
+        self.assertLessEqual(lookup.call_count, 5, "窗口还没出现时，不该每一轮都去重新定位一次")
+        self.assertGreaterEqual(lookup.call_count, 3, "宽限期内还是要隔一会儿就找一次，别彻底不找")
 
     def test_the_window_is_looked_up_again_once_it_is_gone(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -298,11 +326,17 @@ class WindowTests(unittest.TestCase):
             fake_user32 = Mock()
             fake_user32.IsWindow.side_effect = lambda hwnd: next(alive, False)
             clock = itertools.count(0, 1)
-            with patch.object(app_window.launcher, "DATA_ROOT", root), \
-                 patch.object(app_window, "_user32", return_value=fake_user32), \
-                 patch.object(app_window, "_app_window", side_effect=lambda u, p, **kw: handles_used.append(next(handles, 0)) or handles_used[-1]), \
-                 patch.object(app_window.time, "sleep"), \
-                 patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)):
+            with (
+                patch.object(app_window.launcher, "DATA_ROOT", root),
+                patch.object(app_window, "_user32", return_value=fake_user32),
+                patch.object(
+                    app_window,
+                    "_app_window",
+                    side_effect=lambda u, p, **kw: handles_used.append(next(handles, 0)) or handles_used[-1],
+                ),
+                patch.object(app_window.time, "sleep"),
+                patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)),
+            ):
                 app_window.watch_window(root)
 
             # 句柄还有效时不找；失效后重新定位（111 -> 222），之后再失效就等宽限期收工。
@@ -314,8 +348,12 @@ class WindowTests(unittest.TestCase):
             profile = root / "app-profile"
             preferences = profile / "Default" / "Preferences"
             preferences.parent.mkdir(parents=True)
-            original = {"credentials_enable_service": True, "credentials_enable_autosignin": True,
-                        "appearance": {"theme": "custom"}, "profile": {"name": "题有据", "exit_type": "Normal"}}
+            original = {
+                "credentials_enable_service": True,
+                "credentials_enable_autosignin": True,
+                "appearance": {"theme": "custom"},
+                "profile": {"name": "题有据", "exit_type": "Normal"},
+            }
             preferences.write_text(json.dumps(original), encoding="utf-8")
             ordinary = root / "ordinary-browser" / "Default" / "Preferences"
             ordinary.parent.mkdir(parents=True)
@@ -367,15 +405,20 @@ class WindowTests(unittest.TestCase):
             original = b'{"credentials_enable_service":true,"appearance":{"theme":"custom"}}'
             preferences.write_bytes(original)
             output = io.StringIO()
-            with patch.object(app_window.os, "replace", side_effect=OSError("private failure detail")), patch("sys.stdout", output):
+            with (
+                patch.object(app_window.os, "replace", side_effect=OSError("private failure detail")),
+                patch("sys.stdout", output),
+            ):
                 self.assertFalse(app_window._disable_profile_password_saving(profile))
             self.assertEqual(preferences.read_bytes(), original)
             self.assertNotIn("private failure detail", output.getvalue())
             self.assertEqual(list(preferences.parent.glob(".password-preferences-*")), [])
 
     def test_no_browser_falls_back_to_default_browser(self):
-        with patch.object(app_window, "browser_candidates", return_value=[]), \
-                patch.object(app_window.webbrowser, "open_new_tab") as opened:
+        with (
+            patch.object(app_window, "browser_candidates", return_value=[]),
+            patch.object(app_window.webbrowser, "open_new_tab") as opened,
+        ):
             self.assertIsNone(app_window.open_window("http://127.0.0.1:8768"))
         opened.assert_called_once_with("http://127.0.0.1:8768")
 
@@ -408,8 +451,10 @@ class MainFlowTests(unittest.TestCase):
         prepare = Mock()
         opened = Mock()
         focused = Mock(return_value=True)
-        result = self.run_patched(self.patches(focus_existing_window=focused, open_window=opened),
-                                  {"_running_instance": Mock(return_value="http://127.0.0.1:8768"), "_prepare": prepare})
+        result = self.run_patched(
+            self.patches(focus_existing_window=focused, open_window=opened),
+            {"_running_instance": Mock(return_value="http://127.0.0.1:8768"), "_prepare": prepare},
+        )
         self.assertEqual(result, 0)
         focused.assert_called_once_with()
         opened.assert_not_called()
@@ -420,8 +465,12 @@ class MainFlowTests(unittest.TestCase):
         prepare = Mock()
         opened = Mock(return_value=Mock())
         waited = Mock()
-        result = self.run_patched(self.patches(open_window=opened, wait_for_reattached_window=waited, focus_existing_window=Mock(return_value=False)),
-                                  {"_running_instance": Mock(return_value="http://127.0.0.1:8768"), "_prepare": prepare})
+        result = self.run_patched(
+            self.patches(
+                open_window=opened, wait_for_reattached_window=waited, focus_existing_window=Mock(return_value=False)
+            ),
+            {"_running_instance": Mock(return_value="http://127.0.0.1:8768"), "_prepare": prepare},
+        )
         self.assertEqual(result, 0)
         opened.assert_called_once_with("http://127.0.0.1:8768/eagle")
         prepare.assert_not_called()
@@ -438,26 +487,30 @@ class MainFlowTests(unittest.TestCase):
         alive = iter([True, True, False])
         fake_user32 = Mock()
         fake_user32.IsWindow.side_effect = lambda hwnd: next(alive, False)
-        with patch.object(app_window, "_user32", Mock(return_value=fake_user32)), \
-             patch.object(app_window, "_app_window", Mock(return_value=1234)), \
-             patch.object(app_window.time, "sleep", Mock()):
+        with (
+            patch.object(app_window, "_user32", Mock(return_value=fake_user32)),
+            patch.object(app_window, "_app_window", Mock(return_value=1234)),
+            patch.object(app_window.time, "sleep", Mock()),
+        ):
             app_window.wait_for_reattached_window(window)
-        self.assertEqual(fake_user32.IsWindow.call_count, 3,
-                         "it keeps watching the window instead of returning at once")
+        self.assertEqual(
+            fake_user32.IsWindow.call_count, 3, "it keeps watching the window instead of returning at once"
+        )
 
     def test_a_reattached_window_that_appears_late_is_still_waited_for(self):
         # Edge 冷启动时窗口可能要过一会儿才出现。这一瞬间找不到，不能当作「没有
         # 窗口」直接返回 —— 返回之后，页面上的最小化/关闭就没���人执行了。
-        handed_out = [0, 0, 2468]          # 前两次还没出现
+        handed_out = [0, 0, 2468]  # 前两次还没出现
         fake_user32 = Mock()
         fake_user32.IsWindow.return_value = False
-        with patch.object(app_window, "_user32", Mock(return_value=fake_user32)), \
-             patch.object(app_window, "_app_window", Mock(side_effect=lambda u, p, **kw: handed_out.pop(0))), \
-             patch.object(app_window, "_WINDOW_LOOKUP_BACKOFF", 0), \
-             patch.object(app_window.time, "sleep", Mock()):
+        with (
+            patch.object(app_window, "_user32", Mock(return_value=fake_user32)),
+            patch.object(app_window, "_app_window", Mock(side_effect=lambda u, p, **kw: handed_out.pop(0))),
+            patch.object(app_window, "_WINDOW_LOOKUP_BACKOFF", 0),
+            patch.object(app_window.time, "sleep", Mock()),
+        ):
             app_window.wait_for_reattached_window(Mock())
-        self.assertEqual(handed_out, [],
-                         "a window that turns up late is waited for, not given up on")
+        self.assertEqual(handed_out, [], "a window that turns up late is waited for, not given up on")
 
     def test_closing_the_window_stops_at_once_without_its_background_processes(self):
         # 一个题有据窗口背后挂着 8 个 Edge 进程（1 个管窗口 + 崩溃收集器/显卡/工具/
@@ -467,13 +520,15 @@ class MainFlowTests(unittest.TestCase):
         # 现在只看窗口：句柄一失效就收工，后台进程退得再慢也不拖住软件。
         window = Mock()
         fake_user32 = Mock()
-        fake_user32.IsWindow.side_effect = [True, False]     # 窗口消失的那一刻
-        profile_check = Mock(return_value=True)              # 那些后台进程还在
-        with patch.object(app_window, "_user32", Mock(return_value=fake_user32)), \
-             patch.object(app_window, "_app_window", Mock(return_value=1234)), \
-             patch.object(app_window, "_profile_still_open", profile_check), \
-             patch.object(app_window, "window_profile", Mock(return_value=Path("profile"))), \
-             patch.object(app_window.time, "sleep", Mock()):
+        fake_user32.IsWindow.side_effect = [True, False]  # 窗口消失的那一刻
+        profile_check = Mock(return_value=True)  # 那些后台进程还在
+        with (
+            patch.object(app_window, "_user32", Mock(return_value=fake_user32)),
+            patch.object(app_window, "_app_window", Mock(return_value=1234)),
+            patch.object(app_window, "_profile_still_open", profile_check),
+            patch.object(app_window, "window_profile", Mock(return_value=Path("profile"))),
+            patch.object(app_window.time, "sleep", Mock()),
+        ):
             how = app_window.wait_for_window(window, Mock(**{"poll.return_value": None}))
         self.assertEqual(how, "closed")
         profile_check.assert_not_called()
@@ -484,21 +539,24 @@ class MainFlowTests(unittest.TestCase):
         # 「配置目录还在被占用」这件事必须自己 mock 出来 —— 早先这条测试靠
         # 真机上恰好有个带 "profile" 字样的浏览器进程才成立，换台机器就红。
         still_open = Mock(return_value=True)
-        with patch.object(app_window, "_user32", Mock(return_value=None)), \
-             patch.object(app_window, "_CLOSE_BACKSTOP", 5.0), \
-             patch.object(app_window, "_profile_still_open", still_open), \
-             patch.object(app_window, "window_profile", Mock(return_value=Path("profile"))), \
-             patch.object(app_window.time, "sleep", Mock()), \
-             patch.object(app_window.time, "monotonic", Mock(side_effect=[0.0, 9.9, 10.1])):
+        with (
+            patch.object(app_window, "_user32", Mock(return_value=None)),
+            patch.object(app_window, "_CLOSE_BACKSTOP", 5.0),
+            patch.object(app_window, "_profile_still_open", still_open),
+            patch.object(app_window, "window_profile", Mock(return_value=Path("profile"))),
+            patch.object(app_window.time, "sleep", Mock()),
+            patch.object(app_window.time, "monotonic", Mock(side_effect=[0.0, 9.9, 10.1])),
+        ):
             how = app_window.wait_for_window(Mock(), Mock(**{"poll.return_value": None}))
-        self.assertEqual(how, "closed-slow",
-                         "a browser that never finishes quitting must not block exit forever")
+        self.assertEqual(how, "closed-slow", "a browser that never finishes quitting must not block exit forever")
 
     def test_first_install_is_handed_to_console(self):
         handoff = Mock(return_value=0)
         mutex = Mock()
-        result = self.run_patched(self.patches(_needs_install=Mock(return_value=True), _hand_off_to_console=handoff),
-                                  {"_running_instance": Mock(return_value=None), "InstanceMutex": mutex})
+        result = self.run_patched(
+            self.patches(_needs_install=Mock(return_value=True), _hand_off_to_console=handoff),
+            {"_running_instance": Mock(return_value=None), "InstanceMutex": mutex},
+        )
         self.assertEqual(result, 0)
         handoff.assert_called_once()
         mutex.assert_not_called()
@@ -531,46 +589,74 @@ class MainFlowTests(unittest.TestCase):
         mutex = Mock(acquired=True)
         waited = Mock()
         saved = {
-            "mineru_token": "m-token", "mineru_tokens": ["m-token", "m-token-2"],
-            "minimax_key": "mm-key", "minimax_keys": ["mm-key", "mm-key-2"],
-            "siliconflow_key": "sf-key", "siliconflow_keys": ["sf-key", "sf-key-2"],
+            "mineru_token": "m-token",
+            "mineru_tokens": ["m-token", "m-token-2"],
+            "minimax_key": "mm-key",
+            "minimax_keys": ["mm-key", "mm-key-2"],
+            "siliconflow_key": "sf-key",
+            "siliconflow_keys": ["sf-key", "sf-key-2"],
         }
         preferences = {
             "primary_engine": "siliconflow_qwen3",
             "checker_engine": "minimax_m3",
             "arbiter_engine": "checker",
         }
-        with patch.dict(os.environ, {
-            "MINERU_TOKEN": "", "MINIMAX_API_KEY": "", "SILICONFLOW_API_KEY": "",
-            "MINERU_TOKENS_JSON": '["untrusted"]',
-            "MINIMAX_API_KEYS_JSON": '["untrusted"]',
-            "SILICONFLOW_API_KEYS_JSON": '["untrusted"]',
-            "QB_PRIMARY_ENGINE": "untrusted", "QB_CHECKER_ENGINE": "untrusted",
-            "QB_ARBITER_ENGINE": "untrusted", "QB_MINIMAX_MODEL": "untrusted",
-            "QB_SILICONFLOW_MODEL": "untrusted", "QB_MODEL_PREFERENCES_FILE": "C:/untrusted.json",
-            "QB_PARALLEL": "",
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                "MINERU_TOKEN": "",
+                "MINIMAX_API_KEY": "",
+                "SILICONFLOW_API_KEY": "",
+                "MINERU_TOKENS_JSON": '["untrusted"]',
+                "MINIMAX_API_KEYS_JSON": '["untrusted"]',
+                "SILICONFLOW_API_KEYS_JSON": '["untrusted"]',
+                "QB_PRIMARY_ENGINE": "untrusted",
+                "QB_CHECKER_ENGINE": "untrusted",
+                "QB_ARBITER_ENGINE": "untrusted",
+                "QB_MINIMAX_MODEL": "untrusted",
+                "QB_SILICONFLOW_MODEL": "untrusted",
+                "QB_MODEL_PREFERENCES_FILE": "C:/untrusted.json",
+                "QB_PARALLEL": "",
+            },
+        ):
             result = self.run_patched(
-                self.patches(_needs_install=Mock(return_value=False), Splash=DirectSplash, load_credentials=Mock(return_value=saved),
-                             open_window=Mock(return_value=Mock()), wait_for_window=waited),
-                {"_running_instance": Mock(return_value=None), "InstanceMutex": Mock(return_value=mutex),
-                 "_prepare": Mock(), "_mineru_token_validity": Mock(return_value=True), "load_credentials": Mock(return_value=saved),
-                  "_model_preferences": Mock(return_value=preferences),
-                  "_available_port": Mock(return_value=8768), "ChildJob": Mock(), "_start": fake_start, "_health": Mock(),
-                 "_write_instance": Mock(), "_clear_instance": Mock()})
+                self.patches(
+                    _needs_install=Mock(return_value=False),
+                    Splash=DirectSplash,
+                    load_credentials=Mock(return_value=saved),
+                    open_window=Mock(return_value=Mock()),
+                    wait_for_window=waited,
+                ),
+                {
+                    "_running_instance": Mock(return_value=None),
+                    "InstanceMutex": Mock(return_value=mutex),
+                    "_prepare": Mock(),
+                    "_mineru_token_validity": Mock(return_value=True),
+                    "load_credentials": Mock(return_value=saved),
+                    "_model_preferences": Mock(return_value=preferences),
+                    "_available_port": Mock(return_value=8768),
+                    "ChildJob": Mock(),
+                    "_start": fake_start,
+                    "_health": Mock(),
+                    "_write_instance": Mock(),
+                    "_clear_instance": Mock(),
+                },
+            )
         self.assertEqual(result, 0)
         worker, web = environments["worker.log"], environments["web.log"]
         self.assertEqual(web["QB_DESKTOP_EXPORT"], "1")
         self.assertNotIn("QB_DESKTOP_EXPORT", worker)
-        self.assertEqual((worker["MINERU_TOKEN"], worker["MINIMAX_API_KEY"], worker["SILICONFLOW_API_KEY"]), ("m-token", "mm-key", "sf-key"))
+        self.assertEqual(
+            (worker["MINERU_TOKEN"], worker["MINIMAX_API_KEY"], worker["SILICONFLOW_API_KEY"]),
+            ("m-token", "mm-key", "sf-key"),
+        )
         self.assertEqual(json.loads(worker["MINERU_TOKENS_JSON"]), ["m-token", "m-token-2"])
         self.assertEqual(json.loads(worker["MINIMAX_API_KEYS_JSON"]), ["mm-key", "mm-key-2"])
         self.assertEqual(json.loads(worker["SILICONFLOW_API_KEYS_JSON"]), ["sf-key", "sf-key-2"])
         for name in app_window.launcher.SECRET_NAMES:
             self.assertNotIn(name, web)
         self.assertEqual(
-            (web["QB_MINERU_POOL_SIZE"], web["QB_MINIMAX_POOL_SIZE"], web["QB_SILICONFLOW_POOL_SIZE"]),
-            ("2", "2", "2"),
+            (web["QB_MINERU_POOL_SIZE"], web["QB_MINIMAX_POOL_SIZE"], web["QB_SILICONFLOW_POOL_SIZE"]), ("2", "2", "2")
         )
         # 2 MiniMax accounts x 6 + 2 SiliconFlow accounts x 2 simultaneous requests.
         self.assertEqual(worker["QB_PARALLEL"], "16")
@@ -605,29 +691,29 @@ class MainFlowTests(unittest.TestCase):
         mutex = Mock(acquired=True)
         waited = Mock()
         saved = {"mineru_token": "m-token", "siliconflow_key": "sf-key"}
-        preferences = {
-            "primary_engine": "siliconflow_qwen3",
-            "checker_engine": "auto",
-            "arbiter_engine": "primary",
-        }
-        with patch.dict(os.environ, {
-            "MINERU_TOKEN": "", "MINIMAX_API_KEY": "", "SILICONFLOW_API_KEY": "",
-        }):
+        preferences = {"primary_engine": "siliconflow_qwen3", "checker_engine": "auto", "arbiter_engine": "primary"}
+        with patch.dict(os.environ, {"MINERU_TOKEN": "", "MINIMAX_API_KEY": "", "SILICONFLOW_API_KEY": ""}):
             result = self.run_patched(
                 self.patches(
-                    _needs_install=Mock(return_value=False), Splash=DirectSplash,
+                    _needs_install=Mock(return_value=False),
+                    Splash=DirectSplash,
                     load_credentials=Mock(return_value=saved),
-                    open_window=Mock(return_value=Mock()), wait_for_window=waited,
+                    open_window=Mock(return_value=Mock()),
+                    wait_for_window=waited,
                 ),
                 {
                     "_running_instance": Mock(return_value=None),
                     "InstanceMutex": Mock(return_value=mutex),
-                    "_prepare": Mock(), "_mineru_token_validity": Mock(return_value=True),
+                    "_prepare": Mock(),
+                    "_mineru_token_validity": Mock(return_value=True),
                     "load_credentials": Mock(return_value=saved),
                     "_model_preferences": Mock(return_value=preferences),
-                    "_available_port": Mock(return_value=8768), "ChildJob": Mock(),
-                    "_start": fake_start, "_health": Mock(),
-                    "_write_instance": Mock(), "_clear_instance": Mock(),
+                    "_available_port": Mock(return_value=8768),
+                    "ChildJob": Mock(),
+                    "_start": fake_start,
+                    "_health": Mock(),
+                    "_write_instance": Mock(),
+                    "_clear_instance": Mock(),
                 },
             )
 
@@ -667,21 +753,35 @@ class MainFlowTests(unittest.TestCase):
         mutex = Mock(acquired=True)
         configure = Mock(return_value=False)
         waited = Mock()
-        with patch.dict(os.environ, {
-            "MINERU_TOKEN": "", "MINIMAX_API_KEY": "", "SILICONFLOW_API_KEY": "",
-        }):
+        with patch.dict(os.environ, {"MINERU_TOKEN": "", "MINIMAX_API_KEY": "", "SILICONFLOW_API_KEY": ""}):
             result = self.run_patched(
                 self.patches(
-                    _needs_install=Mock(return_value=False), Splash=DirectSplash,
-                    load_credentials=Mock(return_value={}), _configure_credentials=configure,
-                    open_window=Mock(return_value=Mock()), wait_for_window=waited,
+                    _needs_install=Mock(return_value=False),
+                    Splash=DirectSplash,
+                    load_credentials=Mock(return_value={}),
+                    _configure_credentials=configure,
+                    open_window=Mock(return_value=Mock()),
+                    wait_for_window=waited,
                 ),
-                {"_running_instance": Mock(return_value=None), "InstanceMutex": Mock(return_value=mutex),
-                 "_prepare": Mock(), "_model_preferences": Mock(return_value={
-                     "primary_engine": "minimax_m3", "checker_engine": "auto", "arbiter_engine": "primary",
-                 }), "_available_port": Mock(return_value=8768), "ChildJob": Mock(),
-                 "_start": fake_start, "_health": Mock(), "_write_instance": Mock(),
-                 "_clear_instance": Mock()})
+                {
+                    "_running_instance": Mock(return_value=None),
+                    "InstanceMutex": Mock(return_value=mutex),
+                    "_prepare": Mock(),
+                    "_model_preferences": Mock(
+                        return_value={
+                            "primary_engine": "minimax_m3",
+                            "checker_engine": "auto",
+                            "arbiter_engine": "primary",
+                        }
+                    ),
+                    "_available_port": Mock(return_value=8768),
+                    "ChildJob": Mock(),
+                    "_start": fake_start,
+                    "_health": Mock(),
+                    "_write_instance": Mock(),
+                    "_clear_instance": Mock(),
+                },
+            )
         self.assertEqual(result, 0)
         configure.assert_not_called()
         waited.assert_called_once()
@@ -710,8 +810,10 @@ class ShortcutTests(unittest.TestCase):
         self.assertEqual(spec["description"], "题有据 · 原卷可追溯的题库整理工具")
 
     def test_powershell_quotes_paths(self):
-        script = create_shortcut.powershell_script(Path("C:/Users/O'Neil/Desktop/题有据.lnk"),
-                                                   {"target": "a", "arguments": '"b"', "workdir": "c", "icon": "d,0", "description": "e"})
+        script = create_shortcut.powershell_script(
+            Path("C:/Users/O'Neil/Desktop/题有据.lnk"),
+            {"target": "a", "arguments": '"b"', "workdir": "c", "icon": "d,0", "description": "e"},
+        )
         self.assertIn("O''Neil", script)
         self.assertIn("题有据.lnk", script)
 
@@ -752,7 +854,7 @@ class ShortcutTests(unittest.TestCase):
 
             create_shortcut._write_with_com(link, spec)
             shortcut = pythoncom.CoCreateInstance(
-                shell.CLSID_ShellLink, None, pythoncom.CLSCTX_INPROC_SERVER, shell.IID_IShellLink,
+                shell.CLSID_ShellLink, None, pythoncom.CLSCTX_INPROC_SERVER, shell.IID_IShellLink
             )
             shortcut.QueryInterface(pythoncom.IID_IPersistFile).Load(str(link))
 
@@ -765,6 +867,7 @@ class ShortcutTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 
 class BrowserCacheTests(unittest.TestCase):
     """1.25.40：升级后窗口里可能还是上一版的界面。启动时清掉脚本缓存，保留登录与设置。"""
@@ -807,11 +910,13 @@ class BrowserCacheTests(unittest.TestCase):
                 return 4242 if len(found) <= 2 else 0
 
             clock = itertools.count(0, 1)
-            with patch.object(app_window.launcher, "DATA_ROOT", root), \
-                 patch.object(app_window, "_user32", return_value=fake_user32), \
-                 patch.object(app_window, "_app_window", side_effect=fake_app_window), \
-                 patch.object(app_window.time, "sleep"), \
-                 patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)):
+            with (
+                patch.object(app_window.launcher, "DATA_ROOT", root),
+                patch.object(app_window, "_user32", return_value=fake_user32),
+                patch.object(app_window, "_app_window", side_effect=fake_app_window),
+                patch.object(app_window.time, "sleep"),
+                patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)),
+            ):
                 app_window.watch_window(root)
 
             fake_user32.ShowWindow.assert_not_called()
@@ -830,8 +935,12 @@ class BrowserCacheTests(unittest.TestCase):
             }
 
             class FakeRect(ctypes.Structure):
-                _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
-                            ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+                _fields_ = [
+                    ("left", ctypes.c_long),
+                    ("top", ctypes.c_long),
+                    ("right", ctypes.c_long),
+                    ("bottom", ctypes.c_long),
+                ]
 
             class FakeUser32:
                 def __init__(self):
@@ -870,11 +979,9 @@ class BrowserCacheTests(unittest.TestCase):
 
             fake = FakeUser32()
             with patch.object(app_window, "_browser_pids", return_value={7}):
-                self.assertEqual(app_window._app_window(fake, profile), 2222,
-                                 "最小化的旧窗口不该被挑中")
+                self.assertEqual(app_window._app_window(fake, profile), 2222, "最小化的旧窗口不该被挑中")
                 fake.foreground = 1111
-                self.assertEqual(app_window._app_window(fake, profile), 1111,
-                                 "用户正点着的那个前台窗口优先")
+                self.assertEqual(app_window._app_window(fake, profile), 1111, "用户正点着的那个前台窗口优先")
 
     def test_a_window_left_minimized_is_restored_at_startup(self):
         # 1.25.52：上一次运行留下的浏览器窗口可能还是最小化的；启动后要把它恢复
@@ -892,11 +999,13 @@ class BrowserCacheTests(unittest.TestCase):
                 return 4242 if len(found) <= 2 else 0
 
             clock = itertools.count(0, 1)
-            with patch.object(app_window.launcher, "DATA_ROOT", root), \
-                 patch.object(app_window, "_user32", return_value=fake_user32), \
-                 patch.object(app_window, "_app_window", side_effect=fake_app_window), \
-                 patch.object(app_window.time, "sleep"), \
-                 patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)):
+            with (
+                patch.object(app_window.launcher, "DATA_ROOT", root),
+                patch.object(app_window, "_user32", return_value=fake_user32),
+                patch.object(app_window, "_app_window", side_effect=fake_app_window),
+                patch.object(app_window.time, "sleep"),
+                patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)),
+            ):
                 app_window.watch_window(root)
 
             fake_user32.ShowWindow.assert_called_with(4242, app_window._SW_RESTORE)
@@ -917,12 +1026,14 @@ class BrowserCacheTests(unittest.TestCase):
                 found.append(1)
                 return 5150 if len(found) == 1 else 0
 
-            with patch.object(app_window.launcher, "DATA_ROOT", root), \
-                 patch.object(app_window, "_user32", return_value=fake_user32), \
-                 patch.object(app_window, "_app_window", side_effect=fake_app_window), \
-                 patch.object(app_window, "apply_window_icon", side_effect=lambda u, h: applied.append(h)), \
-                 patch.object(app_window.time, "sleep"), \
-                 patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)):
+            with (
+                patch.object(app_window.launcher, "DATA_ROOT", root),
+                patch.object(app_window, "_user32", return_value=fake_user32),
+                patch.object(app_window, "_app_window", side_effect=fake_app_window),
+                patch.object(app_window, "apply_window_icon", side_effect=lambda u, h: applied.append(h)),
+                patch.object(app_window.time, "sleep"),
+                patch.object(app_window.time, "monotonic", side_effect=lambda: next(clock)),
+            ):
                 app_window.watch_window(root)
             self.assertIn(5150, applied)
 
@@ -945,3 +1056,142 @@ class BrowserCacheTests(unittest.TestCase):
             icon = app_window._load_splash_icon(128, master)
         self.assertIsInstance(icon, FakePhotoImage)
         self.assertEqual(captured, {"size": (128, 128), "mode": "RGBA", "master": master})
+
+    def test_command_matches_profile_handles_slashes_case_and_brackets(self):
+        profile = Path(r"C:\Users\Test[User]\AppData\Local\QuestionBankCard\browser-profile-abc")
+        markers = app_window._profile_markers(profile)
+        self.assertTrue(
+            app_window._command_matches_profile(
+                r'"msedge.exe" --app=http://127.0.0.1:8768 --user-data-dir=c:/users/test[user]/appdata/local/questionbankcard/browser-profile-abc',
+                markers,
+            )
+        )
+        self.assertFalse(
+            app_window._command_matches_profile(
+                r'"msedge.exe" --user-data-dir=C:\Users\Other\browser-profile-xyz', markers
+            )
+        )
+
+    def test_watch_window_reapplies_icon_when_browser_resets_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            alive_sequence = iter([True] * 6 + [False])
+            fake_user32 = Mock()
+            fake_user32.IsIconic.return_value = False
+            fake_user32.IsWindow.side_effect = lambda hwnd: next(alive_sequence, False)
+            applied: list[int] = []
+            refresh_flags = iter([False, True, False])
+            ticks = iter([0.0, 0.5, 0.5, 2.5, 2.6, 3.6, 3.6, 4.7, 4.7, 5.8, 5.8, 6.9, 6.9, 8.0])
+            found = []
+
+            def fake_app_window(user32, profile, **_options):
+                found.append(1)
+                return 6161 if len(found) == 1 else 0
+
+            with (
+                patch.object(app_window.launcher, "DATA_ROOT", root),
+                patch.object(app_window, "_user32", return_value=fake_user32),
+                patch.object(app_window, "_app_window", side_effect=fake_app_window),
+                patch.object(app_window, "apply_window_icon", side_effect=lambda u, h: applied.append(h)),
+                patch.object(
+                    app_window, "_window_needs_icon_refresh", side_effect=lambda h: next(refresh_flags, False)
+                ),
+                patch.object(app_window.time, "sleep"),
+                patch.object(app_window.time, "monotonic", side_effect=lambda: next(ticks, 100.0)),
+            ):
+                app_window.watch_window(root)
+
+            # 首次捕获（1 次）+ 2 秒后复核（1 次）+ 检测到浏览器重置图标后补刷（1 次）= 3 次
+            self.assertEqual(applied, [6161, 6161, 6161])
+
+    def test_apply_window_icon_caches_handles_and_writes_property_store_on_windows(self):
+        app_window._ICON_HANDLE_CACHE.clear()
+        self.addCleanup(app_window._ICON_HANDLE_CACHE.clear)
+        fake_user32 = Mock()
+        with (
+            patch.object(app_window, "_load_window_icon_handles", return_value=(101, 202)) as loader,
+            patch.object(app_window, "_send_window_message_timeout", return_value=(True, 0)) as sender,
+            patch.object(app_window, "_apply_window_app_id") as app_id_setter,
+        ):
+            app_window.apply_window_icon(fake_user32, 7788)
+
+        loader.assert_called_once()
+        self.assertEqual(sender.call_count, 2)
+        app_id_setter.assert_called_once_with(7788, app_window._window_icon_path())
+
+        if os.name == "nt":
+            try:
+                import ctypes
+                import tkinter as tk
+                import uuid
+                from ctypes import wintypes
+
+                root = tk.Tk()
+            except Exception:
+                return
+            try:
+                root.withdraw()
+                root.update_idletasks()
+                user32 = ctypes.WinDLL("user32", use_last_error=True)
+                hwnd = user32.GetParent(root.winfo_id()) or root.winfo_id()
+                ico = app_window._window_icon_path()
+                self.assertIsNotNone(ico)
+                app_window._apply_window_app_id(hwnd, ico)
+
+                class GUID(ctypes.Structure):
+                    _fields_ = [
+                        ("Data1", wintypes.DWORD),
+                        ("Data2", wintypes.WORD),
+                        ("Data3", wintypes.WORD),
+                        ("Data4", ctypes.c_ubyte * 8),
+                    ]
+
+                class PROPERTYKEY(ctypes.Structure):
+                    _fields_ = [("fmtid", GUID), ("pid", wintypes.DWORD)]
+
+                class PROPVARIANT(ctypes.Structure):
+                    _fields_ = [
+                        ("vt", wintypes.WORD),
+                        ("w1", wintypes.WORD),
+                        ("w2", wintypes.WORD),
+                        ("w3", wintypes.WORD),
+                        ("pwszVal", ctypes.c_void_p),
+                        ("extra", ctypes.c_uint64),
+                    ]
+
+                def _guid(raw: str) -> GUID:
+                    u = uuid.UUID(raw)
+                    return GUID(u.time_low, u.time_mid, u.time_hi_version, (ctypes.c_ubyte * 8)(*u.bytes[8:]))
+
+                shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+                ole32 = ctypes.WinDLL("ole32", use_last_error=True)
+                ole32.PropVariantClear.argtypes = [ctypes.c_void_p]
+                ole32.PropVariantClear.restype = ctypes.c_long
+                shell32.SHGetPropertyStoreForWindow.argtypes = [
+                    wintypes.HWND,
+                    ctypes.POINTER(GUID),
+                    ctypes.POINTER(ctypes.c_void_p),
+                ]
+                shell32.SHGetPropertyStoreForWindow.restype = ctypes.c_long
+                ptr = ctypes.c_void_p()
+                hr = shell32.SHGetPropertyStoreForWindow(
+                    hwnd, ctypes.byref(_guid("{886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99}")), ctypes.byref(ptr)
+                )
+                self.assertEqual(hr, 0)
+                vtable = ctypes.cast(
+                    ctypes.cast(ptr, ctypes.POINTER(ctypes.c_void_p))[0], ctypes.POINTER(ctypes.c_void_p)
+                )
+                get_value = ctypes.WINFUNCTYPE(
+                    ctypes.c_long, ctypes.c_void_p, ctypes.POINTER(PROPERTYKEY), ctypes.POINTER(PROPVARIANT)
+                )(vtable[5])
+                release = ctypes.WINFUNCTYPE(wintypes.ULONG, ctypes.c_void_p)(vtable[2])
+                pv = PROPVARIANT()
+                try:
+                    pk = PROPERTYKEY(_guid("{9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}"), 5)
+                    self.assertEqual(get_value(ptr, ctypes.byref(pk), ctypes.byref(pv)), 0)
+                    self.assertEqual(ctypes.wstring_at(pv.pwszVal), app_window.APP_USER_MODEL_ID)
+                finally:
+                    ole32.PropVariantClear(ctypes.byref(pv))
+                    release(ptr)
+            finally:
+                root.destroy()

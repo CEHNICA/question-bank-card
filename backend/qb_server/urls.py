@@ -83,6 +83,7 @@ urlpatterns = [
         "eagle-solution-editor.js", views._frontend("eagle-solution-editor.js", "application/javascript; charset=utf-8")
     ),
     path("library-reading.css", views.library_reading_styles),
+    path("favicon.ico", views.favicon_ico),
     path("favicon.png", views.favicon),
     path("app-icon-256.png", views.app_icon_256),
     path("startup-hint.js", views.startup_hint_script),

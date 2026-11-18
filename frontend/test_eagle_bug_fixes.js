@@ -172,4 +172,14 @@ test('Eagle 7大核心Bug修复综合验证套件', async (t) => {
     assert.ok(submitSlice.includes('base_revision: baseRevision'), '保存正式解析应携带 base_revision');
     assert.ok(!submitSlice.includes('closeEditQuestionModal();\n      if (savedOk)'), '后端保存失败时不得关闭编辑弹窗丢弃用户输入');
   });
+
+  await t.test('打开已关联 OneNote 笔记期间必须显示等待条直到唤醒完成', () => {
+    const openStart = content.indexOf('async function openOneNotePage(');
+    const createStart = content.indexOf('async function createOneNotePage(');
+    assert.ok(openStart > 0 && createStart > openStart);
+    const openSlice = content.slice(openStart, createStart);
+    assert.ok(openSlice.includes('showOneNoteBusy(qid, ONE_NOTE_OPEN_STEPS)'), 'openOneNotePage 应显示顶部等待条与按钮忙态');
+    assert.ok(openSlice.includes('/onenote/open?wait=1'), 'openOneNotePage 应同步等待唤醒结束再关闭等待条');
+    assert.ok(openSlice.includes('hideOneNoteBusy(token)'), 'openOneNotePage 必须在 finally 中收起等待条');
+  });
 });
