@@ -3,6 +3,16 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.1.0
+
+**录题分屏工作台重构、统一 API 队列、暂存旋图与 Eagle 解析直达**
+
+- **共享 API 客户端与按资源串行修改队列（`frontend/qb-api-client.js`）**：统一注入 `X-QB-Request: 1`、`Content-Type: application/json`、409 版本冲突识别与按 `paper:<id>` 串行排队写入机制，录入页与 Eagle 页共用统一请求内核。
+- **拍照暂存预处理升级（`frontend/intake-staging.js` + `#photoDialog`）**：支持缩略图预览、自然序提示、前移/后移/移除与顺时针 90° 旋转（上传前通过 Canvas 实像素转正），并在同窗汇总页数、体积、扫描增亮及云端辅助处理授权策略。
+- **常驻分屏原卷画布与三步流程导航（`frontend/intake-split-canvas.js`）**：桌面端（`>=1120px`）默认展示左侧高清原卷画布（支持翻页、缩放、题框开关），实现「右卡 ↔ 左框」双向定位高亮、双击进入局部调框及移动端一键折叠；新增 `① 导卷切题 → ② 逐题核对 → ③ 完成归档` 顶部流程导航条。
+- **录题安全移入回收站与 Eagle 答案编辑无缝衔接**：试卷菜单新增「移入回收站（安全撤回）…」，复用归档+整批按卷撤回原子回滚链路（永久删除遇在库题时亦提供一键改用移入回收站逃生口）；已入库题卡新增「编答案/解析」按钮直达 `/eagle?q=<id>&edit_solution=1` 并自动打开统一 `LibraryAnswerEditor`。
+
+
 ## 2.0.3
 
 **录题界面与设置页交互及窄屏布局优化**

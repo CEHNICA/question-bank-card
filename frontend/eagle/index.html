@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="/vendor/katex/katex.min.css" onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css';">
   <script defer src="/vendor/katex/katex.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js';"></script>
   <script defer src="/vendor/katex/contrib/auto-render.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js';"></script>
+  <script defer src="/qb-api-client.js"></script>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -2810,9 +2811,16 @@
       updateBasketBadges();
       updateFavoritesBadge();
       await loadRealData();
-      const targetQid = new URLSearchParams(window.location.search).get('q');
+      const urlParams = new URLSearchParams(window.location.search);
+      const targetQid = urlParams.get('q');
       if (targetQid) {
-        locateQuestionById(targetQid);
+        const located = locateQuestionById(targetQid);
+        if (located && urlParams.get('edit_solution') === '1') {
+          const cleanedUrl = new URL(window.location.href);
+          cleanedUrl.searchParams.delete('edit_solution');
+          window.history.replaceState(null, '', cleanedUrl.toString());
+          requestAnimationFrame(() => openSolutionEditorForId(targetQid));
+        }
       }
       startDeepLinkPolling();
     }
@@ -5698,6 +5706,16 @@
     }
 
     function applyFilters() {
+      if (filterState.folderType === 'trash') {
+        const container = document.getElementById('questionListContainer');
+        if (container) container.innerHTML = '';
+        container?.classList.add('hidden');
+        document.getElementById('recycleBinPanel')?.classList.remove('hidden');
+        renderRecycleBinPanel();
+        renderInlineActiveChips();
+        updateBatchActionBar();
+        return;
+      }
       document.getElementById('recycleBinPanel')?.classList.add('hidden');
       document.getElementById('questionListContainer')?.classList.remove('hidden');
       filteredQuestions = computeFilteredQuestions();
@@ -13036,35 +13054,39 @@
       return aggregated;
     }
 
+    async function eagleApiPost(url, body = {}, fallbackMsg = '操作失败', extraHeaders = {}) {
+      const reqHeaders = Object.assign({ 'Content-Type': 'application/json', 'X-QB-Request': '1' }, extraHeaders);
+      if (window.QBApi?.request) {
+        const data = await window.QBApi.request(url, { method: 'POST', headers: reqHeaders, body });
+        if (data && data.ok === false) throw new Error(data.error || fallbackMsg);
+        return data;
+      }
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: reqHeaders,
+        body: JSON.stringify(body)
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || (data && data.ok === false)) {
+        throw new Error((data && data.error) || fallbackMsg);
+      }
+      return data;
+    }
+
     async function movePaperToTrash(paperId) {
       const p = papersData.find(x => x.id === paperId);
       try {
         // 先归档资料再下架题目：若资料仍在解析/识读中被拒绝归档，不会先把名下试题孤立撤进回收站。
-        const aResp = await fetch(`/api/papers/${paperId}/archive`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
-          body: '{}'
-        });
-        const aData = await aResp.json().catch(() => ({}));
-        if (!aResp.ok || (aData && aData.ok === false)) {
-          throw new Error((aData && aData.error) || '归档试卷失败');
-        }
+        await eagleApiPost(`/api/papers/${paperId}/archive`, {}, '归档试卷失败', { 'Content-Type': 'application/json', 'X-QB-Request': '1' });
 
-        // 按资料整批下架：后端按 paper_id 扫全部 published，不依赖本页 questionsData。
-        const wResp = await fetch('/api/library/withdraw-batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
-          body: JSON.stringify({ document_id: paperId })
-        });
-        const wData = await wResp.json().catch(() => ({}));
-        if (!wResp.ok || (wData && wData.ok === false)) {
+        // 按资料整批下架：后端按 paper_id 扫全部 published，不依赖本页 questionsData（X-QB-Request 已统一注入）。
+        let wData;
+        try {
+          wData = await eagleApiPost('/api/library/withdraw-batch', { document_id: paperId }, '下架试卷题目失败', { 'Content-Type': 'application/json', 'X-QB-Request': '1' });
+        } catch (withdrawError) {
           // 撤题失败时尽量回滚刚才的归档状态，避免试卷消失但题还在库里
-          await fetch(`/api/papers/${paperId}/restore`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
-            body: '{}'
-          }).catch(() => {});
-          throw new Error((wData && wData.error) || '下架试卷题目失败');
+          await eagleApiPost(`/api/papers/${paperId}/restore`, {}, '恢复归档失败').catch(() => {});
+          throw withdrawError;
         }
         const withdrawnIds = Array.isArray(wData.withdrawn) ? wData.withdrawn.map(String) : [];
         if (withdrawnIds.length) {

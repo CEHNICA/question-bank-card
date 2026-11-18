@@ -279,6 +279,7 @@
                   </details>
                   <hr class="menu-divider">
                   <button id="settingsArchive" class="link-button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg>归档</button>
+                  <button id="settingsTrashPaper" class="link-button" type="button" title="归档任务并从正式题库撤回已入库题目，可随时在题库回收站恢复"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>移入回收站（安全撤回）…</button>
                   <button id="settingsDelete" class="link-button danger" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>永久删除…</button>
                   <p id="settingsDangerHint" class="menu-note"></p>
                 </div>
@@ -290,6 +291,7 @@
             <button id="publishButton" class="button primary" type="button" hidden>入库</button>
           </div>
         </div>
+        <ol id="intakeStepper" class="intake-stepper" aria-label="录入步骤" hidden></ol>
         <section id="cutReadingStage" class="cut-reading-stage" aria-labelledby="cutReadingTitle" hidden>
           <ol id="cutReadingSteps" class="cut-reading-steps" aria-label="整理题目步骤"></ol>
           <h3 id="cutReadingTitle" tabindex="-1"></h3>
@@ -311,6 +313,7 @@
           <div id="filters" class="filters" role="tablist" aria-label="筛选题卡"></div>
           <span class="toolbar-spacer"></span>
           <div class="tool-group tool-group-icons">
+            <button id="splitCanvasToggle" class="toggle-pill tool-icon" type="button" aria-pressed="true" title="在左侧常驻对照高清原卷画布与题框" aria-label="对照原卷"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg><span class="tool-label">收起原卷</span></button>
             <button id="reviewFindToggle" class="toggle-pill tool-icon" type="button" aria-expanded="false" aria-controls="reviewFinderPanel" title="在当前试卷中找题（Ctrl+F）" aria-label="找题"><svg class="icon" aria-hidden="true"><use href="#i-zoom"/></svg><span class="tool-label">找题</span></button>
             <button id="fullscreenToggle" class="toggle-pill tool-icon" type="button" aria-pressed="false" title="全屏审核：收起顶栏、试卷列表和试卷信息，题卡铺满屏幕（Q；Esc 退出）" aria-label="全屏"><svg class="icon" aria-hidden="true"><use href="#i-expand"/></svg><span id="fullscreenLabel" class="tool-label">全屏</span></button>
             <button id="lensToggle" class="toggle-pill tool-icon" type="button" aria-pressed="true" title="鼠标停在原卷截图上时放大局部（L）" aria-label="放大镜"><svg class="icon" aria-hidden="true"><use href="#i-lens"/></svg><span class="tool-label">放大镜</span></button>
@@ -326,7 +329,27 @@
           <p id="reviewFindHint" class="hint">按题号或页码查原图题；文字搜索只查已保存题文，不会自动识读。</p>
           <div id="reviewFindResults" class="review-finder-results" role="listbox" aria-label="找题结果" hidden></div>
         </section>
-        <div id="cards" class="cards" role="tabpanel"></div>
+        <div id="paperWorkspace" class="paper-workspace split-open">
+          <aside id="intakeSplitPane" class="intake-split-pane" aria-label="原卷对照画布">
+            <div class="split-canvas-head">
+              <div class="split-canvas-nav">
+                <button id="splitPagePrev" class="button small quiet" type="button" title="上一页原卷">上一页</button>
+                <span id="splitPageIndicator" class="split-page-indicator">第 1 / 1 页</span>
+                <button id="splitPageNext" class="button small quiet" type="button" title="下一页原卷">下一页</button>
+              </div>
+              <div class="split-canvas-tools">
+                <button id="splitZoomOut" class="button small quiet" type="button" title="缩小原卷">－</button>
+                <button id="splitZoomFit" class="button small quiet" type="button" title="重置为适合宽度"><span id="splitZoomLabel">100%</span></button>
+                <button id="splitZoomIn" class="button small quiet" type="button" title="放大原卷">＋</button>
+                <button id="splitBoxesToggle" class="button small quiet" type="button" aria-pressed="true" title="显示或隐藏原卷题框叠加">隐藏题框</button>
+                <button id="splitOpenCutDialog" class="button small" type="button" title="打开独立切题与校正窗口（V）">切题与校正</button>
+                <button id="splitCanvasClose" class="button small quiet" type="button" title="收起左侧原卷画布">收起</button>
+              </div>
+            </div>
+            <div id="splitCanvasStage" class="split-canvas-stage" tabindex="0"></div>
+          </aside>
+          <div id="cards" class="cards" role="tabpanel"></div>
+        </div>
       </section>
     </main>
   </div>
@@ -659,6 +682,13 @@
       <input id="photoEnhance" type="checkbox" checked>
       <span><strong>自动处理成扫描件效果</strong>：拍斜了自动拉正，去阴影、提亮、去偏黄（原图会保留）</span>
     </label>
+    <div id="photoStagingBar" class="photo-staging-bar">
+      <span id="photoStagingSummary" class="hint"></span>
+      <label id="photoCloudOption" class="photo-cloud-toggle" hidden>
+        <input id="photoAllowCloud" type="checkbox">
+        <span>允许使用已配置云服务辅助切题</span>
+      </label>
+    </div>
     <ul id="photoList" class="photo-list"></ul>
   </dialog>
 
@@ -920,6 +950,9 @@
   <div id="toast" class="toast" role="status" aria-live="polite" popover="manual"></div>
 
   <script src="/vendor/katex/katex.min.js" defer></script>
+  <script src="/qb-api-client.js" defer></script>
+  <script src="/intake-staging.js" defer></script>
+  <script src="/intake-split-canvas.js" defer></script>
   <script src="/qb-render.js" defer></script>
   <script src="/static/library-ai-settings.js" defer></script>
   <script src="/static/export-settings.js" defer></script>

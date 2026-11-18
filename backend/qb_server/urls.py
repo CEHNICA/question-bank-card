@@ -37,6 +37,9 @@ urlpatterns = [
     path("shortcut-help.js", views._frontend("shortcut-help.js", "application/javascript; charset=utf-8")),
     path("review-finder.js", views._frontend("review-finder.js", "application/javascript; charset=utf-8")),
     path("settings", views.index_page),
+    path("qb-api-client.js", views._frontend("qb-api-client.js", "application/javascript; charset=utf-8")),
+    path("intake-staging.js", views._frontend("intake-staging.js", "application/javascript; charset=utf-8")),
+    path("intake-split-canvas.js", views._frontend("intake-split-canvas.js", "application/javascript; charset=utf-8")),
     path("app.js", views.app_script),
     path(
         "original-paper-layout.js", views._frontend("original-paper-layout.js", "application/javascript; charset=utf-8")

@@ -1046,6 +1046,46 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     publishing: null
   };
   const editGuard = QBEdits.createEditGuard();
+  const splitCanvas = window.QBIntakeSplitCanvas?.createController?.({
+    $,
+    el,
+    getPaper: () => state.paper,
+    getQuestions: () => state.questions,
+    getCurrentId: () => state.current,
+    onSelectQuestion: (qid) => {
+      const targetQ = questionById(qid);
+      if (!targetQ) return;
+      if (isApproved(targetQ) && !state.expanded.has(qid)) {
+        state.expanded.add(qid);
+        renderCards();
+      }
+      setCurrent(qid, { scroll: true, focus: true });
+    },
+    onEditRegions: (qid, pageIdx, regionIndex) => {
+      const targetQ = questionById(qid);
+      if (!targetQ) return;
+      openPageDialog("regions", targetQ, { page: pageIdx, focusRegionIndex: regionIndex });
+    },
+    onOpenCutDialog: (pageIdx) => {
+      if (!state.paper?.pages?.length) return;
+      openPageDialog("view", null, { page: pageIdx });
+    },
+    onSwitchToManual: () => void switchToManual()
+  }) || null;
+  if (splitCanvas) {
+    splitCanvas.bindEvents();
+    const wideDesktop = typeof window.matchMedia === "function"
+      ? window.matchMedia("(min-width: 1120px)").matches
+      : (window.innerWidth || 0) >= 1120;
+    const savedSplit = readPref("qb-split-canvas", wideDesktop ? "1" : "0") === "1";
+    splitCanvas.setOpen(wideDesktop && savedSplit, { render: false });
+    $("splitCanvasToggle")?.addEventListener("click", () => {
+      writePref("qb-split-canvas", splitCanvas.isOpen() ? "1" : "0");
+    });
+    $("splitCanvasClose")?.addEventListener("click", () => {
+      writePref("qb-split-canvas", "0");
+    });
+  }
 
   // ---------------------------------------------------------------- 小工具
 
@@ -1167,6 +1207,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   }
 
   async function api(path, { method = "GET", body, form, signal } = {}) {
+    if (window.QBApi?.request) {
+      return window.QBApi.request(path, { method, body, form, signal });
+    }
     const options = { method, headers: {}, cache: "no-store" };
     if (signal) options.signal = signal;
     if (method !== "GET") options.headers["X-QB-Request"] = "1";
@@ -1184,6 +1227,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       throw error;
     }
     return data;
+  }
+
+  const paperMutationQueue = window.QBApi?.createMutationQueue?.() || { enqueue: (_key, fn) => fn() };
+  function enqueuePaperMutation(paperId, task) {
+    return paperMutationQueue.enqueue(`paper:${paperId || state.paperId || "none"}`, task);
   }
 
   let toastTimer = null;
@@ -1761,6 +1809,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     state.editing.clear();
     state.expanded.clear();
     state.autoExpanded.clear();
+    if ($("intakeStepper")) $("intakeStepper").hidden = true;
+    splitCanvas?.syncPaper(null);
     $("cards").replaceChildren();
     $("paperView").hidden = true;
     $("emptyState").hidden = false;
@@ -2048,10 +2098,45 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       check.replaceChildren();
     }
     renderSettingsTask();
+    renderIntakeStepper(paper, c);
     renderCutReadingStage();
     renderFilters(c);
     renderEntryChapterNav();
+    splitCanvas?.syncPaper(paper);
     renderCards();
+  }
+
+  function renderIntakeStepper(paper, c) {
+    const stepper = $("intakeStepper");
+    const calc = window.QBIntakeSplitCanvas?.computeStepperState;
+    if (!stepper || typeof calc !== "function" || !paper) {
+      if (stepper) stepper.hidden = true;
+      return;
+    }
+    const model = calc(paper, c);
+    stepper.hidden = false;
+    stepper.replaceChildren(...model.steps.map((item) => {
+      const li = el("li", `intake-step is-${item.status}${item.step === model.activeStep ? " is-current" : ""}`);
+      const btn = el("button", "intake-step-btn");
+      btn.type = "button";
+      btn.append(el("span", "intake-step-label", item.label), el("span", "intake-step-hint", item.hint));
+      btn.addEventListener("click", () => {
+        if (item.step === 1) {
+          if (splitCanvas && !splitCanvas.isOpen()) splitCanvas.setOpen(true);
+          if (paper.pages?.length) openPageDialog("view");
+        } else if (item.step === 2) {
+          state.filter = "todo";
+          renderPaper();
+          const firstTodo = (state.questions || []).find((q) => !isApproved(q) && !q.trashed);
+          if (firstTodo) setCurrent(firstTodo.id, { scroll: true, focus: true });
+        } else {
+          if (paperComplete(c)) $("doneBanner")?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+          else void archivePaper();
+        }
+      });
+      li.append(btn);
+      return li;
+    }));
   }
 
   /**
@@ -2830,6 +2915,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (card && hold) state.followHold = true;
     markReading();
     if (typeof syncActiveChapterNav === "function") syncActiveChapterNav(id);
+    if (id !== null && typeof splitCanvas === "object" && splitCanvas?.isOpen?.()) {
+      const targetQ = questionById(id);
+      if (targetQ) splitCanvas.focusQuestionOnCanvas(targetQ);
+    }
     if (card && scroll) card.scrollIntoView?.({ behavior: "smooth", block: "start" });
     if (card && focus) card.focus?.({ preventScroll: true });
   }
@@ -4522,6 +4611,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       actions.append(button("在题库中看", "", () => {
         window.location.href = `/eagle?q=${encodeURIComponent(q.publication.id)}`;
       }, "到题库工作台里找到这道题，看它的标签、答案和入库版本"));
+      actions.append(button("编答案/解析", "quiet", () => {
+        window.location.href = `/eagle?q=${encodeURIComponent(q.publication.id)}&edit_solution=1`;
+      }, "去题库工作台打开统一答案解析编辑器，编写标准答案与解析"));
     }
     const more = el("details", "more");
     const summary = el("summary", "", "更多");
@@ -5176,7 +5268,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const paper = state.paper;
     if (!paper || !["ready", "failed", "needs_grouping"].includes(paper.status)) return;
     if ((paper.counts?.published || 0) > 0) {
-      toast(`这项任务还有 ${paper.counts.published} 道题在正式题库里；先在正式题库撤回这几道，才能删除任务`, "error");
+      toast(`这项任务还有 ${paper.counts.published} 道题在正式题库里；先在正式题库撤回这几道，才能删除任务`, "error", {
+        label: "一键移入回收站",
+        onClick: () => { void moveCurrentPaperToTrash(); }
+      });
       return;
     }
     if (!(await discardEdits())) return;
@@ -5192,7 +5287,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const paperId = paper.id;
     const oldIndex = state.papers.findIndex((item) => item.id === paperId);
     try {
-      const result = await api(`/api/papers/${paperId}`, { method: "DELETE" });
+      const result = await enqueuePaperMutation(paperId, () => api(`/api/papers/${paperId}`, { method: "DELETE" }));
       const message = result.warning || `已删除任务“${displayName}”`;
       const kind = result.warning ? "error" : "";
       state.papers = state.papers.filter((item) => item.id !== paperId);
@@ -5206,6 +5301,55 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       if (next) await selectPaper(next.id);
       toast(message, kind);
     } catch (error) { toast(error.message, "error"); }
+  }
+
+  async function moveCurrentPaperToTrash() {
+    const paper = state.paper;
+    if (!paper) return;
+    if (ACTIVE_STATUS.has(paper.status)) {
+      toast("任务正在处理中，请先停止或等待完成后再移入回收站", "error");
+      return;
+    }
+    if (!(await discardEdits())) return;
+    const displayName = paperDisplayName(paper);
+    const published = Number(paper.counts?.published || 0);
+    const ok = await confirmDialog({
+      title: `将“${displayName}”移入回收站？`,
+      text: published > 0
+        ? `会将这份试卷归档收起，并同步从正式题库撤回已入库的 ${published} 道题。操作可随时在题库回收站一键恢复，原卷与笔记不丢失。`
+        : "会将这份试卷归档收起；原文件和草稿题卡保留，可随时恢复。",
+      ok: "移入回收站",
+      danger: true
+    });
+    if (!ok) return;
+    const paperId = paper.id;
+    const oldIndex = state.papers.findIndex((item) => item.id === paperId);
+    try {
+      await enqueuePaperMutation(paperId, async () => {
+        await api(`/api/papers/${paperId}/archive`, { method: "POST", body: {} });
+        if (published > 0) {
+          try {
+            await api("/api/library/withdraw-batch", { method: "POST", body: { document_id: paperId } });
+          } catch (withdrawError) {
+            try { await api(`/api/papers/${paperId}/restore`, { method: "POST", body: {} }); } catch { /* 尽力回滚 */ }
+            throw withdrawError;
+          }
+        }
+      });
+      state.papers = state.papers.filter((item) => item.id !== paperId);
+      const next = state.papers[Math.min(Math.max(oldIndex, 0), state.papers.length - 1)];
+      await clearPaperSelection();
+      if (next) await selectPaper(next.id);
+      toast(
+        published > 0
+          ? `已将“${displayName}”及 ${published} 道已入库题目移入回收站`
+          : `已将“${displayName}”移入回收站`,
+        "success",
+        { label: "去题库回收站", onClick: () => leaveFor("/eagle") }
+      );
+    } catch (error) {
+      toast(error.message, "error");
+    }
   }
 
   async function archivePaper() {
@@ -5937,6 +6081,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("settingsArchive").disabled = active;
     $("settingsArchive").title = hasTrash
       ? "回收站题卡会跟着这份卷一起归档" : "";
+    if ($("settingsTrashPaper")) {
+      $("settingsTrashPaper").hidden = Boolean(paper.archived);
+      $("settingsTrashPaper").disabled = active;
+    }
     const isSplitTask = Boolean(paper.structure?.split_from || paper.structure?.split_children?.length);
     $("settingsDelete").hidden = published > 0 || isSplitTask
       || !["ready", "failed", "needs_grouping"].includes(paper.status);
@@ -6115,6 +6263,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("settingsConfirmStructure").addEventListener("click", () => closeSettingsThen(confirmStructure));
   $("settingsSplit").addEventListener("click", () => closeSettingsThen(openSplitDialog));
   $("settingsArchive").addEventListener("click", () => closeSettingsThen(archivePaper));
+  $("settingsTrashPaper")?.addEventListener("click", () => closeSettingsThen(moveCurrentPaperToTrash));
   $("settingsDelete").addEventListener("click", () => closeSettingsThen(deletePaper));
   $("questionTrash").addEventListener("click", openQuestionTrash);
   $("approveAllGreen").addEventListener("click", approveAllGreen);
@@ -9181,7 +9330,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   // 照片（一张或几张）先弹出确认框，合成一份试卷；PDF、Word 一份一份直接上传。
   const MAX_PHOTOS = 30;
-  const photoUpload = { files: [], urls: [], policy: Object.freeze({ parseMode: "auto", allowCloud: false }), materialType: "exam" };
+  const photoUpload = { files: [], urls: [], turns: [], policy: Object.freeze({ parseMode: "auto", allowCloud: false }), materialType: "exam" };
   const pasteUpload = { batch: null, resolve: null };
 
   // 1.25.36：不再让人先选「试卷」还是「书」。交给后端按页数判断：
@@ -9395,10 +9544,20 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (target < 0 || target >= photoUpload.files.length) return;
     const files = [...photoUpload.files];
     const urls = [...photoUpload.urls];
+    const turns = [...photoUpload.turns];
     [files[index], files[target]] = [files[target], files[index]];
     [urls[index], urls[target]] = [urls[target], urls[index]];
+    [turns[index], turns[target]] = [turns[target], turns[index]];
     photoUpload.files = files;
     photoUpload.urls = urls;
+    photoUpload.turns = turns;
+    renderPhotoDialogList();
+  }
+
+  function rotatePendingPhoto(index) {
+    if (index < 0 || index >= photoUpload.files.length) return;
+    const current = Number(photoUpload.turns[index]) || 0;
+    photoUpload.turns[index] = (current + 1) % 4;
     renderPhotoDialogList();
   }
 
@@ -9407,11 +9566,30 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const [removedUrl] = photoUpload.urls.splice(index, 1);
     if (removedUrl) URL.revokeObjectURL(removedUrl);
     photoUpload.files.splice(index, 1);
+    photoUpload.turns.splice(index, 1);
     if (!photoUpload.files.length) {
       $("photoDialog").close();
       return;
     }
     renderPhotoDialogList();
+  }
+
+  function syncPhotoStagingBar() {
+    const summaryEl = $("photoStagingSummary");
+    if (!summaryEl) return;
+    const staging = window.QBIntakeStaging;
+    if (staging?.buildStagingSummary) {
+      const info = staging.buildStagingSummary({
+        files: photoUpload.files,
+        materialType: photoUpload.materialType,
+        enhance: Boolean($("photoEnhance")?.checked),
+        cloudReady: cloudCutReady(),
+        allowCloud: Boolean(photoUpload.policy?.allowCloud),
+      });
+      summaryEl.textContent = `${info.countText} · ${info.detailText}`;
+    } else {
+      summaryEl.textContent = `共 ${photoUpload.files.length} 张照片`;
+    }
   }
 
   function renderPhotoDialogList() {
@@ -9420,14 +9598,21 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("photoTitle").textContent = count > 1 ? `上传 ${count} 张照片` : "上传 1 张照片";
     $("photoUpload").textContent = count > 1 ? `上传（${count} 张合成一份试卷）` : "上传";
     $("photoUpload").disabled = !count;
+    syncPhotoStagingBar();
     const last = count - 1;
     $("photoList").replaceChildren(...files.map((file, index) => {
+      const turns = Number(photoUpload.turns[index]) || 0;
       const item = el("li", "photo-item");
+      const thumbWrap = el("div", "photo-thumb-wrap");
       const image = el("img");
       image.src = photoUpload.urls[index];
       image.alt = file.name;
+      if (turns) image.style.transform = `rotate(${turns * 90}deg)`;
+      thumbWrap.append(image);
       const head = el("div", "order-head");
-      head.append(el("strong", "", `第 ${index + 1} 页`), el("span", "photo-name", file.name));
+      const sizeText = window.QBIntakeStaging?.formatFileSize?.(file.size) || "";
+      const meta = [sizeText, turns ? `旋转 ${turns * 90}°` : ""].filter(Boolean).join(" · ");
+      head.append(el("strong", "", `第 ${index + 1} 页`), el("span", "photo-name", meta ? `${file.name} (${meta})` : file.name));
       const tools = el("div", "order-tools");
       if (count > 1) {
         const up = button("← 前移", "small", () => movePendingPhoto(index, -1), "在合成试卷中排到前一页");
@@ -9436,9 +9621,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         down.disabled = index === last;
         tools.append(up, down);
       }
+      tools.append(button("↻ 旋转", "small quiet", () => rotatePendingPhoto(index), "顺时针旋转 90°，上传时自动转正"));
       const remove = button("移除", "small quiet", () => removePendingPhoto(index), "从本次上传列表中去掉这张照片");
       tools.append(remove);
-      item.append(image, head, tools);
+      item.append(thumbWrap, head, tools);
       return item;
     }));
   }
@@ -9446,25 +9632,45 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function openPhotoDialog(files, { policy = Object.freeze({ parseMode: "auto", allowCloud: false }), materialType = selectedMaterialType() } = {}) {
     photoUpload.urls.forEach((url) => URL.revokeObjectURL(url));
     photoUpload.files = [...files];
+    photoUpload.turns = photoUpload.files.map(() => 0);
     photoUpload.policy = policy;
     photoUpload.materialType = materialType;
     photoUpload.urls = photoUpload.files.map((file) => URL.createObjectURL(file));
-    $("photoHint").textContent = `这些照片按下列顺序合成一份试卷，可直接前移、后移或移除误选照片。${policy.allowCloud ? "本次已允许使用已配置的云服务；无法自动切出的题可以从原卷补齐。" : "本次仅在本机保存，可从原卷选取题目；不会自动调用 AI。"}`;
+    if ($("photoCloudOption")) {
+      const canCloud = cloudCutReady();
+      $("photoCloudOption").hidden = !canCloud;
+      if ($("photoAllowCloud")) $("photoAllowCloud").checked = Boolean(photoUpload.policy.allowCloud);
+    }
+    $("photoHint").textContent = `这些照片按下列顺序合成一份试卷，可直接前移、后移、旋转或移除误选照片。${photoUpload.policy.allowCloud ? "本次已允许使用已配置的云服务；无法自动切出的题可以从原卷补齐。" : "本次仅在本机保存，可从原卷选取题目；不会自动调用 AI。"}`;
     renderPhotoDialogList();
     if (!$("photoDialog").open) $("photoDialog").showModal();
   }
 
+  $("photoEnhance")?.addEventListener("change", () => syncPhotoStagingBar());
+  $("photoAllowCloud")?.addEventListener("change", () => {
+    photoUpload.policy = {
+      ...photoUpload.policy,
+      allowCloud: Boolean($("photoAllowCloud").checked),
+    };
+    syncPhotoStagingBar();
+  });
+
   $("photoUpload").addEventListener("click", async () => {
     const files = photoUpload.files;
     if (!files.length) return;
-    const form = new FormData();
-    files.forEach((file) => form.append("file", file));
-    form.append("enhance", $("photoEnhance").checked ? "1" : "0");
-    form.append("material_type", photoUpload.materialType);
-    QBUpload.appendUploadPolicy(form, photoUpload.policy);
     $("photoUpload").disabled = true;
     try {
-      const paper = await sendUpload(form, files.length > 1 ? `${files.length} 张照片` : files[0].name);
+      const prepared = await Promise.all(files.map((file, idx) => {
+        const turns = Number(photoUpload.turns[idx]) || 0;
+        if (!turns || !window.QBIntakeStaging?.rotateImageFile) return file;
+        return window.QBIntakeStaging.rotateImageFile(file, turns);
+      }));
+      const form = new FormData();
+      prepared.forEach((file) => form.append("file", file));
+      form.append("enhance", $("photoEnhance").checked ? "1" : "0");
+      form.append("material_type", photoUpload.materialType);
+      QBUpload.appendUploadPolicy(form, photoUpload.policy);
+      const paper = await sendUpload(form, prepared.length > 1 ? `${prepared.length} 张照片` : prepared[0].name);
       $("photoDialog").close();
       await loadPapers();
       selectPaper(paper.id);
@@ -9477,6 +9683,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     photoUpload.urls.forEach((url) => URL.revokeObjectURL(url));
     photoUpload.files = [];
     photoUpload.urls = [];
+    photoUpload.turns = [];
     $("photoList").replaceChildren();
   });
 
