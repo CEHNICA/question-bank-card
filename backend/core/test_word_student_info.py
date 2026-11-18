@@ -29,6 +29,7 @@ Word 这边原来写的是「姓名：____________    班级：____________    �
 """
 
 import io
+import math
 
 from django.test import SimpleTestCase
 from docx.oxml.ns import qn
@@ -286,3 +287,110 @@ class StudentInfoAbsenceTests(SimpleTestCase):
 
         document = Document(io.BytesIO(data))
         self.assertFalse(any("姓名" in paragraph.text for paragraph in document.paragraphs), "答案卷里不该有考生信息行")
+
+
+# ---------------------------------------------------------------------------
+# 第六十八轮：Word 的**自然排版**宽度。
+#
+# 实测（_probe121.py，Word COM 打印视图，Range.Information(7) 相对文本边界）：
+#   · Word 自然排版：起点 167.75 磅、整行跨度 259.8 磅（COM 粒度 0.6 磅）
+#   · Chrome 预览：  起点 167.695 磅、整行跨度 259.875 磅
+#   → 两者吻合到 0.03 毫米 —— **导出 docx 这一行本来就是准的**。
+#
+# 坑（第六十八轮差点踩进去）：**不要用 Word 导出的 PDF 量文字宽度**。
+# Word 的 PDF 导出器把字号和每个字宽都量化到 1/120 英寸（0.6 磅）的网格上：
+# 10.5 磅的字在 PDF 里是 10.8 磅；0.25em 的半角空格是 3.0 磅（自然 2.625）；
+# 0.5em 的下划线是 5.4 磅（自然 5.25）。于是 PDF 量出来整行 268.5 磅，
+# 比自然值宽 8.6 磅（3 毫米）—— 那是**仪器**的偏差，不是文档的错。
+# 照着 PDF 去"修"，就会把字号降到 10 磅去迁就仪器，把屏幕和打印效果改坏。
+#
+# 下面的模型用**两个互相独立**的实测值标定：自然排版 259.875 磅、
+# Word PDF 导出后 271.47 磅（含段落标记那个尾随空格）。两条都要复现得出来，
+# 否则说明模型本身飘了，先怀疑尺子。
+# ---------------------------------------------------------------------------
+
+# 各字符的 em 宽度（宋体 / Times New Roman 的实测值）：
+#   汉字与全角空格 = 1.0em；半角空格 = 0.25em；下划线 = 0.5em。
+EM_WIDTH = {" ": 0.25, "_": 0.5, "　": 1.0}
+
+# Word 的 PDF 导出器把字号与字宽量化到的网格（1/120 英寸）。
+WORD_EXPORT_GRID_PT = 0.6
+
+# Chrome 打印预览实测的整行宽度。
+PREVIEW_LINE_WIDTH_PT = 259.875
+# Word 导出的 PDF 里实测的整行宽度（含段落标记的尾随空格，12 磅的 Normal）。
+WORD_PDF_LINE_WIDTH_PT = 271.47
+# 段落标记的字号（Normal 样式 12 磅）—— Word 会把它画成一个尾随空格。
+PARAGRAPH_MARK_SIZE_PT = 12.0
+
+
+def quantize(value, grid=WORD_EXPORT_GRID_PT):
+    """Word 的 PDF 导出器那一套量化：四舍五入到网格，进位取大。"""
+    return math.floor(value / grid + 0.5) * grid
+
+
+def natural_width_pt(text, size_pt):
+    """Word 自然排版（屏幕 / 打印）下的整行宽度。"""
+    return sum(EM_WIDTH.get(char, 1.0) for char in text) * size_pt
+
+
+def word_pdf_width_pt(text, size_pt, mark_size_pt=PARAGRAPH_MARK_SIZE_PT):
+    """Word 导出的 PDF 里量到的整行宽度（含段落标记的尾随空格）。"""
+    quantized_size = quantize(size_pt)
+    total = sum(quantize(EM_WIDTH.get(char, 1.0) * quantized_size) for char in text)
+    return total + quantize(EM_WIDTH[" "] * quantize(mark_size_pt))
+
+
+class StudentInfoNaturalWidthTests(SimpleTestCase):
+    """这一行在 Word 自然排版下的整行宽度，必须等于预览。"""
+
+    def info_run(self):
+        """从真实导出结果里取出考生信息行：文本、字号、字体。"""
+        paragraph = info_paragraph(build_document())
+        for run in paragraph.runs:
+            if run.text.strip():
+                return paragraph, run
+        raise AssertionError("尺子自检：考生信息行没有文字")
+
+    def test_the_natural_width_matches_the_preview(self):
+        """自然排版的整行宽度 == 预览实测的 259.875 磅。
+
+        这条守住的是「别为了迁就 Word PDF 导出器的量化而降字号」——
+        字号一旦从 10.5 掉到 10 磅，宽度会变成 247.5 磅，行会窄掉 4.4 毫米。
+        """
+        paragraph, run = self.info_run()
+        size = run.font.size
+        self.assertIsNotNone(size, "尺子自检：考生信息行没有显式字号")
+        width = natural_width_pt(paragraph.text, size.pt)
+        self.assertAlmostEqual(
+            width,
+            PREVIEW_LINE_WIDTH_PT,
+            places=2,
+            msg=f"自然排版宽度 {width:.3f} 磅 != 预览 {PREVIEW_LINE_WIDTH_PT} 磅",
+        )
+
+    def test_the_model_reproduces_the_word_pdf_export_width(self):
+        """尺子自检：同一个模型要能复现 Word PDF 里实测到的 271.47 磅。
+
+        复现不了就说明模型本身跟实测脱节了 —— 先怀疑尺子，别急着改实现。
+        """
+        paragraph, run = self.info_run()
+        width = word_pdf_width_pt(paragraph.text, run.font.size.pt)
+        self.assertAlmostEqual(
+            width,
+            WORD_PDF_LINE_WIDTH_PT,
+            delta=0.5,
+            msg=f"模型算出的 Word PDF 宽度 {width:.3f} 磅，实测 {WORD_PDF_LINE_WIDTH_PT} 磅",
+        )
+
+    def test_the_width_model_assumes_the_preview_fonts(self):
+        """模型的前提：这一行用的是预览那套字体（宋体 + Times New Roman）。
+
+        雅黑/Times New Roman 混排时半角空格与下划线的 em 宽度跟这里不同，
+        宽度模型就不成立了 —— 所以这条是上面两条的前提，必须一起绿。
+        """
+        _, run = self.info_run()
+        rfonts = run._r.find(qn("w:rPr") + "/" + qn("w:rFonts"))
+        self.assertIsNotNone(rfonts, "考生信息行没有写字体")
+        self.assertEqual(rfonts.get(qn("w:ascii")), PREVIEW_LATIN_FONT)
+        self.assertEqual(rfonts.get(qn("w:eastAsia")), PREVIEW_EAST_ASIA_FONT)
