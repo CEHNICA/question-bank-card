@@ -1587,6 +1587,66 @@ def _neighbour_text(segments, index, step):
     return ""
 
 
+# pPr 里 w:autoSpaceDN 之后的兄弟（OOXML 规定的顺序）。python-docx 的
+# CT_PPr._tag_seq 在类体末尾被 del 掉了，只能自己写一份。
+_PPR_TAGS_AFTER_AUTO_SPACE_DN = (
+    "w:bidi",
+    "w:adjustRightInd",
+    "w:snapToGrid",
+    "w:spacing",
+    "w:ind",
+    "w:contextualSpacing",
+    "w:mirrorIndents",
+    "w:suppressOverlap",
+    "w:jc",
+    "w:textDirection",
+    "w:textAlignment",
+    "w:textboxTightWrap",
+    "w:outlineLvl",
+    "w:divId",
+    "w:cnfStyle",
+    "w:rPr",
+    "w:sectPr",
+    "w:pPrChange",
+)
+
+
+def _disable_punctuation_overflow(document):
+    """关掉 Word 的「标点溢出边界」。
+
+    Word 默认允许行末的标点（。，；：等）悬挂到版心右缘之外；Chrome 没有
+    这条规矩 —— 放不下的标点会被推到下一行。
+
+    实测同一道题：预览第 1 行末是「驶向乙」，Word 第 1 行末是「驶向乙地。」。
+    Word 每行多塞一个字，整行的内容就错开一行，块里的公式和图片跟着一起
+    错位；挂出去的标点还会越过版心右缘 194.09 毫米。
+
+    关掉它要写 <w:overflowPunct w:val="0"/>，而且在 pPr 里的位置必须排在
+    w:topLinePunct / w:autoSpaceDE 之前 —— 放错位置 Word 直接忽略。
+    """
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import qn
+
+    successors = ("w:topLinePunct", "w:autoSpaceDE", "w:autoSpaceDN") + _PPR_TAGS_AFTER_AUTO_SPACE_DN
+    namespace = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+
+    def apply(paragraph_element):
+        properties = paragraph_element.get_or_add_pPr()
+        for old in properties.findall(qn("w:overflowPunct")):
+            properties.remove(old)
+        properties.insert_element_before(parse_xml(f'<w:overflowPunct {namespace} w:val="0"/>'), *successors)
+
+    for paragraph in document.element.body.iter(qn("w:p")):
+        apply(paragraph)
+    # 页脚页眉里也有行末标点（「第 1 页，共 2 页」），一样要关。
+    for part in document.part.package.iter_parts():
+        element = getattr(part, "element", None)
+        if element is None or element.tag not in (qn("w:hdr"), qn("w:ftr")):
+            continue
+        for paragraph in element.iter(qn("w:p")):
+            apply(paragraph)
+
+
 def _disable_cjk_auto_spacing(document):
     """关掉 Word 的「自动调整中文与西文的间距」。
 
@@ -1604,28 +1664,8 @@ def _disable_cjk_auto_spacing(document):
     from docx.oxml import parse_xml
     from docx.oxml.ns import qn
 
-    # pPr 里这两个属性后面的兄弟（OOXML 规定的顺序）。python-docx 的
-    # CT_PPr._tag_seq 在类体末尾被 del 掉了，只能自己写一份。
-    after_dn = (
-        "w:bidi",
-        "w:adjustRightInd",
-        "w:snapToGrid",
-        "w:spacing",
-        "w:ind",
-        "w:contextualSpacing",
-        "w:mirrorIndents",
-        "w:suppressOverlap",
-        "w:jc",
-        "w:textDirection",
-        "w:textAlignment",
-        "w:textboxTightWrap",
-        "w:outlineLvl",
-        "w:divId",
-        "w:cnfStyle",
-        "w:rPr",
-        "w:sectPr",
-        "w:pPrChange",
-    )
+    # pPr 里这两个属性后面的兄弟（OOXML 规定的顺序）。
+    after_dn = _PPR_TAGS_AFTER_AUTO_SPACE_DN
     successors = {"w:autoSpaceDE": ("w:autoSpaceDN",) + after_dn, "w:autoSpaceDN": after_dn}
     namespace = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
 
@@ -4477,6 +4517,7 @@ def _document(captured, title, options, mode):
             _pagination(document, unit_start, "compact", size)
     _write_footer(document, len(captured))
     _disable_cjk_auto_spacing(document)
+    _disable_punctuation_overflow(document)
     stream = io.BytesIO()
     document.save(stream)
     return stream.getvalue()
