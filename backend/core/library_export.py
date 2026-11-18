@@ -3728,6 +3728,12 @@ def _paragraph_measure(paragraph, size, width_mm=178):
         return max(int(node.get("cy", "0")) / 36_000 for node in drawings) + gap
     text = "".join(node.text or "" for node in paragraph.findall(".//" + qn("w:t")))
     metrics = [_math_extent(node) for node in paragraph.findall(".//" + qn("m:oMath"))]
+    if not text and not metrics and spacing is not None:
+        # 空段：行高由显式行距决定。留白块是**固定行高**的空段
+        # （w:lineRule="exact"），拿默认行距去估会把留白少算将近一整行，
+        # 分页就会提前。
+        if spacing.get(qn("w:lineRule")) == "exact" and spacing.get(qn("w:line")):
+            return int(spacing.get(qn("w:line"))) / 20 * 25.4 / 72 + gap
     width = (_text_em(text) + sum(metric[0] for metric in metrics)) * size * 25.4 / 72
     height = max(LINE_SPACING, max((metric[1] for metric in metrics), default=1.0)) * size * 25.4 / 72
     return max(1, math.ceil(width / width_mm)) * height + gap
@@ -3796,6 +3802,40 @@ def _pagination(document, start, mode, size):
         short_caption = bool(plain and len(plain) <= 40 and width_mm <= 178)
         if lead_only or (short_caption and next_visual):
             element.get_or_add_pPr().find(qn("w:keepNext")).set(qn("w:val"), "1")
+
+
+def _write_answer_space(document, millimetres):
+    """写出答题留白块。
+
+    预览里留白是紧贴上一块、上下没有外边距的一个固定高度块
+    （frontend/library.css 的 .print-answer-space），题目块的下外边距
+    （8 磅）由 _question_gap 补在留白之后。
+
+    Word 里**不能**拿「段后距」当留白高度：段后距不吃行盒，一段 8 毫米的
+    段后距实际排出来是「一个空行盒 + 8 毫米间距」，比预览多出整个行盒的高度。
+    第六十九轮实测：这样每道解答题比预览高 3.95 毫米（11.2 磅）。
+
+    这里改成**固定行高**（w:lineRule="exact"）的空段，行盒高度就是留白高度；
+    同时把上一段的段后距归零，让留白真正贴住上一块（预览里 .print-answer-space
+    的上下外边距都是 0）。
+    """
+    from docx.enum.text import WD_LINE_SPACING
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
+    from docx.text.paragraph import Paragraph
+
+    elements = list(document._element.body)
+    previous = elements[-2] if len(elements) >= 2 else None
+    if previous is not None and previous.tag == qn("w:p"):
+        Paragraph(previous, document).paragraph_format.space_after = Pt(0)
+
+    paragraph = document.add_paragraph()
+    fmt = paragraph.paragraph_format
+    fmt.line_spacing = Pt(millimetres * 72 / 25.4)
+    fmt.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    fmt.space_before = Pt(0)
+    fmt.space_after = Pt(0)
+    return paragraph
 
 
 def _question_gap(document):
@@ -4238,8 +4278,7 @@ def _document(captured, title, options, mode):
             # 每道题都能有留白；解答题有 8 毫米下限。口径与预览、PDF 一致。
             millimetres = _answer_space_millimetres(answer_space, item["type"])
             if millimetres > 0 and not inline_answers:
-                paragraph = document.add_paragraph()
-                paragraph.paragraph_format.space_after = Mm(millimetres)
+                _write_answer_space(document, millimetres)
             _question_gap(document)
             _pagination(document, unit_start, options["pagination"], size)
             if inline_answers and _has_selected_answers([item]):
