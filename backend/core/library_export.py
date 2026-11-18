@@ -200,8 +200,16 @@ PREVIEW_LATIN_FONT = "Times New Roman"
 # （实测 25/26/27/28 都落在同一档），30 是最接近预览的那个（181.42 磅）。
 PREVIEW_TITLE_LETTER_SPACING = 30
 # .print-info（frontend/library.css:929）：居中；margin 12px 0 22px；14px；#333。
-# Chrome 实测（_probe93.py）：这一行是 **界面字体**（Microsoft YaHei UI），不是卷面
-# 字体 —— .print-info 不在 .qb-question 里，拿不到 --content-font。
+# 字体：**卷面字体**（--content-font），不是界面字体。
+# 第六十轮在这里写的是「界面字体（Microsoft YaHei UI）」，理由是
+# 「.print-info 不在 .qb-question 里，拿不到 --content-font」—— **那条理由是错的**：
+# .print-info 挂在 .print-paper / .exam-page-body 底下，这两层都写了
+# font-family: var(--content-font)（frontend/library.css:891、892）。
+# Chrome 实测（_probe117b.py）：.print-info 的 computed font-family 就是
+# "Times New Roman", "Source Han Serif SC", …, "宋体", serif；
+# 预览 PDF 里这一行也是「中文 STSong（宋体）+ 下划线 TimesNewRomanPSMT」。
+# 写成雅黑的后果：下划线段宽度、整行居中后的起止 x 全跟预览对不上
+# （预览 x 167.7→415.0，Word x 173.6→421.2）。
 # Word 这边原来写的是「姓名：____________    班级：____________    得分：____________」：
 # 多了三个冒号、分隔符是四个半角空格、得分后是 12 个下划线（预览是 8 个），
 # 字号也用了正文 12 磅（16px，预览是 14px），颜色纯黑（预览是 #333）。
@@ -209,8 +217,8 @@ PREVIEW_TITLE_LETTER_SPACING = 30
 # Word 里贴紧标题，整页从这一行往下**整体上移 7.3 毫米**（实测差 7.31）。
 PREVIEW_INFO_FONT_SIZE_PT = 10.5
 PREVIEW_INFO_COLOR = "333333"
-PREVIEW_INFO_EAST_ASIA = "Microsoft YaHei"
-PREVIEW_INFO_LATIN = "Microsoft YaHei UI"
+PREVIEW_INFO_EAST_ASIA = "宋体"
+PREVIEW_INFO_LATIN = "Times New Roman"
 PREVIEW_INFO_SPACE_BEFORE_PT = 9.0  # 12px
 PREVIEW_INFO_SPACE_AFTER_PT = 16.5  # 22px
 PREVIEW_INFO_LINE_HEIGHT_PT = 15.75  # 21px 行盒（14px × 1.5）
