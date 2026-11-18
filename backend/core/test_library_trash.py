@@ -228,3 +228,17 @@ class LibraryTrashTests(TestCase):
     def test_write_endpoints_refuse_get(self):
         self.assertEqual(self.client.get("/api/library/restore-batch", HTTP_X_QB_REQUEST="1").status_code, 405)
         self.assertEqual(self.client.get("/api/library/purge-batch", HTTP_X_QB_REQUEST="1").status_code, 405)
+
+    def test_bodyless_recycle_endpoints_accept_plain_post_without_json_content_type(self):
+        """无请求体的归档、恢复、撤回和彻底删除接口不应因为缺少 application/json 返回 415。"""
+        live = self.make_publication(status="published")
+        paper = live.paper
+        paper.status = Paper.Status.READY
+        paper.save(update_fields=["status"])
+
+        self.assertEqual(self.client.post(f"/api/papers/{paper.id}/archive", HTTP_X_QB_REQUEST="1").status_code, 200)
+        self.assertEqual(self.client.post(f"/api/papers/{paper.id}/restore", HTTP_X_QB_REQUEST="1").status_code, 200)
+        self.assertEqual(self.client.post(f"/api/library/{live.id}/withdraw", HTTP_X_QB_REQUEST="1").status_code, 200)
+        self.assertEqual(self.client.post(f"/api/library/{live.id}/restore", HTTP_X_QB_REQUEST="1").status_code, 200)
+        self.assertEqual(self.client.post(f"/api/library/{live.id}/withdraw", HTTP_X_QB_REQUEST="1").status_code, 200)
+        self.assertEqual(self.client.post(f"/api/library/{live.id}/purge", HTTP_X_QB_REQUEST="1").status_code, 200)

@@ -13005,11 +13005,52 @@
       showToast(`已将智能文件夹「${rootItem.name}」移入回收站`, 'info');
     }
 
+    function splitIdBatches(ids, limit = 500) {
+      const unique = Array.from(new Set((ids || []).map(String))).filter(Boolean);
+      const batches = [];
+      for (let i = 0; i < unique.length; i += limit) {
+        batches.push(unique.slice(i, i + limit));
+      }
+      return batches;
+    }
+
+    async function postBatchIdsAction(url, ids, fallbackError, extraHeaders) {
+      const batches = splitIdBatches(ids, 500);
+      const headers = extraHeaders || { 'Content-Type': 'application/json', 'X-QB-Request': '1' };
+      const aggregated = { withdrawn: [], restored: [], purged: [], skipped: [], ok: true };
+      for (const batch of batches) {
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ ids: batch })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || (data && data.ok === false)) {
+          throw new Error((data && data.error) || fallbackError);
+        }
+        if (Array.isArray(data.withdrawn)) aggregated.withdrawn.push(...data.withdrawn);
+        if (Array.isArray(data.restored)) aggregated.restored.push(...data.restored);
+        if (Array.isArray(data.purged)) aggregated.purged.push(...data.purged);
+        if (Array.isArray(data.skipped)) aggregated.skipped.push(...data.skipped);
+      }
+      return aggregated;
+    }
+
     async function movePaperToTrash(paperId) {
       const p = papersData.find(x => x.id === paperId);
       try {
+        // 先归档资料再下架题目：若资料仍在解析/识读中被拒绝归档，不会先把名下试题孤立撤进回收站。
+        const aResp = await fetch(`/api/papers/${paperId}/archive`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
+          body: '{}'
+        });
+        const aData = await aResp.json().catch(() => ({}));
+        if (!aResp.ok || (aData && aData.ok === false)) {
+          throw new Error((aData && aData.error) || '归档试卷失败');
+        }
+
         // 按资料整批下架：后端按 paper_id 扫全部 published，不依赖本页 questionsData。
-        // 以前只撤内存里已加载的 id，首屏分页没载完就会漏题——资料进了回收站，题还挂着。
         const wResp = await fetch('/api/library/withdraw-batch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
@@ -13017,6 +13058,12 @@
         });
         const wData = await wResp.json().catch(() => ({}));
         if (!wResp.ok || (wData && wData.ok === false)) {
+          // 撤题失败时尽量回滚刚才的归档状态，避免试卷消失但题还在库里
+          await fetch(`/api/papers/${paperId}/restore`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
+            body: '{}'
+          }).catch(() => {});
           throw new Error((wData && wData.error) || '下架试卷题目失败');
         }
         const withdrawnIds = Array.isArray(wData.withdrawn) ? wData.withdrawn.map(String) : [];
@@ -13025,8 +13072,6 @@
           qMap[paperId] = withdrawnIds;
           writePaperTrashQidsMap(qMap);
         }
-        const aResp = await fetch(`/api/papers/${paperId}/archive`, { method: 'POST', headers: { 'X-QB-Request': '1' } });
-        if (!aResp.ok) throw new Error('归档试卷失败');
 
         if (filterState.folderPaperIds.includes(paperId) || filterState.paperId === paperId) {
           filterState.folderPaperIds = [];
@@ -13048,16 +13093,23 @@
 
     async function moveQuestionsToTrash(qids) {
       try {
-        const resp = await fetch('/api/library/withdraw-batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
-          body: JSON.stringify({ ids: qids })
-        });
-        const data = await resp.json().catch(() => ({}));
-        // 只把显式 ok:false 或非 2xx 当失败。旧后端按 ids 撤回成功时不带 ok 字段，
-        // 用 !data.ok 会把真成功误报成「下架试题失败」。
-        if (!resp.ok || (data && data.ok === false)) {
-          throw new Error((data && data.error) || '下架试题失败');
+        const batches = splitIdBatches(qids, 500);
+        const withdrawnAll = [];
+        const skippedAll = [];
+        for (const batch of batches) {
+          const resp = await fetch('/api/library/withdraw-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
+            body: JSON.stringify({ ids: batch })
+          });
+          const data = await resp.json().catch(() => ({}));
+          // 只把显式 ok:false 或非 2xx 当失败。旧后端按 ids 撤回成功时不带 ok 字段，
+          // 用 !data.ok 会把真成功误报成「下架试题失败」。
+          if (!resp.ok || (data && data.ok === false)) {
+            throw new Error((data && data.error) || '下架试题失败');
+          }
+          if (Array.isArray(data.withdrawn)) withdrawnAll.push(...data.withdrawn);
+          if (Array.isArray(data.skipped)) skippedAll.push(...data.skipped);
         }
         selectedQuestionIds.clear();
         if (typeof updateBatchActionBar === 'function') updateBatchActionBar();
@@ -13066,12 +13118,11 @@
         renderFolderTree();
         renderInlineActiveChips();
         applyFilters();
-        const skipped = Array.isArray(data.skipped) ? data.skipped : [];
-        const done = data.withdrawn_count ?? (Array.isArray(data.withdrawn) ? data.withdrawn.length : qids.length);
-        const skippedText = skipped.length
-          ? `；${skipped.length} 道没撤成（${[...new Set(skipped.map((row) => row.reason))].join('、')}）`
+        const done = withdrawnAll.length;
+        const skippedText = skippedAll.length
+          ? `；${skippedAll.length} 道没撤成（${[...new Set(skippedAll.map((row) => row.reason))].join('、')}）`
           : '';
-        showToast(`已将 ${done} 道试题移入回收站${skippedText}`, skipped.length ? 'error' : 'info');
+        showToast(`已将 ${done} 道试题移入回收站${skippedText}`, skippedAll.length ? 'error' : 'info');
       } catch (e) {
         showToast('移入回收站失败：' + (e.message || e), 'error');
       }
@@ -13132,8 +13183,15 @@
       try {
         // 先把回收站总账拉最新：要恢复哪些伴随下架的题，是从这份总账里对出来的。
         await refreshLibraryTrash();
-        const resp = await fetch(`/api/papers/${paperId}/restore`, { method: 'POST', headers: { 'X-QB-Request': '1' } });
-        if (!resp.ok) throw new Error('恢复资料失败');
+        const resp = await fetch(`/api/papers/${paperId}/restore`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
+          body: '{}'
+        });
+        const rData = await resp.json().catch(() => ({}));
+        if (!resp.ok || (rData && rData.ok === false)) {
+          throw new Error((rData && rData.error) || '恢复资料失败');
+        }
         const qMap = readPaperTrashQidsMap();
         const recordedIds = Array.isArray(qMap[paperId]) ? qMap[paperId].map(String) : [];
         // 以回收站里该资料名下全部下架题为准，不只信本地记录——旧版漏撤修好后，
@@ -13143,10 +13201,9 @@
           .map(q => String(q.id));
         const idsToRestore = Array.from(new Set([...recordedIds, ...fromTrash]));
         if (idsToRestore.length) {
-          await fetch('/api/library/restore-batch', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
-            body: JSON.stringify({ ids: idsToRestore })
+          await postBatchIdsAction('/api/library/restore-batch', idsToRestore, '恢复试卷下架试题失败', {
+            'Content-Type': 'application/json',
+            'X-QB-Request': '1'
           });
         }
         delete qMap[paperId];
@@ -13163,9 +13220,13 @@
 
     async function restoreTrashQuestion(pubId) {
       try {
-        const resp = await fetch(`/api/library/${pubId}/restore`, { method: 'POST', headers: { 'X-QB-Request': '1' } });
-        const data = await resp.json();
-        if (!resp.ok || !data.ok) throw new Error((data && data.error) || '恢复试题失败');
+        const resp = await fetch(`/api/library/${pubId}/restore`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
+          body: '{}'
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || (data && data.ok === false)) throw new Error((data && data.error) || '恢复试题失败');
         await loadInitialLibraryData();
         await refreshLibraryTrash();
         renderFolderTree();
@@ -13240,14 +13301,14 @@
               .filter(q => (q.documentId || q.document_id) === paperId)
               .map(q => q.id);
             if (qids.length) {
-              await fetch('/api/library/purge-batch', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
-                body: JSON.stringify({ ids: qids })
+              await postBatchIdsAction('/api/library/purge-batch', qids, '永久删除下架试题失败', {
+                'Content-Type': 'application/json',
+                'X-QB-Request': '1'
               });
             }
             const resp = await fetch(`/api/papers/${paperId}`, { method: 'DELETE', headers: { 'X-QB-Request': '1' } });
-            if (!resp.ok) throw new Error('删除资料失败');
+            const pData = await resp.json().catch(() => ({}));
+            if (!resp.ok || (pData && pData.ok === false)) throw new Error((pData && pData.error) || '删除资料失败');
             const qMap = readPaperTrashQidsMap();
             delete qMap[paperId];
             writePaperTrashQidsMap(qMap);
@@ -13271,9 +13332,13 @@
         confirmLabel: '确认永久删除',
         onConfirm: async () => {
           try {
-            const resp = await fetch(`/api/library/${pubId}/purge`, { method: 'POST', headers: { 'X-QB-Request': '1' } });
-            const data = await resp.json();
-            if (!resp.ok || !data.ok) throw new Error((data && data.error) || '永久删除失败');
+            const resp = await fetch(`/api/library/${pubId}/purge`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
+              body: '{}'
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok || (data && data.ok === false)) throw new Error((data && data.error) || '永久删除失败');
             await refreshLibraryTrash();
             renderFolderTree();
             if (filterState.folderType === 'trash') renderRecycleBinPanel();
@@ -13310,10 +13375,9 @@
         onConfirm: async () => {
           try {
             if (qs.length) {
-              await fetch('/api/library/purge-batch', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
-                body: JSON.stringify({ ids: qs.map(x => x.id) })
+              await postBatchIdsAction('/api/library/purge-batch', qs.map(x => x.id), '清空下架试题失败', {
+                'Content-Type': 'application/json',
+                'X-QB-Request': '1'
               });
             }
             // 录入归档的试卷不是题库垃圾：清空回收站时绝不删它们，避免连带藏掉/毁掉已入库题来源。

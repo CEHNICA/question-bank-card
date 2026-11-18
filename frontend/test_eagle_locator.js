@@ -105,3 +105,18 @@ assert.doesNotMatch(
   /!resp\.ok\s*\|\|\s*!data\.ok/,
   "不许再用 !data.ok —— 那正是「移入回收站失败：下架试题失败」的根因"
 );
+
+// ---- 8. 归档/恢复/彻底删除接口与批处理分片 ----
+for (const pattern of [
+  /\/api\/papers\/\$\{paperId\}\/archive[\s\S]{0,220}application\/json/,
+  /\/api\/papers\/\$\{paperId\}\/restore[\s\S]{0,220}application\/json/,
+  /\/api\/library\/\$\{pubId\}\/restore[\s\S]{0,220}application\/json/,
+  /\/api\/library\/\$\{pubId\}\/purge[\s\S]{0,220}application\/json/,
+]) {
+  assert.match(js, pattern, `回收站单条操作请求 (${pattern}) 必须附带 application/json 头以避免 415`);
+}
+const movePaperFn = js.slice(js.indexOf("async function movePaperToTrash("), js.indexOf("async function moveQuestionsToTrash("));
+assert.ok(
+  movePaperFn.indexOf("/archive") < movePaperFn.indexOf("/api/library/withdraw-batch"),
+  "删整份资料时应先校验归档，避免归档失败却已将试题孤立下架"
+);

@@ -320,7 +320,7 @@ def restore_view(request, publication_id):
     """放回一道题。"""
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
-    rejected = _guard(request)
+    rejected = _guard(request, json_body=False)
     if rejected:
         return rejected
     publication = PublishedQuestion.objects.select_related("paper").filter(pk=publication_id).first()
@@ -337,7 +337,7 @@ def purge_view(request, publication_id):
     """彻底删掉一道题。"""
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
-    rejected = _guard(request)
+    rejected = _guard(request, json_body=False)
     if rejected:
         return rejected
     publication = PublishedQuestion.objects.select_related("paper").filter(pk=publication_id).first()

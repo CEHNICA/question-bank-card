@@ -3,6 +3,14 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.0.2
+
+**修复 Eagle 回收站「移入回收站失败」及恢复/彻底删除 415 报错**
+
+- **修复无请求体回收站接口 415 拦截**：后端 `paper_archive`、`paper_restore`、`library_withdraw`、`library_trash.restore_view`、`library_trash.purge_view` 统一改用 `_guard(request, json_body=False)`，不再因浏览器未传 JSON body 拒绝请求。
+- **修复前端 Eagle 回收站操作头与原子性**：`movePaperToTrash`、`restoreTrashPaper`、`restoreTrashQuestion`、`purgeTrashQuestion` 统一补全 `Content-Type: application/json`；删除整份资料调整为先归档校验再批量下架题目（失败时自动回滚归档），避免报错同时试题被孤立下架；超过 500 题的批量移入回收站/恢复/清空操作按 `MAX_BATCH_IDS=500` 自动分片。
+
+
 ## 2.0.1
 
 **修复 Eagle 工作台答案编辑链路与本地 OneNote 测试注册表隔离**
