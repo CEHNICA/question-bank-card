@@ -19,7 +19,7 @@
 
 要让当前豆包补知识点或参考答案，可以明确让它通过附带的 CLI/MCP 工具完成后交回题库。**这条助手流程不需要豆包 API。** 两项默认关闭，明确需要时再启用；只有聊天能力时由你导入结果。网页中的生成按钮使用已配置的独立 API。[给助手的操作说明](AGENTS.md)
 
-当前发布版本为 **2.0.1**（`2.0.0` 热修复版），可从 [GitHub Releases](https://github.com/CEHNICA/question-bank-card/releases/tag/v2.0.1) 下载（[2.0.0 完整升级说明](docs/release-notes-v2.0.0.md) · [更新记录](CHANGELOG.md)）。
+当前发布版本为 **2.0.1**（`2.0.0` 热修复版），可从 [GitHub Releases](https://github.com/CEHNICA/question-bank-card/releases/tag/v2.0.1) 下载（[2.0.1 说明](docs/release-notes-v2.0.1.md) · [2.0.0 完整升级说明](docs/release-notes-v2.0.0.md) · [更新记录](CHANGELOG.md)）。
 
 ### 2.0.1 修复内容
 
