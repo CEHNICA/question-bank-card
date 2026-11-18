@@ -4333,6 +4333,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       if (/^只有一次识读成功（另一次：/.test(text)) return false;
       if (/^AI 看到的题号是 .+，请确认$/.test(text)) return false;
       if (/^这张卡的范围里还印着第 .+ 题的题号，卡上只有这一道/.test(text)) return false;
+      if (/^按章节结构重新提取，.*原审核记录保留在旧版本中/.test(text)) return false;
+      if (/^文字是本次候选，/.test(text)) return false;
       if (TYPE_REMINDER.test(text) && typeBlocksApproval(q)) return false;
       if (!review) return true;
       if (flag === review.reason) return false;

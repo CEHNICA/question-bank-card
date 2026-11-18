@@ -49,13 +49,47 @@ def _live_publication_ids(questions) -> set[int]:
     )
 
 
+def is_unconfirmed_candidate_source_card(question) -> bool:
+    """判断原图题是否仅存着旧版重提取/助手候选草稿，未形成应锁定识读的人工定稿。"""
+    if not source_images.is_image(question):
+        return False
+    if not bool(getattr(question, "edited", False)):
+        return False
+    if str(getattr(question, "text_source", "") or "") == "assistant":
+        return True
+    flags = getattr(question, "flags", None) or []
+    return any(str(flag or "").startswith("文字是本次候选，") for flag in flags)
+
+
+def clear_unconfirmed_candidate_source_draft(question) -> bool:
+    """清除旧版按章节重提取留下的未定稿候选文字标记，释放原图题以进行 AI 识读。"""
+    if not is_unconfirmed_candidate_source_card(question):
+        return False
+    question.edited = False
+    question.stem = ""
+    question.options = {}
+    question.text_source = ""
+    return True
+
+
+def has_protected_manual_text(question) -> bool:
+    """判断原图题是否真的存在应受保护的人工修改文字。"""
+    if not bool(getattr(question, "edited", False)):
+        return False
+    stem = str(getattr(question, "stem", "") or "").strip()
+    options = getattr(question, "options", None) or {}
+    if not (stem or options):
+        return False
+    return not is_unconfirmed_candidate_source_card(question)
+
+
 def protection_reason(question) -> str:
     """空字符串 = 可以识读；否则是挡住它的那一条理由（与 reread 的 409 口径一致）。"""
     if question.approved:
         return APPROVED
     if question.publications.filter(status=PublishedQuestion.Status.PUBLISHED).exists():
         return PUBLISHED
-    if question.edited and (question.stem.strip() or question.options):
+    if has_protected_manual_text(question):
         return MANUAL_TEXT
     return ""
 
@@ -77,7 +111,7 @@ def reasons_for(questions) -> dict[int, str]:
             reason = APPROVED
         elif question.pk in published:
             reason = PUBLISHED
-        elif question.edited and (question.stem.strip() or question.options):
+        elif has_protected_manual_text(question):
             reason = MANUAL_TEXT
         else:
             reason = ""

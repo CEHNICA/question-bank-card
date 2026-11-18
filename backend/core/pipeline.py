@@ -5227,6 +5227,7 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
 
 
 def _snapshot(question: Question) -> dict:
+    unconfirmed_candidate = cut_guard.is_unconfirmed_candidate_source_card(question)
     return {
         "id": question.id,
         "number": question.number,
@@ -5240,9 +5241,9 @@ def _snapshot(question: Question) -> dict:
         "body_mode": question.body_mode,
         "processing_mode": question.processing_mode,
         "ocr_pending": question.ocr_pending,
-        "stem": question.stem,
-        "options": question.options,
-        "edited": question.edited,
+        "stem": "" if unconfirmed_candidate else question.stem,
+        "options": {} if unconfirmed_candidate else question.options,
+        "edited": False if unconfirmed_candidate else question.edited,
         "answer": question.answer,
         "source_kind": question.source_kind,
         "source_anchor_seq": question.source_anchor_seq,

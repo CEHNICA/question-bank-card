@@ -374,6 +374,50 @@ class SingleReadingWorkflowTests(IsolatedData, TestCase):
         self.assertEqual(mixed_card.flags, ["有看不清的字（[?]），请对照原卷补上"])
         self.assertEqual(mixed_card.state, Question.State.YELLOW)
 
+    def test_reextracted_source_candidate_flags_and_edited_lock_are_cleared(self):
+        source_candidate = self.question(
+            number=7,
+            body_mode="source_image",
+            edited=True,
+            text_source="assistant",
+            stem="候选草稿",
+            state=Question.State.YELLOW,
+            flags=[
+                "按章节结构重新提取，请对照新原图范围核对；原审核记录保留在旧版本中。",
+                "文字是本次候选，显示和出卷以原图题面为准；如需文字题面请另行校订。",
+                "题型没读出来，请在题卡上选一下题型（单选、多选、填空、判断或解答）",
+            ],
+        )
+        Question.objects.filter(pk=source_candidate.pk).update(question_type="unknown")
+        source_candidate.refresh_from_db()
+        real_manual_text = self.question(
+            number=8,
+            body_mode="text",
+            edited=True,
+            text_source="human",
+            stem="人工定稿题干",
+            state=Question.State.GREEN,
+            flags=[],
+        )
+        response = self.client.get(f"/api/papers/{self.original.pk}")
+        self.assertEqual(response.status_code, 200)
+        cards = {item["id"]: item for item in response.json()["questions"]}
+        self.assertFalse(cards[source_candidate.pk]["cut_reading_guard"]["blocked"])
+        self.assertEqual(
+            cards[source_candidate.pk]["flags"], ["题型没读出来，请在题卡上选一下题型（单选、多选、填空、判断或解答）"]
+        )
+
+        counts = library.tidy_saved_cards()
+        self.assertGreaterEqual(counts["questions"], 1)
+        source_candidate.refresh_from_db()
+        real_manual_text.refresh_from_db()
+        self.assertFalse(source_candidate.edited)
+        self.assertEqual(source_candidate.stem, "")
+        self.assertEqual(source_candidate.text_source, "")
+        self.assertEqual(source_candidate.flags, ["题型没读出来，请在题卡上选一下题型（单选、多选、填空、判断或解答）"])
+        self.assertTrue(real_manual_text.edited)
+        self.assertEqual(real_manual_text.stem, "人工定稿题干")
+
 
 class SingleReadRequestPolicyTests(SimpleTestCase):
     def test_single_context_disables_hedge_but_preserves_original_timeout_and_cancel(self):

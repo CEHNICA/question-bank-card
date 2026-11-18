@@ -2170,7 +2170,7 @@ def paper_read_cut_questions(request, paper_id):
                 and suggestion["stem"].strip()
             ):
                 reason = "已有识读结果，但当前原卷或人工内容受保护，请对照原卷检查"
-            elif question.edited and (question.stem.strip() or question.options):
+            elif cut_guard.has_protected_manual_text(question):
                 reason = "已有人工修改的文字，已保留"
             elif not source_images.valid_regions(paper, question.regions):
                 reason = "尚未保存有效切题范围"
@@ -2195,6 +2195,7 @@ def paper_read_cut_questions(request, paper_id):
             # Keep the ordered regions, body, manual figures and review evidence.
             # Drop a failed ocr_suggestion immediately so the stage progress flips
             # from「失败」to「进行中」before the worker writes back.
+            cleared_candidate = cut_guard.clear_unconfirmed_candidate_source_draft(question)
             question.content_revision += 1
             question.reread_requested = True
             question.ocr_pending = True
@@ -2202,16 +2203,17 @@ def paper_read_cut_questions(request, paper_id):
             if question.error:
                 question.error = ""
             question.updated_at = now
-            question.save(
-                update_fields=[
-                    "content_revision",
-                    "reread_requested",
-                    "ocr_pending",
-                    "ocr_suggestion",
-                    "error",
-                    "updated_at",
-                ]
-            )
+            update_fields = [
+                "content_revision",
+                "reread_requested",
+                "ocr_pending",
+                "ocr_suggestion",
+                "error",
+                "updated_at",
+            ]
+            if cleared_candidate:
+                update_fields.extend(["edited", "stem", "options", "text_source"])
+            question.save(update_fields=update_fields)
             queued_ids.append(question.pk)
             question_revisions[str(question.pk)] = question.content_revision
     message = (
@@ -3211,6 +3213,8 @@ def question_action(request, question_id, action: str):
                 )
             if not source_images.is_image(question):
                 question.edited = False
+            else:
+                cut_guard.clear_unconfirmed_candidate_source_draft(question)
             current_review = question.figure_review if isinstance(question.figure_review, dict) else {}
             has_manual_figure = any(
                 isinstance(figure, dict) and figure.get("source") == "manual" for figure in (question.figures or [])

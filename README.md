@@ -19,7 +19,12 @@
 
 要让当前豆包补知识点或参考答案，可以明确让它通过附带的 CLI/MCP 工具完成后交回题库。**这条助手流程不需要豆包 API。** 两项默认关闭，明确需要时再启用；只有聊天能力时由你导入结果。网页中的生成按钮使用已配置的独立 API。[给助手的操作说明](AGENTS.md)
 
-当前发布版本为 **2.1.3**（去掉题号提示条并整合桌面图标与 OneNote 等待条修复版），可从 [GitHub Releases](https://github.com/CEHNICA/question-bank-card/releases/tag/v2.1.3) 下载（[2.1.3 说明](docs/release-notes-v2.1.3.md) · [2.1.2 说明](docs/release-notes-v2.1.2.md) · [2.1.1 说明](docs/release-notes-v2.1.1.md) · [2.1.0 说明](docs/release-notes-v2.1.0.md) · [2.0.0 完整升级说明](docs/release-notes-v2.0.0.md) · [更新记录](CHANGELOG.md)）。
+当前发布版本为 **2.1.4**（解除重提取原图题误锁定并清理历史重提取提示条版），可从 [GitHub Releases](https://github.com/CEHNICA/question-bank-card/releases/tag/v2.1.4) 下载（[2.1.4 说明](docs/release-notes-v2.1.4.md) · [2.1.3 说明](docs/release-notes-v2.1.3.md) · [2.1.2 说明](docs/release-notes-v2.1.2.md) · [2.1.1 说明](docs/release-notes-v2.1.1.md) · [2.1.0 说明](docs/release-notes-v2.1.0.md) · [2.0.0 完整升级说明](docs/release-notes-v2.0.0.md) · [更新记录](CHANGELOG.md)）。
+
+### 2.1.4 修复与改进
+
+- **解除旧版重提取原图题「已有人工文字，不再识读」误拦截**：历史按章节重提取遗留在原图卡底层的未定稿助手候选文字不再锁死「AI 识读这题」与「识读未完成题目」批量队列；真实人工定稿的文字依然保持保护不被覆盖。
+- **清理「按章节结构重新提取 / 文字是本次候选」两行历史提示条**：新旧页面与后台同步自动清理这两行过时提示，保留选题型、缺图、看不清字（`[?]`）等重要提示。
 
 ### 2.1.3 修复与改进
 

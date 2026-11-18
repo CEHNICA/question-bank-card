@@ -1251,6 +1251,9 @@ OBSOLETE_SECOND_READ_FLAG_PREFIX = "只有一次识读成功（另一次："
 OBSOLETE_NUMBER_SEEN_PREFIX = "AI 看到的题号是 "
 OBSOLETE_EXTRA_NUMBER_PREFIX = "这张卡的范围里还印着第 "
 OBSOLETE_EXTRA_NUMBER_MARKER = "题的题号，卡上只有这一道；请对照原书确认那几道题是不是漏进来了"
+OBSOLETE_REEXTRACT_PREFIX = "按章节结构重新提取，"
+OBSOLETE_REEXTRACT_MARKER = "原审核记录保留在旧版本中"
+OBSOLETE_CANDIDATE_TEXT_PREFIX = "文字是本次候选，"
 
 
 def is_obsolete_second_read_flag(flag: object) -> bool:
@@ -1266,9 +1269,19 @@ def is_obsolete_number_warning_flag(flag: object) -> bool:
     return text.startswith(OBSOLETE_EXTRA_NUMBER_PREFIX) and OBSOLETE_EXTRA_NUMBER_MARKER in text
 
 
+def is_obsolete_reextract_flag(flag: object) -> bool:
+    """判断是否为旧版按章节结构重提取与候选文字提示条。"""
+    text = str(flag or "")
+    if text.startswith(OBSOLETE_REEXTRACT_PREFIX) and OBSOLETE_REEXTRACT_MARKER in text:
+        return True
+    return text.startswith(OBSOLETE_CANDIDATE_TEXT_PREFIX)
+
+
 def is_obsolete_review_flag(flag: object) -> bool:
     """判断是否为版本升级后不再展示、应自动清理的历史提示旗标。"""
-    return is_obsolete_second_read_flag(flag) or is_obsolete_number_warning_flag(flag)
+    return (
+        is_obsolete_second_read_flag(flag) or is_obsolete_number_warning_flag(flag) or is_obsolete_reextract_flag(flag)
+    )
 
 
 _BRACKET_NOTE = re.compile(r"[（(【\[][^）)】\]]{0,14}[）)】\]]")
@@ -1331,29 +1344,38 @@ def tidy_saved_cards() -> dict[str, int]:
     reminder (yellow); it cannot be approved until a type is chosen.
     """
 
+    from . import cut_guard
     from .pipeline import read_c_with_spots
 
     switches = features.load()
     counts = {"questions": 0, "publications": 0}
     with transaction.atomic():
         for question in Question.all_objects.select_for_update().select_related("paper", "group"):
-            stem, options, kind, origin = tidy_text(
-                question.stem, question.options, question.question_type, question.origin, switches=switches
-            )
-            if not (question.approved or question.edited or question.type_locked):
+            raw_flags = list(question.flags or [])
+            clear_candidate_source = cut_guard.is_unconfirmed_candidate_source_card(question)
+            edited_value = False if clear_candidate_source else bool(question.edited)
+            text_source_value = "" if clear_candidate_source else str(question.text_source or "")
+            if clear_candidate_source:
+                stem, options = "", {}
+                kind = question.question_type
+                origin = question.origin
+            else:
+                stem, options, kind, origin = tidy_text(
+                    question.stem, question.options, question.question_type, question.origin, switches=switches
+                )
+            if not (question.approved or edited_value or question.type_locked):
                 # 1.10.1: a choice card under “…有多项符合题目要求…” is multiple
                 # choice, whatever the reader said.  Only cards nobody has
                 # approved, edited or typed by hand.
                 kind = qtypes.with_section(kind, question.section)
             invented: list[str] = []
-            if not (question.approved or question.edited):
+            if not (question.approved or edited_value or question.body_mode == "source_image"):
                 # 1.10.2: an option the model wrote as “（原卷此处为配图，无印刷文字）”
                 # was not read; say so instead of keeping the note as its text.
                 figure_slots = {figure.get("slot") for figure in question.figures or [] if isinstance(figure, dict)}
                 options, invented = _without_invented_options(options, figure_slots)
             answer = prose.tidy_value(question.answer, switches=switches)
             analysis = prose.tidy_value(question.analysis, switches=switches)
-            raw_flags = list(question.flags or [])
             current_flags = [flag for flag in raw_flags if not is_obsolete_review_flag(flag)]
             removed_obsolete = len(current_flags) != len(raw_flags)
             if invented:
@@ -1391,8 +1413,10 @@ def tidy_saved_cards() -> dict[str, int]:
                 question.analysis,
                 list(question.flags or []),
                 question.state,
+                bool(question.edited),
+                str(question.text_source or ""),
             )
-            if (stem, options, kind, origin, answer, analysis, flags, state) == before:
+            if (stem, options, kind, origin, answer, analysis, flags, state, edited_value, text_source_value) == before:
                 # 1.10.2: store where the “MinerU 读法不同” spots are, once, so the
                 # review page need not look them up again on every load.
                 spotted = read_c_with_spots(question)
@@ -1403,6 +1427,7 @@ def tidy_saved_cards() -> dict[str, int]:
             question.stem, question.options, question.question_type = stem, options, kind
             question.origin, question.answer, question.analysis = origin, answer, analysis
             question.flags, question.state = flags, state
+            question.edited, question.text_source = edited_value, text_source_value
             spotted = read_c_with_spots(question)
             if spotted is not None:
                 question.read_c = spotted
@@ -1420,6 +1445,8 @@ def tidy_saved_cards() -> dict[str, int]:
                     "analysis",
                     "flags",
                     "state",
+                    "edited",
+                    "text_source",
                     "read_a",
                     "read_b",
                     "read_c",

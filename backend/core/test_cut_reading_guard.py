@@ -105,6 +105,20 @@ class CutReadingGuardTests(TransactionTestCase):
         question = self.cut(edited=True, stem="人工改过的字")
         self.assertEqual(self.guard(question), {"blocked": True, "reason": "manual_text"})
 
+    def test_unconfirmed_assistant_candidate_on_source_image_is_not_guarded(self):
+        question = self.cut(
+            edited=True,
+            text_source="assistant",
+            stem="候选文字",
+            flags=[
+                "按章节结构重新提取，请对照新原图范围核对；原审核记录保留在旧版本中。",
+                "文字是本次候选，显示和出卷以原图题面为准；如需文字题面请另行校订。",
+            ],
+        )
+        self.assertEqual(self.guard(question), {"blocked": False, "reason": ""})
+        response = self.reread(question)
+        self.assertNotEqual(response.status_code, 409)
+
     def test_edited_without_words_is_not_guarded(self):
         # 只动过配图、题干还是空的：后端照样放行识读，页面也不能说它被挡住。
         question = self.cut(edited=True)
