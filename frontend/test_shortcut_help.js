@@ -5,6 +5,8 @@ const read = name => fs.readFileSync(path.join(__dirname, name), "utf8");
 const keys = value => [...value.primary, ...value.more].flatMap(item => item.keys);
 assert.deepEqual(help.reference("review").primary.map(item => item.keys[0]), ["N", "Enter", "K"]);
 assert.deepEqual(help.reference("review", { comparison: true }).primary.flatMap(item => item.keys), ["←", "→", "Enter", "Esc"]);
+assert(keys(help.reference("review")).includes("V") && keys(help.reference("review")).includes("["));
+assert(help.reference("review").extra.includes("原卷画布"));
 assert(!keys(help.reference("review", { comparison: true })).some(key => ["Q", "O", "1", "Delete"].includes(key)), "A modal only describes keys usable inside that modal");
 assert(!keys(help.reference("review")).includes("4")); assert(keys(help.reference("review", { aiFilter: true })).includes("4"));
 assert(keys(help.reference("crop")).includes("S") && keys(help.reference("crop")).includes("Ctrl+S"));

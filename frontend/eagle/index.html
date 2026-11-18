@@ -6,6 +6,7 @@
   <title>题有据 · 题库工作台</title>
   <!-- 任务栏 / Edge --app 窗口图标：必须挂 favicon，否则掉成浏览器默认图标 -->
   <link rel="icon" type="image/png" href="/favicon.png?v=brand-tug-12658">
+  <link rel="icon" type="image/png" sizes="256x256" href="/app-icon-256.png?v=brand-tug-12658">
   <link rel="apple-touch-icon" href="/app-icon-256.png?v=brand-tug-12658">
   <!-- Tailwind CSS：本地预编译产物（tailwindcss@3.4.17），断网/墙内也能出样式 -->
   <link rel="stylesheet" href="/eagle/tailwind.css?v=tw-20261116a">
@@ -303,6 +304,7 @@
       #editQuestionModal .x-close,
       #originalPaperModal .x-close,
       #solutionEditorModal .x-close { min-width: 32px; min-height: 32px; }
+      #eagleHelpModal .x-close { min-width: 32px; min-height: 32px; }
       /* 文件夹选择弹窗：树行与底部按钮 */
       #folderPickerModal #folderPickerTreeList button { min-height: 32px; }
       #folderPickerModal #folderPickerNewBtn,
@@ -1317,6 +1319,10 @@
       <span>⌨️ 键盘快捷键一览</span>
       <kbd class="text-[10px] text-slate-400 font-mono">?</kbd>
     </button>
+    <button type="button" onclick="openEagleHelpModal(); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
+      <span>📖 工作台使用指南</span>
+      <span class="text-[10px] text-emerald-700 font-mono">2.1</span>
+    </button>
 
     <div class="mt-1.5 border-t border-slate-200/90 pt-1">
       <a href="/settings" class="w-full flex flex-col gap-0.5 px-3 py-2 hover:bg-slate-100 text-left" title="API 密钥、显示与导出、备份与帮助">
@@ -1966,6 +1972,44 @@
             <span class="text-slate-600">恢复界面 100%</span>
             <kbd class="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 font-mono shadow-2xs font-bold">Ctrl + 0</kbd>
           </div>
+        </div>
+        <div class="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+          <span>想查看新功能说明与操作流程？</span>
+          <button type="button" onclick="closeShortcutsModal(); openEagleHelpModal();" class="text-emerald-700 hover:underline font-medium cursor-pointer">打开工作台使用指南 →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 3b. 工作台使用指南模态框 (Eagle Help Guide) ================= -->
+  <div id="eagleHelpModal" class="hidden fixed inset-0 z-[10007] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4" onclick="closeEagleHelpModal()">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[82vh] flex flex-col overflow-hidden border border-slate-200" onclick="event.stopPropagation()">
+      <div class="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-slate-50/80 shrink-0">
+        <span class="text-sm font-bold text-slate-800 flex items-center gap-2">
+          <span>📖</span><span>题有据题库工作台使用指南</span>
+        </span>
+        <button type="button" onclick="closeEagleHelpModal()" class="x-close text-slate-400 hover:text-slate-700 text-sm cursor-pointer p-1" title="关闭 (Esc)">✕</button>
+      </div>
+      <div class="p-5 overflow-y-auto space-y-3 text-xs text-slate-700 leading-relaxed">
+        <div class="p-3 rounded-lg bg-emerald-50 border border-emerald-200/80 space-y-1">
+          <div class="font-semibold text-emerald-900">① 录题分屏工作台与断点续读</div>
+          <p class="text-slate-600">从左上角「📄 录入题目」进入录题页后，宽屏左侧常驻高清原卷画布：点击题卡联动定位左框，单击左框聚焦题卡，双击直接调框；拍照上传支持前移/后移调序与 90° 旋转。切题只保存范围不自动扣费，可主动点击「识读未完成题目」批量转文字或直接原图审核；中途退出软件重开后，未开始的排队题会自动续读。</p>
+        </div>
+        <div class="p-3 rounded-lg bg-slate-50 border border-slate-200/80 space-y-1">
+          <div class="font-semibold text-slate-800">② 智能文件夹、右键悬停飞出与标签地图</div>
+          <p class="text-slate-600">左侧栏支持按教材/试卷归属与智能视图（OneNote 有笔记、未分类、待补考点标签、AI 生成未人工核对、最近浏览）快速筛题。在题卡上右键可直接悬停展开子标签菜单贴标、修改题型、校订题目或安全撤回至回收站；「🔖 标签管理中心」支持列表与树状地图双向整理。</p>
+        </div>
+        <div class="p-3 rounded-lg bg-slate-50 border border-slate-200/80 space-y-1">
+          <div class="font-semibold text-slate-800">③ 统一答案解析编辑器 & OneNote 双向联动</div>
+          <p class="text-slate-600">在题卡、快速审题弹窗或录题页已入库题卡右上角点「编答案/解析」，均进入同一套答案解析编辑器（支持公式与步骤实时预览、AI 初稿参考）；有 OneNote 笔记的题目支持一键创建做题页、呼出定位及深链回跳题库。</p>
+        </div>
+        <div class="p-3 rounded-lg bg-slate-50 border border-slate-200/80 space-y-1">
+          <div class="font-semibold text-slate-800">④ 全屏看题、界面缩放与保真组卷导出</div>
+          <p class="text-slate-600">选中题目按 <kbd class="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono">Space</kbd> 全屏审题（<kbd class="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono">← / →</kbd> 切题），<kbd class="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono">Ctrl + Shift + C</kbd> 一键复制高清排版题图，<kbd class="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono">Ctrl + = / - / 0</kbd> 调节工作台缩放；加入试题篮后可预览并导出排版一致的 Word / PDF。</p>
+        </div>
+        <div class="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+          <a href="/settings#help" class="text-emerald-700 hover:underline font-medium">查看录题详细帮助与新手练习 →</a>
+          <button type="button" onclick="closeEagleHelpModal(); openShortcutsModal();" class="text-emerald-700 hover:underline font-medium cursor-pointer">查看键盘快捷键 (?)</button>
         </div>
       </div>
     </div>
@@ -8991,6 +9035,14 @@
       document.getElementById('shortcutsModal')?.classList.add('hidden');
     }
 
+    function openEagleHelpModal() {
+      document.getElementById('eagleHelpModal')?.classList.remove('hidden');
+    }
+
+    function closeEagleHelpModal() {
+      document.getElementById('eagleHelpModal')?.classList.add('hidden');
+    }
+
     // 从 OneNote 回跳时，等卷子补载完再把题目对齐一次。用户自己滚动后就不再改位置。
     let pendingLocateQuestionId = '';
     let locateScrollToken = 0;
@@ -14569,6 +14621,7 @@
           closeQuickLookModal();
           closeOriginalPaperModal();
           closeShortcutsModal();
+          closeEagleHelpModal();
           if (typeof closeSolutionEditor === 'function') closeSolutionEditor();
           clearBatchSelection();
           return;

@@ -508,6 +508,19 @@ def _window_icon_path() -> Path | None:
     return None
 
 
+def _enable_dpi_awareness() -> None:
+    """开启 Windows 系统 DPI 感知，防止高分屏将启动画面与图标按低分位图拉伸发糊。"""
+    if os.name != "nt":
+        return
+    with contextlib.suppress(Exception):
+        import ctypes
+
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:  # noqa: BLE001 - 旧版 Windows 回退到 user32 接口
+            ctypes.windll.user32.SetProcessDPIAware()
+
+
 def apply_window_icon(user32, hwnd: int) -> None:
     """把 Edge/Chrome --app 窗口的任务栏图标换成题有据 TUG，而不是浏览器默认图标。"""
     if not hwnd or user32 is None:
@@ -527,6 +540,8 @@ def apply_window_icon(user32, hwnd: int) -> None:
         WM_SETICON = 0x0080
         ICON_SMALL = 0
         ICON_BIG = 1
+        SM_CXICON = 11
+        SM_CXSMICON = 49
         dll.LoadImageW.argtypes = [
             wintypes.HINSTANCE,
             wintypes.LPCWSTR,
@@ -543,11 +558,22 @@ def apply_window_icon(user32, hwnd: int) -> None:
             wintypes.LPARAM,
         ]
         dll.SendMessageW.restype = ctypes.c_ssize_t
-        handle = dll.LoadImageW(None, str(ico), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE)
-        if not handle:
-            return
-        dll.SendMessageW(hwnd, WM_SETICON, ICON_BIG, handle)
-        dll.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, handle)
+        big_size = int(dll.GetSystemMetrics(SM_CXICON) or 0)
+        small_size = int(dll.GetSystemMetrics(SM_CXSMICON) or 0)
+        big_handle = (
+            dll.LoadImageW(None, str(ico), IMAGE_ICON, big_size, big_size, LR_LOADFROMFILE)
+            if big_size > 0
+            else dll.LoadImageW(None, str(ico), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE)
+        )
+        small_handle = (
+            dll.LoadImageW(None, str(ico), IMAGE_ICON, small_size, small_size, LR_LOADFROMFILE)
+            if small_size > 0
+            else big_handle
+        )
+        if big_handle:
+            dll.SendMessageW(hwnd, WM_SETICON, ICON_BIG, big_handle)
+        if small_handle or big_handle:
+            dll.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small_handle or big_handle)
     except Exception:  # noqa: BLE001 - 图标失败不能挡窗口
         pass
 
@@ -736,12 +762,33 @@ def _set_icon(root) -> None:
             root.iconbitmap(default=str(ico))
 
 
+def _load_splash_icon(icon_size: int, master):
+    """使用高质量 LANCZOS 从 256px 源图缩放启动图标，不可用时回退 Tk 内置缩放。"""
+    if not ICON_PNG.is_file():
+        return None
+    target = max(16, int(icon_size))
+    with contextlib.suppress(Exception):
+        from PIL import Image, ImageTk
+
+        with Image.open(ICON_PNG) as raw:
+            resized = raw.convert("RGBA").resize((target, target), Image.Resampling.LANCZOS)
+        return ImageTk.PhotoImage(resized, master=master)
+    with contextlib.suppress(Exception):
+        import tkinter as tk
+
+        raw_tk = tk.PhotoImage(file=str(ICON_PNG), master=master)
+        step = max(1, round(raw_tk.width() / target))
+        return raw_tk.subsample(step, step) if step > 1 else raw_tk
+    return None
+
+
 class Splash:
     """启动时的小窗口：图标、名称、当前步骤和进度条。tkinter 不可用时什么也不显示。"""
 
     def __init__(self) -> None:
         self.events: queue.Queue = queue.Queue()
         self.root = None
+        _enable_dpi_awareness()
         try:
             import tkinter as tk
             from tkinter import ttk
@@ -754,7 +801,10 @@ class Splash:
         self.root = root
         root.overrideredirect(True)
         root.configure(bg="#ffffff")
-        width, height = 420, 230
+        scale = 1.0
+        with contextlib.suppress(Exception):
+            scale = max(1.0, float(root.winfo_fpixels("1i")) / 96.0)
+        width, height = round(420 * scale), round(230 * scale)
         x = (root.winfo_screenwidth() - width) // 2
         y = (root.winfo_screenheight() - height) // 3
         root.geometry(f"{width}x{height}+{x}+{y}")
@@ -762,24 +812,27 @@ class Splash:
         _set_icon(root)
         frame = tk.Frame(root, bg="#ffffff", highlightthickness=1, highlightbackground="#dfe4dd")
         frame.pack(fill="both", expand=True)
-        self.image = None
-        with contextlib.suppress(Exception):
-            if ICON_PNG.is_file():
-                self.image = tk.PhotoImage(file=str(ICON_PNG)).subsample(4, 4)
+        self.image = _load_splash_icon(round(64 * scale), root)
         if self.image is not None:
-            tk.Label(frame, image=self.image, bg="#ffffff").pack(pady=(26, 8))
+            tk.Label(frame, image=self.image, bg="#ffffff").pack(pady=(round(26 * scale), round(8 * scale)))
         else:
-            tk.Label(frame, text="题", font=("SimSun", 30, "bold"), fg="#fff4dc", bg="#1f6b5f", width=2).pack(pady=(26, 8))
+            tk.Label(frame, text="题", font=("SimSun", 30, "bold"), fg="#fff4dc", bg="#1f6b5f", width=2).pack(
+                pady=(round(26 * scale), round(8 * scale))
+            )
         tk.Label(frame, text=APP_TITLE, font=("Microsoft YaHei UI", 14, "bold"), fg="#1c2a28", bg="#ffffff").pack()
-        tk.Label(frame, text=APP_SUBTITLE, font=("Microsoft YaHei UI", 9), fg="#72807b", bg="#ffffff").pack(pady=(2, 0))
+        tk.Label(frame, text=APP_SUBTITLE, font=("Microsoft YaHei UI", 9), fg="#72807b", bg="#ffffff").pack(
+            pady=(round(2 * scale), 0)
+        )
         self.status = tk.StringVar(value="正在启动…")
-        tk.Label(frame, textvariable=self.status, font=("Microsoft YaHei UI", 9), fg="#72807b", bg="#ffffff").pack(pady=(6, 10))
+        tk.Label(frame, textvariable=self.status, font=("Microsoft YaHei UI", 9), fg="#72807b", bg="#ffffff").pack(
+            pady=(round(6 * scale), round(10 * scale))
+        )
         style = ttk.Style(root)
         with contextlib.suppress(Exception):
             style.theme_use("clam")
         style.configure("QB.Horizontal.TProgressbar", troughcolor="#eaede7", background="#1f6b5f", bordercolor="#eaede7",
-                        lightcolor="#1f6b5f", darkcolor="#1f6b5f", thickness=4)
-        bar = ttk.Progressbar(frame, mode="indeterminate", length=260, style="QB.Horizontal.TProgressbar")
+                        lightcolor="#1f6b5f", darkcolor="#1f6b5f", thickness=max(4, round(4 * scale)))
+        bar = ttk.Progressbar(frame, mode="indeterminate", length=round(260 * scale), style="QB.Horizontal.TProgressbar")
         bar.pack()
         bar.start(12)
 
@@ -911,6 +964,7 @@ def _handle_protocol_uri(uri: str) -> int:
 
 
 def _main(arguments: list[str] | None = None) -> int:
+    _enable_dpi_awareness()
     _set_app_id()
     arguments = [] if arguments is None else list(arguments)
     if arguments == ["--configure"]:

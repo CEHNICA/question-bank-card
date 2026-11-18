@@ -120,6 +120,8 @@ hiddenimports = [
     "docx",
     "mathml2omml",
     "lxml.etree",
+    "PIL.Image",
+    "PIL.ImageTk",
     "pythoncom",
     "pywintypes",
     "win32api",

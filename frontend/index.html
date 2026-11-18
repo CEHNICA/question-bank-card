@@ -6,6 +6,8 @@
   <meta name="color-scheme" content="light">
   <title>题有据 · 录入题目</title>
   <link rel="icon" type="image/png" href="favicon.png?v=brand-check">
+  <link rel="icon" type="image/png" sizes="256x256" href="/app-icon-256.png">
+  <link rel="apple-touch-icon" href="/app-icon-256.png">
   <link rel="stylesheet" href="/vendor/katex/katex.min.css">
   <link rel="stylesheet" href="/styles.css">
 <!-- 1.26.50：打开软件时试卷列表还在准备，这一行说明现在是什么状态。 -->
@@ -117,12 +119,20 @@
           <section class="settings-section help-start" aria-labelledby="settingsReviewTitle">
             <h3 id="settingsReviewTitle">选择一种切题方式</h3>
             <div class="help-paths">
-              <article class="help-path"><h4>自动切题</h4><p>导入自己的资料，先在本机尝试；需要 MinerU 时明确允许本次云处理。切好后核对，通过即入库。</p><button id="settingsAutomaticGuide" class="button primary" type="button">自动切题入门</button></article>
-              <article class="help-path"><h4>切题与校正</h4><p>在同一原卷画布中补题、调整范围和题号。用三道离线示例练框题、改字、通过，再实际选题导出。</p><button id="settingsLearn" class="button" type="button">开始手工练习</button><small>示例与正式题库独立，进度自动记住。</small></article>
+              <article class="help-path"><h4>自动切题</h4><p>导入自己的资料，先在本机尝试；需要 MinerU 时明确允许本次云处理。切好后可在左右分屏对照原卷核对，通过即自动入库。</p><button id="settingsAutomaticGuide" class="button primary" type="button">自动切题入门</button></article>
+              <article class="help-path"><h4>切题与校正</h4><p>在同一原卷画布中补题、调整范围和题号；保存只存范围不自动识读，完成后可主动批量识读或直接原图审核。用三道离线示例练框题、改字、通过，再实际选题导出。</p><button id="settingsLearn" class="button" type="button">开始手工练习</button><small>示例与正式题库独立，进度自动记住。</small></article>
             </div>
           </section>
           <section class="settings-section help-tasks" aria-labelledby="helpTasksTitle">
             <h3 id="helpTasksTitle">遇到问题时再看</h3>
+            <details class="teaching-help"><summary>左右分屏对照原卷与双向定位</summary>
+              <p>宽屏下左侧常驻高清原卷画布：点击右侧题卡会自动翻页并高亮左框；单击原卷题框同步定位右侧题卡，双击题框可直接进入「切题与校正」调整范围。</p>
+              <p>需要全心看题卡或屏幕较窄时，可点工具栏「收起原卷」或「全屏」（快捷键 Q）；顶部流程条会同步显示「① 导卷切题 → ② 逐题核对 → ③ 完成归档」。</p>
+            </details>
+            <details class="teaching-help"><summary>拍照暂存旋转调序与批量识读续读</summary>
+              <p>多张照片合并上传时，弹窗支持「← 前移 / 后移 →」调页序、移除误选照片以及顺时针 90° 旋转（上传前按真实像素转正），并可在同窗确认是否开启云端辅助切题。</p>
+              <p>手工切题或本地文字层切好后，可点「识读未完成题目」批量转为文字，也可点「直接原图审核」。批量识读中途退出软件，已读完题卡保留，重新打开后尚未开始的排队题会自动续读；个别失败题可点「重新识读失败题目」。</p>
+            </details>
             <details class="teaching-help"><summary>题目缺了配图</summary>
               <p>点题卡的“补选配图”，从原卷选图，再选择属于题干还是选项。保存后对照原卷重新通过。</p>
               <button class="button small" type="button" data-teach-task="figure">用示例练补图</button>
@@ -131,7 +141,7 @@
               <p>为同一道题添加多个片段；翻到下一页后点“再加一块”。调整已有题时直接单击题框，拖边角改大小、拖题号标签移动；双击题框可回到对应审核卡。</p>
             </details>
             <details class="teaching-help"><summary>补充或修改答案</summary>
-              <p>在“答案解析”中填写答案和步骤，右边实时预览，保存后用于出卷。需要 AI 帮忙时只勾选本次题目；生成失败可到“设置 → API 配置”检查答题服务。旧初稿保留在折叠历史中，主视图使用你保存的版本。</p>
+              <p>题卡已入库后，右上可直接点「编答案/解析」直达 Eagle 题库工作台的统一答案编辑器；保存后用于出卷。需要 AI 帮忙时只勾选本次题目；生成失败可到“设置 → API 配置”检查答题服务。旧初稿保留在折叠历史中，主视图使用你保存的版本。</p>
             </details>
             <details class="teaching-help"><summary>读题一直没结果，或服务不可用</summary>
               <p>等待时可停止任务并打开“切题与校正”，原卷和已保存题目会保留。完成切题后，再由你选择 AI 识读或直接原图审核。</p>
@@ -142,18 +152,21 @@
             <h3 id="helpFaqTitle">常见问题</h3>
             <details id="settingsFaq" class="teaching-help"><summary>查看常见问题</summary>
               <dl class="explain-list">
+                <div><dt>切题后一定要 AI 识读吗？</dt><dd>不用。切题与校正只保存原卷裁片，不自动调用 AI；你可以主动点「识读未完成题目」转文字，也可以直接原图审核并入库、导出。</dd></div>
                 <div><dt>通过以后还要入库吗？</dt><dd>不用。对照原卷确认后标记通过，题目自动入库；改过题面后需要重新核对。</dd></div>
-                <div><dt>怎样看完整题目？</dt><dd>题库点“全屏看题”，用左右方向键切换题目，Esc 返回。原卷支持 Ctrl＋滚轮缩放和左键拖动。</dd></div>
+                <div><dt>整份已入库资料想安全撤回怎么办？</dt><dd>在「试卷操作 → 移入回收站（安全撤回）…」可一次性归档当前资料并把该卷已入库题目撤回题库回收站，随时可以恢复。</dd></div>
+                <div><dt>怎样看完整题目？</dt><dd>题库工作台点「快速审题」或按空格进入全屏看题，用左右方向键切换题目，Esc 返回。原卷画布支持 Ctrl＋滚轮缩放和拖动。</dd></div>
                 <div><dt>没保存时能直接离开吗？</dt><dd>有实际改动时会提醒。选择“继续编辑”保留当前内容；“丢弃改动”回到上次保存的版本。</dd></div>
                 <div><dt>怎样继续上次组卷？</dt><dd>组卷预览中保存草稿，下次从“组卷草稿”打开。遇到更新或撤回的题，先按提示处理。</dd></div>
                 <div><dt>AI 答案的“未核对”是什么意思？</dt><dd>表示这份初稿还需要人工检查。人工保存后主视图显示保存版本；保存本身不代表数学结论已经正确。</dd></div>
               </dl>
             </details>
             <details class="teaching-help"><summary>题卡上的标记说明</summary>
-              <p>“需要核查”表示还没人工确认；黄色提醒指出需要特别核对的位置；“已通过”表示当前版本已被确认。</p>
+              <p>“需要核查”表示还没人工确认；黄色提醒指出需要特别核对的位置；“已通过 / 已入库”表示当前版本已被确认并写入题库。</p>
               <details class="teaching-help"><summary>查看识读过程的详细标记</summary>
                 <dl class="explain-list">
-                  <div><dt>待核对</dt><dd>还没有人工确认；请对照原卷检查题面和配图。</dd></div>
+                  <div><dt>待核对 / 原图题 · 待核对</dt><dd>还没有人工确认；可先主动 AI 识读转文字，也可直接对照左侧原卷截图核对并入库。</dd></div>
+                  <div><dt>已识读 / 进行中 / 待识读</dt><dd>批量识读进度条按整卷进度统计：含已完成文字题与受保护已有文字题，中途退出重开会从剩余排队题自动续读。</dd></div>
                   <div><dt>处理记录</dt><dd>切题、页序或配图时遇到的情况，可在“试卷操作”中查看。</dd></div>
                 </dl>
               </details>
@@ -848,13 +861,13 @@
 
   <dialog id="welcomeDialog" class="welcome-dialog" aria-labelledby="welcomeTitle">
     <div class="welcome-body">
-      <img class="welcome-mark" src="/favicon.png" width="52" height="52" alt="" aria-hidden="true">
+      <img class="welcome-mark" src="/app-icon-256.png" width="52" height="52" alt="" aria-hidden="true">
       <h2 id="welcomeTitle">欢迎使用题有据</h2>
       <p class="welcome-lead">保留原卷，核对后入库。每道题都有出处，随时回看原页。</p>
       <ol class="welcome-steps">
-        <li><b>1</b><span><strong>上传</strong>PDF、Word 或照片先保存在本机，程序自动尝试切题；未切出的题可以从原卷选取，无需密钥。</span></li>
-        <li><b>2</b><span><strong>核对</strong>完整框出题目、选项与配图，选好题型。可以直接保留原图，也可以主动识读，确认后转成文字。</span></li>
-        <li><b>3</b><span><strong>入库</strong>核对后标记“通过”，题目自动进入“正式题库”，可以搜索、组卷。</span></li>
+        <li><b>1</b><span><strong>上传</strong>PDF、Word 或多张照片（支持调序与 90° 旋转转正），先保存在本机并尝试切题；未切出时可直接从原卷框取，无需密钥。</span></li>
+        <li><b>2</b><span><strong>核对</strong>在左右分屏画布中对照原卷与题框，完善题目、选项与配图；可直接保留原图，也可主动点击 AI 识读转为文字。</span></li>
+        <li><b>3</b><span><strong>入库</strong>核对后标记“通过”，题目自动进入“题库工作台”，可打标、编答案、加入 OneNote 并组卷导出。</span></li>
       </ol>
       <p id="welcomeSetup" class="settings-ready">正在检查读题服务…</p>
       <div class="welcome-learn">
@@ -873,10 +886,10 @@
   <dialog id="automaticGuideDialog" class="automatic-guide-dialog" aria-labelledby="automaticGuideTitle">
     <div class="dialog-head"><div><h3 id="automaticGuideTitle">自动切题入门</h3><p class="hint">这是操作流程说明。手工示例没有经过 MinerU 或 AI 处理。</p></div><button class="button quiet" type="button" data-close>关闭</button></div>
     <ol class="automatic-guide-steps">
-      <li><b>1</b><div><strong>导入资料</strong><p>上传 PDF、Word 或照片。原卷先保存在本机，程序先尝试在本机自动切题。</p></div></li>
+      <li><b>1</b><div><strong>导入资料</strong><p>上传 PDF、Word 或拍照（多张照片可在暂存窗前移/后移调序及顺时针 90° 旋转）。原卷先保存在本机，程序先尝试在本机自动切题。</p></div></li>
       <li><b>2</b><div><strong>需要时允许 MinerU 云处理</strong><p>先在“设置 → API 配置”填写 MinerU。导入时明确允许本次云处理，选择“允许使用已配置服务”；本机无法切题时才会提交。发起前查看发送范围和费用提示，服务不可用时可重试或改用手工切题。</p></div></li>
-      <li><b>3</b><div><strong>核对后通过</strong><p>对照原卷检查题干、选项和配图，改好错漏后勾选通过，题目自动进入正式题库。</p></div></li>
-      <li><b>4</b><div><strong>选题、预览、导出</strong><p>在正式题库把题目加入试题篮，打开组卷预览，再导出 PDF 或 Word。</p></div></li>
+      <li><b>3</b><div><strong>分屏对照，核对后通过</strong><p>宽屏左侧常驻高清原卷画布可与右侧题卡双向定位；切题完成后可主动选择 AI 识读或直接原图审核，勾选通过后自动入库。</p></div></li>
+      <li><b>4</b><div><strong>选题、预览、导出</strong><p>在题库工作台打标、编答案并加入试题篮，打开组卷预览，再导出排版一致的 PDF 或 Word。</p></div></li>
     </ol>
     <footer class="automatic-guide-actions"><span>实际结果以本次资料与服务状态为准。</span><button id="automaticGuideImport" class="button primary" type="button">开始导入</button></footer>
   </dialog>

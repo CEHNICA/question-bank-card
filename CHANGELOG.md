@@ -3,6 +3,15 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.1.1
+
+**高清图标与 DPI 适配、帮助系统同步更新、批量识读进度与断点续读修复**
+
+- **高分屏启动画面与图标高清化（`app_window.py`、`index.html`、`library.html`）**：为启动画面开启 Windows DPI 感知并按系统缩放比等比缩放窗口，启动图标改用 Pillow `LANCZOS` 高质量重采样替代 `subsample` 抽样；任务栏大小图标按系统指标加载；欢迎弹窗与题库顶栏图标升级为 `256×256` 高清图标（`/app-icon-256.png`）。
+- **帮助系统同步更新至 2.1.x（`index.html`、`shortcut-help.js`、`eagle/index.html`）**：补全分屏原卷画布双向定位、三步流程条、拍照旋转调序、安全移入回收站、直达 Eagle 答案编辑器及断点续读说明；Eagle 工作台新增「📖 工作台使用指南」弹窗。
+- **修复批量识读进度统计、已撤回记录拦截与断点续读（`app.js`、`views.py`、`pipeline.py`）**：修正 `cutReadingSummary` 已完成/受保护题数统计，修复 `paper_read_cut_questions` 漏滤 `status='published'` 导致已撤回记录被整批跳过的问题；改进 `read_questions` 为按实际提交清除 `reread_requested`，支持中途退出重开自动续读，并加固 SQLite 锁冲突退避重试。
+
+
 ## 2.1.0
 
 **录题分屏工作台重构、统一 API 队列、暂存旋图与 Eagle 解析直达**

@@ -124,4 +124,13 @@ test("2.1.0 前后端集成契约：三步条、分屏原卷、回收站安全�
   assert.match(eagleHtml, /edit_solution.*openSolutionEditorForId/s);
   const splitJs = fs.readFileSync(path.join(__dirname, "intake-split-canvas.js"), "utf8");
   assert.match(splitJs, /\/api\/papers\/\$\{paper\.id\}\/pages\/\$\{pageIdx\}\/preview/);
+
+  // 2.1.1：高分屏高清图标与帮助系统同步更新
+  const libraryHtml = fs.readFileSync(path.join(__dirname, "library.html"), "utf8");
+  assert.match(indexHtml, /class="welcome-mark" src="\/app-icon-256\.png"/);
+  assert.match(libraryHtml, /class="brand-mark" src="\/app-icon-256\.png"/);
+  assert.match(indexHtml, /左右分屏对照原卷与双向定位/);
+  assert.match(indexHtml, /拍照暂存旋转调序与批量识读续读/);
+  assert.match(eagleHtml, /id="eagleHelpModal"/);
+  assert.match(eagleHtml, /openEagleHelpModal\(/);
 });

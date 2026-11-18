@@ -930,3 +930,18 @@ class BrowserCacheTests(unittest.TestCase):
         ico = app_window.ASSETS / "app.ico"
         self.assertTrue(ico.is_file(), "仓库 assets/app.ico 必须存在，打包后任务栏才有 TUG")
         self.assertEqual(app_window._window_icon_path(), ico)
+
+    def test_load_splash_icon_resamples_high_dpi_without_crude_subsample(self):
+        captured = {}
+
+        class FakePhotoImage:
+            def __init__(self, image, *, master=None):
+                captured["size"] = image.size
+                captured["mode"] = image.mode
+                captured["master"] = master
+
+        with patch("PIL.ImageTk.PhotoImage", FakePhotoImage):
+            master = object()
+            icon = app_window._load_splash_icon(128, master)
+        self.assertIsInstance(icon, FakePhotoImage)
+        self.assertEqual(captured, {"size": (128, 128), "mode": "RGBA", "master": master})
