@@ -1261,6 +1261,10 @@
       <span>🔖 标签管理中心</span>
       <span id="menuBadgeTagCount" class="font-mono text-[10px] text-slate-400">0</span>
     </button>
+    <button type="button" onclick="hideEagleAppMainMenu(); openSolutionEditorFromMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
+      <span>✎ 编辑当前题答案解析</span>
+      <span class="font-mono text-[10px] text-emerald-700">编辑器</span>
+    </button>
     <div class="my-1 border-t border-slate-100"></div>
 
     <div class="px-3 py-1 text-[10px] font-bold text-slate-400 tracking-wider">回收站</div>
@@ -2493,6 +2497,8 @@
     // 题目编辑与审题状态
     let activeEditingQuestionId = null;
     let activeEditingRevisionInfo = null;
+    let activeEditingRevisionPromise = null;
+    let activeEditingInitialSnapshot = null;
     let quickLookQuestionIndex = 0;
     let quickLookShowAnalysis = false;
 
@@ -4207,6 +4213,18 @@
         </div>
 
         <div class="p-1 space-y-0.5">
+          <div
+            data-ctx-item="1"
+            onclick="openSolutionEditorForId('${q.id}'); hideEagleContextMenu();"
+            class="flex items-center justify-between px-2.5 py-1.5 rounded text-emerald-800 hover:bg-emerald-50 cursor-pointer transition-colors font-semibold"
+            title="打开图文答案解析编辑器（支持公式预览与配图）"
+          >
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="text-sm shrink-0">✎</span>
+              <span class="truncate">编辑答案与解析</span>
+            </div>
+            <span class="text-[10px] text-emerald-600 font-mono shrink-0">正式解析</span>
+          </div>
           <div
             data-ctx-item="1"
             onclick="openEditQuestionModal('${q.id}'); hideEagleContextMenu();"
@@ -6012,17 +6030,42 @@
     }
 
     function renderAnalysisContentHtml(q) {
+      const savedSol = q.savedSolution && (
+        q.savedSolution.answer
+        || q.savedSolution.analysis
+        || (Array.isArray(q.savedSolution.figures) && q.savedSolution.figures.length)
+      ) ? q.savedSolution : null;
       const hasOfficial = Boolean(q.rawAnalysis || q.rawAnswer);
       const hasAi = Boolean(q.aiAnswer && (q.aiAnswer.analysis || q.aiAnswer.answer));
+
+      if (savedSol) {
+        return `
+          <div class="space-y-2 bg-emerald-50/45 p-3.5 rounded-lg border border-emerald-200">
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-bold text-emerald-950 text-xs">✓ 【正式答案与解析】</span>
+              <button onclick="event.stopPropagation(); openSolutionEditorForId('${q.id}')" class="text-emerald-700 hover:text-emerald-900 text-[11px] font-semibold flex items-center gap-1 cursor-pointer shrink-0">
+                <span>✎ 编辑正式解析</span>
+              </button>
+            </div>
+            ${savedSol.answer ? `<div class="font-semibold text-emerald-900 text-xs">【答案】${escapeHtml(savedSol.answer)}</div>` : ''}
+            ${savedSol.analysis ? `<div class="text-slate-800 leading-relaxed font-serif text-xs">${escapeHtml(savedSol.analysis)}</div>` : ''}
+          </div>
+        `;
+      }
 
       if (hasOfficial) {
         return `
           <div class="space-y-2 bg-slate-50 p-3.5 rounded-lg border border-slate-200">
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between gap-2">
               <span class="font-bold text-slate-900 text-xs">【原卷参考答案与解析】</span>
-              <button onclick="event.stopPropagation(); requestAiReAnalysis('${q.id}')" class="text-emerald-700 hover:text-emerald-900 text-[11px] font-medium flex items-center gap-1 cursor-pointer">
-                <span>⚡ AI 补充推导</span>
-              </button>
+              <div class="flex items-center gap-2 shrink-0">
+                <button onclick="event.stopPropagation(); openSolutionEditorForId('${q.id}')" class="text-emerald-700 hover:text-emerald-900 text-[11px] font-medium cursor-pointer">
+                  <span>✎ 转为正式解析</span>
+                </button>
+                <button onclick="event.stopPropagation(); requestAiReAnalysis('${q.id}')" class="text-emerald-700 hover:text-emerald-900 text-[11px] font-medium flex items-center gap-1 cursor-pointer">
+                  <span>⚡ AI 补充推导</span>
+                </button>
+              </div>
             </div>
             ${q.rawAnswer ? `<div class="font-semibold text-emerald-800 text-xs">【答案】${escapeHtml(q.rawAnswer)}</div>` : ''}
             <div class="text-slate-700 leading-relaxed font-serif text-xs">${escapeHtml(q.rawAnalysis)}</div>
@@ -6033,14 +6076,19 @@
       if (hasAi) {
         return `
           <div class="space-y-2 bg-emerald-50/50 p-3.5 rounded-lg border border-emerald-200/90">
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between gap-2">
               <div class="flex items-center gap-1.5">
                 <span class="font-bold text-emerald-950 text-xs">⚡ AI 智能解析与考点推导</span>
                 <span class="text-[10px] px-1.5 py-0.2 rounded bg-emerald-200/60 text-emerald-900 font-mono">${escapeHtml((q.aiAnswer && q.aiAnswer.engine) || 'AI')} 推导</span>
               </div>
-              <button onclick="event.stopPropagation(); requestAiReAnalysis('${q.id}')" class="text-emerald-700 hover:text-emerald-900 text-[11px] font-medium flex items-center gap-1 cursor-pointer">
-                <span>↻ 重新推导</span>
-              </button>
+              <div class="flex items-center gap-2 shrink-0">
+                <button onclick="event.stopPropagation(); openSolutionEditorForId('${q.id}')" class="text-emerald-700 hover:text-emerald-900 text-[11px] font-medium cursor-pointer">
+                  <span>✎ 编辑并保存</span>
+                </button>
+                <button onclick="event.stopPropagation(); requestAiReAnalysis('${q.id}')" class="text-emerald-700 hover:text-emerald-900 text-[11px] font-medium flex items-center gap-1 cursor-pointer">
+                  <span>↻ 重新推导</span>
+                </button>
+              </div>
             </div>
             ${q.aiAnswer.answer ? `<div class="font-semibold text-emerald-900 text-xs">【参考答案】${escapeHtml(q.aiAnswer.answer)}</div>` : ''}
             <div class="text-slate-800 leading-relaxed font-serif text-xs">${escapeHtml(q.aiAnswer.analysis || '')}</div>
@@ -6050,14 +6098,22 @@
 
       return `
         <div class="space-y-2 bg-amber-50/50 p-3.5 rounded-lg border border-amber-200/70" id="analysis_prompt_${q.id}">
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between gap-2">
             <span class="text-amber-900 text-xs">原卷暂无官方解析。</span>
-            <button 
-              onclick="event.stopPropagation(); requestAiReAnalysis('${q.id}')" 
-              class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium shadow-2xs transition-colors flex items-center gap-1 text-xs cursor-pointer"
-            >
-              <span>⚡ AI 一键生成推导与解析</span>
-            </button>
+            <div class="flex items-center gap-2 shrink-0">
+              <button
+                onclick="event.stopPropagation(); openSolutionEditorForId('${q.id}')"
+                class="px-2.5 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded font-medium shadow-2xs transition-colors text-xs cursor-pointer"
+              >
+                <span>✎ 录入正式解析</span>
+              </button>
+              <button 
+                onclick="event.stopPropagation(); requestAiReAnalysis('${q.id}')" 
+                class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-medium shadow-2xs transition-colors flex items-center gap-1 text-xs cursor-pointer"
+              >
+                <span>⚡ AI 一键生成推导与解析</span>
+              </button>
+            </div>
           </div>
         </div>
       `;
@@ -6424,6 +6480,13 @@
     function applyAiPayloadToQuestion(q, item) {
       if (!q || !item) return;
       const solution = item.solution || null;
+      if (Object.prototype.hasOwnProperty.call(item, 'solution')) {
+        q.savedSolution = solution;
+        if (solution && (solution.answer || solution.analysis || (Array.isArray(solution.figures) && solution.figures.length))) {
+          q.hasAnswer = Boolean(solution.answer) || q.hasAnswer;
+          q.hasAnalysis = Boolean(solution.analysis) || q.hasAnalysis;
+        }
+      }
       const ai = item.ai_answer || (item.extras && item.extras.ai_answer) || null;
       if (ai && (ai.analysis || ai.answer)) {
         q.aiAnswer = ai;
@@ -6727,7 +6790,20 @@
       if (!answer && q && q.aiAnswer) answer = q.aiAnswer.answer || '';
       if (!analysis && q && q.aiAnswer) analysis = q.aiAnswer.analysis || '';
       try {
-        await fetch(`${API_BASE}/api/library/${qid}/solution`, {
+        let baseRevision = q?.savedSolution?.id || null;
+        if (baseRevision === null) {
+          try {
+            const revRes = await fetch(`${API_BASE}/api/library/${qid}/solution`, {
+              headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
+              cache: 'no-store'
+            });
+            if (revRes.ok) {
+              const revData = await revRes.json();
+              baseRevision = revData?.base_revision || revData?.solution?.id || null;
+            }
+          } catch (e) { /* 读取失败时退回已有值 */ }
+        }
+        const res = await fetch(`${API_BASE}/api/library/${qid}/solution`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -6737,19 +6813,27 @@
           body: JSON.stringify({
             answer: answer,
             analysis: analysis,
+            base_revision: baseRevision,
             sync_library: true
           })
         });
-
-        const q = questionsData.find(item => item.id === qid);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          showToast(errData?.error || `同步正式解析失败 (HTTP ${res.status})`, 'error');
+          return;
+        }
+        const savedData = await res.json().catch(() => ({}));
         if (q) {
+          q.savedSolution = savedData.solution || { answer, analysis };
           q.rawAnswer = answer;
           q.rawAnalysis = analysis;
+          q.hasAnswer = Boolean(answer) || q.hasAnswer;
+          q.hasAnalysis = Boolean(analysis) || q.hasAnalysis;
         }
-
+        if (typeof renderQuestions === 'function') renderQuestions();
         showToast('已成功将解析采纳并同步至题库！', 'success');
       } catch (e) {
-        showToast('已更新本地解析展示', 'info');
+        showToast(e?.message || '同步正式解析请求失败', 'error');
       }
     }
 
@@ -7460,7 +7544,7 @@
         <section class="rounded-xl border border-slate-200 bg-white p-4 sm:p-5 space-y-2.5 shadow-2xs">
           <div class="flex items-center justify-between gap-2 pb-2 border-b border-slate-100">
             <span class="text-xs font-bold text-slate-700">原卷参考答案与解析</span>
-            ${!saved ? `<button type="button" onclick="openEditFromQuickLook()" class="text-[11px] font-medium text-emerald-700 hover:text-emerald-900 whitespace-nowrap cursor-pointer">转为正式解析 →</button>` : ''}
+            ${!saved ? `<button type="button" onclick="openSolutionEditorFromQuickLook()" class="text-[11px] font-medium text-emerald-700 hover:text-emerald-900 whitespace-nowrap cursor-pointer">转为正式解析 →</button>` : ''}
           </div>
           ${q.rawAnswer ? `
             <div class="flex items-baseline gap-2">
@@ -7500,7 +7584,7 @@
           <section class="rounded-xl border border-emerald-200 bg-emerald-50/45 p-4 sm:p-5 space-y-3 shadow-2xs">
             <div class="flex items-center justify-between gap-2 pb-2 border-b border-emerald-200/60">
               <span class="text-xs font-bold text-emerald-900 flex items-center gap-1.5"><span>✓</span><span>正式答案与解析</span></span>
-              <button type="button" onclick="openEditFromQuickLook()" class="text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 whitespace-nowrap cursor-pointer">✎ 编辑正式解析</button>
+              <button type="button" onclick="openSolutionEditorFromQuickLook()" class="text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 whitespace-nowrap cursor-pointer">✎ 编辑正式解析</button>
             </div>
             ${saved.answer ? `
               <div class="flex items-baseline gap-2">
@@ -7558,7 +7642,7 @@
             <div class="flex items-center gap-2 shrink-0">
               ${readFailed
                 ? `<button type="button" onclick="retryReadQuestionDetail('${safeQid}')" class="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-amber-800 border border-amber-200 text-xs font-medium whitespace-nowrap cursor-pointer">↻ 重新读取</button>`
-                : `<button type="button" onclick="openEditFromQuickLook()" class="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium whitespace-nowrap cursor-pointer">✎ 录入正式解析</button>`}
+                : `<button type="button" onclick="openSolutionEditorFromQuickLook()" class="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-medium whitespace-nowrap cursor-pointer">✎ 录入正式解析</button>`}
               <button type="button" onclick="triggerQuickLookAiAnalysis()" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold whitespace-nowrap cursor-pointer shadow-2xs">⚡ AI 生成解析</button>
             </div>
           </section>
@@ -7685,6 +7769,22 @@
       const q = filteredQuestions[quickLookQuestionIndex];
       if (!q) return;
       toggleFavorite(q.id);
+    }
+
+    function openSolutionEditorForId(qid) {
+      if (!qid) return;
+      if (typeof window.openSolutionEditor === 'function') {
+        window.openSolutionEditor([qid]);
+      } else {
+        openEditQuestionModal(qid);
+      }
+    }
+
+    function openSolutionEditorFromQuickLook() {
+      const q = filteredQuestions[quickLookQuestionIndex];
+      if (!q) return;
+      closeQuickLookModal();
+      openSolutionEditorForId(q.id);
     }
 
     function openEditFromQuickLook() {
@@ -8372,8 +8472,20 @@
       }
     }
 
+    function normalizeQuestionOptionsForCompare(opts) {
+      const cleaned = {};
+      if (opts && typeof opts === 'object') {
+        Object.keys(opts).sort().forEach(k => {
+          const val = String(opts[k] ?? '').trim();
+          if (val) cleaned[k.toUpperCase()] = val;
+        });
+      }
+      return cleaned;
+    }
+
     async function openEditQuestionModal(qid) {
       activeEditingQuestionId = qid;
+      activeEditingRevisionInfo = null;
       const q = questionsData.find(item => item.id === qid);
       if (!q) return;
 
@@ -8381,7 +8493,9 @@
       if (!modal) return;
 
       document.getElementById('editModalQBadge').innerText = `${questionIdentity(q)} · ID: ${q.id.slice(0, 8)}`;
-      document.getElementById('editInputType').value = q.questionTypeCode || 'single_choice';
+      const initType = q.questionTypeCode || 'single_choice';
+      const initStem = (q.rawStem || '').trim();
+      document.getElementById('editInputType').value = initType;
       setEditStarsDisplay(q.difficultyStars || 0);
       document.getElementById('editInputStem').value = q.rawStem || '';
 
@@ -8398,8 +8512,20 @@
         scoreInput.value = (q.score != null && !isNaN(q.score)) ? q.score : (q.difficultyStars >= 4 ? 12 : 5);
       }
 
-      document.getElementById('editInputAnswer').value = q.rawAnswer || (q.aiAnswer ? q.aiAnswer.answer : '') || '';
-      document.getElementById('editInputAnalysis').value = q.rawAnalysis || (q.aiAnswer ? q.aiAnswer.analysis : '') || '';
+      // 优先回填已保存的正式答案解析，其次才是原卷答案和 AI 初稿
+      const savedSol = q.savedSolution && (q.savedSolution.answer || q.savedSolution.analysis) ? q.savedSolution : null;
+      const initAnswer = (savedSol ? savedSol.answer : '') || q.rawAnswer || (q.aiAnswer ? q.aiAnswer.answer : '') || '';
+      const initAnalysis = (savedSol ? savedSol.analysis : '') || q.rawAnalysis || (q.aiAnswer ? q.aiAnswer.analysis : '') || '';
+      document.getElementById('editInputAnswer').value = initAnswer;
+      document.getElementById('editInputAnalysis').value = initAnalysis;
+
+      activeEditingInitialSnapshot = {
+        type: initType,
+        stem: initStem,
+        options: normalizeQuestionOptionsForCompare(opts),
+        answer: String(initAnswer || '').trim(),
+        analysis: String(initAnalysis || '').trim()
+      };
 
       initEditPreviewInputs();
       handleEditTypeChange();
@@ -8417,16 +8543,25 @@
         }, 60);
       }
 
-      try {
-        const res = await fetch(`${API_BASE}/api/library/${qid}/question`, {
-          headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
-        });
-        if (res.ok) {
-          activeEditingRevisionInfo = await res.json();
+      activeEditingRevisionPromise = (async () => {
+        try {
+          const res = await fetch(`${API_BASE}/api/library/${qid}/question`, {
+            headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
+            cache: 'no-store'
+          });
+          if (res.ok) {
+            const info = await res.json();
+            if (activeEditingQuestionId === qid) {
+              activeEditingRevisionInfo = info;
+            }
+            return info;
+          }
+        } catch (e) {
+          console.warn('Pre-fetch revision error:', e);
         }
-      } catch (e) {
-        console.warn('Pre-fetch revision error:', e);
-      }
+        return null;
+      })();
+      await activeEditingRevisionPromise;
     }
 
     function closeEditQuestionModal() {
@@ -8434,6 +8569,8 @@
       if (modal) modal.classList.add('hidden');
       activeEditingQuestionId = null;
       activeEditingRevisionInfo = null;
+      activeEditingRevisionPromise = null;
+      activeEditingInitialSnapshot = null;
       lastActiveEditInput = null;
     }
 
@@ -8534,6 +8671,38 @@
       syncPreviewCursorPosition();
     }
 
+    function replaceSetQuestionId(targetSet, oldId, newId) {
+      if (!targetSet || !targetSet.has(oldId)) return;
+      targetSet.delete(oldId);
+      targetSet.add(newId);
+    }
+
+    function migrateQuestionIdAfterEdit(q, oldId, newId, newPub) {
+      if (!q || !oldId || !newId || oldId === newId) return;
+      q.id = newId;
+      q.publicationId = newId;
+      if (newPub && typeof newPub.version === 'number') q.version = newPub.version;
+      replaceSetQuestionId(basketQuestionIds, oldId, newId);
+      replaceSetQuestionId(favoritesSet, oldId, newId);
+      replaceSetQuestionId(selectedQuestionIds, oldId, newId);
+      replaceSetQuestionId(expandedAnalysisQuestionIds, oldId, newId);
+      if (currentActiveQuestionId === oldId) currentActiveQuestionId = newId;
+      activeEditingQuestionId = newId;
+      const oldCard = document.getElementById(`qcard_${oldId}`);
+      if (oldCard) oldCard.id = `qcard_${newId}`;
+    }
+
+    function renderEditedQuestionContent(q, newStem, newOpts) {
+      let formattedStem = newStem
+        .split('\n')
+        .filter(p => p.trim())
+        .map(p => `<p class="font-serif leading-relaxed mb-2 text-slate-800 text-sm sm:text-base">${escapeHtml(p)}</p>`)
+        .join('');
+      const optHtml = renderAdaptiveOptionsHtml(newOpts, {}, q.questionNumber);
+      if (optHtml) formattedStem += optHtml;
+      return formattedStem;
+    }
+
     async function submitQuestionEdit() {
       if (!activeEditingQuestionId) return;
       const qid = activeEditingQuestionId;
@@ -8579,6 +8748,30 @@
         return;
       }
 
+      const init = activeEditingInitialSnapshot || {
+        type: q.questionTypeCode || 'single_choice',
+        stem: (q.rawStem || '').trim(),
+        options: normalizeQuestionOptionsForCompare(q.rawOptions || {}),
+        answer: String((q.savedSolution && q.savedSolution.answer) || q.rawAnswer || '').trim(),
+        analysis: String((q.savedSolution && q.savedSolution.analysis) || q.rawAnalysis || '').trim()
+      };
+
+      const questionBodyChanged = (
+        newType !== init.type
+        || newStem !== init.stem
+        || JSON.stringify(normalizeQuestionOptionsForCompare(newOpts)) !== JSON.stringify(init.options)
+      );
+      const solutionChanged = (
+        newAnswer !== init.answer
+        || newAnalysis !== init.analysis
+        || (Boolean(newAnswer || newAnalysis) && !q.savedSolution)
+      );
+
+      if (questionBodyChanged && isChoice && newOpts.F) {
+        showToast('后端题库仅支持 A–E 五个选项，请先合并或移除选项 F', 'error');
+        return;
+      }
+
       const typeNames = {
         single_choice: '单选题',
         multiple_choice: '多选题',
@@ -8587,72 +8780,99 @@
         free_response: '解答题'
       };
 
-      q.rawStem = newStem;
-      q.rawOptions = newOpts;
-      q.rawAnswer = newAnswer;
-      q.rawAnalysis = newAnalysis;
-      q.score = newScore;
-      q.questionTypeCode = newType;
-      q.questionType = typeNames[newType] || '解答题';
-      q.difficultyStars = newStars;
-
-      let formattedStem = newStem
-        .split('\n')
-        .filter(p => p.trim())
-        .map(p => `<p class="font-serif leading-relaxed mb-2 text-slate-800 text-sm sm:text-base">${escapeHtml(p)}</p>`)
-        .join('');
-
-      const optHtml = renderAdaptiveOptionsHtml(newOpts, {}, q.questionNumber);
-      if (optHtml) formattedStem += optHtml;
-      q.content = formattedStem;
-
-      const cardEl = document.getElementById(`qcard_${qid}`);
-      if (cardEl) {
-        if (currentViewMode === 'card') {
-          cardEl.outerHTML = renderSingleQuestionCardHtml(q);
-        } else {
-          cardEl.outerHTML = renderCompactQuestionRowHtml(q);
-        }
-        const newCard = document.getElementById(`qcard_${qid}`);
-        if (newCard) triggerKaTeX(newCard);
-      }
-
-      let savedOk = true;
-      let saveDetail = '';
+      let targetQid = qid;
+      let newPub = null;
+      let savedSolObj = null;
 
       try {
-        let rev = 1;
-        let cHash = '';
-        if (activeEditingRevisionInfo) {
-          rev = activeEditingRevisionInfo.revision || 1;
-          cHash = activeEditingRevisionInfo.content_hash || '';
+        if (questionBodyChanged) {
+          if (!activeEditingRevisionInfo && activeEditingRevisionPromise) {
+            await activeEditingRevisionPromise;
+          }
+          if (!activeEditingRevisionInfo || !activeEditingRevisionInfo.content_hash) {
+            const revRes = await fetch(`${API_BASE}/api/library/${qid}/question`, {
+              headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
+              cache: 'no-store'
+            });
+            if (revRes.ok) {
+              activeEditingRevisionInfo = await revRes.json();
+            }
+          }
+          if (activeEditingRevisionInfo && activeEditingRevisionInfo.editable === false) {
+            showToast(activeEditingRevisionInfo.reason || '当前题目暂不可修改，请先处理来源题卡', 'error');
+            return;
+          }
+          const rev = (activeEditingRevisionInfo && typeof activeEditingRevisionInfo.revision === 'number')
+            ? activeEditingRevisionInfo.revision
+            : 1;
+          const cHash = (activeEditingRevisionInfo && activeEditingRevisionInfo.content_hash) || '';
+          const editPayload = {
+            revision: rev,
+            content_hash: cHash,
+            question_type: newType,
+            stem: newStem,
+            options: newOpts,
+            figures: activeEditingRevisionInfo?.figures || []
+          };
+
+          const resQuestion = await fetch(`${API_BASE}/api/library/${qid}/question`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-QB-Request': '1',
+              'Referer': window.location.href
+            },
+            body: JSON.stringify(editPayload)
+          });
+          if (!resQuestion.ok) {
+            const errData = await resQuestion.json().catch(() => ({}));
+            showToast(errData?.error || `题干保存失败 (HTTP ${resQuestion.status})`, 'error');
+            return;
+          }
+          const qData = await resQuestion.json();
+          newPub = qData?.publication || null;
+          targetQid = String(newPub?.id || qid);
+          activeEditingRevisionInfo = {
+            revision: qData?.revision ?? (rev + 1),
+            content_hash: qData?.content_hash || (newPub && newPub.content_hash) || cHash,
+            editable: true,
+            figures: (newPub && newPub.content && newPub.content.figures) || editPayload.figures
+          };
+          if (targetQid !== qid) {
+            migrateQuestionIdAfterEdit(q, qid, targetQid, newPub);
+          }
+          // 题干已经入库成功，同步更新本地基准，防止下一步失败重试时重复创建版本
+          q.rawStem = (newPub && newPub.content && newPub.content.stem) || newStem;
+          q.rawOptions = (newPub && newPub.content && newPub.content.options) || newOpts;
+          q.questionTypeCode = (newPub && newPub.question_type) || newType;
+          q.questionType = typeNames[q.questionTypeCode] || '解答题';
+          q.content = renderEditedQuestionContent(q, q.rawStem, q.rawOptions);
+          if (activeEditingInitialSnapshot) {
+            activeEditingInitialSnapshot.type = q.questionTypeCode;
+            activeEditingInitialSnapshot.stem = q.rawStem;
+            activeEditingInitialSnapshot.options = normalizeQuestionOptionsForCompare(q.rawOptions);
+          }
         }
 
-        const editPayload = {
-          revision: rev,
-          content_hash: cHash,
-          question_type: newType,
-          stem: newStem,
-          options: newOpts,
-          figures: activeEditingRevisionInfo?.figures || []
-        };
+        const shouldSaveSolution = (questionBodyChanged && (newAnswer || newAnalysis)) || (solutionChanged && (newAnswer || newAnalysis));
+        if (shouldSaveSolution) {
+          let baseRevision = null;
+          if (newPub && targetQid !== qid) {
+            baseRevision = (newPub.solution && newPub.solution.id) || null;
+          } else {
+            const solGetRes = await fetch(`${API_BASE}/api/library/${targetQid}/solution`, {
+              headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
+              cache: 'no-store'
+            });
+            if (solGetRes.ok) {
+              const solGetData = await solGetRes.json();
+              baseRevision = solGetData?.base_revision || solGetData?.solution?.id || null;
+            } else {
+              baseRevision = (q.savedSolution && q.savedSolution.id) || null;
+            }
+          }
 
-        const resQuestion = await fetch(`${API_BASE}/api/library/${qid}/question`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-QB-Request': '1',
-            'Referer': window.location.href
-          },
-          body: JSON.stringify(editPayload)
-        });
-        if (!resQuestion.ok) {
-          savedOk = false;
-          saveDetail = `题干保存失败 (HTTP ${resQuestion.status})`;
-        }
-
-        if (savedOk && (newAnswer || newAnalysis)) {
-          const resSolution = await fetch(`${API_BASE}/api/library/${qid}/solution`, {
+          const resSolution = await fetch(`${API_BASE}/api/library/${targetQid}/solution`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -8662,26 +8882,60 @@
             body: JSON.stringify({
               answer: newAnswer,
               analysis: newAnalysis,
+              base_revision: baseRevision,
               sync_library: true
             })
           });
           if (!resSolution.ok) {
-            savedOk = false;
-            saveDetail = `答案解析保存失败 (HTTP ${resSolution.status})`;
+            const errData = await resSolution.json().catch(() => ({}));
+            showToast(errData?.error || `答案解析保存失败 (HTTP ${resSolution.status})`, 'error');
+            return;
           }
+          const solData = await resSolution.json().catch(() => ({}));
+          savedSolObj = solData?.solution || { answer: newAnswer, analysis: newAnalysis };
         }
       } catch (err) {
-        savedOk = false;
-        saveDetail = '后端请求失败';
         console.warn('Backend sync save:', err);
+        showToast(err?.message || '后端保存请求失败，当前修改保留在编辑框中', 'error');
+        return;
+      }
+
+      q.rawStem = q.rawStem || newStem;
+      q.rawOptions = questionBodyChanged ? (q.rawOptions || newOpts) : newOpts;
+      q.rawAnswer = newAnswer;
+      q.rawAnalysis = newAnalysis;
+      q.score = newScore;
+      q.questionTypeCode = newType;
+      q.questionType = typeNames[newType] || '解答题';
+      q.difficultyStars = newStars;
+      q.content = renderEditedQuestionContent(q, q.rawStem, q.rawOptions);
+      if (savedSolObj) {
+        q.savedSolution = savedSolObj;
+        q.hasAnswer = Boolean(savedSolObj.answer || newAnswer);
+        q.hasAnalysis = Boolean(savedSolObj.analysis || newAnalysis);
+      }
+
+      const cardEl = document.getElementById(`qcard_${targetQid}`);
+      if (cardEl) {
+        if (currentViewMode === 'card') {
+          cardEl.outerHTML = renderSingleQuestionCardHtml(q);
+        } else {
+          cardEl.outerHTML = renderCompactQuestionRowHtml(q);
+        }
+        const newCard = document.getElementById(`qcard_${targetQid}`);
+        if (newCard) triggerKaTeX(newCard);
+      }
+      if (currentActiveQuestionId === targetQid && typeof renderRightInspector === 'function') {
+        renderRightInspector();
+      }
+      if (typeof refreshQuestionSolution === 'function') {
+        refreshQuestionSolution(q).then(() => {
+          if (typeof renderQuestions === 'function') renderQuestions();
+        }).catch(() => {});
       }
 
       closeEditQuestionModal();
-      if (savedOk) {
-        showToast(`${questionIdentity(q)}修改已保存！`, 'success');
-      } else {
-        showToast(`修改未入库：${saveDetail}（页面已暂时更新，请刷新核对）`, 'error');
-      }
+      showToast(`${questionIdentity(q)}修改已保存！`, 'success');
     }
 
     // ================= 快捷键与弹窗通用逻辑 =================
@@ -14487,9 +14741,20 @@
       get: () => currentActiveQuestionId,
       set: (value) => { currentActiveQuestionId = value; }
     });
+    Object.defineProperty(window, 'quickLookQuestionId', {
+      configurable: true,
+      get: () => {
+        const modal = document.getElementById('quickLookModal');
+        if (!modal || modal.classList.contains('hidden')) return '';
+        return (filteredQuestions[quickLookQuestionIndex] && filteredQuestions[quickLookQuestionIndex].id) || '';
+      }
+    });
     window.showToast = showToast;
     window.refreshQuestionSolution = refreshQuestionSolution;
     window.renderQuestions = typeof renderQuestions === 'function' ? renderQuestions : undefined;
+    window.renderQuickLook = typeof renderQuickLookModal === 'function' ? renderQuickLookModal : undefined;
+    window.openSolutionEditorForId = openSolutionEditorForId;
+    window.openSolutionEditorFromQuickLook = openSolutionEditorFromQuickLook;
     function openSolutionEditorFromMenu() {
       const id = currentActiveQuestionId
         || (filteredQuestions[0] && filteredQuestions[0].id)
@@ -14557,6 +14822,7 @@
 
   <!-- B5：答案解析编辑器本体（双栏实时预览 / 完整题面对照 / 原卷裁图 / AI 初稿对照） -->
   <!-- 禁用非输入区域的浏览器原生上下文菜单，保留文本框的复制粘贴功能 -->
+  <script src="/eagle-solution-editor.js" defer></script>
   <script src="/browser-interactions.js" defer></script>
 </body>
 </html>

@@ -150,4 +150,26 @@ test('Eagle 7大核心Bug修复综合验证套件', async (t) => {
     assert.ok(content.includes("oncontextmenu=\"openQuestionContextMenu(event, '${q.id}')\""), '卡片与行节点应绑定 oncontextmenu');
     assert.ok(content.includes("openQuestionContextMenu(event, '${q.id}')"), '卡片更多按钮点击应触发 openQuestionContextMenu');
   });
+
+  await t.test('Eagle 统一答案编辑器接入与题干版本迁移持久化', () => {
+    assert.ok(content.includes('<script src="/eagle-solution-editor.js"'), 'Eagle 页必须加载 /eagle-solution-editor.js');
+    assert.ok(content.includes('function openSolutionEditorFromQuickLook('), '应定义 openSolutionEditorFromQuickLook()');
+    assert.ok(content.includes('function openSolutionEditorForId('), '应定义 openSolutionEditorForId()');
+    assert.ok(content.includes('window.renderQuickLook ='), '应暴露 window.renderQuickLook 供答案保存后联动刷新');
+    assert.ok(content.includes("'quickLookQuestionId'"), '应暴露 window.quickLookQuestionId');
+    assert.ok(content.includes("onclick=\"openSolutionEditorFromQuickLook()\""), 'QuickLook 解析区按钮应接入统一答案编辑器');
+    assert.ok(content.includes("openSolutionEditorForId('${q.id}')"), '题卡与右键菜单应提供答案编辑器入口');
+
+    const editStart = content.indexOf('async function openEditQuestionModal(');
+    const submitStart = content.indexOf('async function submitQuestionEdit(');
+    const submitEnd = content.indexOf('// ================= 快捷键与弹窗通用逻辑', submitStart);
+    assert.ok(editStart > 0 && submitStart > editStart && submitEnd > submitStart);
+    const editSlice = content.slice(editStart, submitStart);
+    const submitSlice = content.slice(submitStart, submitEnd);
+    assert.ok(editSlice.includes('q.savedSolution'), 'openEditQuestionModal 应优先回填已保存的正式解析');
+    assert.ok(editSlice.includes('activeEditingRevisionPromise'), 'openEditQuestionModal 应跟踪修订信息请求避免竞态');
+    assert.ok(submitSlice.includes('migrateQuestionIdAfterEdit'), '题干改版生成新 UUID 后应迁移前端题卡 ID');
+    assert.ok(submitSlice.includes('base_revision: baseRevision'), '保存正式解析应携带 base_revision');
+    assert.ok(!submitSlice.includes('closeEditQuestionModal();\n      if (savedOk)'), '后端保存失败时不得关闭编辑弹窗丢弃用户输入');
+  });
 });

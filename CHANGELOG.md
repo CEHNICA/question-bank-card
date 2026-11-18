@@ -3,6 +3,16 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.0.1
+
+**修复 Eagle 工作台答案编辑链路与本地 OneNote 测试注册表隔离**
+
+- **打通 Eagle 统一答案编辑器（`eagle-solution-editor.js` → `LibraryAnswerEditor`）**：在 `frontend/eagle/index.html` 中加载 `/eagle-solution-editor.js` 并暴露 `window.renderQuickLook` / `window.quickLookQuestionId`；将 QuickLook 解析区（录入/编辑/转为正式解析）、题卡内联解析区、右键菜单及左上角主菜单接入统一 `LibraryAnswerEditor`。
+- **修复「修改与校订题目」弹窗的版本与解析同步问题**：打开时优先回填 `q.savedSolution` 正式答案与解析，提交前等待版本校验信息避免竞态；修改题干生成新版本 `PublishedQuestion` 后自动迁移前端题号/篮子/收藏/展开集合 ID，并基于新版本与权威 `base_revision` 提交 `/solution`；后端报错时保留弹窗内容并明确提示，不再静默关闭丢修改。
+- **修复 `saveAiSolutionToBank` 冲突与假成功提示**：提交时携带 `base_revision` 并校验响应状态，失败时弹出真实错误而非误报成功。
+- **OneNote 单测注册表隔离**：`backend/core/test_library_onenote.py` 在 `setUp` 中 mock `core.tiyouju_protocol.ensure_registered`，防止本地跑单元测试覆盖用户 Windows `HKCU\Software\Classes\tiyouju` 安装版协议路径。
+
+
 ## 2.0.0
 
 **Eagle 题库工作台、统一答案解析编辑器与底层性能／稳定性全面升级**

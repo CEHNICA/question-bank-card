@@ -28,6 +28,11 @@ class OneNoteLinkTests(TestCase):
     """测试 OneNote 创建、打开、手动绑定与解绑逻辑。"""
 
     def setUp(self):
+        # 测试不得改写本机 Windows 注册表的 tiyouju:// 协议关联
+        reg_patcher = patch("core.tiyouju_protocol.ensure_registered", return_value=True)
+        reg_patcher.start()
+        self.addCleanup(reg_patcher.stop)
+
         library_onenote.clear_section_cache()
         self.item = PublishedQuestion.objects.create(
             source_filename="2026年高三模拟考.pdf",
