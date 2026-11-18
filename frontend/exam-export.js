@@ -255,6 +255,33 @@
     return offsets;
   }
 
+  // 预览里每道题的答题留白在纸上被切成了几段、每段是不是落在续页上。
+  // 预览的留白是**可切**的（exam-layout.js 的 writingSpace）：页底放不下的那几毫米
+  // 挪到下一页，续页顶部还打一行「第 N 题答题区（续）」。Word 排版是静态的，
+  // 自己不知道该在哪儿切、也不知道该打这行标题，只能照这里量好的来。
+  function measureAnswerSpaceSplits(paper) {
+    const splits = {};
+    for (const body of paper.querySelectorAll(".exam-page-body")) {
+      for (const block of body.children) {
+        const id = block.dataset.questionId;
+        if (!id) continue;
+        const pieces = [];
+        for (const blank of block.querySelectorAll(".print-answer-space")) {
+          // getComputedStyle 给的是布局尺寸（不受预览的缩放影响）。
+          const height = parseFloat(getComputedStyle(blank).height);
+          if (!(height > 0)) continue;
+          pieces.push({
+            mm: Math.round(height * 25.4 / 96 * 100) / 100,
+            continuation: block.dataset.continuation === "1"
+          });
+        }
+        if (!pieces.length) continue;
+        (splits[id] = splits[id] || []).push(...pieces);
+      }
+    }
+    return splits;
+  }
+
   // 没人给实测值，就从眼前这份预览里量一份。
   // 调用方给了就一个字都不改（经典题库页量得比这里细：它量的是自己那张纸）。
   function fillMeasured(options, paper) {
@@ -262,6 +289,7 @@
     if (!Object.hasOwn(options, "option_columns")) options.option_columns = measureOptionColumns(paper);
     if (!Object.hasOwn(options, "measured_figure_widths")) options.measured_figure_widths = measureFigureWidths(paper);
     if (!Object.hasOwn(options, "measured_table_offsets")) options.measured_table_offsets = measureTableOffsets(paper);
+    if (!Object.hasOwn(options, "measured_answer_splits")) options.measured_answer_splits = measureAnswerSpaceSplits(paper);
     return options;
   }
 
@@ -405,6 +433,21 @@
           if (Object.keys(perSlot).length) kept[id] = perSlot;
         }
         options.measured_table_offsets = kept;
+      }
+      // 预览量到的留白分段同理：只留这次选中的题，每段的高度也要是看得懂的数字。
+      if (options.measured_answer_splits) {
+        const kept = {};
+        for (const [id, pieces] of Object.entries(options.measured_answer_splits)) {
+          if (!selectedIds.has(id) || !Array.isArray(pieces) || !pieces.length) continue;
+          const clean = pieces.map(piece => {
+            if (!piece || typeof piece !== "object") return null;
+            const value = Number(piece.mm);
+            if (!Number.isFinite(value) || value <= 0 || value > 200) return null;
+            return { mm: value, continuation: piece.continuation === true };
+          }).filter(Boolean);
+          if (clean.length) kept[id] = clean;
+        }
+        options.measured_answer_splits = kept;
       }
       if (options.answer_space_overrides) options.answer_space_overrides = Object.fromEntries(Object.entries(options.answer_space_overrides)
         .filter(([id, value]) => selectedIds.has(id)

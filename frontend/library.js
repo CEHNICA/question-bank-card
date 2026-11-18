@@ -5452,6 +5452,34 @@ $("selectedViewCount").textContent = String(state.basket.length);
     return offsets;
   }
 
+  // 预览里每道题的答题留白在纸上被切成了几段、每段是不是落在续页上。
+  // 预览的留白是**可切**的（exam-layout.js 的 writingSpace）：页底放不下的那几毫米
+  // 挪到下一页，续页顶部还打一行「第 N 题答题区（续）」。Word 排版是静态的，
+  // 自己不知道该在哪儿切、也不知道该打这行标题，只能照这里量好的来 ——
+  // 老师核对的是屏幕上那份，文件里也得是那份。
+  function measuredAnswerSpaceSplits() {
+    const splits = {};
+    for (const body of ui.paper.querySelectorAll(".exam-page-body")) {
+      for (const block of body.children) {
+        const id = block.dataset.questionId;
+        if (!id) continue;
+        const pieces = [];
+        for (const blank of block.querySelectorAll(".print-answer-space")) {
+          // getComputedStyle 给的是布局尺寸（不受预览的缩放影响）。
+          const height = parseFloat(getComputedStyle(blank).height);
+          if (!(height > 0)) continue;
+          pieces.push({
+            mm: Math.round(height * 25.4 / 96 * 100) / 100,
+            continuation: block.dataset.continuation === "1"
+          });
+        }
+        if (!pieces.length) continue;
+        (splits[id] = splits[id] || []).push(...pieces);
+      }
+    }
+    return splits;
+  }
+
   function currentPrintOptions() {
     return normalizePrintOptions({
       document: $("printDocument").value, origin: ui.printOrigin.checked,
@@ -6604,7 +6632,10 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
       preparePrintLayout();
       // 带上预览量到的栏数：Word 照屏幕排，不再自己猜一遍。
       // 带上预览量到的图宽：选项里的图在屏幕上被栏宽收口过，Word 照这个宽度排。
-      const options = { ...currentPrintOptions(), option_columns: measuredOptionColumns(), measured_figure_widths: measuredFigureWidths(), measured_table_offsets: measuredTableOffsets() };
+      // 带上预览量到的表格位置：表在屏幕上的横向位置随题干长度变，Word 照这个位置摆。
+      // 带上预览量到的留白分段：留白在页底会被切开，续页上还要打「第 N 题答题区（续）」，
+      // Word 自己算不出该在哪儿切，只能照这个分段写。
+      const options = { ...currentPrintOptions(), option_columns: measuredOptionColumns(), measured_figure_widths: measuredFigureWidths(), measured_table_offsets: measuredTableOffsets(), measured_answer_splits: measuredAnswerSpaceSplits() };
       if ((format === "print" || format === "pdf") && printState.layoutError) throw new Error(printState.layoutError);
       if ((format === "print" || format === "pdf") && printState.tooWide) throw new Error("有公式超出 A4 正文，请调整本次字号或导出 Word 继续排版");
       if (format === "print") {

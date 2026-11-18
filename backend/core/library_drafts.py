@@ -47,6 +47,13 @@ PRINT_DEFAULTS = {
     # 表格在预览里的横向位置不是定值（题干正文越长，表在那一列里越靠中间），
     # Word 排版是静态的，只能照这个位置摆。
     "measured_table_offsets": {},
+    # 预览量出来的答题留白在纸上被切成了几段、每段是不是落在续页上：
+    # 题目编号 → [{"mm": 该段高度, "continuation": 这段是不是续页上的}, …]。
+    # 预览的留白是**可切**的（frontend/exam-layout.js 的 writingSpace）：页底放不下的
+    # 那几毫米挪到下一页，续页顶部还打一行「第 N 题答题区（续）」。
+    # Word 排版是静态的，自己不知道该在哪儿切、也不知道该打这行标题，
+    # 只能照这里量好的来 —— 老师核对的是屏幕上那份。
+    "measured_answer_splits": {},
     "question_breaks": [],
     "answer_layout": "inline",
     "answer_space_overrides": {},
@@ -62,6 +69,9 @@ PRINT_DEFAULTS = {
 # 旧草稿存的是 none/small/medium/large，这里继续认，落到毫米数上。
 LEGACY_SPACES = {"none": 0, "small": 12, "medium": 30, "large": 60}
 SPACE_MAX_MM = 200
+# 一道题的留白最多被切成几段（页底一段 + 每张续页一段）。留白最大 200 毫米，
+# 版心一页 261 毫米，所以实际最多切两段；留个余量给以后更小的版心。
+ANSWER_SPLIT_MAX_PIECES = 10
 # 解答题保底：再挤也得给学生留两行（和前端 exam-layout.js 的 FREE_RESPONSE_MIN 一致）。
 FREE_RESPONSE_MIN_MM = 8
 # 「智能」档下解答题留多少（对应前端 AUTO_FREE_RESPONSE）。
@@ -330,6 +340,34 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
         raise DraftError("单题表格实测位置的题目编号不正确：" + str(error)) from None
     if len(table_keys) != len(tables):
         raise DraftError("单题表格实测位置的题目编号不能重复")
+    # 预览量出来的答题留白分段：题目编号 → [{"mm": 高度, "continuation": 是否续页}, …]。
+    # 分段总高必须对得上这次要的留白，否则是预览改过、或者量的是另一份卷子 ——
+    # 写错的值不能进导出，Word 照着一个错的分段排，留白高度就不是老师看过的那份。
+    splits = result["measured_answer_splits"]
+    if not isinstance(splits, dict) or len(splits) > 500:
+        raise DraftError("单题留白实测分段应为题目编号到分段的映射，最多 500 题")
+    splits_clean = {}
+    for question, pieces in splits.items():
+        if not isinstance(pieces, list) or not pieces or len(pieces) > ANSWER_SPLIT_MAX_PIECES:
+            raise DraftError(f"每题留白实测分段最多 {ANSWER_SPLIT_MAX_PIECES} 段")
+        cleaned = []
+        for piece in pieces:
+            if not isinstance(piece, dict) or set(piece) - {"mm", "continuation"}:
+                raise DraftError("留白实测分段只能包含高度和是否续页")
+            value = piece.get("mm")
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= SPACE_MAX_MM:
+                raise DraftError("留白实测分段高度只能是 0 到 200 之间的毫米数")
+            flag = piece.get("continuation", False)
+            if type(flag) is not bool:
+                raise DraftError("留白实测分段的续页标记只能是 true 或 false")
+            cleaned.append({"mm": float(value), "continuation": flag})
+        splits_clean[question] = cleaned
+    try:
+        split_keys = normalize_ids(list(splits))
+    except BrowseError as error:
+        raise DraftError("单题留白实测分段的题目编号不正确：" + str(error)) from None
+    if len(split_keys) != len(splits):
+        raise DraftError("单题留白实测分段的题目编号不能重复")
     if (
         selected is not None
         and (
@@ -340,6 +378,7 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
             | set(column_keys)
             | set(measured_keys)
             | set(table_keys)
+            | set(split_keys)
         )
         - selected
     ):
@@ -351,6 +390,7 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
     result["option_columns"] = dict(zip(column_keys, columns.values()))
     result["measured_figure_widths"] = dict(zip(measured_keys, measured_clean.values()))
     result["measured_table_offsets"] = dict(zip(table_keys, tables_clean.values()))
+    result["measured_answer_splits"] = dict(zip(split_keys, splits_clean.values()))
     return result
 
 

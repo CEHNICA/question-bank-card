@@ -187,6 +187,16 @@ PREVIEW_SOLUTION_LINE_BOX_COMPENSATION_PT = 1.5
 # Word 的单行段是「放不下就整段走」，阈值就等于段高，所以段高取 20.1 毫米，
 # Word 的「整段走」阈值就跟预览的 MIN_WRITABLE 对上了。
 ANSWER_SPACE_SLICE_TWIPS = 1140
+# 预览续页顶部的「第 N 题答题区（续）」标题（.exam-continuation-label，
+# frontend/library.css:951）：font-size 10px、line-height 1.35、color #666、
+# margin 0 0 4px。预览正文 16px = 12 磅，所以 1px = 0.75 磅：
+#   字号 10px = 7.5 磅；行盒 13.5px = 10.125 磅；下外边距 4px = 3 磅。
+# 三样加起来 4.63 毫米 —— 预览里这个续块（10.01 / 12.27 / 34.63 毫米高）
+# 就是这么来的，Word 必须一模一样。
+PREVIEW_CONTINUATION_LABEL_SIZE_PT = 7.5
+PREVIEW_CONTINUATION_LABEL_LINE_PT = 10.125
+PREVIEW_CONTINUATION_LABEL_AFTER_PT = 3.0
+PREVIEW_CONTINUATION_LABEL_COLOR = "666666"
 # .solution-figure（解析配图）的上下外边距：6px = 4.5pt。
 PREVIEW_SOLUTION_FIGURE_MARGIN_PT = 4.5
 # 字体规格（字号 / 字重 / 字体族）也照抄预览，Word 这边不许自己另定一套：
@@ -3738,13 +3748,19 @@ def _paragraph_measure(paragraph, size, width_mm=178):
         return max(int(node.get("cy", "0")) / 36_000 for node in drawings) + gap
     text = "".join(node.text or "" for node in paragraph.findall(".//" + qn("w:t")))
     metrics = [_math_extent(node) for node in paragraph.findall(".//" + qn("m:oMath"))]
-    if not text and not metrics and spacing is not None:
+    exact = None
+    if spacing is not None and spacing.get(qn("w:lineRule")) == "exact" and spacing.get(qn("w:line")):
+        exact = int(spacing.get(qn("w:line"))) / 20 * 25.4 / 72
+    if exact is not None and not text and not metrics:
         # 空段：行高由显式行距决定。留白块是**固定行高**的空段
         # （w:lineRule="exact"），拿默认行距去估会把留白少算将近一整行，
         # 分页就会提前。
-        if spacing.get(qn("w:lineRule")) == "exact" and spacing.get(qn("w:line")):
-            return int(spacing.get(qn("w:line"))) / 20 * 25.4 / 72 + gap
+        return exact + gap
     width = (_text_em(text) + sum(metric[0] for metric in metrics)) * size * 25.4 / 72
+    if exact is not None and width <= width_mm:
+        # 单行固定行高的段落（续页标题就是这种）：行盒高度就是写死的那行高，
+        # 拿正文行距去估会把它算高一大截（10.125 磅被当成 16.2 磅）。
+        return exact + gap
     height = max(LINE_SPACING, max((metric[1] for metric in metrics), default=1.0)) * size * 25.4 / 72
     return max(1, math.ceil(width / width_mm)) * height + gap
 
@@ -3814,8 +3830,77 @@ def _pagination(document, start, mode, size):
             element.get_or_add_pPr().find(qn("w:keepNext")).set(qn("w:val"), "1")
 
 
-def _write_answer_space(document, millimetres):
-    """写出答题留白块（**可跨页断开**）。
+def _answer_space_groups(millimetres, plan):
+    """把预览量出来的留白分段整理成 Word 要写的一组组留白。
+
+    plan 是预览量出来的：题目编号 → [{"mm": 毫米, "continuation": 是否续页}, …]。
+    预览的留白是**可切**的（frontend/exam-layout.js 的 writingSpace）：页底放不下的
+    那几毫米挪到下一页，续页顶部还打一行「第 N 题答题区（续）」。Word 排版是静态的，
+    自己不知道该在哪儿切、也不知道该打这行标题，只能照这里量好的来。
+
+    量来的分段总高必须和这次要的留白一致；对不上（老草稿、预览改过、别的导出器
+    量的是另一份卷子）就当没有量过，退回「整块留白、不打标题」的老行为。
+    """
+    fallback = [{"mm": float(millimetres), "continuation": False}]
+    if not isinstance(plan, list) or not plan:
+        return fallback
+    groups = []
+    for piece in plan:
+        if not isinstance(piece, dict):
+            return fallback
+        value = piece.get("mm")
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+            return fallback
+        groups.append({"mm": float(value), "continuation": bool(piece.get("continuation"))})
+    if abs(sum(group["mm"] for group in groups) - millimetres) > 0.6:
+        return fallback
+    return groups
+
+
+def _answer_space_slices(millimetres):
+    """把一段留白切成若干**单行**固定行高段（高度守恒）。
+
+    单行段 Word 没法在段内断开，只能整段挪到下一页 —— 这正是预览要的
+    「页底放得下几毫米就留几毫米、放不下就整段走」。
+    """
+    remaining = int(round(millimetres * 1440 / 25.4))
+    slices = []
+    while remaining > 0:
+        take = min(remaining, ANSWER_SPACE_SLICE_TWIPS)
+        remaining -= take
+        slices.append(take)
+    return slices
+
+
+def _write_continuation_label(document, number):
+    """写出续页顶部的「第 N 题答题区（续）」标题。
+
+    预览里这是 .exam-continuation-label：10px 字号、line-height 1.35、#666、
+    下外边距 4px（合起来 4.63 毫米）。这段标题必须跟住下面那块续页留白
+    （keep_with_next）—— 不然 Word 把它留在上一页页底，学生在下一页看到的是
+    一块没有主人的答题区。
+    """
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
+
+    paragraph = document.add_paragraph()
+    fmt = paragraph.paragraph_format
+    fmt.space_before = Pt(0)
+    fmt.space_after = Pt(PREVIEW_CONTINUATION_LABEL_AFTER_PT)
+    fmt.keep_with_next = True
+    spacing = paragraph._p.get_or_add_pPr().get_or_add_spacing()
+    spacing.set(qn("w:line"), str(int(round(PREVIEW_CONTINUATION_LABEL_LINE_PT * 20))))
+    spacing.set(qn("w:lineRule"), "exact")
+    _font(
+        paragraph.add_run(f"第 {number} 题答题区（续）"),
+        PREVIEW_CONTINUATION_LABEL_SIZE_PT,
+        color=PREVIEW_CONTINUATION_LABEL_COLOR,
+    )
+    return paragraph
+
+
+def _write_answer_space(document, millimetres, plan=None, number=None):
+    """写出答题留白块（**可跨页断开**，跨页时补「第 N 题答题区（续）」标题）。
 
     预览里留白是紧贴上一块、上下没有外边距的一个固定高度块
     （frontend/library.css 的 .print-answer-space），题目块的下外边距
@@ -3840,6 +3925,15 @@ def _write_answer_space(document, millimetres):
     修法：把留白切成若干个**单行**固定行高段。单行段落 Word 无法在段内断开，
     只能整段挪到下一页 —— 于是「页底放得下几毫米就留几毫米、放不下就整段走」
     的行为跟预览一致了。
+
+    第七十一轮：**照着预览的分段写，并补上续页标题**。预览的留白在页底被切成
+    「首页那一份 + 续页那一份」（40 题对照卷实测：题 6 是 24.6 + 5.4 毫米，
+    题 13 整块 30 毫米挪到续页），续页上还要打一行「第 N 题答题区（续）」。
+    Word 原来把 30 毫米一律切成 20.1 + 9.9 —— 切点跟预览不是一回事，
+    续页顶部那行标题更是压根没有。预览的切法只有浏览器知道，所以前端把
+    量好的分段（measured_answer_splits）送过来，Word 照着写：
+      · 首页那份按 20.1 毫米的粒度切（保住「放不下就整段走」的阈值）
+      · 续页那份单独成段，前面加标题
     """
     from docx.oxml.ns import qn
     from docx.shared import Pt
@@ -3850,21 +3944,21 @@ def _write_answer_space(document, millimetres):
     if previous is not None and previous.tag == qn("w:p"):
         Paragraph(previous, document).paragraph_format.space_after = Pt(0)
 
-    # 高度守恒：按 twips 整数切，最后一段拿余数，总高与请求一致。
-    remaining = int(round(millimetres * 1440 / 25.4))
-    paragraphs = []
-    while remaining > 0:
-        take = min(remaining, ANSWER_SPACE_SLICE_TWIPS)
-        remaining -= take
-        paragraph = document.add_paragraph()
-        fmt = paragraph.paragraph_format
-        fmt.space_before = Pt(0)
-        fmt.space_after = Pt(0)
-        spacing = paragraph._p.get_or_add_pPr().get_or_add_spacing()
-        spacing.set(qn("w:line"), str(take))
-        spacing.set(qn("w:lineRule"), "exact")
-        paragraphs.append(paragraph)
-    return paragraphs
+    labels = []
+    for group in _answer_space_groups(millimetres, plan):
+        if group["mm"] <= 0:
+            continue
+        if group["continuation"]:
+            labels.append(_write_continuation_label(document, number))
+        for take in _answer_space_slices(group["mm"]):
+            paragraph = document.add_paragraph()
+            fmt = paragraph.paragraph_format
+            fmt.space_before = Pt(0)
+            fmt.space_after = Pt(0)
+            spacing = paragraph._p.get_or_add_pPr().get_or_add_spacing()
+            spacing.set(qn("w:line"), str(take))
+            spacing.set(qn("w:lineRule"), "exact")
+    return labels
 
 
 def _question_gap(document):
@@ -4306,10 +4400,18 @@ def _document(captured, title, options, mode):
             answer_space = options.get("answer_space_overrides", {}).get(item["id"], options["answer_space"])
             # 每道题都能有留白；解答题有 8 毫米下限。口径与预览、PDF 一致。
             millimetres = _answer_space_millimetres(answer_space, item["type"])
+            continuation_labels = []
             if millimetres > 0 and not inline_answers:
-                _write_answer_space(document, millimetres)
+                # 预览量出来的留白分段（哪一份在首页、哪一份在续页）。
+                # 没有就退回整块留白（老草稿、PDF 路线）。
+                plan = (options.get("measured_answer_splits") or {}).get(item["id"])
+                continuation_labels = _write_answer_space(document, millimetres, plan=plan, number=number)
             _question_gap(document)
             _pagination(document, unit_start, options["pagination"], size)
+            # _pagination 会把整段里的 keepNext 归零，续页标题得自己把 keepNext 补回去：
+            # 它必须跟住下面那块续页留白，不然会被留在上一页页底。
+            for label in continuation_labels:
+                label.paragraph_format.keep_with_next = True
             if inline_answers and _has_selected_answers([item]):
                 # A long solution may cross pages; never keep it with the entire
                 # question or add student writing space to a teacher copy.

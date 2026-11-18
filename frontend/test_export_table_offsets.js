@@ -111,6 +111,9 @@ function runExport(names, context, call) {
     assert.ok(source, `尺子自检：exam-export.js 里找不到 function ${name}(`);
     return source;
   });
+  // 沙箱里没有浏览器全局：留白分段要靠 getComputedStyle 量高度，
+  // 这里用假节点上的 height 顶替（单位 px，跟浏览器一致）。
+  if (!context.getComputedStyle) context.getComputedStyle = (node) => ({ height: node.height });
   vm.createContext(context);
   vm.runInContext(sources.join("\n") + "\n" + call, context);
   return context.__out;
@@ -205,7 +208,7 @@ test("同口径：exam-export.js 与 library.js 量出来的表格位置必须�
 test("兜底：调用方没给实测位置时，导出模块自己量一份", () => {
   const paper = fakePaper([fakeStemBlock({ id: "q1", tables: [fakeTable(17.59)] })]);
   const options = { document: "questions" };
-  const out = runExport(["measureOptionColumns", "measureFigureWidths", "measureTableOffsets", "fillMeasured"],
+  const out = runExport(["measureOptionColumns", "measureFigureWidths", "measureTableOffsets", "measureAnswerSpaceSplits", "fillMeasured"],
     { options, paper },
     "globalThis.__out = fillMeasured(options, paper);");
   assert.ok(out.measured_table_offsets && out.measured_table_offsets.q1,
@@ -215,7 +218,7 @@ test("兜底：调用方没给实测位置时，导出模块自己量一份", ()
 test("兜底：调用方自己量过的位置不许被覆盖", () => {
   const paper = fakePaper([fakeStemBlock({ id: "q1", tables: [fakeTable(17.59)] })]);
   const options = { measured_table_offsets: { q1: { stem: [12.5] } } };
-  const out = runExport(["measureOptionColumns", "measureFigureWidths", "measureTableOffsets", "fillMeasured"],
+  const out = runExport(["measureOptionColumns", "measureFigureWidths", "measureTableOffsets", "measureAnswerSpaceSplits", "fillMeasured"],
     { options, paper },
     "globalThis.__out = fillMeasured(options, paper);");
   assert.deepEqual(out.measured_table_offsets, { q1: { stem: [12.5] } },
