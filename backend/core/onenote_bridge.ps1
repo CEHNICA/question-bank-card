@@ -1,4 +1,4 @@
-<#
+﻿<#
   on.ps1 - OneNote COM core (ASCII-only source on purpose).
 
   Why PowerShell: OneNote.Application is exposed through the .NET PIA
@@ -50,22 +50,30 @@ function Reset-OneNoteCrashFlags {
 
 function Get-OneNote {
   param([switch]$Quick)
-  Reset-OneNoteCrashFlags
-  # Clear stale headless /hyperlink instances (no visible window) that block COM registration with 0x80080005.
-  # Skip on navigate/hyperlink: Win32_Process CIM scan is slow and open-path needs to feel instant.
-  if (-not $Quick) {
-    try {
-      $stale = Get-CimInstance Win32_Process -Filter "Name='ONENOTE.EXE'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -like '*/hyperlink*' }
-      foreach ($procInfo in $stale) {
-        $p = Get-Process -Id $procInfo.ProcessId -ErrorAction SilentlyContinue
-        if ($p -and $p.MainWindowHandle -eq [IntPtr]::Zero -and ((Get-Date) - $p.StartTime).TotalSeconds -gt 8) {
-          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-        }
-      }
-    } catch {}
-    Reset-OneNoteCrashFlags
+  # Fast path first: New-Object succeeds in ~5ms when OneNote COM is healthy,
+  # avoiding an expensive WMI Win32_Process scan on every bridge call.
+  try { return New-Object -ComObject OneNote.Application }
+  catch {
+    try { return New-Object -ComObject ONENOTE.Application }
+    catch {
+      if ($Quick) { throw }
+    }
   }
+
+  Reset-OneNoteCrashFlags
+  # Fallback recovery: clear stale headless /hyperlink instances (no visible window) that block COM registration with 0x80080005.
+  try {
+    $stale = Get-CimInstance Win32_Process -Filter "Name='ONENOTE.EXE'" -ErrorAction SilentlyContinue |
+      Where-Object { $_.CommandLine -like '*/hyperlink*' }
+    foreach ($procInfo in $stale) {
+      $p = Get-Process -Id $procInfo.ProcessId -ErrorAction SilentlyContinue
+      if ($p -and $p.MainWindowHandle -eq [IntPtr]::Zero -and ((Get-Date) - $p.StartTime).TotalSeconds -gt 8) {
+        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+      }
+    }
+  } catch {}
+  Reset-OneNoteCrashFlags
+
   try { return New-Object -ComObject OneNote.Application }
   catch { return New-Object -ComObject ONENOTE.Application }
 }
@@ -438,7 +446,8 @@ try {
     }
 
     'list' {
-      $hier = Get-Hierarchy $one '' $HS_PAGES
+      $listScope = if ($params -and $params.includePages) { $HS_PAGES } else { $HS_SECTIONS }
+      $hier = Get-Hierarchy $one '' $listScope
       $tree = Get-HierarchyTree $hier
       $summary = @()
       foreach ($nb in $tree) {
@@ -824,7 +833,5 @@ finally {
   if ($null -ne $one) {
     try { [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($one) } catch {}
   }
-  Start-Sleep -Milliseconds 200
-  Reset-OneNoteCrashFlags
 }
 if ($exitCode -ne 0) { exit $exitCode }

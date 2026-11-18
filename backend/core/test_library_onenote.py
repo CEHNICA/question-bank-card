@@ -5,9 +5,11 @@ from __future__ import annotations
 import io
 import json
 import os
+import tempfile
 import threading
 import time
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from unittest.mock import patch
 
 from django.test import TestCase
@@ -297,3 +299,43 @@ class OneNoteLinkTests(TestCase):
         self.assertEqual(nb_name, "math")
         self.assertEqual(sec_id, "{sec-math}")
         self.assertEqual(sec_name, "数学试题")
+
+    @patch("core.library_onenote.subprocess.run")
+    @patch("core.library_onenote.get_bridge_script")
+    def test_call_bridge_uses_create_no_window_and_hidden_flags(self, mock_script, mock_run):
+        """调用 PowerShell 桥接时必须隐藏窗口并传入 CREATE_NO_WINDOW，防止桌面端闪出蓝框。"""
+        mock_script.return_value = library_onenote.BUNDLED_BRIDGE_PATH
+
+        def fake_run(cmd, **kwargs):
+            resp_path = cmd[-1]
+            with open(resp_path, "w", encoding="utf-8") as f:
+                json.dump({"ok": True, "data": {"notebooks": []}}, f)
+            return type("Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+        mock_run.side_effect = fake_run
+
+        data = library_onenote.call_bridge("list")
+        self.assertEqual(data, {"notebooks": []})
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args.args[0]
+        kwargs = mock_run.call_args.kwargs
+        self.assertEqual(kwargs.get("creationflags"), library_onenote.CREATE_NO_WINDOW)
+        self.assertIn("-NonInteractive", cmd)
+        idx = cmd.index("-WindowStyle")
+        self.assertEqual(cmd[idx + 1], "Hidden")
+
+    def test_get_bridge_script_resolves_frozen_meipass(self):
+        """打包冻结模式下应能通过 sys._MEIPASS 命中随包分发的 onenote_bridge.ps1，而非回退旧脚本。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            frozen_root = Path(tmp) / "bundle_internal"
+            frozen_script = frozen_root / "backend" / "core" / "onenote_bridge.ps1"
+            frozen_script.parent.mkdir(parents=True)
+            frozen_script.write_text("# frozen bridge", encoding="utf-8")
+            missing = Path(tmp) / "missing_bridge.ps1"
+            with (
+                patch.dict(os.environ, {"TIYOUJU_ONENOTE_BRIDGE": ""}, clear=False),
+                patch.object(library_onenote, "BUNDLED_BRIDGE_PATH", missing),
+                patch.object(library_onenote.sys, "_MEIPASS", str(frozen_root), create=True),
+            ):
+                resolved = library_onenote.get_bridge_script()
+            self.assertEqual(resolved.resolve(), frozen_script.resolve())

@@ -83,6 +83,11 @@ MIGRATIONS_ROOT = BACKEND_ROOT / "core" / "migrations"
 for source in sorted(MIGRATIONS_ROOT.glob("*.py")):
     datas.append((str(source), "backend/core/migrations"))
 
+# OneNote COM bridge script required by backend/core/library_onenote.py.
+ONENOTE_BRIDGE = BACKEND_ROOT / "core" / "onenote_bridge.ps1"
+if ONENOTE_BRIDGE.is_file():
+    datas.append((str(ONENOTE_BRIDGE), "backend/core"))
+
 
 def project_modules(package_root: Path, package_name: str) -> list[str]:
     """Enumerate app modules without ever collecting tests or caches."""

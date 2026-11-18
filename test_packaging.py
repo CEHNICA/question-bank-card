@@ -155,6 +155,7 @@ class BundleAuditTests(unittest.TestCase):
             r"coll = COLLECT\(\s*exe,\s*(?:app_local_binaries\(a\)|a\.binaries),"
             r"\s*a\.datas,\s*cli_exe,",
         )
+        self.assertIn("onenote_bridge.ps1", spec)
         build = (root / "packaging" / "build.ps1").read_text(encoding="utf-8")
         self.assertIn("$cliVersion.Trim() -ne \"tiyouju $Version\"", build)
         installer = (root / "packaging" / "installer.iss").read_text(encoding="utf-8")

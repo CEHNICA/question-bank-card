@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -27,6 +28,8 @@ from .models import PublishedQuestion
 logger = logging.getLogger("core.onenote")
 
 PS_EXE = "powershell.exe"
+# 避免无控制台桌面应用(QuestionBankCard.exe)拉起 powershell.exe 时弹出可见的蓝色控制台窗口。
+CREATE_NO_WINDOW: int = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 # 安装包 / 源码自带的桥接脚本优先；可用环境变量或破甲目录 on.ps1 覆盖。
 BUNDLED_BRIDGE_PATH = Path(__file__).resolve().parent / "onenote_bridge.ps1"
@@ -44,8 +47,13 @@ def get_bridge_script() -> Path:
         path = Path(override)
         if path.is_file():
             return path
-    if BUNDLED_BRIDGE_PATH.is_file():
-        return BUNDLED_BRIDGE_PATH
+    candidates = [BUNDLED_BRIDGE_PATH]
+    frozen = getattr(sys, "_MEIPASS", None)
+    if frozen:
+        candidates.append(Path(frozen) / "backend" / "core" / "onenote_bridge.ps1")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
     if LEGACY_BRIDGE_PATH.is_file():
         return LEGACY_BRIDGE_PATH
     raise OneNoteError("未找到 OneNote PowerShell 桥接脚本，请检查配置文件。")
@@ -102,12 +110,25 @@ def call_bridge(op: str, timeout_seconds: int = 15, **params: Any) -> Any:
 
         try:
             proc = subprocess.run(
-                [PS_EXE, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script_path), req_file, resp_file],
+                [
+                    PS_EXE,
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(script_path),
+                    req_file,
+                    resp_file,
+                ],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
                 timeout=timeout_seconds,
+                creationflags=CREATE_NO_WINDOW,
             )
         except subprocess.TimeoutExpired as exc:
             logger.error("OneNote bridge call timed out on op=%s", op)
@@ -142,7 +163,7 @@ def call_bridge(op: str, timeout_seconds: int = 15, **params: Any) -> Any:
 # 建页时 list/hierarchy 很贵；短时缓存目标分区，连续建页少等一整轮 COM。
 _SECTION_CACHE: tuple[str, str, str, str] | None = None
 _SECTION_CACHE_AT = 0.0
-_SECTION_CACHE_TTL = 300.0
+_SECTION_CACHE_TTL = 3600.0
 _SECTION_CACHE_LOCK = threading.Lock()
 
 
