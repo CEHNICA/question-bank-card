@@ -3,6 +3,13 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.1.3
+
+**去掉题号核对与“范围内还印着第 N 题”黄色提示条并自动转绿**
+
+- **停用并清理两类题号提示（`pipeline.py`、`library.py`、`views.py`、`app.js`）**：停用「AI 看到的题号是 …，请确认」和「这张卡的范围里还印着第 … 题的题号，卡上只有这一道；请对照原书确认那几道题是不是漏进来了」提示生成；在 `library.tidy_saved_cards`、`question_json`/`card_verdicts`、`approve_all_green` 与前端 `questionFlags` 四处统一自动清理存量卡片的此类历史提示并恢复无其他问题卡片的绿色状态，保留缺图、看不清字、混入答案及跨节等核心提醒。
+
+
 ## 2.1.2
 
 **跨机 Edge 应用窗口任务栏图标加固、`/favicon.ico` 补齐与 OneNote 打开等待条恢复**

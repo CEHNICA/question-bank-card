@@ -212,26 +212,9 @@ def _source_kind_has_question_support(
 
 
 def _number_seen_flag(expected: int, readings: list[dict | None], *, clipped_number: bool = False) -> str | None:
-    """Warn only when neither independent reader found the expected number.
-
-    ``clipped_number`` marks a start the local rules recovered from a number
-    whose leading digit was cut off by the scan (“9.” read as 19): a reader
-    seeing 9 there confirms the repair rather than contradicting it.
-    """
-
-    seen_numbers = {
-        value
-        for result in readings
-        if isinstance(result, dict)
-        for value in [result.get("number_seen")]
-        if isinstance(value, int) and not isinstance(value, bool)
-    }
-    if not seen_numbers or expected in seen_numbers:
-        return None
-    if clipped_number and all(value < expected and str(expected).endswith(str(value)) for value in seen_numbers):
-        return None
-    rendered = "、".join(str(value) for value in sorted(seen_numbers))
-    return f"AI 看到的题号是 {rendered}，请确认"
+    """已按需求取消“AI 看到的题号是 N，请确认”黄色提示条，保留接口兼容调用方。"""
+    del expected, readings, clipped_number
+    return None
 
 
 def _content_kind_review_flag(
@@ -270,7 +253,15 @@ def _content_kind_review_flag(
 
 
 def _local_text_review_flag(flag: str) -> bool:
-    return flag.startswith(("本地版面规则判为", "AI 判断这段更像", "两次 AI 对这段是否为题目", "AI 看到的题号是 "))
+    return flag.startswith(
+        (
+            "本地版面规则判为",
+            "AI 判断这段更像",
+            "两次 AI 对这段是否为题目",
+            "AI 看到的题号是 ",
+            "这张卡的范围里还印着第 ",
+        )
+    )
 
 
 def persist_local_text_review_upgrades(questions) -> dict[str, int]:
@@ -5145,13 +5136,6 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         flags.append(
             f"题干里还印着第 {merged} 题的题号，这张卡可能是两道题并成了一道；请对照原卷确认，必要时在这里把它拆成两道"
         )
-    elif snapshot.get("is_book") and (
-        extra_numbers := textnorm.printed_question_numbers(str(snapshot.get("witness") or ""), number)
-    ):
-        # 另一种形状：卡上只有一道题，题号也对得上，范围却罩住了后面几道题 ——
-        # 书上印着，库里却没有它们的卡（八下习题 7.1 的第 2 题就是这样没的）。
-        listed = "、".join(str(value) for value in extra_numbers)
-        flags.append(f"这张卡的范围里还印着第 {listed} 题的题号，卡上只有这一道；请对照原书确认那几道题是不是漏进来了")
     if missing := textnorm.missing_sub_questions(final.get("stem") or "", snapshot.get("witness_blocks")):
         # 小问在整段正文里跳号，而那些号在本题范围内确实印着内容：切题吞了一道小问。
         # 九上 id=1152 就是这样，(2)整条没进卡，成品卷上印成 (1)(3)。判据的另一半

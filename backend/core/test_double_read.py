@@ -339,6 +339,41 @@ class SingleReadingWorkflowTests(IsolatedData, TestCase):
         self.assertEqual(question.flags, [])
         self.assertEqual(question.state, Question.State.GREEN)
 
+    def test_legacy_number_warning_flags_are_removed_and_turn_green(self):
+        cleaned_card = self.question(
+            number=1,
+            body_mode="text",
+            stem=STEM,
+            state=Question.State.YELLOW,
+            flags=[
+                "AI 看到的题号是 5，请确认",
+                "这张卡的范围里还印着第 5 题的题号，卡上只有这一道；请对照原书确认那几道题是不是漏进来了",
+            ],
+        )
+        mixed_card = self.question(
+            number=2,
+            body_mode="text",
+            stem=STEM,
+            state=Question.State.YELLOW,
+            flags=["AI 看到的题号是 5，请确认", "有看不清的字（[?]），请对照原卷补上"],
+        )
+        response = self.client.get(f"/api/papers/{self.original.pk}")
+        self.assertEqual(response.status_code, 200)
+        cards = {item["id"]: item for item in response.json()["questions"]}
+        self.assertEqual(cards[cleaned_card.pk]["flags"], [])
+        self.assertEqual(cards[cleaned_card.pk]["state"], Question.State.GREEN)
+        self.assertEqual(cards[mixed_card.pk]["flags"], ["有看不清的字（[?]），请对照原卷补上"])
+        self.assertEqual(cards[mixed_card.pk]["state"], Question.State.YELLOW)
+
+        counts = library.tidy_saved_cards()
+        self.assertEqual(counts["questions"], 2)
+        cleaned_card.refresh_from_db()
+        mixed_card.refresh_from_db()
+        self.assertEqual(cleaned_card.flags, [])
+        self.assertEqual(cleaned_card.state, Question.State.GREEN)
+        self.assertEqual(mixed_card.flags, ["有看不清的字（[?]），请对照原卷补上"])
+        self.assertEqual(mixed_card.state, Question.State.YELLOW)
+
 
 class SingleReadRequestPolicyTests(SimpleTestCase):
     def test_single_context_disables_hedge_but_preserves_original_timeout_and_cancel(self):

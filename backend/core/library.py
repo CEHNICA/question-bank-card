@@ -1248,11 +1248,27 @@ def _tidy_reading(reading, switches: dict | None = None, origin: str = ""):
 
 
 OBSOLETE_SECOND_READ_FLAG_PREFIX = "只有一次识读成功（另一次："
+OBSOLETE_NUMBER_SEEN_PREFIX = "AI 看到的题号是 "
+OBSOLETE_EXTRA_NUMBER_PREFIX = "这张卡的范围里还印着第 "
+OBSOLETE_EXTRA_NUMBER_MARKER = "题的题号，卡上只有这一道；请对照原书确认那几道题是不是漏进来了"
 
 
 def is_obsolete_second_read_flag(flag: object) -> bool:
     """判断是否为已废弃的二次复核模型警告旗标。"""
     return str(flag or "").startswith(OBSOLETE_SECOND_READ_FLAG_PREFIX)
+
+
+def is_obsolete_number_warning_flag(flag: object) -> bool:
+    """判断是否为已取消的题号核对或范围内印着其他题号提示。"""
+    text = str(flag or "")
+    if text.startswith(OBSOLETE_NUMBER_SEEN_PREFIX) and text.endswith("，请确认"):
+        return True
+    return text.startswith(OBSOLETE_EXTRA_NUMBER_PREFIX) and OBSOLETE_EXTRA_NUMBER_MARKER in text
+
+
+def is_obsolete_review_flag(flag: object) -> bool:
+    """判断是否为版本升级后不再展示、应自动清理的历史提示旗标。"""
+    return is_obsolete_second_read_flag(flag) or is_obsolete_number_warning_flag(flag)
 
 
 _BRACKET_NOTE = re.compile(r"[（(【\[][^）)】\]]{0,14}[）)】\]]")
@@ -1338,8 +1354,8 @@ def tidy_saved_cards() -> dict[str, int]:
             answer = prose.tidy_value(question.answer, switches=switches)
             analysis = prose.tidy_value(question.analysis, switches=switches)
             raw_flags = list(question.flags or [])
-            current_flags = [flag for flag in raw_flags if not is_obsolete_second_read_flag(flag)]
-            removed_second_read = len(current_flags) != len(raw_flags)
+            current_flags = [flag for flag in raw_flags if not is_obsolete_review_flag(flag)]
+            removed_obsolete = len(current_flags) != len(raw_flags)
             if invented:
                 options, restored = _restore_from_readings(options, invented, question)
                 current_flags.extend(f"选项 {letter} 只有一次识读读到，已补上，请对照原卷核对" for letter in restored)
@@ -1355,7 +1371,7 @@ def tidy_saved_cards() -> dict[str, int]:
                 if not current_flags and base_state == Question.State.YELLOW:
                     base_state = Question.State.GREEN
             if (
-                removed_second_read
+                removed_obsolete
                 and not current_flags
                 and base_state == Question.State.YELLOW
                 and review.get("status") not in {"blocked_missing", "conflict"}

@@ -1129,11 +1129,11 @@ class PipelineTests(TestCase):
         self.assertEqual(cards[1].read_b, {"skipped": "disabled"})
         self.assertEqual((cards[2].state, cards[2].text_source), ("green", "single"), cards[2].flags)
         self.assertEqual([f["slot"] for f in cards[2].figures], ["stem"])
-        # A single read remains the saved text and keeps local number warnings.
+        # A single read remains the saved text without emitting number-seen banners.
         self.assertEqual((cards[3].state, cards[3].text_source), ("yellow", "single"))
         self.assertIn("x^2", cards[3].stem)
         self.assertNotIn(("arbiter", 3, "minimax"), chat.calls)
-        self.assertTrue(any("AI 看到的题号是 4" in f for f in cards[3].flags))
+        self.assertFalse(any("AI 看到的题号是" in f for f in cards[3].flags))
         # Question 4 was never found: the card that holds it says so, and the
         # locator got a second look before giving up.
         self.assertIn(pipeline.merged_question_flag(4), cards[3].flags)

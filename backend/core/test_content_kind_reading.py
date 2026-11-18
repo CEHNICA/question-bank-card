@@ -190,10 +190,10 @@ class ContentKindReadingTests(SimpleTestCase):
             )
         )
 
-    def test_number_warning_accepts_either_independent_reader(self):
+    def test_number_warning_is_disabled_even_when_readers_disagree(self):
         self.assertIsNone(pipeline._number_seen_flag(1, [{"number_seen": 2}, {"number_seen": 1}]))
-        self.assertEqual(pipeline._number_seen_flag(1, [{"number_seen": 2}, None]), "AI 看到的题号是 2，请确认")
-        self.assertEqual(pipeline._number_seen_flag(1, [None, {"number_seen": 2}]), "AI 看到的题号是 2，请确认")
+        self.assertIsNone(pipeline._number_seen_flag(1, [{"number_seen": 2}, None]))
+        self.assertIsNone(pipeline._number_seen_flag(1, [None, {"number_seen": 2}]))
 
     def test_second_read_and_arbiter_are_not_requested(self):
         primary_engine = readers.Engine("minimax", "primary-model")
@@ -279,7 +279,10 @@ class LocalTextReviewUpgradeTests(TestCase):
             question_type="single_choice",
             read_a={"content_kind": "exercise", "number_seen": 2},
             read_b={"content_kind": "exercise", "number_seen": 1},
-            flags=["AI 看到的题号是 2，请确认"],
+            flags=[
+                "AI 看到的题号是 2，请确认",
+                "这张卡的范围里还印着第 5 题的题号，卡上只有这一道；请对照原书确认那几道题是不是漏进来了",
+            ],
             state=Question.State.YELLOW,
         )
 

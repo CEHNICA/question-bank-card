@@ -114,11 +114,12 @@ class SwallowedQuestionFlagTests(SimpleTestCase):
         ):
             return pipeline.read_card(snapshot(number=number, **changes), self.store)
 
-    def test_a_range_that_swallowed_another_question_is_not_green(self):
-        result = self.run_card("计算：\n（1）$(\\sqrt{3a^3})^2$（$a\\geq 0$）；", witness=WIDOW_SPAN)
+    def test_extra_printed_question_number_flag_is_no_longer_emitted(self):
+        result = self.run_card("计算：\n（1）$(\\sqrt{3a^3})^2$（$a\\geq 0$）；", number_seen=5, witness=WIDOW_SPAN)
 
-        self.assertTrue(any("范围里还印着第 3 题" in flag for flag in result["flags"]), result["flags"])
-        self.assertEqual(result["state"], Question.State.YELLOW)
+        self.assertFalse(any("范围里还印着" in flag for flag in result["flags"]), result["flags"])
+        self.assertFalse(any("AI 看到的题号是" in flag for flag in result["flags"]), result["flags"])
+        self.assertEqual(result["state"], Question.State.GREEN, result["flags"])
 
     def test_an_ordinary_range_stays_green(self):
         witness = "2. 计算：\n（1）$(\\sqrt{16})^2$；\n（2）$(-3\\sqrt{1/6})^2$。\n数学理解"

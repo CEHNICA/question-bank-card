@@ -19,7 +19,11 @@
 
 要让当前豆包补知识点或参考答案，可以明确让它通过附带的 CLI/MCP 工具完成后交回题库。**这条助手流程不需要豆包 API。** 两项默认关闭，明确需要时再启用；只有聊天能力时由你导入结果。网页中的生成按钮使用已配置的独立 API。[给助手的操作说明](AGENTS.md)
 
-当前发布版本为 **2.1.2**（桌面端任务栏图标加固与 OneNote 打开等待条修复版），可从 [GitHub Releases](https://github.com/CEHNICA/question-bank-card/releases/tag/v2.1.2) 下载（[2.1.2 说明](docs/release-notes-v2.1.2.md) · [2.1.1 说明](docs/release-notes-v2.1.1.md) · [2.1.0 说明](docs/release-notes-v2.1.0.md) · [2.0.0 完整升级说明](docs/release-notes-v2.0.0.md) · [更新记录](CHANGELOG.md)）。
+当前发布版本为 **2.1.3**（去掉题号提示条并整合桌面图标与 OneNote 等待条修复版），可从 [GitHub Releases](https://github.com/CEHNICA/question-bank-card/releases/tag/v2.1.3) 下载（[2.1.3 说明](docs/release-notes-v2.1.3.md) · [2.1.2 说明](docs/release-notes-v2.1.2.md) · [2.1.1 说明](docs/release-notes-v2.1.1.md) · [2.1.0 说明](docs/release-notes-v2.1.0.md) · [2.0.0 完整升级说明](docs/release-notes-v2.0.0.md) · [更新记录](CHANGELOG.md)）。
+
+### 2.1.3 修复与改进
+
+- **去掉题卡上的题号不一致与「范围还印着第 N 题」黄色提示条**：新识读及已有卡片自动清除这两类提示，若无其他实质问题自动恢复绿色状态；保留缺图、看不清字（`[?]`）、混入印刷答案等关键审校提示。
 
 ### 2.1.2 修复与改进
 

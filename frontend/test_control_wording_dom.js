@@ -205,4 +205,24 @@ function runAppMenu(question) {
   assert.doesNotMatch(summary.title, /重读/, "菜单里没有的项不许出现在说明里");
 }
 
+// ── 六、题号核对 / 范围还印着第 N 题黄色提示条过滤 ────────────
+{
+  const fnSource = sliceFunction(appJs, "questionFlags");
+  const sandbox = {
+    FIGURE_REVIEW_BLOCKS: new Set(["blocked_missing"]),
+    TYPE_REMINDER: /^题型没读出来/,
+    figureReview: () => null,
+    typeBlocksApproval: () => false,
+  };
+  vm.runInNewContext(`${fnSource}\nglobalThis.__questionFlags = questionFlags;`, sandbox);
+  const filtered = sandbox.__questionFlags({
+    flags: [
+      "AI 看到的题号是 5，请确认",
+      "这张卡的范围里还印着第 5 题的题号，卡上只有这一道；请对照原书确认那几道题是不是漏进来了",
+      "有看不清的字（[?]），请对照原卷补上",
+    ],
+  });
+  assert.deepEqual(filtered, ["有看不清的字（[?]），请对照原卷补上"], "题号提示条应彻底隐藏且保留其他提醒");
+}
+
 console.log("control wording dom: ok");

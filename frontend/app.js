@@ -4329,13 +4329,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function questionFlags(q) {
     const review = figureReview(q);
     return (q.flags || []).filter((flag) => {
-      if (/^只有一次识读成功（另一次：/.test(String(flag))) return false;
-      if (TYPE_REMINDER.test(String(flag)) && typeBlocksApproval(q)) return false;
+      const text = String(flag || "");
+      if (/^只有一次识读成功（另一次：/.test(text)) return false;
+      if (/^AI 看到的题号是 .+，请确认$/.test(text)) return false;
+      if (/^这张卡的范围里还印着第 .+ 题的题号，卡上只有这一道/.test(text)) return false;
+      if (TYPE_REMINDER.test(text) && typeBlocksApproval(q)) return false;
       if (!review) return true;
       if (flag === review.reason) return false;
       // The figure panel above the text already says this, with the buttons to settle it.
       return !(FIGURE_REVIEW_BLOCKS.has(review.status)
-        && /还没有配图|原卷可能有图没有被找到|选项是图|没有发现图像提示词/.test(String(flag)));
+        && /还没有配图|原卷可能有图没有被找到|选项是图|没有发现图像提示词/.test(text));
     });
   }
 

@@ -416,9 +416,9 @@ def _live_publications(paper: Paper) -> dict[int, PublishedQuestion]:
 
 
 def _strip_obsolete_second_read_flags(question: Question, review: dict | None) -> None:
-    """序列化与状态统计时即时剔除历史遗留的二次复核警告旗标。"""
+    """序列化与状态统计时即时剔除历史遗留的已取消警告旗标。"""
     raw_flags = list(getattr(question, "flags", None) or [])
-    cleaned = [flag for flag in raw_flags if not library.is_obsolete_second_read_flag(flag)]
+    cleaned = [flag for flag in raw_flags if not library.is_obsolete_review_flag(flag)]
     if len(cleaned) == len(raw_flags):
         return
     question.flags = cleaned
@@ -2523,6 +2523,7 @@ def approve_green(request, paper_id):
         with reusing_reviews():
             for question in questions:
                 review = stored_or_derived_review(question)
+                _strip_obsolete_second_read_flags(question, review)
                 # ``stored_or_derived_review`` may rewrite question.state in
                 # memory (an upgraded figure review drops the card back to
                 # yellow).  Such a card used to be dropped without a word, which
