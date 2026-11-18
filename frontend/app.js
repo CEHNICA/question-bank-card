@@ -4276,6 +4276,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function questionFlags(q) {
     const review = figureReview(q);
     return (q.flags || []).filter((flag) => {
+      if (/^只有一次识读成功（另一次：/.test(String(flag))) return false;
       if (TYPE_REMINDER.test(String(flag)) && typeBlocksApproval(q)) return false;
       if (!review) return true;
       if (flag === review.reason) return false;

@@ -320,6 +320,25 @@ class SingleReadingWorkflowTests(IsolatedData, TestCase):
             pipeline.read_questions(self.original, [first])
         self.assertEqual(chat.call_count, 1)
 
+    def test_legacy_only_one_read_succeeded_flag_is_removed_and_turns_green(self):
+        question = self.question(
+            body_mode="text",
+            stem=STEM,
+            state=Question.State.YELLOW,
+            flags=["只有一次识读成功（另一次：所选复核模型没有可用的 API Key）"],
+        )
+        response = self.client.get(f"/api/papers/{self.original.pk}")
+        self.assertEqual(response.status_code, 200)
+        card = response.json()["questions"][0]
+        self.assertEqual(card["flags"], [])
+        self.assertEqual(card["state"], Question.State.GREEN)
+
+        counts = library.tidy_saved_cards()
+        self.assertEqual(counts["questions"], 1)
+        question.refresh_from_db()
+        self.assertEqual(question.flags, [])
+        self.assertEqual(question.state, Question.State.GREEN)
+
 
 class SingleReadRequestPolicyTests(SimpleTestCase):
     def test_single_context_disables_hedge_but_preserves_original_timeout_and_cancel(self):

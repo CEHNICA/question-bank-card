@@ -4681,8 +4681,6 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
         for name, engine, url, figures in (("a", primary, marked_url, True), ("b", checker, clean_url, False))
         if engine is not None
     ]
-    if double_read and checker is None:
-        errors["b"] = "所选复核模型没有可用的 API Key"
 
     unavailable: set[str] = set()
 
@@ -4885,7 +4883,6 @@ def read_card(snapshot: dict, store: PageStore) -> dict:
     else:
         final = a_text or b_text or {}
         source = "single"
-        flags.append(f"只有一次识读成功（另一次：{errors.get('b') or errors.get('a')}）")
 
     empty_stem_error = ""
     if not str(final.get("stem") or "").strip():

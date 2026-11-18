@@ -415,6 +415,24 @@ def _live_publications(paper: Paper) -> dict[int, PublishedQuestion]:
     return latest
 
 
+def _strip_obsolete_second_read_flags(question: Question, review: dict | None) -> None:
+    """序列化与状态统计时即时剔除历史遗留的二次复核警告旗标。"""
+    raw_flags = list(getattr(question, "flags", None) or [])
+    cleaned = [flag for flag in raw_flags if not library.is_obsolete_second_read_flag(flag)]
+    if len(cleaned) == len(raw_flags):
+        return
+    question.flags = cleaned
+    if (
+        getattr(question, "state", None) == Question.State.YELLOW
+        and not cleaned
+        and not blocks_approval(review)
+        and not library.type_blocks_approval(question)
+        and not getattr(question, "error", "")
+        and getattr(question, "body_mode", "text") != "source_image"
+    ):
+        question.state = Question.State.GREEN
+
+
 def _verdict(row: Question, live: PublishedQuestion | None = None) -> tuple[str, bool, bool, bool]:
     """(state, approval current, figures block approval, in the library as shown).
 
@@ -425,7 +443,9 @@ def _verdict(row: Question, live: PublishedQuestion | None = None) -> tuple[str,
     nothing left for the teacher to look at.  A card edited after it was
     published hashes differently and stays unsettled on purpose.
     """
-    approved, blocked = library.approval_is_current(row), blocks_approval(source_images.review(row))
+    review = source_images.review(row)
+    _strip_obsolete_second_read_flags(row, review)
+    approved, blocked = library.approval_is_current(row), blocks_approval(review)
     settled = live is not None and live.content_hash == library.content_hash(library.final_content(row))
     return row.state, approved, blocked, settled
 
@@ -617,6 +637,7 @@ def question_json(question: Question, table_blocks: list[dict] | None = None, gu
     # before those derived state/flag/review changes occur.
     layout_fingerprint = question_layout.fingerprint(question)
     figure_review = source_images.review(question)
+    _strip_obsolete_second_read_flags(question, figure_review)
     if table_blocks is None and question.figures:
         table_blocks = tables.table_blocks(question.paper)
     valid_candidate_keys = _candidate_keys(question)

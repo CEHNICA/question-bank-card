@@ -1247,6 +1247,14 @@ def _tidy_reading(reading, switches: dict | None = None, origin: str = ""):
     return changed
 
 
+OBSOLETE_SECOND_READ_FLAG_PREFIX = "只有一次识读成功（另一次："
+
+
+def is_obsolete_second_read_flag(flag: object) -> bool:
+    """判断是否为已废弃的二次复核模型警告旗标。"""
+    return str(flag or "").startswith(OBSOLETE_SECOND_READ_FLAG_PREFIX)
+
+
 _BRACKET_NOTE = re.compile(r"[（(【\[][^）)】\]]{0,14}[）)】\]]")
 
 
@@ -1329,7 +1337,9 @@ def tidy_saved_cards() -> dict[str, int]:
                 options, invented = _without_invented_options(options, figure_slots)
             answer = prose.tidy_value(question.answer, switches=switches)
             analysis = prose.tidy_value(question.analysis, switches=switches)
-            current_flags = list(question.flags or [])
+            raw_flags = list(question.flags or [])
+            current_flags = [flag for flag in raw_flags if not is_obsolete_second_read_flag(flag)]
+            removed_second_read = len(current_flags) != len(raw_flags)
             if invented:
                 options, restored = _restore_from_readings(options, invented, question)
                 current_flags.extend(f"选项 {letter} 只有一次识读读到，已补上，请对照原卷核对" for letter in restored)
@@ -1344,6 +1354,15 @@ def tidy_saved_cards() -> dict[str, int]:
                 current_flags = [flag for flag in current_flags if flag not in DECISION_FLAGS]
                 if not current_flags and base_state == Question.State.YELLOW:
                     base_state = Question.State.GREEN
+            if (
+                removed_second_read
+                and not current_flags
+                and base_state == Question.State.YELLOW
+                and review.get("status") not in {"blocked_missing", "conflict"}
+                and not question.error
+                and question.body_mode != "source_image"
+            ):
+                base_state = Question.State.GREEN
             flags, state = qtypes.sync(current_flags, base_state, kind)
             if invented and state == Question.State.GREEN:
                 state = Question.State.YELLOW
