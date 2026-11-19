@@ -31,6 +31,7 @@ from . import (
     demo,
     features,
     figure_assignment,
+    figure_candidate_repair,
     figure_claims,
     figure_policy,
     imaging,
@@ -5521,6 +5522,60 @@ def promote_saved_readings(paper_id=None) -> list[int]:
     return promoted
 
 
+def _ensure_missing_figure_candidates(paper: Paper, questions: list[Question], all_blocks: list[dict]) -> None:
+    """识读前为缺失 ``figure_candidates`` 的题卡回填原卷范围里的候选图。
+
+    旧版按章节重提取或手工切题遗留的题卡可能 ``figure_candidates=[]``；若不先回填就送图识读，
+    原卷截图画不出蓝色候选框，模型只能按题号编造配图键或报「缺图」，最终有图却被判成「可能漏图」。
+    """
+    missing = [
+        question
+        for question in questions
+        if not question.figure_candidates
+        and bool(question.regions)
+        and not figure_candidate_repair.has_human_figure_decision(question)
+    ]
+    if not missing:
+        return
+    figure_blocks = sorted(
+        (
+            block
+            for block in all_blocks
+            if block.get("type") in segment.FIGURE_TYPES
+            and block.get("page_idx") is not None
+            and isinstance(block.get("bbox"), list)
+            and len(block["bbox"]) == 4
+        ),
+        key=lambda block: int(block["seq"]) if isinstance(block.get("seq"), int) else 0,
+    )
+    if not figure_blocks:
+        return
+    owned_by_seq = figure_candidate_repair.owned_question_ids_by_seq(
+        paper.questions.filter(deleted_at__isnull=True).values_list("pk", "figure_candidates")
+    )
+    material_type = str(getattr(paper, "material_type", "") or "")
+    for question in missing:
+        new_candidates = figure_candidate_repair.unowned_figure_candidates_for_question(
+            material_type=material_type,
+            question_pk=question.pk,
+            regions=question.regions or [],
+            figure_blocks=figure_blocks,
+            owned_by_seq=owned_by_seq,
+        )
+        if not new_candidates:
+            continue
+        # 带上 content_revision 与 figure_candidates=[] 条件写库，避免覆盖并发人工改框或已入池候选。
+        updated = Question.objects.filter(
+            pk=question.pk, content_revision=question.content_revision, figure_candidates=[]
+        ).update(figure_candidates=new_candidates)
+        if updated:
+            question.figure_candidates = new_candidates
+            for candidate in new_candidates:
+                seq = candidate.get("seq")
+                if isinstance(seq, int):
+                    owned_by_seq[seq].add(question.pk)
+
+
 def read_questions(paper: Paper, questions: list[Question], *, revision: int | None = None) -> None:
     if demo.is_demo(paper):
         return
@@ -5540,6 +5595,8 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
         return
     workers = _reader_parallelism()
     store = PageStore(paper)
+    all_blocks = _block_dicts(paper)
+    _ensure_missing_figure_candidates(paper, questions, all_blocks)
     snapshots = [_snapshot(q) for q in questions]
     # Kept in the private snapshot shape for compatibility with older workers;
     # current production reads are always single-pass.
@@ -5551,7 +5608,7 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
     # prose blocks are used: on marked papers the student's working is mostly
     # recognised as separate equation blocks, which would never match.
     blocks_by_page: dict[int, list[dict]] = defaultdict(list)
-    for block in _block_dicts(paper):
+    for block in all_blocks:
         if block.get("type") in WITNESS_BLOCK_TYPES:
             blocks_by_page[int(block["page_idx"])].append(block)
     # MinerU's own reading of each printed table, to check a table the reader
@@ -5562,7 +5619,7 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
     # could read (the free quota used up): MinerU's text beats a red card.
     assistant = readers.assistant_mode()
     all_by_page: dict[int, list[dict]] = defaultdict(list)
-    for block in _block_dicts(paper):
+    for block in all_blocks:
         all_by_page[int(block["page_idx"])].append(block)
     table_html = {item["seq"]: item["html"] for item in table_list}
     for snapshot in snapshots:

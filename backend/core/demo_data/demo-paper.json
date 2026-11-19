@@ -659,6 +659,9 @@
     },
     "type": "single_choice",
     "content_kind": "exercise",
+    "figures": {
+     "1": "none"
+    },
     "missing_figure": false,
     "others": [],
     "number_seen": 2,

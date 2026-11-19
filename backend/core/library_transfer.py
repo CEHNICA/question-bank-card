@@ -307,14 +307,23 @@ def backup_path(identifier: str) -> Path:
 
 
 def list_exportable_papers() -> list[dict]:
-    """列出可单独打包分享的资料（不含已归档与示例练习卷）。"""
-    from django.db.models import Count
+    """列出可单独打包分享的资料（含已归档但仍有在库题目的书/卷，不含回收站废卷与示例练习卷）。"""
+    from django.db.models import Count, Q
 
     from .demo import is_demo
     from .models import Paper, PublishedQuestion, Question
 
+    live_pub_paper_ids = set(
+        PublishedQuestion.objects.filter(
+            status=PublishedQuestion.Status.PUBLISHED, question__deleted_at__isnull=True, paper_id__isnull=False
+        ).values_list("paper_id", flat=True)
+    )
     papers = [
-        paper for paper in Paper.objects.filter(archived=False).order_by("-created_at", "-id") if not is_demo(paper)
+        paper
+        for paper in Paper.objects.filter(Q(archived=False) | Q(pk__in=live_pub_paper_ids)).order_by(
+            "-created_at", "-id"
+        )
+        if not is_demo(paper)
     ]
     if not papers:
         return []
@@ -555,9 +564,9 @@ def _prune_snapshot_database(
     writer.execute(
         f'DELETE FROM "{PUBLICATION_TABLE}" '
         f"WHERE paper_id IS NULL OR paper_id NOT IN ({placeholders}) "
-        f"OR status = ? OR question_id IS NULL "
+        f"OR status != ? OR question_id IS NULL "
         f'OR question_id NOT IN (SELECT id FROM "{QUESTION_TABLE}")',
-        (*paper_params, "withdrawn"),
+        (*paper_params, "published"),
     )
     if _table_exists(writer, SOLUTION_TABLE):
         writer.execute(

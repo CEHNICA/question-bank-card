@@ -546,3 +546,45 @@ class StoredFigureReviewUpgradeTests(TestCase):
         self.assertEqual(automatic.state, Question.State.YELLOW)
         self.assertEqual(human.figure_review, human_review)
         self.assertEqual(human.flags, [figure_policy.FLAG_NO_FIGURE])
+
+    def test_dangling_question_number_key_does_not_block_unique_stem_candidate(self):
+        # 无候选识读时，模型常按题号输出悬空键 {"5": "stem"}，而候选列表只有 "1"；
+        # 策略只应认落在真实候选标签集合内的绑定角色，不能被悬空键卡死。
+        candidate = {"label": "1", "seq": 10, "page_idx": 5, "bbox": [680, 300, 880, 420]}
+
+        resolved = figure_policy.resolve_automatic_figure_assignments(
+            stem="如图，求二面角的大小。",
+            options={},
+            kind="free_response",
+            candidates=[candidate],
+            assignments={"5": "stem"},
+        )
+
+        self.assertEqual(resolved["1"], "stem")
+
+    def test_complete_text_choice_allows_binding_unique_stem_candidate(self):
+        candidate = {"label": "1", "seq": 11, "page_idx": 6, "bbox": [700, 300, 860, 420]}
+
+        resolved = figure_policy.resolve_automatic_figure_assignments(
+            stem="如图，正方形中某角为（ ）。",
+            options={"A": "1", "B": "2", "C": "3", "D": "4"},
+            kind="single_choice",
+            candidates=[candidate],
+            assignments={"5": "stem"},
+        )
+
+        self.assertEqual(resolved["1"], "stem")
+
+    def test_incomplete_choice_refuses_auto_binding_remaining_candidate(self):
+        # 缺少 D 选项时，唯一候选图也可能是缺失选项的图片，必须留给人工确认。
+        candidate = {"label": "1", "seq": 12, "page_idx": 7, "bbox": [700, 300, 860, 420]}
+
+        resolved = figure_policy.resolve_automatic_figure_assignments(
+            stem="如图，选出正确值（ ）。",
+            options={"A": "1", "B": "2", "C": "3"},
+            kind="single_choice",
+            candidates=[candidate],
+            assignments={"5": "stem"},
+        )
+
+        self.assertNotIn("1", resolved)

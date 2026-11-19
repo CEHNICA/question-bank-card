@@ -29,7 +29,7 @@ BLOCKING_STATUSES = {BLOCKED_MISSING, CONFLICT}
 # value lives inside the JSON review so existing databases do not need a schema
 # migration: old automatic decisions can be recognised and rebuilt from the
 # question data already on disk.
-FIGURE_REVIEW_POLICY_VERSION = 13
+FIGURE_REVIEW_POLICY_VERSION = 14
 
 # 「这张候选图印在别题里」的角色写法。严格匹配 q 后跟若干数字，避免把
 # q / qOtherQuestion / q1a 这种坏值也当合法 foreign。
@@ -467,14 +467,27 @@ def resolve_automatic_figure_assignments(
             label = candidate.get("label")
             if label is not None and str(label) not in decorations:
                 resolved[str(label)] = "stem"
+        valid_labels = {
+            str(candidate["label"])
+            for candidate in candidates
+            if isinstance(candidate, dict) and candidate.get("label") is not None
+        }
         bound_roles = {"stem", *OPTION_SLOTS}
-        if str(kind or "unknown") not in {"single_choice", "multiple_choice"} and not any(
-            role in bound_roles for role in resolved.values()
+        # NOTE: 仅统计落在当前 ``valid_labels`` 内的已绑定角色。历史无候选识读时，
+        # 模型常按题号输出悬空键（例如第 5 题返回 ``{"5": "stem"}`` 而候选仅有 ``"1"``），
+        # 若把这类悬空键也算作“已有绑定配图”，会误阻止唯一候选图自动归入题干。
+        bound_in_candidates = {
+            role for label, role in resolved.items() if label in valid_labels and role in bound_roles
+        }
+        is_choice = str(kind or "unknown") in {"single_choice", "multiple_choice"}
+        non_empty_option_slots = {slot for slot in OPTION_SLOTS if str((options or {}).get(slot, "") or "").strip()}
+        bound_option_slots = {role for role in bound_in_candidates if role in OPTION_SLOTS}
+        choice_options_complete = REQUIRED_OPTION_SLOTS.issubset(non_empty_option_slots | bound_option_slots)
+        if (not is_choice and not bound_in_candidates) or (
+            is_choice and choice_options_complete and "stem" not in bound_in_candidates
         ):
-            # If a free-response stem explicitly says a supplied figure exists
-            # and exactly one ordinary candidate remains unclassified, that
-            # crop is stronger evidence than the reader's omission.  Explicit
-            # ``none``/foreign labels and textbook badges are not reconsidered.
+            # 当题干明确提示有图、且非选择题或选项文字/配图已完整的选择题恰好仅余
+            # 一张普通候选图未归属时，直接归入题干；显式 ``none``/他题及教材小徽章除外。
             plausible = [
                 candidate
                 for candidate in candidates

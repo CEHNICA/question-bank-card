@@ -3,6 +3,15 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.2.1
+
+**合入无候选识读漏图误报根治并修复题包分享归档书籍、Word 题号段落与启动自愈锁库问题**
+
+- **合入并加固无候选识读漏图误报根治（`figure_candidate_repair.py`、`figure_policy.py`、`pipeline.py`、`run_worker.py`、`repair_figure_candidates.py`）**：识读前自动回填范围图块、升级 `figure_policy` 至 v14 消除悬空键误阻塞并支持选择题自动归图、后台启动自动找回存量误报配图；并将 `apply=True` 改为逐卡短事务防 SQLite 全库长时间锁表，补充 `approved` / `ocr_pending` 守卫及布尔 `seq` 类型防护；同步适配新手教学示例卷第 2 题在 v14 下的配图练习状态。
+- **修复按卷/书打包分享归档资料与历史版本边界（`library_transfer.py`）**：`list_exportable_papers` 改为允许已归档但仍有在库正式题目的书/卷导出分享（继续屏蔽回收站废卷与示例卷）；裁剪分享快照库时同步剔除 `superseded` 历史入库版本，仅保留在用 `published` 记录。
+- **修复 Word 导出题号段落制表符与行距（`library_export.py`）**：统一为题号段落设置标准行距，且在题干为原图、首块为表格或行间公式（且无题源）时不插入孤立 `\t`。
+
+
 ## 2.2.0
 
 **统一合入 Word 导出对齐打印预览、按卷/目录文件夹打包题包分享与 OneNote 回跳加固**

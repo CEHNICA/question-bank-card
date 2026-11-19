@@ -19,7 +19,13 @@
 
 要让当前豆包补知识点或参考答案，可以明确让它通过附带的 CLI/MCP 工具完成后交回题库。**这条助手流程不需要豆包 API。** 两项默认关闭，明确需要时再启用；只有聊天能力时由你导入结果。网页中的生成按钮使用已配置的独立 API。[给助手的操作说明](AGENTS.md)
 
-当前发布版本为 **2.2.0**（Word 导出像素级对齐、按卷/文件夹题包分享与 OneNote 回跳加固版），可从 [GitHub Releases](https://github.com/CEHNICA/question-bank-card/releases/tag/v2.2.0) 下载（[2.2.0 说明](docs/release-notes-v2.2.0.md) · [2.1.4 说明](docs/release-notes-v2.1.4.md) · [2.1.3 说明](docs/release-notes-v2.1.3.md) · [2.1.2 说明](docs/release-notes-v2.1.2.md) · [2.1.1 说明](docs/release-notes-v2.1.1.md) · [2.1.0 说明](docs/release-notes-v2.1.0.md) · [2.0.0 完整升级说明](docs/release-notes-v2.0.0.md) · [更新记录](CHANGELOG.md)）。
+当前发布版本为 **2.2.1**（漏图误报根治 + Word 对齐与题包分享加固版），可从 [GitHub Releases](https://github.com/CEHNICA/question-bank-card/releases/tag/v2.2.1) 下载（[2.2.1 说明](docs/release-notes-v2.2.1.md) · [2.2.0 说明](docs/release-notes-v2.2.0.md) · [2.1.4 说明](docs/release-notes-v2.1.4.md) · [2.1.3 说明](docs/release-notes-v2.1.3.md) · [2.1.2 说明](docs/release-notes-v2.1.2.md) · [2.1.1 说明](docs/release-notes-v2.1.1.md) · [2.1.0 说明](docs/release-notes-v2.1.0.md) · [2.0.0 完整升级说明](docs/release-notes-v2.0.0.md) · [更新记录](CHANGELOG.md)）。
+
+### 2.2.1 修复与改进
+
+- **根治无候选识读「可能漏图」误报与启动自愈加固**：识读前自动回填原卷范围印刷图块并升级 `figure_policy` 至 v14，后台启动逐卡短事务安全找回存量误报配图（跳过已审核与识读中题卡、绝不锁死全库或新增黄卡）。
+- **修复按卷/书题包分享过滤边界**：支持挑选已归档但仍有在库正式题目的书籍打包分享，分享快照仅保留在用 `published` 版本并剔除历史失效版本。
+- **修复 Word 导出题号段落细节**：统一题号段落行距并消除原图题、表格开头及行间公式开头题干的孤立制表符。
 
 ### 2.2.0 升级与改进
 

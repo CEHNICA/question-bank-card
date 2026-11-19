@@ -2549,9 +2549,9 @@ def _write_field(
     #     抢来写会让多栏和单栏排出来的样子不一样。
     #   · 那个段落在格子里物理上排在最前面，抢来写后面的内容会打乱顺序。
     # 第一块是表的时候同理：表是独立的一块，题号自己占一段（单栏排版就是这样）。
+    reusable = False
     if first_paragraph is not None:
         head = blocks[0] if blocks else None
-        reusable = False
         if head is not None and head.get("type") == "text":
             segments = head.get("segments") or []
             if segments:
@@ -2577,9 +2577,11 @@ def _write_field(
     # 标签和正文之间留出预览里那 0.3em：正文从悬挂缩进的位置开始，
     # 折行也折回这一列。tab stop 必须自己写 —— Word 默认的制表位是
     # 12.7 毫米，我们要的是 5.4 毫米。
+    # 若该段后面不会追加任何行内文字（例如原图题或表/行间公式直接起新段），不插多余制表符。
+    will_append_inline = bool(prefix) or bool(lead_segments) or reusable
     if first_paragraph is not None:
         fmt = first_paragraph.paragraph_format
-        if first_paragraph_tab_mm:
+        if first_paragraph_tab_mm and will_append_inline:
             # 悬挂缩进的第一行落在**标签**的位置上（预览的标签列），
             # 正文落在标签 + 间隙那一列。列表自己的缩进（预览 .qb-options 的
             # padding-left）加在左边，两边一起才是正文列的左缘。
@@ -4336,6 +4338,7 @@ def _document(captured, title, options, mode):
             stem_left = _stem_column_left_mm(size, len(str(number)))
             number_paragraph = document.add_paragraph()
             _font(number_paragraph.add_run(f"{number}."), size, True)
+            _line_spacing(number_paragraph, size * LINE_SPACING)
             lead_segments = None
             if "origin" in item["fields"]:
                 origin_blocks = item["fields"]["origin"]

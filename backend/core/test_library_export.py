@@ -2482,6 +2482,69 @@ class LibraryExportTests(ExportFixture, TestCase):
         pub.save(update_fields=["content"])
         self.assertEqual(self.post(self.payload([pub])).status_code, 409)
 
+    def test_stem_number_paragraph_has_no_orphan_tab_and_has_line_spacing(self):
+        # 原图题、表格开头题和行间公式开头题（无题源）的题号段落不该残留多余制表符，且应写好统一行距。
+        img_pub = self.publication(kind="free_response", stem="")
+        img_folder = self.root / "library" / str(img_pub.id)
+        img_folder.mkdir(parents=True, exist_ok=True)
+        target = img_folder / "question-1.png"
+        Image.new("RGB", (240, 120), "red").save(target)
+        img_pub.content.update(
+            body_mode="source_image",
+            question_images=[
+                {
+                    "file": target.name,
+                    "width": 240,
+                    "height": 120,
+                    "page_idx": 0,
+                    "bbox": [0, 0, 100, 100],
+                    "order": 0,
+                    "image_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+                }
+            ],
+            figures=[],
+        )
+        img_pub.content_hash = library.content_hash(img_pub.content)
+        img_pub.save(update_fields=["content", "content_hash"])
+
+        raw_table = "| 列1 | 列2 |\n| --- | --- |\n| 值1 | 值2 |"
+        table_pub = self.publication(kind="free_response", stem=raw_table)
+        math_pub = self.publication(kind="free_response", stem="$$x^2$$")
+
+        rows = export._table_source(raw_table, "合成表格")
+        for row in rows:
+            for cell in row:
+                cell["segments"] = field(cell["source"])["blocks"][0]["segments"] if cell["source"] else []
+        table_field = {
+            "source": raw_table,
+            "blocks": [{"type": "table", "start": 0, "end": units(raw_table), "rows": rows}],
+        }
+        payload = self.payload(
+            [img_pub, table_pub, math_pub], print_options={"document": "questions", "student_info": False}
+        )
+        payload["rendered_fields"][str(table_pub.id)]["stem"] = table_field
+        payload["rendered_fields"][str(math_pub.id)]["stem"] = math_field(
+            "x^2", "<msup><mi>x</mi><mn>2</mn></msup>", display=True
+        )
+        response = self.post(payload)
+        self.assertEqual(response.status_code, 200, response.content[:200])
+        tree = document_xml(response.content)
+
+        expected_line = str(int(round(12 * export.LINE_SPACING * 20)))
+        number_paras = {}
+        for p in tree_paras(tree):
+            text = "".join(p.itertext())
+            for prefix in ("1.", "2.", "3."):
+                if text.startswith(prefix):
+                    number_paras[prefix] = p
+        self.assertEqual(set(number_paras.keys()), {"1.", "2.", "3."})
+        for prefix, p in number_paras.items():
+            self.assertEqual("".join(p.itertext()), prefix, f"{prefix} 题号段落不应包含孤立制表符")
+            self.assertIsNone(p.find(".//w:tab", NS), f"{prefix} 题号段落不应写出 <w:tab/>")
+            spacing = p.find("w:pPr/w:spacing", NS)
+            self.assertIsNotNone(spacing)
+            self.assertEqual(spacing.get(f"{{{NS['w']}}}line"), expected_line)
+
 
 class DraftPrintCompatibilityTests(TestCase):
     def test_legacy_and_explicit_documents_and_validation(self):

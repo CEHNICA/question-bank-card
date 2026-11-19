@@ -71,10 +71,18 @@ def main() -> None:
             item["regions_auto"] = item["regions"]
         if question.number == 2:
             # The reader did not bind the triangle: the card asks for its figure.
+            # 适配 figure_policy v14：将候选框显式标为 none，防止完整四选项单选题自动归图转绿，保留新手配图练习状态。
             item["figures"] = []
             item["figure_review"] = {}
-            item["read_a"] = {key: value for key, value in (item["read_a"] or {}).items()
-                              if key not in {"figures", "figures_followup"}}
+            read_a = {
+                key: value for key, value in (item["read_a"] or {}).items() if key not in {"figures", "figures_followup"}
+            }
+            read_a["figures"] = {
+                str(candidate["label"]): "none"
+                for candidate in (item.get("figure_candidates") or [])
+                if isinstance(candidate, dict) and candidate.get("label") is not None
+            }
+            item["read_a"] = read_a
         questions.append(item)
     blocks = [
         {"seq": block.seq, "type": block.type, "page_idx": block.page_idx, "bbox": block.bbox,

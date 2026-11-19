@@ -794,3 +794,64 @@ class SelectiveExportTests(TransferFixture):
         self.assertEqual(inspected["folder_items"][0]["name"], "（虚构）精选专题")
         self.assertEqual(inspected["paper_items"][0]["title"], "卷一.pdf")
         self.assertEqual(inspected["paper_items"][0]["questions"], 1)
+
+    def test_archived_book_with_live_publications_is_exportable_while_trashed_archived_paper_is_not(self):
+        archived_book = self.make_paper("（虚构）已归档正式导引.pdf", sha="b" * 64)
+        book_q = self.make_question(archived_book, 1, "（虚构）导引已归档题", "甲")
+        self._publish(book_q, answer="甲")
+        archived_book.archived = True
+        archived_book.save(update_fields=["archived"])
+
+        trashed_paper = self.make_paper("（虚构）回收站废卷.pdf", sha="c" * 64)
+        trashed_q = self.make_question(trashed_paper, 1, "（虚构）已撤回题", "乙")
+        PublishedQuestion.objects.create(
+            question=trashed_q,
+            paper=trashed_paper,
+            number=trashed_q.number,
+            version=1,
+            content={"stem": trashed_q.stem, "answer": "乙"},
+            content_hash=uuid.uuid4().hex * 2,
+            search_text=trashed_q.stem,
+            source_filename=trashed_paper.filename,
+            question_type=trashed_q.question_type,
+            status=PublishedQuestion.Status.WITHDRAWN,
+        )
+        trashed_paper.archived = True
+        trashed_paper.save(update_fields=["archived"])
+
+        listed_ids = {item["id"] for item in library_transfer.list_exportable_papers()}
+        self.assertIn(str(archived_book.pk), listed_ids)
+        self.assertNotIn(str(trashed_paper.pk), listed_ids)
+
+        out_dir = self.work / "share_archived"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        result = library_transfer.export_bundle(out_dir, paper_ids=[str(archived_book.pk)])
+        self.assertEqual(result["paper_names"], ["（虚构）已归档正式导引.pdf"])
+        self.assertEqual(result["counts"]["publications"], 1)
+
+    def test_selective_export_prunes_superseded_publications(self):
+        old_pub = PublishedQuestion.objects.create(
+            question=self.questions[0],
+            paper=self.paper,
+            number=self.questions[0].number,
+            version=1,
+            content={"stem": self.questions[0].stem, "answer": "旧答案"},
+            content_hash=uuid.uuid4().hex * 2,
+            search_text=self.questions[0].stem,
+            source_filename=self.paper.filename,
+            question_type=self.questions[0].question_type,
+            status=PublishedQuestion.Status.SUPERSEDED,
+        )
+        live_pub = self._publish(self.questions[0], version=2, answer="新答案")
+
+        out_dir = self.work / "share_superseded"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        bundle = Path(library_transfer.export_bundle(out_dir, paper_ids=[str(self.paper.pk)])["file"])
+        snap = self._inspect_snapshot(bundle)
+        try:
+            pub_ids = {row[0] for row in snap.execute("SELECT id FROM core_publishedquestion").fetchall()}
+            self.assertEqual(pub_ids, {live_pub.pk.hex})
+            self.assertNotIn(old_pub.pk.hex, pub_ids)
+            self.assertEqual(snap.execute("PRAGMA foreign_key_check").fetchall(), [])
+        finally:
+            snap.close()

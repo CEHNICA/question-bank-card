@@ -270,11 +270,15 @@ def clean_saved_example_labels(out=None) -> None:
 
     A failure here must never stop the worker from reading papers."""
     try:
+        from core.figure_candidate_repair import repair_lost_figure_candidates
         from core.library import tidy_saved_cards
+        from core.models import Paper
         from core.pipeline import promote_saved_readings
 
         counts = tidy_saved_cards()
         converted = promote_saved_readings()
+        # 升级后自动为历史丢失候选图的「可能漏图」题卡找回配图，只减黄、不增黄。
+        repaired = repair_lost_figure_candidates(list(Paper.objects.filter(archived=False)), apply=True)
     except Exception:
         logging.getLogger("core").exception("example label cleanup failed")
         return
@@ -282,6 +286,11 @@ def clean_saved_example_labels(out=None) -> None:
         out.write(f"已按新规则整理题面格式：{counts['questions']} 张题卡、{counts['publications']} 条已入库题目")
     if converted and out is not None:
         out.write(f"已恢复 {len(converted)} 道已有识读结果，可直接审核；未重新调用读题服务。")
+    if repaired.recovered and out is not None:
+        out.write(
+            f"已自动找回 {repaired.recovered} 张历史丢失候选图的配图"
+            f"（其中 {repaired.cleared_to_green} 张解除误报转绿）；未重新调用读题服务。"
+        )
 
 
 def auto_backup_lane(stop: threading.Event) -> None:
