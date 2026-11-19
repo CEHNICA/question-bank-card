@@ -173,12 +173,27 @@ class CompactOptionsWidthTests(SimpleTestCase):
                     self.assertAlmostEqual(value, want, places=1)
 
     def test_the_options_table_fills_the_text_column(self):
-        """每列 = 正文净宽 ÷ 栏数，表正好铺满正文。"""
+        """选项表照抄预览的排布：左边缩进 2em，栏宽扣掉栏间 2em 间隙。
+
+        Word 的表格没有列间距，间隙算进左边那一栏的宽度、用段落右缩进让出来。
+        所以各列宽不是「正文净宽 ÷ 栏数」，而是：
+
+            栏宽 = (正文宽 − 2em − (栏数 − 1) × 2em) ÷ 栏数
+            左边的栏 = 栏宽 + 2em（间隙），最后一栏 = 栏宽
+        """
         for columns in (2, 4):
             table = build_options(columns)
             document = table._parent.part.document
             section = document.sections[0]
             text_width = (section.page_width - section.left_margin - section.right_margin) / 36000
             grid = [column.width / 36000 for column in table.columns]
-            for want in grid:
-                self.assertAlmostEqual(want, text_width / columns, places=1)
+            indent = table._tbl.tblPr.find(qn("w:tblInd"))
+            self.assertIsNotNone(indent, "选项表没写 w:tblInd，整块选项会贴在版心左缘")
+            indent_mm = int(indent.get(qn("w:w"))) * MM_PER_TWIP
+            self.assertAlmostEqual(indent_mm, 8.4667, places=1, msg="选项区左边没有留 2em")
+            column_mm = (text_width - 8.4667 - (columns - 1) * 8.4667) / columns
+            want = [column_mm + 8.4667] * (columns - 1) + [column_mm]
+            for got, expected in zip(grid, want):
+                self.assertAlmostEqual(got, expected, places=1, msg=f"{columns} 栏的列宽和预览对不上")
+            # 各列宽 + 左缩进 = 正文宽：不多不少。
+            self.assertAlmostEqual(sum(grid) + indent_mm, text_width, places=1)

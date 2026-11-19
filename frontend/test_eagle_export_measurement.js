@@ -72,7 +72,7 @@ function fakeOption(letter, images) {
   };
 }
 
-function fakeBlock({ id, stem = [], options = [], columns = 0, fragment = false }) {
+function fakeBlock({ id, stem = [], options = [], columns = 0, fragment = false, blanks = [] }) {
   const list = { dataset: { examColumns: String(columns) } };
   return {
     dataset: { questionId: id },
@@ -81,6 +81,7 @@ function fakeBlock({ id, stem = [], options = [], columns = 0, fragment = false 
     querySelectorAll: (sel) => {
       if (sel === ".qb-figures .qb-figure img") return stem;
       if (sel === ".qb-option") return options;
+      if (sel === ".print-answer-space") return blanks;
       return [];
     },
   };
@@ -89,8 +90,19 @@ function fakeBlock({ id, stem = [], options = [], columns = 0, fragment = false 
 function fakePaper(blocks, scale = "1") {
   return {
     style: { getPropertyValue: (name) => (name === "--exam-scale" ? scale : "") },
-    querySelectorAll: (sel) => (sel === ".print-question" ? blocks : []),
+    querySelectorAll: (sel) => {
+      if (sel === ".print-question") return blocks;
+      // 留白分段是在预览的分页容器里量的（.exam-page-body 的子块）。
+      if (sel === ".exam-page-body") return [{ children: blocks }];
+      return [];
+    },
   };
+}
+
+// 沙箱里没有真的 getComputedStyle —— 留白高度是布局尺寸，
+// 这里用假节点上的 height 顶替（单位 px，跟浏览器一致）。
+function fakeComputedStyle(node) {
+  return { height: node.height };
 }
 
 // vm 沙箱里的对象带着另一个 realm 的 Object.prototype，
@@ -107,6 +119,9 @@ function runExport(names, context, call) {
     assert.ok(source, `尺子自检：exam-export.js 里找不到 function ${name}(`);
     return source;
   });
+  // 沙箱里没有浏览器全局：留白高度得靠 getComputedStyle 量，
+  // 这里用假节点上的 height 顶替（单位 px，跟浏览器一致）。
+  if (!context.getComputedStyle) context.getComputedStyle = fakeComputedStyle;
   vm.createContext(context);
   vm.runInContext(sources.join("\n") + "\n" + call, context);
   return context.__out;
@@ -229,11 +244,47 @@ test("兜底：调用方没给实测值时，导出模块自己量一份", () =>
   const blocks = [fakeBlock({ id: "q1", stem: [fakeImage(672.8)], columns: 4 })];
   CURRENT_SCALE = 1;
   const options = { document: "questions" };
-  const out = runExport(["measureOptionColumns", "measureFigureWidths", "fillMeasured"],
+  const out = runExport(["measureOptionColumns", "measureFigureWidths", "measureTableOffsets", "measureAnswerSpaceSplits", "fillMeasured"],
     { options, paper: fakePaper(blocks, "1") },
     "globalThis.__out = fillMeasured(options, paper);");
   assert.deepEqual(plain(out.option_columns), { q1: 4 }, "没人给实测栏数时没有自己量：Word 只能自己猜");
   assert.ok(out.measured_figure_widths.q1, "没人给实测图宽时没有自己量：选项里的图会比屏幕上大一圈");
+});
+
+// ── 6b. 留白分段：预览把留白切成几段，后端才知道该在哪儿切 ──────────
+test("留白分段：量出每道题的留白被切成几段、每段多高（毫米）", () => {
+  const blocks = [
+    fakeBlock({ id: "q1", blanks: [{ height: "113.39px" }] }),
+    fakeBlock({ id: "q2", blanks: [{ height: "113.39px" }, { height: "20.41px" }] }),
+  ];
+  const out = runExport(["measureAnswerSpaceSplits"], { paper: fakePaper(blocks) },
+    "globalThis.__out = measureAnswerSpaceSplits(paper);");
+  assert.deepEqual(plain(out.q1), [{ mm: 30.0, continuation: false }],
+    "留白分段没量出来：Word 只能自己瞎切，切点跟预览对不上");
+  assert.deepEqual(plain(out.q2), [{ mm: 30.0, continuation: false }, { mm: 5.4, continuation: false }],
+    "同一题的留白被切成几段没量对");
+});
+
+test("留白分段：续页上的那段必须标出来（后端要据此打「第 N 题答题区（续）」）", () => {
+  const blocks = [
+    fakeBlock({ id: "q1", blanks: [{ height: "113.39px" }] }),
+    {
+      dataset: { questionId: "q1", continuation: "1" },
+      querySelectorAll: (sel) => (sel === ".print-answer-space" ? [{ height: "20.41px" }] : []),
+    },
+  ];
+  const out = runExport(["measureAnswerSpaceSplits"], { paper: fakePaper(blocks) },
+    "globalThis.__out = measureAnswerSpaceSplits(paper);");
+  const pieces = plain(out.q1);
+  assert.equal(pieces.length, 2, "两段留白没量成两段");
+  assert.equal(pieces[1].continuation, true, "续页上的那段没标出来：Word 不会打续页标题");
+});
+
+test("留白分段：没有留白的题不许出现在结果里（省得后端拿到空计划）", () => {
+  const blocks = [fakeBlock({ id: "q1" })];
+  const out = runExport(["measureAnswerSpaceSplits"], { paper: fakePaper(blocks) },
+    "globalThis.__out = measureAnswerSpaceSplits(paper);");
+  assert.deepEqual(plain(out), {}, "没留白的题也进了分段计划");
 });
 
 // ── 7. 兜底：调用方给了就一个字都不改 ──────────────────────────────
@@ -241,7 +292,7 @@ test("兜底：调用方自己量过的实测值不许被覆盖", () => {
   const blocks = [fakeBlock({ id: "q1", stem: [fakeImage(672.8)], columns: 4 })];
   CURRENT_SCALE = 1;
   const options = { option_columns: { q1: 2 }, measured_figure_widths: { q1: { stem: [12.5] } } };
-  const out = runExport(["measureOptionColumns", "measureFigureWidths", "fillMeasured"],
+  const out = runExport(["measureOptionColumns", "measureFigureWidths", "measureTableOffsets", "measureAnswerSpaceSplits", "fillMeasured"],
     { options, paper: fakePaper(blocks, "1") },
     "globalThis.__out = fillMeasured(options, paper);");
   assert.deepEqual(out.option_columns, { q1: 2 }, "调用方给的实测栏数被覆盖了");
@@ -251,11 +302,12 @@ test("兜底：调用方自己量过的实测值不许被覆盖", () => {
 // ── 8. 没有预览时不动手 ────────────────────────────────────────────
 test("兜底：眼前没有排好版的预览时，什么都不该往请求里塞", () => {
   const options = { document: "questions" };
-  const out = runExport(["measureOptionColumns", "measureFigureWidths", "fillMeasured"],
+  const out = runExport(["measureOptionColumns", "measureFigureWidths", "measureTableOffsets", "measureAnswerSpaceSplits", "fillMeasured"],
     { options, paper: null },
     "globalThis.__out = fillMeasured(options, null);");
   assert.equal(out.option_columns, undefined, "没有预览却塞了栏数：后端会拿到一份来路不明的值");
   assert.equal(out.measured_figure_widths, undefined, "没有预览却塞了图宽");
+  assert.equal(out.measured_table_offsets, undefined, "没有预览却塞了表格位置");
 });
 
 // ── 9. 找预览：同源 iframe 里那张纸 ────────────────────────────────

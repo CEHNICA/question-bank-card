@@ -20,6 +20,18 @@ Word 当年把「解析：」写进正文段的前缀，纸上就挤成了一行
 4. 两个答案块之间的空白 = 预览里两个 4.5 磅的外边距；
 5. 表格单元格行高 1.6em、段后距清零。
 
+**第 3 条的「照抄」要说清楚：纸上要对齐的是预览的位置，不是抄外边距的数值。**
+Chrome 把多出来的行距一半放上、一半放下，Word 全放在基线上方，所以抄完
+预览的外边距之后，纸上还得补一段「行盒差」：
+
+    第一个答案块的段前距 = 预览 4.5 磅 + 行盒补偿 3.5 磅 = 8.0 磅
+    解析正文首段的段前距 = 预览 3.0 磅 + 行盒补偿 1.5 磅 = 4.5 磅
+
+补偿量是实测标定出来的（Chrome DOM 真值见 _probe100.py，真 Word 变体见
+_probe103.py），纸面残差 0.018 毫米。**只补第一段**：第二个答案块、后续解析段
+都不补，多补一次就多 1.2 毫米。这两段的值由
+backend/core/test_word_answer_row_rhythm.py 从另一个角度再锁一遍。
+
 ``w:spacing`` 的 before/after 单位是 1/20 磅，line 单位也是 1/20 磅。
 """
 
@@ -39,6 +51,11 @@ W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 #   .print-flow .print-answer-row { line-height: 1.35 }
 ANSWER_ROW_MARGIN_PT = 4.5
 SOLUTION_PARAGRAPH_MARGIN_PT = 3.0
+# Word 行盒模型比 Chrome 少的那一段（实测标定，见模块 docstring）：
+#   答案块首段：预览 4.5 磅 → Word 写 8.0 磅
+#   解析正文首段：预览 3.0 磅 → Word 写 4.5 磅
+ANSWER_LEAD_COMPENSATION_PT = 3.5
+SOLUTION_BODY_COMPENSATION_PT = 1.5
 LINE_HEIGHT_EM = 1.35
 BODY_SIZE_PT = 12.0
 EXPECTED_LINE_PT = BODY_SIZE_PT * LINE_HEIGHT_EM  # 16.2
@@ -143,13 +160,19 @@ class SolutionVerticalRhythmTests(SimpleTestCase):
     def test_the_answer_paragraph_keeps_the_preview_margins(self):
         rows = _rows(_export())
         first = _find(rows, "1.")
-        self.assertAlmostEqual(first["spacing"]["before"], ANSWER_ROW_MARGIN_PT, delta=0.05)
+        # 预览的外边距 + Word 行盒补偿（只给第一块，见模块 docstring）。
+        self.assertAlmostEqual(
+            first["spacing"]["before"], ANSWER_ROW_MARGIN_PT + ANSWER_LEAD_COMPENSATION_PT, delta=0.05
+        )
         self.assertAlmostEqual(first["spacing"]["after"], 0.0, delta=0.05)
 
     def test_the_analysis_body_uses_the_preview_margins(self):
         rows = _rows(_export())
         body = _find(rows, "解析如下。")
-        self.assertAlmostEqual(body["spacing"]["before"], SOLUTION_PARAGRAPH_MARGIN_PT, delta=0.05)
+        # 预览的外边距 + 预览里被行内公式撑高的那 1.5 磅。
+        self.assertAlmostEqual(
+            body["spacing"]["before"], SOLUTION_PARAGRAPH_MARGIN_PT + SOLUTION_BODY_COMPENSATION_PT, delta=0.05
+        )
 
     def test_the_gap_between_two_answer_blocks_matches_the_preview(self):
         rows = _rows(_export())

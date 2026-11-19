@@ -90,6 +90,58 @@ def tree_paras(tree):
     return tree.find("w:body", NS).findall("w:p", NS)
 
 
+def writing_space_twips(paragraphs, start):
+    """The writing space that follows paragraph ``start``, in twips.
+
+    第六十九轮起，留白是**固定行高的空段**（w:lineRule="exact"），高度写在
+    w:line 上；w:after 是它后面的题块间距（8 磅），不是留白高度。
+
+    第七十轮起，留白不再是一整块 —— 它是若干个**单行**固定行高段：预览的留白
+    本来就可切（frontend/exam-layout.js 的 writingSpace 会把页底放不下的那几毫米
+    挪到下一页），Word 原来写成一整块，放不下就整题推到下一页，于是每页比预览
+    少装一题、分页点逐页漂（40 题对照卷：预览每页首题 1,7,14,20,27,33,40，
+    Word 1,7,13,19,25,31,37，7 页里 5 页对不上）。
+
+    业务语义没变：**一组连续留白段的总高**还是老师要的毫米数，所以尺子量总高。
+    """
+    total = 0
+    for paragraph in paragraphs[start + 1 :]:
+        if "".join(paragraph.itertext()).strip():
+            break
+        spacing = paragraph.find("w:pPr/w:spacing", NS)
+        if spacing is None or spacing.get(f"{{{NS['w']}}}lineRule") != "exact":
+            break
+        total += int(spacing.get(f"{{{NS['w']}}}line"))
+    return total
+
+
+def writing_space_groups(tree):
+    """每一组连续留白段的总高（毫米），按出现顺序。
+
+    一组 = 连续的一段固定行高空段（第七十轮起留白切成多段，见
+    :func:`writing_space_twips`）。业务语义：每组对应一道题的答题留白。
+    """
+    groups = []
+    current = 0
+    for paragraph in tree_paras(tree):
+        spacing = paragraph.find("w:pPr/w:spacing", NS)
+        is_space = (
+            spacing is not None
+            and spacing.get(f"{{{NS['w']}}}lineRule") == "exact"
+            and spacing.get(f"{{{NS['w']}}}line")
+            and not "".join(paragraph.itertext()).strip()
+        )
+        if is_space:
+            current += int(spacing.get(f"{{{NS['w']}}}line"))
+            continue
+        if current:
+            groups.append(current * 25.4 / 1440)
+            current = 0
+    if current:
+        groups.append(current * 25.4 / 1440)
+    return groups
+
+
 class ExportFixture:
     """Publication/payload/post helpers, shared with the opt-in browser module.
 
@@ -235,7 +287,11 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertIn("离线解析", text)
         self.assertLess(text.index("选择题"), text.index("解答题"))
         self.assertEqual(len(xml.findall(".//a:blip", NS)), 1)
-        self.assertTrue(xml.findall(".//w:spacing[@w:after='3402']", NS))  # 60 mm
+        # 答题留白是**固定行高的空段**（第六十九轮起）：高度写在 w:line 上，
+        # w:lineRule="exact"。第七十轮起它切成若干单行段（可跨页断开），
+        # 所以量的是**一组连续留白段的总高**。
+        spaces = writing_space_groups(xml)
+        self.assertTrue(any(abs(value - 60) < 0.2 for value in spaces), f"没有 60 毫米的答题留白：{spaces}")
         with zipfile.ZipFile(io.BytesIO(result.content)) as archive:
             self.assertEqual(len([name for name in archive.namelist() if name.startswith("word/media/")]), 1)
         self.assertEqual(list(PublishedQuestion.objects.values()), before)
@@ -917,7 +973,7 @@ class LibraryExportTests(ExportFixture, TestCase):
         paragraphs = xml.find("w:body", NS).findall("w:p", NS)
         question = [paragraph for paragraph in paragraphs if "离线合成题" in "".join(paragraph.itertext())][0]
         self.assertEqual(question.find("w:pPr/w:keepNext", NS).get(f"{{{NS['w']}}}val"), "1")
-        last_option = [paragraph for paragraph in paragraphs if "B. 乙" in "".join(paragraph.itertext())][0]
+        last_option = [paragraph for paragraph in paragraphs if "B.乙" in "".join(paragraph.itertext())][0]
         self.assertEqual(last_option.find("w:pPr/w:keepNext", NS).get(f"{{{NS['w']}}}val"), "0")
 
     def test_stale_ai_binding_is_rejected_without_overwriting_original(self):
@@ -975,12 +1031,14 @@ class LibraryExportTests(ExportFixture, TestCase):
         for paragraph in question:
             self.assertEqual(paragraph.find("w:pPr/w:keepLines", NS).get(f"{{{NS['w']}}}val"), "0")
             self.assertEqual(paragraph.find("w:pPr/w:keepNext", NS).get(f"{{{NS['w']}}}val"), "0")
-        # 智能档下解答题有 30 毫米答题空间：这段空白单独占一段，题间距落在它身上，
-        # 题干最后一段不再顶着那 8 磅。
+        # 智能档下解答题有 30 毫米答题空间：这段空白单独占一段（第七十轮起
+        # 切成若干单行段，可跨页断开），题间距落在它之后，题干最后一段不再顶着那 8 磅。
         blank = paragraphs[paragraphs.index(question[-1]) + 1]
         self.assertEqual("".join(blank.itertext()).strip(), "")
-        after = int(blank.find("w:pPr/w:spacing", NS).get(f"{{{NS['w']}}}after"))
-        self.assertAlmostEqual(after * 25.4 / 1440, 30, delta=0.2)
+        spacing = blank.find("w:pPr/w:spacing", NS)
+        self.assertEqual(spacing.get(f"{{{NS['w']}}}lineRule"), "exact")
+        total = writing_space_twips(paragraphs, paragraphs.index(question[-1]))
+        self.assertAlmostEqual(total * 25.4 / 1440, 30, delta=0.2)
 
     def test_compact_protects_display_formula_and_picture_without_locking_long_prose(self):
         formula = math_field(r"\frac{a}{b}", "<mfrac><mi>a</mi><mi>b</mi></mfrac>", display=True)
@@ -1042,14 +1100,20 @@ class LibraryExportTests(ExportFixture, TestCase):
         response = self.post(payload)
         self.assertEqual(response.status_code, 200, response.content[:200])
         paragraphs = document_xml(response.content).find("w:body", NS).findall("w:p", NS)
-        question = paragraphs[2:]  # title, section heading
-        self.assertEqual(len(question), 5)
-        # 最后一段是解答题的答题空白（智能档 30 毫米），它是故意留的空段。
-        writing_space = question[-1]
-        self.assertEqual("".join(writing_space.itertext()).strip(), "")
-        after = int(writing_space.find("w:pPr/w:spacing", NS).get(f"{{{NS['w']}}}after"))
-        self.assertAlmostEqual(after * 25.4 / 1440, 30, delta=0.2)
-        question = question[:-1]
+        body = paragraphs[2:]  # title, section heading
+        # 末尾是解答题的答题空白（智能档 30 毫米）。第七十轮起留白切成若干单行段
+        # （这样页底放不下的那几毫米能挪到下一页），先找到第一段留白，再把它和
+        # 后面连续的留白段一起量总高。
+        first_space = next(
+            index
+            for index, paragraph in enumerate(body)
+            if paragraph.find("w:pPr/w:spacing", NS) is not None
+            and paragraph.find("w:pPr/w:spacing", NS).get(f"{{{NS['w']}}}lineRule") == "exact"
+        )
+        total = writing_space_twips(body, first_space - 1)
+        self.assertAlmostEqual(total * 25.4 / 1440, 30, delta=0.2)
+        question = body[:first_space]
+        self.assertEqual(len(question), 4)
         self.assertEqual(sum(paragraph.find("m:oMath", NS) is not None for paragraph in question), 1)
         self.assertFalse(
             any(
@@ -1149,18 +1213,17 @@ class LibraryExportTests(ExportFixture, TestCase):
         second = self.publication(kind="free_response", stem="第二题专用题干标记")
 
         def writing_space(stem, print_options):
-            """The `w:after` of the blank paragraph the writer adds after that question."""
+            """The height (twips) of the blank paragraph the writer adds after that question.
+
+            第六十九轮起，留白是**固定行高的空段**（w:lineRule="exact"），
+            高度写在 w:line 上；w:after 是它后面的题块间距（8 磅），不是留白高度。
+            第七十轮起留白切成若干单行段，这里量一组连续留白段的**总高**。
+            """
             response = self.post(self.payload([first, second], print_options=print_options))
             self.assertEqual(response.status_code, 200)
             paragraphs = document_xml(response.content).find("w:body", NS).findall("w:p", NS)
             index = next(i for i, p in enumerate(paragraphs) if stem in "".join(p.itertext()))
-            for paragraph in paragraphs[index + 1 :]:
-                if "".join(paragraph.itertext()).strip():
-                    break
-                spacing = paragraph.find("w:pPr/w:spacing", NS)
-                if spacing is not None and spacing.get(f"{{{NS['w']}}}after"):
-                    return spacing.get(f"{{{NS['w']}}}after")
-            return None
+            return writing_space_twips(paragraphs, index) or None
 
         none = {"document": "questions", "answer_space": 0}
         large = {"document": "questions", "answer_space": 60}
@@ -1182,18 +1245,18 @@ class LibraryExportTests(ExportFixture, TestCase):
         choice = self.publication(kind="single_choice", stem="选择题任意毫米标记", answer="A")
 
         def writing_space(stem, print_options):
-            """The blank paragraph after that question, in millimetres."""
+            """The blank paragraph after that question, in millimetres.
+
+            第六十九轮起，留白是**固定行高的空段**（w:lineRule="exact"），
+            高度写在 w:line 上；w:after 是它后面的题块间距（8 磅），不是留白高度。
+            第七十轮起留白切成若干单行段，这里量一组连续留白段的**总高**。
+            """
             response = self.post(self.payload([answer, choice], print_options=print_options))
             self.assertEqual(response.status_code, 200, response.content[:300])
             paragraphs = document_xml(response.content).find("w:body", NS).findall("w:p", NS)
             index = next(i for i, p in enumerate(paragraphs) if stem in "".join(p.itertext()))
-            for paragraph in paragraphs[index + 1 :]:
-                if "".join(paragraph.itertext()).strip():
-                    break
-                spacing = paragraph.find("w:pPr/w:spacing", NS)
-                if spacing is not None and spacing.get(f"{{{NS['w']}}}after"):
-                    return int(spacing.get(f"{{{NS['w']}}}after")) * 25.4 / 1440
-            return None
+            total = writing_space_twips(paragraphs, index)
+            return total * 25.4 / 1440 if total else None
 
         # 任意毫米：预览里填 25，卷子上就是 25 毫米。
         self.assertAlmostEqual(
@@ -1241,7 +1304,11 @@ class LibraryExportTests(ExportFixture, TestCase):
         xml = document_xml(result.content)
         table = xml.find(".//w:tbl", NS)
         self.assertEqual(len(table.findall("w:tblGrid/w:gridCol", NS)), 2)
-        self.assertIn("E. 短选项", "".join(table.itertext()))
+        # 标签和正文之间是一个制表位（Word 里标签和正文各占一列），
+        # 不是硬敲的空格 —— 所以纸上取到的文本是「A.短选项」。
+        texts = ["".join(cell.itertext()) for cell in table.findall(".//w:tr/w:tc", NS)]
+        for letter in "ABCDE":
+            self.assertIn(f"{letter}.短选项", texts, f"{letter} 这个选项的内容不在纸上")
         pub.content["options"] = dict.fromkeys("ABCD", "长选项" * 30)
         pub.save(update_fields=["content"])
         result = self.post(
@@ -1250,7 +1317,9 @@ class LibraryExportTests(ExportFixture, TestCase):
         xml = document_xml(result.content)
         self.assertIsNone(xml.find(".//w:tbl", NS))
         for key in "ABCD":
-            self.assertIn(key + ". " + "长选项" * 30, "".join(xml.itertext()))
+            # 单栏路径也是「标签 + 制表位 + 正文」（预览里标签和正文是两列），
+            # 所以取到的文本是「A.长选项…」，不是「A. 长选项…」。
+            self.assertIn(key + "." + "长选项" * 30, "".join(xml.itertext()))
 
     def test_a_non_choice_question_warns_before_its_own_letters_reach_the_paper(self):
         # 数学九上第 1 题：书上印的是 (1)(2)(3)(4) 和物体下面的括号，12 张图却被
@@ -1293,7 +1362,14 @@ class LibraryExportTests(ExportFixture, TestCase):
         breaks = [paragraph for paragraph in paragraphs if paragraph.find("w:pPr/w:pageBreakBefore", NS) is not None]
         self.assertEqual(len(breaks), 2)
         self.assertTrue("".join(breaks[0].itertext()).startswith("2."))
-        self.assertIn("解答题", "".join(breaks[1].itertext()))
+        # 第二组的分页现在由**标题前面的垫行**承担：Word 不吃页首的段前距，
+        # 分页写在标题自己身上会让标题比预览高 2.291 毫米
+        # （机制与标定见 core.test_word_section_page_top）。
+        # 这里断言的是页面上看到的结果 —— 分页之后紧接着就是大题标题，
+        # 不是「分页写在标题身上」这种实现细节。
+        self.assertEqual("".join(breaks[1].itertext()).strip(), "")
+        heading_index = paragraphs.index(breaks[1])
+        self.assertIn("解答题", "".join(paragraphs[heading_index + 1].itertext()))
         answer_index = next(
             index for index, paragraph in enumerate(paragraphs) if "参考答案与解析" in "".join(paragraph.itertext())
         )
@@ -1385,10 +1461,14 @@ class LibraryExportTests(ExportFixture, TestCase):
             max(widths[1:]) * 1.8,
             f"表头列只有 {widths[0]:.1f}mm，数字列 {max(widths[1:]):.1f}mm，没按内容分",
         )
-        # 「12」两个数字是 5.02mm，Word 标称的两侧内边距是 3.8mm。
-        # 正好卡在 8.82mm 上就会断成两行——实测就是，所以数字列必须留出余量。
+        # 这张表 13 列，预览里走 dense（qb-table-dense）：没有 2.6em 下限，
+        # 左右内边距收成 0.45em。Chrome 实测两数字那几列是 8.30 毫米。
+        # 「12」两个数字是 4.23 毫米（数字 0.5 个字宽 × 2），加上 dense 的
+        # 内边距 3.81 毫米和 1 像素边框 —— 正好卡在这条线上，数字列要是
+        # 再窄一点就断成两行。
+        need = 2 * 0.5 * 12 * 25.4 / 72 + 0.9 * 12 * 25.4 / 72 + 25.4 / 96
         self.assertGreaterEqual(
-            max(widths[1:]), 2 * 0.6 * 12 * 25.4 / 72 + 3.8 + 0.8, f"数字列只有 {max(widths[1:]):.2f}mm，放不下两个数字"
+            max(widths[1:]), need - 25.4 / 1440, f"数字列只有 {max(widths[1:]):.2f}mm，放不下两个数字"
         )
 
     def test_a_table_wider_than_the_page_is_scaled_back_inside_it(self):
@@ -1400,23 +1480,40 @@ class LibraryExportTests(ExportFixture, TestCase):
 
         self.assertLessEqual(sum(widths), 178.5)
 
-    def test_a_narrow_table_is_left_at_its_own_width_and_centred(self):
-        """内容窄的表不硬撑满版心——预览里那张表是 `margin: 0 auto`，居中收着。"""
+    def test_a_narrow_table_sits_at_the_left_edge_of_the_stem_column(self):
+        """内容窄的表不硬撑满版心——预览里那张表是 `margin: 0 auto`，居中收着。
+
+        注意「在哪儿居中」：预览里题干正文列（``.qb-stem-body``）是 flex item，
+        宽度 = min(列可用宽, max(正文宽, 表宽))。这张表只有表、没有正文，
+        整列就缩到表那么宽（Chrome 实测 22.27 毫米），表于是**贴着正文列的左缘**，
+        离版心左缘 4.655 毫米 —— 不是在 173.34 毫米里居中（那是 82.10 毫米）。
+
+        两者差 77 毫米，位置根本不是一回事。
+
+        所以 Word 这边写 ``w:jc=left`` + ``w:tblInd``，而不是 ``jc=center``。
+        （第五十一轮实测：题干表原来被摆在整栏正中，离版心左缘 56.9 毫米。）
+        """
         raw = "| 甲 | 乙 |\n| --- | --- |\n| 1 | 2 |"
         xml = self.table_export(raw)
         widths = self.column_widths_mm(xml)
 
         self.assertLess(sum(widths), 178.0)
-        self.assertEqual(xml.find(".//w:tbl/w:tblPr/w:jc", NS).get(f"{{{NS['w']}}}val"), "center")
+        self.assertEqual(xml.find(".//w:tbl/w:tblPr/w:jc", NS).get(f"{{{NS['w']}}}val"), "left")
+        indent = xml.find(".//w:tbl/w:tblPr/w:tblInd", NS)
+        self.assertIsNotNone(indent, "窄表要落在题干正文列里，必须写 w:tblInd")
+        # 题干正文列左缘 4.655 毫米 = 264 twips，加这张表实际写进去的单元格
+        # 左边距（普通表 .7em = 168 twips）= 432 twips。
+        self.assertEqual(indent.get(f"{{{NS['w']}}}w"), "432")
 
     def test_an_over_wide_table_keeps_the_columns_that_already_fit(self):
         """版心放不下时，被挤的只该是本来就超宽的那几列。
 
         九上「根据图象，填写下表」那张五列表（性质 二次函数 / 开口方向 / 对称轴 /
-        顶点坐标 / 取哪些值时…）需求合计 195.2mm，超版心 17.2mm。按比例全体缩到
-        0.912，「开口方向」本该 21.93mm 只剩 20.00mm，扣掉 Word 单元格左右各
-        1.9mm 只余 16.2mm，而四个字实测 16.99mm——差 0.79mm，表头就印成
-        「开口方 / 向」两行。需求本来放得下的三列全被陪着缩窄了。
+        顶点坐标 / 取哪些值时…）按预览的列宽模型算，需求合计 180.2mm，超版心
+        2.2mm。按比例全体缩到 0.988，需求本来放得下的四列全被陪着缩窄了。
+
+        判据用预览那套独立字面值（2.6em 下限 / 1.4em 内边距 / 1 像素边框），
+        不引用被测模块的常量 —— 免得尺子跟着实现一起跑偏。
         """
         raw = (
             "| 性质 二次函数 | 开口方向 | 对称轴 | 顶点坐标 | 取哪些值时，x的值随y值的增大而增大 |\n"
@@ -1426,17 +1523,15 @@ class LibraryExportTests(ExportFixture, TestCase):
         )
         widths = self.column_widths_mm(self.table_export(raw))
 
-        # 「开口方向」四个字：12pt 汉字一个 1em = 4.23mm，加上留白。
+        # 「开口方向」四个字：12pt 汉字一个 1em = 4.23mm，
+        # 加上预览里 .7em 的左右内边距和 1 像素边框。
         # docx 的列宽存在 twip 里（1 twip = 0.0176mm），比下来会少 0.008mm。
         tolerance = 25.4 / 1440
+        need = 4 * 12 * 25.4 / 72 + 1.4 * 12 * 25.4 / 72 + 25.4 / 96
         self.assertGreaterEqual(
-            widths[1],
-            4 * 12 * 25.4 / 72 + export.CELL_PADDING_MM - tolerance,
-            f"「开口方向」列只有 {widths[1]:.2f}mm，表头会被顶成「开口方 / 向」两行",
+            widths[1], need - tolerance, f"「开口方向」列只有 {widths[1]:.2f}mm，表头会被顶成「开口方 / 向」两行"
         )
-        self.assertGreaterEqual(
-            widths[3], 4 * 12 * 25.4 / 72 + export.CELL_PADDING_MM - tolerance, f"「顶点坐标」列只有 {widths[3]:.2f}mm"
-        )
+        self.assertGreaterEqual(widths[3], need - tolerance, f"「顶点坐标」列只有 {widths[3]:.2f}mm")
         self.assertLessEqual(sum(widths), 178.5)
 
     def test_squeezing_a_wide_table_wraps_fewer_cells_than_scaling_every_column(self):
@@ -1602,7 +1697,7 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertIsNone(document_xml(response.content).find(".//w:tbl", NS))
         self.assertIn("X-QB-Layout-Warning", response)
 
-    def test_explicit_picture_columns_retain_all_labels_images_and_natural_width(self):
+    def test_explicit_picture_columns_retain_all_labels_and_fit_their_own_column(self):
         pub = self.publication(kind="single_choice", options=dict.fromkeys("ABCD", ""))
         folder = self.root / "library" / str(pub.id)
         folder.mkdir(parents=True)
@@ -1613,7 +1708,17 @@ class LibraryExportTests(ExportFixture, TestCase):
             pub.content["figures"].append({"slot": key, "file": target.name, "page_idx": 0, "bbox": [0, 0, 100, 100]})
         pub.content_hash = library.content_hash(pub.content)
         pub.save(update_fields=["content", "content_hash"])
-        for mode, columns in (("four", 4), ("two", 2), ("vertical", 0), ("auto", 4)):
+        # 150dpi 自然尺寸：200 像素 = 33.8667 毫米。
+        natural = 200 * 25.4 / 150
+        # 4 栏时图在预览里被正文列收口（Chrome 实测 2026-11-17）：
+        # 「A.」比「B.」宽，A 那一行的正文列就窄一点点。
+        body_width = {"A": 30.646, "B": 30.882, "C": 30.882, "D": 30.646}
+        for mode, columns, want in (
+            ("four", 4, [body_width[letter] for letter in "ABCD"]),
+            ("two", 2, [natural] * 4),
+            ("vertical", 0, [natural] * 4),
+            ("auto", 4, [body_width[letter] for letter in "ABCD"]),
+        ):
             # A 200px diagram fits a 178mm/4 column, so "four" and "auto" keep four
             # columns and every label and image survives. Only the explicit "two"
             # and "vertical" reduce.
@@ -1631,7 +1736,9 @@ class LibraryExportTests(ExportFixture, TestCase):
                 extents = tree.xpath(
                     "//*[local-name()='extent' and namespace-uri()='http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing']/@cx"
                 )
-                self.assertTrue(all(abs(int(width) / 36000 - 200 * 25.4 / 150) < 0.01 for width in extents))
+                self.assertEqual(len(extents), len(want))
+                for width, expected in zip(extents, want):
+                    self.assertAlmostEqual(int(width) / 36000, expected, delta=0.05)
 
         # A wide image downgrades the requested grid and is never shrunk just
         # to preserve the number of columns. The transport explains the change.
@@ -2133,7 +2240,9 @@ class LibraryExportTests(ExportFixture, TestCase):
                 self.assertEqual(response.status_code, 200)
                 line = None
                 for paragraph in tree_paras(document_xml(response.content)):
-                    if "姓名：" in "".join(paragraph.itertext()):
+                    # 找「姓名」两个字，不带冒号：这一行现在的文字跟预览逐字相同，
+                    # 而预览里本来就没有冒号（见 core.test_word_student_info）。
+                    if "姓名" in "".join(paragraph.itertext()):
                         line = paragraph
                         break
                 if not student_info:

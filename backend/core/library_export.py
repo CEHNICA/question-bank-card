@@ -133,12 +133,70 @@ QUESTION_GAP_PT = 8
 #     .print-section line-height: 1.5   （16px 字号 → 24px 行盒 = 18 磅）
 #     .print-title   继承 body 的 1.5  （24px 字号 → 36px 行盒 = 27 磅）
 PREVIEW_TABLE_LINE_HEIGHT_EM = 1.6
+# .qb-table td, .qb-table th { height: 2.1em; padding: .2em .7em; }
+#
+# Chrome 实测（2026-11-17，12pt 字号）：单元格 height 33.59px = 2.1em，
+# 上下内边距各 3.2px = .2em，行与行之间 33.59px（= 25.2 磅）。
+# Word 这边原来只写 1.6em 的行距、上下一点白都不留，每一行比预览矮 5.4 磅
+# （实测 19.8 vs 25.2），一张四行的表就差出 7.5 毫米 —— 纸上那几行挤成一团，
+# 屏幕上明明是松开的。
+PREVIEW_TABLE_CELL_HEIGHT_EM = 2.1
+PREVIEW_TABLE_CELL_PADDING_Y_EM = 0.2
 PREVIEW_SECTION_LINE_HEIGHT_PT = 18
 PREVIEW_TITLE_LINE_HEIGHT_PT = 27
 # .print-answer-row 的上下外边距：6px = 4.5 磅（每个答案块上下各一圈）。
 PREVIEW_ANSWER_ROW_MARGIN_PT = 4.5
 # .solution-paragraph（解析正文）的上下外边距：3pt。
 PREVIEW_SOLUTION_PARAGRAPH_MARGIN_PT = 3
+#
+# 上面两个数是**照抄预览**的，但预览和 Word 的**行盒模型**不一样，
+# 照抄完还得补一段距离，不然纸上还是对不上。
+#
+# Chrome（预览，基准）把多出来的行距**一半放上、一半放下** —— 字顶在行盒里
+# 居中（实测：标题行盒 18 磅 → 字顶偏移 3.0 磅；答案行盒 16.2 磅 → 1.5 磅）。
+# Word 把多出来的空间**全放在基线上方**，字顶几乎贴着行盒顶。
+#
+# 于是两段挨着时，「上一段的字顶 → 下一段的字顶」这段距离，Word 比预览短。
+# 真 Word 实测（Chrome DOM 见 _probe100.py，真 Word 见 _probe103.py）：
+#
+#     预览  标题字顶 → 答案字顶    24.84 磅
+#     Word  同上                    20.46 磅
+#     差                            4.38 磅
+#
+# 这 4.38 磅里有 0.885 磅是**标题自己**的字顶残差（SimHei 在 Chrome 是
+# Type3、在 Word 是 CID，ascent 度量不同），补不了；真正要补的是净差
+# 3.5 磅。实测：补 3.0 → 答案偏 −0.190 毫米，补 3.5 → 偏 +0.018 毫米，
+# 补 4.0 → 偏 +0.233 毫米 —— 3.5 最准。
+#
+# **只有行盒高度不同的接缝要补**：答案 → 解析这两行盒一样高（都是 16.2 磅），
+# 实测只差 0.24 磅，不用补。
+WORD_LINE_BOX_LEADING_COMPENSATION_PT = 3.5
+#
+# 解析正文那一段还要单独补 1.5 磅：预览里解析正文所在的那一行，行盒被行内
+# 公式**撑高**了（行盒顶离上一行底 3 磅，字顶却比行盒顶还高 1.52 磅 ——
+# Chrome 把撑出来的高度放在了字顶上面）。Word 的公式是行内对象，行盒不会
+# 撑成那个形状，实测差 1.5 磅（0.53 毫米）。
+PREVIEW_SOLUTION_LINE_BOX_COMPENSATION_PT = 1.5
+# 答题留白切成多段时的单段高度上限（twips）。1140 twips = 57 磅 = 20.1 毫米：
+# 一段一行，Word 没法在段内断开，只能整段挪到下一页。
+#
+# 这个上限**不是随便取的**：预览里留白块往下切的时候有一条阈值
+# （frontend/exam-layout.js 的 writingSpace：MIN_WRITABLE = 76px = 20.1 毫米）——
+# 页底剩下的空间不足 20.1 毫米，就**整块**把留白推到下一页，不留碎片
+# （碎片在纸上看不见，却会逼着下一页顶上一行「第 N 题答题区（续）」）。
+# Word 的单行段是「放不下就整段走」，阈值就等于段高，所以段高取 20.1 毫米，
+# Word 的「整段走」阈值就跟预览的 MIN_WRITABLE 对上了。
+ANSWER_SPACE_SLICE_TWIPS = 1140
+# 预览续页顶部的「第 N 题答题区（续）」标题（.exam-continuation-label，
+# frontend/library.css:951）：font-size 10px、line-height 1.35、color #666、
+# margin 0 0 4px。预览正文 16px = 12 磅，所以 1px = 0.75 磅：
+#   字号 10px = 7.5 磅；行盒 13.5px = 10.125 磅；下外边距 4px = 3 磅。
+# 三样加起来 4.63 毫米 —— 预览里这个续块（10.01 / 12.27 / 34.63 毫米高）
+# 就是这么来的，Word 必须一模一样。
+PREVIEW_CONTINUATION_LABEL_SIZE_PT = 7.5
+PREVIEW_CONTINUATION_LABEL_LINE_PT = 10.125
+PREVIEW_CONTINUATION_LABEL_AFTER_PT = 3.0
+PREVIEW_CONTINUATION_LABEL_COLOR = "666666"
 # .solution-figure（解析配图）的上下外边距：6px = 4.5pt。
 PREVIEW_SOLUTION_FIGURE_MARGIN_PT = 4.5
 # 字体规格（字号 / 字重 / 字体族）也照抄预览，Word 这边不许自己另定一套：
@@ -161,6 +219,111 @@ PREVIEW_LATIN_FONT = "Times New Roman"
 # 差 4.3 毫米）。w:spacing 的单位是 1/20 磅，而且 Word 把它量化到 0.5 磅一档
 # （实测 25/26/27/28 都落在同一档），30 是最接近预览的那个（181.42 磅）。
 PREVIEW_TITLE_LETTER_SPACING = 30
+# .print-info（frontend/library.css:929）：居中；margin 12px 0 22px；14px；#333。
+# 字体：**卷面字体**（--content-font），不是界面字体。
+# 第六十轮在这里写的是「界面字体（Microsoft YaHei UI）」，理由是
+# 「.print-info 不在 .qb-question 里，拿不到 --content-font」—— **那条理由是错的**：
+# .print-info 挂在 .print-paper / .exam-page-body 底下，这两层都写了
+# font-family: var(--content-font)（frontend/library.css:891、892）。
+# Chrome 实测（_probe117b.py）：.print-info 的 computed font-family 就是
+# "Times New Roman", "Source Han Serif SC", …, "宋体", serif；
+# 预览 PDF 里这一行也是「中文 STSong（宋体）+ 下划线 TimesNewRomanPSMT」。
+# 写成雅黑的后果：下划线段宽度、整行居中后的起止 x 全跟预览对不上
+# （预览 x 167.7→415.0，Word x 173.6→421.2）。
+# Word 这边原来写的是「姓名：____________    班级：____________    得分：____________」：
+# 多了三个冒号、分隔符是四个半角空格、得分后是 12 个下划线（预览是 8 个），
+# 字号也用了正文 12 磅（16px，预览是 14px），颜色纯黑（预览是 #333）。
+# 更要命的是上下那 12px / 22px 的外边距没写：预览里姓名行下面才轮到第一题，
+# Word 里贴紧标题，整页从这一行往下**整体上移 7.3 毫米**（实测差 7.31）。
+PREVIEW_INFO_FONT_SIZE_PT = 10.5
+PREVIEW_INFO_COLOR = "333333"
+PREVIEW_INFO_EAST_ASIA = "宋体"
+PREVIEW_INFO_LATIN = "Times New Roman"
+PREVIEW_INFO_SPACE_BEFORE_PT = 9.0  # 12px
+PREVIEW_INFO_SPACE_AFTER_PT = 16.5  # 22px
+PREVIEW_INFO_LINE_HEIGHT_PT = 15.75  # 21px 行盒（14px × 1.5）
+PREVIEW_STUDENT_INFO_TEXT = "姓名 ____________　班级 ____________　得分 ________"
+
+# 预览的页脚（frontend/exam-layout.js:463）：
+#     `第 ${index + 1} 页 / 共 ${pages.length} 页${countText ? ' · ' + countText : ''}`
+# countText 来自 `.print-footer`（library.js:5986 的 `共 ${number} 题`）。
+# 样式 frontend/library.css:901：
+#     .exam-page-number { position:absolute; bottom:8mm; left:16mm; right:16mm;
+#                         text-align:center; color:#666; font:10px/1.4 "Microsoft YaHei" }
+# 真实预览 PDF 实测：字号 7.5 磅、颜色 #666666、字体 MicrosoftYaHei、文字底距页底 8.187mm。
+#
+# Word 侧原来写的是「共 N 题 · 第 {PAGE} 页」：页码和题数**顺序反了**、
+# 分隔符反了、**没有总页数**、字号 9 磅（预览 7.5）、纯黑、右对齐（预览居中）。
+PREVIEW_FOOTER_FONT_SIZE_PT = 7.5
+PREVIEW_FOOTER_COLOR = "666666"
+PREVIEW_FOOTER_EAST_ASIA = "Microsoft YaHei"
+PREVIEW_FOOTER_LATIN = "Microsoft YaHei"
+PREVIEW_FOOTER_LINE_HEIGHT_PT = 10.5  # 14px 行盒（10px × 1.4）
+
+# 页首那一段外边距（第六十二轮标定）。
+#
+# 预览的版心是 .exam-page { padding: 18mm 16mm }，页里第一个元素是 .print-section
+# （margin: 12px 0 6px）。.exam-page-body 是 flex 容器，外边距不塌陷，
+# 所以**页首那 12px 是照算的**：18 + 3.175 = 21.175mm 才是标题行盒的上沿
+# （Chrome 实测：标题元素上沿离版心顶正好 3.175mm，见 _probe97.py）。
+#
+# Word 这边同一段写了 space_before = Pt(9)（就是那 12px），但 **Word 不吃页首的
+# 段前距**：硬分页（w:br type=page）、段前分页（w:pageBreakBefore）都不算，
+# 连兼容开关 w:suppressSpBfAfterPgBrk=0（顺序放对以后）也实测无效 —— 五种写法
+# 真 Word 渲染对照见 _probe97.py / _probe98.py：
+#     现状 19.317mm   段前分页 19.741mm   兼容开关 19.317/19.741mm
+#     预览 22.180mm（差 2.863mm）
+#
+# 补法：页首垫一个「固定行距 9 磅」的空行，把那 12px 补回来
+# （实测 22.492mm，与预览差 0.312mm —— 那是 SimHei 在 Chrome 与 Word 里
+#  ascent 度量不同带来的行内残差，跟页脚那 0.227mm 一个量级）。
+PREVIEW_PAGE_TOP_SPACE_PT = 9.0  # 12px
+PREVIEW_PAGE_TOP_LINE_TWIPS = 180  # 9 磅 = 180 twips（固定行距）
+
+# .print-section 的 margin-top 12px（= 9 磅）。大题标题、答案区标题的段前距都是它。
+PREVIEW_SECTION_SPACE_BEFORE_PT = 9.0
+
+# .print-question { margin: 0 0 8pt }（frontend/library.css:931）——
+# 预览里一个题块的下外边距，**写死的是 8 磅**（不是 px）。
+#
+# 这个数在「Word 取大 vs 预览相加」的模型里是块间距的一半：
+# 预览的 .exam-page-body 是 flex 容器，相邻两块的外边距**相加**
+# （题块的下外边距 8 磅 + 下一个大题标题的上外边距 9 磅 = 17 磅）；
+# Word 是 max(前段段后距, 后段段前距)，只写 9 磅的话那 8 磅会被吃掉。
+PREVIEW_QUESTION_MARGIN_BOTTOM_PT = 8.0
+
+# .qb-options { row-gap: .1em }（frontend/styles.css:1642）—— 选项区里
+# **行与行之间**的间距，按字号算（.1em = 字号的十分之一）。
+#
+# Word 的表格行之间没有间距这回事，行间距只能靠段落段后距顶出来
+# （Word 表格行高 = 单元格段落行高 + 该段段后距）。所以：
+#     单栏（选项写在正文里）：每段段后距 = .1em
+#     多栏（选项在表格里）：非末行的段落段后距 = .1em，末行 = 0
+#                          （末行给了，表格底就多出来，后面全被顶下去）
+PREVIEW_OPTION_ROW_GAP_EM = 0.1
+
+# 大题标题落在**页首**时的垫行高度（不是 9 磅，见下面）。
+#
+# 预览（Chrome DOM 实测 _probe106.py，纸面真值 _probe105.py）：
+#     版心顶 → 大题标题字顶 = 12px（9 磅 margin-top）+ 行内字顶偏移
+# Word：
+#     版心顶 → 大题标题字顶 = 只剩行内字顶偏移（页首的段前距被吃掉）
+#
+# 差在两处：
+#   1. 页首不吃段前距 → 预览那 9 磅（3.175 毫米）整段丢失；
+#   2. SimHei 在 Chrome 是 Type3、在 Word 是 CID，ascent 度量不同，
+#      Word 的字顶比 Chrome 低一点点。
+#
+# 垫行高度是实测标定出来的（真 Word 六档对照 _probe108/_probe109.py）：
+#     128 / 134 twips → 21.646mm（残差 −0.386mm）
+#     140 / 146 twips → 21.857mm（残差 −0.175mm）
+#     150 / 152 twips → 22.069mm（残差 +0.037mm）  ← 预览 22.032mm
+#
+# Word 把「固定行距」量化到 0.6 磅一档（同一档里写多少都一样），
+# 所以取最好那一档的**中间值**：7.8 磅 = 156 twips，落在 [150, 162] 这一档正中，
+# 以后字体度量再动一点也不会掉出档。
+PREVIEW_SECTION_PAGE_TOP_LINE_TWIPS = 156
+
 # 有效排版、但 Word 的公式模型表达不了的公式。不再让一条这样的公式废掉整卷：
 # 交上去让本机浏览器渲染成图片，警告里点名第几题哪个位置。
 _UNSUPPORTED = object()
@@ -1021,17 +1184,18 @@ def _recheck(captured, options, use_ai):
                 _fail(item["where"], "导出期间解析图片发生变化，请重新打开组卷", 409)
 
 
-def _font(run, size, bold=False, east_asia="宋体", latin=None, letter_spacing=None):
+def _font(run, size, bold=False, east_asia="宋体", latin=None, letter_spacing=None, color=None):
     """把这个 run 的字体规格写成预览里的那一套。
 
     预览的 --content-font 是 "Times New Roman", …, "SimSun", "宋体", serif：
     西文走 Times New Roman，中文走宋体。Word 这边原来西文写的是 Cambria ——
     数字和字母的宽度跟屏幕上对不上（导出来的卷子里同一个 "1." 比预览窄）。
     ``letter_spacing`` 是字符间距（1/20 磅），对应 CSS 的 letter-spacing。
+    ``color`` 是十六进制颜色（不带 #），对应 CSS 的 color。
     """
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
-    from docx.shared import Pt
+    from docx.shared import Pt, RGBColor
 
     if latin is None:
         latin = PREVIEW_LATIN_FONT
@@ -1040,6 +1204,10 @@ def _font(run, size, bold=False, east_asia="宋体", latin=None, letter_spacing=
     run.bold = bold
     rpr = run._element.get_or_add_rPr()
     rpr.get_or_add_rFonts().set(qn("w:eastAsia"), east_asia)
+    if color:
+        # 交给 python-docx 写 w:color —— 它知道 OOXML 里 w:color 的确切次序
+        # （排在 w:spacing 之前），自己插容易插错位置，Word 打开就报文件损坏。
+        run.font.color.rgb = RGBColor.from_string(color)
     if letter_spacing:
         node = OxmlElement("w:spacing")
         node.set(qn("w:val"), str(int(letter_spacing)))
@@ -1419,6 +1587,66 @@ def _neighbour_text(segments, index, step):
     return ""
 
 
+# pPr 里 w:autoSpaceDN 之后的兄弟（OOXML 规定的顺序）。python-docx 的
+# CT_PPr._tag_seq 在类体末尾被 del 掉了，只能自己写一份。
+_PPR_TAGS_AFTER_AUTO_SPACE_DN = (
+    "w:bidi",
+    "w:adjustRightInd",
+    "w:snapToGrid",
+    "w:spacing",
+    "w:ind",
+    "w:contextualSpacing",
+    "w:mirrorIndents",
+    "w:suppressOverlap",
+    "w:jc",
+    "w:textDirection",
+    "w:textAlignment",
+    "w:textboxTightWrap",
+    "w:outlineLvl",
+    "w:divId",
+    "w:cnfStyle",
+    "w:rPr",
+    "w:sectPr",
+    "w:pPrChange",
+)
+
+
+def _disable_punctuation_overflow(document):
+    """关掉 Word 的「标点溢出边界」。
+
+    Word 默认允许行末的标点（。，；：等）悬挂到版心右缘之外；Chrome 没有
+    这条规矩 —— 放不下的标点会被推到下一行。
+
+    实测同一道题：预览第 1 行末是「驶向乙」，Word 第 1 行末是「驶向乙地。」。
+    Word 每行多塞一个字，整行的内容就错开一行，块里的公式和图片跟着一起
+    错位；挂出去的标点还会越过版心右缘 194.09 毫米。
+
+    关掉它要写 <w:overflowPunct w:val="0"/>，而且在 pPr 里的位置必须排在
+    w:topLinePunct / w:autoSpaceDE 之前 —— 放错位置 Word 直接忽略。
+    """
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import qn
+
+    successors = ("w:topLinePunct", "w:autoSpaceDE", "w:autoSpaceDN") + _PPR_TAGS_AFTER_AUTO_SPACE_DN
+    namespace = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+
+    def apply(paragraph_element):
+        properties = paragraph_element.get_or_add_pPr()
+        for old in properties.findall(qn("w:overflowPunct")):
+            properties.remove(old)
+        properties.insert_element_before(parse_xml(f'<w:overflowPunct {namespace} w:val="0"/>'), *successors)
+
+    for paragraph in document.element.body.iter(qn("w:p")):
+        apply(paragraph)
+    # 页脚页眉里也有行末标点（「第 1 页，共 2 页」），一样要关。
+    for part in document.part.package.iter_parts():
+        element = getattr(part, "element", None)
+        if element is None or element.tag not in (qn("w:hdr"), qn("w:ftr")):
+            continue
+        for paragraph in element.iter(qn("w:p")):
+            apply(paragraph)
+
+
 def _disable_cjk_auto_spacing(document):
     """关掉 Word 的「自动调整中文与西文的间距」。
 
@@ -1436,28 +1664,8 @@ def _disable_cjk_auto_spacing(document):
     from docx.oxml import parse_xml
     from docx.oxml.ns import qn
 
-    # pPr 里这两个属性后面的兄弟（OOXML 规定的顺序）。python-docx 的
-    # CT_PPr._tag_seq 在类体末尾被 del 掉了，只能自己写一份。
-    after_dn = (
-        "w:bidi",
-        "w:adjustRightInd",
-        "w:snapToGrid",
-        "w:spacing",
-        "w:ind",
-        "w:contextualSpacing",
-        "w:mirrorIndents",
-        "w:suppressOverlap",
-        "w:jc",
-        "w:textDirection",
-        "w:textAlignment",
-        "w:textboxTightWrap",
-        "w:outlineLvl",
-        "w:divId",
-        "w:cnfStyle",
-        "w:rPr",
-        "w:sectPr",
-        "w:pPrChange",
-    )
+    # pPr 里这两个属性后面的兄弟（OOXML 规定的顺序）。
+    after_dn = _PPR_TAGS_AFTER_AUTO_SPACE_DN
     successors = {"w:autoSpaceDE": ("w:autoSpaceDN",) + after_dn, "w:autoSpaceDN": after_dn}
     namespace = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
 
@@ -1517,13 +1725,58 @@ def _write_segments(paragraph, segments, size, bold=False):
             _font(paragraph.add_run(shown), size, bold)
 
 
-# Word 标称单元格左右各留 0.19cm，合起来 3.8mm。实测按 3.8 算仍然会差一点：
-# 「二次项系数」五个字要 21.17mm，列宽算出来 24.9mm，减去 3.8 只剩 21.1mm，
-# 就差 0.07mm 被顶成两行。留到 5mm，一列多 1.2mm，十三列的表也还有富余。
-CELL_PADDING_MM = 5.0
-# 一列最少给多少。跟预览里 `.qb-table td { min-width: 2.6em }` 一个量级，
-# 免得内容窄的时候挤成一条看不见的缝。
-COLUMN_FLOOR_MM = 8.0
+# 预览里 .qb-table 的规矩（frontend/styles.css，1690 行）：
+#   .qb-table td { min-width: 2.6em; padding: .2em .7em; border: 1px solid }
+#   全局 box-sizing: border-box
+# 所以一列的**边框盒**宽度 = max(2.6em, 文字宽 + 1.4em 内边距 + 1 像素边框)。
+#
+# 这三个数是照抄预览的，不是估的：12 磅正文里 2.6em = 11.007 毫米，
+# Chrome 实测两列的 | x | y | 表每列正好 11.005 毫米（整表 22.275）。
+PREVIEW_TABLE_MIN_COLUMN_EM = 2.6
+PREVIEW_TABLE_CELL_PADDING_X_EM = 0.7
+PREVIEW_TABLE_BORDER_MM = 25.4 / 96.0  # 1 像素
+
+# 列数达到这个数，预览就给表格挂 ``qb-table-dense``（qb-render.js 的
+# ``DENSE_TABLE_COLUMNS = 13``）：最小列宽放开、内边距收成 ``.15em .45em``。
+# 导出这边必须跟着换模型 —— 不然十三列的表每列还占 11 毫米，
+# 整张表比预览宽 54 毫米（预览实测 111.32 毫米，模型算出来 165.8 毫米）。
+PREVIEW_TABLE_DENSE_COLUMNS = 13
+PREVIEW_TABLE_DENSE_CELL_PADDING_X_EM = 0.45
+
+# 表格的边框照抄预览：``border: 1px solid var(--paper-ink)``，
+# ``--paper-ink: #161816``（frontend/styles.css:17 与 1690）。
+# 1 CSS 像素 = 0.75 磅，w:sz 的单位是 1/8 磅 → 6。
+PREVIEW_TABLE_BORDER_COLOR = "161816"
+PREVIEW_TABLE_BORDER_SZ = 6
+
+# 预览正文字体（Times New Roman）里那些**窄**字符的字宽。
+# 全角汉字和全角标点都是 1 个字宽；ASCII 的标点符号多数不到半个字宽，
+# 按 0.5 算会高估：「零售收入/万元」实际 6.278 个字宽，
+# 按「斜杠 0.5」算成了 6.5，dense 表的表头列因此宽了 0.94 毫米。
+# 数值是 Chrome 实测（_probe69.py，在真实 .qb-stem-body 里量 20 个重复字符）。
+PREVIEW_NARROW_CHAR_EM = {
+    "/": 0.2778,
+    "\\": 0.2778,
+    "(": 0.3330,
+    ")": 0.3330,
+    "[": 0.3330,
+    "]": 0.3330,
+    "{": 0.4800,
+    "}": 0.4800,
+    "<": 0.5640,
+    ">": 0.5640,
+    "-": 0.3330,
+    "=": 0.5640,
+    "+": 0.5640,
+    "\u00d7": 0.5640,
+    "\u00f7": 0.5488,
+    "%": 0.8330,
+    "\u00b7": 0.3330,
+    "\u201c": 0.4438,
+    "\u201d": 0.4438,
+    "\u2018": 0.2625,
+    "\u2019": 0.2625,
+}
 
 
 def _WIDE_CHAR(ch):
@@ -1531,14 +1784,70 @@ def _WIDE_CHAR(ch):
     return "\u2e80" <= ch <= "\u9fff" or "\uff00" <= ch <= "\uffef"
 
 
-def _cell_width_mm(cell, size):
-    """这一格大概要占多宽（毫米）。
+def _preview_char_em(ch):
+    """预览里这个字符占多少 em。
 
-    系数是量出来的，不是猜的：12pt 正文里一个汉字 4.23mm、数字 2.51mm，
-    也就是 1 em = 4.23mm、数字 0.6 em。取 0.6 是宁可高估一点——
-    差 0.3mm 就够把「12」顶到换行（实测 8.3mm 的格子放不下 5.02mm 的「12」）。
+    预览的正文字体是 ``Times New Roman, Source Han Serif SC``：
+    汉字 1 个字宽，数字 0.5 个（实测「2023」四个字 31.96 像素，字号 16 像素），
+    大写字母约 0.72 个，小写约 0.5 个，空格 0.25 个。
+    """
+    if _WIDE_CHAR(ch):
+        return 1.0
+    if ch == " ":
+        return 0.25
+    narrow = PREVIEW_NARROW_CHAR_EM.get(ch)
+    if narrow is not None:
+        return narrow
+    if ch.isupper():
+        return 0.72
+    return 0.5
 
-    公式段按 LaTeX 去命令后估：`\\tan\\theta` 当 4 个字符算，量出来 8.26mm。
+
+def _field_max_text_width_mm(blocks, size, extra_segments=None):
+    """这一段正文「不换行」时最多占多宽（毫米）。
+
+    预览里 ``.qb-stem-body`` 是 flex item，宽度 = 正文内容宽度，但不超过
+    题干正文列的可用宽度；正文比表窄时，整个正文列会缩到表那么宽，
+    表于是**贴左**（实测离版心左缘 4.66 毫米），而不是在 173 毫米里居中。
+
+    要算准这张表的位置，就得知道正文有多宽。这里按硬换行（源码里的换行符）
+    分段，取最宽的那一段 —— 跟浏览器 max-content 的算法一致：软换行的机会
+    在 max-content 下不算换行点，只有源码里的真换行才算。
+    """
+    em = 0.0
+    line = 0.0
+
+    def feed(segments):
+        nonlocal em, line
+        for segment in segments or []:
+            if segment.get("type") == "math":
+                stripped = re.sub(r"\\[a-zA-Z]+", "ab", segment.get("latex") or "")
+                line += max(1.0, len(stripped) * 0.6)
+                continue
+            parts = (segment.get("raw") or "").split("\n")
+            for index, part in enumerate(parts):
+                if index:
+                    em = max(em, line)
+                    line = 0.0
+                line += sum(_preview_char_em(ch) for ch in part)
+        em = max(em, line)
+        line = 0.0
+
+    for block in blocks or []:
+        if block.get("type") == "text":
+            feed(block.get("segments"))
+    if extra_segments:
+        feed(extra_segments)
+    return em * size * 25.4 / 72.0
+
+
+def _cell_content_mm(cell, size):
+    """这一格里的**文字**有多宽（毫米），不含单元格内边距。
+
+    这是**预览**里的文字宽度：字宽系数是照预览量的（汉字 1 个、数字 0.5、
+    大写字母 0.72、小写 0.5、空格 0.25），不含单元格内边距。
+    预览里（``styles.css`` 全局 ``box-sizing: border-box``）单元格的内边距是
+    ``.7em`` 两侧，最小宽度 ``2.6em`` 是一起算的，所以这里单独留一份。
     """
     em = 0.0
     for segment in cell["segments"]:
@@ -1546,23 +1855,73 @@ def _cell_width_mm(cell, size):
             stripped = re.sub(r"\\[a-zA-Z]+", "ab", segment.get("latex") or "")
             em += max(1.0, len(stripped) * 0.6)
         else:
-            em += sum(1.0 if _WIDE_CHAR(ch) else 0.6 for ch in segment.get("raw") or "")
-    return em * size * 25.4 / 72.0 + CELL_PADDING_MM
+            em += sum(_preview_char_em(ch) for ch in segment.get("raw") or "")
+    return em * size * 25.4 / 72.0
+
+
+def _preview_column_widths(placements, width, size):
+    """预览里**每一列**的边框盒宽度（毫米）。
+
+    预览的 ``.qb-table`` 是 ``table-layout: auto``，列宽按内容分，
+    每格还有 ``min-width: 2.6em`` 和 ``.7em`` 的左右内边距
+    （``styles.css`` 全局 ``box-sizing: border-box``，最小宽度含内边距）。
+
+    真实宽度是这么来的（Chrome 实测，12pt / 16 像素字号）：
+      · 单元格边框盒 = max(2.6em, 文字宽 + 1.4em 内边距 + 1 像素边框)；
+      · 表宽 = 各列边框盒之和 + 左右外边框（各半像素，合起来 1 像素）。
+
+    拿「年份 | 产量（辆） | 备注」这张三列表验：56.92 毫米（实测 56.9185）。
+    拿「甲 | 乙」那张两列表验：每列 11.005 毫米、整表 22.275 毫米（实测）。
+
+    列数 >= 13 的表在预览里挂 ``qb-table-dense``（qb-render.js 的
+    ``DENSE_TABLE_COLUMNS = 13``）：最小列宽放开、内边距收成 ``.15em .45em``，
+    所以那种表的每列 = 文字宽 + 0.9em + 1 像素，**没有 2.6em 下限**。
+    实测那张十三列表：表头列 30.646、数字列 6.185、整表 111.319 毫米。
+
+    Word 这边画出来的列距就等于写进去的 ``w:gridCol``（真 Word 16 实测：
+    写 8.008 毫米，纸上是 8.052；写 11.005，纸上是 11.016），
+    所以这一列宽可以直接当 Word 的列宽用，不需要补偿。
+    """
+    em_mm = size * 25.4 / 72.0
+    need = [0.0] * width
+    for _, column, cell in placements:
+        span = min(max(1, cell["colspan"]), width - column)
+        share = _cell_content_mm(cell, size) / span
+        for offset in range(span):
+            need[column + offset] = max(need[column + offset], share)
+    if width >= PREVIEW_TABLE_DENSE_COLUMNS:
+        # dense 表（列数 >= 13）：没有最小列宽，内边距也收窄。
+        floor = 0.0
+        padding = 2 * PREVIEW_TABLE_DENSE_CELL_PADDING_X_EM * em_mm
+    else:
+        floor = PREVIEW_TABLE_MIN_COLUMN_EM * em_mm
+        padding = 2 * PREVIEW_TABLE_CELL_PADDING_X_EM * em_mm
+    return [max(floor, need[index] + padding + PREVIEW_TABLE_BORDER_MM) for index in range(width)]
+
+
+def _preview_table_width_mm(placements, width, size):
+    """这张表在**预览**里有多宽（毫米）。
+
+    表宽决定它在一列里居中时落在哪儿，所以兜底落位必须按预览的宽算，
+    不能拿 Word 自己的列宽（那边内边距是 1.9 毫米）来算。
+    """
+    return sum(_preview_column_widths(placements, width, size)) + PREVIEW_TABLE_BORDER_MM
 
 
 def _fair_widths(need, budget):
     """版心放不下时，先让每一列都够用，实在放不下的几列再一起挤。
 
     按比例全体缩小是错的：九上「根据图象，填写下表」那张五列表（性质/二次函数、
-    开口方向、对称轴、顶点坐标、取哪些值时……）需求合计 195.2mm，超版心 17.2mm。
-    按比例缩到 0.912 之后，「开口方向」本该 21.93mm 只剩 20.00mm，扣掉 Word 单元格
-    左右各 1.9mm 只余 16.2mm，而四个字实测 16.99mm——差 0.79mm，表头就被顶成
-    「开口方 / 向」两行。同一张表里需求本来就放得下的三列，全被陪着缩窄了。
+    开口方向、对称轴、顶点坐标、取哪些值时……）按预览的列宽模型算，需求合计
+    180.2mm，超版心 2.2mm。按比例缩到 0.988 之后，「开口方向」本该 23.12mm
+    只剩 22.85mm，扣掉 Word 单元格左右各 1.9mm 只余 19.0mm，而四个字实测
+    16.99mm——虽然这一列还塞得下，别的表就会把表头顶成「开口方 / 向」两行。
+    同一张表里需求本来就放得下的几列，全被陪着缩窄了。
 
     这里按水位线分：需求不超过水位的列照需求给，剩下的列一律给水位线，水位由
-    「未分到水位的列的需求之和」摊平得出。对五列表算出来是
-    ``[48.18, 21.93, 17.70, 21.93, 68.26]``——需求放得下的四列全都拿到完整需求，
-    只有最后那列（需求 85.43mm，本来就超出版心）被挤；按比例缩放则是四列一起折行。
+    「未分到水位的列的需求之和」摊平得出。对上面那张五列表算出来是
+    ``[32.65, 23.12, 18.89, 23.12, 80.22]``——需求放得下的四列全都拿到完整需求，
+    只有最后那列（需求 82.39mm，本来就超出版心）被挤；按比例缩放则是四列一起缩。
 
     水位线取的是「能让总和凑齐版心的最低水位」，所以能让多少列保持完整需求就让
     多少列保持——**折行的格子数最少**，这才是换掉按比例的理由（按比例并不逐列
@@ -1584,18 +1943,21 @@ def _fair_widths(need, budget):
 
 
 def _table_column_widths(placements, width, size, text_width_mm=178.0):
-    """按内容分列宽，跟预览里那张表一样（`.qb-table` 是 table-layout:auto，不写死列宽）。
+    """按预览的列宽模型分列宽（`.qb-table` 是 table-layout:auto，不写死列宽）。
 
     早先每列都 `Mm(178 / width)`：13 列的表每列只剩 13.7mm，「零售收入/万元」
     七个字被挤成五行，整张表凭空长高一倍——同一份内容在 PDF 路线里是一行。
     真库 27 个表格里 11 个会这样，九上第 1 题（#1282）最典型。
+
+    接着换成了 ``max(8.0, 内容 + 5.0)`` 这套 Word 味的估法：窄表被 8 毫米的
+    下限卡住，而预览里同样的表每列是 11.005 毫米（2.6em 下限）——两边每列
+    差 3 毫米，纸上一眼就看出表比预览窄。
+
+    现在直接用预览那套（``_preview_column_widths``）：每列
+    ``max(2.6em, 文字宽 + 1.4em 内边距 + 1 像素边框)``，Word 画出来的列距
+    就等于 ``w:gridCol``，不需要任何补偿。
     """
-    need = [COLUMN_FLOOR_MM] * width
-    for _, column, cell in placements:
-        span = min(max(1, cell["colspan"]), width - column)
-        share = _cell_width_mm(cell, size) / span
-        for offset in range(span):
-            need[column + offset] = max(need[column + offset], share)
+    need = _preview_column_widths(placements, width, size)
     total = sum(need)
     if total <= text_width_mm:
         # 内容窄就照内容的宽度印，别硬撑满——预览里那张表也是这么收着的。
@@ -1703,11 +2065,285 @@ def _mark_repeat_header(trpr):
     trpr.insert_element_before(header, "w:tblCellSpacing", "w:jc", "w:hidden", "w:ins", "w:del", "w:trPrChange")
 
 
-def _write_table(document, rows, size, where, text_width_mm=None):
+def _cell_vertical_padding(cell, twips_value, horizontal_twips=None):
+    """给单元格留出上下白，并把文字垂直居中（照抄 .qb-table td 的 padding）。
+
+    预览里单元格上下各 .2em 的白，文字在这块白里居中；Word 默认上下不留白、
+    文字贴顶。写 w:tcMar（上下）+ w:vAlign（居中）才跟预览一样。
+
+    左右内边距（``horizontal_twips``）也写进同一个 w:tcMar：Word 对「只写了
+    上下的 tcMar」不一定去继承表级的 w:tblCellMar，左右也写死最保险 ——
+    真 Word 实测（_probe76.py）：同一张表里把 w:tblCellMar 的左右从 0 改到
+    216 twips，格子里三段探针（居中/右对齐）的位置跟着变，唯独**左对齐那一段
+    纹丝不动**（x0 恒为 45.650pt），说明内容盒的左缘是钉在 tblInd 上的，
+    边距只决定右边往回收多少。
+    """
+    from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tc_pr = cell._tc.get_or_add_tcPr()
+    margin = tc_pr.find(qn("w:tcMar"))
+    if margin is None:
+        margin = OxmlElement("w:tcMar")
+        tc_pr.insert_element_before(margin, "w:textDirection", "w:tcFitText", "w:vAlign", "w:hideMark")
+    # 旧的四边先收起来：w:tcMar 里的顺序是 上、左、下、右，重排才合法。
+    previous = {}
+    for side in list(margin):
+        name = side.tag.split("}")[-1]
+        if name in ("top", "left", "bottom", "right"):
+            previous[name] = side.get(qn("w:w"))
+            margin.remove(side)
+    values = {"top": twips_value, "bottom": twips_value}
+    for name in ("left", "right"):
+        values[name] = horizontal_twips if horizontal_twips is not None else previous.get(name)
+    for name in ("top", "left", "bottom", "right"):
+        if values[name] is None:
+            continue
+        element = OxmlElement("w:" + name)
+        element.set(qn("w:w"), str(values[name]))
+        element.set(qn("w:type"), "dxa")
+        margin.append(element)
+    cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+
+
+def _table_cell_margin_twips(size, dense):
+    """预览里单元格的**左右内边距**，换算成 twips。
+
+    预览（frontend/styles.css）：``.qb-table td { padding: .2em .7em }`` →
+    左右各 .7em；列数 >= 13 的 dense 表（frontend/library.css 的
+    ``.print-flow .qb-table-dense td``）收成 ``.15em .45em`` → 左右各 .45em。
+
+    12 磅正文里（Chrome 实测，_probe72.py）：.7em = 2.963 毫米 = 168 twips，
+    .45em = 1.905 毫米 = 108 twips。
+
+    Word 的 Table Grid 默认每格留 108 twips —— 普通表每侧少 60 twips
+    （1.058 毫米），格子里的内容盒比预览**宽 2.1 毫米**：11.005 毫米那一列，
+    预览的内容盒 4.82 毫米，Word 却有 7.09 毫米，格子里的字折行位置直接对不上。
+    """
+    em = PREVIEW_TABLE_DENSE_CELL_PADDING_X_EM if dense else PREVIEW_TABLE_CELL_PADDING_X_EM
+    return int(round(size * em * 20))
+
+
+def _set_table_cell_margins(table, horizontal_twips):
+    """写 w:tblCellMar：单元格的左右内边距照抄打印预览。
+
+    上下留白是每格的 w:tcMar（.2em，见 _cell_vertical_padding），这里只管左右；
+    表级的 w:tblCellMar 是「这张表每格默认留多少白」的声明，写上它，
+    没被单独指定过的格子才不会退回 Word 默认的 108 twips。
+
+    w:tblCellMar 在 w:tblPr 里必须排在 w:tblLook 之前，顺序错了 Word 会自己
+    重排整块 tblPr，那几个值也就跟着丢了。
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tbl_pr = table._tbl.tblPr
+    existing = tbl_pr.find(qn("w:tblCellMar"))
+    if existing is not None:
+        tbl_pr.remove(existing)
+    margins = OxmlElement("w:tblCellMar")
+    # w:tblCellMar 里的顺序是 上、左、下、右。
+    for side, value in (("top", 0), ("left", horizontal_twips), ("bottom", 0), ("right", horizontal_twips)):
+        node = OxmlElement("w:" + side)
+        node.set(qn("w:w"), str(value))
+        node.set(qn("w:type"), "dxa")
+        margins.append(node)
+    tbl_pr.insert_element_before(margins, "w:tblLook", "w:tblCaption", "w:tblDescription")
+
+
+def _set_table_borders(table):
+    """把表格的边框照抄打印预览：0.75 磅、#161816 的实线。
+
+    预览（frontend/styles.css:1690）：``.qb-table td, .qb-table th
+    { border: 1px solid var(--paper-ink) }``，``--paper-ink: #161816``
+    （styles.css:17）。Chrome 实测（_probe82.py）每一格四边都是
+    ``1px solid rgb(22, 24, 22)``。
+
+    1 CSS 像素 = 1/96 英寸 = 0.75 磅，而 ``w:sz`` 的单位是 1/8 磅 → 6。
+
+    不写的话就走 Table Grid 样式的默认：0.5 磅（sz=4）纯黑 auto —— 细一档
+    的黑框，跟预览那张纸不是一回事。
+
+    **纸上的实际线宽是 0.6 磅，不是 0.75**：真 Word 一次排四张表（sz=4/6/8/12），
+    导 PDF 量竖边框矩形（_probe84.py）—— sz=4、6、8 在纸上**全都是** 0.600 磅，
+    sz=12 才是 1.2 磅。也就是 Word 在 0.25~1 磅之间只给 0.6 磅这一档，
+    sz=6 已经是能拿到的最近值（差 0.15 磅 = 0.05 毫米，肉眼看不出来）。
+
+    六边都要写：外框四条（top/left/bottom/right）加内部两条
+    （insideH/insideV），少一条就少一道线。
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tbl_pr = table._tbl.tblPr
+    existing = tbl_pr.find(qn("w:tblBorders"))
+    if existing is not None:
+        tbl_pr.remove(existing)
+    borders = OxmlElement("w:tblBorders")
+    # w:tblBorders 里的顺序是 上、左、下、右、内部横线、内部竖线。
+    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        node = OxmlElement("w:" + side)
+        node.set(qn("w:val"), "single")
+        node.set(qn("w:sz"), str(PREVIEW_TABLE_BORDER_SZ))
+        node.set(qn("w:space"), "0")
+        node.set(qn("w:color"), PREVIEW_TABLE_BORDER_COLOR)
+        borders.append(node)
+    # w:tblBorders 在 w:tblPr 里排在 w:tblInd 之后、w:shd 之前。
+    tbl_pr.insert_element_before(
+        borders, "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription"
+    )
+
+
+def _set_table_indent(table, left_mm, nested=False, cell_margin_twips=0):
+    """把表格的左边缘挪到离版心左缘 ``left_mm`` 毫米的位置。
+
+    ``w:tblInd`` 是表格相对左边距的缩进，``w:jc`` 必须写成 left ——
+    jc=center 是「在整栏里居中」，那正是 Word 这边一直排错的地方：
+    预览里题干里那张表贴在题号右边（实测离版心左缘 4.66 毫米），
+    Word 却把它摆在 178 毫米版心的正中间（差 56.9 毫米）。
+
+    但 ``w:tblInd`` 量到的是**第一格文字的左缘**，不是表格边框的左缘 ——
+    边框还要再往左退一个单元格左边距。真 Word 16 实测（_probe76.py：
+    八张 40 毫米的表，w:tblCellMar 的左右从 0 一路排到 216 twips，
+    每张格里放左对齐/居中/右对齐三段探针，导 PDF 量原始 pt）：
+
+      · 第一格**文字左缘** = 版心左缘 + tblInd + 0.3pt，**与单元格边距无关**
+        （tblInd=0 时八张表的左对齐那一段 x0 恒为 45.650pt，一动不动）；
+      · 表格**边框中心** = 版心左缘 + tblInd − 单元格左边距；
+      · **内容盒宽度** = 列宽 − 2 × 单元格左边距 − 0.3pt。
+
+    所以要让边框落在 ``left_mm``，tblInd 必须写成「目标位置 + 这张表实际写进去的
+    单元格左边距」（普通表 168 twips、dense 表 108 twips），而不是拍一个常数 ——
+    补错了表就整体偏出去：第一格文字会离开它该在的位置。
+
+    **嵌套在格子里的表是另一条规矩**：真 Word 实测（2026-11-17，_probe57.py，
+    同一格里摆 5 张 tblInd = 0/200/400/848/1200 twips 的嵌套表，导 PDF 量边框）：
+    缩进 0 时嵌套表的边框正好落在**格子左缘**（53.075 毫米 = B 栏格子左缘），
+    缩进 200 twips 时边框落在 56.684（差 3.609 毫米 ≈ 3.528 + 0.08）。
+    也就是说嵌套表的 ``w:tblInd`` 直接就是**边框**的位置，没有那 1.905 毫米的
+    补偿。补偿加错方向，选项里的表就会偏右 2 毫米（实测 70.026 vs 预览 67.924）。
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tbl_pr = table._tbl.tblPr
+    existing = tbl_pr.find(qn("w:tblInd"))
+    if existing is not None:
+        tbl_pr.remove(existing)
+    indent = OxmlElement("w:tblInd")
+    indent.set(qn("w:type"), "dxa")
+    # 主文档里的表：tblInd 量到第一格文字的左缘，边框还要再往左退一个单元格
+    # 左边距，所以把「这张表实际写进去的那个边距」加回去。
+    # 嵌套表：tblInd 就是边框位置，一个 twips 都不用补。
+    twips = int(round(float(left_mm) * 1440 / 25.4))
+    if not nested:
+        twips += cell_margin_twips
+    indent.set(qn("w:w"), str(twips))
+    # 元素顺序是硬要求：w:tblInd 排在 w:jc 之后、w:tblBorders 之前。
+    tbl_pr.insert_element_before(
+        indent, "w:tblBorders", "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription"
+    )
+
+
+def _set_table_text_indent(table, text_left_mm):
+    """把表格里**第一格文字**的左缘挪到离版心左缘 ``text_left_mm`` 毫米。
+
+    ``w:tblInd`` 量到的就是第一格文字的左缘（真 Word 16 实测：写 480 twips
+    = 8.4667 毫米，文字就落在离版心左缘 8.4667 毫米处）。这一点与单元格
+    左边距无关 —— 默认的 108 twips 和写成 0，量出来都是同一个位置；
+    变的只是表格**边框**落在哪儿（边框还要再往左退一个单元格左边距）。
+
+    ``_set_table_indent`` 管的是边框位置（题干里那些表要的就是它）；
+    选项块要对齐的是文字，所以这里另写一个。
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tbl_pr = table._tbl.tblPr
+    existing = tbl_pr.find(qn("w:tblInd"))
+    if existing is not None:
+        tbl_pr.remove(existing)
+    indent = OxmlElement("w:tblInd")
+    indent.set(qn("w:type"), "dxa")
+    indent.set(qn("w:w"), str(int(round(float(text_left_mm) * 1440 / 25.4))))
+    # 元素顺序是硬要求：w:tblInd 排在 w:jc 之后、w:tblBorders 之前。
+    tbl_pr.insert_element_before(
+        indent, "w:tblBorders", "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription"
+    )
+
+
+def _zero_cell_margins(cell):
+    """把一个单元格的左右内边距清零。
+
+    预览里选项那一栏两侧都没有留白（``.qb-option`` 没有 padding），
+    Word 默认每格留 108 twips（1.905 毫米），不清掉的话正文那一列会比
+    预览窄 3.81 毫米 —— 折行位置就不一样了。
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tc_pr = cell._tc.get_or_add_tcPr()
+    existing = tc_pr.find(qn("w:tcMar"))
+    if existing is not None:
+        tc_pr.remove(existing)
+    mar = OxmlElement("w:tcMar")
+    for side in ("top", "left", "bottom", "right"):
+        node = OxmlElement("w:" + side)
+        node.set(qn("w:w"), "0")
+        node.set(qn("w:type"), "dxa")
+        mar.append(node)
+    # w:tcPr 里的顺序也是硬要求：w:tcMar 排在 w:textDirection 之前。
+    for tag in ("w:textDirection", "w:tcFitText", "w:vAlign", "w:hideMark"):
+        found = tc_pr.find(qn(tag))
+        if found is not None:
+            found.addprevious(mar)
+            break
+    else:
+        tc_pr.append(mar)
+    return cell
+
+
+def _write_table(
+    container,
+    rows,
+    size,
+    where,
+    text_width_mm=None,
+    left_mm=None,
+    column=None,
+    column_shrinks=False,
+    field_text_width_mm=None,
+):
+    """写一张表。
+
+    ``container`` 是正文（Document）或一个 Word 单元格（_Cell）——
+    两种都有 ``add_table``，选项里的表要嵌在自己的格子里。
+
+    ``left_mm`` 是预览量出来的表格左边缘位置（离版心左缘多少毫米）；
+    ``column`` 是这张表所在那一列的 (左缘, 宽度)，没有实测值时退回到按预览的排版规则算。
+
+    ``column_shrinks`` 说那一列会不会「缩到内容那么宽」：预览里题干正文列是
+    flex item，正文比表窄时整列缩到表宽，表于是**贴左**；答案正文列是
+    ``minmax(0, 1fr)``，宽度恒定，表永远在列里居中。两条规则不一样，
+    搞混了窄表就会差 77 毫米（实测：贴左 4.66 毫米 vs 居中 82.10 毫米）。
+
+    ``field_text_width_mm`` 是这一段正文不换行时的宽度（估算），只在
+    ``column_shrinks`` 时用得上：正文列宽 = min(列可用宽, max(正文宽, 表宽))。
+    """
     from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     from docx.shared import Mm, Pt
+
+    # 嵌套在格子里的表，w:tblInd 的解释跟主文档里的表不一样（见 _set_table_indent）：
+    # 嵌套表的 tblInd 直接就是边框位置，没有那 1.905 毫米的单元格边距补偿。
+    nested = getattr(container, "_tc", None) is not None
+
+    # 下面两个循环都要用 "column" 这个名字（网格列号、python-docx 的列对象），
+    # 会把形参 column 覆盖掉 —— 形参先另存一份，落位时用它。
+    column_box = column
 
     # Place rowspan cells into a complete grid; overlapping/out-of-bounds spans abort.
     grid, placements, width = {}, [], 0
@@ -1729,11 +2365,17 @@ def _write_table(document, rows, size, where, text_width_mm=None):
             width = max(width, column)
     if width < 1:
         _fail(where, "表格没有可导出的单元格")
-    table = document.add_table(rows=len(rows), cols=width)
+    table = container.add_table(rows=len(rows), cols=width)
     table.style = "Table Grid"
     table.autofit = False
-    # `.qb-table { margin: 0 auto }`：预览里窄表是居中的，Word 这边也要跟着居中。
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    # 横向位置：预览量出来的位置说了算，实在量不到才退回到「在这一列里居中」。
+    # 什么都不给的时候才居中整栏 —— 那正是 Word 这边一直排错的地方：
+    # 预览里题干里那张表贴在题号右边（离版心左缘 4.66 毫米），
+    # Word 却把它摆在 178 毫米版心的正中间（差 56.9 毫米）。
+    if left_mm is not None or column_box is not None:
+        table.alignment = WD_TABLE_ALIGNMENT.LEFT
+    else:
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
     # 先合并，再写宽度：合并之后 w:gridSpan 才在，_set_table_widths 才能把
     # 跨列的格子写成「那几列宽度之和」。反过来（先写宽度再合并）的话，
     # 合并格的宽度就轮到 python-docx 自己去加 —— 那是它的内部行为，
@@ -1746,33 +2388,97 @@ def _write_table(document, rows, size, where, text_width_mm=None):
         column.width = Mm(value)
     # 光写 w:gridCol 不够，Word 会按自己的规矩把表重排成等宽。
     _set_table_widths(table, widths)
+    # 单元格的左右内边距照抄预览：普通表 .7em、dense 表 .45em。
+    # Word 默认 108 twips，普通表每侧少 60 twips，内容盒比预览宽 2.1 毫米 ——
+    # 格子里的字折行位置就跟着错（真 Word 实测：11.005 毫米那一列，
+    # 预览内容盒 4.82 毫米，Word 7.09 毫米）。
+    cell_margin_twips = _table_cell_margin_twips(size, width >= PREVIEW_TABLE_DENSE_COLUMNS)
+    _set_table_cell_margins(table, cell_margin_twips)
+    # 边框照抄预览：0.75 磅、#161816 的实线（不是 Table Grid 的 0.5 磅纯黑）。
+    _set_table_borders(table)
+    # 表格的左边缘该落在哪儿：优先用预览量出来的实测位置；
+    # 量不到（没渲染过预览、或题被拆到跨页续片里）就按预览的排版规则算。
+    #
+    # 预览里表是在**自己的那一列**里居中（.qb-table { margin: 0 auto }），
+    # 但「那一列」有多宽，两种情况不一样：
+    #   - 题干正文列是 flex item（.qb-stem-body），宽度 = min(列可用宽, max(正文, 表)）。
+    #     正文比表窄时整列缩到表宽 → 表**贴左**（实测离版心左缘 4.66 毫米）；
+    #     正文撑满时列宽 173.34 毫米 → 表居中（实测 80.19 毫米）。
+    #   - 答案正文列是 grid 的 minmax(0, 1fr)，宽度恒定 166.78 毫米 → 表永远居中
+    #     （实测 83.47 毫米，答案长短不影响）。
+    # 两种规则差 77 毫米，不能混。
+    offset = left_mm
+    if offset is None and column_box is not None:
+        column_left, column_width = column_box
+        preview_width = _preview_table_width_mm(placements, width, size)
+        if column_shrinks:
+            body_width = min(column_width, max(field_text_width_mm or 0.0, preview_width))
+        else:
+            body_width = column_width
+        offset = column_left + max(0.0, (body_width - preview_width) / 2)
+    if offset is not None:
+        _set_table_indent(table, offset, nested=nested, cell_margin_twips=cell_margin_twips)
     for r, c, cell in placements:
         target = table.cell(r, c)
         target.text = ""
-        _write_segments(target.paragraphs[0], cell["segments"], size, cell["header"])
+        # 预览里 th 和 td 是同一条规则（font-weight: 400），表头**不加粗**。
+        _write_segments(target.paragraphs[0], cell["segments"], size, False)
         # 预览里表格是 .qb-table { line-height: 1.6 }，单元格没有外边距。
         # Word 这边跟着走：行高用 1.6em，段后距清零（Normal 样式默认留 3 磅，
         # 不清的话每一行都白胖 3 磅）。
         cell_paragraph = target.paragraphs[0]
         _line_spacing(cell_paragraph, size * PREVIEW_TABLE_LINE_HEIGHT_EM)
         cell_paragraph.paragraph_format.space_after = Pt(0)
-        if cell["header"]:
-            shade = OxmlElement("w:shd")
-            shade.set(qn("w:fill"), "F1F5F3")
-            target._tc.get_or_add_tcPr().append(shade)
+        # 预览里格子里的字是**居中**的：``.qb-table td, .qb-table th
+        # { text-align: center }``（frontend/styles.css:1690）。Chrome 实测
+        # （_probe80.py）：表头格和数据格都居中，dense 表也一样。
+        #
+        # Word 这边默认左对齐 —— 窄表那一列的内容盒只有 4.97 毫米，
+        # 居中时左边空 1.30 毫米，左对齐只空 0.13 毫米，纸上差 1.17 毫米。
+        #
+        # 注意这跟**表格整体**的位置是两回事：w:tblPr/w:jc 管的是表格框在页面
+        # 上的位置（题干表靠左、答案表在正文列里居中），w:pPr/w:jc 管的才是
+        # 格子里的文字。
+        cell_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        # 预览里表头**没有底色**：``.qb-table td, .qb-table th`` 只写边框和
+        # 内边距，底色是透明的（Chrome 实测 rgba(0, 0, 0, 0)，_probe82.py）。
+        # Word 这边原来给表头涂了 F1F5F3 浅绿底 —— 导出后表头一块绿，跟预览
+        # 那张白纸完全不是一回事，所以这里不涂。
+        # 预览里表头**没有底色**：``.qb-table td, .qb-table th`` 只写边框和
+        # 内边距，底色是透明的（Chrome 实测 rgba(0, 0, 0, 0)，_probe82.py）。
+        # Word 这边原来给表头涂了 F1F5F3 浅绿底 —— 导出后表头一块绿，跟预览
+        # 那张白纸完全不是一回事，所以这里不涂。
     # 首行整行都是表头格时，把它标成「表头行」：表格跨页时 Word 会把这一行
     # 在每一页的顶端重复一遍。
     head_row = bool(rows) and all(cell["header"] for cell in rows[0])
+    # 预览里每一行都是 2.1em 高、上下各留 .2em 的白（Chrome 实测 25.2 磅/行）。
+    # Word 这边照抄：文字垂直居中，上下边距 .2em。
+    #
+    # 行高那个数要减掉边距：Word 的 w:trHeight 量的是「内容区」最低高度，单元格
+    # 边距算在它外面（实测：trHeight 25.2 磅 + 上下 2.4 磅 = 行高 30.6 磅）；
+    # Chrome 的 height 2.1em 是「整行」的高度（实测 25.5 磅）。所以这里写
+    # 2.1em − 2×.2em = 1.7em，行高才跟预览一样是 25.2 磅。
+    row_height = int(round(size * (PREVIEW_TABLE_CELL_HEIGHT_EM - 2 * PREVIEW_TABLE_CELL_PADDING_Y_EM) * 20))
+    padding_y = int(round(size * PREVIEW_TABLE_CELL_PADDING_Y_EM * 20))
     for index, row in enumerate(table.rows):
         trpr = row._tr.get_or_add_trPr()
         avoid = OxmlElement("w:cantSplit")
         trpr.append(avoid)
+        height = OxmlElement("w:trHeight")
+        height.set(qn("w:hRule"), "atLeast")
+        height.set(qn("w:val"), str(row_height))
+        # w:trPr 里 trHeight 排在 cantSplit 之后、tblHeader 之前。
+        trpr.insert_element_before(
+            height, "w:tblHeader", "w:tblCellSpacing", "w:jc", "w:hidden", "w:ins", "w:del", "w:trPrChange"
+        )
+        for cell in row.cells:
+            _cell_vertical_padding(cell, padding_y, cell_margin_twips)
         if index == 0 and head_row:
             _mark_repeat_header(trpr)
 
 
 def _write_field(
-    document,
+    container,
     blocks,
     size,
     prefix="",
@@ -1783,27 +2489,111 @@ def _write_field(
     text_width_mm=None,
     space_before_pt=None,
     space_after_pt=None,
+    table_lefts=None,
+    table_column=None,
+    table_column_shrinks=False,
+    first_paragraph=None,
+    first_paragraph_tab_mm=None,
+    right_indent_mm=None,
+    list_indent_mm=None,
 ):
     """Write one field (题干预览里的一个字段块) into the document.
+
+    ``container`` 是正文（Document）或一个 Word 单元格（_Cell）——
+    两种都有 ``add_paragraph``。选项里的内容要排进选项格子里，
+    用的就是这一套（多栏排版时一个选项可能不止一段、还可能带一张表）。
+
+    ``first_paragraph`` 是已经建好的第一个段落：调用方先把「A. 」这样的题号
+    写进去了，正文要接着往下写，不能另起一段（预览里题号和选项正文在同一格里）。
+
+    ``first_paragraph_tab_mm`` 是「标签 → 正文」的距离（毫米）：复用那个段落时，
+    先插一个 tab 把正文推到标签右边，并把段落设成悬挂缩进 —— 折行时折回正文
+    那一列，跟预览里 ``.qb-option`` 的两列网格一致。
+
+    ``right_indent_mm`` 把这一段的右边让出来（毫米）：Word 的表格没有列间距，
+    预览里栏与栏之间那 2em 的间隙就是这么让出来的。
 
     ``indent_mm`` 把这一段挪到答案正文列里（预览里那一列缩在题号右边）；
     ``hanging`` 让首行顶格放题号、后续行缩进，跟预览的两栏网格一致；
     ``text_width_mm`` 是这一列的净宽，里面的表格不能比它宽；
     ``space_before_pt`` / ``space_after_pt`` 覆盖预览里那一段的外边距
     （.solution-result 没有外边距、.solution-paragraph 上下各 3pt）。
+    ``table_lefts`` 是预览量出来的每张表的位置（离版心左缘多少毫米），
+    ``table_column`` 是这些表所在那一列的 (左缘, 宽度) —— 量不到时按这一列居中。
+    ``table_column_shrinks`` 说这一列会不会缩到内容那么宽（题干正文列会，
+    答案正文列不会）。
+
+    ``list_indent_mm`` 是这一段所属**列表**的左缩进（毫米）—— 预览里
+    ``.qb-options`` 那个 2em 的 padding。多栏路径里选项被塞进表格格子，
+    格子的左缘已经是栏左缘，所以不用给（None）；单栏路径里选项直接写在
+    正文里，就要把这 2em 补上，否则整块选项比预览靠左 8.47 毫米
+    （第五十五轮实测：Word 顶格 0.11 毫米，预览 13.85 毫米）。
     """
     from docx.shared import Mm, Pt
 
     written = []
 
+    # 一张表对一个位置。数量对不上就整份丢掉：一张表配错位置，
+    # 表就摆在错的地方 —— 比位置差一点更糟。
+    tables = [block for block in blocks if block["type"] == "table"]
+    offsets = list(table_lefts) if table_lefts is not None and len(table_lefts) == len(tables) else None
+    table_index = 0
+    # 这一段正文不换行时有多宽（估算）。题干正文列是 flex item，正文比表窄时
+    # 整列缩到表宽，表于是贴左 —— 要算准位置就得知道正文有多宽。
+    field_text_width = _field_max_text_width_mm(blocks, size, extra_segments=lead_segments)
+
+    # 调用方先写好的那个段落（选项里的「A.」）只有在这一段是**普通行内文字**时
+    # 才能接着写：
+    #   · 行间公式要自己起一段 —— 预览里公式另起一行，单栏排版也是另起一段；
+    #     抢来写会让多栏和单栏排出来的样子不一样。
+    #   · 那个段落在格子里物理上排在最前面，抢来写后面的内容会打乱顺序。
+    # 第一块是表的时候同理：表是独立的一块，题号自己占一段（单栏排版就是这样）。
+    if first_paragraph is not None:
+        head = blocks[0] if blocks else None
+        reusable = False
+        if head is not None and head.get("type") == "text":
+            segments = head.get("segments") or []
+            if segments:
+                first_segment = segments[0]
+                group = first_segment.get("displayGroup") or ("display" if first_segment.get("display") else None)
+                reusable = group is None
+        if not reusable:
+            first_paragraph = None
+
+    # 标签和正文之间留出预览里那 0.3em：正文从悬挂缩进的位置开始，
+    # 折行也折回这一列。tab stop 必须自己写 —— Word 默认的制表位是
+    # 12.7 毫米，我们要的是 5.4 毫米。
+    if first_paragraph is not None:
+        fmt = first_paragraph.paragraph_format
+        if first_paragraph_tab_mm:
+            # 悬挂缩进的第一行落在**标签**的位置上（预览的标签列），
+            # 正文落在标签 + 间隙那一列。列表自己的缩进（预览 .qb-options 的
+            # padding-left）加在左边，两边一起才是正文列的左缘。
+            base = float(list_indent_mm or 0.0)
+            fmt.left_indent = Mm(base + first_paragraph_tab_mm)
+            fmt.first_line_indent = Mm(-first_paragraph_tab_mm)
+            fmt.tab_stops.add_tab_stop(Mm(base + first_paragraph_tab_mm))
+            _font(first_paragraph.add_run("\t"), size)
+        # 右缩进和悬挂缩进是两回事：栏间间隙要一直让出来，
+        # 不能因为这一格没有 tab（标签栏没复用）就跟着丢掉。
+        if right_indent_mm:
+            fmt.right_indent = Mm(right_indent_mm)
+
     def _new_paragraph():
-        paragraph = document.add_paragraph()
+        nonlocal first_paragraph
+        if first_paragraph is not None:
+            paragraph = first_paragraph
+            first_paragraph = None
+        else:
+            paragraph = container.add_paragraph()
+        fmt = paragraph.paragraph_format
         if indent_mm:
-            fmt = paragraph.paragraph_format
             fmt.left_indent = Mm(indent_mm)
             if hanging:
                 fmt.first_line_indent = Mm(-indent_mm)
                 fmt.tab_stops.add_tab_stop(Mm(indent_mm))
+        if right_indent_mm:
+            fmt.right_indent = Mm(right_indent_mm)
         written.append(paragraph)
         return paragraph
 
@@ -1816,7 +2606,19 @@ def _write_field(
         _write_segments(paragraph, lead_segments, size)
     for block in blocks:
         if block["type"] == "table":
-            _write_table(document, block["rows"], size, where, text_width_mm=text_width_mm)
+            left = offsets[table_index] if offsets is not None else None
+            _write_table(
+                container,
+                block["rows"],
+                size,
+                where,
+                text_width_mm=text_width_mm,
+                left_mm=left,
+                column=table_column,
+                column_shrinks=table_column_shrinks,
+                field_text_width_mm=field_text_width,
+            )
+            table_index += 1
             paragraph = None
         else:
             display_group = None
@@ -1873,10 +2675,6 @@ PREVIEW_PAGE_HEIGHT_MM = 210
 # 从左往右排，加上间距塞不下正文栏就换下一行。一 CSS 像素是 1/96 英寸，14px 即 3.70mm。
 PREVIEW_PX_PER_INCH = 96
 PREVIEW_FIGURE_GAP_PX = 14
-# Word 单元格里能放东西的宽度 = 列宽 - 左右单元格边距。
-# Word 默认左右各 108 twips = 1.905 毫米（导出没有改这个默认值，
-# Word 16 实测：44.5 毫米的列，净宽 40.69 毫米）。
-WORD_CELL_MARGIN_MM = 1.9
 # 预览里答案块是「题号列 + 正文列」两栏网格：
 #     .print-answer-row { display: grid; grid-template-columns: 2.4em minmax(0, 1fr); gap: 4px; }
 # 老师核对的是屏幕：题干顶格，答案正文和解析配图缩在题号右边（实测缩进 11.22mm）。
@@ -1889,6 +2687,25 @@ WORD_CELL_MARGIN_MM = 1.9
 PREVIEW_ANSWER_NUMBER_COLUMN_EM = 2.4
 PREVIEW_ANSWER_COLUMN_GAP_PX = 4
 PREVIEW_PX_TO_MM = 25.4 / 96
+# 题干正文列的左缘：预览里题干也是「题号列 + 正文列」两栏
+# （.qb-stem { display: flex; gap: .35em }），正文列紧跟在题号列右边。
+# 题号列多宽取决于题号有几位：Times New Roman 粗体下数字宽 0.5em、句点 0.25em，
+# 再加 0.35em 的列间隙 —— 1 位数时正文列左缘 = 1.1em
+# （实测 17.59 像素 @12pt，与 1.1em 一字不差）。
+PREVIEW_NUMBER_DIGIT_EM = 0.5
+PREVIEW_NUMBER_DOT_EM = 0.25
+PREVIEW_STEM_COLUMN_GAP_EM = 0.35
+# Word 的 Table Grid 样式给每个单元格留 108 twips（1.905 毫米）的左右内边距，
+# 而 ``w:tblInd`` 量的是**第一格文字的左缘**，不是表格边框的左缘 ——
+# 边框还要再往左退这一个单元格左边距。实测（Word 16.0 转 PDF）：
+# 题干表预览在离版心左缘 4.66 毫米处，写 tblInd=264（4.66 毫米）后
+# Word 的边框却落在 2.65 毫米处，差的正是这 1.905 毫米；答案表同样差 1.905。
+# 写 tblInd 时必须把它加回去，否则「看着贴左了，其实还差 2 毫米」。
+#
+# 但补多少要看这张表**实际写进去**的单元格左边距：第五十七轮起，Word 这边
+# 不再用 Word 默认的 108，而是照抄预览（普通表 .7em = 168 twips、dense 表
+# .45em = 108 twips，见 _table_cell_margin_twips），所以补偿也跟着变 ——
+# 补的是那张表的边距，不是某个写死的常数。
 # 选项列数不再照抄 styles.css 那条 "@container qpaper (max-width: 680px) {
 # .qb-options.cols-4 -> two columns }"。
 #
@@ -1921,6 +2738,16 @@ def _answer_block_indent_mm(size):
 def _answer_block_text_width_mm(size):
     """答案正文列的净宽（毫米）：版心宽度减去题号列和列间隙。"""
     return PREVIEW_TEXT_WIDTH_MM - _answer_block_indent_mm(size)
+
+
+def _stem_column_left_mm(size, digits):
+    """题干正文列相对版心左边缘的缩进（毫米）。
+
+    与 ``.qb-stem`` 的两栏结构逐字对应：题号列的宽度随题号位数变，
+    再加 0.35em 的列间隙，就是正文列的左缘。
+    """
+    font_mm = size * 25.4 / 72
+    return (PREVIEW_NUMBER_DIGIT_EM * digits + PREVIEW_NUMBER_DOT_EM + PREVIEW_STEM_COLUMN_GAP_EM) * font_mm
 
 
 def _figure_paper_size(
@@ -2066,25 +2893,99 @@ def _figure_widths_for_slot(pictures, slot, settings=None, measured=None):
     return [min(width, measured[index]) if index < len(measured) else width for index, width in enumerate(widths)]
 
 
-def _option_cell_usable_mm(columns, text_width_mm=PREVIEW_TEXT_WIDTH_MM):
+# ---- 选项块的水平排版规矩（照抄打印预览）--------------------------
+#
+# 预览里选项是两层 grid：``.qb-options`` 排栏，``.qb-option`` 排标签和正文。
+#   · ``.qb-options`` 的 padding-left 是 2em —— 选项区整体离版心左缘 2em；
+#   · 栏与栏之间 column-gap 是 2em；
+#   · 标签（「A.」）和正文之间 column-gap 是 .3em。
+# 预览的字号是写死的 16px，也就是 12 磅，所以 1em = 4.2333 毫米。
+#
+# 以上三个数都是 Chrome 实测（2026-11-17，_probe53.py）：
+#   选项区左缘 8.47 毫米；栏 1 左缘 8.47 宽 80.53；栏 2 左缘 97.47。
+#
+# Word 这边原来一张表平均分栏（每栏 89 毫米），既没有那 2em 缩进，也没有栏间
+# 2em 间隙 —— 纸上的选项整体比预览靠左 8.47 毫米，第二栏还整整偏左 8.47 毫米。
+# 现在照抄预览的规矩：左边缩进用 tblInd，栏间间隙算进左栏宽度 +
+# 段落右缩进（Word 的表格没有列间距这一说）。
+PREVIEW_EM_MM = 12 * 25.4 / 72.0  # 16px = 12 磅 = 4.2333 毫米
+OPTION_LIST_INDENT_MM = 2 * PREVIEW_EM_MM  # 8.4667
+OPTION_COLUMN_GAP_MM = 2 * PREVIEW_EM_MM  # 8.4667
+OPTION_LABEL_GAP_MM = 0.3 * PREVIEW_EM_MM  # 1.27
+# Times New Roman 的大写字母宽度（em）。预览的西文首选就是这个字体：
+# Chrome 实测「A.」4.11 毫米、「B.」3.88 毫米，与 (advance + 0.25em) 逐个对得上。
+OPTION_LABEL_EM = {"A": 0.722, "B": 0.667, "C": 0.667, "D": 0.722, "E": 0.611}
+OPTION_PERIOD_EM = 0.25
+
+
+def _option_column_width_mm(columns, text_width_mm=PREVIEW_TEXT_WIDTH_MM):
+    """选项表里一栏有多宽（毫米）—— 照抄预览的 ``.qb-options``。
+
+    预览里选项区左边留 2em，栏与栏之间还有 2em 的间隙，所以一栏比
+    「版心平均分」要窄：两栏时 80.53 毫米（平均分是 89）。
+    """
+    columns = max(1, int(columns or 1))
+    gaps = (columns - 1) * OPTION_COLUMN_GAP_MM
+    return (text_width_mm - OPTION_LIST_INDENT_MM - gaps) / columns
+
+
+def _option_label_width_mm(letter, size=12):
+    """标签（「A.」）有多宽（毫米）。"""
+    em = size * 25.4 / 72.0
+    return (OPTION_LABEL_EM.get(letter, 0.722) + OPTION_PERIOD_EM) * em
+
+
+def _option_label_indent_mm(letter, size=12):
+    """标签加标签与正文之间的间隙 —— 正文从这儿开始（毫米）。
+
+    Chrome 实测：正文左缘离栏左缘 5.386 毫米（A）/ 5.151 毫米（B），
+    与这里的 5.3848 / 5.1520 逐个对得上。
+    """
+    return _option_label_width_mm(letter, size) + OPTION_LABEL_GAP_MM
+
+
+def _option_cell_usable_mm(columns, text_width_mm=PREVIEW_TEXT_WIDTH_MM, size=12, letter="A"):
     """选项表格里，一格最多能放多宽的东西（毫米）。
 
     Word 不会自动缩图：图比格子宽，就直接压到隔壁列上。
-    选项表按正文宽平均分栏，每格再扣掉 Word 默认的左右单元格边距。
-    实测（Word 16）：4 栏时列宽 44.5 毫米、净宽 40.69 毫米；
-    没有这条收口时，一张 169 毫米的图会压出 128 毫米，把后面的列全盖掉。
+    预览里选项里的图排在正文那一列（``.qb-option .qb-figure { grid-column: 2 }``），
+    所以上限就是正文列的宽：栏宽减去标签和它后面的间隙。
+
+    ``letter`` 是这一格是哪个选项：预览里标签列的宽是 ``auto``，各行自己算 ——
+    「A.」比「B.」宽，所以 A 那一行的正文列就比 B 窄（Chrome 实测 2026-11-17：
+    4 栏时 A 的正文列 30.646 毫米、B 的 30.882 毫米）。一律按最宽的 A 算，
+    B、C、D 的图就会被多裁掉两三毫米。
     """
-    columns = max(1, int(columns or 1))
-    return text_width_mm / columns - 2 * WORD_CELL_MARGIN_MM
+    return _option_column_width_mm(columns, text_width_mm) - _option_label_indent_mm(letter, size)
 
 
-def _write_images(document, item, slot, lines=None, settings=None, measured=None, max_width_mm=None):
+def _write_images(
+    document,
+    item,
+    slot,
+    lines=None,
+    settings=None,
+    measured=None,
+    max_width_mm=None,
+    indent_mm=None,
+    align_override=None,
+):
+    """写这个位置上的图。
+
+    ``indent_mm`` 是图所在段落的左缩进（毫米）。选项里的图在预览里被钉在
+    **正文列**（``.qb-option .qb-figure { grid-column: 2 }``），所以要往右挪出
+    「标签宽 + 标签与正文之间的间隙」，让图落在正文列的左缘上。
+
+    ``align_override`` 强制对齐方式。题干配图默认靠右（``.qb-figures`` 是
+    ``justify-content: flex-end``），但选项里的图是正文列里的一个网格格子，
+    贴着列的**左**缘 —— 沿用「靠右」会把图推到整格的右边，偏 8.46 毫米。
+    """
     from docx.shared import Mm
 
     pictures = [image for image in item["images"] if image["slot"] == slot]
     if not pictures:
         return
-    align = (settings or {}).get("align") or "right"
+    align = align_override or (settings or {}).get("align") or "right"
     if align not in ("left", "center", "right"):
         align = "right"
     widths = _figure_widths_for_slot(pictures, slot, settings, measured)
@@ -2120,6 +3021,9 @@ def _write_images(document, item, slot, lines=None, settings=None, measured=None
         # choice, not a licence to print them larger than the screen shows.
         paper = widths[index]
         paragraph = document.add_paragraph()
+        # 图所在的段落要落在正文列上：往右挪出「标签 + 间隙」那么远。
+        if indent_mm is not None:
+            paragraph.paragraph_format.left_indent = Mm(indent_mm)
         # A lone stem figure still belongs to a .qb-figures row, and that row is
         # centred — measured in the app, a single 188px picture sits with 242px of
         # space on each side. Left alone, Word parks it against the margin, which
@@ -2360,7 +3264,7 @@ def _write_solution_image(document, image, indent_mm=0.0, text_width_mm=None, sp
     return paragraph
 
 
-def _write_solution(document, item, size, label, lead_space_pt=0.0):
+def _write_solution(document, item, size, label, lead_space_pt=0.0, table_lefts=None):
     """把一道题的答案块写进 Word。
 
     结构照抄预览（frontend/library-solutions.js 的 render()）：
@@ -2373,6 +3277,9 @@ def _write_solution(document, item, size, label, lead_space_pt=0.0):
 
     竖向节奏也照抄：行高 1.35em（Word 的「倍数行距」是字体自然行高的倍数，
     跟 CSS 的 em 不是一回事），每一段的外边距按 CSS 折叠后的结果给。
+
+    ``table_lefts`` 是预览量出来的表格位置：``{"answer": [...], "analysis": [...]}``，
+    每个数是那张表离版心左缘多少毫米（答案正文列里的表是居中的，实测 79.80 毫米）。
     """
     from docx.shared import Mm, Pt
 
@@ -2449,6 +3356,14 @@ def _write_solution(document, item, size, label, lead_space_pt=0.0):
         _close_block()
         return
     parts = _analysis_parts(item["fields"].get("analysis", []))
+    # 答案正文列里的表：预览把它放在这一列里居中（实测离版心左缘 79.80 毫米）。
+    answer_lefts = (table_lefts or {}).get("answer")
+    # 解析里的表按段落顺序排，这里按同样的顺序一段一段切给它们。
+    part_tables = [sum(1 for block in blocks if block["type"] == "table") for blocks in parts]
+    analysis_lefts = (table_lefts or {}).get("analysis")
+    analysis_offsets = (
+        list(analysis_lefts) if analysis_lefts is not None and len(analysis_lefts) == sum(part_tables) else None
+    )
     if has_answer:
         written = _write_field(
             document,
@@ -2462,6 +3377,8 @@ def _write_solution(document, item, size, label, lead_space_pt=0.0):
             text_width_mm=column,
             space_before_pt=_space_before(0.0, first=True),
             space_after_pt=0.0,
+            table_lefts=answer_lefts,
+            table_column=(indent, column),
         )
         if written:
             last[0] = written[-1]
@@ -2488,8 +3405,20 @@ def _write_solution(document, item, size, label, lead_space_pt=0.0):
             where=item["where"],
             indent_mm=indent,
             text_width_mm=column,
-            space_before_pt=_space_before(PREVIEW_SOLUTION_PARAGRAPH_MARGIN_PT),
+            # 紧跟「解析：」标签的那一段要补 1.5 磅（Chrome 的行盒被行内公式
+            # 撑高，字顶比 Word 高）。后面的解析段不补 —— 预览里那些段之间
+            # 的间距是折叠后的 3 磅，补了就多一截。
+            space_before_pt=_space_before(
+                PREVIEW_SOLUTION_PARAGRAPH_MARGIN_PT
+                + (PREVIEW_SOLUTION_LINE_BOX_COMPENSATION_PT if index == 0 else 0.0)
+            ),
             space_after_pt=PREVIEW_SOLUTION_PARAGRAPH_MARGIN_PT,
+            table_lefts=(
+                analysis_offsets[sum(part_tables[:index]) : sum(part_tables[: index + 1])]
+                if analysis_offsets is not None
+                else None
+            ),
+            table_column=(indent, column),
         )
         if written:
             last[0] = written[-1]
@@ -2627,13 +3556,23 @@ def _write_compact_options(document, item, size, columns, *, text_width_mm=178, 
         for key in "ABCDE"
         if f"options.{key}" in item["fields"] or any(image["slot"] == key for image in item["images"])
     ]
+    columns = max(1, int(columns or 1))
+    # 预览里栏与栏之间有 2em 的间隙，Word 的表格没有列间距这一说。
+    # 把那一段间隙算进左边那一栏的宽度，再用段落的右缩进把它让出来：
+    # 这样每栏的文字区宽度还是预览里的栏宽（80.53 毫米），折行位置才对得上，
+    # 而第二栏的左缘正好落在 97.47 毫米 —— 跟预览一模一样。
+    column_mm = _option_column_width_mm(columns, text_width_mm)
+    widths = [column_mm + OPTION_COLUMN_GAP_MM] * (columns - 1) + [column_mm]
     table = document.add_table(rows=(len(letters) + columns - 1) // columns, cols=columns)
     table.autofit = False
-    column_mm = text_width_mm / columns
-    for column in table.columns:
-        column.width = Mm(column_mm)
-    # 选项里的图最多只能占满自己那一格：Word 不会缩图，画超了就压到隔壁列上。
-    usable_mm = _option_cell_usable_mm(columns, text_width_mm)
+    for column, width in zip(table.columns, widths):
+        column.width = Mm(width)
+    # 只改 w:gridCol 是不够的：每个格子原来的 w:tcW 原地不动，Word 打开时
+    # 会自己重排成等宽（第四十二轮实测：写成 30/20/15 毫米的表，Word 认成
+    # 50.8×3）。tblW 和 tcW 都要写，Word 才认我们写的列宽。
+    _set_table_widths(table, widths)
+    # 选项区整体离版心左缘 2em（预览的 .qb-options padding-left）。
+    _set_table_text_indent(table, OPTION_LIST_INDENT_MM)
     borders = OxmlElement("w:tblBorders")
     for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
         border = OxmlElement("w:" + side)
@@ -2646,19 +3585,104 @@ def _write_compact_options(document, item, size, columns, *, text_width_mm=178, 
         borders, "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription"
     )
     for index, letter in enumerate(letters):
-        cell = table.cell(index // columns, index % columns)
+        row_index, column_index = divmod(index, columns)
+        cell = table.cell(row_index, column_index)
+        # 预览里选项那一栏两侧不留白，清掉 Word 默认的 1.905 毫米。
+        _zero_cell_margins(cell)
         paragraph = cell.paragraphs[0]
-        _font(paragraph.add_run(letter + ". "), size)
+        _font(paragraph.add_run(letter + "."), size)
         blocks = item["fields"].get(f"options.{letter}", [])
-        _write_segments(paragraph, blocks[0]["segments"] if blocks else [], size)
         _line_spacing(paragraph, size * LINE_SPACING)
+        # 选项里的图最多只能占满正文那一列：Word 不会缩图，画超了就压到隔壁列上。
+        # 正文列的宽按这一格的标签算（预览里标签列是 auto，各行自己算宽：
+        # 「A.」比「B.」宽，A 那一行的正文列就比 B 窄）。
+        usable_mm = _option_cell_usable_mm(columns, text_width_mm, size, letter)
+        # 正文列离栏左缘多远 = 标签宽 + 标签与正文之间的间隙（预览的 .qb-option
+        # 两列网格）。选项里的图和表都要落在这条线上。
+        label_offset_mm = _option_label_indent_mm(letter, size)
+        # 一个选项的内容可能不止一段，还可能带着一张表（预览里选项里也能排表）。
+        #
+        # 原来这里只写 blocks[0]：选项以表开头时直接 KeyError('segments') 崩掉，
+        # 整份 Word 导出失败；表排在第二块时更阴险 —— 整张表被静默丢掉，
+        # 纸上的选项少了一截，而 PDF 路线那边好好地排着表。
+        # 这条路不是理论上的：一张窄表（| x | / | 1 |）的前端实测栏数就是 2，
+        # auto 布局下老师什么都不用选，Word 就崩（实测 2026-11-17）。
+        #
+        # 现在多栏和单栏走同一套块处理（_write_field），内容不会少。
+        _write_field(
+            cell,
+            blocks,
+            size,
+            where=item.get("where", ""),
+            # 表格不能比这一格还宽：Word 不会缩表，超了就压到隔壁列上。
+            text_width_mm=usable_mm,
+            first_paragraph=paragraph,
+            # 标签和正文之间留出预览里那 0.3em，正文从这儿开始，
+            # 折行也折回这一列（预览里正文是一个独立的列）。
+            first_paragraph_tab_mm=label_offset_mm,
+            # 最后一栏右边没有下一栏了，不用让出间隙。
+            right_indent_mm=0 if column_index == columns - 1 else OPTION_COLUMN_GAP_MM,
+            # 选项里的表在预览里是在**正文列**里居中（.qb-table { margin: 0 auto }），
+            # 不是在整格里居中 —— 整格比正文列宽 13.6 毫米（栏宽 + 栏间间隙），
+            # 居中的话表会偏右 3.4 毫米（Chrome 实测 71.296 vs 67.924）。
+            # 这一列的左缘是相对**格子**说的：格子的左缘就是栏左缘。
+            table_column=(label_offset_mm, usable_mm),
+            table_column_shrinks=False,
+        )
         # 选项里的图在预览里被选项栏宽收口过，Word 照实测宽度排；
-        # 就算没有实测值（老前端、预览没量到），也不能超过这一格的净宽。
+        # 就算没有实测值（老前端、预览没量到），也不能超过正文那一列的宽。
+        #
+        # 位置：预览里 ``.qb-option .qb-figure { grid-column: 2 }`` 把图钉在正文列，
+        # 所以图要往右挪出「标签 + 间隙」，且是**左**对齐（不是题干配图那种靠右）。
+        # 预览里选项里的几张图是网格里各自一行的格子 —— 一张一行，不是并排。
+        option_pictures = [image for image in item["images"] if image["slot"] == letter]
         _write_images(
-            cell, item, letter, measured=(figures or {}).get("measured", {}).get(letter), max_width_mm=usable_mm
+            cell,
+            item,
+            letter,
+            lines=[1] * len(option_pictures) if option_pictures else None,
+            measured=(figures or {}).get("measured", {}).get(letter),
+            max_width_mm=usable_mm,
+            indent_mm=label_offset_mm,
+            align_override="left",
         )
     for row in table.rows:
         row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
+    _set_option_row_spacing(table, size, columns, len(letters))
+
+
+def _set_option_row_spacing(table, size, columns, letter_count):
+    """把选项表格里单元格的段后距写死。
+
+    Word 表格的行高 = 单元格内段落行高 **+ 该段的段后距**。选项表格的
+    单元格段落原来没写段后距，全都继承 Normal 样式的 3 磅 —— 每一行白胖
+    3 磅，整张表比预览高 3 磅，后面的内容全被顶下去（真 Word 实测
+    _exp116.py：选项表①末行 → 下一题题干这一处边界，Word 比预览宽
+    1.062 毫米；把表格内的段后距清零后只剩 0.003 毫米）。
+
+    预览侧的真值（frontend/styles.css:1642）：
+        .qb-options { row-gap: .1em }        行与行之间 0.1em
+        .qb-option-body { white-space: pre-wrap }  一个选项就是一个块，
+                                                  块内没有段后距这回事
+
+    所以：
+        多行（末行以外）：段后距 = .1em —— 顶出预览那个行间距
+        末行：段后距 = 0 —— 表格底不能多出来
+        单行：段后距 = 0 —— 预览里只有一行，没有行间距
+
+    嵌套表（选项里带的表）不在这里动 —— 它的行高由 _write_table 自己管。
+    """
+    from docx.shared import Pt
+
+    count = max(1, int(columns or 1))
+    row_count = (letter_count + count - 1) // count
+    gap = Pt(size * PREVIEW_OPTION_ROW_GAP_EM)
+    for row_index, row in enumerate(table.rows):
+        # 只有「不是末行」的行才顶出预览的行间距。
+        after = gap if row_count > 1 and row_index < row_count - 1 else Pt(0)
+        for cell in row.cells:
+            for paragraph in cell.paragraphs:
+                paragraph.paragraph_format.space_after = after
 
 
 def _ordered(captured):
@@ -2764,7 +3788,19 @@ def _paragraph_measure(paragraph, size, width_mm=178):
         return max(int(node.get("cy", "0")) / 36_000 for node in drawings) + gap
     text = "".join(node.text or "" for node in paragraph.findall(".//" + qn("w:t")))
     metrics = [_math_extent(node) for node in paragraph.findall(".//" + qn("m:oMath"))]
+    exact = None
+    if spacing is not None and spacing.get(qn("w:lineRule")) == "exact" and spacing.get(qn("w:line")):
+        exact = int(spacing.get(qn("w:line"))) / 20 * 25.4 / 72
+    if exact is not None and not text and not metrics:
+        # 空段：行高由显式行距决定。留白块是**固定行高**的空段
+        # （w:lineRule="exact"），拿默认行距去估会把留白少算将近一整行，
+        # 分页就会提前。
+        return exact + gap
     width = (_text_em(text) + sum(metric[0] for metric in metrics)) * size * 25.4 / 72
+    if exact is not None and width <= width_mm:
+        # 单行固定行高的段落（续页标题就是这种）：行盒高度就是写死的那行高，
+        # 拿正文行距去估会把它算高一大截（10.125 磅被当成 16.2 磅）。
+        return exact + gap
     height = max(LINE_SPACING, max((metric[1] for metric in metrics), default=1.0)) * size * 25.4 / 72
     return max(1, math.ceil(width / width_mm)) * height + gap
 
@@ -2778,8 +3814,11 @@ def _unit_height(elements, size):
             total += _paragraph_measure(element, size)
         elif element.tag == qn("w:tbl"):
             columns = max(1, len(element.findall(qn("w:tblGrid") + "/" + qn("w:gridCol"))))
+            # 表格的行高有下限：预览里每行 2.1em（12pt 字号 = 25.2 磅），
+            # 算分页的时候不能只按文字高度算，否则 Word 会以为表格比实际矮。
+            floor = size * PREVIEW_TABLE_CELL_HEIGHT_EM * 25.4 / 72
             for row in element.findall(qn("w:tr")):
-                total += max(
+                content = max(
                     (
                         sum(
                             _paragraph_measure(paragraph, size, 178 / columns - 4)
@@ -2789,6 +3828,7 @@ def _unit_height(elements, size):
                     ),
                     default=0,
                 )
+                total += max(content, floor)
     return total
 
 
@@ -2830,6 +3870,137 @@ def _pagination(document, start, mode, size):
             element.get_or_add_pPr().find(qn("w:keepNext")).set(qn("w:val"), "1")
 
 
+def _answer_space_groups(millimetres, plan):
+    """把预览量出来的留白分段整理成 Word 要写的一组组留白。
+
+    plan 是预览量出来的：题目编号 → [{"mm": 毫米, "continuation": 是否续页}, …]。
+    预览的留白是**可切**的（frontend/exam-layout.js 的 writingSpace）：页底放不下的
+    那几毫米挪到下一页，续页顶部还打一行「第 N 题答题区（续）」。Word 排版是静态的，
+    自己不知道该在哪儿切、也不知道该打这行标题，只能照这里量好的来。
+
+    量来的分段总高必须和这次要的留白一致；对不上（老草稿、预览改过、别的导出器
+    量的是另一份卷子）就当没有量过，退回「整块留白、不打标题」的老行为。
+    """
+    fallback = [{"mm": float(millimetres), "continuation": False}]
+    if not isinstance(plan, list) or not plan:
+        return fallback
+    groups = []
+    for piece in plan:
+        if not isinstance(piece, dict):
+            return fallback
+        value = piece.get("mm")
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+            return fallback
+        groups.append({"mm": float(value), "continuation": bool(piece.get("continuation"))})
+    if abs(sum(group["mm"] for group in groups) - millimetres) > 0.6:
+        return fallback
+    return groups
+
+
+def _answer_space_slices(millimetres):
+    """把一段留白切成若干**单行**固定行高段（高度守恒）。
+
+    单行段 Word 没法在段内断开，只能整段挪到下一页 —— 这正是预览要的
+    「页底放得下几毫米就留几毫米、放不下就整段走」。
+    """
+    remaining = int(round(millimetres * 1440 / 25.4))
+    slices = []
+    while remaining > 0:
+        take = min(remaining, ANSWER_SPACE_SLICE_TWIPS)
+        remaining -= take
+        slices.append(take)
+    return slices
+
+
+def _write_continuation_label(document, number):
+    """写出续页顶部的「第 N 题答题区（续）」标题。
+
+    预览里这是 .exam-continuation-label：10px 字号、line-height 1.35、#666、
+    下外边距 4px（合起来 4.63 毫米）。这段标题必须跟住下面那块续页留白
+    （keep_with_next）—— 不然 Word 把它留在上一页页底，学生在下一页看到的是
+    一块没有主人的答题区。
+    """
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
+
+    paragraph = document.add_paragraph()
+    fmt = paragraph.paragraph_format
+    fmt.space_before = Pt(0)
+    fmt.space_after = Pt(PREVIEW_CONTINUATION_LABEL_AFTER_PT)
+    fmt.keep_with_next = True
+    spacing = paragraph._p.get_or_add_pPr().get_or_add_spacing()
+    spacing.set(qn("w:line"), str(int(round(PREVIEW_CONTINUATION_LABEL_LINE_PT * 20))))
+    spacing.set(qn("w:lineRule"), "exact")
+    _font(
+        paragraph.add_run(f"第 {number} 题答题区（续）"),
+        PREVIEW_CONTINUATION_LABEL_SIZE_PT,
+        color=PREVIEW_CONTINUATION_LABEL_COLOR,
+    )
+    return paragraph
+
+
+def _write_answer_space(document, millimetres, plan=None, number=None):
+    """写出答题留白块（**可跨页断开**，跨页时补「第 N 题答题区（续）」标题）。
+
+    预览里留白是紧贴上一块、上下没有外边距的一个固定高度块
+    （frontend/library.css 的 .print-answer-space），题目块的下外边距
+    （8 磅）由 _question_gap 补在留白之后。
+
+    Word 里**不能**拿「段后距」当留白高度：段后距不吃行盒，一段 8 毫米的
+    段后距实际排出来是「一个空行盒 + 8 毫米间距」，比预览多出整个行盒的高度。
+    第六十九轮实测：这样每道解答题比预览高 3.95 毫米（11.2 磅）。
+
+    这里改成**固定行高**（w:lineRule="exact"）的空段，行盒高度就是留白高度；
+    同时把上一段的段后距归零，让留白真正贴住上一块（预览里 .print-answer-space
+    的上下外边距都是 0）。
+
+    第七十轮：**留白必须能断开**。预览的留白是可切的
+    （frontend/exam-layout.js 的 writingSpace：页底放不下的那几毫米留白
+    挪到下一页，续页顶部还打一行「第 N 题答题区（续）」）。
+    Word 原来把 30 毫米留白写成**一整块**固定行高空段 —— 固定行高的段落
+    不可断开，放不下就整题推到下一页，于是 Word 每页比预览少装一题，
+    分页点逐页漂：40 题对照卷实测，预览每页首题 1,7,14,20,27,33,40，
+    Word 是 1,7,13,19,25,31,37，7 页里 5 页对不上。
+
+    修法：把留白切成若干个**单行**固定行高段。单行段落 Word 无法在段内断开，
+    只能整段挪到下一页 —— 于是「页底放得下几毫米就留几毫米、放不下就整段走」
+    的行为跟预览一致了。
+
+    第七十一轮：**照着预览的分段写，并补上续页标题**。预览的留白在页底被切成
+    「首页那一份 + 续页那一份」（40 题对照卷实测：题 6 是 24.6 + 5.4 毫米，
+    题 13 整块 30 毫米挪到续页），续页上还要打一行「第 N 题答题区（续）」。
+    Word 原来把 30 毫米一律切成 20.1 + 9.9 —— 切点跟预览不是一回事，
+    续页顶部那行标题更是压根没有。预览的切法只有浏览器知道，所以前端把
+    量好的分段（measured_answer_splits）送过来，Word 照着写：
+      · 首页那份按 20.1 毫米的粒度切（保住「放不下就整段走」的阈值）
+      · 续页那份单独成段，前面加标题
+    """
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
+    from docx.text.paragraph import Paragraph
+
+    elements = list(document._element.body)
+    previous = elements[-2] if len(elements) >= 2 else None
+    if previous is not None and previous.tag == qn("w:p"):
+        Paragraph(previous, document).paragraph_format.space_after = Pt(0)
+
+    labels = []
+    for group in _answer_space_groups(millimetres, plan):
+        if group["mm"] <= 0:
+            continue
+        if group["continuation"]:
+            labels.append(_write_continuation_label(document, number))
+        for take in _answer_space_slices(group["mm"]):
+            paragraph = document.add_paragraph()
+            fmt = paragraph.paragraph_format
+            fmt.space_before = Pt(0)
+            fmt.space_after = Pt(0)
+            spacing = paragraph._p.get_or_add_pPr().get_or_add_spacing()
+            spacing.set(qn("w:line"), str(take))
+            spacing.set(qn("w:lineRule"), "exact")
+    return labels
+
+
 def _question_gap(document):
     from docx.oxml.ns import qn
     from docx.shared import Pt
@@ -2865,23 +4036,145 @@ def _question_page_break(document, start):
         first.get_or_add_pPr().append(OxmlElement("w:pageBreakBefore"))
 
 
-def _write_footer(document, count):
-    """页脚：共 N 题 · 第 <PAGE> 页。
+def _page_top_space(document, points=PREVIEW_PAGE_TOP_SPACE_PT):
+    """在页首补回预览那一段外边距（.print-section 的 margin-top 12px）。
 
-    页码必须是域（fldSimple PAGE），不能是写死的数字 —— 域的结果是 Word
-    打开时才算出来的，写死的话整份卷子都印「第 1 页」。
-    单独抽出来，是为了能单独盯住它（见 test_library_export_footer.py）。
+    Word 不吃页首的段前距 —— 硬分页、段前分页都不算，兼容开关
+    ``w:suppressSpBfAfterPgBrk=0`` 也实测无效（见 PREVIEW_PAGE_TOP_SPACE_PT
+    上面的对照表）。唯一靠得住的办法是在页首垫一个**固定行距**的空行：
+    行盒高度就是那 9 磅（180 twips），跟字号无关（实测 1 磅字号和 12 磅字号
+    落点完全一样），纸上只多 3.175 毫米白，跟预览里那 12px 一模一样。
+
+    这个空行是**正文里的一个空段落**：正文里多一行空白，但纸上多出来的
+    就是预览里页首那 12px —— 位置对得上就说明排版对上了。
+    """
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
+
+    paragraph = document.add_paragraph()
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
+    # 字号压到 1 磅：万一固定行距被忽略，也不至于撑出一个 12 磅的行盒。
+    paragraph.add_run("").font.size = Pt(1)
+    spacing = paragraph._p.get_or_add_pPr().get_or_add_spacing()
+    spacing.set(qn("w:line"), str(PREVIEW_PAGE_TOP_LINE_TWIPS))
+    spacing.set(qn("w:lineRule"), "exact")
+    return paragraph
+
+
+def _section_page_top_space(document, twips=None):
+    """大题标题落在页首时：分页 + 垫一行，把预览页首那 12px 补回来。
+
+    原来这里是把 ``w:pageBreakBefore`` 写在标题自己身上 —— 页首的段前距
+    Word 照样不吃（见 PREVIEW_PAGE_TOP_SPACE_PT 上面的对照表），标题比预览
+    高 2.291 毫米。
+
+    现在改成：分页写在**垫行**身上，标题跟着垫行走，标题自己的段前距归零
+    （它在页首，写了也是白写；不归零就跟垫行叠加）。
+
+    垫行的高度不是预览那 9 磅，而是 7.8 磅（156 twips）—— Word 把「固定行距」
+    量化到 0.6 磅一档，实测六档里 150/152 落在最好的一档，取那档的中间值，
+    见 PREVIEW_SECTION_PAGE_TOP_LINE_TWIPS 的说明。
+    """
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
+
+    if twips is None:
+        twips = PREVIEW_SECTION_PAGE_TOP_LINE_TWIPS
+    paragraph = document.add_paragraph()
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
+    # 字号压到 1 磅：万一固定行距被忽略，也不至于撑出一个 12 磅的行盒。
+    paragraph.add_run("").font.size = Pt(1)
+    spacing = paragraph._p.get_or_add_pPr().get_or_add_spacing()
+    spacing.set(qn("w:line"), str(twips))
+    spacing.set(qn("w:lineRule"), "exact")
+    paragraph.paragraph_format.page_break_before = True
+    return paragraph
+
+
+def _footer_style(document):
+    """把页脚样式改成预览的那一套。
+
+    **域结果的格式取自段落样式，不是域里的 run。** 实测（真 Word 渲染，
+    _probe96.py 五个变体对照）：
+
+      - fldSimple 里放带格式的 run      → 无效，域结果还是正文 12 磅黑
+      - 段落标记 pPr/rPr 带格式          → 无效
+      - 三段式域（fldChar）+ 带格式结果  → 无效
+      - 改 Footer 样式                    → **有效**，整行连域结果都对了
+
+    所以域里那个 run 带不带格式都无所谓，但样式必须改 —— 不改的话，
+    页码和总页数这两个数字会比预览大一圈、还是纯黑。
+    """
+    from docx.oxml.ns import qn
+    from docx.shared import Pt, RGBColor
+
+    style = document.styles["Footer"]
+    style.font.size = Pt(PREVIEW_FOOTER_FONT_SIZE_PT)
+    style.font.name = PREVIEW_FOOTER_LATIN
+    style.font.color.rgb = RGBColor.from_string(PREVIEW_FOOTER_COLOR)
+    rpr = style.element.get_or_add_rPr()
+    rpr.get_or_add_rFonts().set(qn("w:eastAsia"), PREVIEW_FOOTER_EAST_ASIA)
+    return style
+
+
+def _footer_field(footer, instr):
+    """页脚里的域（PAGE / NUMPAGES）。
+
+    域自带一个带格式的 run —— Word 更新域时按域里 run 的格式重排，
+    域里没有 run 就退回段落默认格式（正文 12 磅纯黑），字号和颜色全丢。
+
+    run 是先用 python-docx 造好再搬进域里的：w:color 之类由 python-docx
+    写才不会插错 OOXML 次序（自己插容易插错位置，Word 打开就报文件损坏）。
     """
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
-    footer = document.sections[0].footer.paragraphs[0]
-    footer.alignment = 2
-    _font(footer.add_run(f"共 {count} 题 · 第 "), 9)
     field = OxmlElement("w:fldSimple")
-    field.set(qn("w:instr"), "PAGE")
+    field.set(qn("w:instr"), instr)
+    run = footer.add_run("1")  # 域的缓存结果；Word 打开/打印时按 PAGE/NUMPAGES 重算
+    _font(
+        run,
+        PREVIEW_FOOTER_FONT_SIZE_PT,
+        east_asia=PREVIEW_FOOTER_EAST_ASIA,
+        latin=PREVIEW_FOOTER_LATIN,
+        color=PREVIEW_FOOTER_COLOR,
+    )
+    field.append(run._r)  # lxml 的 append 是移动：run 从段落里进到域里
     footer._p.append(field)
-    _font(footer.add_run(" 页"), 9)
+    return field
+
+
+def _write_footer(document, count):
+    """页脚：第 <PAGE> 页 / 共 <NUMPAGES> 页 · 共 N 题。
+
+    文字照抄预览（frontend/exam-layout.js:463）。
+
+    页码必须是域（fldSimple PAGE），不能是写死的数字 —— 域的结果是 Word
+    打开时才算出来的，写死的话整份卷子都印「第 1 页」。
+    总页数同理用 NUMPAGES 域：预览分完页才知道有几页，写死的话分页一变就错。
+    单独抽出来，是为了能单独盯住它（见 test_library_export_footer.py）。
+    """
+    _footer_style(document)
+    footer = document.sections[0].footer.paragraphs[0]
+    footer.alignment = 1  # 预览 .exam-page-number 是 text-align:center
+    _line_spacing(footer, PREVIEW_FOOTER_LINE_HEIGHT_PT)
+
+    def text(value):
+        _font(
+            footer.add_run(value),
+            PREVIEW_FOOTER_FONT_SIZE_PT,
+            east_asia=PREVIEW_FOOTER_EAST_ASIA,
+            latin=PREVIEW_FOOTER_LATIN,
+            color=PREVIEW_FOOTER_COLOR,
+        )
+
+    text("第 ")
+    _footer_field(footer, "PAGE")
+    text(" 页 / 共 ")
+    _footer_field(footer, "NUMPAGES")
+    text(f" 页 · 共 {count} 题")
 
 
 def _page_setup(document):
@@ -2933,6 +4226,7 @@ def _document(captured, title, options, mode):
     _line_spacing(heading, PREVIEW_TITLE_LINE_HEIGHT_PT)
     if options["student_info"] and mode != "answers":
         from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.shared import Pt
 
         info = document.add_paragraph()
         # 预览里这一行是居中的（.print-info 的 text-align: center），PDF 也跟着
@@ -2940,11 +4234,46 @@ def _document(captured, title, options, mode):
         # 导出来却贴着左页边 —— 整张卷子上只有这一行对不上，一眼就能看出来。
         info.alignment = WD_ALIGN_PARAGRAPH.CENTER
         info.paragraph_format.keep_with_next = True
-        _font(info.add_run("姓名：____________    班级：____________    得分：____________"), size)
+        # 字、字号、颜色、字体、上下外边距、行高全部照抄 .print-info（Chrome 实测
+        # 见 _probe93.py）。少了上下那 12px / 22px，卷子从这一行往下整体上移
+        # 7.3 毫米 —— 预览和导出的题号根本不在一条横线上。
+        info.paragraph_format.space_before = Pt(PREVIEW_INFO_SPACE_BEFORE_PT)
+        info.paragraph_format.space_after = Pt(PREVIEW_INFO_SPACE_AFTER_PT)
+        _line_spacing(info, PREVIEW_INFO_LINE_HEIGHT_PT)
+        _font(
+            info.add_run(PREVIEW_STUDENT_INFO_TEXT),
+            PREVIEW_INFO_FONT_SIZE_PT,
+            east_asia=PREVIEW_INFO_EAST_ASIA,
+            latin=PREVIEW_INFO_LATIN,
+            color=PREVIEW_INFO_COLOR,
+        )
     numbered, number = [], 0
+    # 考生信息行在不在（第一组大题标题的前一个块就是它）。
+    has_student_info = bool(options["student_info"]) and mode != "answers"
+    # 预览量出来的表格位置：题目编号 → 位置 → 离版心左缘多少毫米。
+    # 表格在预览里的横向位置不是定值（题干正文越长，表在那一列里越靠中间），
+    # Word 排版是静态的，只能照量好的位置摆。
+    measured_tables = options.get("measured_table_offsets") or {}
     for index, (name, group) in enumerate(_ordered(captured)):
         section_title = None
+        # 这一组的第一题被设成「每题分页」时，预览里**整组的大题标题跟着它**
+        # 落到新页页首：大题标题在预览的排版器里是 pending 的，题一分页，
+        # 它就跟到新页的第一块（实测 _probe106.py：第 2 页第一个孩子就是它）。
+        #
+        # Word 这边原来把分页写在标题自己身上（page_break_before），页首的段前距
+        # 照样被 Word 吃掉，标题比预览高 2.291 毫米（实测 _probe105.py）。
+        # 现在改成：组开头先垫一个带分页的垫行，标题跟着它，段前距归零。
+        group_starts_page = mode != "answers" and number > 0 and group[0]["id"] in options["question_breaks"]
+        # 前一块在预览里的下外边距 —— 大题标题的段前距要把它加上（见下面）。
+        # 第一组的前一块是考生信息行（.print-info 的 margin-bottom 22px），
+        # 之后每一组的前一块都是上一组的最后一道题（.print-question 的 8pt）。
+        if index == 0:
+            previous_margin_bottom = PREVIEW_INFO_SPACE_AFTER_PT if has_student_info else 0.0
+        else:
+            previous_margin_bottom = PREVIEW_QUESTION_MARGIN_BOTTOM_PT
         if mode != "answers":
+            if group_starts_page:
+                _section_page_top_space(document)
             section_title = document.add_paragraph()
             section_title.paragraph_format.keep_with_next = True
             _font(
@@ -2955,7 +4284,21 @@ def _document(captured, title, options, mode):
             )
             # .print-section { margin: 12px 0 6px; line-height: 1.5 } → 18 磅行盒。
             _line_spacing(section_title, PREVIEW_SECTION_LINE_HEIGHT_PT)
-            section_title.paragraph_format.space_before = Pt(9)
+            # 段前距 = **前一块在预览里的下外边距 + 本标题的上外边距**。
+            #
+            # 预览的 .exam-page-body 是 flex 容器：相邻两块的外边距**相加**
+            # （题块 8 磅 + 标题 9 磅 = 17 磅；考生信息行 16.5 磅 + 标题 9 磅
+            # = 25.5 磅）。Word 却是 max(前段段后距, 后段段前距)（真 Word 实测
+            # _probe107.py，本轮 _probe113.py 又验了一遍）：只写 9 磅，前一块的
+            # 下外边距就被 Word 吃掉 —— 整卷从第一个大题标题起逐段往下漂移
+            # （实测三个标题分别偏 −1.798 / −3.463 / −6.091 毫米）。
+            #
+            # 把和值整个写进段前距，Word 取大时取到的正是预览那个和值。
+            # 标题落在页首时另说：那里没有前一块，12px 由垫行补回来（见上面
+            # PREVIEW_SECTION_PAGE_TOP_LINE_TWIPS）。
+            section_title.paragraph_format.space_before = Pt(
+                0 if group_starts_page else previous_margin_bottom + PREVIEW_SECTION_SPACE_BEFORE_PT
+            )
             section_title.paragraph_format.space_after = Pt(PREVIEW_ANSWER_ROW_MARGIN_PT)
         for item in group:
             number += 1
@@ -2981,6 +4324,10 @@ def _document(captured, title, options, mode):
                     )
                     prefix = ""
             image_body = item["content"].get("body_mode", "text") == "source_image"
+            # 题干正文列的左缘随题号位数变（题号列 + 0.35em 的列间隙）。
+            stem_left = _stem_column_left_mm(size, len(str(number)))
+            stem_column = (stem_left, PREVIEW_TEXT_WIDTH_MM - stem_left)
+            table_lefts = measured_tables.get(item["id"]) or {}
             _write_field(
                 document,
                 [] if image_body else item["fields"]["stem"],
@@ -2988,6 +4335,10 @@ def _document(captured, title, options, mode):
                 prefix=prefix,
                 where=item["where"],
                 lead_segments=lead_segments,
+                table_lefts=table_lefts.get("stem"),
+                table_column=stem_column,
+                # 题干正文列是 flex item：正文比表窄时整列缩到表宽，表于是贴左。
+                table_column_shrinks=True,
             )
             # 老师在预览里改过的图宽、整行位置和换行点，跟预览走同一套算法，
             # 而不是在这里再猜一次。预览和 PDF 共用 exam-layout.js 的排版，
@@ -3016,26 +4367,91 @@ def _document(captured, title, options, mode):
             if columns > 1:
                 _write_compact_options(document, item, size, columns, figures=figures)
             else:
+                # 单栏路径：预览里选项照样是「选项区缩进 2em + 标签列 + 正文列」
+                # 两列网格（.qb-options padding-left 2em，.qb-option 两列 grid），
+                # 不是顶格的一段话。原来这里直接写 "A. 正文"，整块选项比预览
+                # 靠左 8.47 毫米，折行也不回正文列（实测：Word 顶格 0.11 毫米，
+                # 预览正文列 13.85 毫米）。
+                #
+                # 这里照抄预览：段落左缩进 = 选项区缩进 + 标签宽 + 标签与正文的
+                # 间隙，首行悬挂缩进 = 负的（标签宽 + 间隙）—— 标签落在选项区
+                # 缩进那一列，正文落在正文列，制表位把正文推过去。
+                # 选项里的图钉在正文列（.qb-option .qb-figure { grid-column: 2 }），
+                # 选项里的表在正文列里居中（.qb-table { margin: 0 auto }），
+                # 两样都按正文列算。
                 for letter in "" if image_body else "ABCDE":
-                    if f"options.{letter}" in item["fields"]:
+                    has_field = f"options.{letter}" in item["fields"]
+                    has_image = any(image["slot"] == letter for image in item["images"])
+                    if not has_field and not has_image:
+                        continue
+                    # 标签列是 auto 宽，各行自己算：「A.」比「B.」宽，
+                    # 所以 A 那一行的正文列比 B 窄（Chrome 实测 13.853 / 13.618）。
+                    label_offset_mm = _option_label_indent_mm(letter, size)
+                    body_left_mm = OPTION_LIST_INDENT_MM + label_offset_mm
+                    body_width_mm = PREVIEW_TEXT_WIDTH_MM - body_left_mm
+                    if has_field:
+                        paragraph = document.add_paragraph()
+                        _font(paragraph.add_run(f"{letter}."), size)
+                        # 标签这一段自己也要缩进：选项以表开头时正文用不上
+                        # first_paragraph（表是独立的一块），标签就落回顶格了。
+                        fmt = paragraph.paragraph_format
+                        fmt.left_indent = Mm(body_left_mm)
+                        fmt.first_line_indent = Mm(-label_offset_mm)
                         _write_field(
                             document,
                             item["fields"][f"options.{letter}"],
                             size,
-                            prefix=f"{letter}. ",
                             where=item["where"],
+                            # 正文列的左缘（版心左缘起算）。
+                            indent_mm=body_left_mm,
+                            text_width_mm=body_width_mm,
+                            first_paragraph=paragraph,
+                            # 标签 → 正文：正文从悬挂缩进那一列开始。
+                            first_paragraph_tab_mm=label_offset_mm,
+                            # 选项区自己的 2em 缩进。
+                            list_indent_mm=OPTION_LIST_INDENT_MM,
+                            # 选项里的表在预览里是在**正文列**里居中，不是整栏居中。
+                            table_column=(body_left_mm, body_width_mm),
+                            table_column_shrinks=False,
                         )
-                    elif any(image["slot"] == letter for image in item["images"]):
-                        _font(document.add_paragraph().add_run(f"{letter}."), size)
-                    _write_images(document, item, letter, measured=figures["measured"].get(letter))
+                    else:
+                        paragraph = document.add_paragraph()
+                        _font(paragraph.add_run(f"{letter}."), size)
+                        fmt = paragraph.paragraph_format
+                        fmt.left_indent = Mm(body_left_mm)
+                        fmt.first_line_indent = Mm(-label_offset_mm)
+                    # 单栏路径里选项的段后距也写死：预览 .qb-options 的 row-gap
+                    # 是 .1em（frontend/styles.css:1642），而这一段原来继承
+                    # Normal 的 3 磅，选项之间凭空多出 1.8 磅（0.63 毫米）。
+                    # 最后一个选项的段后距由 _question_gap 抬到 8 磅（题块下外边距）。
+                    paragraph.paragraph_format.space_after = Pt(size * PREVIEW_OPTION_ROW_GAP_EM)
+                    # 选项里的图在预览里被钉在正文列、左对齐，一张一行。
+                    option_pictures = [image for image in item["images"] if image["slot"] == letter]
+                    _write_images(
+                        document,
+                        item,
+                        letter,
+                        lines=[1] * len(option_pictures) if option_pictures else None,
+                        measured=figures["measured"].get(letter),
+                        max_width_mm=body_width_mm,
+                        indent_mm=body_left_mm,
+                        align_override="left",
+                    )
             answer_space = options.get("answer_space_overrides", {}).get(item["id"], options["answer_space"])
             # 每道题都能有留白；解答题有 8 毫米下限。口径与预览、PDF 一致。
             millimetres = _answer_space_millimetres(answer_space, item["type"])
+            continuation_labels = []
             if millimetres > 0 and not inline_answers:
-                paragraph = document.add_paragraph()
-                paragraph.paragraph_format.space_after = Mm(millimetres)
+                # 预览量出来的留白分段（哪一份在首页、哪一份在续页）。
+                # 没有就退回整块留白（老草稿、PDF 路线）。
+                plan = (options.get("measured_answer_splits") or {}).get(item["id"])
+                continuation_labels = _write_answer_space(document, millimetres, plan=plan, number=number)
             _question_gap(document)
             _pagination(document, unit_start, options["pagination"], size)
+            # _pagination 会把整段里的 keepNext 归零，续页标题得自己把 keepNext 补回去：
+            # 它必须跟住下面那块续页留白，不然会被留在上一页页底。
+            for label in continuation_labels:
+                label.paragraph_format.keep_with_next = True
             if inline_answers and _has_selected_answers([item]):
                 # A long solution may cross pages; never keep it with the entire
                 # question or add student writing space to a teacher copy.
@@ -3043,12 +4459,20 @@ def _document(captured, title, options, mode):
                 _question_gap(document)
             if number > 1 and item["id"] in options["question_breaks"]:
                 if item is group[0] and section_title is not None:
-                    section_title.paragraph_format.page_break_before = True
+                    # 这一组的分页已经在组开头处理了（垫行 + 标题），
+                    # 这里再写一次就多一个空页。
+                    pass
                 else:
                     _question_page_break(document, unit_start)
     if mode != "questions" and not inline_answers:
         if mode == "combined":
             document.add_page_break()
+            # 答案区从新页页首开始：预览里页首那 12px 是**算进去**的
+            # （.exam-page-body 是 flex 容器，外边距不塌陷），Word 不吃页首的
+            # 段前距 —— 硬分页、段前分页、兼容开关都试过，一个都不管用。
+            # 所以这里垫一个固定行距 9 磅的空行把那 12px 补回来，
+            # 标题自己的段前距就得让位（否则补两次，实测会多出 3.175 毫米）。
+            _page_top_space(document)
         answer_heading = document.add_paragraph()
         answer_heading.paragraph_format.keep_with_next = True
         _font(
@@ -3059,7 +4483,10 @@ def _document(captured, title, options, mode):
         )
         # .print-section { margin: 12px 0 6px; line-height: 1.5 } → 18 磅行盒。
         _line_spacing(answer_heading, PREVIEW_SECTION_LINE_HEIGHT_PT)
-        answer_heading.paragraph_format.space_before = Pt(9)
+        # 段前距 12px：合卷模式下这一份已经由页首那个空行补上了（Word 页首不吃
+        # 段前距，写在这里只会跟空行叠加）；答案卷里标题跟在卷名后面、不在页首，
+        # 预览的 margin-top 照算，这边就照写。
+        answer_heading.paragraph_format.space_before = Pt(0 if mode == "combined" else PREVIEW_SECTION_SPACE_BEFORE_PT)
         answer_heading.paragraph_format.space_after = Pt(PREVIEW_ANSWER_ROW_MARGIN_PT)
         for index, (number, item) in enumerate(numbered):
             unit_start = len(document._element.body) - 1
@@ -3069,13 +4496,28 @@ def _document(captured, title, options, mode):
             # 第一个答案块紧跟在小标题后面：预览里那一行的上外边距（6px = 4.5 磅）
             # 就是这一块自己的。之后的块靠 _question_gap 隔开（上下各 6px = 9 磅）。
             _write_solution(
-                document, item, size, label, lead_space_pt=PREVIEW_ANSWER_ROW_MARGIN_PT if index == 0 else 0.0
+                document,
+                item,
+                size,
+                label,
+                # 预览的 .print-answer-row 上外边距是 6px = 4.5 磅，这边照抄；
+                # 再补 3.5 磅 —— Chrome 和 Word 的行盒模型不同，标题行盒
+                # 18 磅、答案行盒 16.2 磅，两行挨着时字顶距离 Word 比预览短
+                # 3.5 磅（详见 WORD_LINE_BOX_LEADING_COMPENSATION_PT）。
+                lead_space_pt=(
+                    PREVIEW_ANSWER_ROW_MARGIN_PT + WORD_LINE_BOX_LEADING_COMPENSATION_PT if index == 0 else 0.0
+                ),
+                table_lefts={
+                    "answer": (measured_tables.get(item["id"]) or {}).get("answer"),
+                    "analysis": (measured_tables.get(item["id"]) or {}).get("analysis"),
+                },
             )
             _question_gap(document)
             # Even keep-whole-question mode must allow a long solution to flow.
             _pagination(document, unit_start, "compact", size)
     _write_footer(document, len(captured))
     _disable_cjk_auto_spacing(document)
+    _disable_punctuation_overflow(document)
     stream = io.BytesIO()
     document.save(stream)
     return stream.getvalue()
