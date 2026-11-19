@@ -41,6 +41,10 @@ function makeDom() {
 }
 
 function boot({ inspect = {}, merge = {}, records = { records: [] }, exportBody = {}, choose = { selected: true, directory: "D:/备份" },
+  catalog = {
+    papers: [{ id: "p-1", title: "高中数学思想导引", filename: "高中数学思想导引.pdf", questions: 512, publications: 500 }],
+    folders: [{ id: "t-1", name: "函数与导数", kind: "knowledge", path_label: "知识点 · 函数与导数", questions: 48 }],
+  },
   auto = { backups: [{ id: "题有据自动备份-20261020-050000", name: "题有据自动备份-20261020-050000.zip", size: 12 * 1024 * 1024, created_at: "2026-10-20T05:00:00" }], due: false, keep: 2, total_bytes: 12 * 1024 * 1024 } } = {}) {
   const dom = makeDom();
   const calls = [];
@@ -50,6 +54,7 @@ function boot({ inspect = {}, merge = {}, records = { records: [] }, exportBody 
     FormData: class { append() {} },
     fetch: async (url, options = {}) => {
       calls.push({ url, options });
+      if (url === "/api/backup/papers") return { ok: true, json: async () => catalog };
       if (url === "/api/backup/choose-directory") return { ok: true, json: async () => choose };
       if (url === "/api/backup/export") return { ok: true, json: async () => exportBody };
       if (url === "/api/backup/inspect") return { ok: true, json: async () => inspect };
@@ -264,6 +269,66 @@ assert.match(html, /<script src="\/static\/library-transfer\.js" defer><\/script
   assert.equal(saved.length, 1, "关掉的时候要存到开关里");
   assert.deepEqual(JSON.parse(saved[0].options.body), { features: { auto_backup: false } });
   assert.match(dom.document.getElementById("transferStatusauto").textContent, /已关闭/);
+}
+
+// 11. 按卷/按书导出与按目录文件夹导出，以及预览显示书名/文件夹名。
+{
+  const { dom, calls, window } = boot({
+    exportBody: { name: "题有据题包-高中数学思想导引-1.zip", file: "D:/备份/题有据题包-高中数学思想导引-1.zip", size: 8 * 1024 * 1024, papers: 1, questions: 512, paper_names: ["高中数学思想导引"] },
+  });
+  window.LibraryTransfer.mount(dom.document.getElementById("transferSettingsMount"));
+  const exportBox = dom.document.getElementById("transferExport");
+  await find(exportBox, "只选几套卷子或书").listeners.click[0]();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(calls.some((call) => call.url === "/api/backup/papers"), "切到选卷模式就应读取卷子清单");
+  const paperOption = find(dom.document.getElementById("transferExport"), "高中数学思想导引");
+  assert.ok(paperOption, "列表里应显示书名");
+  const pickerList = dom.document.getElementById("transferExport").children.find((child) => child.className === "transfer-paper-list");
+  const checkbox = pickerList.children[0].children[0];
+  checkbox.checked = true;
+  await checkbox.listeners.change[0]();
+  await find(dom.document.getElementById("transferExport"), "选择文件夹").listeners.click[0]();
+  await find(dom.document.getElementById("transferExport"), "导出备份").listeners.click[0]();
+  const exportCall = calls.find((call) => call.url === "/api/backup/export");
+  assert.deepEqual(JSON.parse(exportCall.options.body), { directory: "D:/备份", paper_ids: ["p-1"] });
+  assert.match(dom.document.getElementById("transferStatusexport").textContent, /高中数学思想导引/);
+}
+
+{
+  const { dom, calls, window } = boot({
+    exportBody: { name: "题有据题包-函数与导数-1.zip", file: "D:/备份/题有据题包-函数与导数-1.zip", size: 2 * 1024 * 1024, papers: 2, questions: 48, folder_names: ["函数与导数"] },
+    inspect: {
+      papers: 2, questions: 48, tags: 5, publications: 48,
+      paper_items: [{ title: "高中数学思想导引", filename: "高中数学思想导引.pdf", questions: 48 }],
+      folder_items: [{ name: "函数与导数", kind: "knowledge" }],
+      report: { "新增卷子": 1, "新增题目": 48 },
+    },
+    records: { records: [{ id: "1", created_at: "2026-10-22T09:00:00Z", papers: 1, questions: 48, folder_names: ["函数与导数"] }] },
+  });
+  window.LibraryTransfer.mount(dom.document.getElementById("transferSettingsMount"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await find(dom.document.getElementById("transferExport"), "只选目录文件夹").listeners.click[0]();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const folderRow = find(dom.document.getElementById("transferExport"), "知识点 · 函数与导数");
+  assert.ok(folderRow, "目录列表里应显示文件夹路径");
+  const pickerList = dom.document.getElementById("transferExport").children.find((child) => child.className === "transfer-paper-list");
+  const checkbox = pickerList.children[0].children[0];
+  checkbox.checked = true;
+  await checkbox.listeners.change[0]();
+  await find(dom.document.getElementById("transferExport"), "选择文件夹").listeners.click[0]();
+  await find(dom.document.getElementById("transferExport"), "导出备份").listeners.click[0]();
+  const exportCall = calls.find((call) => call.url === "/api/backup/export");
+  assert.deepEqual(JSON.parse(exportCall.options.body), { directory: "D:/备份", tag_ids: ["t-1"] });
+  assert.match(dom.document.getElementById("transferStatusexport").textContent, /函数与导数/);
+
+  const label = find(dom.document.getElementById("transferMerge"), "选择备份包");
+  const input = label.children.find((child) => child.type === "file");
+  input.files = [{ name: "bundle.zip", size: 1024 }];
+  await input.listeners.change[0]();
+  const previewText = text(dom.document.getElementById("transferPreview"));
+  assert.match(previewText, /包含文件夹：「函数与导数」/);
+  assert.match(previewText, /包含：《高中数学思想导引》（48 道题）/);
+  assert.match(text(dom.document.getElementById("transferRecords")), /「函数与导数」/);
 }
 
 console.log("设置 → 数据备份与迁移：所有断言通过");

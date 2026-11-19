@@ -57,3 +57,45 @@ class BackupDestCliTests(SimpleTestCase):
         res = tiyouju_cli.cmd_backup(client, args)
         client.post.assert_called_once_with("/api/backup/auto", {})
         self.assertEqual(res["name"], "题有据自动备份-test.zip")
+
+    def test_cmd_backup_with_papers_sends_paper_ids(self):
+        client = MagicMock()
+        args = MagicMock()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            args.dest = temp_dir
+            args.papers = ["paper-uuid-1"]
+            args.folders = None
+            client.post.return_value = {"file": "题有据题包-test.zip", "size": 512}
+            tiyouju_cli.cmd_backup(client, args)
+            client.post.assert_called_once_with(
+                "/api/backup/export", {"directory": str(Path(temp_dir).resolve()), "paper_ids": ["paper-uuid-1"]}
+            )
+
+    def test_cmd_backup_with_folders_sends_tag_ids(self):
+        client = MagicMock()
+        args = MagicMock()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            args.dest = temp_dir
+            args.papers = None
+            args.folders = ["函数与导数"]
+            client.post.return_value = {"file": "题有据题包-函数与导数.zip", "size": 512}
+            tiyouju_cli.cmd_backup(client, args)
+            client.post.assert_called_once_with(
+                "/api/backup/export", {"directory": str(Path(temp_dir).resolve()), "tag_ids": ["函数与导数"]}
+            )
+
+    def test_cmd_backup_selective_requires_dest_and_single_mode(self):
+        client = MagicMock()
+        args = MagicMock()
+        args.dest = None
+        args.papers = ["paper-uuid-1"]
+        args.folders = None
+        with self.assertRaises(tiyouju_cli.CliError):
+            tiyouju_cli.cmd_backup(client, args)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            args.dest = temp_dir
+            args.papers = ["paper-uuid-1"]
+            args.folders = ["函数与导数"]
+            with self.assertRaises(tiyouju_cli.CliError):
+                tiyouju_cli.cmd_backup(client, args)

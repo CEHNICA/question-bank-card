@@ -194,11 +194,21 @@ def _pythonw_executable() -> Path:
 
 
 def build_command_line() -> str:
-    """构造写入 Windows 注册表 shell\\open\\command 的命令行。"""
+    """构造写入 Windows 注册表 shell\\open\\command 的命令行。
+
+    安装版与源码版都走窗口启动器的 `--tiyouju-uri`：写深链、置前已有题有据窗口。
+    绝不能再注册成直接跑本脚本 —— 旧路径默认 webbrowser.open，会在外部浏览器里打开题库。
+    """
     if FROZEN:
         exe = Path(sys.executable).resolve()
         return f'"{exe}" {URI_FLAG} "%1"'
     exe = _pythonw_executable()
+    window_launcher = PROJECT_ROOT / "app_launcher.pyw"
+    if not window_launcher.is_file():
+        window_launcher = PROJECT_ROOT / "app_window.py"
+    if window_launcher.is_file():
+        return f'"{exe}" "{window_launcher}" {URI_FLAG} "%1"'
+    # 极端兜底：没有窗口脚本时仍可调起本模块，但 main() 也不再外开浏览器。
     return f'"{exe}" "{SCRIPT_PATH}" "%1"'
 
 
@@ -299,8 +309,12 @@ def build_target_url(port: int, question_id: str | None) -> str:
     return base
 
 
-def handle_uri(uri: str, *, open_browser: bool = True) -> bool:
-    """解析 tiyouju:// URI：写入深链，并在需要时打开题目页。"""
+def handle_uri(uri: str, *, open_browser: bool = False) -> bool:
+    """解析 tiyouju:// URI：写入深链，确保服务在跑。
+
+    默认不外开浏览器。正常回跳应由窗口启动器置前题有据；只有显式
+    ``open_browser=True``（无窗口环境）才用 webbrowser 打开 /eagle?q=。
+    """
     question_id = parse_question_id(uri)
     if question_id:
         queue_deep_link(question_id)
@@ -330,13 +344,34 @@ def _notify_user_error(message: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """命令行与协议调起入口。"""
+    """命令行与协议调起入口。
+
+    优先把 URI 交给窗口启动器（与安装版同一条路）；本进程只做注册 / 兜底写深链。
+    """
     args = sys.argv[1:] if argv is None else argv
     if not args or args[0] == "--register":
         return 0 if ensure_registered() else 1
 
     uri = extract_uri_from_argv(args) or args[0]
-    if handle_uri(uri):
+    # 源码兜底：尽量转给 app_launcher，让它置前软件窗而不是外开浏览器。
+    window_launcher = PROJECT_ROOT / "app_launcher.pyw"
+    if not window_launcher.is_file():
+        window_launcher = PROJECT_ROOT / "app_window.py"
+    if window_launcher.is_file() and not FROZEN:
+        try:
+            subprocess.Popen(
+                [str(_pythonw_executable()), str(window_launcher), URI_FLAG, uri],
+                cwd=str(PROJECT_ROOT),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
+            )
+            return 0
+        except OSError as exc:
+            logger.warning("转交窗口启动器失败，改走深链兜底: %s", exc)
+
+    if handle_uri(uri, open_browser=False):
         return 0
 
     _notify_user_error("未能启动或连接到题有据服务，请手动启动题有据后再点击链接。")

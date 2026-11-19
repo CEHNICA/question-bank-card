@@ -74,4 +74,19 @@ test("Eagle 的 OneNote 回跳轮询要有限", async (t) => {
       "应区分快慢两档轮询间隔"
     );
   });
+
+  await t.test("7. 窗口被置前时要能再开一波回跳轮询", () => {
+    assert.ok(
+      /armDeepLinkPollingFromFocus/.test(html),
+      "应有 armDeepLinkPollingFromFocus，供 visibility/focus 再开一波"
+    );
+    assert.ok(
+      /visibilitychange/.test(html),
+      "页面重新可见时应接住 OneNote 回跳"
+    );
+    assert.ok(
+      /addEventListener\(\s*['"]focus['"]/.test(html),
+      "窗口 focus 时应接住 OneNote 回跳"
+    );
+  });
 });

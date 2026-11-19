@@ -1345,13 +1345,26 @@ def cmd_whereami(client: Client, args) -> dict:
 
 
 def cmd_backup(client: Client, args) -> dict:
-    """备份题库（支持在线打包并指定导出目录）。"""
+    """备份题库（支持在线打包并指定导出目录、指定卷子/书籍或目录文件夹）。"""
     dest = getattr(args, "dest", None)
+    raw_papers = getattr(args, "papers", None)
+    raw_folders = getattr(args, "folders", None)
+    papers = [str(item) for item in raw_papers] if isinstance(raw_papers, (list, tuple)) and raw_papers else None
+    folders = [str(item) for item in raw_folders] if isinstance(raw_folders, (list, tuple)) and raw_folders else None
+    if papers and folders:
+        raise CliError("一次只能指定 --paper 或 --folder 其中一种。")
+    if (papers or folders) and not dest:
+        raise CliError("按卷或按目录文件夹导出题包请用 --dest 指定保存文件夹。")
     if dest:
         dest_path = Path(dest).resolve()
         if not dest_path.is_dir():
             raise CliError(f"指定的目录不存在：{dest}")
-        return client.post("/api/backup/export", {"directory": str(dest_path)})
+        payload: dict = {"directory": str(dest_path)}
+        if papers:
+            payload["paper_ids"] = papers
+        if folders:
+            payload["tag_ids"] = folders
+        return client.post("/api/backup/export", payload)
     return client.post("/api/backup/auto", {})
 
 
@@ -1833,6 +1846,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("whereami", parents=[common], help="老师此刻在哪、我刚提的有没有被否决")
     backup = sub.add_parser("backup", parents=[common], help="备份题库（支持在线打包并指定导出目录）")
     backup.add_argument("--dest", metavar="DIR", help="备份包保存到的文件夹（如外部移动硬盘或网盘路径）")
+    backup.add_argument("--paper", dest="papers", action="append", metavar="PAPER_ID", help="只打包指定的试卷或书籍 UUID（可多次指定）")
+    backup.add_argument("--folder", dest="folders", action="append", metavar="FOLDER", help="只打包指定的目录文件夹 UUID 或名称（可多次指定）")
     return parser
 
 

@@ -37,21 +37,54 @@ def _body(request, limit: int = 100_000) -> dict | None:
 
 
 @csrf_exempt
+def papers_view(request):
+    """列出本机可单独打包分享的卷子/书与目录文件夹。"""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return _error("题库资料列表只能在本机题库中查看", 403)
+    response = JsonResponse(
+        {"papers": library_transfer.list_exportable_papers(), "folders": library_transfer.list_exportable_folders()}
+    )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@csrf_exempt
 def export_view(request):
-    """把整库打包成一个 zip，放到老师选的文件夹里。"""
+    """把整库或选定资料打包成一个 zip，放到老师选的文件夹里。"""
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
     rejected = _guard(request)
     if rejected:
         return rejected
-    payload = _body(request, limit=10_000)
+    payload = _body(request, limit=100_000)
     if payload is None:
         return _error("请求格式不正确。")
     directory = str(payload.get("directory") or "").strip()
     if not directory:
         return _error("先选一个文件夹，备份会放在那里。")
+    raw_paper_ids = payload.get("paper_ids")
+    raw_tag_ids = payload.get("tag_ids")
+    if raw_paper_ids is not None and raw_tag_ids is not None:
+        return _error("一次只能按卷子或按目录文件夹其中一种方式导出。")
+    paper_ids: list[str] | None = None
+    tag_ids: list[str] | None = None
+    if raw_paper_ids is not None:
+        if not isinstance(raw_paper_ids, list) or not all(isinstance(item, str) for item in raw_paper_ids):
+            return _error("选中的卷子列表格式不正确。")
+        paper_ids = raw_paper_ids
+    if raw_tag_ids is not None:
+        if not isinstance(raw_tag_ids, list) or not all(isinstance(item, str) for item in raw_tag_ids):
+            return _error("选中的目录文件夹格式不正确。")
+        tag_ids = raw_tag_ids
     try:
-        result = library_transfer.export_bundle(Path(directory))
+        if tag_ids is not None:
+            result = library_transfer.export_bundle(Path(directory), tag_ids=tag_ids)
+        elif paper_ids is not None:
+            result = library_transfer.export_bundle(Path(directory), paper_ids=paper_ids)
+        else:
+            result = library_transfer.export_bundle(Path(directory))
     except TransferError as error:
         return _error(str(error))
     except OSError:
@@ -66,6 +99,8 @@ def export_view(request):
             "questions": counts.get("questions", 0),
             "tags": counts.get("tags", 0),
             "publications": counts.get("publications", 0),
+            "paper_names": result.get("paper_names") or [],
+            "folder_names": result.get("folder_names") or [],
         }
     )
     response["Cache-Control"] = "no-store"
@@ -112,6 +147,42 @@ def _uploaded_bundle(request) -> Path:
     return target
 
 
+def _inspect_response(result: dict) -> JsonResponse:
+    """整理备份预览结果，补充包含的资料名与目录文件夹清单。"""
+    manifest = result["manifest"]
+    counts = manifest.get("counts") or {}
+    paper_items = [
+        {
+            "title": str(item.get("title") or item.get("filename") or "").strip(),
+            "filename": str(item.get("filename") or "").strip(),
+            "questions": int(item.get("questions") or 0),
+        }
+        for item in (manifest.get("papers") or [])
+        if isinstance(item, dict) and (item.get("title") or item.get("filename"))
+    ]
+    folder_items = [
+        {"name": str(item.get("name") or "").strip(), "kind": str(item.get("kind") or "").strip()}
+        for item in (manifest.get("folders") or [])
+        if isinstance(item, dict) and item.get("name")
+    ]
+    response = JsonResponse(
+        {
+            "created_at": manifest.get("created_at"),
+            "machine": manifest.get("machine"),
+            "app_version": manifest.get("app_version"),
+            "papers": counts.get("papers", 0),
+            "questions": counts.get("questions", 0),
+            "tags": counts.get("tags", 0),
+            "publications": counts.get("publications", 0),
+            "paper_items": paper_items,
+            "folder_items": folder_items,
+            "report": result["report"],
+        }
+    )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
 @csrf_exempt
 def inspect_view(request):
     """合并前先看一眼：这份备份会带来什么。"""
@@ -132,22 +203,7 @@ def inspect_view(request):
         return _error("这个备份包读不出来，没法看。请确认它是题有据导出的备份包。", status=400)
     finally:
         shutil.rmtree(path.parent, ignore_errors=True)
-    manifest = result["manifest"]
-    counts = manifest.get("counts") or {}
-    response = JsonResponse(
-        {
-            "created_at": manifest.get("created_at"),
-            "machine": manifest.get("machine"),
-            "app_version": manifest.get("app_version"),
-            "papers": counts.get("papers", 0),
-            "questions": counts.get("questions", 0),
-            "tags": counts.get("tags", 0),
-            "publications": counts.get("publications", 0),
-            "report": result["report"],
-        }
-    )
-    response["Cache-Control"] = "no-store"
-    return response
+    return _inspect_response(result)
 
 
 @csrf_exempt
@@ -243,22 +299,7 @@ def auto_backup_inspect_view(request):
         return _error(str(error))
     except (OSError, ValueError):
         return _error("这个备份包读不出来，没法看。", status=400)
-    manifest = result["manifest"]
-    counts = manifest.get("counts") or {}
-    response = JsonResponse(
-        {
-            "created_at": manifest.get("created_at"),
-            "machine": manifest.get("machine"),
-            "app_version": manifest.get("app_version"),
-            "papers": counts.get("papers", 0),
-            "questions": counts.get("questions", 0),
-            "tags": counts.get("tags", 0),
-            "publications": counts.get("publications", 0),
-            "report": result["report"],
-        }
-    )
-    response["Cache-Control"] = "no-store"
-    return response
+    return _inspect_response(result)
 
 
 @csrf_exempt

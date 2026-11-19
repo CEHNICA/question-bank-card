@@ -180,6 +180,14 @@ class OneNoteLinkTests(TestCase):
                 tiyouju_protocol.build_command_line(), r'"C:\Apps\QuestionBankCard.exe" --tiyouju-uri "%1"'
             )
 
+        with patch.object(tiyouju_protocol, "FROZEN", False):
+            cmd = tiyouju_protocol.build_command_line()
+            self.assertIn("--tiyouju-uri", cmd)
+            self.assertTrue(
+                "app_launcher.pyw" in cmd or "app_window.py" in cmd, f"源码版协议应注册窗口启动器，实际: {cmd}"
+            )
+            self.assertNotIn("tiyouju_protocol.py", cmd)
+
         tiyouju_protocol.queue_deep_link(qid)
         pending = tiyouju_protocol.consume_deep_link()
         self.assertEqual(pending["q"], qid)

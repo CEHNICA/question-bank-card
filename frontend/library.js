@@ -5237,22 +5237,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
           for (const value of state.items) if (value.id === item.id) value.solution = solution;
         }
         deferAnswerRefresh(scope === "paper" ? scopeContext : null, sync, item.id);
-        // 1.25.82：右侧面板里"为本题写答案"是单题入口，老师刚答完一道要回到列表
-        // 自己找下一道没答案的题 —— 不友好。存完之后自动在当前可见的列表里找下一道
-        // 没有正式解析的题，直接选上并打开编辑器。多道（出卷草稿）那种入口不动。
-        if (scope === "library" && answerEditor?.isOpen() && items.length <= 1) {
-          const next = (state.items || []).find(candidate => candidate.id !== item.id
-            && solutions.completeness(candidate) === "missing"
-            && candidate.status !== "withdrawn");
-          if (next) {
-            state.inspectorId = next.id;
-            const card = document.getElementById(`q-${next.id}`);
-            if (card) { card.scrollIntoView({ block: "center" }); card.focus(); selectInspectorQuestion(next, card); }
-            openAnswerEditor([next], { scope: "library" });
-          } else {
-            toast("当前筛选下没有更多没有答案解析的题了。", "success");
-          }
-        }
+        // 一次只编一道：保存后停在本题，不再自动跳下一道缺解析。
       } });
     return answerEditor.open(items, { ...options, scopeContext: { token: printState.token, draftId: state.draft?.id || null } });
   }

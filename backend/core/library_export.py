@@ -2494,6 +2494,7 @@ def _write_field(
     table_column_shrinks=False,
     first_paragraph=None,
     first_paragraph_tab_mm=None,
+    first_paragraph_keep=False,
     right_indent_mm=None,
     list_indent_mm=None,
 ):
@@ -2558,7 +2559,20 @@ def _write_field(
                 group = first_segment.get("displayGroup") or ("display" if first_segment.get("display") else None)
                 reusable = group is None
         if not reusable:
-            first_paragraph = None
+            # ``first_paragraph_keep`` 是题干用的：那个段落里已经写着题号，
+            # 丢不得。题干只有三种情况会走到这里：
+            #   · 没有正文块（题干是空的，或者题干在题源那一段里就写完了）——
+            #     题号段落自己留着，「6.」独占一行；
+            #   · 正文第一块是表 —— 题号和题源在正文列的第一行，表是独立的一块，
+            #     自己另起。题号不该因为后面是表就自己独占一行。
+            #   · 题源在题干前面（lead_segments）—— 「（题源）」是行内文字，
+            #     跟在题号同一行（预览里它在正文列的第一行），后面的行间公式
+            #     自己另起就是了。
+            # 选项那边（keep=False）保持原样：行间公式开头时标签自己占一段，
+            # 免得多栏排出来的样子跟单栏不一样。
+            keep = first_paragraph_keep and (head is None or head.get("type") == "table" or bool(lead_segments))
+            if not keep:
+                first_paragraph = None
 
     # 标签和正文之间留出预览里那 0.3em：正文从悬挂缩进的位置开始，
     # 折行也折回这一列。tab stop 必须自己写 —— Word 默认的制表位是
@@ -4308,7 +4322,20 @@ def _document(captured, title, options, mode):
             unit_start = len(document._element.body) - 1
             # 题号在预览里是粗的（.qb-number { font-weight: 700 }），Word 这边
             # 原来写成一个普通 run，纸上就是常规 —— 一眼能看出粗细不一样。
-            prefix = [(f"{number}. ", True)]
+            #
+            # 题号还占预览里**自己那一列**：.qb-stem 是「题号列 + 正文列」两栏
+            # （gap .35em），正文列左缘 = (0.5*位数 + 0.25 + 0.35) em。
+            # Word 原来把题号写成行内 run「N. 」（1.0 em）：
+            #   · 正文列左缘只有 1.0 em，比预览窄 0.1 em = 0.42 毫米 ——
+            #     40 个汉字（169.33 毫米）在预览里放不下第 41 个，在 Word 里
+            #     放得下，断行点就差一个字（实测 _probe167.py：题 6 差一个字）；
+            #   · 折行更是从版心左缘起（预览折回正文列，差 4.66 毫米，
+            #     实测 _probe167.py：Word 16.10 毫米 vs 预览 20.65 毫米）。
+            # 现在照抄预览：题号写成「N.」+ tab，段落悬挂缩进 = 正文列左缘，
+            # 第一行从版心左缘起（题号列），正文从正文列起，折行也折回这一列。
+            stem_left = _stem_column_left_mm(size, len(str(number)))
+            number_paragraph = document.add_paragraph()
+            _font(number_paragraph.add_run(f"{number}."), size, True)
             lead_segments = None
             if "origin" in item["fields"]:
                 origin_blocks = item["fields"]["origin"]
@@ -4320,25 +4347,37 @@ def _document(captured, title, options, mode):
                     ]
                 else:
                     _write_field(
-                        document, origin_blocks, size, prefix=prefix + [("（题源）", False)], where=item["where"]
+                        document,
+                        origin_blocks,
+                        size,
+                        prefix=[("（题源）", False)],
+                        where=item["where"],
+                        first_paragraph=number_paragraph,
+                        first_paragraph_tab_mm=stem_left,
+                        first_paragraph_keep=True,
                     )
-                    prefix = ""
+                    # 题号那一段已经被题源用掉了，题干接着从正文列起。
+                    number_paragraph = None
             image_body = item["content"].get("body_mode", "text") == "source_image"
-            # 题干正文列的左缘随题号位数变（题号列 + 0.35em 的列间隙）。
-            stem_left = _stem_column_left_mm(size, len(str(number)))
             stem_column = (stem_left, PREVIEW_TEXT_WIDTH_MM - stem_left)
             table_lefts = measured_tables.get(item["id"]) or {}
             _write_field(
                 document,
                 [] if image_body else item["fields"]["stem"],
                 size,
-                prefix=prefix,
                 where=item["where"],
                 lead_segments=lead_segments,
                 table_lefts=table_lefts.get("stem"),
                 table_column=stem_column,
                 # 题干正文列是 flex item：正文比表窄时整列缩到表宽，表于是贴左。
                 table_column_shrinks=True,
+                # 题干正文列的左缘（版心左缘起算）——预览的正文列，
+                # 折行也折回这一列。
+                indent_mm=stem_left,
+                # 首行顶上挂着题号：题号落在版心左缘，正文从正文列起。
+                first_paragraph=number_paragraph,
+                first_paragraph_tab_mm=stem_left,
+                first_paragraph_keep=True,
             )
             # 老师在预览里改过的图宽、整行位置和换行点，跟预览走同一套算法，
             # 而不是在这里再猜一次。预览和 PDF 共用 exam-layout.js 的排版，

@@ -33,6 +33,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -113,6 +114,34 @@ def _looks_like_uuid(value) -> bool:
     except (ValueError, AttributeError, TypeError):
         return False
     return True
+
+
+def _uuid_hex(value) -> str:
+    """把编号统一成 SQLite 库内使用的 32 位小写无横杠写法。"""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return uuid.UUID(text).hex
+    except (ValueError, AttributeError, TypeError):
+        return text
+
+
+_INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
+
+
+def _safe_bundle_stem(name: str) -> str:
+    """把资料显示名整理成适合放进备份压缩包文件名的片段。"""
+    text = str(name or "").strip()
+    for suffix in (".pdf", ".docx", ".doc", ".zip"):
+        if text.lower().endswith(suffix):
+            text = text[: -len(suffix)].strip()
+            break
+    text = _INVALID_FILENAME_CHARS.sub("_", text)
+    text = re.sub(r"\s+", " ", text).strip(" ._")
+    if len(text) > 40:
+        text = text[:40].strip(" ._")
+    return text or "精选资料"
 
 
 def data_root() -> Path:
@@ -277,7 +306,352 @@ def backup_path(identifier: str) -> Path:
 # ---------------------------------------------------------------- 导出
 
 
-def _snapshot_database(target: Path) -> None:
+def list_exportable_papers() -> list[dict]:
+    """列出可单独打包分享的资料（不含已归档与示例练习卷）。"""
+    from django.db.models import Count
+
+    from .demo import is_demo
+    from .models import Paper, PublishedQuestion, Question
+
+    papers = [
+        paper for paper in Paper.objects.filter(archived=False).order_by("-created_at", "-id") if not is_demo(paper)
+    ]
+    if not papers:
+        return []
+    paper_ids = [paper.pk for paper in papers]
+    question_counts = {
+        str(row["paper_id"]): int(row["total"])
+        for row in Question.objects.filter(paper_id__in=paper_ids).values("paper_id").annotate(total=Count("id"))
+    }
+    pub_counts = {
+        str(row["paper_id"]): int(row["total"])
+        for row in PublishedQuestion.objects.filter(paper_id__in=paper_ids, status=PublishedQuestion.Status.PUBLISHED)
+        .values("paper_id")
+        .annotate(total=Count("id"))
+    }
+    return [
+        {
+            "id": str(paper.pk),
+            "title": paper.display_name,
+            "filename": paper.filename,
+            "material_type": paper.material_type,
+            "questions": question_counts.get(str(paper.pk), 0),
+            "publications": pub_counts.get(str(paper.pk), 0),
+        }
+        for paper in papers
+    ]
+
+
+def list_exportable_folders() -> list[dict]:
+    """列出包含已入库题目的目录文件夹（支持按知识点/方法/自定义目录整支打包分享）。"""
+    from .demo import is_demo
+    from .library_tagging import descendant_ids, relation_context
+    from .models import LibraryTag, LibraryTagAssignment, PublishedQuestion
+
+    context = relation_context()
+    live = LibraryTagAssignment.objects.filter(
+        publication__status=PublishedQuestion.Status.PUBLISHED,
+        publication__question__isnull=False,
+        publication__question__deleted_at__isnull=True,
+        publication__paper__isnull=False,
+        needs_review=False,
+    ).select_related("publication__paper")
+    publications_by_tag: dict[str, set[str]] = {}
+    for assignment in live:
+        if is_demo(assignment.publication.paper):
+            continue
+        publications_by_tag.setdefault(str(assignment.tag_id), set()).add(str(assignment.publication_id))
+
+    if not publications_by_tag:
+        return []
+
+    tags = list(LibraryTag.objects.filter(active=True).order_by("kind", "name", "id"))
+    by_id = {str(tag.pk): tag for tag in tags}
+    kind_labels = {"knowledge": "知识点", "method": "解题方法", "custom": "自定义"}
+    items: list[dict] = []
+    for tag in tags:
+        pub_ids: set[str] = set()
+        for child_id in descendant_ids([tag.pk], context=context):
+            pub_ids.update(publications_by_tag.get(child_id, set()))
+        if not pub_ids:
+            continue
+        # 沿着第一条父级链向上拼出完整路径，方便在导出列表中区分同名子节点。
+        chain = [tag.name]
+        seen = {str(tag.pk)}
+        current_id = str(tag.pk)
+        for _ in range(4):
+            parents = context.get(current_id, {}).get("parents") or []
+            parent_id = next((str(pid) for pid in parents if str(pid) in by_id and str(pid) not in seen), None)
+            if not parent_id:
+                break
+            seen.add(parent_id)
+            chain.append(by_id[parent_id].name)
+            current_id = parent_id
+        chain.reverse()
+        kind_label = kind_labels.get(tag.kind, "文件夹")
+        items.append(
+            {
+                "id": str(tag.pk),
+                "name": tag.name,
+                "kind": tag.kind,
+                "kind_label": kind_label,
+                "path_label": f"{kind_label} · {' / '.join(chain)}",
+                "questions": len(pub_ids),
+            }
+        )
+    return items
+
+
+def _resolve_export_folders(tag_ids: list[str] | None) -> dict:
+    """校验并展开所选目录文件夹（含下级子文件夹）对应的已入库题目与所属卷子。"""
+    if not isinstance(tag_ids, (list, tuple)) or not tag_ids:
+        raise TransferError("先勾选至少一个要导出的目录文件夹。")
+
+    from .demo import is_demo
+    from .library_tagging import descendant_ids, relation_context
+    from .models import LibraryTag, LibraryTagAssignment, PublishedQuestion
+
+    selected_tags: list = []
+    seen_ids: set[str] = set()
+    for raw in tag_ids:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        tag = None
+        try:
+            uid = str(uuid.UUID(text))
+        except (ValueError, AttributeError, TypeError):
+            tag = LibraryTag.objects.filter(name=text).order_by("-active", "kind", "id").first()
+        else:
+            tag = LibraryTag.objects.filter(pk=uid).first()
+        if tag is None:
+            raise TransferError(f"找不到目录文件夹「{text}」，请刷新列表后再试。")
+        if str(tag.pk) not in seen_ids:
+            seen_ids.add(str(tag.pk))
+            selected_tags.append(tag)
+
+    if not selected_tags:
+        raise TransferError("先勾选至少一个要导出的目录文件夹。")
+
+    context = relation_context()
+    subtree_tag_ids = descendant_ids([tag.pk for tag in selected_tags], context=context)
+    matched_assignments = LibraryTagAssignment.objects.filter(
+        tag_id__in=subtree_tag_ids,
+        needs_review=False,
+        publication__status=PublishedQuestion.Status.PUBLISHED,
+        publication__question__isnull=False,
+        publication__question__deleted_at__isnull=True,
+        publication__paper__isnull=False,
+    ).select_related("publication__paper")
+
+    matched_pubs = []
+    seen_pub_ids = set()
+    for assignment in matched_assignments:
+        pub = assignment.publication
+        if pub.pk in seen_pub_ids or is_demo(pub.paper):
+            continue
+        seen_pub_ids.add(pub.pk)
+        matched_pubs.append(pub)
+
+    if not matched_pubs:
+        raise TransferError("选中的目录文件夹里还没有已入库的题目，先给题目贴上该文件夹的标签再导出。")
+
+    question_ids = {int(pub.question_id) for pub in matched_pubs if pub.question_id is not None}
+    papers_by_id = {pub.paper_id: pub.paper for pub in matched_pubs if pub.paper is not None}
+    papers = sorted(papers_by_id.values(), key=lambda paper: (paper.created_at, str(paper.pk)))
+    return {
+        "tags": selected_tags,
+        "subtree_tag_hexes": {_uuid_hex(tid) for tid in subtree_tag_ids},
+        "question_ids": question_ids,
+        "papers": papers,
+        "paper_hexes": {_uuid_hex(paper.pk) for paper in papers},
+    }
+
+
+def _resolve_export_papers(paper_ids: list[str] | None) -> list | None:
+    """校验并按顺序取出要单独打包的资料；传入 None 表示整库导出。"""
+    if paper_ids is None:
+        return None
+    if not isinstance(paper_ids, (list, tuple)) or not paper_ids:
+        raise TransferError("先勾选至少一套要导出的卷子或书。")
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_id in paper_ids:
+        text = str(raw_id or "").strip()
+        if not text:
+            continue
+        try:
+            uid = str(uuid.UUID(text))
+        except (ValueError, AttributeError, TypeError):
+            raise TransferError("选中的资料编号不正确，请刷新列表后再试。") from None
+        if uid not in seen:
+            seen.add(uid)
+            normalized.append(uid)
+    if not normalized:
+        raise TransferError("先勾选至少一套要导出的卷子或书。")
+
+    from .demo import is_demo
+    from .models import Paper
+
+    by_id = {str(paper.pk): paper for paper in Paper.objects.filter(pk__in=normalized)}
+    missing = [uid for uid in normalized if uid not in by_id]
+    if missing:
+        raise TransferError("选中的部分卷子或书已经不在题库里，请刷新列表后再试。")
+    papers = [by_id[uid] for uid in normalized]
+    if any(is_demo(paper) for paper in papers):
+        raise TransferError("示例练习卷不能当作题包分享，请改选你自己的卷子或书。")
+    return papers
+
+
+def _table_exists(connect: sqlite3.Connection, table: str) -> bool:
+    return (
+        connect.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1", (table,)).fetchone()
+        is not None
+    )
+
+
+def _prune_snapshot_database(
+    writer: sqlite3.Connection,
+    keep_paper_hexes: set[str],
+    *,
+    keep_question_ids: set[int] | None = None,
+    extra_keep_tag_hexes: set[str] | None = None,
+) -> None:
+    """按选定资料或目录文件夹裁剪临时快照库：只留目标题目、解析、配图归属与相关标签。"""
+    placeholders = ",".join("?" for _ in keep_paper_hexes)
+    paper_params = tuple(sorted(keep_paper_hexes))
+
+    writer.execute(f'DELETE FROM "{PAPER_TABLE}" WHERE id NOT IN ({placeholders})', paper_params)
+    for table_name in (BLOCK_TABLE, QUESTION_GROUP_TABLE, "core_importchunk"):
+        if _table_exists(writer, table_name):
+            writer.execute(f'DELETE FROM "{table_name}" WHERE paper_id NOT IN ({placeholders})', paper_params)
+
+    # 分享给网友的题包剔除本机已删进回收站的废题，并清理本机删除批次关联。
+    writer.execute(
+        f'DELETE FROM "{QUESTION_TABLE}" WHERE paper_id NOT IN ({placeholders}) OR deleted_at IS NOT NULL', paper_params
+    )
+    if keep_question_ids is not None:
+        writer.execute("CREATE TEMP TABLE IF NOT EXISTS _keep_questions (id INTEGER PRIMARY KEY)")
+        writer.execute("DELETE FROM _keep_questions")
+        writer.executemany(
+            "INSERT OR IGNORE INTO _keep_questions (id) VALUES (?)", [(int(qid),) for qid in keep_question_ids]
+        )
+        writer.execute(f'DELETE FROM "{QUESTION_TABLE}" WHERE id NOT IN (SELECT id FROM _keep_questions)')
+        if _table_exists(writer, QUESTION_GROUP_TABLE):
+            writer.execute(
+                f'DELETE FROM "{QUESTION_GROUP_TABLE}" '
+                f'WHERE id NOT IN (SELECT DISTINCT group_id FROM "{QUESTION_TABLE}" WHERE group_id IS NOT NULL)'
+            )
+
+    writer.execute(f'UPDATE "{QUESTION_TABLE}" SET deletion_batch_id = NULL WHERE deletion_batch_id IS NOT NULL')
+    if _table_exists(writer, QUESTION_GROUP_TABLE):
+        writer.execute(
+            f'UPDATE "{QUESTION_TABLE}" SET group_id = NULL '
+            f'WHERE group_id IS NOT NULL AND group_id NOT IN (SELECT id FROM "{QUESTION_GROUP_TABLE}")'
+        )
+    if _table_exists(writer, DELETION_BATCH_TABLE):
+        writer.execute(f'DELETE FROM "{DELETION_BATCH_TABLE}"')
+
+    writer.execute(
+        f'DELETE FROM "{PUBLICATION_TABLE}" '
+        f"WHERE paper_id IS NULL OR paper_id NOT IN ({placeholders}) "
+        f"OR status = ? OR question_id IS NULL "
+        f'OR question_id NOT IN (SELECT id FROM "{QUESTION_TABLE}")',
+        (*paper_params, "withdrawn"),
+    )
+    if _table_exists(writer, SOLUTION_TABLE):
+        writer.execute(
+            f'DELETE FROM "{SOLUTION_TABLE}" WHERE publication_id NOT IN (SELECT id FROM "{PUBLICATION_TABLE}")'
+        )
+        writer.execute(
+            f'UPDATE "{SOLUTION_TABLE}" SET parent_id = NULL '
+            f'WHERE parent_id IS NOT NULL AND parent_id NOT IN (SELECT id FROM "{SOLUTION_TABLE}")'
+        )
+    if _table_exists(writer, REGION_TABLE):
+        writer.execute(f'DELETE FROM "{REGION_TABLE}" WHERE question_id NOT IN (SELECT id FROM "{QUESTION_TABLE}")')
+
+    for transient_table in (
+        "core_libraryjob",
+        "core_librarytagsuggestion",
+        "core_librarytagoperation",
+        "core_assistantproposal",
+        "core_teacheractivity",
+        "core_questionlayoutoperation",
+    ):
+        if _table_exists(writer, transient_table):
+            writer.execute(f'DELETE FROM "{transient_table}"')
+
+    keep_tags: set[str] = set(extra_keep_tag_hexes or set())
+    if _table_exists(writer, ASSIGNMENT_TABLE):
+        writer.execute(
+            f'DELETE FROM "{ASSIGNMENT_TABLE}" WHERE publication_id NOT IN (SELECT id FROM "{PUBLICATION_TABLE}")'
+        )
+        keep_tags.update(
+            str(row[0])
+            for row in writer.execute(
+                f'SELECT DISTINCT tag_id FROM "{ASSIGNMENT_TABLE}" WHERE tag_id IS NOT NULL'
+            ).fetchall()
+            if row[0]
+        )
+
+    # 沿标签上下级与关联解题方法闭包向上补齐祖先标签，避免标签树断裂。
+    if _table_exists(writer, RELATION_TABLE) and keep_tags:
+        relations = writer.execute(f'SELECT parent_id, child_id, relation_type FROM "{RELATION_TABLE}"').fetchall()
+        changed = True
+        while changed:
+            changed = False
+            for parent_id, child_id, relation_type in relations:
+                parent_hex = str(parent_id or "")
+                child_hex = str(child_id or "")
+                if child_hex in keep_tags and parent_hex and parent_hex not in keep_tags:
+                    keep_tags.add(parent_hex)
+                    changed = True
+                if (
+                    str(relation_type or "").lower() == "related_method"
+                    and parent_hex in keep_tags
+                    and child_hex
+                    and child_hex not in keep_tags
+                ):
+                    keep_tags.add(child_hex)
+                    changed = True
+
+    if _table_exists(writer, TAG_TABLE):
+        if keep_tags:
+            writer.execute("CREATE TEMP TABLE IF NOT EXISTS _keep_tags (id TEXT PRIMARY KEY)")
+            writer.execute("DELETE FROM _keep_tags")
+            writer.executemany("INSERT OR IGNORE INTO _keep_tags (id) VALUES (?)", [(tid,) for tid in keep_tags])
+            writer.execute(f'DELETE FROM "{TAG_TABLE}" WHERE id NOT IN (SELECT id FROM _keep_tags)')
+        else:
+            writer.execute(f'DELETE FROM "{TAG_TABLE}"')
+
+    if _table_exists(writer, RELATION_TABLE) and _table_exists(writer, TAG_TABLE):
+        writer.execute(
+            f'DELETE FROM "{RELATION_TABLE}" '
+            f'WHERE parent_id NOT IN (SELECT id FROM "{TAG_TABLE}") '
+            f'OR child_id NOT IN (SELECT id FROM "{TAG_TABLE}")'
+        )
+    if _table_exists(writer, TAG_MEMBERSHIP_TABLE) and _table_exists(writer, TAG_TABLE):
+        writer.execute(
+            f'DELETE FROM "{TAG_MEMBERSHIP_TABLE}" WHERE librarytag_id NOT IN (SELECT id FROM "{TAG_TABLE}")'
+        )
+    if _table_exists(writer, TAG_GROUP_TABLE):
+        if _table_exists(writer, TAG_MEMBERSHIP_TABLE):
+            writer.execute(
+                f'DELETE FROM "{TAG_GROUP_TABLE}" '
+                f'WHERE id NOT IN (SELECT DISTINCT librarytaggroup_id FROM "{TAG_MEMBERSHIP_TABLE}" '
+                f"WHERE librarytaggroup_id IS NOT NULL)"
+            )
+        else:
+            writer.execute(f'DELETE FROM "{TAG_GROUP_TABLE}"')
+
+
+def _snapshot_database(
+    target: Path,
+    keep_paper_hexes: set[str] | None = None,
+    *,
+    keep_question_ids: set[int] | None = None,
+    extra_keep_tag_hexes: set[str] | None = None,
+) -> dict | None:
     """拍一份一致的题库快照。
 
     不能直接拷文件：软件正在写的时候拷到半个库。也不能用 SQLite 的 backup 接口 ——
@@ -285,7 +659,7 @@ def _snapshot_database(target: Path) -> None:
     连接写事务锁着），表现为整个程序卡住不动。
 
     这里逐表读、逐表写：读到的是这个连接此刻看到的样子（没提交的改动也在），
-    写出来的是一份独立、可直接打开的库。
+    写出来的是一份独立、可直接打开的库。传入 keep_paper_hexes 时只留所选资料。
     """
     connection.ensure_connection()  # 连接是懒开的，不先打开就拿不到
     raw = getattr(connection, "connection", None)
@@ -317,10 +691,43 @@ def _snapshot_database(target: Path) -> None:
             sequence = []
         for name, value in sequence:
             writer.execute("INSERT OR REPLACE INTO sqlite_sequence (name, seq) VALUES (?, ?)", (name, value))
+        if keep_paper_hexes is not None:
+            _prune_snapshot_database(
+                writer, keep_paper_hexes, keep_question_ids=keep_question_ids, extra_keep_tag_hexes=extra_keep_tag_hexes
+            )
         writer.commit()
+        if keep_paper_hexes is not None:
+            writer.execute("VACUUM")
     with contextlib_closing(sqlite3.connect(target)) as check:
         if check.execute("PRAGMA quick_check").fetchone() != ("ok",):
             raise TransferError("备份没有拍完整，已停止，没有动本机题库。")
+        if keep_paper_hexes is not None:
+            if check.execute("PRAGMA foreign_key_check").fetchall():
+                raise TransferError("打包后的题库存在外键引用异常，已停止，没有动本机题库。")
+            pub_rows = check.execute(f'SELECT id FROM "{PUBLICATION_TABLE}"').fetchall()
+            paper_question_counts = {
+                _uuid_hex(row[0]): int(row[1])
+                for row in check.execute(
+                    f'SELECT paper_id, COUNT(*) FROM "{QUESTION_TABLE}" GROUP BY paper_id'
+                ).fetchall()
+                if row[0]
+            }
+            counts = {
+                "papers": int(check.execute(f'SELECT COUNT(*) FROM "{PAPER_TABLE}"').fetchone()[0]),
+                "questions": int(check.execute(f'SELECT COUNT(*) FROM "{QUESTION_TABLE}"').fetchone()[0]),
+                "publications": len(pub_rows),
+                "tags": (
+                    int(check.execute(f'SELECT COUNT(*) FROM "{TAG_TABLE}"').fetchone()[0])
+                    if _table_exists(check, TAG_TABLE)
+                    else 0
+                ),
+            }
+            return {
+                "counts": counts,
+                "publications": {_uuid_text(row[0]) for row in pub_rows if row[0]},
+                "paper_question_counts": paper_question_counts,
+            }
+    return None
 
 
 def contextlib_closing(value):
@@ -329,7 +736,7 @@ def contextlib_closing(value):
     return closing(value)
 
 
-def _bundle_files(root: Path):
+def _bundle_files(root: Path, *, allowed_papers: set[str] | None = None, allowed_publications: set[str] | None = None):
     """原卷里值得带走的东西：每套卷自己的文件，和答案解析里的图片。"""
     if not root.is_dir():
         return
@@ -341,6 +748,19 @@ def _bundle_files(root: Path):
             continue
         if path.name in SKIP_NAMES or path.name.endswith(".page.jpg"):
             continue
+        if allowed_papers is not None:
+            parts = relative.parts
+            if not parts:
+                continue
+            head = parts[0]
+            if head in {"library", "library-solutions"}:
+                if len(parts) < 2 or _uuid_text(parts[1]) not in (allowed_publications or set()):
+                    continue
+            elif _looks_like_uuid(head):
+                if _uuid_text(head) not in allowed_papers:
+                    continue
+            else:
+                continue
         yield path
 
 
@@ -372,34 +792,59 @@ def _paper_files(paper) -> dict:
     return files
 
 
-def _manifest() -> dict:
+def _manifest(
+    papers_list: list | None = None,
+    counts_override: dict | None = None,
+    *,
+    include_machine: bool = True,
+    paper_question_counts: dict[str, int] | None = None,
+    folders_list: list | None = None,
+) -> dict:
     from core.models import LibraryTag, Paper, PublishedQuestion, Question
 
+    source_papers = papers_list if papers_list is not None else Paper.objects.all().order_by("created_at")
     papers = []
-    for paper in Paper.objects.all().order_by("created_at"):
+    for paper in source_papers:
         files = _paper_files(paper)
+        q_count = (
+            paper_question_counts.get(_uuid_hex(paper.pk), 0)
+            if paper_question_counts is not None
+            else Question.objects.filter(paper=paper).count()
+        )
         papers.append(
             {
                 "id": str(paper.pk),
+                "title": paper.display_name,
                 "filename": paper.filename,
                 "sha256": paper.sha256,
-                "questions": Question.objects.filter(paper=paper).count(),
+                "questions": q_count,
                 "files": files,
             }
         )
-    return {
-        "format": BUNDLE_FORMAT,
-        "app_version": getattr(__import__("core.version", fromlist=["APP_VERSION"]), "APP_VERSION", ""),
-        "created_at": timezone.now().isoformat(),
-        "machine": os.environ.get("COMPUTERNAME") or "这台电脑",
-        "counts": {
+    counts = (
+        dict(counts_override)
+        if counts_override is not None
+        else {
             "papers": len(papers),
             "questions": Question.objects.count(),
             "publications": PublishedQuestion.objects.count(),
             "tags": LibraryTag.objects.count(),
-        },
+        }
+    )
+    payload: dict = {
+        "format": BUNDLE_FORMAT,
+        "app_version": getattr(__import__("core.version", fromlist=["APP_VERSION"]), "APP_VERSION", ""),
+        "created_at": timezone.now().isoformat(),
+        "machine": (os.environ.get("COMPUTERNAME") or "这台电脑") if include_machine else "",
+        "counts": counts,
         "papers": papers,
     }
+    if folders_list:
+        payload["scope"] = "folder"
+        payload["folders"] = [{"id": str(tag.pk), "name": tag.name, "kind": tag.kind} for tag in folders_list]
+    elif papers_list is not None:
+        payload["scope"] = "selected"
+    return payload
 
 
 BACKUP_LOCK_NAME = "backup.lock"
@@ -446,8 +891,10 @@ def _backup_lock():
             pass
 
 
-def export_bundle(directory: Path, prefix: str = "题有据备份") -> dict:
-    """把整库打包成一个 zip 放进 `directory`。
+def export_bundle(
+    directory: Path, prefix: str = "题有据备份", *, paper_ids: list[str] | None = None, tag_ids: list[str] | None = None
+) -> dict:
+    """把整库、选定资料或目录文件夹打包成一个 zip 放进 `directory`。
 
     1.26.20：**先写临时文件，写成了再改名**。以前直接往最终文件名上写，
     中途出错（比如软件被关掉）就留下一个半个的包 —— 那不是备份，是垃圾：
@@ -456,23 +903,92 @@ def export_bundle(directory: Path, prefix: str = "题有据备份") -> dict:
     directory = Path(directory)
     if not directory.is_dir():
         raise TransferError("选的文件夹不在了，重新选一个。")
+    if paper_ids is not None and tag_ids is not None:
+        raise TransferError("一次只能按卷子或按目录文件夹其中一种方式导出。")
+
+    selected_papers: list | None = None
+    selected_folders: list | None = None
+    keep_question_ids: set[int] | None = None
+    extra_keep_tag_hexes: set[str] | None = None
+    actual_prefix = prefix
+
+    if tag_ids is not None:
+        folder_selection = _resolve_export_folders(tag_ids)
+        selected_papers = folder_selection["papers"]
+        selected_folders = folder_selection["tags"]
+        keep_question_ids = folder_selection["question_ids"]
+        extra_keep_tag_hexes = folder_selection["subtree_tag_hexes"]
+        if prefix == "题有据备份":
+            first_stem = _safe_bundle_stem(selected_folders[0].name)
+            if len(selected_folders) == 1:
+                actual_prefix = f"题有据题包-{first_stem}"
+            else:
+                actual_prefix = f"题有据题包-{first_stem}等{len(selected_folders)}个文件夹"
+    elif paper_ids is not None:
+        selected_papers = _resolve_export_papers(paper_ids)
+        if selected_papers is not None and prefix == "题有据备份":
+            first_stem = _safe_bundle_stem(selected_papers[0].display_name)
+            if len(selected_papers) == 1:
+                actual_prefix = f"题有据题包-{first_stem}"
+            else:
+                actual_prefix = f"题有据题包-{first_stem}等{len(selected_papers)}套"
+
     with _backup_lock():
-        return _export_bundle(directory, prefix)
+        return _export_bundle(
+            directory,
+            actual_prefix,
+            selected_papers=selected_papers,
+            selected_folders=selected_folders,
+            keep_question_ids=keep_question_ids,
+            extra_keep_tag_hexes=extra_keep_tag_hexes,
+        )
 
 
-def _export_bundle(directory: Path, prefix: str) -> dict:
+def _export_bundle(
+    directory: Path,
+    prefix: str,
+    selected_papers: list | None = None,
+    *,
+    selected_folders: list | None = None,
+    keep_question_ids: set[int] | None = None,
+    extra_keep_tag_hexes: set[str] | None = None,
+) -> dict:
     stamp = time.strftime("%Y%m%d-%H%M%S")
     target = directory / f"{prefix}-{stamp}.zip"
     temp = directory / f".{prefix}-{stamp}.part"
     try:
         with tempfile.TemporaryDirectory() as work:
             snapshot = Path(work) / DATABASE_NAME
-            _snapshot_database(snapshot)
-            manifest = _manifest()
+            if selected_papers is None:
+                _snapshot_database(snapshot)
+                manifest = _manifest()
+                files_iter = _bundle_files(data_root())
+            else:
+                keep_paper_hexes = {_uuid_hex(paper.pk) for paper in selected_papers}
+                snapshot_info = _snapshot_database(
+                    snapshot,
+                    keep_paper_hexes=keep_paper_hexes,
+                    keep_question_ids=keep_question_ids,
+                    extra_keep_tag_hexes=extra_keep_tag_hexes,
+                )
+                counts_override = snapshot_info["counts"] if snapshot_info else None
+                allowed_publications = snapshot_info["publications"] if snapshot_info else set()
+                paper_question_counts = snapshot_info.get("paper_question_counts") if snapshot_info else None
+                manifest = _manifest(
+                    papers_list=selected_papers,
+                    counts_override=counts_override,
+                    include_machine=False,
+                    paper_question_counts=paper_question_counts,
+                    folders_list=selected_folders,
+                )
+                allowed_papers = {_uuid_text(paper.pk) for paper in selected_papers}
+                files_iter = _bundle_files(
+                    data_root(), allowed_papers=allowed_papers, allowed_publications=allowed_publications
+                )
             with zipfile.ZipFile(temp, "w", zipfile.ZIP_DEFLATED) as archive:
                 archive.writestr(MANIFEST_NAME, json.dumps(manifest, ensure_ascii=False, indent=2))
                 archive.write(snapshot, DATABASE_NAME)
-                for path in _bundle_files(data_root()):
+                for path in files_iter:
                     archive.write(path, f"{ORIGINALS}/{path.relative_to(data_root()).as_posix()}")
         # 写完了自己先验一遍：包能打开、清单和题库都在，才算是个备份。
         with zipfile.ZipFile(temp) as check:
@@ -486,12 +1002,18 @@ def _export_bundle(directory: Path, prefix: str) -> dict:
             pass
         raise
     os.replace(temp, target)
+    paper_names = [
+        str(item.get("title") or item.get("filename") or "").strip() for item in (manifest.get("papers") or [])
+    ]
+    folder_names = [str(item.get("name") or "").strip() for item in (manifest.get("folders") or [])]
     return {
         "file": str(target),
         "name": target.name,
         "size": target.stat().st_size,
         "counts": manifest["counts"],
         "created_at": manifest["created_at"],
+        "paper_names": [name for name in paper_names if name],
+        "folder_names": [name for name in folder_names if name],
     }
 
 
@@ -1457,7 +1979,27 @@ def _write_record(merge: _Merge) -> dict:
     root = records_root()
     root.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    record = {"id": f"{stamp}", "created_at": timezone.now().isoformat(), **merge.added}
+    paper_names: list[str] = []
+    for item in merge.manifest.get("papers") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("title") or item.get("filename") or "").strip()
+        if name and name not in paper_names:
+            paper_names.append(name)
+    folder_names: list[str] = []
+    for item in merge.manifest.get("folders") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if name and name not in folder_names:
+            folder_names.append(name)
+    record = {
+        "id": f"{stamp}",
+        "created_at": timezone.now().isoformat(),
+        "paper_names": paper_names,
+        "folder_names": folder_names,
+        **merge.added,
+    }
     target = root / f"merge-{stamp}.json"
     target.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
     return {
@@ -1465,6 +2007,8 @@ def _write_record(merge: _Merge) -> dict:
         "created_at": record["created_at"],
         "papers": len(merge.added["papers"]),
         "questions": len(merge.added["questions"]),
+        "paper_names": paper_names[:5],
+        "folder_names": folder_names[:5],
     }
 
 
@@ -1487,6 +2031,8 @@ def list_records() -> list[dict]:
                 "solutions": len(data.get("solutions") or []),
                 "filled": len(data.get("filled") or []),
                 "tags": len(data.get("tags") or []),
+                "paper_names": [str(name) for name in (data.get("paper_names") or []) if str(name).strip()][:5],
+                "folder_names": [str(name) for name in (data.get("folder_names") or []) if str(name).strip()][:5],
             }
         )
     return records

@@ -3,6 +3,15 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.2.0
+
+**统一合入 Word 导出对齐打印预览、按卷/目录文件夹打包题包分享与 OneNote 回跳加固**
+
+- **导出 Word 排版对齐打印预览（`library_export.py`、`library_drafts.py`、`exam-export.js`、`library.js`）**：合入全套 27 项 Word 导出精度改进及题号两栏悬挂缩进对齐，覆盖表格列宽/行高/内边距/对齐/边框表头、选项与题干位置、考生信息行字体与自然宽度、页首/页脚/相邻块间距、答案区纵向节奏、答题留白跨页分段与「第 N 题答题区（续）」标题，以及关闭行末标点溢出边界。
+- **按试卷/书籍与目录文件夹打包题包分享（`library_transfer.py`、`transfer_views.py`、`urls.py`、`library-transfer.js`、`styles.css`、`tiyouju_cli.py`）**：支持在备份恢复界面与 CLI（`--paper` / `--folder`）中按选定试卷、书籍或目录文件夹（含下级子文件夹）裁剪打包干净快照分享给他人，自动剔除回收站废题并校验外键。
+- **OneNote 回跳与编辑器交互优化（`eagle/index.html`、`tiyouju_protocol.py`、`library.js`）**：Eagle 窗口重新聚焦或可见时重启深链回跳轮询以支持连续多次回跳定位；源码模式 `tiyouju://` 协议统一转交窗口启动器且默认不外开浏览器；经典题库页单题保存答案解析后停在本题不再自动跳下一题。
+
+
 ## 2.1.4
 
 **解除重提取候选原图题「已有人工文字，不再识读」误拦截并清理历史重提取提示条**

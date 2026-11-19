@@ -21,7 +21,7 @@ import uuid
 import zipfile
 from pathlib import Path
 
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 
 from core import library_transfer
 from core.models import (
@@ -30,6 +30,7 @@ from core.models import (
     LibraryTag,
     LibraryTagAssignment,
     LibraryTagGroup,
+    LibraryTagRelation,
     Paper,
     PublishedQuestion,
     Question,
@@ -511,3 +512,285 @@ class SolutionVersionTests(TransferFixture):
         self.assertEqual(
             LibrarySolution.objects.filter(publication=publication).count(), 1, "同一份解析不会被复制成两版"
         )
+
+
+class SelectiveExportTests(TransferFixture):
+    """按选定卷子/书籍或目录文件夹独立打包分享，再合并到另一台电脑。"""
+
+    def _publish(self, question, *, version=1, answer=""):
+        return PublishedQuestion.objects.create(
+            question=question,
+            paper=question.paper,
+            number=question.number,
+            version=version,
+            content={"stem": question.stem, "answer": answer or question.answer},
+            content_hash=uuid.uuid4().hex * 2,
+            search_text=question.stem,
+            source_filename=question.paper.filename,
+            question_type=question.question_type,
+            status=PublishedQuestion.Status.PUBLISHED,
+        )
+
+    def _inspect_snapshot(self, bundle_path: Path) -> sqlite3.Connection:
+        out = self.work / f"snap-{uuid.uuid4().hex}.sqlite3"
+        with zipfile.ZipFile(bundle_path) as archive:
+            out.write_bytes(archive.read(library_transfer.DATABASE_NAME))
+        return sqlite3.connect(out)
+
+    def test_selective_export_only_packs_chosen_paper_and_its_files(self):
+        book = self.make_paper("（虚构）思想导引.pdf", sha="b" * 64)
+        book_q = self.make_question(book, 1, "（虚构）导引第一题", "答案乙")
+        pub_main = self._publish(self.questions[0], answer="甲")
+        pub_book = self._publish(book_q, answer="答案乙")
+
+        (self.data / str(self.paper.pk) / "figures").mkdir(parents=True, exist_ok=True)
+        (self.data / str(self.paper.pk) / "figures" / "m1.png").write_bytes(b"main-fig")
+        (self.data / str(book.pk) / "figures").mkdir(parents=True, exist_ok=True)
+        (self.data / str(book.pk) / "figures" / "b1.png").write_bytes(b"book-fig")
+        (self.data / "library" / str(pub_main.pk)).mkdir(parents=True, exist_ok=True)
+        (self.data / "library" / str(pub_main.pk) / "crop.png").write_bytes(b"main-crop")
+        (self.data / "library" / str(pub_book.pk)).mkdir(parents=True, exist_ok=True)
+        (self.data / "library" / str(pub_book.pk) / "crop.png").write_bytes(b"book-crop")
+        (self.data / "library-solutions" / str(pub_book.pk)).mkdir(parents=True, exist_ok=True)
+        (self.data / "library-solutions" / str(pub_book.pk) / "sol.png").write_bytes(b"book-sol")
+
+        out_dir = self.work / "share_out"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        result = library_transfer.export_bundle(out_dir, paper_ids=[str(book.pk)])
+        bundle = Path(result["file"])
+        self.assertTrue(bundle.name.startswith("题有据题包-（虚构）思想导引-"))
+        self.assertEqual(result["paper_names"], ["（虚构）思想导引.pdf"])
+
+        with zipfile.ZipFile(bundle) as archive:
+            names = set(archive.namelist())
+            manifest = json.loads(archive.read(library_transfer.MANIFEST_NAME).decode("utf-8"))
+
+        self.assertEqual(manifest["machine"], "", "分享包不该泄露电脑主机名")
+        self.assertEqual(manifest["scope"], "selected")
+        self.assertEqual(manifest["counts"]["papers"], 1)
+        self.assertEqual(manifest["counts"]["questions"], 1)
+        self.assertEqual(manifest["counts"]["publications"], 1)
+        self.assertEqual(len(manifest["papers"]), 1)
+        self.assertEqual(manifest["papers"][0]["title"], "（虚构）思想导引.pdf")
+
+        self.assertIn(f"{library_transfer.ORIGINALS}/{book.pk}/source.pdf", names)
+        self.assertIn(f"{library_transfer.ORIGINALS}/{book.pk}/figures/b1.png", names)
+        self.assertIn(f"{library_transfer.ORIGINALS}/library/{pub_book.pk}/crop.png", names)
+        self.assertIn(f"{library_transfer.ORIGINALS}/library-solutions/{pub_book.pk}/sol.png", names)
+        self.assertNotIn(f"{library_transfer.ORIGINALS}/{self.paper.pk}/source.pdf", names)
+        self.assertNotIn(f"{library_transfer.ORIGINALS}/{self.paper.pk}/figures/m1.png", names)
+        self.assertNotIn(f"{library_transfer.ORIGINALS}/library/{pub_main.pk}/crop.png", names)
+
+        snap = self._inspect_snapshot(bundle)
+        try:
+            self.assertEqual(snap.execute("SELECT COUNT(*) FROM core_paper").fetchone()[0], 1)
+            self.assertEqual(snap.execute("SELECT COUNT(*) FROM core_question").fetchone()[0], 1)
+            self.assertEqual(snap.execute("PRAGMA foreign_key_check").fetchall(), [])
+        finally:
+            snap.close()
+
+    def test_selective_export_omits_recycle_bin_questions_and_unused_tags(self):
+        self.questions[2].deleted_at = "2026-01-01T00:00:00Z"
+        self.questions[2].save(update_fields=["deleted_at"])
+        pub = self._publish(self.questions[0], answer="甲")
+        parent_tag = LibraryTag.objects.create(name="（虚构）函数与导数", kind=LibraryTag.Kind.KNOWLEDGE)
+        child_tag = LibraryTag.objects.create(name="（虚构）单调性", kind=LibraryTag.Kind.KNOWLEDGE)
+        unused_tag = LibraryTag.objects.create(name="（虚构）无关标签", kind=LibraryTag.Kind.KNOWLEDGE)
+        tag_group = LibraryTagGroup.objects.create(name="（虚构）分组", position=0)
+        child_tag.groups.add(tag_group)
+        LibraryTagRelation.objects.create(
+            parent=parent_tag, child=child_tag, relation_type=LibraryTagRelation.Type.HIERARCHY
+        )
+        LibraryTagAssignment.objects.create(publication=pub, tag=child_tag, source=LibraryTagAssignment.Source.HUMAN)
+
+        out_dir = self.work / "share_tags"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        result = library_transfer.export_bundle(out_dir, paper_ids=[str(self.paper.pk)])
+        snap = self._inspect_snapshot(Path(result["file"]))
+        try:
+            self.assertEqual(
+                snap.execute("SELECT COUNT(*) FROM core_question").fetchone()[0], 2, "回收站废题不能进分享包"
+            )
+            tag_names = {row[0] for row in snap.execute("SELECT name FROM core_librarytag").fetchall()}
+            self.assertEqual(tag_names, {"（虚构）函数与导数", "（虚构）单调性"})
+            self.assertNotIn("（虚构）无关标签", tag_names)
+            self.assertEqual(snap.execute("SELECT COUNT(*) FROM core_librarytagrelation").fetchone()[0], 1)
+            self.assertEqual(snap.execute("SELECT COUNT(*) FROM core_librarytaggroup").fetchone()[0], 1)
+            self.assertEqual(snap.execute("PRAGMA foreign_key_check").fetchall(), [])
+        finally:
+            snap.close()
+
+    def test_selective_bundle_merges_cleanly_and_passes_foreign_key_check(self):
+        from django.db import connection
+
+        book = self.make_paper("（虚构）导引.pdf", sha="b" * 64)
+        book_q = self.make_question(book, 1, "（虚构）导引第一题", "答案乙")
+        pub = self._publish(book_q, answer="答案乙")
+        LibrarySolution.objects.create(publication=pub, fingerprint="e" * 64, answer="答案乙", analysis="（虚构）详解")
+        parent_tag = LibraryTag.objects.create(name="（虚构）专题一", kind=LibraryTag.Kind.KNOWLEDGE)
+        child_tag = LibraryTag.objects.create(name="（虚构）小节一", kind=LibraryTag.Kind.KNOWLEDGE)
+        LibraryTagRelation.objects.create(
+            parent=parent_tag, child=child_tag, relation_type=LibraryTagRelation.Type.HIERARCHY
+        )
+        LibraryTagAssignment.objects.create(publication=pub, tag=child_tag, source=LibraryTagAssignment.Source.HUMAN)
+        (self.data / "library" / str(pub.pk)).mkdir(parents=True, exist_ok=True)
+        (self.data / "library" / str(pub.pk) / "figure-1.png").write_bytes(b"\x89PNG crop")
+
+        out_dir = self.work / "share_merge"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        bundle = Path(library_transfer.export_bundle(out_dir, paper_ids=[str(book.pk)])["file"])
+
+        # 模拟网友本机：已有 self.paper，没有 book 及其标签。
+        LibraryTagAssignment.objects.all().delete()
+        LibraryTagRelation.objects.all().delete()
+        LibraryTag.objects.all().delete()
+        LibrarySolution.objects.all().delete()
+        PublishedQuestion.objects.filter(paper=book).delete()
+        Question.all_objects.filter(paper=book).delete()
+        Paper.objects.filter(pk=book.pk).delete()
+        shutil.rmtree(self.data / str(book.pk), ignore_errors=True)
+        shutil.rmtree(self.data / "library" / str(pub.pk), ignore_errors=True)
+
+        merged = library_transfer.merge_bundle(bundle)
+        self.assertEqual(merged["report"]["新增卷子"], 1)
+        self.assertEqual(merged["report"]["新增题目"], 1)
+        self.assertEqual(Paper.objects.count(), 2)
+        self.assertTrue(LibraryTag.objects.filter(name="（虚构）专题一").exists())
+        self.assertTrue(LibraryTag.objects.filter(name="（虚构）小节一").exists())
+        self.assertEqual(LibraryTagRelation.objects.count(), 1)
+        restored_pub = PublishedQuestion.objects.get(paper__sha256="b" * 64)
+        self.assertTrue((self.data / "library" / str(restored_pub.pk) / "figure-1.png").is_file())
+
+        with connection.cursor() as cursor:
+            cursor.execute("PRAGMA foreign_key_check")
+            self.assertEqual(cursor.fetchall(), [])
+
+        records = library_transfer.list_records()
+        self.assertEqual(records[0]["paper_names"], ["（虚构）导引.pdf"])
+
+        removed = library_transfer.undo_last_merge()
+        self.assertEqual(removed["papers"], 1)
+        self.assertEqual(Paper.objects.count(), 1)
+        self.assertTrue(Paper.objects.filter(pk=self.paper.pk).exists())
+
+    def test_folder_export_only_packs_tagged_questions_and_preserves_hierarchy(self):
+        from django.db import connection
+
+        book_a = self.make_paper("（虚构）导引上册.pdf", sha="b" * 64)
+        q_a1 = self.make_question(book_a, 1, "（虚构）函数极值题", "甲")
+        q_a2 = self.make_question(book_a, 2, "（虚构）立体几何题", "乙")
+        book_b = self.make_paper("（虚构）导引下册.pdf", sha="c" * 64)
+        q_b1 = self.make_question(book_b, 1, "（虚构）导数应用题", "丙")
+        q_b2 = self.make_question(book_b, 2, "（虚构）未贴标签题", "丁")
+
+        group_a = QuestionGroup.objects.create(
+            paper=book_a, title="第一章", kind=QuestionGroup.Kind.CHAPTER, sequence=0
+        )
+        q_a1.group = group_a
+        q_a1.save(update_fields=["group"])
+
+        pub_a1 = self._publish(q_a1, answer="甲")
+        pub_a2 = self._publish(q_a2, answer="乙")
+        pub_b1 = self._publish(q_b1, answer="丙")
+        self._publish(q_b2, answer="丁")
+
+        root_folder = LibraryTag.objects.create(name="（虚构）函数与导数", kind=LibraryTag.Kind.KNOWLEDGE)
+        sub_folder = LibraryTag.objects.create(name="（虚构）导数应用", kind=LibraryTag.Kind.KNOWLEDGE)
+        other_folder = LibraryTag.objects.create(name="（虚构）立体几何", kind=LibraryTag.Kind.KNOWLEDGE)
+        LibraryTagRelation.objects.create(
+            parent=root_folder, child=sub_folder, relation_type=LibraryTagRelation.Type.HIERARCHY
+        )
+        LibraryTagAssignment.objects.create(publication=pub_a1, tag=root_folder)
+        LibraryTagAssignment.objects.create(publication=pub_b1, tag=sub_folder)
+        LibraryTagAssignment.objects.create(publication=pub_a2, tag=other_folder)
+
+        folders = {item["name"]: item for item in library_transfer.list_exportable_folders()}
+        self.assertEqual(folders["（虚构）函数与导数"]["questions"], 2)
+        self.assertEqual(folders["（虚构）导数应用"]["questions"], 1)
+        self.assertEqual(folders["（虚构）立体几何"]["questions"], 1)
+
+        out_dir = self.work / "share_folder"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        result = library_transfer.export_bundle(out_dir, tag_ids=[str(root_folder.pk)])
+        bundle = Path(result["file"])
+        self.assertTrue(bundle.name.startswith("题有据题包-（虚构）函数与导数-"))
+        self.assertEqual(result["folder_names"], ["（虚构）函数与导数"])
+
+        with zipfile.ZipFile(bundle) as archive:
+            manifest = json.loads(archive.read(library_transfer.MANIFEST_NAME).decode("utf-8"))
+        self.assertEqual(manifest["scope"], "folder")
+        self.assertEqual([f["name"] for f in manifest["folders"]], ["（虚构）函数与导数"])
+        self.assertEqual(manifest["counts"]["papers"], 2)
+        self.assertEqual(manifest["counts"]["questions"], 2)
+        self.assertTrue(all(item["questions"] == 1 for item in manifest["papers"]))
+
+        snap = self._inspect_snapshot(bundle)
+        try:
+            stems = {row[0] for row in snap.execute("SELECT stem FROM core_question").fetchall()}
+            self.assertEqual(stems, {"（虚构）函数极值题", "（虚构）导数应用题"})
+            tag_names = {row[0] for row in snap.execute("SELECT name FROM core_librarytag").fetchall()}
+            self.assertEqual(tag_names, {"（虚构）函数与导数", "（虚构）导数应用"})
+            self.assertNotIn("（虚构）立体几何", tag_names)
+            self.assertEqual(snap.execute("PRAGMA foreign_key_check").fetchall(), [])
+        finally:
+            snap.close()
+
+        # 模拟网友空库加载这个文件夹题包
+        LibraryTagAssignment.objects.all().delete()
+        LibraryTagRelation.objects.all().delete()
+        LibraryTag.objects.all().delete()
+        PublishedQuestion.objects.all().delete()
+        Question.all_objects.all().delete()
+        QuestionGroup.objects.all().delete()
+        Paper.objects.all().delete()
+
+        merged = library_transfer.merge_bundle(bundle)
+        self.assertEqual(merged["report"]["新增卷子"], 2)
+        self.assertEqual(merged["report"]["新增题目"], 2)
+        self.assertEqual(
+            set(Question.objects.values_list("stem", flat=True)), {"（虚构）函数极值题", "（虚构）导数应用题"}
+        )
+        self.assertEqual(library_transfer.list_records()[0]["folder_names"], ["（虚构）函数与导数"])
+        with connection.cursor() as cursor:
+            cursor.execute("PRAGMA foreign_key_check")
+            self.assertEqual(cursor.fetchall(), [])
+
+        library_transfer.undo_last_merge()
+        self.assertEqual(Paper.objects.count(), 0)
+        self.assertEqual(Question.objects.count(), 0)
+
+    def test_backup_papers_and_selective_export_views(self):
+        client = Client()
+        pub = self._publish(self.questions[0], answer="甲")
+        folder = LibraryTag.objects.create(name="（虚构）精选专题", kind=LibraryTag.Kind.CUSTOM)
+        LibraryTagAssignment.objects.create(publication=pub, tag=folder)
+
+        self.assertEqual(client.get("/api/backup/papers", REMOTE_ADDR="192.0.2.10").status_code, 403)
+        listing = client.get("/api/backup/papers")
+        self.assertEqual(listing.status_code, 200)
+        body = listing.json()
+        self.assertEqual(len(body["papers"]), 1)
+        self.assertEqual(body["papers"][0]["id"], str(self.paper.pk))
+        self.assertEqual(len(body["folders"]), 1)
+        self.assertEqual(body["folders"][0]["id"], str(folder.pk))
+
+        out_dir = self.work / "api_out"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        resp = client.post(
+            "/api/backup/export",
+            data=json.dumps({"directory": str(out_dir), "tag_ids": [str(folder.pk)]}),
+            content_type="application/json",
+            HTTP_X_QB_REQUEST="1",
+        )
+        self.assertEqual(resp.status_code, 200)
+        exported = resp.json()
+        self.assertEqual(exported["folder_names"], ["（虚构）精选专题"])
+        self.assertEqual(exported["questions"], 1)
+
+        with open(exported["file"], "rb") as stream:
+            inspect_resp = client.post("/api/backup/inspect", {"file": stream}, HTTP_X_QB_REQUEST="1")
+        self.assertEqual(inspect_resp.status_code, 200)
+        inspected = inspect_resp.json()
+        self.assertEqual(inspected["folder_items"][0]["name"], "（虚构）精选专题")
+        self.assertEqual(inspected["paper_items"][0]["title"], "卷一.pdf")
+        self.assertEqual(inspected["paper_items"][0]["questions"], 1)

@@ -2797,14 +2797,17 @@
     }
 
     // ================= 初始化与数据拉取 =================
-    // OneNote 回跳轮询：只盯开头一小会儿，拿到定位请求就收工。
+    // OneNote 回跳轮询：每波只盯一小会儿，拿到定位就收工。
     // 原来是无限定时器每 1.2 秒轮一次 —— 页面挂一天就是 7 万多个请求，
     // 后端每次都要去 runtime 目录把深链文件查一遍，纯烧电。
-    const DEEP_LINK_POLL_WINDOW_MS = 300000;   // 最多盯 5 分钟
+    // 窗口被协议置前时再开一波（visibility/focus），这样第二次从 OneNote 回来还能定位。
+    const DEEP_LINK_POLL_WINDOW_MS = 300000;   // 单波最多盯 5 分钟
     const DEEP_LINK_POLL_FAST_MS = 1200;       // 开头密一点，尽快接住回跳
     const DEEP_LINK_POLL_SLOW_MS = 5000;
     const DEEP_LINK_POLL_FAST_UNTIL_MS = 60000;
     const DEEP_LINK_POLL_HIDDEN_MS = 3000;     // 页面不在前台时的歇脚间隔
+    let deepLinkPollGeneration = 0;
+    let deepLinkFocusArmTimer = 0;
 
     async function consumeDeepLinkOnce() {
       try {
@@ -2821,8 +2824,10 @@
     }
 
     function startDeepLinkPolling() {
+      const generation = ++deepLinkPollGeneration;
       const startedAt = Date.now();
       const schedule = async () => {
+        if (generation !== deepLinkPollGeneration) return;
         const elapsed = Date.now() - startedAt;
         if (elapsed > DEEP_LINK_POLL_WINDOW_MS) return;
         // 页面切到后台就别打扰后端了，回前台再继续
@@ -2831,13 +2836,22 @@
           return;
         }
         const consumed = await consumeDeepLinkOnce();
-        if (consumed) return; // 定位到了，收工
+        if (consumed) return; // 这一波定位到了，收工；下次置前再开新波
         const delay = elapsed < DEEP_LINK_POLL_FAST_UNTIL_MS
           ? DEEP_LINK_POLL_FAST_MS
           : DEEP_LINK_POLL_SLOW_MS;
         setTimeout(schedule, delay);
       };
       schedule();
+    }
+
+    function armDeepLinkPollingFromFocus() {
+      if (document.hidden) return;
+      window.clearTimeout(deepLinkFocusArmTimer);
+      deepLinkFocusArmTimer = window.setTimeout(async () => {
+        const hit = await consumeDeepLinkOnce();
+        if (!hit) startDeepLinkPolling();
+      }, 200);
     }
 
     async function init() {
@@ -2850,6 +2864,10 @@
         clearTimeout(leftSidebarResizeTimer);
         leftSidebarResizeTimer = setTimeout(applyResponsiveLeftSidebar, 120);
       });
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) armDeepLinkPollingFromFocus();
+      });
+      window.addEventListener('focus', armDeepLinkPollingFromFocus);
       bindTagAutocomplete();
       updatePaperSectionCollapseUI();
       renderFolderTree();

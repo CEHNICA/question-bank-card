@@ -8,6 +8,8 @@
   "use strict";
   const $ = (id) => document.getElementById(id);
   let host = null, busy = false, chosen = "", pending = null;
+  let exportMode = "all", catalogData = null, catalogLoading = false, catalogError = "";
+  let selectedPapers = new Set(), selectedFolders = new Set();
 
   function el(tag, className = "", text) {
     const node = document.createElement(tag);
@@ -68,10 +70,137 @@
 
   // ---- 导出 --------------------------------------------------------
 
+  async function loadCatalog(force = false) {
+    if (catalogLoading) return;
+    if (catalogData && !force) return;
+    catalogLoading = true;
+    catalogError = "";
+    renderExport();
+    try {
+      const body = await json("/api/backup/papers");
+      catalogData = {
+        papers: Array.isArray(body.papers) ? body.papers : [],
+        folders: Array.isArray(body.folders) ? body.folders : [],
+      };
+      const validPapers = new Set(catalogData.papers.map((item) => String(item.id)));
+      selectedPapers = new Set([...selectedPapers].filter((id) => validPapers.has(id)));
+      const validFolders = new Set(catalogData.folders.map((item) => String(item.id)));
+      selectedFolders = new Set([...selectedFolders].filter((id) => validFolders.has(id)));
+    } catch (error) {
+      catalogError = error.message || "暂时读不出可导出的资料列表。";
+    } finally {
+      catalogLoading = false;
+      renderExport();
+    }
+  }
+
+  function renderPickerList(box, items, selectedSet, isFolder) {
+    if (catalogLoading) {
+      box.append(el("p", "settings-footnote", isFolder ? "正在读取目录文件夹…" : "正在读取可导出的卷子和书…"));
+      return;
+    }
+    if (catalogError) {
+      const retry = el("button", "button button-small button-quiet", "重新读取");
+      retry.type = "button";
+      retry.disabled = busy;
+      retry.addEventListener("click", () => { void loadCatalog(true); });
+      const errRow = el("div", "transfer-picker-bar");
+      errRow.append(el("span", "transfer-status is-error", catalogError), retry);
+      box.append(errRow);
+      return;
+    }
+    if (!items.length) {
+      box.append(el("p", "settings-footnote", isFolder
+        ? "还没有已入库且贴了正式标签的目录文件夹。先给题目贴标签并入库。"
+        : "还没有可导出的卷子或书。"));
+      return;
+    }
+    const bar = el("div", "transfer-picker-bar");
+    const summary = el("span", "settings-footnote", `已选 ${selectedSet.size} / ${items.length}`);
+    const selectAll = el("button", "button button-small button-quiet", "全选");
+    selectAll.type = "button";
+    selectAll.disabled = busy;
+    selectAll.addEventListener("click", () => {
+      items.forEach((item) => selectedSet.add(String(item.id)));
+      renderExport();
+    });
+    const clearAll = el("button", "button button-small button-quiet", "清空");
+    clearAll.type = "button";
+    clearAll.disabled = busy || selectedSet.size === 0;
+    clearAll.addEventListener("click", () => {
+      selectedSet.clear();
+      renderExport();
+    });
+    const refresh = el("button", "button button-small button-quiet", "刷新列表");
+    refresh.type = "button";
+    refresh.disabled = busy;
+    refresh.addEventListener("click", () => { void loadCatalog(true); });
+    bar.append(summary, selectAll, clearAll, refresh);
+    box.append(bar);
+
+    const list = el("div", "transfer-paper-list");
+    items.forEach((item) => {
+      const id = String(item.id);
+      const option = el("label", "transfer-paper-option");
+      const checkbox = el("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = selectedSet.has(id);
+      checkbox.disabled = busy;
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) selectedSet.add(id);
+        else selectedSet.delete(id);
+        renderExport();
+      });
+      const titleText = isFolder ? (item.path_label || item.name) : (item.title || item.filename);
+      const nameSpan = el("span", "transfer-paper-name", titleText);
+      const metaText = isFolder
+        ? `${item.questions || 0} 道题`
+        : (item.publications ? `${item.questions || 0} 道题 · 已入库 ${item.publications} 道` : `${item.questions || 0} 道题`);
+      const metaSpan = el("span", "transfer-paper-meta", metaText);
+      option.append(checkbox, nameSpan, metaSpan);
+      list.append(option);
+    });
+    box.append(list);
+  }
+
   function renderExport() {
     const box = $("transferExport");
     if (!box) return;
     box.replaceChildren();
+
+    const scopeBar = el("div", "transfer-scope-bar");
+    [
+      ["all", "全部题库"],
+      ["papers", "只选几套卷子或书"],
+      ["folders", "只选目录文件夹"],
+    ].forEach(([mode, label]) => {
+      const btn = el("button", `button button-small transfer-scope-btn${exportMode === mode ? " is-active" : ""}`, label);
+      btn.type = "button";
+      btn.disabled = busy;
+      btn.setAttribute("aria-pressed", String(exportMode === mode));
+      btn.addEventListener("click", () => {
+        if (exportMode === mode || busy) return;
+        exportMode = mode;
+        status("export", "", false);
+        renderExport();
+        if (mode !== "all" && !catalogData && !catalogLoading) {
+          void loadCatalog();
+        }
+      });
+      scopeBar.append(btn);
+    });
+    box.append(scopeBar);
+
+    if (exportMode === "papers") {
+      box.append(el("p", "settings-footnote", "只打包选中的卷子或书（含原卷、配图、解析与用到的标签），不带走其他资料和回收站废题，适合传给网友。"));
+      if (!catalogData && !catalogLoading && !catalogError) void loadCatalog();
+      renderPickerList(box, catalogData?.papers || [], selectedPapers, false);
+    } else if (exportMode === "folders") {
+      box.append(el("p", "settings-footnote", "按教材目录或自定义标签文件夹打包，只带走该文件夹（含下级子文件夹）里的已入库题目、解析和原卷出处。"));
+      if (!catalogData && !catalogLoading && !catalogError) void loadCatalog();
+      renderPickerList(box, catalogData?.folders || [], selectedFolders, true);
+    }
+
     const row = el("div", "transfer-actions");
     const pick = el("button", "button button-small", chosen ? "换个文件夹" : "选择文件夹");
     pick.type = "button";
@@ -91,11 +220,34 @@
     run.addEventListener("click", async () => {
       if (busy) return;
       if (!chosen) { status("export", "先选一个文件夹，备份会放在那里。", true); return; }
+      if (exportMode === "papers" && selectedPapers.size === 0) {
+        status("export", "先勾选至少一套要导出的卷子或书。", true);
+        return;
+      }
+      if (exportMode === "folders" && selectedFolders.size === 0) {
+        status("export", "先勾选至少一个要导出的目录文件夹。", true);
+        return;
+      }
       busy = true; renderExport();
       status("export", "正在打包，可能要等一会儿…");
       try {
-        const body = await post("/api/backup/export", { directory: chosen });
-        status("export", `已导出：${body.papers} 套卷子、${body.questions} 道题，${megabytes(body.size)}（含原卷照片）。文件在 ${body.file}`, false);
+        const payload = { directory: chosen };
+        if (exportMode === "papers") payload.paper_ids = Array.from(selectedPapers);
+        else if (exportMode === "folders") payload.tag_ids = Array.from(selectedFolders);
+        const body = await post("/api/backup/export", payload);
+        if (exportMode === "folders" && Array.isArray(body.folder_names) && body.folder_names.length) {
+          const lead = body.folder_names.length === 1
+            ? `「${body.folder_names[0]}」`
+            : `「${body.folder_names[0]}」等 ${body.folder_names.length} 个文件夹`;
+          status("export", `已导出文件夹 ${lead}：${body.papers} 套卷子、${body.questions} 道题，${megabytes(body.size)}（含原卷照片）。文件在 ${body.file}`, false);
+        } else if (exportMode === "papers" && Array.isArray(body.paper_names) && body.paper_names.length) {
+          const lead = body.paper_names.length === 1
+            ? `《${body.paper_names[0]}》`
+            : `《${body.paper_names[0]}》等 ${body.papers} 套资料`;
+          status("export", `已导出 ${lead}：${body.papers} 套卷子、${body.questions} 道题，${megabytes(body.size)}（含原卷照片）。文件在 ${body.file}`, false);
+        } else {
+          status("export", `已导出：${body.papers} 套卷子、${body.questions} 道题，${megabytes(body.size)}（含原卷照片）。文件在 ${body.file}`, false);
+        }
       } catch (error) { status("export", error.message, true); }
       finally { busy = false; renderExport(); }
     });
@@ -145,6 +297,18 @@
     card.append(el("h4", "", "这份备份里有什么"));
     const list = el("ul", "transfer-facts");
     list.append(el("li", "", `${body.papers} 套卷子、${body.questions} 道题、${body.tags} 个标签`));
+    if (Array.isArray(body.folder_items) && body.folder_items.length) {
+      const folderText = body.folder_items.slice(0, 5).map((item) => `「${item.name}」`).join("、")
+        + (body.folder_items.length > 5 ? ` 等 ${body.folder_items.length} 个文件夹` : "");
+      list.append(el("li", "", `包含文件夹：${folderText}`));
+    }
+    if (Array.isArray(body.paper_items) && body.paper_items.length) {
+      const paperText = body.paper_items.slice(0, 5)
+        .map((item) => `《${item.title || item.filename}》（${item.questions || 0} 道题）`)
+        .join("、")
+        + (body.paper_items.length > 5 ? ` 等 ${body.paper_items.length} 套` : "");
+      list.append(el("li", "", `包含：${paperText}`));
+    }
     if (body.created_at) list.append(el("li", "", `导出于 ${moment(body.created_at)}${body.machine ? "，" + body.machine : ""}`));
     if (body.app_version) list.append(el("li", "", `题有据 ${body.app_version} 导出的`));
     card.append(list);
@@ -334,7 +498,14 @@
         if (record.solutions) bits.push(`${record.solutions} 份解析`);
         if (record.filled) bits.push(`给 ${record.filled} 道题补上答案`);
         if (record.tags) bits.push(`${record.tags} 个标签`);
-        item.append(el("span", "", `${when(record.created_at)}　并进来 ${bits.join("、") || "一些题目"}`));
+        const folderNames = Array.isArray(record.folder_names) ? record.folder_names.filter(Boolean) : [];
+        const paperNames = Array.isArray(record.paper_names) ? record.paper_names.filter(Boolean) : [];
+        const scopeLabel = folderNames.length
+          ? folderNames.slice(0, 2).map((n) => `「${n}」`).join("、") + (folderNames.length > 2 ? `等 ${folderNames.length} 个文件夹 ` : " ")
+          : (paperNames.length
+            ? paperNames.slice(0, 2).map((n) => `《${n}》`).join("、") + (paperNames.length > 2 ? `等 ${paperNames.length} 套 ` : " ")
+            : "");
+        item.append(el("span", "", `${when(record.created_at)}　并进来 ${scopeLabel}${bits.join("、") || "一些题目"}`));
         list.append(item);
       });
       box.append(list);
@@ -374,6 +545,9 @@
   async function mount(target) {
     host = target || host;
     if (!host) return;
+    catalogData = null;
+    catalogLoading = false;
+    catalogError = "";
     host.replaceChildren();
     // 1.26.16：这一区的引导改由页头统一给（每个区一句），这里不再重复一遍。
     const exportBox = el("section", "settings-section");

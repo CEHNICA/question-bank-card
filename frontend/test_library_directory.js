@@ -82,7 +82,8 @@ assert.match(answerJs, /is-ai-suggested/, "AI 自动填的两个字段加 is-ai-
 assert.match(css, /#answerEditorResult\.is-ai-suggested/, "AI 初稿角标和浅底色到位");
 assert.match(answerJs, /采纳并保存/, "答案编辑器保存按钮在老师没改字时换名字 — 直接说「采纳并保存」");
 assert.match(answerJs, /aiUntouched/, "按钮换名字的依据是 AI 字段没被老师改过");
-assert.match(js, /solutions\.completeness\(candidate\)\s*===\s*"missing"/, "答完一道题，编辑器自动跳到当前可见列表里下一道没答案的题");
+assert.doesNotMatch(js, /openAnswerEditor\(\[next\].*scope:\s*"library"/s, "单题保存后不再自动跳下一道缺解析");
+assert.match(js, /一次只编一道/, "单题保存后停在本题的注释还在");
 assert.match(js, /is-chapter/, "目录里的章根（深度 0）加粗，子标签弱化，让层级一眼能分");
 assert.match(js, /is-leaf/, "深度 ≥ 1 的子标签走 is-leaf 子标签样式");
 assert.match(css, /library-directory-row-wrap\.is-chapter/, "章根字号加大、加粗、底下加虚线分隔");
