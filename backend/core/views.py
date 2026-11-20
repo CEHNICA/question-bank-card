@@ -1143,7 +1143,8 @@ def papers(request):
     mode = request.POST.get("parse_mode", "auto")
     if mode not in intake.MODES:
         return _error("请选择自动准备、手工框题、本地文字 PDF 或 MinerU 自动解析")
-    if mode == "mineru" and (not readers.configured("mineru") or not _reading_ready()):
+    cut_only = request.POST.get("cut_only") == "1"
+    if mode == "mineru" and (not readers.configured("mineru") or (not cut_only and not _reading_ready())):
         return _error(
             "上传新资料需要 MinerU Token，以及一家看图读题的密钥（魔搭有免费的）；"
             "也可以在“设置 → 读题模型”里选“AI 助手读题”，只用 MinerU。"
@@ -1180,13 +1181,16 @@ def papers(request):
     # 1.25.36：不再让老师先选「试卷」还是「书」——先把文件落到临时目录、量出页数，
     # 再决定：40 页以上按书/讲义（本机不自动切题，避免各章重复题号被合并），其余按试卷。
     # 判断写在试卷上（材料的类型和未切题的原因都会显示），判错了还能在「试卷操作」改。
+    plan = {"schema": 1, "mode": mode, "revision": 0}
+    if cut_only:
+        plan["cut_only"] = True
     paper = Paper(
         filename=filename,
         kind=kind,
         sha256=digest.hexdigest(),
         material_type=Paper.MaterialType.EXAM if material_type == "auto" else material_type,
         task_name="",
-        processing_plan={"schema": 1, "mode": mode, "revision": 0},
+        processing_plan=plan,
         status=Paper.Status.READY if mode != "mineru" else Paper.Status.QUEUED,
     )
     folder = settings.DATA_ROOT / str(paper.id)
@@ -1295,13 +1299,17 @@ def _upload_photos(
         return JsonResponse({"paper": paper_json(existing), "duplicate": True, "archived": bool(existing.archived)})
     first = Path(uploads[0].name).name
     name = first if len(uploads) == 1 else f"{Path(first).stem} 等 {len(uploads)} 张照片"
+    cut_only = request.POST.get("cut_only") == "1"
+    plan = {"schema": 1, "mode": parse_mode, "revision": 0}
+    if cut_only:
+        plan["cut_only"] = True
     paper = Paper(
         filename=name[:255],
         kind="image",
         sha256=combined,
         material_type=material_type,
         task_name=_distinct_task_name(name) if existing else "",
-        processing_plan={"schema": 1, "mode": parse_mode, "revision": 0},
+        processing_plan=plan,
         status=Paper.Status.READY if parse_mode != "mineru" else Paper.Status.QUEUED,
     )
     folder = settings.DATA_ROOT / str(paper.id)
@@ -2678,6 +2686,109 @@ def publish_paper(request, paper_id):
 
 
 @csrf_exempt
+def publish_cut_images(request, paper_id):
+    """将已切割的原图题卡直接标记通过并批量入库（不要求先 AI 识读，也允许题型未定）。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    paper = get_object_or_404(Paper, pk=paper_id)
+    if demo.is_demo(paper):
+        return JsonResponse({"error": demo.PUBLISH_REFUSED, "demo": True}, status=409)
+    if paper.status == Paper.Status.NEEDS_GROUPING:
+        return _error("请先确认资料结构或拆分任务，再将原图题卡入库")
+    payload = _body(request) or {}
+    approver = _approver(payload)
+    if approver is None:
+        return _error("by 只能是 human 或 ai")
+    ids = payload.get("question_ids")
+    if ids is not None and (
+        not isinstance(ids, list)
+        or len(ids) > 500
+        or any(not isinstance(value, int) or isinstance(value, bool) or value < 1 for value in ids)
+    ):
+        return _error("question_ids 需为最多 500 个题卡编号")
+    now = timezone.now()
+    published_count = 0
+    unchanged_count = 0
+    problems: list[str] = []
+    skipped: list[dict] = []
+    with transaction.atomic():
+        query = (
+            paper.questions.select_for_update()
+            .select_related("paper", "group")
+            .filter(body_mode="source_image")
+            .order_by("number", "id")
+        )
+        if ids is not None:
+            query = query.filter(pk__in=ids)
+        for question in list(query):
+            if question.ocr_pending or question.reread_requested or question.state not in library.REVIEWABLE_STATES:
+                skipped.append(
+                    {
+                        **_skip_locate(question),
+                        "category": "正在识读中",
+                        "detail": "请等待识读完成或先停止识读",
+                        "reason": "这道题正在识读中，暂不直接原图入库",
+                    }
+                )
+                continue
+            if not source_images.body_valid(question):
+                skipped.append(
+                    {
+                        **_skip_locate(question),
+                        "category": "原卷裁片无效",
+                        "detail": "请先在原卷中调整范围",
+                        "reason": "原卷范围或裁片无效，请先调整范围",
+                    }
+                )
+                continue
+            if library.already_published(question):
+                unchanged_count += 1
+                continue
+            library.approve(question, now=now, source=approver[0], agent=approver[1])
+            question.updated_at = now
+            question.save(
+                update_fields=[
+                    "approved",
+                    "approved_at",
+                    "approved_content_hash",
+                    "approval_source",
+                    "approval_agent",
+                    "updated_at",
+                ]
+            )
+            try:
+                _, is_new = library.publish(question)
+            except (ValueError, OSError) as exc:
+                _clear_approval(question)
+                question.save(
+                    update_fields=[
+                        "approved",
+                        "approved_at",
+                        "approved_content_hash",
+                        "approval_source",
+                        "approval_agent",
+                        "updated_at",
+                    ]
+                )
+                problems.append(f"第 {question.number} 题入库未完成：{exc}")
+                continue
+            published_count += int(is_new)
+            unchanged_count += int(not is_new)
+    return JsonResponse(
+        {
+            "published": published_count,
+            "unchanged": unchanged_count,
+            "problems": problems,
+            "skipped": skipped,
+            "paper": paper_json(Paper.objects.get(pk=paper.pk)),
+        }
+    )
+
+
+@csrf_exempt
 def demo_paper(request):
     """Open the practice paper for 新手教学 (``reset`` starts it over)."""
     if request.method != "POST":
@@ -3801,6 +3912,104 @@ def library_withdraw(request, publication_id):
     return JsonResponse({"publication": library.publication_json(publication)})
 
 
+def _queue_library_ocr_upgrade(publication: PublishedQuestion) -> tuple[bool, str]:
+    """为题库中的原图题排队「AI 识别转文字升级」任务，成功返回 (True, "")，否则返回 (False, 原因)。"""
+    if publication.status != PublishedQuestion.Status.PUBLISHED:
+        return False, "这道题已撤回或已被新版替代，请刷新题库"
+    if (publication.content or {}).get("body_mode") != "source_image":
+        return False, "这道题已经是文字题，无需再转文字"
+    if not publication.question_id:
+        return False, "这道题缺少来源题卡记录，无法发起 AI 识读"
+    with transaction.atomic():
+        question = (
+            Question.objects.select_for_update().select_related("paper").filter(pk=publication.question_id).first()
+        )
+        if question is None:
+            return False, "来源题卡已放入回收站，请先恢复后再转文字"
+        if demo.is_demo(question.paper):
+            return False, "示例练习题不调用云端识读服务"
+        if question.body_mode != "source_image":
+            return False, "来源题卡已是文字版，请直接在题卡同步或刷新题库"
+        if not source_images.valid_regions(question.paper, question.regions):
+            return False, "来源题卡缺少有效的原卷裁片范围"
+        if not _vision_ready(question.paper) or readers.assistant_mode():
+            return False, _reader_unavailable_sentence(question.paper) + "请在“设置 → API 配置”里补上读题密钥。"
+        if question.ocr_pending or question.reread_requested:
+            return True, ""
+        question.content_revision += 1
+        question.ocr_suggestion = {
+            "library_upgrade_publication_id": str(publication.pk),
+            "requested_at": timezone.now().isoformat(),
+        }
+        question.ocr_pending = True
+        question.reread_requested = True
+        question.error = ""
+        question.save(
+            update_fields=[
+                "content_revision",
+                "ocr_suggestion",
+                "ocr_pending",
+                "reread_requested",
+                "error",
+                "updated_at",
+            ]
+        )
+    return True, ""
+
+
+@csrf_exempt
+def library_ocr_upgrade(request, publication_id):
+    """对题库中的单道原图题发起 AI 识别转文字，完成后自动发布新版本并保留原图历史。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    publication = get_object_or_404(PublishedQuestion, pk=publication_id)
+    ok, reason = _queue_library_ocr_upgrade(publication)
+    if not ok:
+        return _error(reason, 409)
+    return JsonResponse({"ok": True, "queued": True, "publication_id": str(publication.pk)})
+
+
+@csrf_exempt
+def library_ocr_upgrade_batch(request):
+    """批量将题库中的原图题加入 AI 识别转文字升级队列。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request) or {}
+    ids = payload.get("ids")
+    if not isinstance(ids, list) or not 1 <= len(ids) <= 200:
+        return _error("请提供 1–200 道需要转文字的题库编号")
+    parsed_ids: list[uuid.UUID] = []
+    for raw in ids:
+        try:
+            parsed_ids.append(uuid.UUID(str(raw)))
+        except (ValueError, TypeError, AttributeError):
+            return _error("题库条目编号格式不正确")
+    publications = {
+        pub.pk: pub for pub in PublishedQuestion.objects.filter(pk__in=parsed_ids).select_related("paper", "question")
+    }
+    queued_ids: list[str] = []
+    skipped: list[dict] = []
+    for pub_id in parsed_ids:
+        pub = publications.get(pub_id)
+        if pub is None:
+            skipped.append({"id": str(pub_id), "reason": "题库条目不存在"})
+            continue
+        ok, reason = _queue_library_ocr_upgrade(pub)
+        if ok:
+            queued_ids.append(str(pub.pk))
+        else:
+            skipped.append({"id": str(pub.pk), "reason": reason})
+    if not queued_ids and skipped:
+        return _error(skipped[0]["reason"], 409)
+    return JsonResponse({"ok": True, "queued": len(queued_ids), "queued_ids": queued_ids, "skipped": skipped})
+
+
 @csrf_exempt
 def library_withdraw_batch(request):
     """一批题一起从题库撤下。
@@ -3990,6 +4199,47 @@ def credential_connection_test_view(request):
         result = reader_test.test_reading_connection(service)
     except reader_test.ReadingTestError as error:
         return _error(str(error), 400)
+    return JsonResponse(result, status=200 if result.get("ok") else 409)
+
+
+@csrf_exempt
+def api_config_view(request):
+    """统一读取与保存 API 凭据、读题模型偏好及解题 AI 配置。"""
+
+    from . import api_config
+
+    if request.method not in {"GET", "POST"}:
+        return HttpResponseNotAllowed(["GET", "POST"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return _error("API 与密钥设置只能在本机使用", 403)
+    if request.method == "GET":
+        return JsonResponse(api_config.public_payload())
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    try:
+        return JsonResponse(api_config.save_payload(_body(request)))
+    except api_config.ApiConfigError as exc:
+        return _error(str(exc), exc.status_code)
+
+
+@csrf_exempt
+def api_config_test_view(request):
+    """统一运行看图读题或独立解题 API 的合成连接探测（需显式 confirm=true）。"""
+
+    from . import api_config
+
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return _error("连接测试只能在本机使用", 403)
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    try:
+        result = api_config.test_connection(_body(request))
+    except api_config.ApiConfigError as exc:
+        return _error(str(exc), exc.status_code)
     return JsonResponse(result, status=200 if result.get("ok") else 409)
 
 

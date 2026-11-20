@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import ctypes
 import contextlib
-from concurrent.futures import ThreadPoolExecutor
+import ctypes
 import getpass
 import hashlib
 import json
 import os
 import re
 import shutil
-import sqlite3
 import socket
+import sqlite3
 import subprocess
 import sys
 import time
@@ -20,22 +19,22 @@ import urllib.error
 import urllib.request
 import uuid
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from credential_store import (
     DEFAULT_MODEL_PREFERENCES,
     ENGINE_NAMES,
     MODEL_ENVIRONMENT_KEYS,
-    provider_catalog,
     CredentialStoreError,
     credential_path,
     credential_pool,
     load_credentials,
     load_model_preferences,
     model_preference_environment,
+    provider_catalog,
     save_credentials,
 )
-
 
 FROZEN = bool(getattr(sys, "frozen", False))
 RESOURCE_ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)).resolve()
@@ -70,8 +69,8 @@ SECRET_NAMES = {
 }
 CREDENTIAL_STATUS_NAMES = {
     name
-    for _legacy_name, _pool_name, configured_name, size_name in POOL_ENVIRONMENT_NAMES.values()
-    for name in (configured_name, size_name)
+    for service in provider_catalog.ALL_SERVICES
+    for name in (f"QB_{service.upper()}_CONFIGURED", f"QB_{service.upper()}_POOL_SIZE")
 }
 # A start-up estimate of simultaneous requests one account may carry
 # (backend/core/account_pool.DEFAULT_ACCOUNT_CONCURRENCY).  MiniMax really
@@ -135,13 +134,13 @@ def _worker_credential_environment(
 
 
 def _credential_status_environment(pools: dict[str, list[str]]) -> dict[str, str]:
-    """Return non-secret availability/count fields safe for the web process."""
+    """为网页进程生成全部服务（切题/识图/解题）的非涉密可用状态与数量快照。"""
 
     result: dict[str, str] = {}
-    for service, (_legacy_name, _pool_name, configured_name, size_name) in POOL_ENVIRONMENT_NAMES.items():
+    for service in provider_catalog.ALL_SERVICES:
         count = len(pools.get(service, []))
-        result[configured_name] = "1" if count else "0"
-        result[size_name] = str(count)
+        result[f"QB_{service.upper()}_CONFIGURED"] = "1" if count else "0"
+        result[f"QB_{service.upper()}_POOL_SIZE"] = str(count)
     return result
 
 
@@ -781,7 +780,7 @@ def _resolve_credential_pools() -> tuple[list[str], list[str]]:
 
 
 def _saved_credential_pools() -> dict[str, list[str]]:
-    """Load desktop pools without prompting so the in-app settings can open."""
+    """无交互读取全部已保存服务的账号池，以便应用内设置页零延迟展示状态。"""
 
     try:
         saved = load_credentials()
@@ -790,7 +789,7 @@ def _saved_credential_pools() -> dict[str, list[str]]:
         # repaired through the explicitly retained recovery tool.
         print(exc)
         saved = {}
-    return {service: credential_pool(saved, service) for service in POOL_ENVIRONMENT_NAMES}
+    return {service: credential_pool(saved, service) for service in provider_catalog.ALL_SERVICES}
 
 
 def main() -> int:

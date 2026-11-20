@@ -93,6 +93,13 @@ def library_rows(params, *, omit: str = ""):
     if answer in {"yes", "no"} and omit != "answer":
         missing = models.Q(content__answer="") | models.Q(content__answer__isnull=True)
         rows = rows.exclude(missing) if answer == "yes" else rows.filter(missing)
+    body_mode = params.get("body_mode", "").strip()
+    if body_mode == "source_image" and omit != "body_mode":
+        rows = rows.filter(content__body_mode="source_image")
+    elif body_mode == "text" and omit != "body_mode":
+        # 文字题的快照通常不写入 body_mode 键，SQLite 下直接 exclude(content__body_mode="source_image")
+        # 会因 NULL != 'source_image' 为 UNKNOWN 而漏掉全部文字题。
+        rows = rows.filter(models.Q(content__body_mode__isnull=True) | models.Q(content__body_mode="text"))
 
     def tag_ids(key):
         raw = params.get(key, "")
@@ -170,6 +177,8 @@ def _active_facets(params) -> set[str]:
         active.add("review")
     if str(params.get("answer", "")).strip() in {"yes", "no"}:
         active.add("answer")
+    if str(params.get("body_mode", "")).strip() in {"source_image", "text"}:
+        active.add("body_mode")
     if (
         str(params.get("tag", "")).strip()
         or params.get("untagged_knowledge") == "true"
@@ -248,6 +257,10 @@ def facet_counts(params) -> dict:
     answers["yes"] = yes_answers
     answers["no"] = total_answers - yes_answers
 
+    body_mode_rows = rows_for("body_mode")
+    source_image_count = body_mode_rows.filter(content__body_mode="source_image").count()
+    body_modes = {"source_image": source_image_count, "text": body_mode_rows.count() - source_image_count}
+
     from .library_tagging import descendant_ids, relation_context
     from .models import LibraryTag
 
@@ -277,6 +290,7 @@ def facet_counts(params) -> dict:
         "types": types,
         "reviews": reviews,
         "answers": answers,
+        "body_modes": body_modes,
         "tags": sorted(tags.values(), key=lambda item: (-item["count"], item["tag"])),
     }
 

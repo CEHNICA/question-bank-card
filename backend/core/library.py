@@ -267,7 +267,9 @@ def confirm_published_review(question: Question) -> int:
 
 
 def type_blocks_approval(question: Question) -> bool:
-    """题型还没定的题不能通过、不能入库（题库里不再出现“题型待核对”）。"""
+    """文字题题型还没定不能通过入库；原图题允许带「题型未定」先入库，后续在题库随时补选。"""
+    if source_images.is_image(question):
+        return False
     return not qtypes.decided(question.question_type)
 
 

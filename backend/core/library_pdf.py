@@ -500,11 +500,12 @@ window.__qbPdfStatus = {ready:false};
   const types=[['single_choice','选择题'],['multiple_choice','多选题'],['fill_blank','填空题'],['true_false','判断题'],['free_response','解答题']];
   const known=new Set(types.map(x=>x[0]));types.push(['other','其他']);
   const printed=input.sectionHeadings||{};
+  const basketOrder=o.group_mode==='basket_order';
+  const grouped=basketOrder?[['basket_order',null,input.items]]:types.map(([key,name])=>[key,name,input.items.filter(x=>key==='other'?!known.has(x.type):x.type===key)]);
   let section=0;
-  for(const [key,name] of types){
-    const items=input.items.filter(x=>key==='other'?!known.has(x.type):x.type===key);if(!items.length)continue;
-    if(o.document!=='answers')source.append(node('h3','print-section',printed[key]||('一二三四五六'[section]+'、'+name)));
-    section++;
+  for(const [key,name,items] of grouped){
+    if(!items.length)continue;
+    if(name&&o.document!=='answers'){source.append(node('h3','print-section',printed[key]||('一二三四五六'[section]+'、'+name)));section++;}
     for(const item of items){
       number++;numbered.push([number,item]);if(o.document==='answers')continue;
       const block=node('div','print-question');
@@ -544,13 +545,15 @@ window.__qbPdfStatus = {ready:false};
 """
 
 
-def _section_headings(captured) -> dict:
+def _section_headings(captured, group_mode: str = "by_type") -> dict:
     """每组题印什么大题标题，在 Python 这边算好再交给页面。
 
     PDF 在浏览器里分组，Word 在这里分组；标题的取舍只有一条规则
     （见 word._section_heading），两处各写一遍迟早会对不上。
     枚举方式和 word._ordered 完全一致，空组跳过，所以序号也一致。
     """
+    if group_mode == "basket_order":
+        return {}
     known = {key for key, _ in word.GROUPS}
     groups = [(key, name, [item for item in captured if item["type"] == key]) for key, name in word.GROUPS]
     groups.append(("other", "其他", [item for item in captured if item["type"] not in known]))
@@ -607,7 +610,12 @@ def _html_document(captured, title, options):
             }
         )
     data = json.dumps(
-        {"items": items, "title": title, "options": options, "sectionHeadings": _section_headings(captured)},
+        {
+            "items": items,
+            "title": title,
+            "options": options,
+            "sectionHeadings": _section_headings(captured, options.get("group_mode", "by_type")),
+        },
         ensure_ascii=False,
     )
     data = (

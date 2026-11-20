@@ -1,202 +1,207 @@
 "use strict";
 
+// 统一凭据池明文查看安全组件测试：
+// - 默认只展示 16 星号掩码，绝不自动请求明文；
+// - 点击「查看」后通过 POST /api/settings/api-config/key/reveal (no-store + X-QB-Request) 显式拉取单条；
+// - 同一时间至多展示一条，查看第二条时自动隐藏第一条；
+// - 60 秒定时自动隐藏，切后台（visibilitychange）、pagehide、discard 与保存后立即清零。
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const path = require("node:path");
 const vm = require("node:vm");
-const dom = require("./credential-test-dom.js");
-const App = require("./app.js");
-const source = fs.readFileSync(require.resolve("./app.js"), "utf8");
-const css = fs.readFileSync(require.resolve("./styles.css"), "utf8");
-assert.match(css, /\.credential-dialog::backdrop\s*\{\s*backdrop-filter:\s*none;/);
-const between = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
-const functions = between("  function settingsEngineChoices(", "  function renderSettingsTask(");
-const start = source.indexOf('  Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {', source.indexOf('  $("questionTrash").addEventListener("click", openQuestionTrash);'));
-const listeners = source.slice(start, source.indexOf("  // Queue the values captured", start));
-const apiFunction = between("  async function api(", "  let toastTimer =");
-const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { resolve, reject, promise }; };
-const response = (body, ok = true) => ({ ok, status: ok ? 200 : 409, json: async () => body });
-const copy = (value) => JSON.parse(JSON.stringify(value));
 
-function scenario() {
-  const nodes = new Map(), calls = [], timers = new Map(), closes = [], events = {}, windows = {};
-  const counts = { mineru: 2, modelscope: 0, minimax: 3, siliconflow: 1 };
-  let timer = 0;
-  const $ = (id) => { if (!nodes.has(id)) nodes.set(id, dom.node(id)); return nodes.get(id); };
-  $("credentialDialog").showModal = function () { this.open = true; };
-  $("credentialDialog").close = function () { this.open = false; closes.push(() => this.events.close?.forEach((fn) => fn())); };
-  const metadata = () => ({ services: Object.fromEntries(Object.entries(counts).map(([service, count]) => [service, { configured: count > 0, count }])) });
-  const context = {
-    $, el: dom.el, icon: dom.icon, AbortController, console,
-    // 密钥来源标注要读 /api/status（这台电脑上「生效的」是旧环境变量那份），
-    // 所以这两个测试桩也得有 state；这里没有旧环境变量，判定就是「没有说明」。
-    state: { status: null }, credentialSourceNote: () => "",
-    document: { hidden: false, addEventListener(type, fn) { (events[type] ||= []).push(fn); } },
-    window: { addEventListener(type, fn) { (windows[type] ||= []).push(fn); } },
-    requestAnimationFrame() { return 0; }, cancelAnimationFrame() {}, anyDialogOpen: () => $("credentialDialog").open,
-    setTimeout(fn, delay) { const id = ++timer; timers.set(id, { fn, delay }); return id; }, clearTimeout(id) { timers.delete(id); },
-    toast() {}, confirmDialog: async () => true, loadStatus: async () => true,
-    fetch: async (url, options) => {
-      calls.push({ url, options, body: options.body ? JSON.parse(options.body) : null });
-      if (url.endsWith("/key/reveal")) return context.reveal ? context.reveal(calls.at(-1)) :
-        response({ ...calls.at(-1).body, key: `synthetic-${calls.at(-1).body.service}-${calls.at(-1).body.index}` });
-      if (options.method === "POST") Object.entries(calls.at(-1).body.services).forEach(([service, item]) => {
-        if (item.action === "clear") counts[service] = 0;
-        if (item.action === "replace") counts[service] = item.accounts.length;
-      });
-      return response(metadata());
+const apiJs = fs.readFileSync(path.join(__dirname, "api-settings.js"), "utf8");
+
+class El {
+  constructor(tag = "div") {
+    this.tagName = tag.toUpperCase();
+    this.id = "";
+    this.className = "";
+    this.textContent = "";
+    this.value = "";
+    this.checked = false;
+    this.disabled = false;
+    this.hidden = false;
+    this.open = false;
+    this.dataset = {};
+    this.attributes = {};
+    this.children = [];
+    this.listeners = new Map();
+  }
+  append(...items) {
+    for (const i of items) if (i && typeof i === "object") { this.children.push(i); i.parentElement = this; }
+  }
+  replaceChildren(...items) {
+    this.children = [];
+    this.append(...items);
+  }
+  addEventListener(n, fn) {
+    const arr = this.listeners.get(n) || [];
+    arr.push(fn);
+    this.listeners.set(n, arr);
+  }
+  trigger(n) {
+    for (const fn of this.listeners.get(n) || []) fn({ target: this, preventDefault() {} });
+  }
+  setAttribute(k, v) { this.attributes[k] = String(v); }
+  querySelector(selector) {
+    if (this.className && selector.startsWith(".") && this.className.split(/\s+/).includes(selector.slice(1))) return this;
+    for (const c of this.children) {
+      const hit = c.querySelector?.(selector);
+      if (hit) return hit;
     }
-  };
-  vm.runInNewContext(apiFunction + functions + listeners + "\nglobalThis.savedRows = credentialSavedRows; globalThis.fields = CREDENTIAL_FIELDS;", context);
-  const row = (service, index = 0) => context.savedRows.get(`${service}:${index}`);
-  const submit = () => $("credentialForm").events.submit[0]({ preventDefault() {} });
-  const expire = (delay) => {
-    for (const [id, value] of [...timers]) if (value.delay === delay) { timers.delete(id); value.fn(); }
-  };
-  return { context, $, calls, counts, metadata, row, submit, timers, expire, events, windows,
-    flushClose() { while (closes.length) closes.shift()(); } };
-}
-
-function cropCloseScenario({ dirty = false, backendChanged = false } = {}) {
-  const nodes = new Map(), frames = [], tasks = [], log = [];
-  const $ = (id) => { if (!nodes.has(id)) nodes.set(id, dom.node(id)); return nodes.get(id); };
-  $("pageDialog").open = true;
-  $("pageDialog").close = function () { log.push("closed"); this.open = false; };
-  const q = { id: 7, state: "green", approved: false, todo: backendChanged, green: !backendChanged };
-  const frozen = { dirty, wasDirty: dirty, todo: false, green: true, approved: false, ai: false,
-    waiting: false, red: false, unpublished: false };
-  const state = { paperId: "paper", paper: {}, cropDraftAttention: new Map([[7, frozen]]), rendered: new Map([[7, "cached"]]) };
-  const dialog = { active: true, session: 1, question: q, paperId: "paper", mode: "figures", boxes: [], ignoredCandidates: new Set(),
-    page: 0, saving: false, closing: false, sketch: null, pendingFigure: null, zoomFrame: 0 };
-  const context = { $, state, dialog, pageOpenIntent: 0, CROP_EDIT_KEY: "crop", QBManualCrop: App, editGuard: App.createEditGuard(),
-    questionById: () => q, isApproved: () => false, isAiApproved: () => false, needsCheck: () => q.todo, needsGeneralReview: () => q.green,
-    cancelFigureSketch() {}, cancelPendingPageOpening() { context.pageOpenIntent++; }, closeFigureSlotMenu() {}, clearPagePanKey() {},
-    setCropSaving() {}, showCropGuide() {}, hasRegionReadSubmission: () => false, toast() {},
-    counts() { log.push("counts"); return {}; }, renderFilters() {}, renderMeter() {}, renderCards() { log.push("cards"); },
-    requestAnimationFrame(fn) { frames.push(fn); return frames.length; }, cancelAnimationFrame() {},
-    setTimeout(fn) { tasks.push(fn); }, confirmDialog: async () => { log.push("confirm"); return true; }
-  };
-  vm.runInNewContext(between("  function cropSnapshot()", "  function syncCropDraftClassification()")
-    + between("  function syncCropDraftClassification()", "  function showCropResult("), context);
-  context.trackCropDraft();
-  if (dirty) dialog.boxes.push({ page_idx: 0, bbox: [1, 2, 30, 40], slot: "A" });
-  return { context, $, dialog, state, frames, tasks, log };
+    return null;
+  }
+  querySelectorAll(selector) {
+    const out = [];
+    const match = (n) => {
+      if (selector.startsWith("[data-secret-row=")) {
+        const expected = selector.slice('[data-secret-row="'.length, -2);
+        return n.dataset?.secretRow === expected;
+      }
+      return false;
+    };
+    const walk = (n) => {
+      if (match(n)) out.push(n);
+      for (const c of n.children || []) walk(c);
+    };
+    walk(this);
+    return out;
+  }
 }
 
 (async () => {
-  const masked = scenario(); await masked.context.openCredentialSettings();
-  assert.equal(masked.$("credentialSavedTotal").textContent, "共保存 6 个密钥");
-  for (const [service, count] of Object.entries(masked.counts)) {
-    const field = masked.context.fields[service];
-    assert.equal(masked.$(field.state).textContent, `已保存 ${count} 个`);
-    // 1.26.15：没存过的那家不再塞一句"暂无已保存密钥"占位 —— 状态已经写在
-    // 卡片标题右边（"已保存 0 个"），同一件事说两遍只会让页面更吵。
-    assert.equal(masked.$(field.list).children.length, count);
-    assert.equal(masked.$(field.input).value, "");
-    for (let index = 0; index < count; index++) assert.equal(masked.row(service, index).value.textContent, "****************");
-  }
-  await masked.context.toggleCredentialKey("minimax", 1);
-  const viewed = masked.row("minimax", 1), call = masked.calls.at(-1);
-  assert.deepEqual(copy(call.body), { service: "minimax", index: 1 });
-  assert.equal(call.options.method, "POST"); assert.equal(call.options.cache, "no-store");
-  assert.equal(call.options.headers["X-QB-Request"], "1");
-  assert.equal(viewed.value.textContent, "synthetic-minimax-1");
-  assert.equal(viewed.button.getAttribute("aria-pressed"), "true");
-  assert.equal(masked.$("credentialMinimaxInput").value, "", "Viewing never populates a replacement field");
-  const beforeSave = masked.calls.length; await masked.submit();
-  assert.equal(masked.calls.length, beforeSave, "Only viewing a stored value sends no save request");
-  await masked.context.toggleCredentialKey("mineru", 0);
-  await masked.context.toggleCredentialKey("minimax", 1);
-  assert.equal(viewed.value.textContent, "****************");
-  assert.equal(masked.row("mineru", 0).visible, true, "Rows have independent reveal controls");
-  masked.expire(60000); assert.equal(masked.row("mineru", 0).value.textContent, "****************");
-  assert.equal(masked.timers.size, 0);
-  await masked.context.toggleCredentialKey("siliconflow", 0);
-  masked.$("credentialMinimaxInput").value = "new-synthetic-a;new-synthetic-b";
-  await masked.submit();
-  const write = masked.calls.findLast((item) => item.options.method === "POST" && item.url === "/api/settings/credentials");
-  assert.deepEqual(copy(write.body.services.minimax), { action: "replace", accounts: ["new-synthetic-a", "new-synthetic-b"] });
-  for (const service of ["mineru", "modelscope", "siliconflow"]) assert.deepEqual(copy(write.body.services[service]), { action: "keep" });
-  assert.equal(JSON.stringify(write.body).includes("synthetic-siliconflow"), false, "A revealed saved key is never resent");
-  assert.equal(masked.$("credentialSavedTotal").textContent, "共保存 5 个密钥");
-  assert.equal(masked.row("siliconflow", 0).visible, false);
+  const nodes = new Map();
+  const register = (n) => { if (n?.id) nodes.set(n.id, n); for (const c of n?.children || []) register(c); };
+  const host = new El("div");
+  host.id = "settingsCredentialHost";
+  const orig = host.replaceChildren.bind(host);
+  host.replaceChildren = (...items) => { orig(...items); for (const i of items) register(i); };
+  nodes.set("settingsCredentialHost", host);
 
-  const cancelled = scenario(); await cancelled.context.openCredentialSettings();
-  const wait = deferred(); cancelled.context.reveal = () => wait.promise;
-  const task = cancelled.context.toggleCredentialKey("mineru", 0);
-  const signal = cancelled.calls.at(-1).options.signal;
-  await cancelled.context.toggleCredentialKey("mineru", 0);
-  assert.equal(signal.aborted, true);
-  wait.resolve(response({ service: "mineru", index: 0, key: "late-synthetic" })); await task;
-  assert.equal(cancelled.row("mineru").value.textContent, "****************");
-  assert.equal(cancelled.$("credentialResult").textContent, "");
+  const docEvents = {};
+  const winEvents = {};
+  const timers = new Map();
+  let timerSeq = 0;
+  const calls = [];
 
-  const reopened = scenario(); await reopened.context.openCredentialSettings();
-  const late = deferred(); reopened.context.reveal = () => late.promise;
-  const oldTask = reopened.context.toggleCredentialKey("minimax", 0);
-  const oldRow = reopened.row("minimax");
-  const closeCalls = reopened.calls.length;
-  reopened.context.requestCredentialClose();
-  assert.equal(reopened.calls.length, closeCalls, "Closing sends no fetch, save or reload request");
-  assert.equal(reopened.$("credentialDialog").open, false);
-  assert.equal(oldRow.controller, null); assert.equal(reopened.calls.at(-1).options.signal.aborted, true);
-  await reopened.context.openCredentialSettings();
-  reopened.context.reveal = (request) => response({ ...request.body, key: "new-scope-synthetic" });
-  await reopened.context.toggleCredentialKey("minimax", 0);
-  reopened.flushClose();
-  reopened.$("credentialMinimaxInput").value = "new-session-synthetic";
-  late.resolve(response({ service: "minimax", index: 0, key: "old-session-synthetic" })); await oldTask;
-  assert.equal(reopened.row("minimax").value.textContent, "new-scope-synthetic", "Queued old close/reveal cannot clear a newly revealed key");
-  assert.equal(reopened.$("credentialMinimaxInput").value, "new-session-synthetic");
+  const documentObj = {
+    readyState: "complete",
+    hidden: false,
+    createElement: (t) => new El(t),
+    getElementById: (id) => nodes.get(id) || null,
+    addEventListener(n, fn) { (docEvents[n] ||= []).push(fn); },
+    dispatchEvent() {},
+  };
+  const windowObj = {
+    location: { pathname: "/settings", hash: "" },
+    addEventListener(n, fn) { (winEvents[n] ||= []).push(fn); },
+  };
+  const payload = {
+    catalog: {
+      services: [
+        { key: "mineru", label: "MinerU", roles: ["cutting"] },
+        { key: "minimax", label: "MiniMax", engine: "minimax_m3", roles: ["reading", "answering"], reading_default_model: "MiniMax-M3", reading_suggested_models: [], answer_defaults: { model: "MiniMax-M3.1-Flash-Preview", base_url: "https://api.minimax.cn/v1", supports_images: true, thinking: true } },
+        { key: "deepseek", label: "DeepSeek", roles: ["answering"], answer_defaults: { model: "deepseek-v4-pro", base_url: "https://api.deepseek.com", supports_images: false, thinking: true } },
+      ],
+      vision_order: ["minimax"],
+      answer_order: ["deepseek", "minimax"],
+    },
+    max_accounts: 8,
+    credentials: { mineru: { configured: true, count: 2 }, minimax: { configured: true, count: 1 }, deepseek: { configured: true, count: 1 } },
+    reading: { primary: "minimax_m3", models: { minimax: "MiniMax-M3" }, plans: { minimax: "auto" }, readiness: { ready: true } },
+    answering: { mode: "api", provider: "deepseek", features: { ai_answer: true, knowledge_tags: false }, on_intake: { answer: false } },
+  };
 
-  const changed = scenario(); await changed.context.openCredentialSettings();
-  const stale = deferred(); changed.context.reveal = () => stale.promise;
-  const staleTask = changed.context.toggleCredentialKey("minimax", 2);
-  const staleSignal = changed.calls.at(-1).options.signal;
-  changed.counts.minimax = 0; changed.context.renderCredentialStates(changed.metadata());
-  assert.equal(staleSignal.aborted, true);
-  stale.resolve(response({ service: "minimax", index: 2, key: "deleted-synthetic" })); await staleTask;
-  assert.equal(changed.row("minimax", 2), undefined); assert.equal(changed.$("credentialSavedTotal").textContent, "共保存 3 个密钥");
+  const sandbox = {
+    window: windowObj,
+    document: documentObj,
+    HTMLElement: El,
+    AbortController,
+    CustomEvent: class { constructor(t, init) { this.type = t; this.detail = init?.detail; } },
+    setTimeout(fn, delay) { const id = ++timerSeq; timers.set(id, { fn, delay }); return id; },
+    clearTimeout(id) { timers.delete(id); },
+    fetch: async (url, opts = {}) => {
+      const body = opts.body ? JSON.parse(opts.body) : null;
+      calls.push({ url, method: opts.method || "GET", cache: opts.cache, headers: opts.headers, body });
+      if (url === "/api/settings/api-config/key/reveal") {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ ...body, key: `secret-${body.service}-${body.index}` }) };
+      }
+      return { ok: true, status: 200, text: async () => JSON.stringify(payload) };
+    },
+  };
+  windowObj.setTimeout = sandbox.setTimeout;
+  windowObj.clearTimeout = sandbox.clearTimeout;
+  vm.runInNewContext(apiJs, sandbox);
 
-  for (const result of [{ service: "mineru", index: 0, key: "wrong-provider-synthetic" },
-    { service: "minimax", index: 1, key: "wrong-index-synthetic" }, { service: "minimax", index: 0, key: "" }]) {
-    const invalid = scenario(); await invalid.context.openCredentialSettings(); invalid.context.reveal = () => response(result);
-    await invalid.context.toggleCredentialKey("minimax", 0);
-    assert.equal(invalid.row("minimax").value.textContent, "****************");
-    assert.match(invalid.$("credentialResult").textContent, /暂时无法查看/);
-  }
-  const error = scenario(); await error.context.openCredentialSettings();
-  error.context.reveal = () => response({ error: "synthetic-sensitive-error-value" }, false);
-  await error.context.toggleCredentialKey("mineru", 0);
-  assert.equal(error.$("credentialResult").textContent.includes("synthetic-sensitive"), false);
-  const timed = scenario(); await timed.context.openCredentialSettings(); const timeout = deferred();
-  timed.context.reveal = () => timeout.promise; const timedTask = timed.context.toggleCredentialKey("siliconflow", 0);
-  const timedSignal = timed.calls.at(-1).options.signal; timed.expire(15000); assert.equal(timedSignal.aborted, true);
-  timeout.resolve(response({ service: "siliconflow", index: 0, key: "timeout-synthetic" })); await timedTask;
-  assert.equal(timed.row("siliconflow").value.textContent, "****************"); assert.equal(timed.timers.size, 0);
+  await windowObj.APISettings.mount(host, { mode: "inline" });
 
-  const hidden = scenario(); await hidden.context.openCredentialSettings(); await hidden.context.toggleCredentialKey("mineru", 0);
-  hidden.context.document.hidden = true; hidden.events.visibilitychange.forEach((fn) => fn());
-  assert.equal(hidden.row("mineru").visible, false);
-  await hidden.context.toggleCredentialKey("minimax", 0); hidden.windows.pagehide.forEach((fn) => fn());
-  assert.equal(hidden.row("minimax").visible, false);
-  await hidden.context.toggleCredentialKey("siliconflow", 0); hidden.context.requestCredentialClose();
-  assert.equal(hidden.row("siliconflow").value.textContent, "****************", "Close conceals immediately, before native close events");
-  assert.equal(hidden.timers.size, 0);
+  const findRow = (svc, idx) => {
+    const out = [];
+    const walk = (n) => {
+      if (n.dataset?.secretRow === `${svc}:${idx}`) out.push(n);
+      for (const c of n.children || []) walk(c);
+    };
+    walk(host);
+    return out[0];
+  };
+  host.querySelector = (selector) => {
+    if (selector.startsWith('[data-secret-row="')) {
+      const val = selector.slice('[data-secret-row="'.length, -2);
+      const [s, i] = val.split(":");
+      return findRow(s, Number(i));
+    }
+    return null;
+  };
 
-  const clean = cropCloseScenario(); const close = clean.context.requestPageDialogClose();
-  assert.equal(clean.$("pageDialog").open, false); assert.deepEqual(clean.log, ["closed"]);
-  assert.equal(clean.frames.length, 0); assert.equal(clean.state.rendered.get(7), "cached"); await close;
-  const refreshing = cropCloseScenario({ backendChanged: true }); await refreshing.context.requestPageDialogClose();
-  assert.deepEqual(refreshing.log, ["closed"]); assert.equal(refreshing.frames.length, 1);
-  refreshing.frames.shift()(); assert.deepEqual(refreshing.log, ["closed"], "The animation frame only queues cleanup after paint");
-  refreshing.tasks.shift()(); assert.deepEqual(refreshing.log, ["closed", "counts", "cards"]);
-  const newScope = cropCloseScenario({ backendChanged: true }); await newScope.context.requestPageDialogClose();
-  newScope.frames.shift()(); newScope.dialog.active = true; newScope.dialog.session++; newScope.$("pageDialog").open = true;
-  newScope.tasks.shift()(); assert.deepEqual(newScope.log, ["closed"], "Old deferred cleanup cannot touch a reopened editor");
-  const draft = cropCloseScenario({ dirty: true }); draft.context.confirmDialog = async () => false;
-  assert.equal(await draft.context.requestPageDialogClose(), false); assert.equal(draft.$("pageDialog").open, true);
-  assert.equal(draft.dialog.boxes.length, 1); assert.equal(draft.frames.length, 0);
-  draft.context.confirmDialog = async () => true; assert.equal(await draft.context.requestPageDialogClose(), true);
-  assert.equal(draft.$("pageDialog").open, false); assert.equal(draft.context.editGuard.hasPendingWork(), false);
-  console.log("Saved credentials: masked multi-key counts; explicit no-store reveal; 60s hide; independent rows; keep/replace isolation; close/abort/timeout/stale/provider guards; paint-first clean and dirty crop exit: OK");
-})().catch((error) => { console.error(error); process.exitCode = 1; });
+  // 默认全部掩码展示，绝不提前发 reveal 请求
+  const m0 = findRow("mineru", 0);
+  const m1 = findRow("mineru", 1);
+  const ds0 = findRow("deepseek", 0);
+  assert.equal(m0.children[1].textContent, "****************");
+  assert.equal(ds0.children[1].textContent, "****************");
+  assert.equal(calls.length, 1, "only initial config load fired");
+
+  const flush = async () => { for (let i = 0; i < 8; i += 1) await Promise.resolve(); };
+
+  // 1. 查看 mineru:1（严格同源 no-store POST + 60 秒自动隐藏计时器）
+  m1.children[2].trigger("click");
+  await flush();
+  const revealCall = calls.at(-1);
+  assert.equal(revealCall.url, "/api/settings/api-config/key/reveal");
+  assert.equal(revealCall.method, "POST");
+  assert.equal(revealCall.cache, "no-store");
+  assert.equal(revealCall.headers["X-QB-Request"], "1");
+  assert.deepEqual(revealCall.body, { service: "mineru", index: 1 });
+  assert.equal(m1.children[1].textContent, "secret-mineru-1");
+  assert.equal(m1.children[2].textContent, "隐藏");
+
+  // 2. 查看 deepseek:0 时自动隐藏上一条 mineru:1
+  ds0.children[2].trigger("click");
+  await flush();
+  assert.equal(m1.children[1].textContent, "****************", "previous key masked when another revealed");
+  assert.equal(ds0.children[1].textContent, "secret-deepseek-0", "answer-only service uses same secure reveal");
+
+  // 3. 触发 60000ms 定时器自动掩码
+  const sixty = [...timers.entries()].find(([, v]) => v.delay === 60000);
+  assert.ok(sixty, "schedules 60s auto-hide timer");
+  timers.delete(sixty[0]);
+  sixty[1].fn();
+  assert.equal(ds0.children[1].textContent, "****************", "auto-hides after 60 seconds");
+
+  // 4. 切后台 visibilitychange 与 pagehide 立即清零
+  ds0.children[2].trigger("click");
+  await flush();
+  assert.equal(ds0.children[1].textContent, "secret-deepseek-0");
+  documentObj.hidden = true;
+  for (const fn of docEvents.visibilitychange || []) fn();
+  assert.equal(ds0.children[1].textContent, "****************", "hides immediately when tab hidden");
+
+  documentObj.hidden = false;
+  ds0.children[2].trigger("click");
+  await flush();
+  for (const fn of winEvents.pagehide || []) fn();
+  assert.equal(ds0.children[1].textContent, "****************", "hides immediately on pagehide");
+
+  console.log("saved key 60s reveal & masking checks: OK");
+})();

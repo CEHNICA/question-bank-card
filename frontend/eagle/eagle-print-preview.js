@@ -313,18 +313,18 @@
 
     // 分组顺序只有一份定义（导出那边也用同一份）。
     const grouped = window.ExamExport && typeof window.ExamExport.paperGroups === "function"
-      ? window.ExamExport.paperGroups(items)
+      ? window.ExamExport.paperGroups(items, options)
       : items.map(value => ["全部", [value]]);
 
     let number = 0;
     const answers = [];
     const toolMap = new Map();
     grouped.forEach(([name, group], index) => {
-      if (options.document !== "answers") {
+      if (options.document !== "answers" && name) {
         const heading = window.ExamExport && typeof window.ExamExport.sectionHeading === "function"
           ? window.ExamExport.sectionHeading(group, index, name)
           : name;
-        paper.append(node("h3", "print-section", heading));
+        if (heading) paper.append(node("h3", "print-section", heading));
       }
       group.forEach(item => {
         number += 1;

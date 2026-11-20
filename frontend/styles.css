@@ -375,6 +375,9 @@ body.drawer-open { overflow: hidden; }
 .side-note { display: flex; gap: 7px; font-size: 12px; color: var(--amber); line-height: 1.55; padding: 8px 10px; border-radius: 9px; background: var(--amber-soft); }
 .side-note::before { content: "!"; flex: none; display: grid; place-items: center; width: 16px; height: 16px; margin-top: 1px; border-radius: 50%;
   background: var(--amber); color: #fff; font-size: 11px; font-weight: 700; }
+.side-cut-only { display: flex; align-items: center; gap: 6px; margin: 6px 2px 0; font-size: 12px; color: var(--muted); cursor: pointer; user-select: none; }
+.side-cut-only[hidden] { display: none; }
+.side-cut-only input { accent-color: var(--accent); cursor: pointer; }
 .side-heading { display: flex; justify-content: space-between; align-items: center; margin: 6px 4px -4px; font-size: 12px; font-weight: 600;
   color: var(--muted); letter-spacing: .04em; }
 .paper-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
@@ -592,11 +595,11 @@ body.drawer-open { overflow: hidden; }
 .card.flash { animation: flash .9s ease-out; }
 @keyframes flash { 0% { box-shadow: 0 0 0 6px rgba(31,107,95,.35); } 100% { box-shadow: 0 0 0 3px var(--accent-ring); } }
 .card-toggle { position: absolute; top: 10px; right: 12px; z-index: 2; }
-.card.has-toggle .card-head { padding-right: 84px; }
 .card.compact { display: block; cursor: pointer; }
 .card.compact:hover { background: var(--surface-2); }
 .compact-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px 10px 18px; min-width: 0; }
-.compact-row .card-toggle { position: static; margin-left: 2px; }
+/* NOTE: 展开态与收起态的「展开/收起」按钮统一放进头部 flex 流，避免绝对定位被后续 padding 覆写而与「已入库」徽章重合。 */
+.compact-row .card-toggle, .card-head .card-toggle { position: static; margin-left: 2px; flex: none; white-space: nowrap; }
 .compact-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ink-2); font-family: var(--content-font); font-size: 14.5px; }
 .compact-text .qb-math { font-size: .95em; }
 
@@ -1195,6 +1198,20 @@ dialog[open]:has(> .teach-panel:not([hidden]), > .tour:not([hidden])) { animatio
 .resegment-acknowledge { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; align-items: start; padding: 12px 13px;
   border: 1px solid var(--amber-line); border-radius: 10px; background: #fffaf0; color: var(--ink-2); font-size: 13px; line-height: 1.55; cursor: pointer; }
 .resegment-acknowledge input { width: 18px; height: 18px; margin-top: 1px; accent-color: var(--accent); }
+/* 原图批量入库前未定题型速定弹窗 */
+.cut-type-dialog { width: min(640px, 94vw); max-height: min(88vh, 840px); padding: 0; }
+.cut-type-dialog[open] { display: flex; flex-direction: column; }
+.cut-type-dialog .dialog-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 22px 12px; border-bottom: 1px solid var(--line); }
+.cut-type-dialog .dialog-head h2 { font-size: 16px; margin: 0; }
+.cut-type-desc { margin: 14px 22px 0; font-size: 13px; color: var(--ink-2); line-height: 1.65; }
+.cut-type-bulk { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 22px 0; padding: 10px 12px; border: 1px solid var(--amber-line); border-radius: 10px; background: #fffaf0; font-size: 13px; }
+.cut-type-bulk select, .cut-type-row select { height: 34px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font-size: 13px; }
+.cut-type-list { flex: 1; min-height: 120px; overflow: auto; margin: 12px 22px 0; padding-right: 4px; display: grid; gap: 8px; }
+.cut-type-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.cut-type-meta { display: grid; gap: 4px; min-width: 0; flex: 1; }
+.cut-type-meta strong { font-size: 13.5px; color: var(--ink); }
+.cut-type-section { font-size: 12px; color: var(--muted); }
+.cut-type-thumb { max-width: 280px; max-height: 76px; object-fit: contain; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
 .resegment-preview-actions { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 13px 20px;
   border-top: 1px solid var(--line); background: var(--surface); }
 .resegment-preview-actions .settings-save-result { margin-right: auto; }

@@ -60,6 +60,8 @@ PRINT_DEFAULTS = {
     # 全卷配图整行默认位置；单题 figure_overrides.align 可覆盖。靠右更贴卷面习惯。
     "figure_align": "right",
     "figure_overrides": {},
+    # 大题组织方式："by_type" 按题型自动归组；"basket_order" 按当前选题顺序混排（不拆大题）。
+    "group_mode": "by_type",
 }
 # 留白（answer_space）有两种形态：
 #
@@ -236,9 +238,13 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
         raise DraftError("答案位置只能选 inline 或 appendix")
     if "figure_align" in value and value["figure_align"] not in FIGURE_ALIGNMENTS:
         raise DraftError("配图整行位置只能选靠左、居中或靠右")
+    if "group_mode" in value and value["group_mode"] not in ("by_type", "basket_order"):
+        raise DraftError("大题组织方式只能选按题型归组或按选题顺序混排")
     result = {**deepcopy(PRINT_DEFAULTS), **deepcopy(defaults or {}), **deepcopy(value)}
     if result.get("figure_align") not in FIGURE_ALIGNMENTS:
         result["figure_align"] = "right"
+    if result.get("group_mode") not in ("by_type", "basket_order"):
+        result["group_mode"] = "by_type"
     if "document" not in value and "answers" in value:
         result["document"] = "combined" if value["answers"] else "questions"
     result["answers"] = result["document"] != "questions"

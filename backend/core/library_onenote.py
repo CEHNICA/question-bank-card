@@ -448,6 +448,58 @@ def cached_question_image(publication: PublishedQuestion) -> bytes | None:
     return None
 
 
+def _source_image_png(publication: PublishedQuestion) -> bytes | None:
+    """原图题直接读取本机已入库的原卷裁片（多段时纵向拼接），无需启动无头浏览器。"""
+    content = publication.content or {}
+    if content.get("body_mode") != "source_image":
+        return None
+    items = content.get("question_images") or []
+    if not isinstance(items, list) or not items:
+        return None
+    from django.conf import settings
+    from PIL import Image
+
+    folder = Path(settings.DATA_ROOT) / "library" / str(publication.pk)
+    paths: list[Path] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("file") or "")
+        if not name or Path(name).name != name:
+            continue
+        candidate = folder / name
+        if candidate.is_file():
+            paths.append(candidate)
+    if not paths:
+        return None
+    if len(paths) == 1:
+        try:
+            return paths[0].read_bytes()
+        except OSError:
+            return None
+    images: list[Image.Image] = []
+    try:
+        for path in paths:
+            with Image.open(path) as opened:
+                images.append(opened.convert("RGB"))
+        gap = 12
+        width = max(item.width for item in images)
+        height = sum(item.height for item in images) + gap * (len(images) - 1)
+        canvas = Image.new("RGB", (width, height), (255, 255, 255))
+        y = 0
+        for item in images:
+            canvas.paste(item, (0, y))
+            y += item.height + gap
+        buf = io.BytesIO()
+        canvas.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+    except OSError:
+        return None
+    finally:
+        for item in images:
+            item.close()
+
+
 def render_question_image(publication: PublishedQuestion) -> bytes | None:
     """复用「复制题目图片」的无头浏览器管线，把题面（含公式与配图）渲染成 PNG。
 
@@ -458,6 +510,9 @@ def render_question_image(publication: PublishedQuestion) -> bytes | None:
     cached = cached_question_image(publication)
     if cached is not None:
         return cached
+    source_png = _source_image_png(publication)
+    if source_png is not None:
+        return source_png
 
     cache_file = clip._cache_path(publication, mode="combined")
     try:
@@ -610,8 +665,8 @@ def create_or_sync_page(publication: PublishedQuestion) -> dict[str, Any]:
 
     threading.Thread(target=_ensure_protocol_background, name="onenote-protocol-register", daemon=True).start()
 
-    # 只吃缓存，绝不在建页热路径里启动无头浏览器。
-    png = cached_question_image(publication)
+    # 只吃缓存，绝不在建页热路径里启动无头浏览器；原图题直接读取本地裁片秒传。
+    png = cached_question_image(publication) or _source_image_png(publication)
     need_backfill = png is None
     page_xml = build_page_xml(publication, title, png)
 

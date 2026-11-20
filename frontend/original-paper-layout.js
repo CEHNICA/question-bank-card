@@ -215,6 +215,11 @@
     let selectedPart = null, confirmOpen = false, conflict = false, lookupFailed = false, previewOpen = true;
     let manualSession = false, continuousAdd = false, saveDisposition = null;
     let generation = 0, closing = false, draftRevision = null, pendingAfterSave = null, lastFrameTap = null, lastDeleted = null;
+    const TYPE_SHORTCUTS = { "1": "single_choice", "2": "multiple_choice", "3": "fill_blank", "4": "true_false", "5": "free_response" };
+    const rememberedTypeByPaper = new Map();
+    const rememberType = (type) => {
+      if (state.paperId && type && type !== "unknown") rememberedTypeByPaper.set(state.paperId, type);
+    };
     const kindNames = { regions: "调整范围", renumber: "修改题号", add: "补题", merge: "合题" };
     const panel = $("pageLayoutPanel"), overlap = $("pageLayoutOverlap");
     $("pageStage").addEventListener("dblclick", async (event) => {
@@ -374,7 +379,9 @@
       saveDisposition = null;
       if (kind === "add") {
         if (options.number !== undefined) draft.targets[0].number = options.number;
-        if (options.questionType) draft.targets[0].question_type = options.questionType;
+        const fallbackType = rememberedTypeByPaper.get(state.paperId) || "unknown";
+        const initialType = (options.questionType && options.questionType !== "unknown") ? options.questionType : fallbackType;
+        if (initialType) draft.targets[0].question_type = initialType;
       }
       baseline = snap(); history = []; future = []; request = null; conflict = false; lookupFailed = false; confirmOpen = false;
       draftRevision = state.paper.layout_revision;
@@ -631,7 +638,11 @@
         }
         const type = el("select"); type.id = "pageLayoutType";
         Object.entries(host.TYPE_NAMES).forEach(([value, name]) => { const o = el("option", "", name); o.value = value; type.append(o); }); type.value = t.question_type;
-        type.addEventListener("change", () => change(() => { t.question_type = type.value; })); panel.append(labeledField("题型", type));
+        type.addEventListener("change", () => change(() => { t.question_type = type.value; rememberType(type.value); }));
+        panel.append(labeledField("题型", type));
+        if (draft.kind === "add") {
+          panel.append(el("p", "hint", "快捷键 1–5 秒选题型：1 单选 · 2 多选 · 3 填空 · 4 判断 · 5 解答"));
+        }
       }
       const draw = button(dialog.tool === "draw" ? "取消框选" : t.regions.length ? "再加一块" : "画题框", "small", toggleDrawing);
       draw.id = "pageLayoutDraw"; draw.setAttribute("aria-pressed", String(dialog.tool === "draw")); panel.append(draw);
@@ -899,7 +910,9 @@
           const number = nextNumberAfter(saved);
           // Continuing on the same scope keeps the numbering straight; when
           // there is nothing saved yet, fall back to the page's own scope.
-          await begin("add", null, { continuous: true, groupId: saved ? groupId(saved) : undefined, number, questionType: saved?.question_type || "unknown", page: page });
+          const nextType = (saved?.question_type && saved.question_type !== "unknown") ? saved.question_type : (rememberedTypeByPaper.get(state.paperId) || "unknown");
+          rememberType(nextType);
+          await begin("add", null, { continuous: true, groupId: saved ? groupId(saved) : undefined, number, questionType: nextType, page: page });
           dialog.page = page; dialog.zoom = zoom; dialog.zoomMode = zoomMode;
           requestAnimationFrame(() => { if (dialog.layoutWorkspace) stage.scrollTo({ top, left }); });
           toast(number === null ? "题目已保存。题号已到 999，请为下一题手动填写题号。" : "题目已保存；已准备下一题。", "success");
@@ -1111,6 +1124,17 @@
       if (event.key === "Escape" && confirmOpen) { confirmOpen = false; render(); event.preventDefault(); event.stopPropagation(); return true; }
       const editing = event.target.closest?.("input, select, textarea, [contenteditable=true]");
       const otherDialog = typeof document !== "undefined" && document.querySelector('dialog[open]:not(#pageDialog)');
+      if (!editing && !otherDialog && !event.repeat && !event.altKey && !event.ctrlKey && !event.metaKey && draft && draft.kind !== "regions" && draft.kind !== "renumber" && TYPE_SHORTCUTS[event.key]) {
+        const nextType = TYPE_SHORTCUTS[event.key];
+        const target = current();
+        if (target && target.question_type !== nextType) {
+          event.preventDefault(); event.stopPropagation();
+          rememberType(nextType);
+          change(() => { target.question_type = nextType; });
+          toast(`题型已切换为：${host.TYPE_NAMES[nextType] || nextType}`, "info");
+          return true;
+        }
+      }
       if (!editing && event.target.closest?.("#pageStage") && !otherDialog && !event.repeat && !event.altKey) {
         const key = event.key.toLowerCase(), modified = event.ctrlKey || event.metaKey;
         if (key === "enter" && modified) { event.preventDefault(); event.stopPropagation(); void preview({ complete: true }); return true; }

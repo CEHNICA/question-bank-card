@@ -5303,7 +5303,8 @@ $("selectedViewCount").textContent = String(state.basket.length);
       option_overrides: Object.fromEntries(Object.entries(options.option_overrides || {}).filter(([, value]) => ["auto", "four", "two", "vertical"].includes(value))),
       question_breaks: Array.isArray(options.question_breaks) ? [...new Set(options.question_breaks.filter(id => typeof id === "string"))] : [],
       figure_align: figureAlign,
-      figure_overrides: normalizeFigureOverrides(options.figure_overrides)
+      figure_overrides: normalizeFigureOverrides(options.figure_overrides),
+      ...(options.group_mode === "basket_order" ? { group_mode: "basket_order" } : {})
     };
   }
 
@@ -5959,8 +5960,9 @@ $("selectedViewCount").textContent = String(state.basket.length);
     // 「第 N 题」迟早和卷面上看到的对不上。ExamExport 没载入时退回本地那份。
     const knownTypes = new Set(["single_choice", "multiple_choice", "fill_blank", "true_false", "free_response"]);
     const ordered = window.ExamExport?.paperGroups
-      ? window.ExamExport.paperGroups(items)
+      ? window.ExamExport.paperGroups(items, options)
       : (() => {
+        if (options.group_mode === "basket_order") return items.length ? [[null, items]] : [];
         const out = [];
         for (const [key, name] of [["single_choice", "选择题"], ["multiple_choice", "多选题"],
           ["fill_blank", "填空题"], ["true_false", "判断题"], ["free_response", "解答题"]]) {
@@ -5976,7 +5978,7 @@ $("selectedViewCount").textContent = String(state.basket.length);
     ordered.forEach(([name, group], index) => {
       // 1.26.25：大题标题由 ExamExport 算 —— 屏幕预览和导出的文件用的是同一个定义，
       // 老师核对过的和拿到手的必须是同一句话。
-      if (options.document !== "answers") ui.paper.append(node("h3", "print-section", window.ExamExport.sectionHeading(group, index, name)));
+      if (options.document !== "answers" && name) ui.paper.append(node("h3", "print-section", window.ExamExport.sectionHeading(group, index, name)));
       group.forEach((item, position) => {
         number += 1;
         if (options.document !== "answers") {
@@ -6192,6 +6194,7 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
       // fitFormulas 标上去的，排在前面读的是上一版的卷面 —— 第一次打开一张
       // 含有放不下的公式的卷子，按钮不会挡、提示也不出，印出来才发现被切了。
       preparePrintLayout();
+      const activeOptions = currentPrintOptions();
       const knownTypes = new Set(["single_choice", "multiple_choice", "fill_blank", "true_false", "free_response"]);
       const seen = new Set();
       ui.paper.querySelectorAll(".print-question").forEach(question => {
@@ -6200,7 +6203,9 @@ if (ui.printOrigin.checked && origin) (block.querySelector(".qb-stem-body") || b
         seen.add(id);
         const item = printState.items.find(item => item.id === id);
         if (!item) return;
-        const group = printState.items.filter(other => knownTypes.has(item.question_type) ? other.question_type === item.question_type : !knownTypes.has(other.question_type));
+        const group = activeOptions.group_mode === "basket_order"
+          ? printState.items
+          : printState.items.filter(other => knownTypes.has(item.question_type) ? other.question_type === item.question_type : !knownTypes.has(other.question_type));
         const number = parseInt(question.querySelector(".qb-number")?.textContent, 10) || seen.size;
         question.append(printTools(printState.items, group, group.indexOf(item), number));
       });

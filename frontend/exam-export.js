@@ -312,8 +312,11 @@
   const PAPER_GROUPS = [["single_choice", "选择题"], ["multiple_choice", "多选题"],
     ["fill_blank", "填空题"], ["true_false", "判断题"], ["free_response", "解答题"]];
 
-  function paperGroups(items) {
+  function paperGroups(items, options = {}) {
     const list = (Array.isArray(items) ? items : []).filter((item) => item && typeof item === "object");
+    if (options && options.group_mode === "basket_order") {
+      return list.length ? [[null, list]] : [];
+    }
     const known = new Set(PAPER_GROUPS.map(([key]) => key));
     const groups = [];
     for (const [key, name] of PAPER_GROUPS) {
@@ -325,8 +328,8 @@
     return groups;
   }
 
-  function paperOrder(items) {
-    return paperGroups(items).flatMap(([, group]) => group.map((item) => item.id));
+  function paperOrder(items, options = {}) {
+    return paperGroups(items, options).flatMap(([, group]) => group.map((item) => item.id));
   }
 
   // 1.26.25：组卷上每个大题前面那一行，屏幕预览和导出的文件必须是同一句话。
@@ -356,6 +359,7 @@
   }
 
   function sectionHeading(group, index, name) {
+    if (!name) return "";
     const sections = new Set((group || [])
       .map((item) => String(item && item.content && item.content.section || "").trim())
       .filter(Boolean));
@@ -384,7 +388,7 @@
       // 按卷面顺序发，不是按试题篮顺序。后端报的「第 N 题」是 ids 里的位置，
       // 篮里的顺序跟卷面（按题型重排）不是一回事时，老师按那个号去卷子上找会找错。
       // 排出来的文件本身不受影响：后端还会按题型再分一次组，组内顺序不变。
-      const rank = new Map(paperOrder(items).map((id, index) => [id, index]));
+      const rank = new Map(paperOrder(items, options).map((id, index) => [id, index]));
       const ordered = [...items].sort((a, b) => (rank.get(a.id) ?? items.length) - (rank.get(b.id) ?? items.length));
       const rendered_fields = {};
       for (let index = 0; index < ordered.length; index++) {

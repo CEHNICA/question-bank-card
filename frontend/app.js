@@ -113,6 +113,7 @@ const QBUpload = (() => {
   function appendUploadPolicy(form, policy) {
     form.append("parse_mode", "auto");
     form.append("allow_cloud", policy?.allowCloud === true ? "1" : "0");
+    if (policy?.cutOnly === true) form.append("cut_only", "1");
   }
 
   return {
@@ -1317,7 +1318,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   // warning there; in-app navigation keeps the clearer two-action dialog.
   window.addEventListener("beforeunload", (event) => {
     QBEdits.protectBeforeUnload(event, editGuard);
-    if (modelFormDirty || credentialHasNewKeys() || window.LibraryAISettings?.hasUnsavedChanges?.() || window.LibraryAISettings?.isMutating?.()) {
+    if (window.APISettings?.hasUnsavedChanges?.() || window.APISettings?.isMutating?.()) {
       event.preventDefault();
       event.returnValue = "";
     }
@@ -1481,7 +1482,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     renderUploadAvailability();
     $("m3Button").hidden = !s.m3_available;
     if (s.app_version) $("aboutVersion").textContent = `题有据 ${s.app_version}`;
-    renderSettingsModels();
     renderServiceReadiness();
     // 密钥刚配好时，识读卷头要立刻按 live readiness 重画，别继续灰着「没 Key」。
     if (state.paper) renderCutReadingStage();
@@ -2421,6 +2421,17 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     if (stage !== 1 && !summary.pending && stage !== 3) {
       actions.append(button("直接原图审核", "quiet", () => { directImageReview.add(paper.id); renderCutReadingStage(); focusCutReview(); }));
+    }
+    const cutReadyCards = typeof eligibleCutImageCards === "function"
+      ? eligibleCutImageCards()
+      : (state.questions || []).filter((q) => (
+        q && q.body_mode === "source_image" && q.regions?.length
+        && !q.ocr_pending && ["green", "yellow"].includes(q.state)
+        && !(q.publication && q.publication.up_to_date)
+      ));
+    if (stage !== 1 && !summary.pending && cutReadyCards.length) {
+      actions.append(button(`原图批量入库（${cutReadyCards.length} 题）`, stage === 3 && !allSettled ? "primary" : "", () => publishCutImages(),
+        "将已切好的原图题卡直接存入正式题库（可暂不选题型，后续可在题库随时改题型、打标签或按需转文字）"));
     }
     if (stage === 3 && !allSettled) actions.append(button("开始审核", "", () => focusCutReview()));
     if (stage !== 1) {
@@ -4603,6 +4614,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (hasMultipleQuestionGroups() && q.group?.title) head.append(el("span", "group-label", q.group.title));
     head.append(el("span", "qnum", questionLabel(q)), typePicker(q), stateChip(q));
     head.append(el("span", "head-spacer"), publicationChip(q));
+    if (approved && !isAiApproved(q)) head.append(expandToggle(q, false));
 
     if (q.state === "waiting" || q.state === "reading") {
       const placeholder = el("div", "reading-placeholder");
@@ -4705,7 +4717,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     actions.append(more);
     body.append(actions);
     card.append(head, source, body);
-    if (approved && !isAiApproved(q)) card.append(expandToggle(q, false));
     return card;
   }
 
@@ -4964,6 +4975,163 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (!$("approveResultDialog").open) $("approveResultDialog").showModal();
   }
 
+  function eligibleCutImageCards(questions = state.questions) {
+    return (questions || []).filter((q) => (
+      q && q.body_mode === "source_image" && q.regions?.length
+      && !q.ocr_pending && ["green", "yellow"].includes(q.state)
+      && !(q.publication && q.publication.up_to_date)
+    ));
+  }
+
+  function buildTypeSelectElement(initialValue) {
+    const select = el("select");
+    Object.entries(TYPE_NAMES).forEach(([code, name]) => {
+      const option = el("option", "", code === "unknown" ? "暂定（题型未定）" : name);
+      option.value = code;
+      select.append(option);
+    });
+    select.value = TYPE_NAMES[initialValue] ? initialValue : "unknown";
+    return select;
+  }
+
+  /**
+   * 原图批量入库前引导固定未定题型，避免导出按题型分组时落入「其他」或丢失留白。
+   * @param {Array<Object>} candidates 待入库原图题卡
+   * @param {Array<Object>} undecided 当前 question_type 为 unknown 的题卡
+   * @returns {Promise<"proceed"|"cancel">}
+   */
+  function resolveCutImageTypesBeforePublish(candidates, undecided) {
+    return new Promise((resolve) => {
+      const dialog = el("dialog", "modal cut-type-dialog");
+      const head = el("div", "dialog-head");
+      const title = el("h2", "", `入库前确认未定题型（共 ${undecided.length} 题未定）`);
+      const closeBtn = button("✕", "small quiet", () => dialog.close("cancel"));
+      closeBtn.setAttribute("aria-label", "关闭");
+      head.append(title, closeBtn);
+
+      const desc = el(
+        "p",
+        "cut-type-desc",
+        `本次共准备入库 ${candidates.length} 道原图题卡，其中 ${undecided.length} 题为“题型未定”。组卷导出按题型分组时，未定题型会排到卷末“其他”且解答题不会自动留白；建议在此一键或逐题定型：`
+      );
+
+      const bulkBar = el("div", "cut-type-bulk");
+      const bulkLabel = el("span", "", "未定题一键全部设为：");
+      const bulkSelect = el("select");
+      Object.entries(TYPE_NAMES).forEach(([code, name]) => {
+        if (code === "unknown") return;
+        const opt = el("option", "", name);
+        opt.value = code;
+        bulkSelect.append(opt);
+      });
+      bulkSelect.value = "free_response";
+      const rows = new Map();
+      const applyAllBtn = button("应用到全部未定题", "small", () => {
+        for (const select of rows.values()) select.value = bulkSelect.value;
+      });
+      bulkBar.append(bulkLabel, bulkSelect, applyAllBtn);
+
+      const list = el("div", "cut-type-list");
+      undecided.forEach((card) => {
+        const item = el("div", "cut-type-row");
+        const meta = el("div", "cut-type-meta");
+        meta.append(el("strong", "", questionLabel(card)));
+        if (card.section) meta.append(el("span", "cut-type-section", card.section));
+        const imgUrl = card.question_images?.[0]?.url;
+        if (imgUrl) {
+          const thumb = el("img", "cut-type-thumb");
+          thumb.src = imgUrl;
+          thumb.alt = `${questionLabel(card)} 裁片预览`;
+          thumb.loading = "lazy";
+          meta.append(thumb);
+        }
+        const select = buildTypeSelectElement(card.question_type);
+        select.setAttribute("aria-label", `${questionLabel(card)} 题型`);
+        rows.set(card.id, select);
+        item.append(meta, select);
+        list.append(item);
+      });
+
+      const foot = el("div", "confirm-actions");
+      const cancelBtn = button("取消", "", () => dialog.close("cancel"));
+      const skipBtn = button("暂不固定，仍按未定入库", "", () => dialog.close("skip"));
+      const saveBtn = button("保存已选题型并入库", "primary", async () => {
+        saveBtn.disabled = true;
+        skipBtn.disabled = true;
+        try {
+          for (const card of undecided) {
+            const picked = rows.get(card.id)?.value || "unknown";
+            if (picked !== (card.question_type || "unknown")) {
+              const res = await api(`/api/questions/${card.id}/type`, {
+                method: "POST",
+                body: { question_type: picked },
+              });
+              card.question_type = res?.question?.question_type || picked;
+            }
+          }
+          dialog.close("save");
+        } catch (err) {
+          toast(`保存题型失败：${err.message}`, "error");
+          saveBtn.disabled = false;
+          skipBtn.disabled = false;
+        }
+      });
+      foot.append(cancelBtn, skipBtn, saveBtn);
+
+      dialog.append(head, desc, bulkBar, list, foot);
+      document.body.append(dialog);
+      dialog.addEventListener("close", () => {
+        const result = dialog.returnValue;
+        dialog.remove();
+        resolve(result === "save" || result === "skip" ? "proceed" : "cancel");
+      }, { once: true });
+      dialog.showModal();
+      saveBtn.focus();
+    });
+  }
+
+  async function publishCutImages() {
+    const paperId = state.paperId;
+    if (!paperId || state.approveAllBusy) return;
+    const candidates = eligibleCutImageCards();
+    if (!candidates.length) { toast("这一卷没有待入库的原图题卡", "error"); return; }
+    const undecided = candidates.filter((card) => !card.question_type || card.question_type === "unknown");
+    if (undecided.length) {
+      const action = await resolveCutImageTypesBeforePublish(candidates, undecided);
+      if (action !== "proceed") return;
+    } else if (!(await confirmDialog({
+      title: "将已切好的原图题卡直接入库？",
+      text: `将 ${candidates.length} 道原图题卡直接标记通过并存入正式题库。入库后仍可随时在题库里补选题型、打标签或按需 AI 转文字。`,
+      ok: "原图批量入库"
+    }))) return;
+    $("paperMenu").open = false;
+    state.approveAllBusy = true;
+    syncTrashControls();
+    try {
+      const data = await api(`/api/papers/${paperId}/publish-cut-images`, { method: "POST", body: { by: "human" } });
+      if (state.paperId === paperId) {
+        updatePaperFromResponse(data.paper);
+        await refreshPaper();
+      } else {
+        await loadPapers();
+      }
+      const published = Number(data.published) || 0;
+      if ((data.problems && data.problems.length) || (data.skipped && data.skipped.length)) {
+        showApproveResult({
+          approved: published,
+          problems: data.problems || [],
+          skipped: data.skipped || []
+        });
+      }
+      toast(`已将 ${published} 道原图题卡入库`, "success");
+    } catch (error) {
+      toast(error.message, "error");
+    } finally {
+      state.approveAllBusy = false;
+      syncTrashControls();
+    }
+  }
+
   async function approveAllGreen() {
     const paperId = state.paperId;
     if (!paperId || state.approveAllBusy) return;
@@ -5129,6 +5297,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       $("approveAllGreen").title = ready
         ? (waiting ? `把这一卷里能通过的题一次入库（还有 ${waiting} 题待核对）；过不了的会按原因归类说明` : "这一卷没有待通过的题")
         : "任务处理完成后才能标记通过";
+    }
+    if ($("publishCutImages")) {
+      const cutWaiting = eligibleCutImageCards().length;
+      $("publishCutImages").hidden = !state.paper || !cutWaiting;
+      $("publishCutImages").disabled = !ready || !cutWaiting || state.approveAllBusy;
+      $("publishCutImages").textContent = cutWaiting ? `原图批量入库（${cutWaiting} 题）…` : "原图批量入库…";
+      $("publishCutImages").title = ready
+        ? (cutWaiting ? `将 ${cutWaiting} 道已切好的原图题卡直接存入正式题库` : "这一卷没有待入库的原图题卡")
+        : "任务处理完成后才能入库";
     }
     if ($("questionTrash")) {
       $("questionTrash").hidden = !state.paper;
@@ -5471,596 +5648,40 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   // 「已填写」和「共保存 0 个」都是真的，凑在一起就成了两个答案。
   // 判定只有这一处，设置页和密钥窗口都用它；只说明「生效的是哪一份」，
   // 不动后台判定、不迁移、不碰环境变量。
-  const LEGACY_KEY_NOTE = "这台电脑上还留着一份旧的 Windows 环境变量密钥。请在 API 配置里重新填一次，统一保存在这里；留空仍可沿用旧配置。";
-
-  function credentialSourceNote(service) {
-    const stored = state.credentialStore?.[service];
-    if (stored && stored.configured) return "";
-    const configured = state.status?.configured || state.status?.engines?.configured || {};
-    const live = service === "mineru"
-      ? Boolean(state.status?.mineru || configured.mineru) : Boolean(configured[service]);
-    return live ? LEGACY_KEY_NOTE : "";
+  // API 配置与密钥管理统一由 /static/api-settings.js 接管；此处仅保留宿主挂载与离开守卫桥接。
+  function apiSettingsOptions(mode = "inline") {
+    return {
+      mode,
+      confirm: confirmDialog,
+      toast,
+      onStatusChange: () => { void loadStatus(); },
+    };
   }
 
-  function selectedEngine(engines, role, fallback) {
-    return engines.saved?.[role] || engines.selected?.[role] || engines.selection?.[role]
-      || engines[`${role}_setting`] || engines[role] || fallback;
-  }
-
-  function fillModelSelect(select, entries, selected) {
-    select.replaceChildren(...entries.map(({ value, label }) => {
-      const option = el("option", "", label);
-      option.value = value;
-      return option;
-    }));
-    if ([...select.options].some((option) => option.value === selected)) {
-      select.value = selected;
-    } else if (select.options.length) {
-      select.selectedIndex = 0;
-    }
-  }
-
-  function settingsEngineChoices(engines) {
-    return (Array.isArray(engines.choices) ? engines.choices : [])
-      .filter((choice) => choice && typeof choice.key === "string" && choice.key
-        && typeof choice.model === "string" && choice.model)
-      .map((choice) => {
-        const providerKey = choice.provider_key || choice.key.split("_", 1)[0];
-        return {
-          ...choice,
-          provider_key: providerKey,
-          provider: choice.provider || providerKey || choice.key,
-          model: engines.saved?.models?.[providerKey] || engines.models?.[providerKey] || choice.model
-        };
-      });
-  }
-
-  function renderProviderModelSetting(engines, choices, providerKey, inputId, listId, stateId) {
-    const configured = Boolean(engines.configured?.[providerKey]);
-    const providerChoices = choices.filter((choice) => choice.provider_key === providerKey);
-    const suggested = Array.isArray(engines.suggested_models?.[providerKey])
-      ? engines.suggested_models[providerKey] : [];
-    const modelIds = [...new Set([...suggested, ...providerChoices.map((choice) => choice.model)]
-      .map((value) => String(value || "").trim()).filter(Boolean))];
-    const current = String(engines.saved?.models?.[providerKey] || engines.models?.[providerKey]
-      || providerChoices[0]?.model || modelIds[0] || "");
-    const input = $(inputId);
-    const list = $(listId);
-    const providerState = $(stateId);
-    input.value = current;
-    input.placeholder = modelIds[0] || "填写服务商支持的 model_id";
-    list.replaceChildren(...modelIds.map((modelId) => {
-      const option = document.createElement("option");
-      option.value = modelId;
-      return option;
-    }));
-    providerState.textContent = configured ? "API 已配置" : "API 未配置";
-    providerState.className = `model-provider-state ${configured ? "ready" : "missing"}`;
-  }
-
-  function renderSettingsModels() {
-    if (!state.status) return;
-    renderSettingsModelsTail();
-  }
-
-  function renderSettingsModelsTail() {
-    const status = state.status;
-    const engines = status.engines || {};
-    // A status response can arrive while another choice is still being saved,
-    // or while a model ID is being typed. Keep that newer form intact.
-    if (modelFormDirty) return;
-
-    const choices = settingsEngineChoices(engines);
-    const modelEntries = choices.map((choice) => ({
-      value: choice.key,
-      label: `${choice.provider} · ${choice.model}${choice.available === false ? "（未填密钥）" : ""}`
-    }));
-    const defaultPrimary = modelEntries[0]?.value || "";
-    // 所选那家没有密钥时，后台会换用有密钥的那家读题；这里直接显示实际读题的那家。
-    let primary = selectedEngine(engines, "primary", defaultPrimary);
-    const chosen = choices.find((choice) => choice.key === primary);
-    if (chosen && chosen.available === false && engines.primary) primary = engines.primary;
-    fillModelSelect($("settingsPrimaryModel"), [
-      ...modelEntries,
-      { value: "assistant", label: "原图审核或 AI 助手（不使用看图 API）" }
-    ], primary);
-    renderProviderModelSetting(engines, choices, "minimax", "settingsMinimaxModel",
-      "settingsMinimaxModels", "settingsMinimaxModelState");
-    renderProviderModelSetting(engines, choices, "siliconflow", "settingsSiliconflowModel",
-      "settingsSiliconflowModels", "settingsSiliconflowModelState");
-    renderProviderModelSetting(engines, choices, "modelscope", "settingsModelscopeModel",
-      "settingsModelscopeModels", "settingsModelscopeModelState");
-    // 模型名前面写上是哪一家：只看“Qwen3.5-35B-A3B”，老师认不出是谁家的。
-    const named = (key, label) => [choices.find((choice) => choice.key === key)?.provider, label].filter(Boolean).join(" ");
-    const summary = [
-      status.reader && `读题 ${named(engines.primary, status.reader)}`
-    ].filter(Boolean).join("；");
-    $("settingsModelSummary").textContent = status.assistant_mode
-      ? "现在是 AI 助手读题：导入会先在本机准备原卷并尝试切题，无需 MinerU。未切出的题可手工框选；再由 AI 助手或你对照原卷整理、核对。"
-      : summary ? `当前读题：${summary}。` : "请先配置一家读题服务，或选择 AI 助手读题。";
-    syncCredentialVisionPanel();
-    renderMinimaxPlan(engines);
-  }
-
-  function selectedReadingProvider() {
-    const engines = state.status?.engines || {};
-    const key = $("settingsPrimaryModel").value || engines.primary;
-    if (key === "assistant") return "assistant";
-    return settingsEngineChoices(engines).find((choice) => choice.key === key)?.provider_key || "modelscope";
-  }
-
-  function syncCredentialVisionPanel({ followSelection = true } = {}) {
-    const select = $("credentialVisionProvider");
-    if (!select) return;
-    if (followSelection) {
-      const engines = state.status?.engines || {};
-      const configured = state.status?.configured || engines.configured || {};
-      const hasSavedReader = Boolean(engines.saved?.primary || ["modelscope", "minimax", "siliconflow"].some((provider) => configured[provider]));
-      select.value = hasSavedReader ? selectedReadingProvider() : "modelscope";
-    }
-    // 1.26.9：勾选行跟着下拉框走（真正的状态还是这一份，下拉框只是留着给老逻辑用）。
-    for (const provider of ["modelscope", "minimax", "siliconflow", "assistant"]) {
-      const option = $(`credentialVision-${provider}`);
-      if (!option) continue;
-      option.checked = option.value === select.value;
-      option.disabled = credentialBusy || !visionPickerReady();
-      // 1.26.11：谁有密钥一眼看见（别家不用挨个点开才知道）。
-      // 参照 kaogong-shuati 的"每张卡写明已配置/未配置"和 Chatbox 的绿点。
-      const state = $(`credentialVisionState-${provider}`);
-      if (state) state.textContent = provider === "assistant" ? "不用密钥" : credentialKeyHint(provider);
-    }
-    for (const [provider, id] of [["modelscope", "credentialModelscopeSection"], ["minimax", "credentialMinimaxSection"], ["siliconflow", "credentialSiliconflowSection"]]) {
-      $(id).hidden = select.value !== provider;
-    }
-    window.LibraryAISettings?.setReadingService?.({
-      provider: selectedReadingProvider(),
-      models: state.status?.engines?.saved?.models || state.status?.engines?.models || {}
-    });
-  }
-
-  // MiniMax 的并发跟会员档位走：档位给出起步和上限，中间按实际限流自动调。
-  const PLAN_NOTES = {
-    auto: "每个密钥先同时读 3 道，顺利就逐步加到最多 8 道，遇到限流再退回来。不知道自己是哪一档就选这个。",
-    plus: "MiniMax 说 Plus 高峰期大约能同时跑 3–4 个；每个密钥同时读 3–4 道。",
-    max: "MiniMax 说 Max 高峰期大约能同时跑 4–5 个；每个密钥同时读 4–5 道。",
-    ultra: "MiniMax 说 Ultra 高峰期大约能同时跑 6–7 个；每个密钥同时读 6–7 道。",
-    payg: "按量付费的密钥按每分钟请求数限流；每个密钥同时读 6 道起，最多 8 道。"
-  };
-
-  function renderMinimaxPlan(engines) {
-    const select = $("settingsMinimaxPlan");
-    if (!select || !$("settingsMinimaxPlanNote")) return;
-    const plan = engines.saved?.plans?.minimax || engines.plans?.minimax || "auto";
-    select.value = PLAN_NOTES[plan] ? plan : "auto";
-    const pending = engines.plans?.minimax && engines.plans.minimax !== select.value;
-    $("settingsMinimaxPlanNote").textContent = `${PLAN_NOTES[select.value]}遇到限流会自动放慢，不会出错。${
-      pending ? "改动从下一份新资料开始生效。" : ""}`;
-  }
-
-  const CREDENTIAL_FIELDS = {
-    mineru: { input: "credentialMineruInput", remove: "credentialMineruDelete", state: "credentialMineruState", list: "credentialMineruSaved", label: "MinerU" },
-    modelscope: { input: "credentialModelscopeInput", remove: "credentialModelscopeDelete", state: "credentialModelscopeState", list: "credentialModelscopeSaved", label: "魔搭" },
-    minimax: { input: "credentialMinimaxInput", remove: "credentialMinimaxDelete", state: "credentialMinimaxState", list: "credentialMinimaxSaved", label: "MiniMax" },
-    siliconflow: { input: "credentialSiliconflowInput", remove: "credentialSiliconflowDelete", state: "credentialSiliconflowState", list: "credentialSiliconflowSaved", label: "硅基流动" }
-  };
-  let credentialBusy = false;
-  let credentialStateRequest = 0;
-  let credentialSession = 0;
-  let credentialFocusFrame = 0;
-  let credentialServices = {};
-  let credentialAnswersMounted = false;
-
-  function visionPickerReady() {
-    // 1.26.9：服务列表还没读到之前不让勾 —— 否则勾完会被回填覆盖，
-    // 老师只看到"勾了一下又弹回去"。
-    return Boolean(state.status?.engines);
-  }
-
-  function credentialKeyHint(provider) {
-    // 1.26.11：一句人话说明这家现在是什么状态。
-    const status = credentialServices[provider];
-    if (!status) return "正在读取…";
-    if (!status.configured) return "未存密钥";
-    return status.count > 1 ? `已存 ${status.count} 把` : "已存 1 把";
-  }
-  let credentialClosing = false;
-  let credentialCloseTask = null;
-  let credentialModelGuard = null;
-  const credentialSavedRows = new Map();
-  const CREDENTIAL_MASK = "****************";
-
-  function hideCredentialKey(row) {
-    row.epoch += 1;
-    row.controller?.abort();
-    row.controller = null;
-    clearTimeout(row.timer);
-    clearTimeout(row.timeout);
-    row.timer = row.timeout = null;
-    row.pending = row.visible = false;
-    row.value.textContent = CREDENTIAL_MASK;
-    row.value.classList.remove("revealed");
-    row.button.setAttribute("aria-pressed", "false");
-    row.button.setAttribute("aria-label", `查看 ${row.label} 第 ${row.index + 1} 个密钥`);
-    row.button.title = "临时查看密钥（60 秒后隐藏）";
-  }
-
-  function hideCredentialKeys() {
-    credentialSavedRows.forEach(hideCredentialKey);
-  }
-
-  async function toggleCredentialKey(service, index) {
-    const row = credentialSavedRows.get(`${service}:${index}`);
-    if (!row || credentialBusy || !credentialUiVisible()) return;
-    if (row.pending || row.visible) { hideCredentialKey(row); return; }
-    const epoch = ++row.epoch, session = credentialSession;
-    const controller = new AbortController();
-    row.controller = controller;
-    row.pending = true;
-    row.button.title = "正在读取，再点眼睛可取消";
-    row.button.setAttribute("aria-label", `取消查看 ${row.label} 第 ${index + 1} 个密钥`);
-    row.timeout = setTimeout(() => controller.abort(), 15000);
-    const current = () => row.epoch === epoch && session === credentialSession
-      && credentialSavedRows.get(`${service}:${index}`) === row && credentialUiVisible();
-    try {
-      const result = await api("/api/settings/credentials/key/reveal", {
-        method: "POST", body: { service, index }, signal: controller.signal
-      });
-      if (!current() || controller.signal.aborted) return;
-      if (result.service !== service || result.index !== index || typeof result.key !== "string" || !result.key) {
-        throw new Error("Invalid credential response");
+  async function openCredentialSettings({ section = "" } = {}) {
+    if (window.location.pathname === "/settings") {
+      if (section === "answering" || ["#ai", "#api"].includes(window.location.hash)) {
+        scrollToCredentialAnswers();
       }
-      // Saved values have their own text node. They never enter the replacement
-      // inputs or the services payload sent by the Save button.
-      row.value.textContent = result.key;
-      row.value.classList.add("revealed");
-      row.visible = true;
-      row.button.setAttribute("aria-pressed", "true");
-      row.button.setAttribute("aria-label", `隐藏 ${row.label} 第 ${index + 1} 个密钥`);
-      row.button.title = "隐藏密钥";
-      row.timer = setTimeout(() => { if (current()) hideCredentialKey(row); }, 60000);
-    } catch (error) {
-      if (current()) {
-        hideCredentialKey(row);
-        $("credentialResult").textContent = error.name === "AbortError"
-          ? "查看已取消，可再次点击眼睛。" : "暂时无法查看这条密钥，请重新打开窗口后重试。";
-      }
-    } finally {
-      if (current()) {
-        clearTimeout(row.timeout);
-        row.timeout = null;
-        row.controller = null;
-        row.pending = false;
-        if (!row.visible) hideCredentialKey(row);
-      }
+      return;
     }
-  }
-
-  function renderCredentialSavedRows(service, field, count) {
-    const list = $(field.list);
-    list.replaceChildren();
-    // 1.26.15：空的占位句去掉了 —— 状态已经写在卡片标题右边（"已保存 0 个"），
-    // 同一件事再说一遍只会让页面更吵。
-    if (!count) { list.replaceChildren(); return; }
-    for (let index = 0; index < count; index += 1) {
-      const item = el("li", "credential-saved-row");
-      const number = el("span", "credential-saved-number", `${index + 1}`);
-      const value = el("span", "credential-saved-value", CREDENTIAL_MASK);
-      const eye = el("button", "button quiet small credential-eye");
-      eye.type = "button";
-      eye.append(icon("eye"));
-      eye.disabled = credentialBusy;
-      const row = { service, index, label: field.label, value, button: eye,
-        epoch: 0, pending: false, visible: false, controller: null, timer: null, timeout: null };
-      hideCredentialKey(row);
-      credentialSavedRows.set(`${service}:${index}`, row);
-      eye.addEventListener("click", () => { void toggleCredentialKey(service, index); });
-      item.append(number, value, eye);
-      list.append(item);
-    }
-  }
-
-  function cancelCredentialFocus() {
-    if (credentialFocusFrame) cancelAnimationFrame(credentialFocusFrame);
-    credentialFocusFrame = 0;
-  }
-
-  function focusCredentialControl(id, session, opening) {
-    cancelCredentialFocus();
-    credentialFocusFrame = requestAnimationFrame(() => {
-      credentialFocusFrame = 0;
-      if (session !== credentialSession || credentialUiVisible() !== opening) return;
-      // A previous close must not pull focus out of a newly opened dialog.
-      if (!opening && anyDialogOpen()) return;
-      $(id)?.focus({ preventScroll: true });
-    });
-  }
-
-  function credentialMutationPending() {
-    return credentialBusy || Boolean(credentialModelGuard?.isMutating())
-      || Boolean(credentialAnswersMounted && window.LibraryAISettings?.isMutating?.());
-  }
-
-  function hideAPISecrets() {
-    hideCredentialKeys();
-    if (credentialAnswersMounted) window.LibraryAISettings?.hideSecrets?.();
-  }
-
-  function credentialHasNewKeys() {
-    return Object.values(CREDENTIAL_FIELDS).some((field) => $(field.input).value.trim() !== "");
-  }
-
-  function finishCredentialClose({ native = false } = {}) {
-    if (credentialMutationPending()) return false;
-    if (credentialAnswersMounted && window.LibraryAISettings?.deactivate?.() === false) return false;
-    hideAPISecrets();
-    credentialStateRequest += 1;
-    cancelCredentialFocus();
-    if (!native && $("credentialDialog").open) $("credentialDialog").close();
-    return true;
-  }
-
-  function requestCredentialClose({ native = false } = {}) {
-    if (credentialClosing) return false;
-    if (credentialMutationPending()) { toast("API 配置正在保存或测试，请稍候再关闭。", "warn"); return false; }
-    const aiDirty = credentialAnswersMounted && window.LibraryAISettings?.hasUnsavedChanges?.();
-    if (!credentialModelGuard?.hasUnsavedChanges() && !aiDirty && !credentialHasNewKeys()) return finishCredentialClose({ native });
-    const session = credentialSession;
-    credentialClosing = true;
-    hideAPISecrets();
-    credentialCloseTask = (async () => {
-      // 关闭时若模型设置还没保存，这一步会等一次真实的网络往返。原先这一段
-      // 什么都不显示：点“关闭”后窗口像是卡住了，直到保存完才弹出一句提示。
-      // 先把要说的话说出来，再去等。
-      const savingFirst = credentialModelGuard?.hasUnsavedChanges();
-      if (savingFirst) {
-        $("credentialResult").textContent = "模型设置还没保存，正在保存后关闭…";
-        $("credentialDialog").querySelectorAll("[data-close]").forEach((node) => { node.disabled = true; });
-      }
-      try {
-        if (credentialModelGuard?.hasUnsavedChanges() && !(await credentialModelGuard.prepareClose())) return;
-        if (session !== credentialSession || !credentialUiVisible() || credentialMutationPending()) return;
-        const answerDirty = credentialAnswersMounted && window.LibraryAISettings?.hasUnsavedChanges?.();
-        if (credentialHasNewKeys() || answerDirty) {
-          const discard = await confirmDialog({ title: "API 配置还没保存", text: "关闭会放弃尚未保存的新密钥与标签、答案设置；已经保存的配置保持原样。", ok: "放弃并关闭", cancel: "继续设置", focusCancel: true });
-          if (!discard || session !== credentialSession || !credentialUiVisible() || credentialMutationPending()) return;
-          if (answerDirty && window.LibraryAISettings.discard() === false) return;
-          resetCredentialInputs();
-        }
-        if (session === credentialSession && $("credentialDialog").open) finishCredentialClose();
-      } finally {
-        if (session === credentialSession) {
-          credentialClosing = false; credentialCloseTask = null;
-          // The close can still be refused (a save failed, or the teacher chose
-          // 继续设置).  Put the buttons back and clear the pending line, or the
-          // dialog is left looking like the one that hangs.
-          if ($("credentialDialog").open) {
-            $("credentialResult").textContent = "";
-            $("credentialDialog").querySelectorAll("[data-close]").forEach((node) => { node.disabled = credentialBusy; });
-          }
-        }
-      }
-    })();
-    return false;
-  }
-
-  // 1.26.9：整份 API 配置现在只有**一份**（#credentialUi），可以摆在两个地方：
-  // 设置页里直接平铺，或者临时搬回弹窗。搬的是同一个 DOM，密钥、开关和未保存的
-  // 改动都原样跟着走 —— 不会出现"弹窗里填了一半、设置页里是另一份"。
-  let credentialInline = false;
-  let credentialWasInline = false;
-  let credentialReturnFocus = null;
-
-  function credentialUiVisible() {
-    return credentialInline || Boolean($("credentialDialog")?.open);
-  }
-
-  function mountCredentialUI(host) {
-    const ui = $("credentialUi");
-    if (!ui || !host) return;
-    if (ui.parentElement === host) return;
-    host.append(ui);
-    ui.hidden = false;
-  }
-
-  async function showCredentialSections() {
-    hideAPISecrets();
-    cancelCredentialFocus();
-    $("credentialReadingPanel").hidden = false;
-    $("credentialAnswerPanel").hidden = false;
-    $("credentialSavedTotal").hidden = false;
-    if (!window.LibraryAISettings?.mount) return;
-    // The optional answers panel can reuse a configured visual service.
-    // It must not read the reading credential store itself,
-    // so the status this dialog already loaded is handed over instead.
-    window.LibraryAISettings.setReadingKeys?.(credentialServices);
-    syncCredentialVisionPanel();
-    if (!credentialAnswersMounted) {
-      credentialAnswersMounted = true;
-      await window.LibraryAISettings.mount($("libraryAIAPISettingsMount"), { embedded: true, confirm: confirmDialog });
-    } else await window.LibraryAISettings.activate();
-  }
-
-  function credentialAccounts(value) {
-    return [...new Set(String(value || "").split(/[;\r\n]+/)
-      .map((item) => item.trim()).filter(Boolean))];
-  }
-
-  function resetCredentialInputs() {
-    hideCredentialKeys();
-    Object.values(CREDENTIAL_FIELDS).forEach((field) => {
-      $(field.input).value = "";
-      $(field.input).disabled = false;
-    });
-  }
-
-  function setCredentialBusy(busy) {
-    credentialBusy = busy;
-    if (busy) hideCredentialKeys();
-    credentialSavedRows.forEach((row) => { row.button.disabled = busy; });
-    $("credentialSave").disabled = busy;
-    $("credentialVisionProvider").disabled = busy;
-    // 1.26.9：勾选行也要跟着忙闲走 —— 忙的时候勾了会被服务端回来的状态覆盖，
-    // 看起来就像"勾了又弹回去"。
-    for (const provider of ["modelscope", "minimax", "siliconflow", "assistant"]) {
-      const option = $(`credentialVision-${provider}`);
-      if (option) option.disabled = busy || !visionPickerReady();
-    }
-    Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {
-      $(field.input).disabled = busy;
-      $(field.remove).disabled = busy || !credentialServices[service]?.configured;
-    });
-    $("credentialDialog").querySelectorAll("[data-close]").forEach((node) => { node.disabled = busy; });
-  }
-
-  function renderCredentialStates(payload) {
-    hideCredentialKeys();
-    credentialSavedRows.clear();
-    const services = payload?.services || {};
-    credentialServices = services;
-    // 密钥窗口的判据也存进同一个地方：设置页那边要靠它说「生效的是哪一份」。
-    state.credentialStore = services;
-    window.LibraryAISettings?.setReadingKeys?.(services);
-    let total = 0;
-    Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {
-      const status = services[service] || {};
-      const count = status.configured ? Math.min(8, Math.max(0, Math.floor(Number(status.count) || 0))) : 0;
-      total += count;
-      const node = $(field.state);
-      node.textContent = `已保存 ${count} 个`;
-      node.className = `api-state ${status.configured ? "ready" : "missing"}`;
-      // 这个库是空的、但 /api/status 说这台电脑上有一份旧环境变量密钥在生效 ——
-      // 说清楚，别让「共保存 0 个」和设置页的「已填写」各说各的。
-      const note = credentialSourceNote(service);
-      const block = $(field.state).parentElement?.parentElement || $(field.state).parentElement;
-      let hint = block?.querySelector?.(".api-source-note");
-      if (note) {
-        if (!hint) { hint = el("p", "api-source-note"); block?.append?.(hint); }
-        hint.textContent = note;
-      } else if (hint) hint.remove();
-      $(field.remove).hidden = !status.configured;
-      $(field.remove).disabled = credentialBusy || !status.configured;
-      renderCredentialSavedRows(service, field, count);
-    });
-    $("credentialSavedTotal").textContent = `共保存 ${total} 个密钥`;
-    // 1.26.11：密钥读回来之后，勾选行上那句"存没存"要跟着更新 ——
-    // 不然老师看到的还是"正在读取…"。
-    syncCredentialVisionPanel({ followSelection: false });
-  }
-
-  async function loadCredentialStates() {
-    const request = ++credentialStateRequest;
-    let payload;
-    try { payload = await api("/api/settings/credentials"); }
-    catch (error) { if (request !== credentialStateRequest) return null; throw error; }
-    if (request === credentialStateRequest && credentialUiVisible()) renderCredentialStates(payload);
-    return payload;
-  }
-
-  async function openCredentialSettings() {
-    if (credentialClosing) return;
-    if ($("credentialDialog").open) return showCredentialSections();
-    if (credentialBusy) return;
-    const session = ++credentialSession;
-    cancelCredentialFocus();
-    // 1.26.9：设置页上原来那个「配置 API」按钮没有了，关闭后要把焦点还给
-    // **打开这个窗口的那个东西**，不能还给一个已经不在页面上的按钮。
-    credentialReturnFocus = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
-    // 1.26.9：已经填了东西的时候不要一上来就清空 —— 老师在内嵌那一页填了一半的
-    // 密钥，临时弹窗看一眼再关掉，填的东西应该还在。
-    const hadDraft = credentialHasNewKeys();
-    if (!hadDraft) {
-      resetCredentialInputs();
-      renderCredentialStates({ services: {} });
-      $("credentialSavedTotal").textContent = "正在读取已保存的密钥…";
-      Object.values(CREDENTIAL_FIELDS).forEach((field) => { $(field.state).textContent = "正在读取…"; });
-      $("credentialResult").textContent = "";
-    }
-    // 1.26.9：从题库或答案编辑器打开时，把整份配置搬回弹窗里（设置页那一份会
-    // 让位 —— 同一时刻只有一份，不会出现两处各填一半的情况）。
-    credentialWasInline = credentialInline;
-    credentialInline = false;
-    mountCredentialUI($("credentialDialogBody"));
-    $("credentialDialog").showModal();
-    const panelReady = showCredentialSections();
-    try {
-      await loadCredentialStates();
-      if (session === credentialSession && $("credentialDialog").open) focusCredentialControl("credentialMineruInput", session, true);
-    } catch (error) {
-      if (session !== credentialSession || !$("credentialDialog").open) return;
-      $("credentialSavedTotal").textContent = "暂时无法读取密钥数量";
-      $("credentialResult").textContent = error.message;
-      toast(error.message, "error");
-    }
-    await panelReady;
+    if (!window.APISettings?.open) return;
+    await window.APISettings.open({ ...apiSettingsOptions("modal"), section });
   }
 
   async function showCredentialInline() {
-    // 1.26.9：设置页 → API 配置。整份配置直接摆在这一页上：云端切题、看图读题、
-    // 生成标签和答案，一页看完，不用再点一个按钮、也不用切标签。
     const host = $("settingsCredentialHost");
-    const ui = $("credentialUi");
-    // 已经在这一页上了就别重置 —— 老师填了一半的密钥不能因为切了个页签就没了。
-    const alreadyHere = Boolean(ui && host && ui.parentElement === host);
-    credentialInline = true;
-    mountCredentialUI(host);
-    if (!alreadyHere) {
-      resetCredentialInputs();
-      renderCredentialStates({ services: {} });
-      $("credentialSavedTotal").textContent = "正在读取已保存的密钥…";
-      Object.values(CREDENTIAL_FIELDS).forEach((field) => { $(field.state).textContent = "正在读取…"; });
-      $("credentialResult").textContent = "";
-    }
-    const panelReady = showCredentialSections();
-    try {
-      await loadCredentialStates();
-    } catch (error) {
-      $("credentialSavedTotal").textContent = "暂时无法读取密钥数量";
-      $("credentialResult").textContent = error.message;
-    }
-    await panelReady;
-    // 1.26.9：旧书签（/settings#ai、#api）要滚到"生成标签和答案"那一段 ——
-    // 块挂上来之后才滚得动。
+    if (!host || !window.APISettings?.mount) return;
+    await window.APISettings.mount(host, {
+      ...apiSettingsOptions("inline"),
+      preserveDraftIfDirty: true,
+    });
     if (["#ai", "#api"].includes(window.location.hash)) scrollToCredentialAnswers();
   }
 
-  window.APISettings = Object.freeze({ open: openCredentialSettings });
-
-  async function refreshCredentialStatus(message, session) {
-    let refreshed = false;
-    try { refreshed = await loadStatus(); } catch { /* The mutation already succeeded. */ }
-    if (!refreshed && session === credentialSession && credentialUiVisible()) {
-      $("credentialResult").textContent = `${message} 当前状态暂未刷新，重新打开设置或刷新页面即可查看。`;
-    }
-  }
-
-  async function deleteCredential(service) {
-    const field = CREDENTIAL_FIELDS[service];
-    if (!field || credentialBusy || !credentialServices[service]?.configured) return;
-    const session = credentialSession;
-    let refreshMessage = "";
-    setCredentialBusy(true);
-    try {
-      const confirmed = await confirmDialog({
-        title: `删除 ${field.label} 的密钥？`,
-        text: "只删除这家服务已保存的密钥。其他服务和输入框里尚未保存的内容都会保留；正在运行的任务不会中途切换账号。",
-        ok: "删除密钥", danger: true, focusCancel: true
-      });
-      if (!confirmed) return;
-      credentialStateRequest += 1;
-      $("credentialResult").textContent = `正在删除 ${field.label} 密钥…`;
-      const result = await api("/api/settings/credentials", { method: "POST", body: { services: { [service]: { action: "clear" } } } });
-      renderCredentialStates(result);
-      const message = `已删除 ${field.label} 密钥，其他服务和未保存的内容已保留。`;
-      $("credentialResult").textContent = message;
-      toast(message, "success");
-      refreshMessage = message;
-    } catch (error) {
-      const message = `未能删除 ${field.label} 密钥：${error.message}`;
-      $("credentialResult").textContent = message;
-      toast(message, "error");
-    } finally { setCredentialBusy(false); }
-    // The key operation is complete. A slow status refresh must not lock Close.
-    if (refreshMessage) await refreshCredentialStatus(refreshMessage, session);
+  async function prepareSettingsLeave() {
+    if (!window.APISettings?.prepareLeave) return true;
+    return window.APISettings.prepareLeave();
   }
 
   function renderSettingsTask() {
@@ -6285,13 +5906,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function openSettings() {
     if (window.location.pathname !== "/settings") { void leaveFor("/settings"); return; }
     void loadFeatureSwitches();
-    renderSettingsModels();
     $("settingsLens").checked = state.lens;
     $("settingsAutoExpand").checked = state.autoExpand;
-    if (!modelFormDirty) showModelSaveResult("");
     syncSettingsRoute();
     void loadStatus();
-    // 1.26.9：API 配置直接摆在这一页上（不再是一个按钮 + 一个弹窗）。
+    // API 配置直接在设置页平铺挂载，与全局状态同步。
     void showCredentialInline();
     requestAnimationFrame(() => { if (!anyDialogOpen()) $("settingsTitle").focus({ preventScroll: true }); });
   }
@@ -6299,6 +5918,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("settingsButton").addEventListener("click", (event) => {
     if (window.location.pathname === "/settings") { event.preventDefault(); openSettings(); }
   });
+  document.addEventListener("api-config-saved", () => { void loadFeatureSwitches(); void loadStatus(); });
   document.addEventListener("library-ai-settings-saved", () => { void loadFeatureSwitches(); });
   $("settingsLens").addEventListener("change", (event) => setLens(event.target.checked));
   $("settingsAutoExpand").addEventListener("change", (event) => {
@@ -6326,303 +5946,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("settingsDelete").addEventListener("click", () => closeSettingsThen(deletePaper));
   $("questionTrash").addEventListener("click", openQuestionTrash);
   $("approveAllGreen").addEventListener("click", approveAllGreen);
-
-  Object.entries(CREDENTIAL_FIELDS).forEach(([service, field]) => {
-    $(field.remove).addEventListener("click", () => deleteCredential(service));
-  });
-
-  // 1.26.9：不再有"切题与读题 / 标签与答案"两个标签页，两块内容一直摆在一起。
-  $("credentialDialog").addEventListener("cancel", (event) => {
-    if (!requestCredentialClose({ native: true })) event.preventDefault();
-  });
-  document.addEventListener("visibilitychange", () => { if (document.hidden) hideAPISecrets(); });
-  window.addEventListener("pagehide", hideAPISecrets);
-  $("credentialDialog").addEventListener("click", (event) => {
-    if (credentialBusy && event.target === $("credentialDialog")) { event.preventDefault(); event.stopImmediatePropagation(); }
-  }, true);
-
-  $("credentialDialog").addEventListener("close", () => {
-    // Native close events are queued; reopening can happen before this runs.
-    if ($("credentialDialog").open) return;
-    ++credentialSession;
-    credentialClosing = false;
-    credentialCloseTask = null;
-    credentialStateRequest += 1;
-    cancelCredentialFocus();
-    if (credentialAnswersMounted) window.LibraryAISettings?.deactivate?.();
-    resetCredentialInputs();
-    $("credentialResult").textContent = "";
-    // 1.26.9：弹窗是从设置页上"借"走这一块的，关掉之后要还回去 —— 否则设置页
-    // 上的 API 配置会整块消失，只能刷新页面才回来。
-    if (credentialWasInline) {
-      credentialWasInline = false;
-      credentialInline = true;
-      mountCredentialUI($("settingsCredentialHost"));
-    }
-    // 1.26.9：焦点还给打开这个窗口的那个东西（设置页上原来那个按钮没有了）。
-    const back = credentialReturnFocus;
-    credentialReturnFocus = null;
-    if (back && typeof back.focus === "function") back.focus({ preventScroll: true });
-  });
-
-  // 1.26.9：这一块现在是 dialog 的**兄弟**不是子节点，所以
-  // "dialog [data-close]" 匹配不到它里面的「取消」按钮 —— 那个按钮点了没反应。
-  // 这里显式接上。
-  $("credentialCancel")?.addEventListener("click", () => { void requestCredentialClose(); });
-
-  $("credentialForm").addEventListener("submit", async (event) => {    event.preventDefault();
-    if (credentialBusy) return;
-    const services = {};
-    for (const [service, field] of Object.entries(CREDENTIAL_FIELDS)) {
-      const accounts = credentialAccounts($(field.input).value);
-      if (accounts.length > 8) {
-        const message = `${field.label} 最多保存 8 个账号`;
-        $("credentialResult").textContent = message;
-        toast(message, "error");
-        return;
-      }
-      services[service] = accounts.length ? { action: "replace", accounts } : { action: "keep" };
-    }
-    if (!Object.values(services).some((change) => change.action === "replace")) {
-      $("credentialResult").textContent = "没有填写新的密钥，已保存的密钥保持不变。";
-      return;
-    }
-    const session = credentialSession;
-    let refreshMessage = "";
-    setCredentialBusy(true);
-    credentialStateRequest += 1;
-    $("credentialResult").textContent = "正在检查填写格式并加密保存…";
-    try {
-      const result = await api("/api/settings/credentials", { method: "POST", body: { services } });
-      resetCredentialInputs();
-      renderCredentialStates(result);
-      const message = result.message || "API 配置已加密保存；下一项任务开始时生效。";
-      $("credentialResult").textContent = message;
-      toast(message, "success");
-      refreshMessage = message;
-    } catch (error) {
-      $("credentialResult").textContent = error.message;
-      toast(error.message, "error");
-    } finally {
-      setCredentialBusy(false);
-    }
-    if (refreshMessage) await refreshCredentialStatus(refreshMessage, session);
-  });
-
-  // 1.26.13：看图读题这一段的"测试连接"。1.26.14 起，每一家的卡片里各有一个：
-  // 测的就是眼前这家，不用猜是哪一家的密钥。测的是**已保存**的密钥 ——
-  // 没保存的密钥要先点「保存读题密钥」，不然测的是旧的那一份。
-  async function testVisionConnection(provider) {
-    if (credentialBusy) return;
-    const result = $(`credentialVisionTestResult-${provider}`);
-    const button = $(`credentialVisionTestButton-${provider}`);
-    if (!["modelscope", "minimax", "siliconflow"].includes(provider)) {
-      result.textContent = "这家没有可用的连接测试。";
-      return;
-    }
-    if (!credentialServices[provider]?.configured) {
-      result.textContent = "这家还没有保存密钥：先把密钥填进去，保存之后再测。";
-      return;
-    }
-    if (!$(`credentialVisionTestConsent-${provider}`).checked) {
-      result.textContent = "先勾上「我同意这一次测试」，测试会向服务商发一张合成图。";
-      return;
-    }
-    const session = credentialSession;
-    setCredentialBusy(true);
-    result.textContent = "正在发一张合成图测试…";
-    if (button) button.disabled = true;
-    try {
-      const body = await api("/api/settings/credentials/test", { method: "POST", body: { service: provider, confirm: true } });
-      if (session !== credentialSession) return;
-      result.textContent = body.message || "连接成功。";
-      toast(result.textContent, "success");
-    } catch (error) {
-      if (session !== credentialSession) return;
-      result.textContent = error.message;
-      toast(error.message, "error");
-    } finally {
-      $(`credentialVisionTestConsent-${provider}`).checked = false;
-      if (button) button.disabled = false;
-      setCredentialBusy(false);
-    }
-  }
-
-  // Queue the values captured at each change, rather than reading the form
-  // later, after an older response may have arrived.
-  let modelSaving = Promise.resolve();
-  let modelFormDirty = false;
-  let lastModelSave = null;
-  let modelRetryButton = null;
-  const MODEL_SAVED_MESSAGE = "已保存；从下一项新任务或重新识读开始生效，不会改写现有题卡。";
-
-  function readModelSettings() {
-    return {
-      primary: $("settingsPrimaryModel").value,
-      models: {
-        minimax: $("settingsMinimaxModel").value.trim(),
-        siliconflow: $("settingsSiliconflowModel").value.trim(),
-        modelscope: $("settingsModelscopeModel").value.trim()
-      },
-    };
-  }
-
-  function showModelSaveResult(message, { retry = false } = {}) {
-    $("settingsModelResult").textContent = message;
-    if (!modelRetryButton && retry) {
-      modelRetryButton = button("重试保存", "small", () => { void saveModelSettings(); });
-      modelRetryButton.id = "settingsModelRetry";
-      $("settingsModelResult").parentElement.append(modelRetryButton);
-    }
-    if (modelRetryButton) modelRetryButton.hidden = !retry;
-  }
-
-  function saveModelSettings({ refresh = true } = {}) {
-    const body = readModelSettings();
-    const signature = JSON.stringify(body);
-    // Native blur/change and dialog cancel/close can describe the same edit.
-    // Keep one request; a failed request remains explicitly retryable.
-    if (lastModelSave?.signature === signature && !lastModelSave.failed) {
-      if (lastModelSave.succeeded) {
-        modelFormDirty = false;
-        showModelSaveResult(MODEL_SAVED_MESSAGE);
-      }
-      return modelSaving;
-    }
-    const change = { body, signature, failed: false, succeeded: false };
-    lastModelSave = change;
-    modelFormDirty = true;
-    showModelSaveResult("正在保存…");
-    modelSaving = modelSaving.then(
-      () => saveModelSettingsNow(change, { refresh }), () => saveModelSettingsNow(change, { refresh }));
-    return modelSaving;
-  }
-
-  const modelSettingFields = ["settingsPrimaryModel", "settingsMinimaxModel",
-    "settingsSiliconflowModel", "settingsModelscopeModel"];
-  // 1.26.9：勾选行和下拉框是一份状态的两个脸。勾哪一家 → 写下拉框 → 走原来那套
-  // 保存逻辑；下拉框被别的代码改了 → 勾选行跟着回填。
-  for (const provider of ["modelscope", "minimax", "siliconflow", "assistant"]) {
-    const option = $(`credentialVision-${provider}`);
-    if (!option) continue;
-    option.addEventListener("change", () => {
-      if (!option.checked) return;
-      $("credentialVisionProvider").value = option.value;
-      $("credentialVisionProvider").dispatchEvent(new Event("change"));
-    });
-  }
-  $("credentialVisionProvider").addEventListener("change", () => {
-    if (credentialBusy || credentialMutationPending()) { syncCredentialVisionPanel(); return; }
-    hideAPISecrets();
-    const provider = $("credentialVisionProvider").value;
-    const key = provider === "assistant" ? "assistant" : settingsEngineChoices(state.status?.engines || {})
-      .find((choice) => choice.provider_key === provider)?.key;
-    if (!key) { toast("服务列表尚未加载，请稍后重试。", "warn"); syncCredentialVisionPanel(); return; }
-    $("settingsPrimaryModel").value = key;
-    syncCredentialVisionPanel({ followSelection: false });
-    void saveModelSettings();
-  });
-  // 1.26.13：看图读题这一段的测试连接。1.26.14：每一家的卡片里各有一个按钮。
-  for (const provider of ["modelscope", "minimax", "siliconflow"]) {
-    const button = $(`credentialVisionTestButton-${provider}`);
-    if (button) button.addEventListener("click", () => { void testVisionConnection(provider); });
-  }
-  modelSettingFields.forEach((id) => $(id).addEventListener("input", () => {
-    modelFormDirty = true;
-    showModelSaveResult("有改动待保存；离开输入框后会自动保存。", { retry: Boolean(lastModelSave?.failed) });
-  }));
-  modelSettingFields
-    .forEach((id) => $(id).addEventListener("change", () => { void saveModelSettings(); }));
-  $("modelSettingsForm").addEventListener("submit", (event) => {
-    event.preventDefault();
-    void saveModelSettings();
-  });
-
-  credentialModelGuard = {
-    hasUnsavedChanges: () => modelFormDirty,
-    isMutating: () => Boolean(lastModelSave && !lastModelSave.succeeded && !lastModelSave.failed),
-    async prepareClose() {
-      if (!modelFormDirty) return true;
-      if (lastModelSave?.failed && lastModelSave.signature === JSON.stringify(readModelSettings())) {
-        showModelSaveResult("模型设置尚未保存，请重试保存后再关闭。", { retry: true });
-        return false;
-      }
-      // The close waits for the save and nothing else: the status refresh it
-      // used to await as well has no bearing on whether this dialog may close.
-      await saveModelSettings({ refresh: false });
-      return !modelFormDirty;
-    }
-  };
-
-  async function prepareSettingsLeave() {
-    if ($("credentialDialog").open) {
-      if (!requestCredentialClose() && credentialCloseTask) await credentialCloseTask;
-      if ($("credentialDialog").open) return false;
-    }
-    if (window.location.pathname !== "/settings") return true;
-    if (window.LibraryAISettings?.isMutating?.()) { toast("设置正在处理，请稍候再离开。", "warn"); return false; }
-    if (modelFormDirty) {
-      const signature = JSON.stringify(readModelSettings());
-      if (lastModelSave?.failed && lastModelSave.signature === signature) {
-        showModelSaveResult("模型设置尚未保存，请重试保存后再离开。", { retry: true });
-        return false;
-      }
-      await saveModelSettings();
-      await modelSaving;
-      if (modelFormDirty) return false;
-    }
-    if (window.LibraryAISettings?.isMutating?.()) { toast("设置正在处理，请稍候再离开。", "warn"); return false; }
-    // 1.26.9：刚填了还没保存的读题密钥，也要在离开这一页时问一次。
-    // 以前这段只查弹窗（弹窗关得掉），平铺之后这一页就是配置的所在地 —— 不查就
-    // 会让老师填了一半的 Token 悄悄消失。
-    if (credentialHasNewKeys()) {
-      const discard = await confirmDialog({ title: "API 配置还没保存", text: "离开会放弃刚刚填入、还没保存的密钥；已经保存的配置保持原样。", ok: "放弃并离开", cancel: "继续设置", focusCancel: true });
-      if (!discard) return false;
-      resetCredentialInputs();
-    }
-    if (window.LibraryAISettings?.hasUnsavedChanges?.()) {
-      const discard = await confirmDialog({ title: "标签与答案设置还没保存", text: "离开会放弃本次设置改动；已经保存的开关和密钥保持原样。", ok: "放弃并离开", cancel: "继续设置", focusCancel: true });
-      if (!discard) return false;
-      await window.LibraryAISettings.discard();
-    }
-    return true;
-  }
-
-  async function saveModelSettingsNow(change, { refresh = true } = {}) {
-    try {
-      await api("/api/settings/models", { method: "POST", body: change.body });
-      change.succeeded = true;
-      if (change !== lastModelSave) return;
-      // An uncommitted text edit is also a newer intent. A completed save must
-      // not replace it with the older value before blur/change submits it.
-      if (JSON.stringify(readModelSettings()) !== change.signature) {
-        showModelSaveResult("有新改动待保存；离开输入框后会自动保存。");
-        return;
-      }
-      modelFormDirty = false;
-      const message = MODEL_SAVED_MESSAGE;
-      showModelSaveResult(message);
-      toast(message, "success");
-      if (!refresh) {
-        // Closing the dialog is gated on the save, not on the status refresh
-        // behind it: two round trips in series is what made 关闭 feel like a
-        // hang, and the refreshed status is only worth having once the window
-        // is already gone.
-        void loadStatus();
-        return;
-      }
-      const refreshed = await loadStatus();
-      if (!refreshed && change === lastModelSave && !modelFormDirty) {
-        showModelSaveResult(`${message} 当前状态暂未刷新，重新打开设置即可查看。`);
-      }
-    } catch (error) {
-      change.failed = true;
-      if (change !== lastModelSave) return;
-      const message = `未保存：${error.message}。你的选择仍保留，可以重试保存。`;
-      showModelSaveResult(message, { retry: true });
-      toast(message, "error");
-    }
-  }
+  $("publishCutImages")?.addEventListener("click", publishCutImages);
 
   function renderPublishButton(c = counts(), structureBlocked = state.paper?.status === "needs_grouping") {
     const button = $("publishButton");
@@ -9429,6 +8753,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     $("fileInput").disabled = false;
     $("dropZone").classList.remove("disabled");
     $("dropZone").setAttribute("aria-disabled", "false");
+    if ($("uploadCutOnlyWrap")) $("uploadCutOnlyWrap").hidden = !cloudCutReady();
     // 云服务已经配好时不再挂这行常驻提示：它一直在说一件你早就知道的事，
     // 真到了会把资料发出去的那一步，弹窗里本来就会写清发送范围。
     const note = $("uploadNote");
@@ -9537,6 +8862,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (policy.allowCloud && !acknowledged) {
       try { sessionStorage.setItem("qb-cloud-upload-ack", "1"); } catch { /* 无存储时每次都提示 */ }
     }
+    const cutOnly = Boolean($("uploadCutOnly")?.checked);
+    const uploadPolicy = cutOnly && policy.allowCloud ? Object.freeze({ ...policy, cutOnly: true }) : policy;
     const pictures = routed.pictures;
     const others = routed.documents;
     let last = null;
@@ -9544,12 +8871,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const form = new FormData();
       form.append("file", file);
       form.append("material_type", materialType);
-      QBUpload.appendUploadPolicy(form, policy);
+      QBUpload.appendUploadPolicy(form, uploadPolicy);
       try { last = await sendUpload(form, file.name); } catch (error) { toast(`${file.name}：${error.message}`, "error"); }
     }
     if (last) { await loadPapers(); selectPaper(last.id); }
     if (pictures.length > MAX_PHOTOS) toast(`一份试卷最多 ${MAX_PHOTOS} 张照片，这次选了 ${pictures.length} 张`, "error");
-    else if (pictures.length) openPhotoDialog(pictures, { policy, materialType: "exam" });
+    else if (pictures.length) openPhotoDialog(pictures, { policy: uploadPolicy, materialType: "exam" });
   }
 
   function fileSizeLabel(bytes) {
@@ -9700,6 +9027,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       $("photoCloudOption").hidden = !canCloud;
       if ($("photoAllowCloud")) $("photoAllowCloud").checked = Boolean(photoUpload.policy.allowCloud);
     }
+    if ($("photoCutOnlyOption")) {
+      const canCloud = cloudCutReady();
+      $("photoCutOnlyOption").hidden = !canCloud || !photoUpload.policy.allowCloud;
+      if ($("photoCutOnly")) $("photoCutOnly").checked = Boolean(photoUpload.policy.cutOnly);
+    }
     $("photoHint").textContent = `这些照片按下列顺序合成一份试卷，可直接前移、后移、旋转或移除误选照片。${photoUpload.policy.allowCloud ? "本次已允许使用已配置的云服务；无法自动切出的题可以从原卷补齐。" : "本次仅在本机保存，可从原卷选取题目；不会自动调用 AI。"}`;
     renderPhotoDialogList();
     if (!$("photoDialog").open) $("photoDialog").showModal();
@@ -9707,9 +9039,19 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   $("photoEnhance")?.addEventListener("change", () => syncPhotoStagingBar());
   $("photoAllowCloud")?.addEventListener("change", () => {
+    const allowCloud = Boolean($("photoAllowCloud").checked);
     photoUpload.policy = {
       ...photoUpload.policy,
-      allowCloud: Boolean($("photoAllowCloud").checked),
+      allowCloud,
+      cutOnly: allowCloud ? Boolean($("photoCutOnly")?.checked) : false,
+    };
+    if ($("photoCutOnlyOption")) $("photoCutOnlyOption").hidden = !cloudCutReady() || !allowCloud;
+    syncPhotoStagingBar();
+  });
+  $("photoCutOnly")?.addEventListener("change", () => {
+    photoUpload.policy = {
+      ...photoUpload.policy,
+      cutOnly: Boolean($("photoCutOnly").checked),
     };
     syncPhotoStagingBar();
   });
@@ -10043,8 +9385,9 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function requestDialogClose(modal) {
     if (!modal?.open) return;
     if (modal.id === "pageDialog") requestPageDialogClose();
-    else if (modal.id === "credentialDialog") requestCredentialClose();
-    else modal.close();
+    else if (modal.id === "credentialDialog") {
+      if (!window.APISettings?.close) modal.close();
+    } else modal.close();
   }
 
   document.querySelectorAll("dialog [data-close]").forEach((node) => node.addEventListener("click", () => {

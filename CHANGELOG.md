@@ -3,6 +3,19 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.2.3
+
+**统一全站 API 配置与密钥池架构，并合入原图切题直入库、按需转文字及题卡排版修复**
+
+- **统一全站 API 配置、唯一加密凭据池与单宿主设置界面（`provider_catalog.py`、`credential_store.py`、`credential_settings.py`、`library_ai_settings.py`、`api_config.py`、`api_key_reveal.py`、`api-settings.js`、`index.html`、`app.js`、`library-ai-settings.js`）**：
+  - 将 `mineru`、`modelscope`、`minimax`、`siliconflow`、`deepseek`、`doubao`、`custom` 全平台 7 家服务的配置目录、默认端点/模型与路由角色收敛至 `provider_catalog.py`，消除多处重复定义。
+  - 统一将全站 API 密钥加密保存在 `credentials.dat` 账号池（首次加载时无损合并旧 `library-ai*.dat` 并保留原文件作为备份，不再需要手动「共用读题密钥」）；新增统一协调接口 `/api/settings/api-config`、`/api/settings/api-config/test` 与 `/api/settings/api-config/key/reveal`（保留原接口兼容旧脚本），GET 不触发 DPAPI 解密，POST 单次校验保存全部配置。
+  - 前端新增 `api-settings.js`，移除三卡片重复 HTML、隐藏阴影控件及设置页/弹窗跨父节点 DOM 搬运逻辑，收敛为单宿主就地渲染、统一 60 秒明文查看/切后台掩码组件与单套未保存离开守卫。
+- **原图切题直接入库、Eagle 按需转文字与 OneNote/题卡修复（`pipeline.py`、`library*.py`、`eagle/index.html`、`original-paper-layout.js`、`exam-export.js`、`styles.css`）**：
+  - 支持录入页「只切题不识读」与切割原图题卡批量直接入库，引入 `unknown`（题型未定）快捷键标注、按纸/组记忆题型及导出混排分组；Eagle 工作台支持原图/纯文本筛选、空题干原图保存、单题及批量 AI 转文字轮询及 OneNote 适配。
+  - 修复录题审核页展开态已通过题卡右上角「已入库」徽章与「收起」按钮重叠问题。
+
+
 ## 2.2.1
 
 **合入无候选识读漏图误报根治并修复题包分享归档书籍、Word 题号段落与启动自愈锁库问题**

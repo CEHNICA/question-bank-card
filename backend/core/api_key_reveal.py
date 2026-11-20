@@ -84,3 +84,43 @@ def credential_reveal_view(request):
     except credential_settings.CredentialStoreError:
         return JsonResponse({"error": "这条密钥无法读取或已移除，请重新读取设置或重新保存。"}, status=409)
     return JsonResponse({"service": payload["service"], "index": payload["index"], "key": key})
+
+
+@csrf_exempt
+@never_cache
+def unified_reveal_view(request):
+    """在严格本机同源校验下查看统一凭据池中任意服务的指定序号已保存密钥。"""
+
+    from .views import _body
+
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _local_reveal_guard(request)
+    if rejected is not None:
+        return rejected
+    payload = _body(request, limit=1024)
+    if not isinstance(payload, dict) or set(payload) not in ({"service", "index"}, {"provider", "index"}, {"service"}):
+        return JsonResponse({"error": "请明确选择要查看的服务和密钥序号。"}, status=400)
+    service = payload.get("service", payload.get("provider"))
+    index = payload.get("index", 0)
+    if not isinstance(service, str) or service not in credential_settings.ALL_SERVICES:
+        return JsonResponse({"error": "请选择有效的 API 服务。"}, status=400)
+    if type(index) is not int or not 0 <= index < credential_settings.MAX_ACCOUNT_POOL_SIZE:
+        return JsonResponse({"error": "请选择有效的密钥序号。"}, status=400)
+    try:
+        key = credential_settings.reveal_saved_key(service, index)
+        return JsonResponse({"service": service, "index": index, "key": key})
+    except credential_settings.CredentialValidationError:
+        return JsonResponse({"error": "请选择有效的 API 服务和密钥序号。"}, status=400)
+    except credential_settings.CredentialStoreError:
+        # 若尚未写入统一池但历史独立凭据文件存在，尝试兼容回退读取第 0 条
+        if index == 0 and service in library_ai_settings.DEFAULTS:
+            with library_ai_settings._lock:
+                config = library_ai_settings.saved_key_configuration(service)
+                if config.get("key_configured"):
+                    try:
+                        legacy_key = library_ai_settings._key(config)
+                        return JsonResponse({"service": service, "index": 0, "key": legacy_key})
+                    except library_ai_settings.SettingsError:
+                        pass
+        return JsonResponse({"error": "这条密钥无法读取或已移除，请重新读取设置或重新保存。"}, status=409)

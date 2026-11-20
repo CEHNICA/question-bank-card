@@ -23,59 +23,26 @@ import requests
 from django.utils import timezone
 from PIL import Image, ImageDraw
 
-from . import credential_settings, features, provider_catalog, readers
+from . import credential_settings, features, provider_catalog
 
 logger = logging.getLogger(__name__)
 
-ARK_BASE = "https://ark.cn-beijing.volces.com/api/v3"
+ARK_BASE = provider_catalog.ARK_BASE
 ARK_URL = ARK_BASE + "/chat/completions"
-MINIMAX_BASE = "https://api.minimax.cn/v1"
-MINIMAX_MODEL = "MiniMax-M3.1-Flash-Preview"
-MODELSCOPE_BASE = readers.MODELSCOPE_URL.removesuffix("/chat/completions")
-SILICONFLOW_BASE = readers.SILICONFLOW_URL.removesuffix("/chat/completions")
-MINIMAX_TEXT_MODELS = {
-    "MiniMax-M2",
-    *(f"MiniMax-M2.{version}{speed}" for version in (1, 5, 7) for speed in ("", "-highspeed")),
-}
-DEFAULTS = {
-    "deepseek": {
-        "base_url": "https://api.deepseek.com",
-        "model": "deepseek-v4-pro",
-        "supports_images": False,
-        "thinking": True,
-    },
-    "doubao": {"base_url": ARK_BASE, "model": "", "supports_images": False, "thinking": True},
-    "minimax": {"base_url": MINIMAX_BASE, "model": MINIMAX_MODEL, "supports_images": True, "thinking": True},
-    "custom": {"base_url": "", "model": "", "supports_images": False, "thinking": True},
-    "modelscope": {
-        "base_url": MODELSCOPE_BASE,
-        "model": provider_catalog.VISION["modelscope"]["default_model"],
-        "supports_images": True,
-        "thinking": True,
-    },
-    # The existing reader's default is an Instruct model, so it must not be
-    # advertised as a reasoning model merely because the service has others.
-    "siliconflow": {
-        "base_url": SILICONFLOW_BASE,
-        "model": provider_catalog.VISION["siliconflow"]["default_model"],
-        "supports_images": True,
-        "thinking": False,
-    },
-}
+MINIMAX_BASE = provider_catalog.MINIMAX_API_BASE
+MINIMAX_MODEL = provider_catalog.MINIMAX_ANSWER_MODEL
+MODELSCOPE_BASE = provider_catalog.MODELSCOPE_BASE
+SILICONFLOW_BASE = provider_catalog.SILICONFLOW_BASE
+MINIMAX_TEXT_MODELS = set(provider_catalog.MINIMAX_TEXT_MODELS)
+# 各解题服务商的默认端点/模型目录统一由 provider_catalog 提供
+DEFAULTS = {key: dict(value) for key, value in provider_catalog.ANSWER_DEFAULTS.items()}
 ENDPOINT_ID = re.compile(r"ep-[A-Za-z0-9][A-Za-z0-9_-]{3,150}\Z")
 FEATURE_KEYS = {"knowledge_tags", "ai_answer"}
 # 「入库时生成」的每一项对应哪个功能开关。library_jobs.FEATURE_OF 说的是同一件事
 # （那边按任务种类写），两份定义必须一致，test_library_ai_settings 里有一条盯着。
 ON_INTAKE_FEATURE = {"tags": "knowledge_tags", "answer": "ai_answer"}
-KEY_PROVIDER_ORDER = ("deepseek", "minimax", "doubao", "custom", "modelscope", "siliconflow")
-PROVIDER_NAMES = {
-    "deepseek": "DeepSeek",
-    "minimax": "MiniMax",
-    "doubao": "豆包",
-    "custom": "其他兼容服务",
-    "modelscope": "魔搭",
-    "siliconflow": "硅基流动",
-}
+KEY_PROVIDER_ORDER = provider_catalog.ANSWER_ORDER
+PROVIDER_NAMES = {key: provider_catalog.PROVIDER_NAMES[key] for key in KEY_PROVIDER_ORDER}
 # A key is shared only by an explicit local action and only with the same
 # provider. Existing independently configured services remain independent.
 SHAREABLE_FROM_READING = {"minimax", "modelscope", "siliconflow"}
@@ -410,27 +377,87 @@ def saved_key_configuration(provider: str, config: dict | None = None) -> dict:
     }
 
 
-def saved_key_status(config: dict | None = None) -> dict:
-    """Configured/count metadata only; missing/corrupt contents aren't opened.
+def _is_isolated_legacy_key_store() -> bool:
+    """当测试或外部显式指定 QB_LIBRARY_AI_CREDENTIAL_FILE 时走独立密钥文件模式。"""
 
-    A count of one means a configured encrypted file exists, not that it can
-    be decrypted or that a remote service has accepted the key.
-    """
+    return bool(os.environ.get("QB_LIBRARY_AI_CREDENTIAL_FILE", "").strip())
+
+
+def saved_key_status(config: dict | None = None) -> dict:
+    """仅返回密钥可用状态与数量元数据，绝不读取/解密凭据文件。"""
+
     current = config if config is not None else _load()
+    isolated = _is_isolated_legacy_key_store()
+    env_status = {} if isolated else credential_settings.public_all_environment_status()
     result = {}
     for provider in KEY_PROVIDER_ORDER:
         selected = saved_key_configuration(provider, current)
-        configured = selected["key_configured"] is True and key_path(provider).is_file()
         state = current.get("key_states", {}).get(provider, {})
         state = state if isinstance(state, dict) else {}
+        legacy_configured = selected["key_configured"] is True and key_path(provider).is_file()
+        if isolated:
+            configured = legacy_configured
+            count = int(configured)
+        else:
+            env_item = env_status.get(provider, {})
+            env_count = int(env_item.get("count", 0)) if isinstance(env_item, dict) else 0
+            env_configured = bool(env_item.get("configured")) if isinstance(env_item, dict) else False
+            if env_configured or env_count > 0:
+                configured = True
+                count = max(1, env_count)
+            elif not current.get("keys_migrated_to_unified") and legacy_configured:
+                configured = True
+                count = 1
+            else:
+                configured = False
+                count = 0
         result[provider] = {
             "configured": configured,
-            "count": int(configured),
-            # “这里用的是读题那份密钥” is a fact the teacher needs
-            # before deleting or replacing one of the two.
+            "count": count,
             "shared_with_reading": state.get("shared") == "reading",
         }
     return result
+
+
+def migrate_legacy_keys_to_unified() -> bool:
+    """将历史上独立保存的 library-ai*.dat 密钥无损合并进统一 credentials.dat。
+
+    已迁移或处于独立密钥隔离模式时跳过，且保留原始 .dat 文件作为只读备份不删除。
+    """
+
+    if _is_isolated_legacy_key_store():
+        return False
+    with _lock:
+        current = _load()
+        if current.get("keys_migrated_to_unified") is True:
+            return False
+        changed_any = False
+        for provider in KEY_PROVIDER_ORDER:
+            legacy_file = key_path(provider)
+            if not legacy_file.is_file():
+                continue
+            try:
+                raw = json.loads(
+                    credential_settings.store._transform(legacy_file.read_bytes(), protect=False).decode("utf-8")
+                )
+                key = raw.get("key", "") if isinstance(raw, dict) and raw.get("version") == 1 else ""
+                if isinstance(key, str) and key.strip() and not any(c.isspace() for c in key.strip()):
+                    if credential_settings.store.merge_pool_accounts(provider, [key.strip()]):
+                        changed_any = True
+            except (OSError, ValueError, TypeError, credential_settings.CredentialStoreError):
+                # 单份历史凭据损坏时跳过，不阻塞其余服务与页面打开
+                continue
+        if changed_any:
+            credential_settings.refresh_public_environment(include_all=True)
+        current["keys_migrated_to_unified"] = True
+        if changed_any or any(key_path(p).is_file() for p in KEY_PROVIDER_ORDER):
+            _write_settings(current)
+        elif not current.get("revision"):
+            # 无需落盘无意义文件，保持未创建状态即可
+            pass
+        else:
+            _write_settings(current)
+        return changed_any
 
 
 def share_reading_key(provider: str = "minimax") -> dict:
@@ -690,6 +717,162 @@ def save(payload: dict) -> dict:
                 if stale and {**config["on_intake"], **stale} != config["on_intake"]:
                     config["on_intake"] = {**config["on_intake"], **stale}
                     _write_settings(config)
+        # 在统一凭据模式下同步写入 credentials.dat 并刷新状态环境变量，保持两侧完全一致
+        if not _is_isolated_legacy_key_store():
+            unified_ops: dict[str, dict[str, object]] = {}
+            if action == "replace":
+                unified_ops[provider] = {"action": "replace", "accounts": [key]}
+            elif action == "clear":
+                unified_ops[provider] = {"action": "clear"}
+            for name, (extra_action, extra_key) in extra_keys.items():
+                if extra_action == "replace":
+                    unified_ops[name] = {"action": "replace", "accounts": [extra_key]}
+                elif extra_action == "clear":
+                    unified_ops[name] = {"action": "clear"}
+            if unified_ops:
+                status_after = credential_settings.save_all_actions(unified_ops)
+                credential_settings.apply_public_environment(status_after)
+    return public_status()
+
+
+def _sync_key_states_from_status(config: dict, key_status: dict[str, dict[str, object]]) -> None:
+    states = dict(config.get("key_states") or {})
+    for name in KEY_PROVIDER_ORDER:
+        info = key_status.get(name, {})
+        configured = bool(info.get("configured")) if isinstance(info, dict) else False
+        old = states.get(name) if isinstance(states.get(name), dict) else {}
+        revision = str(old.get("revision") or "") or (uuid.uuid4().hex if configured else "")
+        states[name] = {"revision": revision if configured else "", "configured": configured}
+    config["key_states"] = states
+    active = config.get("provider", "deepseek")
+    active_state = states.get(active, {})
+    config["key_configured"] = bool(active_state.get("configured"))
+    config["key_revision"] = str(active_state.get("revision") or "")
+
+
+def sync_credential_change(changed_services: set[str], key_status: dict[str, dict[str, object]]) -> None:
+    """在统一凭据保存后同步解题配置里的密钥状态；仅当前启用服务变更时重置已测试标记。"""
+
+    with _lock:
+        current = _load()
+        _sync_key_states_from_status(current, key_status)
+        if current.get("provider") in changed_services:
+            current.update(revision=uuid.uuid4().hex, verified=False, verified_at="", resolved_model="")
+        current["keys_migrated_to_unified"] = True
+        _write_settings(current)
+
+
+def _validate_unified_payload_shape(payload: dict) -> dict:
+    """校验统一接口传入的解题配置结构，并返回清洗后的中间数据。"""
+
+    allowed = {"mode", *API_FIELDS, "endpoint_id", "features", "on_intake", "provider_profiles"}
+    if not isinstance(payload, dict) or set(payload) - allowed:
+        raise SettingsError("标签与参考答案设置格式不正确。")
+    changes = payload.get("features", {})
+    if (
+        not isinstance(changes, dict)
+        or set(changes) - FEATURE_KEYS
+        or not all(type(v) is bool for v in changes.values())
+    ):
+        raise SettingsError("标签与参考答案开关只能分别设为 true 或 false。")
+    timing = payload.get("on_intake", {})
+    if (
+        not isinstance(timing, dict)
+        or set(timing) - {"tags", "answer"}
+        or not all(type(v) is bool for v in timing.values())
+    ):
+        raise SettingsError("录入时生成的开关只能分别设为 true 或 false。")
+    extra_profiles = payload.get("provider_profiles", {})
+    profile_fields = set(API_FIELDS) - {"provider"}
+    if (
+        not isinstance(extra_profiles, dict)
+        or set(extra_profiles) - set(DEFAULTS)
+        or any(not isinstance(profile, dict) or set(profile) - profile_fields for profile in extra_profiles.values())
+    ):
+        raise SettingsError("备用服务模型配置格式不正确。")
+    return {"changes": changes, "timing": timing, "extra_profiles": extra_profiles}
+
+
+def validate_unified_payload(payload: dict) -> None:
+    """在写入任何凭据或配置文件前，预先校验解题配置参数是否合法。"""
+
+    parsed = _validate_unified_payload_shape(payload)
+    previous = _load()
+    mode = payload.get("mode", previous["mode"])
+    provider = payload.get("provider", "doubao" if "endpoint_id" in payload else previous["provider"])
+    if mode not in ("assistant", "api") or not isinstance(provider, str) or provider not in DEFAULTS:
+        raise SettingsError("请选择当前 AI 助手或独立 API，以及有效的服务商。")
+    config = {**_select_provider(previous, provider), "mode": mode}
+    for field in API_FIELDS:
+        if field in payload:
+            config[field] = payload[field]
+    if "endpoint_id" in payload:
+        if "model" in payload and payload["model"] != payload["endpoint_id"]:
+            raise SettingsError("模型 ID 不一致。")
+        config["model"] = payload["endpoint_id"]
+    _validate_profile(config)
+    for name, profile in parsed["extra_profiles"].items():
+        if name == provider:
+            continue
+        _validate_profile({**_select_provider(previous, name), **profile})
+
+
+def save_from_unified(
+    payload: dict, *, changed_services: set[str] | None = None, key_status: dict[str, dict[str, object]] | None = None
+) -> dict:
+    """供统一 API 配置接口在保存凭据后原子更新解题模式、模型参数与功能开关。"""
+
+    changed_services = set(changed_services or ())
+    if key_status is None:
+        key_status = credential_settings.public_all_environment_status()
+    parsed = _validate_unified_payload_shape(payload)
+    changes = parsed["changes"]
+    timing = parsed["timing"]
+    extra_profiles = parsed["extra_profiles"]
+
+    with _lock:
+        previous = _load()
+        mode = payload.get("mode", previous["mode"])
+        provider = payload.get("provider", "doubao" if "endpoint_id" in payload else previous["provider"])
+        if mode not in ("assistant", "api") or not isinstance(provider, str) or provider not in DEFAULTS:
+            raise SettingsError("请选择当前 AI 助手或独立 API，以及有效的服务商。")
+        config = {**_select_provider(previous, provider), "mode": mode}
+        config["on_intake"] = {**previous["on_intake"], **timing, "tags": False}
+        for field in API_FIELDS:
+            if field in payload:
+                config[field] = payload[field]
+        if "endpoint_id" in payload:
+            if "model" in payload and payload["model"] != payload["endpoint_id"]:
+                raise SettingsError("模型 ID 不一致。")
+            config["model"] = payload["endpoint_id"]
+        _validate_profile(config)
+        validated_profiles = {}
+        for name, profile in extra_profiles.items():
+            if name == provider:
+                continue
+            selected = {**_select_provider(previous, name), **profile}
+            _validate_profile(selected)
+            validated_profiles[name] = _profile(selected)
+        _sync_key_states_from_status(config, key_status)
+        api_changed = (
+            provider in changed_services
+            or any(previous.get(k) != config.get(k) for k in API_FIELDS)
+            or str(previous["revision"]).startswith("recovery-")
+        )
+        if api_changed:
+            config.update(revision=uuid.uuid4().hex, verified=False, verified_at="", resolved_model="")
+        config.pop("endpoint_id", None)
+        _remember_profiles(config, previous)
+        config["provider_profiles"].update(validated_profiles)
+        config["keys_migrated_to_unified"] = True
+        with _settings_transaction(previous, [provider], include_features=bool(changes)):
+            _write_settings(config)
+            if changes:
+                features.save(changes)
+                stale = {kind: False for kind, feature in ON_INTAKE_FEATURE.items() if not features.enabled(feature)}
+                if stale and {**config["on_intake"], **stale} != config["on_intake"]:
+                    config["on_intake"] = {**config["on_intake"], **stale}
+                    _write_settings(config)
     return public_status()
 
 
@@ -725,23 +908,29 @@ def require_snapshot(snapshot: dict) -> None:
 
 
 def _key(config: dict) -> str:
+    provider = config["provider"]
+    if not _is_isolated_legacy_key_store():
+        try:
+            unified_key = credential_settings.reveal_saved_key(provider, 0)
+            if isinstance(unified_key, str) and unified_key and not any(c.isspace() for c in unified_key):
+                return unified_key
+        except (credential_settings.CredentialStoreError, credential_settings.CredentialValidationError):
+            pass
     try:
         value = json.loads(
-            credential_settings.store._transform(key_path(config["provider"]).read_bytes(), protect=False).decode(
-                "utf-8"
-            )
+            credential_settings.store._transform(key_path(provider).read_bytes(), protect=False).decode("utf-8")
         )
         key = value.get("key", "") if isinstance(value, dict) and value.get("version") == 1 else ""
         if (
             not isinstance(key, str)
             or not key
             or any(c.isspace() for c in key)
-            or value.get("revision") != config.get("key_revision")
+            or (_is_isolated_legacy_key_store() and value.get("revision") != config.get("key_revision"))
         ):
             raise ValueError
         return key
     except (OSError, ValueError, credential_settings.CredentialStoreError):
-        raise ConnectionError("API Key 无法读取，已暂停 API 生成；请在独立设置中重新保存。") from None
+        raise ConnectionError("API Key 无法读取，已暂停 API 生成；请在设置中重新保存。") from None
 
 
 def _same_configuration(left: dict, right: dict) -> bool:

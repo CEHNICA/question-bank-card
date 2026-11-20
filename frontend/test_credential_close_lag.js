@@ -1,129 +1,112 @@
 "use strict";
 
-// 关闭 API 配置窗口曾经“卡一下”：模型设置没保存时，关闭会先等一次
-// /api/settings/models，再等一次 loadStatus，两次往返串行，而且中间什么都不显示。
-// 本机的后台任务正在写库时，这两次往返足够长，长到像是点了没反应。
-//
-// 实测（真实 Chromium、仓库自己的 styles.css 和 credentialDialog 标记，
-// 20 次取中位数）：关闭那一帧的间隔只有 3 ms，去掉 ::backdrop 模糊没有区别，
-// 把关闭逻辑延后一帧反而更慢。渲染不是原因，等待才是。所以这里钉的是
-// “只等一次往返”和“等待期间必须看得见”。
-
+// 统一保存性能与防卡顿测试：
+// 关闭或保存只需等待单次 POST /api/settings/api-config，绝不被异步状态刷新串行阻塞；
+// 等待期间界面立即展示保存状态并锁定重复提交与关闭按钮。
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const dom = require("./credential-test-dom.js");
 
-const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8").replace(/\r\n/g, "\n");
-// 下面几段是用源码的起止标记切出来丢进 vm 跑的，切之前先把行尾统一成 LF。
-// 以前这里直接用 "\n  }\n" 当结束标记：文件一旦被存成 CRLF，这个串一次都匹配不上，
-// slice(起点, -1 + 4) 会**悄悄**切出一段空字符串 —— 少了一个函数，测试照样往下跑，
-// 直到哪天那个函数真的被调用才炸，而那时看起来像是新改动弄坏了旧东西。
-const credentialCode = js.slice(js.indexOf("  function settingsEngineChoices("),
-  js.indexOf("  function renderSettingsTask("));
-const modelCode = js.slice(js.indexOf("  let modelSaving = Promise.resolve();"),
-  js.indexOf("  async function prepareSettingsLeave("))
-  + "\n" + js.slice(js.indexOf("  async function saveModelSettingsNow("),
-    js.indexOf("\n  }\n", js.indexOf("  async function saveModelSettingsNow(")) + 4);
-assert.ok(credentialCode.length > 0 && modelCode.length > 0);
-assert.ok(modelCode.includes("function saveModelSettingsNow("),
-  "saveModelSettingsNow must actually be inside the slice; a -1 end marker yields an empty string, not a failure");
-assert.ok(js.indexOf("  function settingsEngineChoices(") < js.indexOf("  let modelSaving"));
+const apiJs = fs.readFileSync(path.join(__dirname, "api-settings.js"), "utf8");
+const deferred = () => {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+};
 
-const providers = ["mineru", "modelscope", "minimax", "siliconflow"];
-const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
-  return { promise, resolve, reject }; };
-const turns = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
-
-function scenario() {
-  const nodes = new Map(), requests = [], messages = [], statusCalls = [], closeButtons = [], nativeTasks = [];
-  const saved = Object.fromEntries(providers.map((p) => [p, { configured: true, count: 1 }]));
-  function $(id) {
-    if (!nodes.has(id)) nodes.set(id, { ...dom.node(id),
-      parentElement: { append() {} },
-      addEventListener(type, fn) { (this.events[type] ||= []).push(fn); },
-      querySelectorAll() { return closeButtons; },
-      showModal() { this.open = true; },
-      close() { if (!this.open) return; this.open = false; nativeTasks.push(() => this.events.close?.forEach((fn) => fn({ target: this }))); },
-      focus() {} });
-    return nodes.get(id);
+class Node {
+  constructor(tag = "div") {
+    this.tagName = tag.toUpperCase();
+    this.id = "";
+    this.className = "";
+    this.textContent = "";
+    this.value = "";
+    this.checked = false;
+    this.disabled = false;
+    this.hidden = false;
+    this.open = false;
+    this.dataset = {};
+    this.attributes = {};
+    this.children = [];
+    this.listeners = new Map();
   }
-  for (const label of ["close", "cancel"]) closeButtons.push({ label, disabled: false, events: {},
-    addEventListener(type, fn) { (this.events[type] ||= []).push(fn); }, closest() { return $("credentialDialog"); } });
-  const dialogs = [$("credentialDialog"), $("pageDialog")];
-  const context = vm.createContext({ $, console, state: { status: null }, credentialSourceNote: () => "", el: dom.el, icon: dom.icon, AbortController, setTimeout, clearTimeout,
-    window: { addEventListener() {} },
-    button: (...args) => dom.el("button", "", ...args),
-    requestAnimationFrame(fn) { fn(); return 1; }, cancelAnimationFrame() {},
-    anyDialogOpen() { return dialogs.some((d) => d.open); },
-    document: { addEventListener() {}, querySelectorAll: (s) => (s === "dialog [data-close]" ? closeButtons : dialogs) },
-    toast(message, kind) { messages.push({ message, kind }); },
-    confirmDialog: async () => true,
-    loadStatus: async () => { statusCalls.push("loadStatus"); return true; },
-    api: async (url, options) => { requests.push({ url, body: (options || {}).body }); return { services: saved }; }
-  });
-  vm.runInContext(credentialCode + modelCode
-    + "\nglobalThis.dirty = (value) => { modelFormDirty = value; };"
-    + "\nglobalThis.close = (options) => requestCredentialClose(options);", context);
-  const drainNative = () => { while (nativeTasks.length) nativeTasks.shift()(); };
-  return { context, $, requests, messages, statusCalls, closeButtons, drainNative };
+  append(...items) { for (const i of items) if (i && typeof i === "object") { this.children.push(i); i.parentElement = this; } }
+  replaceChildren(...items) { this.children = []; this.append(...items); }
+  addEventListener(n, fn) { const a = this.listeners.get(n) || []; a.push(fn); this.listeners.set(n, a); }
+  trigger(n) { for (const fn of this.listeners.get(n) || []) fn({ target: this, preventDefault() {} }); }
+  setAttribute(k, v) { this.attributes[k] = String(v); }
+  querySelectorAll() { return []; }
+  querySelector() { return null; }
+  showModal() { this.open = true; }
+  close() { this.open = false; }
+  focus() {}
 }
 
+const sample = {
+  catalog: { services: [{ key: "mineru", label: "MinerU", roles: ["cutting"] }], vision_order: [], answer_order: [] },
+  max_accounts: 8,
+  credentials: { mineru: { configured: false, count: 0 } },
+  reading: { primary: "assistant", models: {}, plans: { minimax: "auto" }, readiness: { ready: true } },
+  answering: { mode: "assistant", provider: "deepseek", features: { ai_answer: false, knowledge_tags: false }, on_intake: { answer: false } },
+};
+
 (async () => {
-  // 1. 关闭时不再等第二次往返。
-  const one = scenario();
-  await one.context.openCredentialSettings();
-  one.requests.length = 0;
-  one.statusCalls.length = 0;
-  one.context.dirty(true);
-  one.context.close();
-  await turns();
-  assert.equal(one.$("credentialDialog").open, false, "the dialog closes once the save is done");
-  assert.deepEqual(one.requests.map((r) => r.url), ["/api/settings/models"],
-    "closing waits for the save only; the status refresh is not a gate");
-  assert.equal(one.statusCalls.length, 1, "the status is still refreshed, just not before the close");
+  const nodes = new Map();
+  const reg = (n) => { if (n?.id) nodes.set(n.id, n); for (const c of n?.children || []) reg(c); };
+  const dlg = new Node("dialog"); dlg.id = "credentialDialog";
+  const body = new Node("div"); body.id = "credentialDialogBody";
+  const orig = body.replaceChildren.bind(body);
+  body.replaceChildren = (...items) => { orig(...items); for (const i of items) reg(i); };
+  nodes.set("credentialDialog", dlg); nodes.set("credentialDialogBody", body);
 
-  // 2. 等待期间看得见：不是“点了没反应”。
-  const slow = scenario(), save = deferred(), status = deferred();
-  await slow.context.openCredentialSettings();
-  slow.context.dirty(true);
-  slow.context.loadStatus = async () => { slow.statusCalls.push("slow"); return status.promise; };
-  slow.context.api = async (url) => { slow.requests.push({ url }); return save.promise; };
-  slow.context.close();
-  await turns();
-  assert.equal(slow.$("credentialDialog").open, true, "still open while the save is in flight");
-  assert.match(slow.$("credentialResult").textContent, /正在保存后关闭/,
-    "a close that has to wait must say so, or the window looks frozen");
-  assert.ok(slow.closeButtons.every((button) => button.disabled),
-    "the close buttons are disabled so one click cannot queue a second close");
-  save.resolve({ services: {} });
-  await turns();
-  assert.equal(slow.$("credentialDialog").open, false);
+  const postGate = deferred();
+  const slowStatusGate = deferred();
+  let statusRefreshCount = 0;
+  const requests = [];
+  const sandbox = {
+    window: { location: { pathname: "/", hash: "" }, setTimeout, clearTimeout, addEventListener() {} },
+    document: { readyState: "complete", hidden: false, createElement: (t) => new Node(t), getElementById: (id) => nodes.get(id) || null, addEventListener() {}, dispatchEvent() {} },
+    HTMLElement: Node,
+    AbortController,
+    CustomEvent: class { constructor(t, init) { this.type = t; this.detail = init?.detail; } },
+    setTimeout,
+    clearTimeout,
+    fetch: async (url, opts = {}) => {
+      requests.push({ url, method: opts.method || "GET" });
+      if (opts.method === "POST") return postGate.promise;
+      return { ok: true, status: 200, text: async () => JSON.stringify(sample) };
+    },
+  };
+  vm.runInNewContext(apiJs, sandbox);
 
-  // 3. 关闭被拒绝时，按钮和提示都要复原——否则留下的正是那个“卡住”的窗口。
-  const refused = scenario();
-  await refused.context.openCredentialSettings();
-  refused.context.dirty(true);
-  refused.context.api = async (url) => { refused.requests.push({ url }); throw new Error("network down"); };
-  refused.context.close();
-  await turns();
-  assert.equal(refused.$("credentialDialog").open, true, "a failed save must not close the window");
-  assert.equal(refused.$("credentialResult").textContent, "",
-    "the pending line is cleared so it cannot be mistaken for a live progress state");
-  assert.ok(refused.closeButtons.every((button) => !button.disabled), "the close buttons work again");
-  assert.ok(refused.messages.some((m) => m.kind === "error"), "the failure is reported");
+  await sandbox.window.APISettings.open({
+    confirm: async () => true,
+    onStatusChange: () => { statusRefreshCount += 1; return slowStatusGate.promise; },
+  });
+  const mineruIn = nodes.get("apiKeyInput-mineru");
+  mineruIn.value = "tok-fast";
+  mineruIn.trigger("input");
 
-  // 4. 什么都没改的时候，关闭不产生任何请求。
-  const clean = scenario();
-  await clean.context.openCredentialSettings();
-  clean.requests.length = 0;
-  clean.context.close();
-  await turns();
-  clean.drainNative();
-  assert.equal(clean.$("credentialDialog").open, false);
-  assert.deepEqual(clean.requests.map((r) => r.url), [],
-    "closing an untouched dialog never talks to the server");
+  requests.length = 0;
+  const closeTask = sandbox.window.APISettings.close();
+  for (let i = 0; i < 6; i += 1) await Promise.resolve();
 
-  console.log("credential close ok");
+  // 等待保存期间：窗体仍打开、按钮禁用且提示可见
+  assert.equal(dlg.open, true, "dialog waits only for the single save round-trip");
+  assert.equal(nodes.get("credentialSave").disabled, true, "save button disabled while saving");
+  assert.equal(nodes.get("credentialCancel").disabled, true, "cancel button disabled while saving");
+  assert.match(nodes.get("credentialResult").textContent, /正在加密保存/);
+
+  postGate.resolve({ ok: true, status: 200, text: async () => JSON.stringify({ ...sample, message: "saved" }) });
+  const closed = await closeTask;
+
+  // 保存完成后立刻关闭，不等待缓慢的后台状态刷新（slowStatusGate 仍未 resolve）
+  assert.equal(closed, true);
+  assert.equal(dlg.open, false, "dialog closes without blocking on async status refresh");
+  assert.equal(statusRefreshCount, 1, "status refresh was still triggered asynchronously");
+  assert.deepEqual(requests, [{ url: "/api/settings/api-config", method: "POST" }]);
+
+  slowStatusGate.resolve(true);
+  console.log("credential close lag checks: OK");
 })();

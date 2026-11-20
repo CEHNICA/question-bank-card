@@ -19,7 +19,12 @@
 
 要让当前豆包补知识点或参考答案，可以明确让它通过附带的 CLI/MCP 工具完成后交回题库。**这条助手流程不需要豆包 API。** 两项默认关闭，明确需要时再启用；只有聊天能力时由你导入结果。网页中的生成按钮使用已配置的独立 API。[给助手的操作说明](AGENTS.md)
 
-当前发布版本为 **2.2.1**（漏图误报根治 + Word 对齐与题包分享加固版），可从 [GitHub Releases](https://github.com/CEHNICA/question-bank-card/releases/tag/v2.2.1) 下载（[2.2.1 说明](docs/release-notes-v2.2.1.md) · [2.2.0 说明](docs/release-notes-v2.2.0.md) · [2.1.4 说明](docs/release-notes-v2.1.4.md) · [2.1.3 说明](docs/release-notes-v2.1.3.md) · [2.1.2 说明](docs/release-notes-v2.1.2.md) · [2.1.1 说明](docs/release-notes-v2.1.1.md) · [2.1.0 说明](docs/release-notes-v2.1.0.md) · [2.0.0 完整升级说明](docs/release-notes-v2.0.0.md) · [更新记录](CHANGELOG.md)）。
+当前发布版本为 **2.2.3**（统一 API 配置与密钥池 + 原图切题直入库与按需转文字版），可从 [GitHub Releases](https://github.com/CEHNICA/question-bank-card/releases/tag/v2.2.3) 下载（[2.2.3 说明](docs/release-notes-v2.2.3.md) · [2.2.1 说明](docs/release-notes-v2.2.1.md) · [2.2.0 说明](docs/release-notes-v2.2.0.md) · [2.1.4 说明](docs/release-notes-v2.1.4.md) · [2.1.3 说明](docs/release-notes-v2.1.3.md) · [2.1.2 说明](docs/release-notes-v2.1.2.md) · [2.1.1 说明](docs/release-notes-v2.1.1.md) · [2.1.0 说明](docs/release-notes-v2.1.0.md) · [2.0.0 完整升级说明](docs/release-notes-v2.0.0.md) · [更新记录](CHANGELOG.md)）。
+
+### 2.2.3 升级与改进
+
+- **全站统一 API 配置与加密凭据池**：切题、看图读题与正式题库解题/标签的全部 7 家服务商共用唯一服务目录与单一 Windows DPAPI 加密池（首次自动无损迁移旧独立密钥文件），设置页与弹窗统一为单次「保存全部 API 配置」、统一 60 秒明文查看与单一离开守卫，彻底去除重复表单与跨父节点 DOM 搬运。
+- **原图切题直入库与 Eagle 按需转文字**：支持「只切题不识读」、原图题卡批量直入正式题库、`unknown` 未定题型快捷键标定及导出分组兼容；Eagle 工作台支持原图筛选、单题/批量 AI 转文字升级、OneNote 链接优化，并修复展开态已通过题卡头部徽章与「收起」按钮重叠问题。
 
 ### 2.2.1 修复与改进
 

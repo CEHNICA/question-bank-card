@@ -184,11 +184,12 @@ def save(publication, payload):
         raise EditorError("选项只能使用 A、B、C、D、E")
     options = {key: _text(value, "选项", 4000) for key, value in options.items()}
     kind = payload["question_type"]
-    if not isinstance(kind, str) or kind not in qtypes.DECIDED_TYPES:
-        raise EditorError("请选择单选、多选、填空、判断或解答题")
     mode = payload.get("body_mode", (publication.content or {}).get("body_mode", "text"))
     if not isinstance(mode, str) or mode not in {"text", "source_image"} or (mode == "text" and not stem):
         raise EditorError("文字题的题干不能为空，原图题请保留原图正文形式")
+    allowed_types = qtypes.TYPES if mode == "source_image" else qtypes.DECIDED_TYPES
+    if not isinstance(kind, str) or kind not in allowed_types:
+        raise EditorError("请选择单选、多选、填空、判断或解答题")
 
     # Match publish's lock order. An OCR completion or a second editor cannot
     # slip between validating the source and publishing the human edit.

@@ -5,18 +5,19 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 
-const panelJs = fs.readFileSync(require.resolve("./library-ai-settings.js"), "utf8");
+const panelJs = fs.readFileSync(require.resolve("./api-settings.js"), "utf8");
+const compatJs = fs.readFileSync(require.resolve("./library-ai-settings.js"), "utf8");
 const libraryJs = fs.readFileSync(require.resolve("./library.js"), "utf8");
 const libraryHtml = fs.readFileSync(require.resolve("./library.html"), "utf8");
 
-assert.match(panelJs, /只在正式题库中由你主动发起/,
-  "settings explain that AI tag proposals only happen after a user action");
 assert.doesNotMatch(panelJs, /新题入库时生成标签|libraryAITagsIntake/,
   "settings contain no tag-on-intake control");
-assert.match(panelJs, /on_intake: \{ tags: false, answer:/,
-  "saving settings always disables legacy automatic tag generation");
+assert.match(panelJs, /on_intake:\s*\{\s*tags:\s*false,\s*answer:\s*Boolean\(ans\.on_intake\.answer\)/,
+  "saving settings only carries answer auto-intake flag and never enables automatic tag generation");
 assert.doesNotMatch(panelJs, /api\/settings\/knowledge|libraryAIKnowledge|openCatalogue/,
   "settings do not read or present the legacy text catalogue");
+assert.match(compatJs, /window\.LibraryAISettings\s*=\s*Object\.freeze/,
+  "compatibility shim keeps LibraryAISettings facade available");
 
 assert.match(libraryHtml, /id="libraryTagManager"/,
   "the formal library owns tag directory management through its dedicated page entry");

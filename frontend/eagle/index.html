@@ -911,6 +911,10 @@
                 <button id="btnRequireAnswer" onclick="toggleRequireAnswer()" class="w-full text-left px-2 py-1.5 rounded-md border text-xs cursor-pointer transition-colors">必须有参考答案</button>
                 <button id="btnRequireAnalysis" onclick="toggleRequireAnalysis()" class="w-full text-left px-2 py-1.5 rounded-md border text-xs cursor-pointer transition-colors">必须有详细解析</button>
                 <button id="btnRequireOneNote" onclick="toggleRequireOneNote()" class="w-full text-left px-2 py-1.5 rounded-md border text-xs cursor-pointer transition-colors">OneNote 中有笔记</button>
+                <div class="my-1 border-t border-slate-100"></div>
+                <div class="text-[10px] font-bold text-slate-400 px-1 pt-0.5">题面形式</div>
+                <button id="btnBodySourceImage" onclick="toggleBodyModeFilter('source_image')" class="w-full text-left px-2 py-1.5 rounded-md border text-xs cursor-pointer transition-colors">仅看原图题</button>
+                <button id="btnBodyText" onclick="toggleBodyModeFilter('text')" class="w-full text-left px-2 py-1.5 rounded-md border text-xs cursor-pointer transition-colors">仅看文字题</button>
               </div>
             </div>
           </div>
@@ -1400,6 +1404,7 @@
                 <option value="fill_blank">填空题</option>
                 <option value="true_false">判断题</option>
                 <option value="free_response">解答题</option>
+                <option value="unknown">题型未定</option>
               </select>
             </div>
             <div>
@@ -1613,6 +1618,13 @@
                 </select>
                 <input id="exportAnswerSpaceCustom" type="number" min="0" max="200" step="1" value="30" onchange="onExportOptionsChanged()" class="hidden w-full mt-1 px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none" aria-label="自定义留白毫米数">
               </div>
+              <div class="col-span-2">
+                <label class="block text-slate-600 mb-1" for="exportGroupMode">大题组织方式</label>
+                <select id="exportGroupMode" onchange="onExportOptionsChanged()" class="w-full px-2 py-1 border border-slate-200 rounded-md bg-white text-xs focus:border-emerald-500 outline-none">
+                  <option value="by_type" selected>按题型自动归组（选择题→填空题→解答题…）</option>
+                  <option value="basket_order">按选题顺序混排（不按题型拆大题）</option>
+                </select>
+              </div>
             </div>
             <div class="p-3 bg-white rounded-lg border border-slate-200/80 space-y-2">
               <label class="flex items-center gap-2 cursor-pointer">
@@ -1757,6 +1769,9 @@
     </button>
     <button onclick="batchExportPaper()" class="hover:text-emerald-400 transition-colors flex items-center gap-1.5 font-medium cursor-pointer">
       <span>🖨️</span><span>快速组卷</span>
+    </button>
+    <button onclick="batchOcrUpgrade()" class="hover:text-sky-300 transition-colors flex items-center gap-1.5 font-medium cursor-pointer" title="将勾选的原图题提交 AI 识别转为文字版（原图保留历史版）">
+      <span>🤖</span><span>AI 转文字</span>
     </button>
     <button onclick="confirmDeleteQuestions(Array.from(selectedQuestionIds))" class="hover:text-rose-400 transition-colors flex items-center gap-1.5 font-medium cursor-pointer">
       <span>🗑️</span><span>移入回收站</span>
@@ -2111,6 +2126,7 @@
       hasAnswer: false,
       hasAnalysis: false,
       hasOneNote: false,
+      bodyMode: '',
       selectedTagIds: [],
       excludedTagIds: [],
       tagLogic: 'and',
@@ -3094,7 +3110,7 @@
         fill_blank: '填空题',
         true_false: '判断题',
         free_response: '解答题',
-        unknown: '解答题'
+        unknown: '题型未定'
       };
 
       const optionFiguresMap = {};
@@ -3118,11 +3134,13 @@
 
       // 若为纯图片裁片题，无文字识别则回退展现高分辨率原裁片
       if (!formattedStem.trim() && qImages.length > 0) {
-        formattedStem = qImages.map(img => {
+        formattedStem = qImages.map((img, imgIdx) => {
           const imgUrl = (img.url && img.url.startsWith('/') && API_BASE) ? (API_BASE + img.url) : (img.url || '');
+          if (!imgUrl) return '';
+          const safeUrl = escapeHtml(imgUrl);
           return `
-            <div class="my-2 text-right">
-              <img src="${imgUrl}" class="max-h-64 max-w-full inline-block rounded border border-slate-200 bg-white p-1" />
+            <div class="my-2 text-left">
+              <img src="${safeUrl}" alt="原图题第 ${imgIdx + 1} 段" loading="lazy" onclick="event.stopPropagation(); previewImageModal('${safeUrl}', '第 ${qNum} 题 原卷裁片')" title="点击放大查看高清原图" class="max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs cursor-zoom-in hover:shadow-xs transition-shadow" />
             </div>
           `;
         }).join('');
@@ -3198,7 +3216,8 @@
       multiple_choice: '多选题',
       fill_blank: '填空题',
       true_false: '判断题',
-      free_response: '解答题'
+      free_response: '解答题',
+      unknown: '题型未定'
     };
 
     // 卡上那两句话统一由 QBQuestionLocator 说出来（全库只留一套说法）。
@@ -3266,7 +3285,8 @@
           const imgUrl = (img.url && img.url.startsWith('/') && API_BASE) ? (API_BASE + img.url) : (img.url || '');
           if (!imgUrl) return '';
           const pageHint = Number.isInteger(img.page_idx) ? ` · 原卷第 ${img.page_idx + 1} 页` : '';
-          return `<div class="my-2 text-right"><img src="${escapeHtml(imgUrl)}" alt="原图题第 ${idx + 1} 段${escapeHtml(pageHint)}" loading="lazy" class="max-h-64 max-w-full inline-block rounded border border-slate-200 bg-white p-1" /></div>`;
+          const safeUrl = escapeHtml(imgUrl);
+          return `<div class="my-2 text-left"><img src="${safeUrl}" alt="原图题第 ${idx + 1} 段${escapeHtml(pageHint)}" loading="lazy" onclick="event.stopPropagation(); previewImageModal('${safeUrl}', '第 ${qNum} 题 原卷裁片')" title="点击放大查看高清原图" class="max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs cursor-zoom-in hover:shadow-xs transition-shadow" /></div>`;
         }).join('');
       }
       const optionsHtml = renderAdaptiveOptionsHtml(rawOptions, optionFiguresMap, qNum);
@@ -3305,8 +3325,8 @@
         page: (item.page && item.page > 0) ? item.page : 0,
         chapter: c.section || '综合题库',
         section: (c && c.section) || '',
-        questionType: LIBRARY_TYPE_NAMES[item.question_type] || '解答题',
-        questionTypeCode: item.question_type || 'free_response',
+        questionType: LIBRARY_TYPE_NAMES[item.question_type] || '题型未定',
+        questionTypeCode: item.question_type || 'unknown',
         documentId: item.document_id || '',
         sourcePage: sourcePageIdx + 1,
         sourcePageIdx,
@@ -4286,6 +4306,20 @@
             </div>
             <kbd class="text-[10px] text-slate-400 font-mono shrink-0">E</kbd>
           </div>
+          ${q.isSourceImage ? `
+          <div
+            data-ctx-item="1"
+            onclick="ocrUpgradeQuestion('${q.id}'); hideEagleContextMenu();"
+            class="flex items-center justify-between px-2.5 py-1.5 rounded text-sky-800 hover:bg-sky-50 cursor-pointer transition-colors font-semibold"
+            title="提交 AI 识读转为可编辑文字版，原图版保留在版本历史中"
+          >
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="text-sm shrink-0">🤖</span>
+              <span class="truncate">AI 识别转文字</span>
+            </div>
+            <span class="text-[10px] text-sky-600 font-mono shrink-0">升级文字版</span>
+          </div>
+          ` : ''}
           <div data-ctx-sep="1" class="my-1 border-t border-slate-100"></div>
           ${!hasOneNote ? `
           <div 
@@ -5657,6 +5691,8 @@
       if (s.hasAnswer && !q.hasAnswer) return false;
       if (s.hasAnalysis && !q.hasAnalysis) return false;
       if (s.hasOneNote && !hasQuestionOneNote(q)) return false;
+      if (s.bodyMode === 'source_image' && !q.isSourceImage) return false;
+      if (s.bodyMode === 'text' && q.isSourceImage) return false;
 
       const exclTags = s.excludedTagIds || [];
       if (exclTags.length > 0) {
@@ -5900,6 +5936,8 @@
               ${qName ? `<span onclick="event.stopPropagation(); focusInspectorNameInput('${q.id}')" class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200/80 font-bold text-xs truncate max-w-[240px] cursor-pointer hover:bg-emerald-100 transition-colors" title="题目名称：${escapeHtml(qName)}（点击可修改）">${escapeHtml(qName)}</span>` : ''}
               <span class="text-slate-300">·</span>
               <span class="text-slate-600 font-medium">${escapeHtml(q.questionType)}</span>
+              ${q.isSourceImage ? '<span class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200/80 text-[10px] font-semibold">原图题</span>' : ''}
+              ${pendingOcrUpgradeIds.has(String(q.id)) ? '<span class="px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200/80 text-[10px] font-semibold">⏳ AI 转文字中</span>' : ''}
               <span class="q-difficulty-stars text-amber-500 font-bold ml-1 transition-transform inline-block">${q.difficultyStars > 0 ? '★'.repeat(q.difficultyStars) : ''}</span>
               
               <button 
@@ -8167,18 +8205,60 @@
         return;
       }
 
-      const basketList = questionsData.filter(q => basketQuestionIds.has(q.id));
-      container.innerHTML = basketList.map((q, idx) => {
+      // 按试题篮顺序展示，确保上下调序和「按选题顺序混排」所见即所得。
+      const basketList = Array.from(basketQuestionIds)
+        .map(id => questionsData.find(q => String(q.id) === String(id)))
+        .filter(Boolean);
+      const undecided = basketList.filter(q => !q.questionTypeCode || q.questionTypeCode === 'unknown');
+      const currentGroupMode = document.getElementById('exportGroupMode')?.value || 'by_type';
+
+      const alertBanner = undecided.length > 0 ? `
+        <div class="p-2.5 mb-2 rounded-lg border border-amber-200 bg-amber-50/90 text-amber-950 text-[11px] space-y-2">
+          <div class="leading-relaxed">
+            <strong>提醒：</strong>篮中有 <strong>${undecided.length}</strong> 题为「题型未定」。按题型归组时未定题会落入“其他”，且解答题不会自动留白。建议直接补选题型（自动保存回题库），或切换右侧为「按选题顺序混排」。
+          </div>
+          <div class="flex flex-wrap items-center gap-1.5">
+            <select id="basketBulkTypeSelect" class="px-2 py-1 border border-amber-300 rounded bg-white text-[11px] text-slate-800 focus:outline-none">
+              <option value="single_choice">单选题</option>
+              <option value="multiple_choice">多选题</option>
+              <option value="fill_blank">填空题</option>
+              <option value="true_false">判断题</option>
+              <option value="free_response" selected>解答题</option>
+            </select>
+            <button type="button" onclick="applyBasketBulkQuestionType()" class="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-700 text-white font-semibold cursor-pointer">
+              未定题批量设为此题型
+            </button>
+            ${currentGroupMode !== 'basket_order' ? `
+              <button type="button" onclick="switchExportGroupMode('basket_order')" class="px-2 py-1 rounded border border-amber-300 bg-white hover:bg-amber-100 text-amber-900 font-medium cursor-pointer">
+                改用按选题顺序混排
+              </button>
+            ` : '<span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-medium">已启用：按选题顺序混排</span>'}
+          </div>
+        </div>
+      ` : '';
+
+      const rowsHtml = basketList.map((q, idx) => {
         const qName = getQuestionDisplayName(q);
+        const isUnknown = !q.questionTypeCode || q.questionTypeCode === 'unknown';
         return `
-        <div class="flex items-center justify-between p-3 rounded-lg border border-slate-200 bg-white hover:border-emerald-300 transition-colors text-xs">
+        <div class="flex items-center justify-between p-3 rounded-lg border ${isUnknown ? 'border-amber-300 bg-amber-50/30' : 'border-slate-200 bg-white'} hover:border-emerald-300 transition-colors text-xs">
           <div class="flex items-center gap-2.5 min-w-0 flex-1 mr-3">
             <span class="inline-flex items-center justify-center w-5 h-5 rounded bg-slate-100 text-slate-700 font-bold text-[11px] shrink-0 font-mono">${idx + 1}</span>
             <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2 mb-0.5">
+              <div class="flex items-center gap-2 mb-0.5 flex-wrap">
                 <span class="font-bold text-slate-900">${escapeHtml(questionIdentity(q))}</span>
                 ${qName ? `<span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200/80 font-bold text-[11px] shrink-0 max-w-[160px] truncate" title="题目名称：${escapeHtml(qName)}">${escapeHtml(qName)}</span>` : ''}
-                <span class="text-slate-400 font-medium">· ${escapeHtml(q.questionType)}</span>
+                ${isUnknown
+                  ? `<select aria-label="快捷设置题型" onchange="saveBasketQuestionType('${q.id}', this.value)" class="px-1.5 py-0.5 rounded border border-amber-400 bg-white text-amber-900 text-[11px] font-semibold focus:border-emerald-500 outline-none">
+                      <option value="unknown" selected>题型未定 · 请选</option>
+                      <option value="single_choice">单选题</option>
+                      <option value="multiple_choice">多选题</option>
+                      <option value="fill_blank">填空题</option>
+                      <option value="true_false">判断题</option>
+                      <option value="free_response">解答题</option>
+                    </select>`
+                  : `<span class="text-slate-400 font-medium">· ${escapeHtml(q.questionType)}</span>`
+                }
                 <span class="text-amber-500 font-bold">${q.difficultyStars > 0 ? '★'.repeat(q.difficultyStars) : ''}</span>
               </div>
               <p class="truncate text-slate-600 text-xs font-serif min-w-0" title="${q.isSourceImage ? '原图题：正文是原卷裁片' : escapeHtml((q.rawStem || '').replace(/\n+/g, ' '))}">${inlineStemPreview(q)}</p>
@@ -8193,7 +8273,101 @@
       `;
       }).join('');
 
+      container.innerHTML = alertBanner + rowsHtml;
       triggerKaTeX(container);
+    }
+
+    function switchExportGroupMode(mode) {
+      const sel = document.getElementById('exportGroupMode');
+      if (!sel) return;
+      sel.value = mode === 'basket_order' ? 'basket_order' : 'by_type';
+      onExportOptionsChanged();
+      renderBasketModalList();
+    }
+
+    async function persistLibraryQuestionType(qid, newType) {
+      const q = questionsData.find(item => String(item.id) === String(qid));
+      if (!q || !newType || newType === 'unknown') return false;
+      const revRes = await fetch(`${API_BASE}/api/library/${encodeURIComponent(qid)}/question`, {
+        headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
+        cache: 'no-store'
+      });
+      if (!revRes.ok) {
+        const err = await revRes.json().catch(() => ({}));
+        throw new Error(err?.error || `获取版本信息失败 (HTTP ${revRes.status})`);
+      }
+      const revInfo = await revRes.json();
+      if (revInfo && revInfo.editable === false) {
+        throw new Error(revInfo.reason || '当前题目暂不可修改，请先处理来源题卡');
+      }
+      const payload = {
+        revision: (revInfo && typeof revInfo.revision === 'number') ? revInfo.revision : 1,
+        content_hash: (revInfo && revInfo.content_hash) || '',
+        body_mode: q.isSourceImage ? 'source_image' : 'text',
+        question_type: newType,
+        stem: q.isSourceImage ? (q.rawStem || '') : (q.rawStem || ''),
+        options: q.isSourceImage ? {} : (q.rawOptions || {}),
+        figures: (revInfo && revInfo.figures) || q.figures || []
+      };
+      const saveRes = await fetch(`${API_BASE}/api/library/${encodeURIComponent(qid)}/question`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1', 'Referer': window.location.href },
+        body: JSON.stringify(payload)
+      });
+      if (!saveRes.ok) {
+        const err = await saveRes.json().catch(() => ({}));
+        throw new Error(err?.error || `题型保存失败 (HTTP ${saveRes.status})`);
+      }
+      const qData = await saveRes.json();
+      const newPub = qData?.publication || null;
+      const targetQid = String(newPub?.id || qid);
+      if (targetQid !== String(qid)) {
+        migrateQuestionIdAfterEdit(q, String(qid), targetQid, newPub);
+      }
+      q.questionTypeCode = (newPub && newPub.question_type) || newType;
+      q.questionType = LIBRARY_TYPE_NAMES[q.questionTypeCode] || '题型未定';
+      q.score = (newPub && newPub.score) || ((q.questionTypeCode === 'free_response') ? 12 : 5);
+      return true;
+    }
+
+    async function saveBasketQuestionType(qid, newType) {
+      if (!newType || newType === 'unknown') return;
+      try {
+        await persistLibraryQuestionType(qid, newType);
+        previewState.pageCount = 0;
+        previewState.items = [];
+        renderBasketModalList();
+        applyFilters();
+        showToast(`已将题型更新为「${LIBRARY_TYPE_NAMES[newType] || newType}」并保存回题库`, 'success');
+      } catch (err) {
+        showToast(err?.message || '题型保存失败', 'error');
+        renderBasketModalList();
+      }
+    }
+
+    async function applyBasketBulkQuestionType() {
+      const sel = document.getElementById('basketBulkTypeSelect');
+      const newType = sel?.value;
+      if (!newType || newType === 'unknown') return;
+      const targets = Array.from(basketQuestionIds)
+        .map(id => questionsData.find(q => String(q.id) === String(id)))
+        .filter(q => q && (!q.questionTypeCode || q.questionTypeCode === 'unknown'));
+      if (!targets.length) return;
+      let updated = 0;
+      try {
+        for (const q of targets) {
+          if (await persistLibraryQuestionType(q.id, newType)) updated += 1;
+        }
+        previewState.pageCount = 0;
+        previewState.items = [];
+        renderBasketModalList();
+        applyFilters();
+        showToast(`已将 ${updated} 道未定题型批量设为「${LIBRARY_TYPE_NAMES[newType] || newType}」`, 'success');
+      } catch (err) {
+        renderBasketModalList();
+        applyFilters();
+        showToast(updated > 0 ? `已保存 ${updated} 题，但中断：${err?.message || err}` : (err?.message || '批量设题型失败'), 'error');
+      }
     }
 
     function moveBasketItem(qid, direction) {
@@ -8269,6 +8443,8 @@
       const optionLayout = document.getElementById('exportOptionLayout')?.value || 'auto';
       const figureAlignRaw = document.getElementById('exportFigureAlign')?.value || 'right';
       const figureAlign = ['left', 'center', 'right'].includes(figureAlignRaw) ? figureAlignRaw : 'right';
+      const groupModeRaw = document.getElementById('exportGroupMode')?.value || 'by_type';
+      const groupMode = groupModeRaw === 'basket_order' ? 'basket_order' : 'by_type';
       const mode = ['questions', 'answers', 'combined'].includes(documentMode) ? documentMode : 'questions';
       return {
         answers: mode !== 'questions',
@@ -8282,6 +8458,7 @@
         pagination: pagination === 'keep' ? 'keep' : 'compact',
         option_layout: ['auto', 'four', 'two', 'vertical'].includes(optionLayout) ? optionLayout : 'auto',
         figure_align: figureAlign,
+        group_mode: groupMode,
         option_overrides: Object.assign({}, exportPreviewOverrides.option_overrides),
         answer_space_overrides: Object.assign({}, exportPreviewOverrides.answer_space_overrides),
         figure_overrides: Object.assign({}, exportPreviewOverrides.figure_overrides),
@@ -8552,11 +8729,16 @@
       if (!modal) return;
 
       document.getElementById('editModalQBadge').innerText = `${questionIdentity(q)} · ID: ${q.id.slice(0, 8)}`;
-      const initType = q.questionTypeCode || 'single_choice';
+      const initType = q.questionTypeCode || 'unknown';
       const initStem = (q.rawStem || '').trim();
       document.getElementById('editInputType').value = initType;
       setEditStarsDisplay(q.difficultyStars || 0);
-      document.getElementById('editInputStem').value = q.rawStem || '';
+      const stemInputEl = document.getElementById('editInputStem');
+      stemInputEl.value = q.rawStem || '';
+      stemInputEl.disabled = Boolean(q.isSourceImage);
+      stemInputEl.placeholder = q.isSourceImage
+        ? '当前为原图题面，如需改字请先在卡片菜单点击「AI 识别转文字」'
+        : '请输入题干内容...';
 
       const opts = q.rawOptions || {};
       document.getElementById('editOptA').value = opts.A || opts.a || '';
@@ -8565,6 +8747,10 @@
       document.getElementById('editOptD').value = opts.D || opts.d || '';
       document.getElementById('editOptE').value = opts.E || opts.e || '';
       document.getElementById('editOptF').value = opts.F || opts.f || '';
+      ['A', 'B', 'C', 'D', 'E', 'F'].forEach((letter) => {
+        const optEl = document.getElementById(`editOpt${letter}`);
+        if (optEl) optEl.disabled = Boolean(q.isSourceImage);
+      });
 
       const scoreInput = document.getElementById('editInputScore');
       if (scoreInput) {
@@ -8691,6 +8877,8 @@
       const figures = (q && (q.figures || q.rawFigures)) || [];
 
       const content = {
+        body_mode: q && q.isSourceImage ? 'source_image' : 'text',
+        question_images: (q && q.questionImages) || [],
         stem: stem,
         options: options,
         answer: answer,
@@ -8802,13 +8990,17 @@
       const newAnswer = (document.getElementById('editInputAnswer')?.value || '').trim();
       const newAnalysis = (document.getElementById('editInputAnalysis')?.value || '').trim();
 
-      if (!newStem) {
+      if (!q.isSourceImage && !newStem) {
         showToast('题干内容不能为空！', 'error');
+        return;
+      }
+      if (!q.isSourceImage && newType === 'unknown') {
+        showToast('文字题请选择具体题型！', 'error');
         return;
       }
 
       const init = activeEditingInitialSnapshot || {
-        type: q.questionTypeCode || 'single_choice',
+        type: q.questionTypeCode || 'unknown',
         stem: (q.rawStem || '').trim(),
         options: normalizeQuestionOptionsForCompare(q.rawOptions || {}),
         answer: String((q.savedSolution && q.savedSolution.answer) || q.rawAnswer || '').trim(),
@@ -8868,9 +9060,10 @@
           const editPayload = {
             revision: rev,
             content_hash: cHash,
+            body_mode: q.isSourceImage ? 'source_image' : 'text',
             question_type: newType,
-            stem: newStem,
-            options: newOpts,
+            stem: q.isSourceImage ? (q.rawStem || '') : newStem,
+            options: q.isSourceImage ? {} : newOpts,
             figures: activeEditingRevisionInfo?.figures || []
           };
 
@@ -8901,11 +9094,21 @@
             migrateQuestionIdAfterEdit(q, qid, targetQid, newPub);
           }
           // 题干已经入库成功，同步更新本地基准，防止下一步失败重试时重复创建版本
-          q.rawStem = (newPub && newPub.content && newPub.content.stem) || newStem;
-          q.rawOptions = (newPub && newPub.content && newPub.content.options) || newOpts;
+          const typeNames = {
+            single_choice: '单选题',
+            multiple_choice: '多选题',
+            fill_blank: '填空题',
+            true_false: '判断题',
+            free_response: '解答题',
+            unknown: '题型未定'
+          };
+          q.rawStem = (newPub && newPub.content && newPub.content.stem) || (q.isSourceImage ? (q.rawStem || '') : newStem);
+          q.rawOptions = (newPub && newPub.content && newPub.content.options) || (q.isSourceImage ? {} : newOpts);
           q.questionTypeCode = (newPub && newPub.question_type) || newType;
-          q.questionType = typeNames[q.questionTypeCode] || '解答题';
-          q.content = renderEditedQuestionContent(q, q.rawStem, q.rawOptions);
+          q.questionType = typeNames[q.questionTypeCode] || '题型未定';
+          if (!q.isSourceImage) {
+            q.content = renderEditedQuestionContent(q, q.rawStem, q.rawOptions);
+          }
           if (activeEditingInitialSnapshot) {
             activeEditingInitialSnapshot.type = q.questionTypeCode;
             activeEditingInitialSnapshot.stem = q.rawStem;
@@ -13734,6 +13937,161 @@
       syncFilterPanelUI();
     }
 
+    const pendingOcrUpgradeIds = new Set();
+    let ocrUpgradePollTimer = null;
+    let ocrUpgradePollCount = 0;
+
+    function stopOcrUpgradePolling() {
+      if (ocrUpgradePollTimer) {
+        clearInterval(ocrUpgradePollTimer);
+        ocrUpgradePollTimer = null;
+      }
+      ocrUpgradePollCount = 0;
+    }
+
+    function applyUpgradedPublicationToLocalCard(oldId, pub) {
+      const idx = questionsData.findIndex(item => String(item.id) === String(oldId));
+      if (idx === -1 || !pub) return false;
+      const existing = questionsData[idx];
+      const converted = convertLibraryListItem(pub, idx);
+      const targetQid = String(pub.id || converted.id || oldId);
+      if (targetQid !== String(oldId)) {
+        migrateQuestionIdAfterEdit(existing, String(oldId), targetQid, pub);
+      }
+      Object.assign(existing, {
+        isSourceImage: converted.isSourceImage,
+        questionImages: converted.questionImages,
+        content: converted.content,
+        rawStem: converted.rawStem,
+        rawOptions: converted.rawOptions,
+        rawFigures: converted.rawFigures,
+        figures: converted.figures,
+        rawAnswer: converted.rawAnswer,
+        rawAnalysis: converted.rawAnalysis,
+        hasAnswer: converted.hasAnswer,
+        hasAnalysis: converted.hasAnalysis,
+        questionTypeCode: converted.questionTypeCode,
+        questionType: converted.questionType,
+        tags: converted.tags && converted.tags.length ? converted.tags : existing.tags
+      });
+      return true;
+    }
+
+    async function pollPendingOcrUpgrades() {
+      if (!pendingOcrUpgradeIds.size) {
+        stopOcrUpgradePolling();
+        return;
+      }
+      ocrUpgradePollCount += 1;
+      if (ocrUpgradePollCount > 45) {
+        stopOcrUpgradePolling();
+        return;
+      }
+      let completedCount = 0;
+      for (const oldId of Array.from(pendingOcrUpgradeIds)) {
+        try {
+          const res = await fetch(`${API_BASE}/api/library/${encodeURIComponent(oldId)}`, {
+            headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
+            cache: 'no-store'
+          });
+          if (!res.ok) continue;
+          const detail = await res.json();
+          const history = Array.isArray(detail?.history) ? detail.history : [];
+          const latestPublished = history.find(h => h && h.status === 'published' && String(h.id) !== String(oldId));
+          const currentPub = detail?.publication;
+          let upgradedPub = null;
+          if (latestPublished) {
+            const pubRes = await fetch(`${API_BASE}/api/library/${encodeURIComponent(latestPublished.id)}`, {
+              headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
+              cache: 'no-store'
+            });
+            if (pubRes.ok) {
+              const pubDetail = await pubRes.json();
+              upgradedPub = pubDetail?.publication || null;
+            }
+          } else if (currentPub && currentPub.status === 'published' && currentPub.content?.body_mode === 'text') {
+            upgradedPub = currentPub;
+          }
+          if (upgradedPub && upgradedPub.content?.body_mode !== 'source_image') {
+            applyUpgradedPublicationToLocalCard(oldId, upgradedPub);
+            pendingOcrUpgradeIds.delete(oldId);
+            completedCount += 1;
+          }
+        } catch (err) {
+          // 忽略单次轮询网络抖动，下一轮重试
+        }
+      }
+      if (completedCount > 0) {
+        applyFilters();
+        renderRightInspector();
+        if (!document.getElementById('basketExportModal')?.classList.contains('hidden')) {
+          renderBasketModalList();
+        }
+        showToast(`已有 ${completedCount} 道原图题完成 AI 转文字，已自动切换为文本版`, 'success');
+      }
+      if (!pendingOcrUpgradeIds.size) stopOcrUpgradePolling();
+    }
+
+    function startOcrUpgradePolling(ids) {
+      ids.forEach(id => {
+        if (id) pendingOcrUpgradeIds.add(String(id));
+      });
+      if (!pendingOcrUpgradeIds.size) return;
+      applyFilters();
+      if (!ocrUpgradePollTimer) {
+        ocrUpgradePollCount = 0;
+        ocrUpgradePollTimer = setInterval(pollPendingOcrUpgrades, 3000);
+      }
+    }
+
+    async function ocrUpgradeQuestion(qid) {
+      if (!qid) return;
+      try {
+        const res = await fetch(`${API_BASE}/api/library/${encodeURIComponent(qid)}/ocr-upgrade`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1', 'Referer': window.location.href },
+          body: JSON.stringify({})
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showToast(data?.error || '提交 AI 转文字失败', 'error');
+          return;
+        }
+        startOcrUpgradePolling([qid]);
+        showToast('已加入 AI 识别转文字队列，完成后将自动切换为文本版（原图保留在历史版中）', 'success');
+      } catch (err) {
+        showToast('提交 AI 转文字失败：' + (err?.message || err), 'error');
+      }
+    }
+
+    async function batchOcrUpgrade() {
+      const ids = Array.from(selectedQuestionIds).filter((id) => {
+        const q = questionsData.find((item) => item.id === id);
+        return Boolean(q && q.isSourceImage);
+      });
+      if (!ids.length) {
+        showToast('当前勾选的题目中没有原图题', 'error');
+        return;
+      }
+      try {
+        const res = await fetch(`${API_BASE}/api/library/ocr-upgrade-batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1', 'Referer': window.location.href },
+          body: JSON.stringify({ ids })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showToast(data?.error || '批量提交 AI 转文字失败', 'error');
+          return;
+        }
+        startOcrUpgradePolling(ids);
+        showToast(`已提交 ${data.queued || ids.length} 道原图题进行 AI 转文字，完成后将自动刷新为文本版`, 'success');
+        clearBatchSelection();
+      } catch (err) {
+        showToast('批量提交 AI 转文字失败：' + (err?.message || err), 'error');
+      }
+    }
+
     function countContentFilters() {
       return (
         (filterState.selectedTagIds || []).length +
@@ -13744,6 +14102,7 @@
         (filterState.hasAnswer ? 1 : 0) +
         (filterState.hasAnalysis ? 1 : 0) +
         (filterState.hasOneNote ? 1 : 0) +
+        (filterState.bodyMode ? 1 : 0) +
         (filterState.datePreset ? 1 : 0)
       );
     }
@@ -13764,7 +14123,7 @@
       setBadge('pillBadgeTag', filterState.selectedTagIds.length + filterState.excludedTagIds.length, 'bg-emerald-500');
       setBadge('pillBadgeType', filterState.questionTypes.length, 'bg-sky-500');
       setBadge('pillBadgeStar', filterState.difficultyStars.length + (filterState.difficultyMinStar ? 1 : 0), 'bg-amber-500');
-      setBadge('pillBadgeStatus', (filterState.hasAnswer ? 1 : 0) + (filterState.hasAnalysis ? 1 : 0) + (filterState.hasOneNote ? 1 : 0), 'bg-teal-500');
+      setBadge('pillBadgeStatus', (filterState.hasAnswer ? 1 : 0) + (filterState.hasAnalysis ? 1 : 0) + (filterState.hasOneNote ? 1 : 0) + (filterState.bodyMode ? 1 : 0), 'bg-teal-500');
       setBadge('pillBadgeDate', filterState.datePreset ? 1 : 0, 'bg-violet-500');
       setBadge('filterPanelBadge', countContentFilters(), 'bg-emerald-500');
     }
@@ -13992,6 +14351,8 @@
       if (filterState.hasAnswer) statusChips.push(renderFilterChip('status', '✓ 有答案', "removeFilterChip('answer', '')"));
       if (filterState.hasAnalysis) statusChips.push(renderFilterChip('status', '✓ 有解析', "removeFilterChip('analysis', '')"));
       if (filterState.hasOneNote) statusChips.push(renderFilterChip('status', '📝 OneNote有笔记', "removeFilterChip('onenote', '')"));
+      if (filterState.bodyMode === 'source_image') statusChips.push(renderFilterChip('status', '🖼️ 仅原图题', "removeFilterChip('bodymode', '')"));
+      if (filterState.bodyMode === 'text') statusChips.push(renderFilterChip('status', '📝 仅文字题', "removeFilterChip('bodymode', '')"));
       if (statusChips.length) {
         if (statusChips.length > 1) html += renderFilterGroupHead('完整度与笔记', 'status', 'bg-teal-100 text-teal-900 border-teal-200');
         html += renderFilterGroupChips('status', statusChips);
@@ -14035,6 +14396,9 @@
         case 'onenote':
           filterState.hasOneNote = false;
           break;
+        case 'bodymode':
+          filterState.bodyMode = '';
+          break;
         case 'date':
           filterState.datePreset = '';
           filterState.dateFrom = '';
@@ -14060,6 +14424,7 @@
             filterState.hasAnswer = false;
             filterState.hasAnalysis = false;
             filterState.hasOneNote = false;
+            filterState.bodyMode = '';
           } else if (val === 'date') {
             filterState.datePreset = '';
             filterState.dateFrom = '';
@@ -14087,6 +14452,7 @@
       filterState.hasAnswer = false;
       filterState.hasAnalysis = false;
       filterState.hasOneNote = false;
+      filterState.bodyMode = '';
       filterState.keyword = '';
       filterState.chapter = '';
       filterState.paperId = '';
@@ -14168,6 +14534,12 @@
      */
     function toggleRequireOneNote() {
       filterState.hasOneNote = !filterState.hasOneNote;
+      syncFilterDropdownStates();
+      applyFilters();
+    }
+
+    function toggleBodyModeFilter(mode) {
+      filterState.bodyMode = filterState.bodyMode === mode ? '' : mode;
       syncFilterDropdownStates();
       applyFilters();
     }
@@ -14274,7 +14646,9 @@
       { code: 'single_choice', label: '单选题' },
       { code: 'multiple_choice', label: '多选题' },
       { code: 'fill_blank', label: '填空题' },
-      { code: 'free_response', label: '解答题' }
+      { code: 'true_false', label: '判断题' },
+      { code: 'free_response', label: '解答题' },
+      { code: 'unknown', label: '题型未定' }
     ];
 
     // 题型/难度浮层改成动态渲染：以前是静态 HTML，重新打开浮层勾选态全丢，
@@ -14345,6 +14719,20 @@
       if (oneBtn) {
         oneBtn.className = 'w-full text-left px-2 py-1.5 rounded-md border text-xs cursor-pointer transition-colors ' +
           (filterState.hasOneNote
+            ? 'bg-teal-500 border-teal-500 text-white font-bold'
+            : 'bg-white border-slate-200 text-slate-700 hover:border-teal-400');
+      }
+      const bodyImgBtn = document.getElementById('btnBodySourceImage');
+      if (bodyImgBtn) {
+        bodyImgBtn.className = 'w-full text-left px-2 py-1.5 rounded-md border text-xs cursor-pointer transition-colors ' +
+          (filterState.bodyMode === 'source_image'
+            ? 'bg-amber-500 border-amber-500 text-white font-bold'
+            : 'bg-white border-slate-200 text-slate-700 hover:border-amber-400');
+      }
+      const bodyTxtBtn = document.getElementById('btnBodyText');
+      if (bodyTxtBtn) {
+        bodyTxtBtn.className = 'w-full text-left px-2 py-1.5 rounded-md border text-xs cursor-pointer transition-colors ' +
+          (filterState.bodyMode === 'text'
             ? 'bg-teal-500 border-teal-500 text-white font-bold'
             : 'bg-white border-slate-200 text-slate-700 hover:border-teal-400');
       }

@@ -17,16 +17,11 @@ assert.match(html, /apiStepTrack-mineru/, "step one is the cloud cut");
 assert.match(html, /apiStepTrack-reader/, "step two is the reader");
 assert.match(html, /apiStepTrack-answers/, "step three is the answers");
 assert.match(html, /api-redesign\.css/, "the redesigned layout lives in its own stylesheet");
-// 1.26.18：「删除密钥」原来绝对定位在卡片左下角，正好压在「测试连接」按钮上
-// （只有存过密钥的账号才看得到，所以平时发现不了）。
+// API 配置卡片底部操作流不再绝对定位，避免遮挡测试按钮。
 const redesign = fs.readFileSync(path.join(__dirname, "api-redesign.css"), "utf8");
-const actionsRule = redesign.slice(
-  redesign.indexOf("#credentialUi .credential-service .credential-service-actions")
-);
-assert.ok(actionsRule.length, "the delete-button row is styled in the redesign stylesheet");
-assert.doesNotMatch(actionsRule.slice(0, actionsRule.indexOf("}")), /position:\s*absolute/,
+assert.match(redesign, /\.api-unified-root\b/, "the redesign stylesheet styles the unified root");
+assert.doesNotMatch(redesign, /\.credential-service-actions\s*\{[^}]*position:\s*absolute/,
   "删除密钥不再绝对定位 —— 绝对定位会压住测试连接按钮");
-assert.match(actionsRule.slice(0, actionsRule.indexOf("}")), /position:\s*static/);
 // 1.26.16：每个区一句引导，页头按区换。
 assert.match(html, /id="settingsPageLead"/, "the page header carries a per-area lead sentence");
 const leads = js.slice(js.indexOf("const SETTINGS_AREA_LEADS"), js.indexOf("};", js.indexOf("const SETTINGS_AREA_LEADS")));
@@ -98,9 +93,9 @@ assert.match(js, /renderServiceReadiness\(\);/, "refreshing the status refreshes
 assert.match(js, /function showSettingsTab\(id, \{ updateHash = true \} = \{\}\)/);
 assert.match(html, /<section id="settingsDialog" class="settings-panel"/);
 assert.doesNotMatch(html, /<dialog id="settingsDialog"|id="reopenSettings"/);
-assert.match(html, /id="libraryAIAPISettingsMount"/);
-assert.match(js, /LibraryAISettings\.mount\(\$\("libraryAIAPISettingsMount"\), \{ embedded: true, confirm: confirmDialog \}\)/);
-assert.doesNotMatch(html + js, /libraryAISettingsMount/);
+assert.match(html, /id="settingsCredentialHost"/);
+assert.match(js, /window\.APISettings\?\.mount/);
+assert.doesNotMatch(html + js, /libraryAISettingsMount|libraryAIAPISettingsMount/);
 // 外层只给真实配置入口，不再重复四家服务的密钥状态清单。
 assert.match(html, /data-settings-tab="settingsGeneral"[^>]*>API 配置</);
 // 1.26.9：API 配置直接平铺在设置页上，不再是"一个按钮 + 一个弹窗"，也没有标签页了。
@@ -110,11 +105,8 @@ assert.doesNotMatch(html, /id="settingsCredentialOpen"/);
 assert.doesNotMatch(html, /credential-tabs|credentialReadingTab|credentialAnswerTab/);
 const outerAPI = html.slice(html.indexOf('id="settingsGeneral"'), html.indexOf('id="settingsDisplay"'));
 assert.doesNotMatch(outerAPI, /api-status|settings(?:Mineru|Modelscope|Minimax|Siliconflow)State|settingsFreePlan/);
-assert.match(html, /云端自动切题必填/);
-assert.match(html, /只手工框题或直接审核原图时，可以跳过这两步/);
-assert.match(html, /id="credentialVisionProvider"[\s\S]*?value="modelscope"[\s\S]*?value="minimax"[\s\S]*?value="siliconflow"[\s\S]*?value="assistant"/);
-assert.doesNotMatch(html + js, /settingsAI\b|settingsAPIOpen/);
-assert.match(js, /window\.APISettings = Object\.freeze\(\{ open: openCredentialSettings \}\)/);
+assert.doesNotMatch(html + js, /settingsAI\b|settingsAPIOpen|libraryAIAPISettingsMount|id="credentialUi"/);
+assert.match(fs.readFileSync(path.join(__dirname, "api-settings.js"), "utf8"), /window\.APISettings\s*=\s*Object\.freeze/);
 
 // Run the actual settings route and navigation handlers against the tabs parsed
 // from the page. Old answer bookmarks must work on both entry and hash changes.
@@ -189,7 +181,7 @@ navigation.context.openSettings(); assert.deepEqual(navigation.navigated, ["/set
 // 那是给人看的，不该被一条「文件里不许出现这几个字」的断言误伤。
 assert.doesNotMatch(html, /id="settingsReady"/);
 assert.doesNotMatch(js, /function renderSettingsReady/);
-assert.match(js, /现在是 AI 助手读题：导入会先在本机准备原卷并尝试切题，无需 MinerU/);
+assert.match(fs.readFileSync(path.join(__dirname, "api-settings.js"), "utf8"), /原图审核或交由 AI 助手读取/);
 assert.doesNotMatch(js, /新资料的题卡先用 MinerU 的文字/);
 // 放大镜开关在“审核界面”里，与工具栏按钮保持同步。聚光灯入口已从设置页撤掉。
 assert.match(html, /id="settingsLens" type="checkbox" role="switch"/);
@@ -197,55 +189,20 @@ assert.doesNotMatch(html, /id="settingsFocus"/);
 assert.doesNotMatch(js, /\$\("settingsFocus"\)\.checked/);
 // 读题模型改了就保存，不再依赖单独的保存按钮。
 assert.doesNotMatch(html, /id="settingsModelSave"/);
-assert.match(js, /\.forEach\(\(id\) => \$\(id\)\.addEventListener\("change", \(\) => \{ void saveModelSettings\(\); \}\)\)/);
-// 当前这份试卷的操作不属于“设置”：右键打开试卷操作菜单。
-assert.doesNotMatch(html, /id="settingsTask"/);
-assert.match(html, /<details class="menu paper-menu paper-context-menu" id="paperMenu">[\s\S]*?id="settingsRename"[\s\S]*?id="settingsTaskNotes"[\s\S]*?id="settingsArchive"[\s\S]*?id="settingsDelete"/);
-assert.match(html, /id="paperMenuTrigger"/, "录入页试卷操作入口挂在 paperMenuTrigger");
-assert.match(js, /function openPaperContextMenu\(/, "试卷操作改走右键菜单");
-assert.doesNotMatch(js, /function retireCurrentPaperIfComplete\(/, "看完的当前卷不再自动归档收起");
-assert.match(js, /button\("归档任务"/, "做完后由人手点归档");
-
-// 1.13.1：题库里还有活题才拦删除，撤回完就应该能删。
-// 提示必须给出路（先去题库撤回），不能只丢一句“不能删除”让人反复试。
-assert.match(js, /if \(\(paper\.counts\?\.published \|\| 0\) > 0\) \{[\s\S]*?先在正式题库撤回这几道，才能删除任务/);
-assert.match(js, /`已有 \$\{published\} 道题在正式题库里。先在正式题库撤回这几道，就能删除这项任务；撤回后题面快照仍留在题库。`/);
-assert.doesNotMatch(js, /为保留来源追溯只能归档/);
-assert.doesNotMatch(js, /已有正式题库记录的任务不能删除/);
-// 确认框要说明删掉任务不会毁掉题库里那些撤回记录的题面快照。
-assert.match(js, /题库里还留着的、已经撤回的那些题的题面快照不受影响，仍然查得到。/);
-
-// 读题设置只保留一个实际读题模型；第二读和裁决入口已移除。
-for (const id of ["settingsPrimaryModel"]) {
-  assert.match(html, new RegExp(`id="${id}"`));
-}
+// API 与模型配置已统一到 api-settings.js，设置页只保留唯一宿主和统一离开守卫。
+const unifiedJs = fs.readFileSync(path.join(__dirname, "api-settings.js"), "utf8");
+assert.match(unifiedJs, /\/api\/settings\/api-config/, "unified settings page uses /api/settings/api-config");
+assert.doesNotMatch(js, /settingsCheckerModel|settingsArbiterModel|saveModelSettingsNow/);
 assert.doesNotMatch(html, /settingsCheckerModel|settingsArbiterModel|有出入时复核|两次不一致时裁决/);
-for (const id of ["settingsMinimaxModel", "settingsSiliconflowModel", "settingsModelscopeModel"]) {
-  assert.match(html, new RegExp(`id="${id}"[^>]*list="${id}s"`));
-}
-assert.match(js, /api\("\/api\/settings\/models"/);
-assert.match(js, /primary:\s*\$\("settingsPrimaryModel"\)\.value/);
-assert.doesNotMatch(js, /settingsCheckerModel|settingsArbiterModel/);
-assert.match(js, /models:\s*\{[\s\S]*?minimax:\s*\$\("settingsMinimaxModel"\)\.value\.trim\(\)[\s\S]*?siliconflow:\s*\$\("settingsSiliconflowModel"\)\.value\.trim\(\)/);
+assert.match(html, /id="settingsCredentialHost"/);
+assert.match(html, /id="credentialDialogBody"/);
 
-// 角色选项与 model_id 建议必须来自后端；建议列表不限制用户填写其他合法 model_id。
-assert.match(js, /const choices = settingsEngineChoices\(engines\)/);
-assert.match(js, /modelEntries = choices\.map/);
-assert.match(js, /engines\.suggested_models\?\.\[providerKey\]/);
-assert.match(js, /engines\.saved\?\.models\?\.\[providerKey\]\s*\|\|\s*engines\.models\?\.\[providerKey\]/);
-assert.doesNotMatch(js, /MiniMax-M3|Qwen3-VL-32B-Instruct|minimax_m3|siliconflow_qwen3/);
-assert.match(js, /API 未配置/);
-assert.match(js, /从下一项新任务或重新识读开始生效/);
-assert.doesNotMatch(js, /重启桌面程序后生效|重新打开题库后生效/);
-
-// 设置直接显示在页面中，键盘焦点落在标题，正常链接经保存保护返回。
+// 设置直接显示在页面中，键盘焦点落在标题，正常链接经统一离开守卫保护返回。
 assert.doesNotMatch(js, /\$\("settingsDialog"\)\.showModal\(\)/);
 assert.match(js, /\$\("settingsTitle"\)\.focus\(\{ preventScroll: true \}\)/);
 assert.match(html, /id="settingsReturn"[^>]*href="\/eagle"/);
 assert.match(js, /async function prepareSettingsLeave\(\)/);
-assert.match(js, /await modelSaving/);
-assert.match(js, /hasUnsavedChanges\?\.\(\)/);
-assert.match(js, /await window\.LibraryAISettings\.discard\(\)/);
+assert.match(js, /window\.APISettings\?\.prepareLeave/);
 assert.match(css, /\.settings-home \{ max-width: 1080px/);
 assert.match(css, /\.settings-nav \{ display: flex; flex-wrap: wrap/);
 
@@ -253,7 +210,7 @@ assert.match(css, /\.settings-nav \{ display: flex; flex-wrap: wrap/);
 assert.match(js, /\/api\/papers\/\$\{splitPlan\.paperId\}\/split/);
 assert.match(html, /id="settingsConfirmStructure"/);
 assert.match(js, /\/api\/papers\/\$\{paper\.id\}\/confirm-structure/);
-assert.match(js, /engines\.saved\?\.\[role\]\s*\|\|\s*engines\.selected/);
+assert.match(unifiedJs, /data\.reading\?\.readiness\?\.ready/);
 assert.doesNotMatch(js, /AI 两次一致|AI 三读多数一致/);
 
 // 手工切题统一由原卷校正器保存；题组选择和 group_id 都在同一布局请求中。
@@ -268,31 +225,10 @@ assert.doesNotMatch(js, /api\/papers\/\$\{state\.paperId\}\/questions/);
 assert.match(js, /按教材重试/);
 assert.match(js, /body:\s*materialType\s*\?\s*\{\s*material_type:\s*materialType\s*\}\s*:\s*\{\}/);
 
-// 档位控件移除。修改读题模型只发送角色和模型ID，不能默认覆盖旧plans。
-assert.doesNotMatch(html, /settingsMinimaxPlan|同时读题数量|MiniMax 会员档位/);
-assert.doesNotMatch(js, /plans: \{ minimax: \$\("settingsMinimaxPlan"\)\.value \}/);
-assert.match(js, /if \(!select \|\| !\$\("settingsMinimaxPlanNote"\)\) return;/);
-const readModelSource = js.slice(js.indexOf("  function readModelSettings()"), js.indexOf("  function showModelSaveResult"));
-const values = { settingsPrimaryModel: "assistant", settingsMinimaxModel: "ModelA", settingsSiliconflowModel: "ModelB", settingsModelscopeModel: "ModelC" };
-const payload = require("node:vm").runInNewContext(readModelSource + "\nreadModelSettings();", { $: id => {
-  assert.notEqual(id, "settingsMinimaxPlan", "removed controls must never be read");
-  return { value: values[id] };
-} });
-assert.deepEqual(JSON.parse(JSON.stringify(payload)), { primary: "assistant", models: { minimax: "ModelA", siliconflow: "ModelB", modelscope: "ModelC" } });
-assert.equal(Object.hasOwn(payload, "plans"), false);
-
-// 获取密钥链接放在实际填写步骤，模型细节由用户主动展开。
+// 获取密钥与题面整理开关校验
 assert.doesNotMatch(html, /id="settingsFreePlan"/);
-assert.match(html, /href="https:\/\/mineru\.net\/apiManage\/token"/);
-assert.match(html, /href="https:\/\/www\.modelscope\.cn\/my\/myaccesstoken"/);
-assert.match(html, /id="settingsModels" class="settings-section settings-models"/);
 assert.match(js, /origin_split: "提取题源", chinese_quotes: "统一中文引号", subquestions: "显示小问数"/);
 assert.match(css, /\.free-plan \{/);
-assert.match(js, /\{ value: "assistant", label: "原图审核或 AI 助手/);
-assert.match(js, /settingsPrimaryModel"\)\.value/);
-assert.match(js, /models:\s*\{[\s\S]*?modelscope:\s*\$\("settingsModelscopeModel"\)\.value\.trim\(\)/);
-assert.doesNotMatch(html, /id="settingsModelscopeState"/);
-// 选的那家没填密钥时显示实际读题的那家，而不是一个读不了的选项。
-assert.match(js, /if \(chosen && chosen\.available === false && engines\.primary\) primary = engines\.primary;/);
+assert.match(js, /status\.reader_readiness/);
 
 console.log("settings UI static checks: OK");

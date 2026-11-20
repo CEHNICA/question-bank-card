@@ -47,30 +47,39 @@ store = _load_store()
 CredentialStoreError = store.CredentialStoreError
 CredentialValidationError = store.CredentialValidationError
 MAX_ACCOUNT_POOL_SIZE = store.MAX_ACCOUNT_POOL_SIZE
-SERVICES = tuple(store.ACCOUNT_POOL_FIELDS)
+SERVICES = tuple(store.READING_SERVICES)
+ALL_SERVICES = tuple(store.ACCOUNT_POOL_FIELDS)
 
 
 def public_status(values: Mapping[str, object] | None = None) -> dict[str, dict[str, object]]:
-    """Read only configured/count fields, never a masked credential."""
+    """仅返回核心切题/识图 4 项服务的可用状态与数量（兼容旧接口）。"""
 
-    return store.credential_status(values)
+    return store.credential_status(values, services=SERVICES)
+
+
+def public_all_status(values: Mapping[str, object] | None = None) -> dict[str, dict[str, object]]:
+    """返回全部 7 项服务的可用状态与数量，不泄露任何明文或前缀。"""
+
+    return store.credential_status(values, services=ALL_SERVICES)
 
 
 def save_actions(changes: Mapping[str, object]) -> dict[str, dict[str, object]]:
-    """Persist one validated keep/clear/replace transaction with DPAPI."""
+    """保存核心 4 项服务的凭据变更（兼容旧接口）。"""
 
-    return store.update_credentials(changes)
+    return store.update_credentials(changes, allowed_services=SERVICES)
+
+
+def save_all_actions(changes: Mapping[str, object]) -> dict[str, dict[str, object]]:
+    """以单次原子事务保存任意 7 项服务的凭据变更。"""
+
+    return store.update_credentials(changes, allowed_services=ALL_SERVICES)
 
 
 def reveal_saved_key(service: str, index: int) -> str:
-    """Read one explicitly selected saved credential without mutating a pool.
+    """读取指定服务与序号下已保存的原始密钥（须由调用方先做本机同源校验）。"""
 
-    Callers must enforce the local same-origin viewing guard. Environment keys
-    are deliberately excluded: this operation views the saved desktop store.
-    The same lock as replacement keeps the selected index in one snapshot.
-    """
-    if not isinstance(service, str) or service not in SERVICES:
-        raise CredentialValidationError("请选择有效的读题服务。")
+    if not isinstance(service, str) or service not in ALL_SERVICES:
+        raise CredentialValidationError("请选择有效的 API 服务。")
     if type(index) is not int or not 0 <= index < MAX_ACCOUNT_POOL_SIZE:
         raise CredentialValidationError("请选择有效的密钥序号。")
     with store._CREDENTIAL_UPDATE_LOCK:
@@ -129,9 +138,11 @@ def verify_mineru_replacement(changes: Mapping[str, object]) -> str:
 
 
 def apply_public_environment(status: Mapping[str, Mapping[str, object]]) -> None:
-    """Refresh the web process's non-secret availability snapshot."""
+    """刷新 Web 进程的非涉密凭据可用状态快照。"""
 
-    for service in SERVICES:
+    for service in ALL_SERVICES:
+        if service not in status:
+            continue
         item = status.get(service, {})
         count = item.get("count", 0) if isinstance(item, Mapping) else 0
         try:
@@ -142,48 +153,48 @@ def apply_public_environment(status: Mapping[str, Mapping[str, object]]) -> None
         os.environ[f"QB_{service.upper()}_POOL_SIZE"] = str(count)
 
 
-def public_environment_status() -> dict[str, dict[str, object]]:
-    """Return the launch/save-time non-secret snapshot without decrypting keys."""
-
+def _read_environment_status(services: tuple[str, ...]) -> dict[str, dict[str, object]]:
     result: dict[str, dict[str, object]] = {}
-    for service in SERVICES:
+    for service in services:
         try:
             count = int(os.environ.get(f"QB_{service.upper()}_POOL_SIZE", "0"))
         except (TypeError, ValueError):
             count = 0
         count = max(0, min(MAX_ACCOUNT_POOL_SIZE, count))
         configured = os.environ.get(f"QB_{service.upper()}_CONFIGURED") == "1"
-        # A non-zero count is authoritative even if an old launcher omitted
-        # the companion boolean.  Never infer a count from a secret variable.
         result[service] = {"configured": configured or bool(count), "count": count}
     return result
 
 
-def refresh_public_environment() -> dict[str, dict[str, object]]:
-    """Explicitly decrypt once and refresh the non-secret snapshot.
+def public_environment_status() -> dict[str, dict[str, object]]:
+    """在不解密凭据文件的前提下读取核心 4 项服务的状态快照。"""
 
-    Startup/recovery code and tests may call this helper.  Ordinary web GETs
-    deliberately use :func:`public_environment_status` instead.
-    """
+    return _read_environment_status(SERVICES)
 
-    status = public_status()
+
+def public_all_environment_status() -> dict[str, dict[str, object]]:
+    """在不解密凭据文件的前提下读取全部 7 项服务的状态快照。"""
+
+    return _read_environment_status(ALL_SERVICES)
+
+
+def refresh_public_environment(*, include_all: bool = False) -> dict[str, dict[str, object]]:
+    """显式解密一次并刷新全部非涉密状态环境变量。"""
+
+    status = public_all_status()
     apply_public_environment(status)
-    return status
+    if include_all:
+        return status
+    return {service: status[service] for service in SERVICES}
 
 
 def apply_worker_environment() -> dict[str, dict[str, object]] | None:
-    """Load one immutable credential snapshot at a worker task boundary.
-
-    Source/server deployments that start the worker directly may intentionally
-    provide API keys as environment variables.  Only desktop launcher children
-    carry ``QB_CREDENTIAL_HOT_RELOAD=1``; without it their environment is left
-    untouched.
-    """
+    """在 Worker 任务边界加载不可变的读题/切题凭据快照。"""
 
     if os.environ.get("QB_CREDENTIAL_HOT_RELOAD") != "1":
         return None
     values = store.load_credentials()
-    pools = {service: store.credential_pool(values, service) for service in SERVICES}
+    pools = {service: store.credential_pool(values, service) for service in SERVICE_ENVIRONMENT}
     updates: dict[str, str] = {}
     removals: set[str] = set()
     for service, (pool_name, legacy_name) in SERVICE_ENVIRONMENT.items():
@@ -194,9 +205,6 @@ def apply_worker_environment() -> dict[str, dict[str, object]] | None:
         else:
             removals.update({legacy_name, pool_name})
 
-    # All decrypting and validation happens above.  Mutate the live worker only
-    # after a complete valid snapshot exists, so a read failure keeps the last
-    # known-good task configuration.
     for name in removals:
         os.environ.pop(name, None)
     os.environ.update(updates)

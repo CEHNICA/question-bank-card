@@ -2913,6 +2913,8 @@ def segment_paper(paper: Paper) -> None:
                 dropped_on_manual_pages.append(int(item["number"]))
                 continue
             if question is None:
+                cut_only = bool((paper.processing_plan or {}).get("cut_only"))
+                extra_flags = ["MinerU 切题原图卡，可直接审核入库，或按需 AI 识读为文字。"] if cut_only else []
                 Question.objects.create(
                     paper=paper,
                     group=group,
@@ -2925,7 +2927,10 @@ def segment_paper(paper: Paper) -> None:
                     figure_candidates=candidates,
                     source_kind=item["source_kind"],
                     source_anchor_seq=item["source_anchor_seq"],
-                    flags=list(item.get("segmentation_flags") or []),
+                    body_mode="source_image" if cut_only else "text",
+                    processing_mode="manual" if cut_only else "auto",
+                    state=Question.State.YELLOW if cut_only else Question.State.WAITING,
+                    flags=list(dict.fromkeys([*(item.get("segmentation_flags") or []), *extra_flags])),
                 )
                 continue
             if question.deleted_at is not None:
@@ -5437,8 +5442,60 @@ def _cut_source_current(question: Question) -> bool:
         return False
 
 
+def _has_library_ocr_upgrade(question: Question) -> bool:
+    """判断原图题是否由题库主动发起了「AI 识别转文字升级」请求。"""
+    suggestion = question.ocr_suggestion if isinstance(question.ocr_suggestion, dict) else {}
+    return bool(
+        question.body_mode == "source_image"
+        and (question.ocr_pending or question.reread_requested)
+        and suggestion.get("library_upgrade_publication_id")
+    )
+
+
+def _carry_tag_assignments_on_upgrade(source_pub_id: str, target_pub) -> None:
+    """原图版升级为文字版 v2 时，继承 v1 已贴的正式标签（保留来源并标为待核对）。"""
+    from .models import LibraryTagAssignment, PublishedQuestion
+
+    source_pub = PublishedQuestion.objects.filter(pk=source_pub_id).first()
+    if source_pub is None:
+        return
+    assignments = list(LibraryTagAssignment.objects.filter(publication=source_pub).select_related("tag"))
+    if not assignments:
+        return
+    for row in assignments:
+        LibraryTagAssignment.objects.get_or_create(
+            publication=target_pub,
+            tag=row.tag,
+            defaults={
+                "scope": deepcopy(row.scope or {}),
+                "source": row.source,
+                "generation_source": row.generation_source,
+                "rationale": row.rationale,
+                "evidence": row.evidence,
+                "needs_review": row.needs_review,
+                "source_snapshot": deepcopy(row.source_snapshot or {}),
+            },
+        )
+    tag_names = [
+        row.tag.name
+        for row in LibraryTagAssignment.objects.filter(publication=target_pub).select_related("tag")
+        if not row.needs_review
+    ]
+    if tag_names:
+        from . import library
+
+        extras = dict(target_pub.extras or {})
+        extras["tags"] = tag_names
+        target_pub.extras = extras
+        target_pub.tags_text = library.tags_text(tag_names)
+        target_pub.search_text = library._search_text(target_pub.content, extras)
+        target_pub.save(update_fields=["extras", "tags_text", "search_text"])
+
+
 def _cut_to_text(question: Question, fields: dict) -> None:
-    """Replace only an unprotected original-image draft, never approve it."""
+    """Replace only an unprotected original-image draft, never approve it unless upgrading a library card."""
+    suggestion = question.ocr_suggestion if isinstance(question.ocr_suggestion, dict) else {}
+    upgrade_pub_id = suggestion.get("library_upgrade_publication_id")
     question.body_mode = "text"
     question.content_revision += 1
     question.ocr_suggestion = {}
@@ -5449,6 +5506,33 @@ def _cut_to_text(question: Question, fields: dict) -> None:
     question.edited = False
     _invalidate_approval(question)
     _apply_reading_fields(question, fields)
+    if upgrade_pub_id:
+        from . import library
+
+        if not qtypes.decided(question.question_type):
+            inferred = qtypes.infer(question.question_type, question.stem, question.options)
+            question.question_type = inferred if qtypes.decided(inferred) else "free_response"
+            question.flags = qtypes.with_flag(question.flags, question.question_type)
+            if question.state == Question.State.YELLOW and not question.flags:
+                question.state = Question.State.GREEN
+            question.save(update_fields=["question_type", "flags", "state", "updated_at"])
+        if library.type_blocks_approval(question) or figure_policy.blocks_approval(source_images.review(question)):
+            return
+        if question.state not in library.REVIEWABLE_STATES:
+            return
+        library.approve(question, now=timezone.now(), source="ai", agent="AI 识读升级")
+        question.save(
+            update_fields=[
+                "approved",
+                "approved_at",
+                "approved_content_hash",
+                "approval_source",
+                "approval_agent",
+                "updated_at",
+            ]
+        )
+        new_pub, _created = library.publish(question)
+        _carry_tag_assignments_on_upgrade(str(upgrade_pub_id), new_pub)
 
 
 def promote_saved_readings(paper_id=None) -> list[int]:
@@ -5584,7 +5668,11 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
     questions = [question for question in questions if question.processing_mode == "auto" or question.reread_requested]
     eligible = []
     for question in questions:
-        if question.body_mode == "source_image" and _cut_content_protected(question):
+        if (
+            question.body_mode == "source_image"
+            and _cut_content_protected(question)
+            and not _has_library_ocr_upgrade(question)
+        ):
             Question.objects.filter(pk=question.pk, content_revision=question.content_revision).update(
                 reread_requested=False, ocr_pending=False
             )
@@ -5724,7 +5812,9 @@ def read_questions(paper: Paper, questions: list[Question], *, revision: int | N
         ):
             return
         if question.body_mode == "source_image":
-            if not question.ocr_pending or _cut_content_protected(question):
+            if not question.ocr_pending or (
+                _cut_content_protected(question) and not _has_library_ocr_upgrade(question)
+            ):
                 # A review/publication may happen without changing revision.
                 # It is still authoritative over the late OCR response.
                 question.ocr_pending = question.reread_requested = False
@@ -6709,6 +6799,9 @@ def process_paper(paper: Paper) -> None:
             if _fail_when_nothing_was_cut(paper, run_revision):
                 return
         if paper.status == Paper.Status.READING:
+            if (paper.processing_plan or {}).get("cut_only"):
+                _set_if_plan_current(paper, run_revision, status=Paper.Status.READY, progress=paper.questions.count())
+                return
             pending = list(
                 paper.questions.filter(
                     processing_mode="auto", state__in=[Question.State.WAITING, Question.State.READING]

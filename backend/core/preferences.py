@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import tempfile
 from pathlib import Path
 
@@ -19,18 +18,17 @@ from django.conf import settings
 from . import provider_catalog
 from .account_pool import DEFAULT_MINIMAX_PLAN, MINIMAX_PLANS
 
-DEFAULTS = {"primary_engine": "minimax_m3", "checker_engine": "auto", "arbiter_engine": "primary"}
-DEFAULT_MODELS = {key: spec["default_model"] for key, spec in provider_catalog.VISION.items()}
+DEFAULTS = dict(provider_catalog.DEFAULT_MODEL_ROLES)
+DEFAULT_MODELS = dict(provider_catalog.DEFAULT_VISION_MODELS)
 SUGGESTED_MODELS = {key: list(spec["suggested"]) for key, spec in provider_catalog.VISION.items()}
 FREE_MODELS = {key: list(spec["free_models"]) for key, spec in provider_catalog.VISION.items()}
 _ENGINES = set(provider_catalog.ENGINES)
 CHOICES = {
     # "assistant": no vision model; MinerU's text is the draft and an AI assistant checks it.
-    "primary_engine": _ENGINES | {provider_catalog.ASSISTANT_ENGINE},
-    "checker_engine": {"auto", *_ENGINES},
-    "arbiter_engine": {"primary", "checker", *_ENGINES},
+    key: set(values)
+    for key, values in provider_catalog.MODEL_ROLE_CHOICES.items()
 }
-MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,159}")
+MODEL_ID = provider_catalog.MODEL_ID
 DEFAULT_PLANS = {"minimax": DEFAULT_MINIMAX_PLAN}
 
 

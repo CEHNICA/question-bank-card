@@ -15,8 +15,8 @@ import re
 import sys
 import tempfile
 import threading
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 
 def _provider_catalog():
@@ -42,27 +42,21 @@ class CredentialValidationError(CredentialStoreError):
     """A new credential settings request is structurally invalid."""
 
 
-# Every service in backend/core/provider_catalog.py has a singular field (kept
-# for old readers and the separately installed M3 tool) and a pool field.
-ACCOUNT_POOL_FIELDS = provider_catalog.credential_fields()
+# 统一从 provider_catalog 读取所有服务与模型目录定义，避免多处维护不一致
+READING_POOL_FIELDS = provider_catalog.credential_fields()
+READING_SERVICES = provider_catalog.SERVICES
+ACCOUNT_POOL_FIELDS = provider_catalog.all_credential_fields()
 CREDENTIAL_KEYS = tuple(legacy for legacy, _pool in ACCOUNT_POOL_FIELDS.values())
 MAX_ACCOUNT_POOL_SIZE = 8
 VISION_SERVICES = tuple(provider_catalog.VISION)
 
 MINIMAX_MODEL = provider_catalog.VISION["minimax"]["default_model"]
 SILICONFLOW_MODEL = provider_catalog.VISION["siliconflow"]["default_model"]
-DEFAULT_MODEL_IDS = {key: spec["default_model"] for key, spec in provider_catalog.VISION.items()}
-MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,159}")
-DEFAULT_MODEL_PREFERENCES = {
-    "primary_engine": "minimax_m3",
-    "checker_engine": "auto",
-    "arbiter_engine": "primary",
-}
-_ENGINES = tuple(provider_catalog.ENGINES)
+DEFAULT_MODEL_IDS = dict(provider_catalog.DEFAULT_VISION_MODELS)
+MODEL_ID = provider_catalog.MODEL_ID
+DEFAULT_MODEL_PREFERENCES = dict(provider_catalog.DEFAULT_MODEL_ROLES)
 MODEL_PREFERENCE_CHOICES = {
-    "primary_engine": (*_ENGINES, provider_catalog.ASSISTANT_ENGINE),
-    "checker_engine": ("auto", *_ENGINES),
-    "arbiter_engine": ("primary", "checker", *_ENGINES),
+    key: tuple(choices) for key, choices in provider_catalog.MODEL_ROLE_CHOICES.items()
 }
 ENGINE_NAMES = {spec["engine"]: f"{spec['label']} {spec['default_model'].split('/')[-1]}"
                 for spec in provider_catalog.VISION.values()}
@@ -302,41 +296,41 @@ def credential_pool(values: Mapping[str, object] | None, service: str) -> list[s
     return pool
 
 
-def credential_status(values: Mapping[str, object] | None = None) -> dict[str, dict[str, object]]:
-    """Return the only credential information that may enter the web process.
+def credential_status(
+    values: Mapping[str, object] | None = None,
+    *,
+    services: tuple[str, ...] | list[str] | None = None,
+) -> dict[str, dict[str, object]]:
+    """返回指定服务集合的凭据可用状态与账号数量（不暴露任何明文或掩码前缀）。"""
 
-    Deliberately expose neither prefixes/suffixes nor stable fingerprints: even
-    masked credentials make it easier to correlate a private account.  The UI
-    needs only availability and the number of accounts in each local pool.
-    """
-
+    target_services = READING_SERVICES if services is None else tuple(services)
     source = load_credentials() if values is None else values
     result: dict[str, dict[str, object]] = {}
-    for service in ACCOUNT_POOL_FIELDS:
+    for service in target_services:
+        if service not in ACCOUNT_POOL_FIELDS:
+            continue
         count = len(credential_pool(source, service))
         result[service] = {"configured": bool(count), "count": count}
     return result
 
 
 def update_credentials(
-    changes: Mapping[str, object], path: Path | None = None,
+    changes: Mapping[str, object],
+    path: Path | None = None,
+    *,
+    allowed_services: tuple[str, ...] | list[str] | None = None,
 ) -> dict[str, dict[str, object]]:
-    """Atomically apply keep/clear/replace operations to encrypted pools.
+    """原子化对加密账号池执行保持/替换/清除操作，验证错误信息中不回显任何提交值。"""
 
-    This is the shared contract used by the in-app settings page and the
-    native recovery tool.  Validation errors are intentionally phrased without
-    quoting submitted values so an exception or access log cannot disclose a
-    credential.
-    """
-
+    scope = READING_SERVICES if allowed_services is None else tuple(allowed_services)
     if not isinstance(changes, Mapping):
         raise CredentialValidationError("凭据设置格式不正确。")
-    unknown = set(changes) - set(ACCOUNT_POOL_FIELDS)
+    unknown = set(changes) - set(scope)
     if unknown:
         raise CredentialValidationError("凭据设置中包含不支持的服务。")
 
     operations: dict[str, tuple[str, list[str] | None]] = {}
-    for service in ACCOUNT_POOL_FIELDS:
+    for service in scope:
         raw = changes.get(service, {"action": "keep"})
         if not isinstance(raw, Mapping):
             raise CredentialValidationError("凭据设置格式不正确。")
@@ -378,7 +372,37 @@ def update_credentials(
                 updated[legacy_key] = accounts[0]
                 updated[pool_key] = accounts
         save_credentials(updated, target)
-        return credential_status(updated)
+        return credential_status(updated, services=scope)
+
+
+def merge_pool_accounts(
+    service: str,
+    extra_accounts: list[str] | tuple[str, ...],
+    path: Path | None = None,
+) -> bool:
+    """将历史分散存储的凭据无损合并进统一加密账号池，返回是否新增了账号。"""
+
+    if service not in ACCOUNT_POOL_FIELDS or not extra_accounts:
+        return False
+    legacy_key, pool_key = ACCOUNT_POOL_FIELDS[service]
+    incoming = credential_pool({pool_key: list(extra_accounts)}, service)
+    if not incoming:
+        return False
+    target = path or credential_path()
+    with _CREDENTIAL_UPDATE_LOCK:
+        current = load_credentials(target)
+        existing = credential_pool(current, service)
+        merged = list(existing)
+        for item in incoming:
+            if item not in merged and len(merged) < MAX_ACCOUNT_POOL_SIZE:
+                merged.append(item)
+        if merged == existing:
+            return False
+        updated = dict(current)
+        updated[legacy_key] = merged[0]
+        updated[pool_key] = merged
+        save_credentials(updated, target)
+        return True
 
 
 def load_credentials(path: Path | None = None) -> dict[str, object]:

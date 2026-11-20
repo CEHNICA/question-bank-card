@@ -3701,7 +3701,9 @@ def _set_option_row_spacing(table, size, columns, letter_count):
                 paragraph.paragraph_format.space_after = after
 
 
-def _ordered(captured):
+def _ordered(captured, group_mode: str = "by_type"):
+    if group_mode == "basket_order":
+        return [(None, list(captured))] if captured else []
     known = {key for key, _ in GROUPS}
     result = [(name, [item for item in captured if item["type"] == key]) for key, name in GROUPS]
     result.append(("其他", [item for item in captured if item["type"] not in known]))
@@ -4270,7 +4272,8 @@ def _document(captured, title, options, mode):
     # 表格在预览里的横向位置不是定值（题干正文越长，表在那一列里越靠中间），
     # Word 排版是静态的，只能照量好的位置摆。
     measured_tables = options.get("measured_table_offsets") or {}
-    for index, (name, group) in enumerate(_ordered(captured)):
+    group_mode = options.get("group_mode", "by_type")
+    for index, (name, group) in enumerate(_ordered(captured, group_mode)):
         section_title = None
         # 这一组的第一题被设成「每题分页」时，预览里**整组的大题标题跟着它**
         # 落到新页页首：大题标题在预览的排版器里是 pending 的，题一分页，
@@ -4287,7 +4290,7 @@ def _document(captured, title, options, mode):
             previous_margin_bottom = PREVIEW_INFO_SPACE_AFTER_PT if has_student_info else 0.0
         else:
             previous_margin_bottom = PREVIEW_QUESTION_MARGIN_BOTTOM_PT
-        if mode != "answers":
+        if mode != "answers" and name is not None:
             if group_starts_page:
                 _section_page_top_space(document)
             section_title = document.add_paragraph()
@@ -4337,6 +4340,8 @@ def _document(captured, title, options, mode):
             # 第一行从版心左缘起（题号列），正文从正文列起，折行也折回这一列。
             stem_left = _stem_column_left_mm(size, len(str(number)))
             number_paragraph = document.add_paragraph()
+            if number == 1 and name is None and has_student_info:
+                number_paragraph.paragraph_format.space_before = Pt(PREVIEW_INFO_SPACE_AFTER_PT)
             _font(number_paragraph.add_run(f"{number}."), size, True)
             _line_spacing(number_paragraph, size * LINE_SPACING)
             lead_segments = None
@@ -4606,7 +4611,7 @@ def export(payload, *, warnings=None):
     if warnings is not None:
         warnings.extend(fallback_warnings)
     if warnings is not None and (options["document"] != "answers" or output_format == "split"):
-        numbered = [item for _, group in _ordered(captured) for item in group]
+        numbered = [item for _, group in _ordered(captured, options.get("group_mode", "by_type")) for item in group]
         for number, item in enumerate(numbered, 1):
             requested = options.get("option_overrides", {}).get(item["id"], options.get("option_layout", "auto"))
             wanted = 4 if requested == "four" else 2 if requested == "two" else 1
