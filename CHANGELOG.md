@@ -3,6 +3,15 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.2.6
+
+**去网页端助手模式、题目身份证定位体系，以及无标签题后台并行慢跑与高优先级插队**
+
+- **去网页端「助手模式」陷阱（`api-settings.js`、`eagle/index.html`、`views.py`）**：设置页移除易误选的「AI 助手模式 vs 独立 API」单选开关，工作台所有标签与答案生成动作直连已配置的模型 API，彻底告别静默落入无人消费队列造成的假排队卡死。
+- **每道题目的「身份证 / 定位码」（`library.py`、`views.py`、`urls.py`、`tiyouju_cli.py`、`eagle/index.html`）**：为每条入库题目生成唯一短定位码（如 `Q-950683dc`），在题卡与右侧栏提供「📋 复制给 AI」一键复制完整位置信息，支持工作台顶部搜索框粘贴定位，并新增 `tiyouju locate` 命令供 AI Agent 秒定位题干与本机原卷截图。
+- **后台无标签题并行慢跑 + 单题高优先级插队（`models.py`、`0034_alter_libraryjob_options_libraryjob_priority_and_more.py`、`library_jobs.py`、`library_job_control.py`、`run_worker.py`、`features.py`）**：`LibraryJob` 新增 `priority` 优先级字段（支持低优后台任务原地提权插队），`run_worker` 新增独立 3 线程并行 `library_job_lane` 与 `auto_tag_background` 节流补标签机制（工作台可直接开关「后台补标」）；同步修复工作台 AI 标签建议卡片「提示叫重试但按钮禁用成 `⏳ 排队中…`」的死胡同交互，新增「⚡ 优先插队 / ↻ 取消并重试 / × 取消」。
+
+
 ## 2.2.5
 
 **启动与首页版本号展示，及仿 egolite 的多 AI Agent 技能与命令行自动接管**

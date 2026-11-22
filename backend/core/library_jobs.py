@@ -10,11 +10,15 @@ import hashlib
 import io
 import json
 import logging
+import os
 import re
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from django.conf import settings
-from django.db import close_old_connections, transaction
+from django.db import OperationalError, close_old_connections, transaction
 from django.utils import timezone
 from PIL import Image
 
@@ -25,6 +29,10 @@ logger = logging.getLogger("core")
 
 FEATURE_OF = {LibraryJob.Kind.TAGS: "knowledge_tags", LibraryJob.Kind.ANSWER: "ai_answer"}
 ACTIVE = (LibraryJob.Status.QUEUED, LibraryJob.Status.RUNNING)
+PRIORITY_NORMAL = 0
+PRIORITY_HIGH = 10
+DEFAULT_JOB_CONCURRENCY = 3
+MAX_JOB_CONCURRENCY = 6
 
 
 class JobError(ValueError):
@@ -65,6 +73,7 @@ def enqueue(
     tag_scope: bool = False,
     retry: bool = False,
     expire: bool = True,
+    priority: int = PRIORITY_NORMAL,
 ) -> LibraryJob:
     """Queue one job; an identical job already waiting is reused.
 
@@ -176,7 +185,11 @@ def enqueue(
                 compatible |= Q(api_snapshot=ordinary)
             waiting = waiting.filter(compatible)
         existing = waiting.first()
+        normalized_priority = max(PRIORITY_NORMAL, min(100, int(priority)))
         if existing is not None:
+            if existing.status == LibraryJob.Status.QUEUED and normalized_priority > existing.priority:
+                existing.priority = normalized_priority
+                existing.save(update_fields=["priority", "updated_at"])
             return existing
         job = LibraryJob.objects.create(
             publication=publication,
@@ -186,6 +199,7 @@ def enqueue(
             agent=agent,
             solution_scope=solution_scope,
             tag_scope=tag_scope,
+            priority=normalized_priority,
             api_snapshot=snapshot,
         )
         if tag_scope:
@@ -670,48 +684,80 @@ def _finish(job: LibraryJob, status: str, error: str = "") -> None:
             ).update(status=LibraryTagSuggestion.Status.FAILED, message=error[:500], updated_at=timezone.now())
 
 
-def process_pending(limit: int = 5) -> int:
-    """Run queued jobs (worker only).  Returns how many were handled."""
-    from .library_job_control import expire_api_jobs
+def default_concurrency() -> int:
+    """后台并行处理题库任务（标签/答案）的并发线程数（默认 3，可通过环境变量调整 1~6）。"""
+    raw = os.environ.get("QB_LIBRARY_JOB_CONCURRENCY", "").strip()
+    if raw:
+        try:
+            return max(1, min(MAX_JOB_CONCURRENCY, int(raw)))
+        except ValueError:
+            pass
+    return DEFAULT_JOB_CONCURRENCY
 
-    expire_api_jobs()
-    handled = 0
-    for _ in range(limit):
+
+def _with_sqlite_retry(fn, *, attempts: int = 5):
+    """在多并发写 SQLite WAL 遇到瞬时锁冲突时做短暂退避重试。"""
+    for attempt in range(attempts):
+        try:
+            return fn()
+        except OperationalError as error:
+            if "locked" not in str(error).lower() or attempt == attempts - 1:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+
+
+def claim_next_job() -> LibraryJob | None:
+    """按优先级与排队顺序原子抢占下一条待执行的 API 任务（支持多 Worker 并发不重抢）。"""
+    for _ in range(8):
         close_old_connections()
-        with transaction.atomic():
-            job = (
-                LibraryJob.objects.select_for_update()
-                .filter(executor=LibraryJob.Executor.API, status=LibraryJob.Status.QUEUED)
-                .select_related("publication")
-                .order_by("created_at")
+        candidate = _with_sqlite_retry(
+            lambda: (
+                LibraryJob.objects.filter(executor=LibraryJob.Executor.API, status=LibraryJob.Status.QUEUED)
+                .order_by("-priority", "created_at")
+                .only("id")
                 .first()
             )
-            if job is None:
-                break
-            job.status = LibraryJob.Status.RUNNING
-            job.save(update_fields=["status", "updated_at"])
-        handled += 1
-        try:
-            publication = live_version(job.publication)
-            if publication is None:
-                raise JobError("这道题已撤回或被新版替代，旧任务未执行；请在当前版本重新生成。")
-            if job.kind == LibraryJob.Kind.TAGS and not job.tag_scope:
-                job.tag_scope = True
-                job.save(update_fields=["tag_scope", "updated_at"])
-                from . import library_tagging
+        )
+        if candidate is None:
+            return None
+        updated = _with_sqlite_retry(
+            lambda cid=candidate.pk: LibraryJob.objects.filter(
+                pk=cid, executor=LibraryJob.Executor.API, status=LibraryJob.Status.QUEUED
+            ).update(status=LibraryJob.Status.RUNNING, updated_at=timezone.now())
+        )
+        if updated == 1:
+            return _with_sqlite_retry(
+                lambda cid=candidate.pk: LibraryJob.objects.select_related("publication").get(pk=cid)
+            )
+    return None
 
-                catalogue = library_tagging.catalogue_state()
-                context = library_tagging.current_method_source(publication)
-                method_snapshot = (
-                    {
-                        key: context[key]
-                        for key in ("source", "solution_id", "publication_id", "analysis_hash", "image_hashes")
-                        if key in context
-                    }
-                    if context
-                    else {}
-                )
-                LibraryTagSuggestion.objects.get_or_create(
+
+def _execute_claimed_job(job: LibraryJob) -> None:
+    """执行一条已抢占为 RUNNING 状态的题库任务。"""
+    from .library_job_control import expire_api_jobs
+
+    try:
+        publication = _with_sqlite_retry(lambda: live_version(job.publication))
+        if publication is None:
+            raise JobError("这道题已撤回或被新版替代，旧任务未执行；请在当前版本重新生成。")
+        if job.kind == LibraryJob.Kind.TAGS and not job.tag_scope:
+            job.tag_scope = True
+            _with_sqlite_retry(lambda: job.save(update_fields=["tag_scope", "updated_at"]))
+            from . import library_tagging
+
+            catalogue = library_tagging.catalogue_state()
+            context = library_tagging.current_method_source(publication)
+            method_snapshot = (
+                {
+                    key: context[key]
+                    for key in ("source", "solution_id", "publication_id", "analysis_hash", "image_hashes")
+                    if key in context
+                }
+                if context
+                else {}
+            )
+            _with_sqlite_retry(
+                lambda: LibraryTagSuggestion.objects.get_or_create(
                     job=job,
                     defaults={
                         "publication": publication,
@@ -725,46 +771,51 @@ def process_pending(limit: int = 5) -> int:
                         "message": "旧版任务转为待核对建议。",
                     },
                 )
-            if not job.solution_scope and not job.tag_scope and not features.enabled(FEATURE_OF[job.kind]):
-                raise JobError("这个功能已在设置里关掉")
-            if not job.solution_scope and not job.tag_scope:
-                _no_existing_result(publication, job.kind)
-            fingerprint = library.generation_fingerprint(publication.content or {}, publication.pk)
-            if not job.fingerprint or job.fingerprint != fingerprint:
-                raise JobError("排队后题面或配图已变化，旧任务未执行；请在当前版本重新排队。")
-            library_ai_settings.require_snapshot(job.api_snapshot)
-            initial_hash = publication.content_hash
-            if job.kind == LibraryJob.Kind.ANSWER:
-                if job.solution_scope and job.api_snapshot.get("explicit_api") is True:
-                    result = run_answer(publication, explicit_once=True, force_api=True)
-                else:
-                    result = (
-                        run_answer(publication, explicit_once=True) if job.solution_scope else run_answer(publication)
-                    )
+            )
+        if not job.solution_scope and not job.tag_scope and not features.enabled(FEATURE_OF[job.kind]):
+            raise JobError("这个功能已在设置里关掉")
+        if not job.solution_scope and not job.tag_scope:
+            _no_existing_result(publication, job.kind)
+        fingerprint = library.generation_fingerprint(publication.content or {}, publication.pk)
+        if not job.fingerprint or job.fingerprint != fingerprint:
+            raise JobError("排队后题面或配图已变化，旧任务未执行；请在当前版本重新排队。")
+        library_ai_settings.require_snapshot(job.api_snapshot)
+        initial_hash = publication.content_hash
+        if job.kind == LibraryJob.Kind.ANSWER:
+            if job.solution_scope and job.api_snapshot.get("explicit_api") is True:
+                result = run_answer(publication, explicit_once=True, force_api=True)
+            else:
+                result = run_answer(publication, explicit_once=True) if job.solution_scope else run_answer(publication)
+
+            def _save_answer():
                 with transaction.atomic():
-                    publication = _bound_target(job, publication, fingerprint, initial_hash)
-                    result.update(fingerprint=fingerprint, publication_id=str(publication.pk), checked=False)
+                    bound = _bound_target(job, publication, fingerprint, initial_hash)
+                    result.update(fingerprint=fingerprint, publication_id=str(bound.pk), checked=False)
                     if job.solution_scope:
                         job.result = result
                         job.save(update_fields=["result", "updated_at"])
                     else:
-                        library.save_extras(publication, {**(publication.extras or {}), "ai_answer": result})
+                        library.save_extras(bound, {**(bound.extras or {}), "ai_answer": result})
                     _finish(job, LibraryJob.Status.DONE)
-            elif job.tag_scope:
-                suggestion = LibraryTagSuggestion.objects.get(job=job)
-                from . import library_tagging
 
-                if (
-                    suggestion.status == LibraryTagSuggestion.Status.STALE
-                    or suggestion.taxonomy_revision != library_tagging.catalogue_state().revision
-                ):
-                    raise JobError("标签目录在排队后发生变化；旧任务已停止，请重新建议。")
-                suggestion.status = LibraryTagSuggestion.Status.RUNNING
-                suggestion.message = "正在根据题面、配图和当前采用的解析整理建议。"
-                suggestion.save(update_fields=["status", "message", "updated_at"])
-                result, engine = run_tag_proposal(publication, suggestion)
+            _with_sqlite_retry(_save_answer)
+        elif job.tag_scope:
+            suggestion = _with_sqlite_retry(lambda: LibraryTagSuggestion.objects.get(job=job))
+            from . import library_tagging
+
+            if (
+                suggestion.status == LibraryTagSuggestion.Status.STALE
+                or suggestion.taxonomy_revision != library_tagging.catalogue_state().revision
+            ):
+                raise JobError("标签目录在排队后发生变化；旧任务已停止，请重新建议。")
+            suggestion.status = LibraryTagSuggestion.Status.RUNNING
+            suggestion.message = "正在根据题面、配图和当前采用的解析整理建议。"
+            _with_sqlite_retry(lambda: suggestion.save(update_fields=["status", "message", "updated_at"]))
+            result, engine = run_tag_proposal(publication, suggestion)
+
+            def _save_suggestion():
                 with transaction.atomic():
-                    publication = _bound_target(job, publication, fingerprint, initial_hash)
+                    _bound_target(job, publication, fingerprint, initial_hash)
                     current_suggestion = LibraryTagSuggestion.objects.select_for_update().get(pk=suggestion.pk)
                     current_suggestion.suggestions = result.get("suggestions", [])
                     current_suggestion.message = result.get("message", "")
@@ -786,32 +837,141 @@ def process_pending(limit: int = 5) -> int:
                     }
                     job.save(update_fields=["result", "updated_at"])
                     _finish(job, LibraryJob.Status.DONE)
-            else:
-                tags, engine = run_tags(publication)
+
+            _with_sqlite_retry(_save_suggestion)
+        else:
+            tags, engine = run_tags(publication)
+
+            def _save_legacy_tags():
                 with transaction.atomic():
-                    publication = _bound_target(job, publication, fingerprint, initial_hash)
+                    bound = _bound_target(job, publication, fingerprint, initial_hash)
                     library.save_extras(
-                        publication,
+                        bound,
                         {
-                            **(publication.extras or {}),
+                            **(bound.extras or {}),
                             "tags": tags,
                             "tags_source": engine,
                             "tags_at": timezone.now().isoformat(),
                             "tags_executor": "api",
                             "tags_checked": False,
                             "tags_fingerprint": fingerprint,
-                            "tags_publication_id": str(publication.pk),
+                            "tags_publication_id": str(bound.pk),
                         },
                     )
                     _finish(job, LibraryJob.Status.DONE)
-        except (JobError, library_ai_settings.SettingsError) as error:
-            expire_api_jobs()
-            _finish(job, LibraryJob.Status.FAILED, str(error) or "失败了，请稍后再试")
-        except Exception as error:  # 一道题失败不影响别的题，也不让工作者退出
-            expire_api_jobs()
-            logger.error("library job failed (%s)", type(error).__name__)
-            _finish(job, LibraryJob.Status.FAILED, "本机生成任务未完成，结果未保存；请稍后重试。")
+
+            _with_sqlite_retry(_save_legacy_tags)
+    except (JobError, library_ai_settings.SettingsError) as error:
+        error_message = str(error) or "失败了，请稍后再试"
+        _with_sqlite_retry(expire_api_jobs)
+        _with_sqlite_retry(lambda msg=error_message: _finish(job, LibraryJob.Status.FAILED, msg))
+    except Exception as error:  # 一道题失败不影响别的题，也不让工作者退出
+        _with_sqlite_retry(expire_api_jobs)
+        logger.error("library job failed (%s)", type(error).__name__)
+        _with_sqlite_retry(
+            lambda: _finish(job, LibraryJob.Status.FAILED, "本机生成任务未完成，结果未保存；请稍后重试。")
+        )
+    finally:
+        close_old_connections()
+
+
+def process_pending(limit: int = 5) -> int:
+    """Run queued jobs (worker only). Returns how many were handled."""
+    from .library_job_control import expire_api_jobs
+
+    expire_api_jobs()
+    handled = 0
+    for _ in range(limit):
+        job = claim_next_job()
+        if job is None:
+            break
+        handled += 1
+        _execute_claimed_job(job)
     return handled
+
+
+def process_parallel(stop: threading.Event | None = None, max_workers: int | None = None) -> int:
+    """并行消费当前题库 API 队列中的任务，同时保证按高优先级先出队。"""
+    from .library_job_control import expire_api_jobs
+
+    expire_api_jobs()
+    workers = default_concurrency() if max_workers is None else max(1, min(MAX_JOB_CONCURRENCY, int(max_workers)))
+    if workers == 1:
+        return process_pending(limit=6)
+    claimed_jobs: list[LibraryJob] = []
+    for _ in range(workers * 2):
+        if stop is not None and stop.is_set():
+            break
+        job = claim_next_job()
+        if job is None:
+            break
+        claimed_jobs.append(job)
+    if not claimed_jobs:
+        return 0
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="libjob") as pool:
+        futures = [pool.submit(_execute_claimed_job, job) for job in claimed_jobs]
+        for fut in futures:
+            fut.result()
+    return len(claimed_jobs)
+
+
+def enqueue_untagged_background(batch_size: int = 6, max_queued_floor: int = 4) -> int:
+    """当用户开启「无标签题目后台自动补标签」且 API 已就绪时，低优先级慢跑补齐无标签题目。"""
+    if not (features.enabled("auto_tag_background") and features.enabled("knowledge_tags")):
+        return 0
+    try:
+        library_ai_settings.ensure_api_ready()
+    except library_ai_settings.SettingsError:
+        return 0
+    active_count = LibraryJob.objects.filter(
+        executor=LibraryJob.Executor.API, kind=LibraryJob.Kind.TAGS, status__in=ACTIVE
+    ).count()
+    if active_count >= max_queued_floor:
+        return 0
+    from . import library_tagging
+
+    catalogue = library_tagging.catalogue_state()
+    tagged_ids = LibraryTagAssignment.objects.filter(tag__kind="knowledge", needs_review=False).values("publication_id")
+    queued_or_running_ids = LibraryJob.objects.filter(kind=LibraryJob.Kind.TAGS, status__in=ACTIVE).values(
+        "publication_id"
+    )
+    handled_suggestion_ids = LibraryTagSuggestion.objects.filter(
+        taxonomy_revision=catalogue.revision,
+        status__in=[
+            LibraryTagSuggestion.Status.QUEUED,
+            LibraryTagSuggestion.Status.RUNNING,
+            LibraryTagSuggestion.Status.PENDING,
+            LibraryTagSuggestion.Status.NO_MATCH,
+            LibraryTagSuggestion.Status.REVIEW,
+            LibraryTagSuggestion.Status.ACCEPTED,
+            LibraryTagSuggestion.Status.REJECTED,
+        ],
+    ).values("publication_id")
+    candidates = (
+        PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
+        .exclude(pk__in=tagged_ids)
+        .exclude(pk__in=queued_or_running_ids)
+        .exclude(pk__in=handled_suggestion_ids)
+        .order_by("-published_at")[: max(1, batch_size * 2)]
+    )
+    queued = 0
+    for publication in candidates:
+        if queued >= batch_size:
+            break
+        try:
+            enqueue(
+                publication,
+                LibraryJob.Kind.TAGS,
+                api_only=True,
+                tag_scope=True,
+                retry=False,
+                expire=False,
+                priority=PRIORITY_NORMAL,
+            )
+            queued += 1
+        except (JobError, library_ai_settings.SettingsError):
+            continue
+    return queued
 
 
 def recover_interrupted() -> int:

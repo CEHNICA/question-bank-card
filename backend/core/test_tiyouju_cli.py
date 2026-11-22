@@ -548,3 +548,28 @@ class TiyoujuOfflineTests(SimpleTestCase):
                 code, silent_out, _err = run("setup-agents", "--quiet")
                 self.assertEqual(code, 0)
                 self.assertEqual(silent_out.strip(), "")
+
+    def test_locate_resolves_short_id_via_api(self):
+        sample = {
+            "publication": {
+                "id": "c65f1f5f-0d23-4291-a72d-246d5b2eabc1",
+                "short_id": "Q-c65f1f5f",
+                "question_type": "single_choice",
+                "version": 1,
+                "content": {"stem": "已知集合 $A$", "options": {"A": "1"}, "answer": "A"},
+                "tags": [{"name": "集合的运算"}],
+            },
+            "locator": {
+                "short_id": "Q-c65f1f5f",
+                "copy_text": "[题有据题目 Q-c65f1f5f] 《2026模拟卷》第1题 (id: c65f1f5f-0d23-4291-a72d-246d5b2eabc1)",
+            },
+            "local_images": [],
+        }
+        fake = mock.Mock()
+        fake.get.return_value = sample
+        with mock.patch.object(cli, "Client", return_value=fake):
+            code, out, _err = run("locate", "Q-c65f1f5f")
+            self.assertEqual(code, 0)
+            self.assertIn("Q-c65f1f5f", out)
+            self.assertIn("已知集合", out)
+            self.assertIn("集合的运算", out)

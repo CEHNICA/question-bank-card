@@ -827,6 +827,72 @@ def _content_with_figure_state(publication: PublishedQuestion) -> dict:
     return marked
 
 
+_LOCATOR_UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+_LOCATOR_SHORT_RE = re.compile(r"(?:^|[^0-9a-fA-F])Q-([0-9a-fA-F]{6,32})\b", re.IGNORECASE)
+
+
+def short_id_for(publication_id, length: int = 8) -> str:
+    """生成题目“身份证”短定位码（形如 Q-c65f1f5f），供用户复制并由 AI Agent 快速定位。"""
+    hex_id = str(publication_id).replace("-", "").lower()
+    return f"Q-{hex_id[:length]}"
+
+
+def question_locator(publication: PublishedQuestion, *, short_id: str | None = None) -> dict:
+    """构造题目的结构化位置卡片，同时包含可读题源、短定位码与可复制定位串。"""
+    sid = short_id or short_id_for(publication.pk)
+    title = str(publication.source_filename or "").strip() or "未命名资料"
+    return {
+        "short_id": sid,
+        "id": str(publication.pk),
+        "source": title,
+        "number": publication.number,
+        "version": publication.version,
+        "url": f"/eagle?q={publication.pk}",
+        "copy_text": f"[题有据题目 {sid}] 《{title}》第{publication.number}题 (id: {publication.pk})",
+    }
+
+
+def resolve_publication_ref(raw_ref: str) -> PublishedQuestion:
+    """从 UUID、短码（Q-xxxxxxxx）或整段复制定位文本中解析唯一的已入库题目。"""
+    text = str(raw_ref or "").strip()
+    if not text:
+        raise ValueError("请提供题目定位码或 UUID。")
+
+    uuid_match = _LOCATOR_UUID_RE.search(text)
+    if uuid_match:
+        target_uuid = uuid.UUID(uuid_match.group(0))
+        pub = PublishedQuestion.objects.filter(pk=target_uuid).first()
+        if pub is None:
+            raise ValueError(f"未找到编号为 {target_uuid} 的题库题目。")
+        return pub
+
+    short_match = _LOCATOR_SHORT_RE.search(text)
+    prefix = (
+        (short_match.group(1) if short_match else text.removeprefix("Q-").removeprefix("q-")).replace("-", "").lower()
+    )
+    if not re.fullmatch(r"[0-9a-f]{6,32}", prefix):
+        raise ValueError(f"无法识别的题目定位格式：{text}")
+
+    candidates = list(
+        PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED).only(
+            "id", "status", "source_filename", "number", "version"
+        )
+    )
+    matched = [item for item in candidates if str(item.pk).replace("-", "").lower().startswith(prefix)]
+    if not matched:
+        # 兜底查全库（包含已替代或撤回版本），给出准确对象或引导
+        all_candidates = list(PublishedQuestion.objects.all().only("id"))
+        matched_ids = [item.pk for item in all_candidates if str(item.pk).replace("-", "").lower().startswith(prefix)]
+        if len(matched_ids) == 1:
+            return PublishedQuestion.objects.get(pk=matched_ids[0])
+        if len(matched_ids) > 1:
+            raise ValueError(f"定位前缀 {prefix} 匹配到 {len(matched_ids)} 条记录，请提供更长前缀或完整 UUID。")
+        raise ValueError(f"题库中没有匹配 {text} 的题目。")
+    if len(matched) > 1:
+        raise ValueError(f"定位前缀 Q-{prefix} 匹配到 {len(matched)} 道题目，请改用完整 UUID。")
+    return PublishedQuestion.objects.get(pk=matched[0].pk)
+
+
 def publication_json(publication: PublishedQuestion, *, include_tag_details: bool = True) -> dict:
     from . import library_solutions
 
@@ -837,8 +903,11 @@ def publication_json(publication: PublishedQuestion, *, include_tag_details: boo
         except library_solutions.SolutionError as error:
             solution_error = str(error)
     content = _content_with_figure_state(publication)
+    locator = question_locator(publication)
     data = {
         "id": str(publication.id),
+        "short_id": locator["short_id"],
+        "locator": locator,
         "draft_id": publication.question_id,
         "document_id": str(publication.paper_id) if publication.paper_id else None,
         "source_filename": publication.source_filename,

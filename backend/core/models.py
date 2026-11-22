@@ -453,13 +453,17 @@ class LibraryJob(models.Model):
     claimed_at = models.DateTimeField(null=True, blank=True)
     lease_expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
     attempts = models.PositiveIntegerField(default=0)
+    priority = models.SmallIntegerField(default=0, db_index=True)
     status = models.CharField(max_length=8, choices=Status.choices, default=Status.QUEUED, db_index=True)
     error = models.CharField(max_length=300, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["created_at"]
+        ordering = ["-priority", "created_at"]
+        indexes = [
+            models.Index(fields=["executor", "status", "-priority", "created_at"], name="libjob_queue_order_idx")
+        ]
 
 
 class LibraryTagGroup(models.Model):

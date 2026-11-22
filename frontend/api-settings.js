@@ -175,6 +175,10 @@
       };
     }
 
+    const bgFeature = Array.isArray(data.features)
+      ? data.features.find((item) => item && item.key === "auto_tag_background")
+      : null;
+
     return {
       reading: {
         primary: reading.primary || "minimax_m3",
@@ -186,13 +190,14 @@
       },
       credentials: credDraft,
       answering: {
-        mode: answering.mode === "api" ? "api" : "assistant",
+        mode: "api",
         provider: answering.provider || "deepseek",
         profiles: answerProfiles,
         features: {
           ai_answer: Boolean(answering.features?.ai_answer),
           knowledge_tags: Boolean(answering.features?.knowledge_tags),
         },
+        autoTagBackground: Boolean(bgFeature?.enabled),
         on_intake: {
           answer: Boolean(answering.on_intake?.answer),
         },
@@ -226,6 +231,7 @@
         provider: draft.answering.provider,
         profiles: draft.answering.profiles,
         features: draft.answering.features,
+        autoTagBackground: Boolean(draft.answering.autoTagBackground),
         on_intake: draft.answering.on_intake,
       },
     });
@@ -573,8 +579,13 @@
     const head = createEl("div", "credential-service-head");
     const title = createEl("strong");
     title.append(createEl("span", "credential-step-number", "3"), " 正式题库解题与知识点标签");
-    const statusText = ans.mode === "assistant" ? "AI 助手模式" : ansData.verified ? "独立 API · 已测通" : "独立 API · 待测试";
-    head.append(title, createEl("span", `api-state ${ansData.ready ? "is-ready" : ""}`, statusText));
+    const activeProviderConfigured = serviceEffectiveState(ans.provider).configured;
+    const statusText = ansData.verified
+      ? "独立 API · 已测通"
+      : activeProviderConfigured
+        ? "独立 API · 待测试"
+        : "尚未配置密钥";
+    head.append(title, createEl("span", `api-state ${ansData.verified ? "is-ready" : ""}`, statusText));
     panel.append(head);
 
     // 功能开关区
@@ -591,7 +602,7 @@
     );
     const intakeSwitch = createSwitchRow(
       "新入库题目自动排入生成参考答案",
-      "仅在开启 AI 参考答案时生效；按当前所选执行方式排队",
+      "仅在开启 AI 参考答案时生效；按当前选定模型后台排队",
       ans.on_intake.answer,
       (checked) => {
         ans.on_intake.answer = checked;
@@ -606,38 +617,32 @@
       ans.features.knowledge_tags,
       (checked) => {
         ans.features.knowledge_tags = checked;
-        syncDirtyIndicator();
+        if (!checked) ans.autoTagBackground = false;
+        renderContent();
       }
     );
-    switchesBox.append(answerSwitch, intakeSwitch, tagSwitch);
+    const bgTagSwitch = createSwitchRow(
+      "无标签题目后台自动慢跑",
+      "开启后，后台低优先级并行为还没打标签的题目生成候选建议；你在工作台点单题会立刻插队到最前",
+      ans.autoTagBackground,
+      (checked) => {
+        ans.autoTagBackground = checked;
+        syncDirtyIndicator();
+      },
+      !ans.features.knowledge_tags
+    );
+    switchesBox.append(answerSwitch, intakeSwitch, tagSwitch, bgTagSwitch);
     panel.append(switchesBox);
 
-    // 执行模式切换：AI 助手 vs 独立 API
-    const modeFieldset = createEl("fieldset", "provider-picker");
-    modeFieldset.append(createEl("legend", "field-legend", "执行方式"));
-    for (const [val, text, sub] of [
-      ["assistant", "AI 助手", "不调用独立 API，交由当前助手领取并写回"],
-      ["api", "独立 API", "直接调用下方选定服务商（需先通过连接测试）"],
-    ]) {
-      const lb = createEl("label", "provider-option");
-      const radio = createEl("input");
-      radio.type = "radio";
-      radio.name = "apiUnifiedAnswerMode";
-      radio.value = val;
-      radio.checked = ans.mode === val;
-      radio.disabled = isMutating();
-      radio.addEventListener("change", () => {
-        ans.mode = val;
-        renderContent();
-      });
-      const sp = createEl("span", "", text);
-      sp.append(createEl("small", "", sub));
-      lb.append(radio, sp);
-      modeFieldset.append(lb);
-    }
-    panel.append(modeFieldset);
+    panel.append(
+      createEl(
+        "p",
+        "settings-footnote",
+        "题库内按钮直接调用下方配置的模型 API；如需让外部 AI 助手协助，直接对话并通过 tiyouju 命令行即可。"
+      )
+    );
 
-    if (ans.mode === "api") {
+    {
       const answerServices = (data.catalog?.answer_order || []).map(
         (key) => (data.catalog?.services || []).find((spec) => spec.key === key)
       ).filter(Boolean);
@@ -754,8 +759,6 @@
       actions.append(testBtn, resSpan);
       probeBox.append(consentLabel, actions);
       panel.append(probeBox);
-    } else {
-      panel.append(createEl("p", "settings-footnote", ansData.message || "由当前 AI 助手完成解题与标签建议；无需配置 API 密钥。"));
     }
 
     return panel;
@@ -930,11 +933,26 @@
     state.lastStatusTone = "";
     renderContent();
     try {
+      const prevBg = Boolean(
+        Array.isArray(state.serverData?.features)
+          ? state.serverData.features.find((item) => item && item.key === "auto_tag_background")?.enabled
+          : false
+      );
+      const nextBg = Boolean(state.draft.answering.autoTagBackground);
       const payload = buildSavePayload();
       const updated = await requestJson("/api/settings/api-config", {
         method: "POST",
         body: payload,
       });
+      if (nextBg !== prevBg) {
+        const featRes = await requestJson("/api/settings/features", {
+          method: "POST",
+          body: { features: { auto_tag_background: nextBg } },
+        });
+        if (featRes && Array.isArray(featRes.features)) {
+          updated.features = featRes.features;
+        }
+      }
       hideSecrets();
       state.serverData = updated;
       state.draft = cloneDraftFromServer(updated);

@@ -1322,8 +1322,23 @@
 
       <div id="inspectorBody" class="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
         
-        <!-- 0. Eagle 风格：题目名称 + 添加注释 + http:// 外部链接 + 所属文件夹（仅单题模式显示） -->
+        <!-- 0. Eagle 风格：题目身份证定位 + 题目名称 + 添加注释 + http:// 外部链接 + 所属文件夹（仅单题模式显示） -->
         <div id="inspectorEagleTopMeta" class="space-y-2 pb-3 border-b border-slate-100">
+          <!-- 题目身份证：一键复制完整定位串发给 AI Agent -->
+          <div id="inspectorLocatorRow" class="flex items-center justify-between gap-1.5 rounded-md bg-slate-50 border border-slate-200/80 px-2 py-1">
+            <div class="flex items-center gap-1.5 min-w-0">
+              <span class="text-[11px] shrink-0" aria-hidden="true">🪪</span>
+              <code id="inspectorLocatorCode" class="text-[11px] font-mono font-semibold text-slate-700 truncate">Q-</code>
+            </div>
+            <button
+              id="btnCopyInspectorLocator"
+              type="button"
+              onclick="copyQuestionLocator(currentActiveQuestionId)"
+              class="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-700 text-[10px] font-medium text-slate-600 cursor-pointer transition-colors"
+              title="复制题目定位码与来源发给 AI Agent"
+            >📋 复制给 AI</button>
+          </div>
+
           <!-- 题目名称（赋予每道题独立的对象名字） -->
           <div class="relative flex items-center">
             <input
@@ -1414,15 +1429,24 @@
         </div>
 
         <!-- 3. AI 语义推荐卡片 -->
-        <div class="rounded-lg border border-emerald-100 bg-emerald-50/40 p-2.5 space-y-1.5">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-1 font-bold text-emerald-900 text-[11px]">
+        <div class="rounded-lg border border-emerald-200/80 bg-emerald-50/35 p-2.5 space-y-2">
+          <div class="flex items-center justify-between gap-1.5">
+            <div class="flex items-center gap-1 font-bold text-emerald-900 text-[11px] shrink-0">
               <svg class="w-3 h-3 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
               <span>AI 语义推荐</span>
             </div>
-            <span class="text-[10px] text-emerald-700/80">点标签即采纳</span>
+            <div class="flex items-center gap-1.5 min-w-0">
+              <span id="aiTagAdoptHint" class="hidden text-[10px] text-emerald-700/80 truncate">点标签即采纳</span>
+              <button
+                id="aiBgTagToggleBtn"
+                type="button"
+                onclick="toggleAutoTagBackground()"
+                class="px-1.5 py-0.5 rounded border border-slate-200 bg-white hover:bg-slate-50 text-[10px] text-slate-500 cursor-pointer transition-colors shrink-0"
+                title="开启后，无标签题目会在后台低优先级自动慢慢生成候选标签；点单题会立即插队到最前"
+              >后台补标: …</button>
+            </div>
           </div>
-          <div id="aiSuggestedTagsContainer" class="flex flex-wrap gap-1 pt-0.5">
+          <div id="aiSuggestedTagsContainer" class="flex flex-col gap-1.5">
             <!-- 动态推荐 -->
           </div>
         </div>
@@ -3322,6 +3346,78 @@
       }
     }
 
+    let autoTagBackgroundEnabled = false;
+    let autoTagBackgroundBusy = false;
+
+    function renderAutoTagBackgroundToggle() {
+      const btn = document.getElementById('aiBgTagToggleBtn');
+      if (!btn) return;
+      btn.disabled = autoTagBackgroundBusy;
+      if (autoTagBackgroundEnabled) {
+        btn.textContent = autoTagBackgroundBusy ? '后台补标: …' : '后台补标: 开';
+        btn.className = 'px-1.5 py-0.5 rounded border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-[10px] font-semibold text-emerald-800 cursor-pointer transition-colors shrink-0';
+      } else {
+        btn.textContent = autoTagBackgroundBusy ? '后台补标: …' : '后台补标: 关';
+        btn.className = 'px-1.5 py-0.5 rounded border border-slate-200 bg-white hover:bg-slate-50 text-[10px] text-slate-500 cursor-pointer transition-colors shrink-0';
+      }
+    }
+
+    async function loadAutoTagBackgroundState() {
+      try {
+        const resp = await fetch(`${API_BASE}/api/settings/features`, { cache: 'no-store' });
+        if (!resp.ok) return;
+        const payload = await resp.json();
+        const feat = Array.isArray(payload.features)
+          ? payload.features.find((item) => item && item.key === 'auto_tag_background')
+          : null;
+        autoTagBackgroundEnabled = Boolean(feat && feat.enabled);
+        renderAutoTagBackgroundToggle();
+      } catch {
+        // 离线或独立测试环境保持默认关
+      }
+    }
+
+    async function toggleAutoTagBackground() {
+      if (autoTagBackgroundBusy) return;
+      const nextValue = !autoTagBackgroundEnabled;
+      autoTagBackgroundBusy = true;
+      renderAutoTagBackgroundToggle();
+      try {
+        const body = nextValue
+          ? { features: { knowledge_tags: true, auto_tag_background: true } }
+          : { features: { auto_tag_background: false } };
+        const resp = await fetch(`${API_BASE}/api/settings/features`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-QB-Request': '1',
+            'Referer': window.location.href
+          },
+          body: JSON.stringify(body)
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => null);
+          throw new Error((err && err.error) || `保存失败（HTTP ${resp.status}）`);
+        }
+        const payload = await resp.json();
+        const feat = Array.isArray(payload.features)
+          ? payload.features.find((item) => item && item.key === 'auto_tag_background')
+          : null;
+        autoTagBackgroundEnabled = Boolean(feat ? feat.enabled : nextValue);
+        showToast(
+          autoTagBackgroundEnabled
+            ? '已开启「无标签题目后台慢跑」：空闲时后台并行生成候选，手动点生成仍会插队到最前'
+            : '已关闭后台自动补标签（已在进行的单题生成不受影响）',
+          'success'
+        );
+      } catch (e) {
+        showToast('切换失败：' + (e && e.message ? e.message : '未知错误'), 'error');
+      } finally {
+        autoTagBackgroundBusy = false;
+        renderAutoTagBackgroundToggle();
+      }
+    }
+
     async function init() {
       syncFilterPanelUI();
 
@@ -3341,7 +3437,9 @@
       renderFolderTree();
       updateBasketBadges();
       updateFavoritesBadge();
+      renderAutoTagBackgroundToggle();
       void loadEagleAppVersion();
+      void loadAutoTagBackgroundState();
       await loadRealData();
       const urlParams = new URLSearchParams(window.location.search);
       const targetQid = urlParams.get('q');
@@ -3763,12 +3861,16 @@
         }));
       const tagSuggestion = item.tag_suggestion || null;
       const tagRevision = (typeof item.tag_revision === 'number') ? item.tag_revision : 0;
+      const rawIdStr = String(item.id || `q_${idx}`);
+      const shortId = item.short_id || `Q-${rawIdStr.replace(/-/g, '').slice(0, 8).toLowerCase()}`;
       const originSource = item.origin || c.origin || c.source_filename || item.source_filename || '真题资料';
       const sourcePageIdx = (Array.isArray(c.sources) && c.sources[0] && Number.isInteger(c.sources[0].page_idx))
         ? c.sources[0].page_idx
         : (item.page ? (item.page - 1) : 0);
       return {
-        id: String(item.id || `q_${idx}`),
+        id: rawIdStr,
+        shortId,
+        locator: item.locator || null,
         questionNumber: qNum,
         isSourceImage,
         questionImages: rawQuestionImages,
@@ -5948,9 +6050,52 @@
      * 题干 / 出处 / 自定义名称·注释·链接 / 已贴标签（含别名拼音）/
      * 所属文件夹与试卷名 / OneNote 页标题。
      */
+    function getQuestionShortId(q) {
+      if (!q) return '';
+      if (q.shortId) return String(q.shortId);
+      const hex = String(q.id || '').replace(/-/g, '').toLowerCase();
+      return hex ? `Q-${hex.slice(0, 8)}` : '';
+    }
+
+    function buildQuestionLocatorText(q) {
+      if (!q) return '';
+      if (q.locator && q.locator.copy_text) return String(q.locator.copy_text);
+      const sid = getQuestionShortId(q);
+      const title = String(q.source || '未命名资料').trim();
+      const numPart = q.number ? `第${q.number}题` : questionIdentity(q);
+      return `[题有据题目 ${sid}] 《${title}》${numPart} (id: ${q.id})`;
+    }
+
+    async function copyQuestionLocator(qid) {
+      const q = questionsData.find(item => item.id === qid);
+      if (!q) return;
+      const text = buildQuestionLocatorText(q);
+      try {
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+        }
+        showToast(`已复制定位 ${getQuestionShortId(q)}，可直接发给 AI Agent`, 'success');
+      } catch {
+        showToast(`复制失败，定位码为 ${getQuestionShortId(q)}`, 'error');
+      }
+    }
+
     function questionMatchesKeyword(q, keyword) {
       const kw = String(keyword || '').trim().toLowerCase();
       if (!kw) return true;
+      const sid = getQuestionShortId(q).toLowerCase();
+      const qidLower = String(q.id || '').toLowerCase();
+      if (sid && (sid.includes(kw) || kw.includes(sid))) return true;
+      if (qidLower && (qidLower.includes(kw) || (kw.length >= 8 && kw.includes(qidLower)))) return true;
       if ((q.rawStem || '').toLowerCase().includes(kw)) return true;
       if ((q.source || '').toLowerCase().includes(kw)) return true;
       if (String(q.chapter || '').toLowerCase().includes(kw)) return true;
@@ -6454,6 +6599,12 @@
             </div>
 
             <div class="flex items-center gap-2 shrink-0 whitespace-nowrap qc-card-head-right">
+              <button
+                type="button"
+                onclick="event.stopPropagation(); copyQuestionLocator('${q.id}')"
+                class="px-1.5 py-0.5 rounded bg-slate-100/80 hover:bg-emerald-50 border border-slate-200/70 hover:border-emerald-300 text-[10px] font-mono text-slate-500 hover:text-emerald-700 cursor-pointer transition-colors shrink-0"
+                title="点击复制题目身份证定位码，可直接发给 AI Agent"
+              >${escapeHtml(getQuestionShortId(q))}</button>
               <button 
                 onclick="event.stopPropagation(); openOriginalPaperModal('${q.documentId}', ${q.sourcePageIdx ?? (q.sourcePage ? q.sourcePage - 1 : 0)}, '${escapeHtml(q.source)}', '${q.id}')"
                 class="qc-evidence-btn opacity-0 group-hover:opacity-100 transition-opacity text-[11px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded hover:bg-emerald-100 flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
@@ -6811,12 +6962,20 @@
      * @param {number} elapsedMs 已耗时毫秒
      * @returns {string} 提示文本（无提示返回空串）
      */
-    function getAiTagStatusHintText(status, elapsedMs) {
+    function getAiTagStatusHintText(status, elapsedMs, progress) {
+      if (progress && progress.executor === 'assistant') {
+        return '该排队属于旧版助手待办，点下方「⚡ 优先重生成」直接用已配 API 生成。';
+      }
+      if (progress && progress.workerActive === false && status === 'queued') {
+        return '后台工作者当前未启动；请确认通过桌面应用或 tiyouju start 打开，也可点「× 取消」。';
+      }
       if (status === 'queued' && elapsedMs >= AI_QUEUE_SLOW_WARN_MS) {
-        return '排队有点久。可稍等，或点「重新生成建议」再试一次。';
+        return (progress && Number(progress.priority) < 10)
+          ? '当前处于后台低优队列；点「⚡ 优先插队」立刻排到最前面。'
+          : '排队有点久。可稍等，或点「↻ 取消并重试」重新排在队首。';
       }
       if (status === 'running' && elapsedMs >= AI_RUNNING_SLOW_WARN_MS) {
-        return '还在生成中，复杂题可能要一两分钟。';
+        return '还在生成中，复杂题可能要一两分钟；不需要继续等待可点「× 取消」。';
       }
       return '';
     }
@@ -6847,7 +7006,7 @@
         }
         const hintEl = document.getElementById('aiTagStatusHint');
         if (hintEl) {
-          const hintText = getAiTagStatusHintText(progress.status, elapsedMs);
+          const hintText = getAiTagStatusHintText(progress.status, elapsedMs, progress);
           if (hintText) {
             hintEl.innerText = hintText;
             hintEl.classList.remove('hidden');
@@ -6915,7 +7074,7 @@
         const currentState = aiTagJobStateByQuestion.get(qid);
         if (!currentState) return;
 
-        const { jobs: list, error: jobReadError } = await fetchLibraryJobs(qid, 'tags');
+        const { jobs: list, workerActive, error: jobReadError } = await fetchLibraryJobs(qid, 'tags');
         if (jobReadError) {
           // 读不到任务状态，不是「任务还在跑」。空转到 5 分钟再谎报「仍在后台排队」是骗人。
           aiTagJobStateByQuestion.delete(qid);
@@ -6944,7 +7103,20 @@
         const activeJobs = mine.filter(j => j.status === 'queued' || j.status === 'running');
         if (activeJobs.length) {
           const runningJob = activeJobs.find(j => j.status === 'running');
+          const primaryJob = runningJob || activeJobs[0];
           const nextStatus = runningJob ? 'running' : 'queued';
+          const nextQueueAhead = (primaryJob && typeof primaryJob.queue_ahead === 'number') ? primaryJob.queue_ahead : null;
+          const nextPriority = (primaryJob && typeof primaryJob.priority === 'number') ? primaryJob.priority : currentState.priority || 0;
+          const nextExecutor = (primaryJob && primaryJob.executor) || currentState.executor || 'api';
+          const changed = currentState.status !== nextStatus
+            || currentState.queueAhead !== nextQueueAhead
+            || currentState.priority !== nextPriority
+            || currentState.executor !== nextExecutor
+            || currentState.workerActive !== workerActive;
+          currentState.queueAhead = nextQueueAhead;
+          currentState.priority = nextPriority;
+          currentState.executor = nextExecutor;
+          currentState.workerActive = workerActive;
           if (currentState.status !== nextStatus) {
             currentState.status = nextStatus;
             const refTime = runningJob
@@ -6952,8 +7124,8 @@
               : (Date.parse(activeJobs[0].created_at || '') || currentState.startedAt);
             currentState.startedAt = refTime;
             if (q.tagSuggestion) q.tagSuggestion.status = nextStatus;
-            if (currentActiveQuestionId === qid) renderRightInspector();
           }
+          if (changed && currentActiveQuestionId === qid) renderRightInspector();
           continue;
         }
 
@@ -7034,9 +7206,13 @@
           return { jobs: [], error: `读取任务状态失败（HTTP ${res.status}）` };
         }
         const body = await res.json();
-        return { jobs: Array.isArray(body.jobs) ? body.jobs : [], error: '' };
+        return {
+          jobs: Array.isArray(body.jobs) ? body.jobs : [],
+          workerActive: typeof body.worker_active === 'boolean' ? body.worker_active : null,
+          error: ''
+        };
       } catch (e) {
-        return { jobs: [], error: `读取任务状态失败：${(e && e.message) || '网络错误'}` };
+        return { jobs: [], workerActive: null, error: `读取任务状态失败：${(e && e.message) || '网络错误'}` };
       }
     }
 
@@ -7194,13 +7370,13 @@
       const problems = [];
       if (wantAnswer) {
         try {
-          const res = await queueLibraryJob('answer', qid, { solution_scope: true });
+          const res = await queueLibraryJob('answer', qid, { solution_scope: true, executor: 'api', priority: 'high' });
           (res.jobs || []).forEach(j => jobIds.push(String(j.id)));
         } catch (e) { problems.push('答案解析：' + e.message); }
       }
       if (wantTags) {
         try {
-          const res = await queueLibraryJob('tags', qid, { retry: true });
+          const res = await queueLibraryJob('tags', qid, { retry: true, api_only: true, priority: 'high' });
           (res.jobs || []).forEach(j => {
             const id = String(j.id);
             jobIds.push(id);
@@ -7211,6 +7387,9 @@
             const firstTagJob = res.jobs[0];
             aiTagJobStateByQuestion.set(qid, {
               status: firstTagJob.status === 'running' ? 'running' : 'queued',
+              priority: typeof firstTagJob.priority === 'number' ? firstTagJob.priority : 10,
+              queueAhead: typeof firstTagJob.queue_ahead === 'number' ? firstTagJob.queue_ahead : null,
+              executor: firstTagJob.executor || 'api',
               startedAt: Date.parse(firstTagJob.started_at || firstTagJob.created_at || '') || Date.now(),
               queuedAt: Date.parse(firstTagJob.created_at || '') || Date.now(),
               jobIds: tagJobIds,
@@ -7307,18 +7486,86 @@
       }
     }
 
-    // 只重跑标签建议（右侧「重新生成」入口）
-    async function regenerateTagSuggestions(qid) {
+    async function cancelTagSuggestionJob(qid, { silent = false } = {}) {
+      const q = questionsData.find(item => item.id === qid);
+      const tracked = aiTagJobStateByQuestion.get(qid);
+      let jobIds = tracked && Array.isArray(tracked.jobIds) ? tracked.jobIds.slice() : [];
+      if (!jobIds.length && q && q.tagSuggestion && q.tagSuggestion.job_id) {
+        jobIds = [String(q.tagSuggestion.job_id)];
+      }
+      if (!jobIds.length) {
+        const { jobs } = await fetchLibraryJobs(qid, 'tags');
+        jobIds = jobs.filter(j => j && (j.status === 'queued' || j.status === 'running')).map(j => String(j.id));
+      }
+      if (jobIds.length) {
+        const resp = await fetch(`${API_BASE}/api/library/jobs/cancel`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-QB-Request': '1',
+            'Referer': window.location.href
+          },
+          body: JSON.stringify({ ids: jobIds, solution_scope: false })
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => null);
+          throw new Error((err && err.error) || `取消失败（HTTP ${resp.status}）`);
+        }
+      }
+      aiTagJobStateByQuestion.delete(qid);
+      aiTagPollingPausedQuestions.delete(qid);
+      if (q) await refreshQuestionSolution(q);
+      if (currentActiveQuestionId === qid) renderRightInspector();
+      stopAiTagTimerIfIdle();
+      if (!silent) showToast('已取消本次标签排队，可随时重新生成', 'info');
+    }
+
+    async function prioritizeTagSuggestionJob(qid) {
       const q = questionsData.find(item => item.id === qid);
       if (!q) return;
+      try {
+        const res = await queueLibraryJob('tags', qid, { retry: false, api_only: true, priority: 'high' });
+        const refJob = (res.jobs && res.jobs[0]) || null;
+        if (refJob) {
+          const state = aiTagJobStateByQuestion.get(qid);
+          if (state) {
+            state.priority = typeof refJob.priority === 'number' ? refJob.priority : 10;
+            state.queueAhead = typeof refJob.queue_ahead === 'number' ? refJob.queue_ahead : 0;
+            state.executor = refJob.executor || 'api';
+          }
+        }
+        if (currentActiveQuestionId === qid) renderRightInspector();
+        showToast('已将该题插队到队列最前面，并行通道将优先处理', 'success');
+      } catch (e) {
+        showToast('插队失败：' + (e && e.message ? e.message : '未知错误'), 'error');
+      }
+    }
+
+    // 只重跑标签建议（右侧「生成建议 / 取消并重试」入口：始终走直连 API + 高优先级插队）
+    async function regenerateTagSuggestions(qid, opts = {}) {
+      const q = questionsData.find(item => item.id === qid);
+      if (!q) return;
+      const forceRestart = Boolean(opts && opts.forceRestart);
       if (aiTagJobStateByQuestion.has(qid)) {
-        showToast('标签建议正在生成中，请留意右侧进度与耗时', 'info');
-        return;
+        if (!forceRestart) {
+          showToast('标签建议正在生成中，可点「× 取消」或「↻ 取消并重试」', 'info');
+          return;
+        }
+        try {
+          await cancelTagSuggestionJob(qid, { silent: true });
+        } catch (e) {
+          showToast('未能取消原任务：' + (e && e.message ? e.message : '未知错误'), 'error');
+          return;
+        }
       }
       aiTagPollingPausedQuestions.delete(qid);
       const localStart = Date.now();
       aiTagJobStateByQuestion.set(qid, {
         status: 'queuing',
+        priority: 10,
+        queueAhead: null,
+        executor: 'api',
+        workerActive: null,
         startedAt: localStart,
         queuedAt: localStart,
         jobIds: [],
@@ -7326,10 +7573,10 @@
       });
       if (currentActiveQuestionId === qid) renderRightInspector();
       ensureAiTagTimer();
-      showToast('正在排队生成标签建议…', 'info');
+      showToast('已优先排在队列最前，正在生成标签建议…', 'info');
 
       try {
-        const res = await queueLibraryJob('tags', qid, { retry: true });
+        const res = await queueLibraryJob('tags', qid, { retry: true, api_only: true, priority: 'high' });
         let jobs = (res.jobs || []).map(j => String(j.id));
         let refJob = (res.jobs && res.jobs[0]) || null;
 
@@ -7356,6 +7603,9 @@
           state.jobIds = jobs;
           state.status = refJob && refJob.status === 'running' ? 'running' : 'queued';
           if (refJob) {
+            state.priority = typeof refJob.priority === 'number' ? refJob.priority : 10;
+            state.queueAhead = typeof refJob.queue_ahead === 'number' ? refJob.queue_ahead : null;
+            state.executor = refJob.executor || 'api';
             state.queuedAt = Date.parse(refJob.created_at || '') || state.queuedAt;
             state.startedAt = refJob.status === 'running'
               ? (Date.parse(refJob.started_at || refJob.updated_at || '') || state.startedAt)
@@ -10263,6 +10513,8 @@
         if (curr) {
           topMetaEl?.classList.remove('hidden');
           metaCard?.classList.remove('hidden');
+          const locatorCodeEl = document.getElementById('inspectorLocatorCode');
+          if (locatorCodeEl) locatorCodeEl.innerText = getQuestionShortId(curr);
           const ann = getQuestionAnnotation(curr.id);
           if (nameInput) nameInput.value = ann.name || '';
           titleEl.innerText = ann.name ? ann.name : '题目属性';
@@ -10317,6 +10569,8 @@
         const suggestion = activeQ ? activeQ.tagSuggestion : null;
         const pending = activeQ ? buildPendingTagSuggestions(suggestion, tags) : [];
         if (activeQ) activeQ.aiSuggestedTags = pending;
+        const adoptHintEl = document.getElementById('aiTagAdoptHint');
+        if (adoptHintEl) adoptHintEl.classList.toggle('hidden', pending.length === 0);
         const progress = (activeQ && !isBatch) ? resolveTagSuggestionProgress(activeQ) : null;
         const failedSuggestion = Boolean(suggestion && suggestion.status === 'failed');
         const parts = [];
@@ -10326,19 +10580,25 @@
           ensureAiTagTimer();
           const elapsedMs = Math.max(0, Date.now() - (progress.startedAt || Date.now()));
           const elapsedText = formatAiElapsed(elapsedMs);
+          const isLowPriority = progress.status === 'queued' && Number(progress.priority || 0) < 10;
+          const queueDetail = (typeof progress.queueAhead === 'number' && progress.queueAhead > 0)
+            ? ` · 前方 ${progress.queueAhead} 题`
+            : '';
           const phaseLabel = progress.status === 'queuing'
-            ? '正在提交生成请求…'
-            : (progress.status === 'queued' ? '排队等待处理…' : 'AI 正在生成标签建议…');
-          const hintText = getAiTagStatusHintText(progress.status, elapsedMs);
+            ? '正在插队提交…'
+            : (progress.status === 'queued'
+              ? (isLowPriority ? `后台低优排队${queueDetail}` : `优先排队中${queueDetail}`)
+              : '正在生成标签…');
+          const hintText = getAiTagStatusHintText(progress.status, elapsedMs, progress);
           parts.push(`
-            <div class="w-full rounded-md bg-white/80 border border-emerald-200/80 px-2 py-1.5 space-y-1 text-[10px]">
+            <div class="w-full space-y-1.5 text-[10px]">
               <div class="flex items-center justify-between gap-2">
-                <span class="inline-flex items-center gap-1.5 font-medium text-emerald-900">
+                <span class="inline-flex items-center gap-1.5 font-medium text-emerald-900 min-w-0 truncate">
                   <svg class="animate-spin h-3 w-3 text-emerald-600 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
-                  <span>${escapeHtml(phaseLabel)}</span>
+                  <span class="truncate">${escapeHtml(phaseLabel)}</span>
                 </span>
                 <span id="aiTagElapsedText" class="font-mono font-semibold tabular-nums px-1.5 py-0.5 rounded bg-emerald-100/80 text-emerald-900 shrink-0">已耗时 ${elapsedText}</span>
               </div>
@@ -10346,11 +10606,11 @@
             </div>
           `);
         } else if (pending.length) {
-          parts.push(pending.map((sg) => `
+          parts.push(`<div class="flex flex-wrap gap-1">${pending.map((sg) => `
             <button onclick="acceptAiTagSuggestion(${sg._index})" class="px-1.5 py-0.5 rounded bg-white border border-emerald-200 text-emerald-800 text-[10px] hover:bg-emerald-50 transition-colors cursor-pointer" title="${escapeHtml(sg.rationale || 'AI 建议')}\n${escapeHtml(sg.evidence || '')}">
               ✓ ${escapeHtml(sg.name)}
             </button>
-          `).join(''));
+          `).join('')}</div>`);
         } else if (failedSuggestion) {
           const failMsg = (suggestion.message || '').trim();
           parts.push(`<span class="text-[10px] text-rose-700/90 leading-snug" title="${escapeHtml(failMsg)}">上次生成没成功${failMsg ? '：' + escapeHtml(failMsg.slice(0, 60)) : ''}</span>`);
@@ -10374,15 +10634,22 @@
           parts.push(`<span class="text-[10px] text-amber-800 leading-snug">这道题的详情没读到（${escapeHtml(activeQ.detailReadError)}）：这里显示的是「读不到」，不是「没有建议」。</span>`);
           parts.push(`<button onclick="retryReadQuestionDetail('${activeQ.id}')" class="px-1.5 py-0.5 rounded bg-white border border-amber-200 text-amber-800 text-[10px] cursor-pointer">↻ 重新读取</button>`);
         } else {
-          parts.push(`<span class="text-[10px] text-emerald-700/70">暂无待采纳建议 · 点下方按钮即可生成</span>`);
+          parts.push(`<span class="text-[10px] text-emerald-700/70">暂无待采纳建议 · 点下方按钮即可优先生成</span>`);
         }
 
         if (activeQ && !isBatch) {
           if (progress) {
-            const btnLabel = progress.status === 'queued' ? '⏳ 排队中…' : '⏳ 生成中…';
-            parts.push(`<button id="aiTagRegenBtn" disabled class="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-400 text-[10px] cursor-not-allowed">${btnLabel}</button>`);
+            const actionBtns = [];
+            if (progress.status === 'queued' && Number(progress.priority || 0) < 10 && progress.executor !== 'assistant') {
+              actionBtns.push(`<button id="aiTagPriorityBtn" type="button" onclick="prioritizeTagSuggestionJob('${activeQ.id}')" class="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-medium cursor-pointer transition-colors">⚡ 优先插队</button>`);
+            } else {
+              actionBtns.push(`<button id="aiTagRegenBtn" type="button" onclick="regenerateTagSuggestions('${activeQ.id}', { forceRestart: true })" class="px-2 py-0.5 rounded bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-[10px] cursor-pointer transition-colors">↻ 取消并重试</button>`);
+            }
+            actionBtns.push(`<button id="aiTagCancelBtn" type="button" onclick="cancelTagSuggestionJob('${activeQ.id}')" class="px-2 py-0.5 rounded bg-white border border-slate-200 hover:border-rose-300 hover:text-rose-700 text-slate-500 text-[10px] cursor-pointer transition-colors">× 取消</button>`);
+            parts.push(`<div class="flex flex-wrap items-center gap-1.5">${actionBtns.join('')}</div>`);
           } else {
-            parts.push(`<button id="aiTagRegenBtn" onclick="regenerateTagSuggestions('${activeQ.id}')" class="px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-600 text-[10px] hover:bg-slate-50 transition-colors cursor-pointer">↻ 重新生成建议</button>`);
+            const genLabel = tags.length === 0 && !pending.length ? '⚡ 生成标签建议' : '↻ 重新生成建议';
+            parts.push(`<div class="flex flex-wrap items-center gap-1.5"><button id="aiTagRegenBtn" type="button" onclick="regenerateTagSuggestions('${activeQ.id}')" class="px-2 py-0.5 rounded bg-white border border-emerald-200/90 hover:bg-emerald-50 text-emerald-800 text-[10px] font-medium transition-colors cursor-pointer">${genLabel}</button></div>`);
           }
         }
         aiContainer.innerHTML = parts.join('');

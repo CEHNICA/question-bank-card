@@ -11,7 +11,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import close_old_connections
 
-from core import credential_settings, library_jobs, preferences, region_reads
+from core import credential_settings, library_job_control, library_jobs, preferences, region_reads
 from core.account_pool import lease_priority, reset_account_pools
 from core.models import Paper, Question
 from core.pipeline import parse_ahead, process_paper, process_rereads, reading_tail, recover_interrupted_readings
@@ -188,6 +188,26 @@ def overlap_lane(stop: threading.Event, interval: float = 1.0) -> None:
             stop.wait(interval)
 
 
+def library_job_lane(stop: threading.Event, interval: float = 1.5) -> None:
+    """独立后台并行通道：并发处理题库标签与答案任务，并在空闲时温和补齐无标签题目。"""
+    logger = logging.getLogger("core")
+    while not stop.is_set():
+        worked = 0
+        try:
+            close_old_connections()
+            library_job_control.touch_worker_heartbeat()
+            library_jobs.enqueue_untagged_background()
+            if library_jobs.pending():
+                apply_saved_settings()
+                worked = library_jobs.process_parallel(stop=stop)
+        except Exception:  # the lane must never take the worker down
+            logger.exception("library job lane error")
+        finally:
+            close_old_connections()
+        if not worked:
+            stop.wait(interval)
+
+
 def claim_for_main_lane(paper) -> bool:
     """The main lane takes a paper unless another lane has it or is mid-read.
 
@@ -319,8 +339,10 @@ class Command(BaseCommand):
             threading.Thread(target=reread_lane, args=(stop,), name="reread-lane", daemon=True).start()
             threading.Thread(target=parse_lane, args=(stop,), name="parse-lane", daemon=True).start()
             threading.Thread(target=overlap_lane, args=(stop,), name="overlap-lane", daemon=True).start()
+            threading.Thread(target=library_job_lane, args=(stop,), name="library-job-lane", daemon=True).start()
         while True:
             close_old_connections()
+            library_job_control.touch_worker_heartbeat()
             worked = False
             try:
                 for paper in (
@@ -353,8 +375,8 @@ class Command(BaseCommand):
                     apply_saved_settings()
                     if region_reads.process_pending():
                         worked = True
-                # 题库里排队的知识点标签、AI 参考答案（设置里默认关）。
-                if library_jobs.pending():
+                # --once 单轮模式在此同步跑完题库队列；常驻模式由独立的 library-job-lane 并行消费。
+                if once and library_jobs.pending():
                     apply_saved_settings()
                     if library_jobs.process_pending():
                         worked = True

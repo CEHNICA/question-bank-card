@@ -179,6 +179,7 @@ urlpatterns = [
     path("api/library/tags/assignments/batch", library_tagging.batch_assignments_view),
     path("api/library/tags/<uuid:tag_id>/relations", library_tagging.relations_view),
     path("api/library/jobs/cancel", views.library_jobs_cancel),
+    path("api/library/locate", views.library_locate),
     path("api/library/assistant/tasks", views.library_assistant_tasks),
     path("api/library/assistant/prepare", views.library_assistant_prepare),
     path("api/library/assistant/complete", views.library_assistant_complete),

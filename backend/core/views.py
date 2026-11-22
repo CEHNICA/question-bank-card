@@ -3818,6 +3818,40 @@ def library_list(request):
     return browse(request)
 
 
+def library_locate(request):
+    """通过题目身份证短码（Q-xxxxxxxx）、UUID 或完整定位文本快速定位唯一题目。"""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    ref = str(request.GET.get("ref") or "").strip()
+    if not ref:
+        return _error("请提供题目定位码或 UUID（ref）")
+    try:
+        publication = library.resolve_publication_ref(ref)
+    except ValueError as error:
+        return _error(str(error), 404)
+    pub_dir = settings.DATA_ROOT / "library" / str(publication.pk)
+    content = publication.content or {}
+    local_images: list[str] = []
+    if pub_dir.is_dir():
+        for entry in content.get("question_images") or []:
+            if isinstance(entry, dict) and entry.get("file"):
+                p = pub_dir / str(entry["file"])
+                if p.is_file():
+                    local_images.append(str(p))
+        for entry in content.get("figures") or []:
+            if isinstance(entry, dict) and entry.get("file"):
+                p = pub_dir / str(entry["file"])
+                if p.is_file():
+                    local_images.append(str(p))
+    return JsonResponse(
+        {
+            "publication": library.publication_json(publication),
+            "locator": library.question_locator(publication),
+            "local_images": local_images,
+        }
+    )
+
+
 def library_detail(request, publication_id):
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
@@ -4324,6 +4358,7 @@ def library_jobs_view(request):
         return JsonResponse(
             {
                 "jobs": [library_job_control.job_json(row) for row in rows],
+                "worker_active": library_job_control.worker_active(),
                 "assistant_handoff": library_job_control.assistant_handoff(rows),
             }
         )
@@ -4357,6 +4392,24 @@ def library_jobs_view(request):
     retry = payload.get("retry", False)
     if type(retry) is not bool:
         return _error("retry 应为 true 或 false")
+    raw_priority = payload.get("priority")
+    if raw_priority is None:
+        raw_ids = (
+            payload.get("ids") if not payload.get("missing") and payload.get("scope") != "current_filter" else None
+        )
+        requested_priority = (
+            library_jobs.PRIORITY_HIGH
+            if isinstance(raw_ids, list) and len(raw_ids) == 1
+            else library_jobs.PRIORITY_NORMAL
+        )
+    elif raw_priority == "high":
+        requested_priority = library_jobs.PRIORITY_HIGH
+    elif raw_priority == "normal":
+        requested_priority = library_jobs.PRIORITY_NORMAL
+    elif type(raw_priority) is int and 0 <= raw_priority <= 100:
+        requested_priority = raw_priority
+    else:
+        return _error("priority 只能是 high、normal 或 0–100 的整数")
     if payload.get("scope") == "current_filter":
         if kind != LibraryJob.Kind.TAGS or not isinstance(payload.get("filters"), dict):
             return _error("只处理当前这批只支持知识点标签建议，并需要完整的筛选条件")
@@ -4434,12 +4487,22 @@ def library_jobs_view(request):
             )
             fingerprint = library.generation_fingerprint(item.content or {}, item.pk)
             latest = LibraryTagSuggestion.objects.filter(publication=item).order_by("-created_at", "-id").first()
-            active = LibraryJob.objects.filter(
-                publication=item,
-                kind="tags",
-                tag_scope=True,
-                status__in=[LibraryJob.Status.QUEUED, LibraryJob.Status.RUNNING],
-            ).exists()
+            active_rows = list(
+                LibraryJob.objects.filter(
+                    publication=item,
+                    kind="tags",
+                    tag_scope=True,
+                    status__in=[LibraryJob.Status.QUEUED, LibraryJob.Status.RUNNING],
+                ).values("status", "priority")
+            )
+            promotable = bool(
+                requested_priority > 0
+                and any(
+                    row["status"] == LibraryJob.Status.QUEUED and row["priority"] < requested_priority
+                    for row in active_rows
+                )
+            )
+            active = bool(active_rows) and not promotable
             already_handled = bool(
                 latest
                 and latest.question_fingerprint == fingerprint
@@ -4454,7 +4517,7 @@ def library_jobs_view(request):
                     LibraryTagSuggestion.Status.REJECTED,
                 }
             )
-            if active or (already_handled and not retry):
+            if active or (already_handled and not retry and not promotable):
                 continue
             eligible.append(item)
         targets = eligible
@@ -4467,7 +4530,7 @@ def library_jobs_view(request):
         library_job_control.expire_api_jobs()
         with transaction.atomic():
             for publication in targets:
-                options = {"solution_scope": solution_scope}
+                options = {"solution_scope": solution_scope, "priority": requested_priority}
                 if tag_scope:
                     options["tag_scope"] = True
                     options["retry"] = retry

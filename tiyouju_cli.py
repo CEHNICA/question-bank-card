@@ -596,7 +596,8 @@ def cmd_skill(_client, _args) -> dict:
         "- `tiyouju approve <paper> <n>` / `tiyouju publish <paper>`：核对无误后标记 AI 通过并发布入库。",
         "",
         "## 3. 组织题库内容与老师协同",
-        "- `tiyouju library --query <关键词> --json`：按题干、标签、题型检索正式题库内容。",
+        "- `tiyouju locate <定位码或位置文本> [--json]`：支持 `Q-xxxxxxxx`、UUID 或用户复制的一整段题目定位文本，秒查完整题干、标签与本机原图。",
+        "- `tiyouju library [关键词] --json`：按题干、标签、题型检索正式题库内容（每条均带 `short_id`）。",
         "- `tiyouju whereami --json`：确认老师当前正在题库工作台查看/编辑哪道题，避免冲突。",
         "- `tiyouju claim` / `tiyouju release` / `tiyouju workbench`：领取和查看助手工作台任务。",
         "- `tiyouju propose <publication_id> ...`：对已入库题目提交改字提案（等老师采纳，不直接篡改正式题库）。",
@@ -1127,7 +1128,8 @@ def cmd_library(client: Client, args) -> dict:
         query["tag"] = args.tag
     result = client.get("/api/library?" + urllib.parse.urlencode(query))
     items = [{
-        "id": item["id"], "source": item.get("source_filename"), "number": item.get("number"),
+        "id": item["id"], "short_id": item.get("short_id") or f"Q-{str(item['id']).replace('-', '')[:8].lower()}",
+        "source": item.get("source_filename"), "number": item.get("number"),
         "type": item.get("question_type"), "version": item.get("version"),
         "review": (item.get("review") or {}).get("source", "human"),
         "origin": item.get("origin") or "",
@@ -1145,13 +1147,62 @@ def show_library(result: dict) -> str:
     for item in result["items"]:
         review = "（AI 审核）" if item["review"] == "ai" else ""
         origin = f"〔{item['origin']}〕" if item.get("origin") else ""
-        lines.append(f"  {item['source']} 第 {item['number']} 题{review}{origin}：{first_line(item['stem'], 50)}")
+        sid = item.get("short_id") or f"Q-{str(item['id']).replace('-', '')[:8].lower()}"
+        lines.append(f"  [{sid}] {item['source']} 第 {item['number']} 题{review}{origin}：{first_line(item['stem'], 50)}")
         if item.get("tags"):
             lines.append(f"      知识点：{'、'.join(item['tags'])}")
     return "\n".join(lines)
 
 
-ENRICH_FEATURES = ("knowledge_tags", "ai_answer")
+def resolve_publication_id(client: Client, ref: str) -> str:
+    """支持将 Q-xxxxxxxx 短码、粘贴定位文本或 UUID 解析为标准题目 UUID。"""
+    text = str(ref or "").strip()
+    if not text:
+        raise CliError("请给出题目 UUID 或定位码（如 Q-xxxxxxxx）")
+    try:
+        return str(uuid.UUID(text))
+    except (ValueError, TypeError, AttributeError):
+        pass
+    located = client.get("/api/library/locate?" + urllib.parse.urlencode({"ref": text}))
+    pub = located.get("publication") or {}
+    pub_id = str(pub.get("id") or "").strip()
+    if not pub_id:
+        raise CliError(f"未能定位到题目：{text}")
+    return pub_id
+
+
+def cmd_locate(client: Client, args) -> dict:
+    """按短码（Q-xxxxxxxx）、UUID 或整段复制的位置信息快速定位一道已入库题。"""
+    raw_ref = " ".join(args.ref).strip()
+    if not raw_ref:
+        raise CliError("请给出要定位的题目编号或复制的位置文本")
+    return client.get("/api/library/locate?" + urllib.parse.urlencode({"ref": raw_ref}))
+
+
+def show_locate(result: dict) -> str:
+    pub = result.get("publication") or {}
+    locator = result.get("locator") or pub.get("locator") or {}
+    content = pub.get("content") or {}
+    tags = [t.get("name") for t in (pub.get("tags") or []) if isinstance(t, dict) and t.get("name")]
+    lines = [
+        f"定位成功：{locator.get('copy_text') or pub.get('id')}",
+        f"题型：{TYPES.get(pub.get('question_type'), pub.get('question_type') or '')}  版本：v{pub.get('version', 1)}  UUID：{pub.get('id')}",
+        f"题干：{content.get('stem') or '(无文字题干)'}",
+    ]
+    options = content.get("options") or {}
+    for key in OPTION_KEYS:
+        if str(options.get(key) or "").strip():
+            lines.append(f"  {key}. {options[key]}")
+    if str(content.get("answer") or "").strip():
+        lines.append(f"原卷答案：{content['answer']}")
+    if tags:
+        lines.append(f"当前标签：{'、'.join(tags)}")
+    for img in result.get("local_images") or []:
+        lines.append(f"本机原图：{img}")
+    return "\n".join(lines)
+
+
+ENRICH_FEATURES = ("knowledge_tags", "ai_answer", "auto_tag_background")
 ENRICH_KINDS = ("tags", "answer")
 ENRICH_RESULT_BYTES = 256 * 1024
 
@@ -1375,7 +1426,7 @@ def cmd_propose(client: Client, args) -> dict:
     已经入库的题，助手不要直接改字 —— 直接改会把老师打过的勾弄没。改法先交成提案：
     题面一个字不动，等老师在题库页点「采纳」。
     """
-    publication_id = _enrichment_ids([args.publication_id])[0]
+    publication_id = resolve_publication_id(client, args.publication_id)
     fields = {}
     stem = read_text_arg(args.stem, getattr(args, "stem_file", None))
     if stem is not None:
@@ -1449,6 +1500,7 @@ SHOWERS = {
     "show": show_card, "fix": show_fix, "figures": show_figures, "approve": show_approve, "publish": show_publish,
     "unapprove": show_unapprove, "reread": show_reread,
     "library": show_library,
+    "locate": show_locate,
     "backup": show_backup,
     "skill": show_skill,
     "setup-agents": show_setup_agents,
@@ -1872,6 +1924,8 @@ def build_parser() -> argparse.ArgumentParser:
     library.add_argument("--answer", choices=["yes", "no"], help="yes 只要有答案的，no 只要原卷没答案的")
     library.add_argument("--tag", help="知识点标签（设置里打开“知识点标签”后才有）")
     library.add_argument("--limit", type=int, default=20)
+    locate = sub.add_parser("locate", parents=[common], help="通过题目身份证短码（如 Q-xxxxxxxx）、UUID 或定位文本秒查一道题")
+    locate.add_argument("ref", nargs="+", help="Q-xxxxxxxx、UUID 或整段复制的定位文本")
 
     feature_parser = sub.add_parser("features", parents=[common], help="查看或明确启用/关闭标签与参考答案（默认关闭）")
     feature_parser.add_argument("--enable", nargs="+", choices=ENRICH_FEATURES, help="按用户明确生成需求启用")
@@ -1932,6 +1986,7 @@ COMMANDS = {
     "status": cmd_status, "config": cmd_config, "start": cmd_start, "papers": cmd_papers, "upload": cmd_upload, "wait": cmd_wait,
     "cards": cmd_cards, "show": cmd_show, "fix": cmd_fix, "figures": cmd_figures, "approve": cmd_approve,
     "unapprove": cmd_unapprove, "reread": cmd_reread, "publish": cmd_publish, "library": cmd_library,
+    "locate": cmd_locate,
     "assistant-setup": cmd_assistant_setup,
     "setup-agents": cmd_setup_agents,
     "skill": cmd_skill,

@@ -40,7 +40,12 @@ FEATURES = {
     "knowledge_tags": {
         "default": False,
         "label": "知识点标签",
-        "help": "默认关闭。开启后由当前豆包或 AI 助手从固定目录选 1–3 个标签并写回；也可在独立设置中选择模型 API。AI 标签需核对。",
+        "help": "默认关闭。开启后可调用已配置模型或 AI 助手从目录中筛选建议标签；AI 标签需人工点击采纳后才成为正式标签。",
+    },
+    "auto_tag_background": {
+        "default": False,
+        "label": "无标签题目后台自动补标签",
+        "help": "开启后且已配置可用模型 API 时，后台会以低优先级逐批为尚未贴标签的题目生成候选标签；手动单题点击会插队到最前面，结果仍需人工采纳。",
     },
     "ai_answer": {
         "default": False,

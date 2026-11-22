@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import uuid
 from datetime import timedelta
 from pathlib import Path
 
+from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
-from .models import LibraryJob
+from .models import LibraryJob, LibraryTagSuggestion
 
 API_QUEUE_SECONDS = 30 * 60
 API_RUNNING_SECONDS = 240
@@ -55,6 +58,39 @@ def expire_api_jobs():
     )
 
 
+def touch_worker_heartbeat() -> None:
+    """记录后台工作者活跃心跳，供界面如实区分「正在排队」还是「后台未运行」。"""
+    try:
+        root = Path(settings.DATA_ROOT)
+        root.mkdir(parents=True, exist_ok=True)
+        heartbeat = root / "worker.heartbeat"
+        heartbeat.write_text(str(time.time()), encoding="ascii")
+    except OSError:
+        pass
+
+
+def worker_active(max_age_seconds: int = 15) -> bool:
+    """检查后台工作者是否近期处于活跃状态。"""
+    try:
+        heartbeat = Path(settings.DATA_ROOT) / "worker.heartbeat"
+        stat = heartbeat.stat()
+        return (time.time() - stat.st_mtime) <= max_age_seconds
+    except OSError:
+        return False
+
+
+def queue_ahead_count(job: LibraryJob) -> int | None:
+    """统计同执行器队列中排在本任务前面的任务数。"""
+    if job.status != LibraryJob.Status.QUEUED or job.executor != LibraryJob.Executor.API:
+        return None
+    priority = getattr(job, "priority", 0)
+    return (
+        LibraryJob.objects.filter(executor=LibraryJob.Executor.API, status=LibraryJob.Status.QUEUED)
+        .filter(Q(priority__gt=priority) | Q(priority=priority, created_at__lt=job.created_at))
+        .count()
+    )
+
+
 def job_json(job):
     terminal = (
         "cancelled"
@@ -69,6 +105,8 @@ def job_json(job):
         "publication_id": str(job.publication_id),
         "kind": job.kind,
         "executor": job.executor,
+        "priority": getattr(job, "priority", 0),
+        "queue_ahead": queue_ahead_count(job),
         "status": job.status,
         "error": job.error,
         "solution_scope": job.solution_scope,
@@ -166,5 +204,11 @@ def cancel_jobs(payload):
             if job.status in ACTIVE:
                 job.status, job.error = LibraryJob.Status.FAILED, CANCEL_MESSAGE
                 job.save(update_fields=["status", "error", "updated_at"])
+                if job.kind == LibraryJob.Kind.TAGS:
+                    LibraryTagSuggestion.objects.filter(
+                        job=job, status__in=[LibraryTagSuggestion.Status.QUEUED, LibraryTagSuggestion.Status.RUNNING]
+                    ).update(
+                        status=LibraryTagSuggestion.Status.FAILED, message=CANCEL_MESSAGE, updated_at=timezone.now()
+                    )
                 count += 1
     return {"cancelled": count, "jobs": [job_json(job) for job in rows], "assistant_handoff": assistant_handoff(rows)}
