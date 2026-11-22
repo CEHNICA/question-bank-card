@@ -975,6 +975,28 @@ def _needs_reasoning_evidence(config: dict) -> bool:
     return config["thinking"] and config["provider"] != "minimax"
 
 
+def _upstream_error_detail(response) -> str:
+    """安全提取上游返回的简短错误原因（绝不包含密钥或网址）。"""
+    try:
+        payload = response.json()
+    except (ValueError, TypeError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    raw = ""
+    err = payload.get("error")
+    if isinstance(err, dict):
+        raw = str(err.get("message") or err.get("code") or "")
+    elif isinstance(err, str):
+        raw = err
+    if not raw:
+        raw = str(payload.get("message") or payload.get("msg") or "")
+    # 若上游误将鉴权串或 URL 附在报错里则直接裁掉，仅留安全可读摘要。
+    cleaned = re.sub(r"https?://\S+|sk-[A-Za-z0-9_\-]+|Bearer\s+\S+", "[已脱敏]", raw).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned[:90]
+
+
 def _request(
     config: dict, prompt: str, image_urls: list[str], max_tokens: int, *, kind=None, explicit_api=False
 ) -> tuple[str, dict]:
@@ -1033,8 +1055,10 @@ def _request(
             allow_redirects=False,
         )
         if response.status_code != 200:
+            detail = _upstream_error_detail(response)
+            reason = f"：{detail}" if detail else ""
             raise ConnectionError(
-                f"独立 API 请求未完成（HTTP {int(response.status_code)}），已暂停，请核对服务配置后显式重试。"
+                f"独立 API 请求未完成（HTTP {int(response.status_code)}{reason}），已暂停，请核对服务配置后显式重试。"
             )
         body = response.json()
         choice = body["choices"][0]

@@ -1428,12 +1428,12 @@
           </div>
         </div>
 
-        <!-- 3. AI 语义推荐卡片 -->
+        <!-- 3. AI 标签建议卡片 -->
         <div class="rounded-lg border border-emerald-200/80 bg-emerald-50/35 p-2.5 space-y-2">
           <div class="flex items-center justify-between gap-1.5">
             <div class="flex items-center gap-1 font-bold text-emerald-900 text-[11px] shrink-0">
               <svg class="w-3 h-3 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-              <span>AI 语义推荐</span>
+              <span>AI 标签建议</span>
             </div>
             <div class="flex items-center gap-1.5 min-w-0">
               <span id="aiTagAdoptHint" class="hidden text-[10px] text-emerald-700/80 truncate">点标签即采纳</span>
@@ -7332,6 +7332,160 @@
       `;
     }
 
+    const EAGLE_PROVIDER_LABELS = {
+      minimax: 'MiniMax',
+      modelscope: '魔搭',
+      siliconflow: '硅基流动',
+      deepseek: 'DeepSeek',
+      doubao: '豆包',
+      custom: '其他兼容服务'
+    };
+
+    function eagleProviderLabel(key) {
+      return EAGLE_PROVIDER_LABELS[key] || key || '未选择';
+    }
+
+    function pickReadyAnswerProvider(cfg) {
+      const keys = (cfg && cfg.keys) || {};
+      const order = ['minimax', 'modelscope', 'siliconflow', 'deepseek', 'doubao', 'custom'];
+      for (const k of order) {
+        if (keys[k] && keys[k].configured) return k;
+      }
+      return '';
+    }
+
+    async function fetchLibraryAiStatusSafe() {
+      try {
+        const cfgRes = await fetch(`${API_BASE}/api/settings/library-ai`, {
+          headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
+          cache: 'no-store'
+        });
+        if (cfgRes.ok) return await cfgRes.json();
+      } catch (e) { /* 读不到则交由后端排队接口返回具体提示 */ }
+      return null;
+    }
+
+    function renderAiSetupActionCard(cfg, qid, mode) {
+      const providerName = eagleProviderLabel(cfg && cfg.provider);
+      const readyFallback = pickReadyAnswerProvider(cfg);
+      const readyLabel = eagleProviderLabel(readyFallback);
+      const canSelfVerify = Boolean(cfg && cfg.configured && !cfg.verified);
+      const canSwitchAndVerify = Boolean(!cfg?.configured && readyFallback);
+      const isTags = mode === 'tags';
+
+      const headline = canSelfVerify
+        ? `已保存「${providerName}${cfg.model ? ' · ' + cfg.model : ''}」密钥，首次使用需先点一次连接测试。`
+        : canSwitchAndVerify
+          ? `当前答题服务「${providerName}」未填密钥；检测到你已配好「${readyLabel}」密钥，点下方一键切换即可使用。`
+          : `还没有填好「${providerName}」密钥或模型参数，暂时无法直接调用 AI 生成${isTags ? '标签' : '答案'}。`;
+
+      const actionHandler = `quickActivateEagleAi('${qid}', '${mode}', '${canSwitchAndVerify ? readyFallback : ''}')`;
+      const actionLabel = canSelfVerify
+        ? `⚡ 确认测试连接并立即生成${isTags ? '标签' : '解析'}`
+        : `⚡ 一键改用 ${readyLabel} 并生成${isTags ? '标签' : '解析'}`;
+
+      return `
+        <div class="${isTags ? 'space-y-1.5 rounded bg-amber-50/80 border border-amber-200 p-2 text-[10px] text-amber-900' : 'p-3.5 bg-amber-50/70 rounded-lg border border-amber-200 text-xs text-amber-950 space-y-2'}">
+          <div class="font-semibold">${isTags ? '需要完成一次 API 就绪检查' : 'AI 服务尚未就绪'}</div>
+          <div class="leading-relaxed">${escapeHtml(headline)}</div>
+          <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
+            ${(canSelfVerify || canSwitchAndVerify) ? `
+              <button type="button" onclick="${actionHandler}" class="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-medium cursor-pointer transition-colors">
+                ${escapeHtml(actionLabel)}
+              </button>
+            ` : ''}
+            <a href="/settings#ai" class="px-2 py-1 rounded bg-white border border-amber-300 hover:bg-amber-50 text-amber-900 font-medium inline-block">
+              前往设置 →
+            </a>
+          </div>
+        </div>
+      `;
+    }
+
+    async function quickActivateEagleAi(qid, mode, switchProvider) {
+      const q = questionsData.find(item => item.id === qid);
+      const box = document.getElementById(`analysis_box_${qid}`) || document.getElementById(`qlAiStatusHost_${qid}`);
+      if (mode === 'answer' && box) {
+        box.innerHTML = aiBoxSpinner(switchProvider ? `正在切换到「${eagleProviderLabel(switchProvider)}」并测试连接…` : '正在运行一次连接测试，请稍候…');
+      } else {
+        showToast(switchProvider ? `正在切换到「${eagleProviderLabel(switchProvider)}」并测试连接…` : '正在测试 API 连接…', 'info');
+      }
+      try {
+        if (switchProvider) {
+          const saveRes = await fetch(`${API_BASE}/api/settings/api-config`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-QB-Request': '1',
+              'Referer': window.location.href
+            },
+            body: JSON.stringify({
+              answering: {
+                mode: 'api',
+                provider: switchProvider,
+                features: { ai_answer: true, knowledge_tags: true }
+              }
+            })
+          });
+          const saveBody = await saveRes.json().catch(() => null);
+          if (!saveRes.ok) throw new Error((saveBody && saveBody.error) || `切换服务失败（HTTP ${saveRes.status}）`);
+        }
+        const testRes = await fetch(`${API_BASE}/api/settings/api-config/test`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-QB-Request': '1',
+            'Referer': window.location.href
+          },
+          body: JSON.stringify({ target: 'answering', confirm: true })
+        });
+        const testBody = await testRes.json().catch(() => null);
+        if (!testRes.ok || (testBody && testBody.ok === false)) {
+          throw new Error((testBody && (testBody.error || testBody.message)) || `连接测试失败（HTTP ${testRes.status}）`);
+        }
+        if (q) {
+          q.tagIssue = null;
+          q.tagJobReadError = '';
+        }
+        if (mode === 'tags') {
+          await enableKnowledgeTagsAndGenerate(qid, { skipPrompt: true });
+        } else {
+          await requestAiReAnalysis(qid);
+        }
+      } catch (e) {
+        const msg = (e && e.message) || '连接测试失败';
+        if (mode === 'answer' && box) {
+          box.innerHTML = aiBoxError(msg + '（请点击前往「设置 → API 配置」检查模型 ID 与密钥余额）');
+        } else if (q) {
+          q.tagJobReadError = msg;
+          if (currentActiveQuestionId === qid) renderRightInspector();
+          showToast(msg, 'error');
+        }
+      }
+    }
+
+    async function enableKnowledgeTagsAndGenerate(qid, { skipPrompt = false } = {}) {
+      const q = questionsData.find(item => item.id === qid);
+      try {
+        const res = await fetch(`${API_BASE}/api/settings/features`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-QB-Request': '1',
+            'Referer': window.location.href
+          },
+          body: JSON.stringify({ features: { knowledge_tags: true } })
+        });
+        const body = await res.json().catch(() => null);
+        if (!res.ok) throw new Error((body && body.error) || `开启失败（HTTP ${res.status}）`);
+        if (q) q.tagIssue = null;
+        if (!skipPrompt) showToast('已开启「AI 标签建议」', 'success');
+        await regenerateTagSuggestions(qid, { skipPrecheck: true });
+      } catch (e) {
+        showToast((e && e.message) || '未能开启 AI 标签建议', 'error');
+      }
+    }
+
     async function requestAiReAnalysis(qid) {
       const box = document.getElementById(`analysis_box_${qid}`) || document.getElementById(`qlAiStatusHost_${qid}`);
       if (!box) return;
@@ -7341,28 +7495,21 @@
       box.classList.remove('hidden');
       const btn = document.getElementById(`btn_analysis_${qid}`);
       if (btn) btn.innerText = '收起解析';
-      box.innerHTML = aiBoxSpinner('正在排队 AI 任务（答案解析 + 标签建议）…');
+      box.innerHTML = aiBoxSpinner('正在检查服务配置并排队 AI 任务…');
 
-      let cfg = null;
-      try {
-        const cfgRes = await fetch(`${API_BASE}/api/settings/library-ai`, {
-          headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
-          cache: 'no-store'
-        });
-        if (cfgRes.ok) cfg = await cfgRes.json();
-      } catch (e) { cfg = null; }
+      const cfg = await fetchLibraryAiStatusSafe();
+      if (cfg && cfg.api_ready === false) {
+        box.innerHTML = renderAiSetupActionCard(cfg, qid, 'answer');
+        return;
+      }
 
       const features = (cfg && cfg.features) || {};
-      const wantAnswer = features.ai_answer !== false;
-      const wantTags = features.knowledge_tags !== false;
-      if (!wantAnswer && !wantTags) {
-        box.innerHTML = aiBoxError('「AI 参考答案」和「知识点标签」两个开关都没开，请到 设置 → 标签与答案 打开后再生成。');
-        return;
-      }
-      if (cfg && cfg.ready === false) {
-        box.innerHTML = aiBoxError(cfg.message || 'AI 服务尚未就绪，请先在 设置 → 标签与答案 里通过连接测试。');
-        return;
-      }
+      // 明确点击单题「AI 一键生成推导与解析」时，即使全局开关关闭也始终生成这道题的答案；
+      // 若全局「AI 标签建议」已开启，则顺便一起生成标签建议。
+      const wantAnswer = true;
+      const wantTags = features.knowledge_tags === true;
+
+      box.innerHTML = aiBoxSpinner(wantTags ? '正在排队 AI 任务（答案解析 + 标签建议）…' : '正在排队 AI 答案解析任务…');
 
       const startedAt = Date.now();
       const jobIds = [];
@@ -7558,6 +7705,24 @@
           return;
         }
       }
+      if (!opts.skipPrecheck && !forceRestart) {
+        const cfg = await fetchLibraryAiStatusSafe();
+        if (cfg && cfg.api_ready === false) {
+          q.tagIssue = { kind: 'api', cfg };
+          q.tagJobReadError = '';
+          if (currentActiveQuestionId === qid) renderRightInspector();
+          showToast('当前尚未完成答题/标签 API 就绪测试，请按右侧卡片提示一键处理', 'error');
+          return;
+        }
+        if (cfg && cfg.features && cfg.features.knowledge_tags === false) {
+          q.tagIssue = { kind: 'feature_off', cfg };
+          q.tagJobReadError = '';
+          if (currentActiveQuestionId === qid) renderRightInspector();
+          showToast('「AI 标签建议」尚未开启，点右侧按钮即可一键开启并生成', 'info');
+          return;
+        }
+      }
+      q.tagIssue = null;
       aiTagPollingPausedQuestions.delete(qid);
       const localStart = Date.now();
       aiTagJobStateByQuestion.set(qid, {
@@ -10605,6 +10770,23 @@
               <div id="aiTagStatusHint" class="text-[10px] leading-snug text-amber-700 ${hintText ? '' : 'hidden'}">${escapeHtml(hintText)}</div>
             </div>
           `);
+        } else if (activeQ && activeQ.tagIssue) {
+          if (activeQ.tagIssue.kind === 'api') {
+            parts.push(renderAiSetupActionCard(activeQ.tagIssue.cfg, activeQ.id, 'tags'));
+          } else {
+            parts.push(`
+              <div class="space-y-1.5 rounded bg-amber-50/80 border border-amber-200 p-2 text-[10px] text-amber-900">
+                <div class="font-semibold">「AI 标签建议」开关尚未开启</div>
+                <div>开启后即可从正式题库目录筛选推荐考点，后台也能自动补齐无标签题目。</div>
+                <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
+                  <button type="button" onclick="enableKnowledgeTagsAndGenerate('${activeQ.id}')" class="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-medium cursor-pointer transition-colors">
+                    ⚡ 开启并立即生成标签
+                  </button>
+                  <a href="/settings#ai" class="px-2 py-1 rounded bg-white border border-amber-300 hover:bg-amber-50 text-amber-900 font-medium inline-block">前往设置 →</a>
+                </div>
+              </div>
+            `);
+          }
         } else if (pending.length) {
           parts.push(`<div class="flex flex-wrap gap-1">${pending.map((sg) => `
             <button onclick="acceptAiTagSuggestion(${sg._index})" class="px-1.5 py-0.5 rounded bg-white border border-emerald-200 text-emerald-800 text-[10px] hover:bg-emerald-50 transition-colors cursor-pointer" title="${escapeHtml(sg.rationale || 'AI 建议')}\n${escapeHtml(sg.evidence || '')}">

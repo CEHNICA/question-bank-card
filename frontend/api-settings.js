@@ -327,22 +327,45 @@
     else text.textContent = "未配置";
   }
 
+  const ANSWER_SUGGESTED_MODELS = Object.freeze({
+    minimax: ["MiniMax-M3.1-Flash-Preview", "MiniMax-M3"],
+    deepseek: ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro"],
+    modelscope: ["Qwen/Qwen3.5-35B-A3B", "Qwen/Qwen3.5-122B-A10B", "Qwen/Qwen3.5-397B-A17B", "Qwen/Qwen3.5-27B"],
+    siliconflow: ["Qwen/Qwen3-VL-32B-Instruct", "Qwen/Qwen3-VL-30B-A3B-Thinking", "Qwen/Qwen3-VL-30B-A3B-Instruct"],
+  });
+
+  const ANSWER_ONLY_KEY_SERVICES = new Set(["deepseek", "doubao", "custom"]);
+
+  function findRecommendedAnswerService(data, draft) {
+    const services = data.catalog?.services || [];
+    const readingEngine = draft.reading?.primary;
+    const preferredReadingSpec = services.find((s) => s.engine === readingEngine && s.roles?.includes("answering"));
+    const candidates = [];
+    if (preferredReadingSpec) candidates.push(preferredReadingSpec);
+    for (const s of services) {
+      if (s.roles?.includes("answering") && s.key !== draft.answering.provider && !candidates.some((c) => c.key === s.key)) {
+        candidates.push(s);
+      }
+    }
+    return candidates.find((s) => serviceEffectiveState(s.key).configured) || null;
+  }
+
   function buildReadingSection(data, draft) {
     const card = createEl("section", "credential-service api-unified-section");
     card.id = "apiSettingsReadingPanel";
     const head = createEl("div", "credential-service-head");
     const title = createEl("strong");
-    title.append(createEl("span", "credential-step-number", "1"), " 先挑选谁来看图读题");
+    title.append(createEl("span", "credential-step-number", "1"), " 看图读题设置");
     const readingState = data.reading?.readiness?.ready ? "就绪" : "未就绪";
     const badge = createEl("span", `api-state ${data.reading?.readiness?.ready ? "is-ready" : ""}`, readingState);
     head.append(title, badge);
     card.append(head);
 
-    card.append(createEl("p", "credential-purpose", "推荐魔搭（每天有免费额度）；已有其他服务的密钥可直接切换。"));
+    card.append(createEl("p", "credential-purpose", "切完题后负责识别图片里的文字和公式；推荐魔搭（每日免费）或 MiniMax。"));
 
     const fieldset = createEl("fieldset", "provider-picker");
     fieldset.id = "credentialVisionPicker";
-    fieldset.append(createEl("legend", "field-legend", "看图读题服务"));
+    fieldset.append(createEl("legend", "field-legend", "选择看图读题服务"));
     const visionServices = (data.catalog?.services || []).filter((spec) => spec.roles?.includes("reading"));
 
     for (const spec of visionServices) {
@@ -387,6 +410,13 @@
 
     const activeSpec = visionServices.find((spec) => spec.engine === draft.reading.primary);
     if (activeSpec) {
+      const currentModel = draft.reading.models[activeSpec.key] ?? activeSpec.reading_default_model ?? "";
+      const advanced = createEl("details", "settings-advanced api-answer-advanced");
+      if (currentModel && currentModel !== activeSpec.reading_default_model) {
+        advanced.open = true;
+      }
+      advanced.append(createEl("summary", "", `模型与档位参数（当前：${currentModel || "默认"} · 一般不用改）`));
+
       const modelRow = createEl("label", "model-id-field");
       modelRow.append(createEl("span", "", `${activeSpec.label} 读题模型名称`));
       const listId = `apiReadingModels-${activeSpec.key}`;
@@ -402,7 +432,7 @@
       input.setAttribute("list", listId);
       input.autocomplete = "off";
       input.spellcheck = false;
-      input.value = draft.reading.models[activeSpec.key] ?? activeSpec.reading_default_model ?? "";
+      input.value = currentModel;
       input.placeholder = activeSpec.reading_default_model || "填写视觉模型 ID";
       input.disabled = isMutating();
       input.addEventListener("input", () => {
@@ -410,7 +440,7 @@
         syncDirtyIndicator();
       });
       modelRow.append(input, datalist);
-      card.append(modelRow);
+      advanced.append(modelRow);
 
       if (activeSpec.key === "minimax") {
         const planLabel = createEl("label", "model-id-field");
@@ -429,8 +459,9 @@
           syncDirtyIndicator();
         });
         planLabel.append(select);
-        card.append(planLabel);
+        advanced.append(planLabel);
       }
+      card.append(advanced);
 
       // 读题连接测试（明确确认才发送合成图）
       const probeBox = createEl("div", "credential-connection-test");
@@ -462,111 +493,135 @@
     return card;
   }
 
+  function renderCredentialCard(spec, draft) {
+    const cred = draft.credentials[spec.key];
+    const card = createEl("article", "credential-service api-service-card");
+    card.dataset.service = spec.key;
+
+    const cardHead = createEl("div", "credential-service-head");
+    const nameWrap = createEl("div", "api-service-title");
+    const titleLabel = spec.key === "mineru" ? `${spec.label}（可选 · 仅整卷自动切题）` : spec.label;
+    nameWrap.append(createEl("strong", "", titleLabel));
+    for (const role of spec.roles || []) {
+      nameWrap.append(createEl("span", "api-role-pill", ROLE_LABELS[role] || role));
+    }
+    const st = serviceEffectiveState(spec.key);
+    const stateBadge = createEl("span", `api-state ${st.configured ? "is-ready" : ""}`, st.label);
+    cardHead.append(nameWrap, stateBadge);
+    card.append(cardHead);
+
+    if (spec.note) {
+      card.append(createEl("p", "credential-purpose", spec.note));
+    }
+
+    // 已保存密钥行（按 count 渲染 0..N 行）
+    if (cred.configured && cred.count > 0 && !cred.clear) {
+      const ul = createEl("ul", "credential-saved-list");
+      ul.setAttribute("aria-label", `已保存的 ${spec.label} 密钥`);
+      for (let idx = 0; idx < cred.count; idx++) {
+        const li = createEl("li", "credential-saved-row");
+        li.dataset.secretRow = `${spec.key}:${idx}`;
+        const entryKey = `${spec.key}:${idx}`;
+        const revealed = state.revealedKeys.get(entryKey);
+        const idxLabel = createEl("span", "credential-saved-index", cred.count > 1 ? `账号 #${idx + 1}` : "已存密钥");
+        const code = createEl("code", "credential-secret-text", revealed ? revealed.value : CREDENTIAL_MASK);
+        const toggleBtn = createEl("button", "button small credential-reveal-btn", revealed ? "隐藏" : "查看");
+        toggleBtn.type = "button";
+        toggleBtn.addEventListener("click", () => {
+          void toggleSecretReveal(spec.key, idx);
+        });
+        li.append(idxLabel, code, toggleBtn);
+        ul.append(li);
+      }
+      card.append(ul);
+    }
+
+    // 输入新密钥
+    const inputId = `apiKeyInput-${spec.key}`;
+    const labelRow = createEl("label");
+    labelRow.htmlFor = inputId;
+    labelRow.append(createEl("span", "", spec.input_label || "填写或更新密钥（留空就不改）"));
+    if (spec.signup) {
+      const link = createEl("a", "api-signup-link", "去官网申请");
+      link.href = spec.signup;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      labelRow.append(" · ", link);
+    }
+    const input = createEl("input");
+    input.id = inputId;
+    input.type = "password";
+    input.autocomplete = "off";
+    input.setAttribute("autocapitalize", "off");
+    input.setAttribute("autocorrect", "off");
+    input.spellcheck = false;
+    input.dataset.lpignore = "true";
+    input.dataset["1pIgnore"] = "true";
+    input.placeholder = spec.placeholder || `粘贴 ${spec.label} 密钥（多个账号可用英文分号 ; 隔开）`;
+    input.value = cred.input;
+    input.disabled = isMutating();
+    input.addEventListener("input", () => {
+      cred.input = input.value;
+      if (input.value.trim()) cred.clear = false;
+      syncDirtyIndicator();
+    });
+    card.append(labelRow, input);
+
+    if (cred.configured) {
+      const actions = createEl("div", "credential-service-actions");
+      const clearBtn = createEl("button", "button small credential-delete", cred.clear ? "撤销清除（保留原密钥）" : "清除已存密钥");
+      clearBtn.type = "button";
+      clearBtn.disabled = isMutating();
+      clearBtn.addEventListener("click", () => {
+        cred.clear = !cred.clear;
+        if (cred.clear) cred.input = "";
+        renderContent();
+      });
+      actions.append(clearBtn);
+      card.append(actions);
+    }
+
+    return card;
+  }
+
   function buildCredentialsSection(data, draft) {
     const section = createEl("section", "credential-service api-unified-section");
     section.id = "apiSettingsCredentialPanel";
     const head = createEl("div", "credential-service-head");
     const title = createEl("strong");
-    title.append(createEl("span", "credential-step-number", "2"), " 统一服务商密钥池");
+    title.append(createEl("span", "credential-step-number", "2"), " 填写服务密钥（填一次全站共用）");
     const totalCount = Object.values(draft.credentials).reduce((acc, item) => acc + (item.configured ? item.count : 0), 0);
-    const totalEl = createEl("span", "credential-saved-total", `已配置 ${totalCount} 个账号`);
+    const totalEl = createEl("span", "credential-saved-total", `已配 ${totalCount} 个账号`);
     totalEl.id = "credentialSavedTotal";
     head.append(title, totalEl);
     section.append(head);
-    section.append(createEl("p", "credential-storage-note", "所有服务的密钥统一保存在本机 Windows 加密文件中；同一服务商全站共用，只需填写一次。查看明文 60 秒后自动隐藏。"));
+    section.append(createEl("p", "credential-storage-note", "密钥全部加密保存在这台电脑里；读题和题库生成答案/标签同一家只填一次。"));
+
+    const services = data.catalog?.services || [];
+    const primaryServices = services.filter((spec) => !ANSWER_ONLY_KEY_SERVICES.has(spec.key));
+    const secondaryServices = services.filter((spec) => ANSWER_ONLY_KEY_SERVICES.has(spec.key));
 
     const list = createEl("div", "api-credential-grid");
-    const services = data.catalog?.services || [];
-    for (const spec of services) {
-      const cred = draft.credentials[spec.key];
-      const card = createEl("article", "credential-service api-service-card");
-      card.dataset.service = spec.key;
-
-      const cardHead = createEl("div", "credential-service-head");
-      const nameWrap = createEl("div", "api-service-title");
-      nameWrap.append(createEl("strong", "", spec.label));
-      for (const role of spec.roles || []) {
-        nameWrap.append(createEl("span", "api-role-pill", ROLE_LABELS[role] || role));
-      }
-      const st = serviceEffectiveState(spec.key);
-      const stateBadge = createEl("span", `api-state ${st.configured ? "is-ready" : ""}`, st.label);
-      cardHead.append(nameWrap, stateBadge);
-      card.append(cardHead);
-
-      if (spec.note) {
-        card.append(createEl("p", "credential-purpose", spec.note));
-      }
-
-      // 已保存密钥行（按 count 渲染 0..N 行）
-      if (cred.configured && cred.count > 0 && !cred.clear) {
-        const ul = createEl("ul", "credential-saved-list");
-        ul.setAttribute("aria-label", `已保存的 ${spec.label} 密钥`);
-        for (let idx = 0; idx < cred.count; idx++) {
-          const li = createEl("li", "credential-saved-row");
-          li.dataset.secretRow = `${spec.key}:${idx}`;
-          const entryKey = `${spec.key}:${idx}`;
-          const revealed = state.revealedKeys.get(entryKey);
-          const idxLabel = createEl("span", "credential-saved-index", cred.count > 1 ? `账号 #${idx + 1}` : "已存密钥");
-          const code = createEl("code", "credential-secret-text", revealed ? revealed.value : CREDENTIAL_MASK);
-          const toggleBtn = createEl("button", "button small credential-reveal-btn", revealed ? "隐藏" : "查看");
-          toggleBtn.type = "button";
-          toggleBtn.addEventListener("click", () => {
-            void toggleSecretReveal(spec.key, idx);
-          });
-          li.append(idxLabel, code, toggleBtn);
-          ul.append(li);
-        }
-        card.append(ul);
-      }
-
-      // 输入新密钥
-      const inputId = `apiKeyInput-${spec.key}`;
-      const labelRow = createEl("label");
-      labelRow.htmlFor = inputId;
-      labelRow.append(createEl("span", "", spec.input_label || "新的密钥（留空就不改）"));
-      if (spec.signup) {
-        const link = createEl("a", "api-signup-link", "获取密钥");
-        link.href = spec.signup;
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        labelRow.append(" · ", link);
-      }
-      const input = createEl("input");
-      input.id = inputId;
-      input.type = "password";
-      input.autocomplete = "off";
-      input.setAttribute("autocapitalize", "off");
-      input.setAttribute("autocorrect", "off");
-      input.spellcheck = false;
-      input.dataset.lpignore = "true";
-      input.dataset["1pIgnore"] = "true";
-      input.placeholder = spec.placeholder || `粘贴 ${spec.label} 密钥（多个账号可用英文分号 ; 隔开）`;
-      input.value = cred.input;
-      input.disabled = isMutating();
-      input.addEventListener("input", () => {
-        cred.input = input.value;
-        if (input.value.trim()) cred.clear = false;
-        syncDirtyIndicator();
-      });
-      card.append(labelRow, input);
-
-      if (cred.configured) {
-        const actions = createEl("div", "credential-service-actions");
-        const clearBtn = createEl("button", "button small credential-delete", cred.clear ? "撤销清除（保留原密钥）" : "清除已存密钥");
-        clearBtn.type = "button";
-        clearBtn.disabled = isMutating();
-        clearBtn.addEventListener("click", () => {
-          cred.clear = !cred.clear;
-          if (cred.clear) cred.input = "";
-          renderContent();
-        });
-        actions.append(clearBtn);
-        card.append(actions);
-      }
-
-      list.append(card);
+    for (const spec of primaryServices) {
+      list.append(renderCredentialCard(spec, draft));
     }
     section.append(list);
+
+    if (secondaryServices.length > 0) {
+      const more = createEl("details", "api-more-credentials");
+      const anySecondaryUsed = secondaryServices.some((spec) => {
+        const st = serviceEffectiveState(spec.key);
+        return st.configured || Boolean(draft.credentials[spec.key]?.input?.trim()) || draft.answering.provider === spec.key && st.configured;
+      });
+      if (anySecondaryUsed) more.open = true;
+      more.append(createEl("summary", "", "更多仅用于题库答题/标签的独立模型密钥（DeepSeek / 豆包 / 其他自定义，可选）"));
+      const secondaryGrid = createEl("div", "api-credential-grid");
+      for (const spec of secondaryServices) {
+        secondaryGrid.append(renderCredentialCard(spec, draft));
+      }
+      more.append(secondaryGrid);
+      section.append(more);
+    }
     return section;
   }
 
@@ -578,21 +633,41 @@
 
     const head = createEl("div", "credential-service-head");
     const title = createEl("strong");
-    title.append(createEl("span", "credential-step-number", "3"), " 正式题库解题与知识点标签");
+    title.append(createEl("span", "credential-step-number", "3"), " 题库生成答案与 AI 标签建议");
     const activeProviderConfigured = serviceEffectiveState(ans.provider).configured;
     const statusText = ansData.verified
-      ? "独立 API · 已测通"
+      ? "已测通 ✓"
       : activeProviderConfigured
-        ? "独立 API · 待测试"
-        : "尚未配置密钥";
+        ? "待测试连接"
+        : "未配密钥";
     head.append(title, createEl("span", `api-state ${ansData.verified ? "is-ready" : ""}`, statusText));
     panel.append(head);
 
-    // 功能开关区
+    // 若当前所选答题服务未配置，但用户已在上方填了其他服务密钥（如 MiniMax / 魔搭 / 硅基流动），给一键沿用按钮
+    const recommended = !activeProviderConfigured ? findRecommendedAnswerService(data, draft) : null;
+    if (recommended) {
+      const banner = createEl("div", "api-quick-reuse-banner");
+      const bannerText = createEl("span", "", `你已在上方填好「${recommended.label}」密钥，可直接用它来生成题库答案和 AI 标签。`);
+      const useBtn = createEl("button", "button small primary", `一键改用 ${recommended.label}（并开启功能）`);
+      useBtn.type = "button";
+      useBtn.disabled = isMutating();
+      useBtn.addEventListener("click", () => {
+        ans.provider = recommended.key;
+        ans.features.ai_answer = true;
+        ans.features.knowledge_tags = true;
+        ans.testConsent = false;
+        ans.testResult = "";
+        renderContent();
+      });
+      banner.append(bannerText, useBtn);
+      panel.append(banner);
+    }
+
+    // 功能开关区（主开关 + 缩进子开关）
     const switchesBox = createEl("div", "api-answering-switches");
     const answerSwitch = createSwitchRow(
       "AI 参考答案",
-      `启用后可在题库内生成参考答案${typeof ansData.backlog?.missing_answer === "number" ? `（当前缺答案 ${ansData.backlog.missing_answer} 题）` : ""}`,
+      `开启后可在题库内生成参考答案${typeof ansData.backlog?.missing_answer === "number" ? `（当前缺答案 ${ansData.backlog.missing_answer} 题）` : ""}`,
       ans.features.ai_answer,
       (checked) => {
         ans.features.ai_answer = checked;
@@ -602,7 +677,7 @@
     );
     const intakeSwitch = createSwitchRow(
       "新入库题目自动排入生成参考答案",
-      "仅在开启 AI 参考答案时生效；按当前选定模型后台排队",
+      "仅在开启上方「AI 参考答案」时生效",
       ans.on_intake.answer,
       (checked) => {
         ans.on_intake.answer = checked;
@@ -610,10 +685,11 @@
       },
       !ans.features.ai_answer
     );
+    intakeSwitch.className = "settings-switch api-sub-switch";
     const kSummary = ansData.knowledge || {};
     const tagSwitch = createSwitchRow(
-      "知识点标签建议",
-      kSummary.total ? `按正式题库标签目录建议（共 ${kSummary.chapters || 0} 章 ${kSummary.total} 个考点）` : "从正式题库标签目录筛选建议考点",
+      "AI 标签建议",
+      kSummary.total ? `按正式题库标签目录建议（共 ${kSummary.chapters || 0} 章 ${kSummary.total} 个考点）` : "从正式题库标签目录筛选建议考点，点一下即可采纳",
       ans.features.knowledge_tags,
       (checked) => {
         ans.features.knowledge_tags = checked;
@@ -631,16 +707,9 @@
       },
       !ans.features.knowledge_tags
     );
+    bgTagSwitch.className = "settings-switch api-sub-switch";
     switchesBox.append(answerSwitch, intakeSwitch, tagSwitch, bgTagSwitch);
     panel.append(switchesBox);
-
-    panel.append(
-      createEl(
-        "p",
-        "settings-footnote",
-        "题库内按钮直接调用下方配置的模型 API；如需让外部 AI 助手协助，直接对话并通过 tiyouju 命令行即可。"
-      )
-    );
 
     {
       const answerServices = (data.catalog?.answer_order || []).map(
@@ -648,14 +717,14 @@
       ).filter(Boolean);
 
       const providerRow = createEl("label", "model-id-field");
-      providerRow.append(createEl("span", "", "解题与标签服务商"));
+      providerRow.append(createEl("span", "", "解题与标签使用哪家服务"));
       const select = createEl("select");
       select.disabled = isMutating();
       for (const spec of answerServices) {
         const st = serviceEffectiveState(spec.key);
         const opt = document.createElement("option");
         opt.value = spec.key;
-        opt.textContent = `${spec.label}${st.configured ? `（${st.label}）` : "（未配置密钥）"}`;
+        opt.textContent = `${spec.label}${st.configured ? `（✓ ${st.label}）` : "（未填密钥）"}`;
         select.append(opt);
       }
       select.value = ans.provider;
@@ -677,8 +746,8 @@
           "p",
           "settings-footnote",
           activeKeyState.configured
-            ? `已关联「步骤 2」中的 ${activeSpec?.label || ans.provider} 密钥（${activeKeyState.label}${isSharedVision ? " · 与读题全站共用，无需再次输入" : ""}）。`
-            : `尚未填写 ${activeSpec?.label || ans.provider} 密钥：请直接在上方「步骤 2 · 统一服务商密钥池」填写。`
+            ? `已关联上方第 2 步的 ${activeSpec?.label || ans.provider} 密钥（${activeKeyState.label}${isSharedVision ? " · 与读题全站共用，无需再次输入" : ""}）。`
+            : `尚未填写 ${activeSpec?.label || ans.provider} 密钥：请直接在上方第 2 步填写，或改选你已经填好密钥的服务商。`
         )
       );
 
@@ -689,10 +758,25 @@
         thinking: true,
       };
 
+      const advanced = createEl("details", "settings-advanced api-answer-advanced");
+      if (ans.provider === "custom" || ans.provider === "doubao" || !profile.model) {
+        advanced.open = true;
+      }
+      advanced.append(createEl("summary", "", `高级模型参数（当前模型：${profile.model || "未填写"} · 一般保持默认即可）`));
+
       const modelField = createEl("label", "model-id-field");
       modelField.append(createEl("span", "", ans.provider === "doubao" ? "火山方舟 Endpoint ID（以 ep- 开头）" : "模型 ID"));
+      const ansModelListId = `apiAnswerModels-${ans.provider}`;
+      const ansDatalist = createEl("datalist");
+      ansDatalist.id = ansModelListId;
+      for (const m of ANSWER_SUGGESTED_MODELS[ans.provider] || activeSpec?.reading_suggested_models || []) {
+        const opt = document.createElement("option");
+        opt.value = m;
+        ansDatalist.append(opt);
+      }
       const modelInput = createEl("input");
       modelInput.type = "text";
+      modelInput.setAttribute("list", ansModelListId);
       modelInput.autocomplete = "off";
       modelInput.spellcheck = false;
       modelInput.value = profile.model;
@@ -702,8 +786,8 @@
         profile.model = modelInput.value.trim();
         syncDirtyIndicator();
       });
-      modelField.append(modelInput);
-      panel.append(modelField);
+      modelField.append(modelInput, ansDatalist);
+      advanced.append(modelField);
 
       const baseField = createEl("label", "model-id-field");
       baseField.append(createEl("span", "", "API 服务地址（Base URL）"));
@@ -720,7 +804,7 @@
         syncDirtyIndicator();
       });
       baseField.append(baseInput);
-      panel.append(baseField);
+      advanced.append(baseField);
 
       const capsBox = createEl("div", "api-answering-switches");
       capsBox.append(
@@ -733,10 +817,20 @@
           syncDirtyIndicator();
         })
       );
-      panel.append(capsBox);
+      advanced.append(capsBox);
+      panel.append(advanced);
 
       // 独立解题连接测试
       const probeBox = createEl("div", "credential-connection-test");
+      if (activeProviderConfigured && !ansData.verified) {
+        probeBox.append(
+          createEl(
+            "p",
+            "api-inline-hint",
+            "还差一步：点下方「保存全部 API 配置」后，勾选确认框并点击「测试解题连接」，测通后题库即可生成答案和标签。"
+          )
+        );
+      }
       const consentLabel = createEl("label", "credential-consent");
       const consentBox = createEl("input");
       consentBox.type = "checkbox";
