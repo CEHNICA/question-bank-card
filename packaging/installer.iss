@@ -49,7 +49,7 @@ UsePreviousAppDir=yes
 ; 品牌改名后不要沿用旧版“题库题卡版”的开始菜单分组。
 UsePreviousGroup=no
 ChangesAssociations=no
-ChangesEnvironment=no
+ChangesEnvironment=yes
 AllowNetworkDrive=no
 VersionInfoVersion={#AppVersion}
 VersionInfoDescription={#MyAppName} 安装程序
@@ -103,6 +103,7 @@ Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{a
 Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Run]
+Filename: "{app}\tiyouju.exe"; Parameters: "setup-agents --quiet"; Flags: runhidden waituntilterminated; StatusMsg: "正在为本机 AI 助手配置题有据技能与命令行..."
 Filename: "{app}\{#MyAppExeName}"; Description: "启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
 [Code]

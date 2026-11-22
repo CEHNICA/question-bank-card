@@ -42,6 +42,26 @@ LOG_FILE = launcher.RUNTIME / "launcher.log"
 APP_TITLE = "题有据"
 APP_SUBTITLE = "原卷可追溯的题库整理工具"
 APP_USER_MODEL_ID = "QuestionBank.CardReview"
+
+
+def _resolve_app_version() -> str:
+    """读取当前软件版本号，供启动画面显示；读取失败时返回空串不阻断启动。"""
+    try:
+        from core.version import APP_VERSION
+
+        return str(APP_VERSION).strip()
+    except ImportError:
+        backend_path = str(launcher.BACKEND)
+        if backend_path not in sys.path:
+            sys.path.insert(0, backend_path)
+        try:
+            from core.version import APP_VERSION
+
+            return str(APP_VERSION).strip()
+        except ImportError:
+            return ""
+    except Exception:  # noqa: BLE001 - 版本号只作启动展示，读取异常不能阻断启动
+        return ""
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 CREATE_NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
 _ICON_HANDLE_CACHE: dict[tuple[str, int, int], tuple[int, int]] = {}
@@ -1120,6 +1140,7 @@ class Splash:
     def __init__(self) -> None:
         self.events: queue.Queue = queue.Queue()
         self.root = None
+        self.version_text = _resolve_app_version()
         _enable_dpi_awareness()
         try:
             import tkinter as tk
@@ -1151,7 +1172,21 @@ class Splash:
             tk.Label(frame, text="题", font=("SimSun", 30, "bold"), fg="#fff4dc", bg="#1f6b5f", width=2).pack(
                 pady=(round(26 * scale), round(8 * scale))
             )
-        tk.Label(frame, text=APP_TITLE, font=("Microsoft YaHei UI", 14, "bold"), fg="#1c2a28", bg="#ffffff").pack()
+        title_row = tk.Frame(frame, bg="#ffffff")
+        title_row.pack()
+        tk.Label(title_row, text=APP_TITLE, font=("Microsoft YaHei UI", 14, "bold"), fg="#1c2a28", bg="#ffffff").pack(
+            side="left"
+        )
+        if self.version_text:
+            tk.Label(
+                title_row,
+                text=f"v{self.version_text}",
+                font=("Microsoft YaHei UI", 8, "bold"),
+                fg="#047857",
+                bg="#ecfdf5",
+                padx=round(6 * scale),
+                pady=max(1, round(1 * scale)),
+            ).pack(side="left", padx=(round(6 * scale), 0), pady=(round(2 * scale), 0))
         tk.Label(frame, text=APP_SUBTITLE, font=("Microsoft YaHei UI", 9), fg="#72807b", bg="#ffffff").pack(
             pady=(round(2 * scale), 0)
         )

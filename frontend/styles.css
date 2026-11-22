@@ -3856,11 +3856,23 @@ kbd {
   font-weight: 600;
   line-height: 1.35;
 }
+.entry-topbar-version {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+}
 :root:has(#settingsHome:not([hidden])) .entry-topbar-brand {
   display: none;
 }
 @media (max-width: 560px) {
-  .entry-topbar-tag {
+  .entry-topbar-tag,
+  .entry-topbar-version {
     display: none;
   }
 }

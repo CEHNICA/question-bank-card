@@ -294,5 +294,94 @@ class AssistantSetupTests(unittest.TestCase):
             self.assertEqual(setup.bundled_skill(), self.root / "_internal" / "skills" / "tiyouju")
 
 
+class SetupAgentsTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.home = self.root / "home"
+        self.home.mkdir()
+        self.data_root = self.root / "appdata"
+        self.source = self.root / "bundled" / "tiyouju"
+        (self.source / "references").mkdir(parents=True)
+        (self.source / "SKILL.md").write_text("---\nname: tiyouju\ndescription: demo\n---\n", encoding="utf-8")
+        (self.source / "references" / "commands.md").write_text("tiyouju skill\n", encoding="utf-8")
+        self.app = self.root / "programs" / "QuestionBankCard.exe"
+        self.app.parent.mkdir()
+        self.app.write_bytes(b"exe")
+
+    def test_discovers_only_present_agent_homes_plus_universal_agents(self):
+        (self.home / ".claude").mkdir()
+        (self.home / ".gemini" / "antigravity").mkdir(parents=True)
+        discovered = dict(setup.discover_agent_skill_parents(self.home))
+        self.assertIn("universal_agents", discovered)
+        self.assertIn("claude_code", discovered)
+        self.assertIn("antigravity", discovered)
+        self.assertIn("gemini_config", discovered)
+        self.assertNotIn("codex", discovered)
+        self.assertNotIn("cursor", discovered)
+
+    def test_setup_agents_links_skills_idempotently_and_preserves_custom_skill(self):
+        (self.home / ".claude").mkdir()
+        custom_dir = self.home / ".codex" / "skills" / "tiyouju"
+        custom_dir.mkdir(parents=True)
+        (custom_dir / "SKILL.md").write_text("custom", encoding="utf-8")
+
+        first = setup.setup_agents(
+            self.app,
+            data_root=self.data_root,
+            home=self.home,
+            resources=self.source,
+            update_path=False,
+        )
+        self.assertEqual(first["canonical"]["status"], "synced")
+        agents = {item["agent"]: item for item in first["agents"]}
+        self.assertTrue(agents["universal_agents"]["verified"])
+        self.assertTrue(agents["claude_code"]["verified"])
+        self.assertEqual(agents["codex"]["status"], "skipped_custom")
+        self.assertEqual((custom_dir / "SKILL.md").read_text(encoding="utf-8"), "custom")
+
+        second = setup.setup_agents(
+            self.app,
+            data_root=self.data_root,
+            home=self.home,
+            resources=self.source,
+            update_path=False,
+        )
+        self.assertEqual(second["canonical"]["status"], "up_to_date")
+        agents_again = {item["agent"]: item for item in second["agents"]}
+        self.assertEqual(agents_again["claude_code"]["status"], "already_linked")
+
+    def test_ensure_user_path_appends_once_and_ignores_trailing_slash(self):
+        stored = {"val": "C:\\Windows\\System32;D:\\Existing\\", "type": 2}
+        broadcasts = []
+
+        def reader():
+            return stored["val"], stored["type"]
+
+        def writer(val, reg_type):
+            stored["val"] = val
+            stored["type"] = reg_type
+
+        added = setup.ensure_user_path(
+            self.app.parent,
+            read_env=reader,
+            write_env=writer,
+            broadcast=lambda: broadcasts.append(True),
+        )
+        self.assertEqual(added["status"], "added")
+        self.assertEqual(len(broadcasts), 1)
+        self.assertIn(str(self.app.parent), stored["val"])
+
+        again = setup.ensure_user_path(
+            Path(str(self.app.parent) + "\\"),
+            read_env=reader,
+            write_env=writer,
+            broadcast=lambda: broadcasts.append(True),
+        )
+        self.assertEqual(again["status"], "already_present")
+        self.assertEqual(len(broadcasts), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

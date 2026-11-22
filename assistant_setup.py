@@ -423,3 +423,287 @@ def format_report(result: dict) -> str:
     lines.extend(item["text"] for item in result["questions"])
     lines.append(result["invitation"])
     return "\n".join(lines)
+
+
+def canonical_skill_dir(data_root: Path | None = None) -> Path:
+    """返回随用户数据目录持久化的规范技能目录，升级主程序时不会断链。"""
+    if data_root is None:
+        local = os.environ.get("LOCALAPPDATA", "").strip()
+        root = Path(local) / "QuestionBankCard" if local else Path.home() / ".local" / "share" / "tiyouju"
+    else:
+        root = Path(data_root)
+    return root / "skills" / "tiyouju"
+
+
+def discover_agent_skill_parents(home: Path | None = None) -> list[tuple[str, Path]]:
+    """按主流 AI Agent 约定探测当前用户的技能父目录（参考 egolite 配置方式）。"""
+    user_home = Path.home() if home is None else Path(home)
+    candidates: list[tuple[str, Path, bool]] = [
+        ("universal_agents", user_home / ".agents" / "skills", True),
+        ("antigravity", user_home / ".gemini" / "antigravity" / "skills", (user_home / ".gemini" / "antigravity").is_dir()),
+        ("gemini_config", user_home / ".gemini" / "config" / "skills", (user_home / ".gemini").is_dir()),
+        ("claude_code", user_home / ".claude" / "skills", (user_home / ".claude").is_dir()),
+        ("codex", user_home / ".codex" / "skills", (user_home / ".codex").is_dir()),
+        ("cursor", user_home / ".cursor" / "skills", (user_home / ".cursor").is_dir()),
+        ("trae", user_home / ".trae" / "skills", (user_home / ".trae").is_dir()),
+        ("windsurf", user_home / ".codeium" / "windsurf" / "skills", (user_home / ".codeium" / "windsurf").is_dir()),
+        ("opencode", user_home / ".config" / "opencode" / "skills", (user_home / ".config" / "opencode").is_dir()),
+    ]
+    found: list[tuple[str, Path]] = []
+    seen: set[str] = set()
+    for agent_id, parent, active in candidates:
+        if not active:
+            continue
+        key = os.path.normcase(str(parent))
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append((agent_id, parent))
+    return found
+
+
+def sync_canonical_skill(source: Path, canonical: Path) -> dict:
+    """将软件内附带技能原子同步到持久化规范目录，供各 AI Agent 共享链接。"""
+    source = _safe_path(source)
+    expected = _resource_manifest(source)
+    canonical = Path(canonical)
+    parent = _safe_path(canonical.parent)
+    parent.mkdir(parents=True, exist_ok=True)
+    if _is_link(canonical):
+        _remove_link_entry(canonical)
+    if canonical.exists():
+        _safe_path(canonical)
+        if _manifest(canonical) == expected:
+            return {
+                "status": "up_to_date",
+                "path": str(canonical),
+                "changed": False,
+                "file_count": sum(not k.endswith("/") for k in expected),
+            }
+    stage = _unique_path(parent, ".tiyouju-install-")
+    old_copy: Path | None = None
+    try:
+        shutil.copytree(source, stage)
+        if _manifest(stage) != expected:
+            raise SetupError("规范技能同步校验失败。")
+        if canonical.exists():
+            old_copy = _unique_path(parent, ".tiyouju-old-")
+            _rename(canonical, old_copy)
+        try:
+            _rename(stage, canonical)
+        except Exception:
+            if old_copy is not None and not canonical.exists():
+                _rename(old_copy, canonical)
+            raise
+        if old_copy is not None and old_copy.exists():
+            shutil.rmtree(old_copy, ignore_errors=True)
+    except OSError as error:
+        raise SetupError(f"同步规范技能失败：{error}") from error
+    finally:
+        _remove_staging(stage, parent)
+    return {
+        "status": "synced",
+        "path": str(canonical),
+        "changed": True,
+        "file_count": sum(not k.endswith("/") for k in expected),
+    }
+
+
+def _remove_link_entry(path: Path) -> None:
+    """仅摘除目录联接点或符号链接本身，绝不递归删除其指向的目标内容。"""
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return
+    if stat.S_ISLNK(info.st_mode):
+        path.unlink()
+        return
+    if os.name == "nt":
+        try:
+            os.rmdir(path)
+            return
+        except OSError:
+            pass
+    path.unlink()
+
+
+def _create_directory_link(target: Path, canonical: Path) -> str:
+    """在 Windows 优先使用免管理员权限的 Directory Junction，失败时安全回退。"""
+    if os.name == "nt":
+        proc = subprocess.run(
+            ["cmd.exe", "/d", "/c", "mklink", "/J", str(target), str(canonical)],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        if proc.returncode == 0 and _is_link(target):
+            return "junction"
+    try:
+        os.symlink(canonical, target, target_is_directory=True)
+        return "symlink"
+    except OSError:
+        shutil.copytree(canonical, target)
+        return "copy"
+
+
+def link_agent_skill(agent_id: str, canonical: Path, parent: Path, *, replace: bool = False) -> dict:
+    """把单个 AI Agent 的 skills/tiyouju 指向规范技能目录。"""
+    canonical = _safe_path(canonical)
+    parent = _safe_path(parent)
+    target = parent / "tiyouju"
+    if parent.resolve() == canonical.parent.resolve() or canonical.resolve().is_relative_to(parent.resolve()):
+        return {"agent": agent_id, "status": "skipped_overlap", "target": str(target), "changed": False}
+    parent.mkdir(parents=True, exist_ok=True)
+    expected = _resource_manifest(canonical)
+    backup: Path | None = None
+    identical_static_copy = False
+    if _is_link(target):
+        try:
+            if target.resolve() == canonical.resolve():
+                return {"agent": agent_id, "status": "already_linked", "target": str(target), "changed": False}
+        except OSError:
+            pass
+        _remove_link_entry(target)
+    elif target.exists():
+        if not target.is_dir():
+            return {"agent": agent_id, "status": "skipped_conflict", "target": str(target), "changed": False}
+        current = _manifest(target)
+        identical_static_copy = current == expected
+        if not identical_static_copy and not replace:
+            return {
+                "agent": agent_id,
+                "status": "skipped_custom",
+                "target": str(target),
+                "changed": False,
+            }
+        backup = _unique_path(parent, "tiyouju.backup-")
+        _rename(target, backup)
+    mode = _create_directory_link(target, canonical)
+    if mode in {"junction", "symlink"}:
+        verified = _is_link(target) and target.resolve() == canonical.resolve() and (target / "SKILL.md").is_file()
+    else:
+        verified = _manifest(target) == expected
+    if backup is not None and identical_static_copy and verified:
+        shutil.rmtree(backup, ignore_errors=True)
+        backup = None
+    return {
+        "agent": agent_id,
+        "status": "linked" if mode in {"junction", "symlink"} else "copied",
+        "mode": mode,
+        "target": str(target),
+        "backup": str(backup) if backup else None,
+        "changed": True,
+        "verified": verified,
+    }
+
+
+def _default_read_user_path() -> tuple[str, int]:
+    import winreg
+
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ) as key:
+        try:
+            value, reg_type = winreg.QueryValueEx(key, "Path")
+            return str(value), int(reg_type)
+        except FileNotFoundError:
+            return "", winreg.REG_EXPAND_SZ
+
+
+def _default_write_user_path(value: str, reg_type: int) -> None:
+    import winreg
+
+    with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_SET_VALUE) as key:
+        winreg.SetValueEx(key, "Path", 0, reg_type, value)
+
+
+def _default_broadcast_env() -> None:
+    if os.name != "nt":
+        return
+    try:
+        result = ctypes.c_ulong()
+        ctypes.windll.user32.SendMessageTimeoutW(
+            0xFFFF,
+            0x001A,
+            0,
+            "Environment",
+            0x0002,
+            1000,
+            ctypes.byref(result),
+        )
+    except Exception:  # noqa: BLE001 - 广播超时不阻塞安装收尾
+        pass
+
+
+def ensure_user_path(
+    cli_dir: Path,
+    *,
+    read_env=None,
+    write_env=None,
+    broadcast=None,
+) -> dict:
+    """将 tiyouju.exe 所在目录写入当前用户 PATH，方便所有 AI Agent 直接调用。"""
+    target = os.path.normpath(str(Path(cli_dir)))
+    if os.name != "nt" and read_env is None:
+        return {"status": "unsupported_os", "dir": target, "changed": False}
+    reader = read_env or _default_read_user_path
+    writer = write_env or _default_write_user_path
+    notifier = broadcast or _default_broadcast_env
+    raw_value, reg_type = reader()
+    entries = [part.strip() for part in str(raw_value or "").split(";") if part.strip()]
+    normalized = {os.path.normcase(os.path.normpath(part.rstrip("\\/"))) for part in entries}
+    target_norm = os.path.normcase(os.path.normpath(target.rstrip("\\/")))
+    if target_norm in normalized:
+        return {"status": "already_present", "dir": target, "changed": False}
+    entries.append(target)
+    updated = ";".join(entries)
+    writer(updated, reg_type)
+    notifier()
+    return {"status": "added", "dir": target, "changed": True}
+
+
+def setup_agents(
+    app: Path | None,
+    *,
+    data_root: Path | None = None,
+    home: Path | None = None,
+    resources: Path | None = None,
+    update_path: bool = True,
+    replace: bool = False,
+) -> dict:
+    """仿照 egolite 的安装接入方式：同步规范技能、链接至全平台 AI Agent、配置用户 PATH。"""
+    source = resources or bundled_skill()
+    canonical = canonical_skill_dir(data_root)
+    canonical_result = sync_canonical_skill(source, canonical)
+    agent_results: list[dict] = []
+    for agent_id, parent in discover_agent_skill_parents(home):
+        try:
+            agent_results.append(link_agent_skill(agent_id, canonical, parent, replace=replace))
+        except (SetupError, OSError) as error:
+            agent_results.append(
+                {
+                    "agent": agent_id,
+                    "status": "error",
+                    "target": str(parent / "tiyouju"),
+                    "changed": False,
+                    "error": str(error),
+                }
+            )
+    path_result: dict = {"status": "skipped", "changed": False}
+    if update_path and app is not None and Path(app).is_file():
+        path_result = ensure_user_path(Path(app).parent)
+    return {
+        "canonical": canonical_result,
+        "agents": agent_results,
+        "path": path_result,
+    }
+
+
+def format_setup_agents_report(result: dict) -> str:
+    canonical = result.get("canonical") or {}
+    lines = [f"规范技能目录：{canonical.get('path', '')}（{canonical.get('status', '')}）"]
+    for item in result.get("agents") or []:
+        lines.append(f"- {item.get('agent')}: {item.get('status')} -> {item.get('target')}")
+    path_info = result.get("path") or {}
+    lines.append(f"用户 PATH：{path_info.get('status')} ({path_info.get('dir', '-')})")
+    return "\n".join(lines)

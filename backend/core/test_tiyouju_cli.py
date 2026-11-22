@@ -524,3 +524,27 @@ class TiyoujuOfflineTests(SimpleTestCase):
         code, out, _err = run()
         self.assertEqual(code, 0)
         self.assertIn("处理一份试卷的标准步骤", out)
+
+    def test_skill_and_setup_agents_stay_offline_and_emit_guide(self):
+        with mock.patch.object(cli, "Client", side_effect=AssertionError("offline command")):
+            code, out, _err = run("skill")
+            self.assertEqual(code, 0)
+            self.assertIn(f"v{cli.VERSION}", out)
+            self.assertIn("[tiyouju:skill] end of guide", out)
+
+            report = {
+                "canonical": {"path": "C:/data/skills/tiyouju", "status": "synced"},
+                "agents": [{"agent": "universal_agents", "status": "linked", "target": "C:/h/.agents/skills/tiyouju"}],
+                "path": {"status": "added", "dir": "C:/app"},
+            }
+            with (
+                mock.patch.object(cli, "app_executable", return_value=Path("C:/app/QuestionBankCard.exe")),
+                mock.patch.object(cli.setup, "setup_agents", return_value=report) as patched,
+            ):
+                code, payload = run_json("setup-agents", "--no-path")
+                self.assertEqual(code, 0)
+                self.assertEqual(payload["canonical"]["status"], "synced")
+                self.assertFalse(patched.call_args.kwargs["update_path"])
+                code, silent_out, _err = run("setup-agents", "--quiet")
+                self.assertEqual(code, 0)
+                self.assertEqual(silent_out.strip(), "")

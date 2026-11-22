@@ -1,7 +1,17 @@
 ---
 name: tiyouju
-description: 安装和操作题有据 Windows 本机软件，把数学试卷、题目整理成可追溯题库。用户发题有据项目地址、要安装或升级题有据、处理试卷、核对题卡、整理题库时使用；显式要求审代码或介绍项目时先按该要求工作。
+description: 安装和操作题有据 Windows 本机软件，把数学试卷、题目整理成可追溯题库。用户发题有据项目地址、要安装或升级题有据、配置软件、处理试卷、核对题卡、整理题库时使用；显式要求审代码或介绍项目时先按该要求工作。
 ---
+
+## 快速接入（仿照 egolite：一条命令对齐当前版本）
+
+在支持本机命令行的 AI Agent 中，操作前可先运行：
+
+```powershell
+tiyouju skill
+```
+
+该命令会输出与当前已安装版本完全一致的操作手册、配置命令和内容组织流程（以 `[tiyouju:skill] end of guide` 结尾）。安装器已自动将 `tiyouju` 目录加入用户 `PATH`，并将本技能链接到本机各 AI Agent 的技能目录；若当前终端是安装前打开的、尚未刷新 `PATH`，可用 `"%LOCALAPPDATA%\Programs\QuestionBankCard\tiyouju.exe"` 或先运行 `tiyouju setup-agents` 补齐链接。
 
 ## 外部助手接管与教辅结构提取
 

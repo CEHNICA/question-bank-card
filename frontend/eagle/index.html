@@ -1000,6 +1000,17 @@
         <div class="py-2 text-center text-[11px] text-slate-400">正在载入题库文件夹树...</div>
       </div>
 
+      <!-- 侧栏底部极简品牌与版本脚标：软件一打开即可看到当前版本号，不占用工作区卡片空间 -->
+      <div id="eagleSidebarVersionFooter" class="px-2.5 py-1.5 border-t border-slate-200/70 bg-[#fafafa] flex items-center justify-between gap-2 text-[10px] text-slate-400 shrink-0 select-none">
+        <span class="font-medium text-slate-500 truncate">题有据</span>
+        <a
+          id="eagleVersionBadge"
+          href="/settings#settingsAbout"
+          class="hidden font-mono px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200/80 hover:bg-emerald-100 transition-colors shrink-0"
+          title="查看版本、隐私与源码"
+        ></a>
+      </div>
+
       <!-- 兼容旧脚本取节点；底栏可见入口已撤，标签管理只在 ≡ 主菜单 -->
       <div id="knowledgePanel" class="hidden" aria-hidden="true">
         <button type="button" id="knowledgeModeTree"></button>
@@ -1708,7 +1719,10 @@
             <span class="eagle-menu-footer-sub">API · 显示与导出 · 备份 · 帮助</span>
           </span>
         </span>
-        <span class="text-xs text-slate-400 shrink-0">›</span>
+        <span class="flex items-center gap-1.5 shrink-0">
+          <span id="eagleMenuVersionPill" class="hidden text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-500"></span>
+          <span class="text-xs text-slate-400">›</span>
+        </span>
       </a>
     </div>
   </div>
@@ -3283,6 +3297,31 @@
       }, 200);
     }
 
+    /**
+     * 启动时异步读取当前软件版本号，分别填充到左栏底部脚标与左上角主菜单。
+     */
+    async function loadEagleAppVersion() {
+      try {
+        const resp = await fetch('/api/status', { cache: 'no-store' });
+        if (!resp.ok) return;
+        const payload = await resp.json();
+        const ver = payload && payload.app_version ? String(payload.app_version).trim() : '';
+        if (!ver) return;
+        const badge = document.getElementById('eagleVersionBadge');
+        if (badge) {
+          badge.textContent = `v${ver}`;
+          badge.classList.remove('hidden');
+        }
+        const menuPill = document.getElementById('eagleMenuVersionPill');
+        if (menuPill) {
+          menuPill.textContent = `v${ver}`;
+          menuPill.classList.remove('hidden');
+        }
+      } catch {
+        // 离线或独立静态预览场景下静默略过，不影响工作台加载
+      }
+    }
+
     async function init() {
       syncFilterPanelUI();
 
@@ -3302,6 +3341,7 @@
       renderFolderTree();
       updateBasketBadges();
       updateFavoritesBadge();
+      void loadEagleAppVersion();
       await loadRealData();
       const urlParams = new URLSearchParams(window.location.search);
       const targetQid = urlParams.get('q');

@@ -1481,7 +1481,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     brandNotice("");
     renderUploadAvailability();
     $("m3Button").hidden = !s.m3_available;
-    if (s.app_version) $("aboutVersion").textContent = `题有据 ${s.app_version}`;
+    if (s.app_version) {
+      $("aboutVersion").textContent = `题有据 ${s.app_version}`;
+      const topVersion = document.getElementById("entryTopbarVersion");
+      if (topVersion) {
+        topVersion.textContent = `v${s.app_version}`;
+        topVersion.hidden = false;
+      }
+    }
     renderServiceReadiness();
     // 密钥刚配好时，识读卷头要立刻按 live readiness 重画，别继续灰着「没 Key」。
     if (state.paper) renderCutReadingStage();

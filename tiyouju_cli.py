@@ -553,6 +553,77 @@ def cmd_assistant_setup(_client, args) -> dict:
         raise CliError(str(error), EXIT_NEEDS_USER) from error
 
 
+def cmd_setup_agents(_client, args) -> dict:
+    """自动将题有据技能与命令行接入本机主流 AI Agent（参考 egolite 配置方式）。"""
+    try:
+        result = setup.setup_agents(
+            app_executable(),
+            home=Path(args.home) if getattr(args, "home", None) else None,
+            update_path=not getattr(args, "no_path", False),
+            replace=bool(getattr(args, "replace", False)),
+        )
+        result["quiet"] = bool(getattr(args, "quiet", False))
+        return result
+    except (setup.SetupError, OSError) as error:
+        raise CliError(str(error), EXIT_NEEDS_USER) from error
+
+
+def cmd_skill(_client, _args) -> dict:
+    """输出与当前安装版本完全匹配的 AI Agent 接管指南（对应 ego-browser skill）。"""
+    app = app_executable()
+    guide_lines = [
+        f"# 题有据（tiyouju）AI Agent 接管指南 · v{VERSION}",
+        "",
+        "以下指南与当前本机已安装的 `tiyouju` 版本完全匹配，可直接通过命令行接管题有据。",
+        f"- 当前 CLI 版本：`{VERSION}`",
+        f"- 主程序路径：`{app}`" if app else "- 主程序路径：未在默认安装目录检测到 QuestionBankCard.exe",
+        "- 默认本地服务地址：`http://127.0.0.1:8768`（工作台 `/eagle` · 录题 `/ ` · 设置 `/settings`）",
+        "",
+        "## 1. 启动与配置软件",
+        "- `tiyouju status --json`：查看本机服务是否运行、版本、已配置密钥状态及读题配置。",
+        "- `tiyouju start`：启动题有据本机服务并就绪（退出码 `2` 表示应用未启动）。",
+        "- `tiyouju config --reader <engine> --checker <checker>`：查看或调整读题与复核引擎（不碰密钥；更改前先与用户确认）。",
+        "- `tiyouju features`：查看或明确启用/关闭标签候选题、参考答案等开关。",
+        "- `tiyouju setup-agents`：把技能重新同步并链接到所有本地 AI Agent 目录，并将命令目录加入用户 PATH。",
+        "",
+        "## 2. 录入试卷与逐题核对入库",
+        "- `tiyouju papers --json`：列出所有待处理或已导入的试卷与资料。",
+        "- `tiyouju upload <文件...> [--allow-cloud] [--book] [--wait]`：导入 PDF/Word/照片（默认本地优先；仅 `--allow-cloud` 才分流 MinerU）。",
+        "- `tiyouju cards <paper> --filter todo --json`：列出待核对题卡与疑点。",
+        "- `tiyouju show <paper> <n>`：导出原卷裁图与配图，必须先看图核对文字、公式、选项和配图后再修改或打勾。",
+        "- `tiyouju fix <paper> <n> --stem-file <path>`：修改未入库题卡（支持 `$...$` LaTeX）。",
+        "- `tiyouju figures <paper> <n> --use <idx>`：指定或更新题卡配图。",
+        "- `tiyouju approve <paper> <n>` / `tiyouju publish <paper>`：核对无误后标记 AI 通过并发布入库。",
+        "",
+        "## 3. 组织题库内容与老师协同",
+        "- `tiyouju library --query <关键词> --json`：按题干、标签、题型检索正式题库内容。",
+        "- `tiyouju whereami --json`：确认老师当前正在题库工作台查看/编辑哪道题，避免冲突。",
+        "- `tiyouju claim` / `tiyouju release` / `tiyouju workbench`：领取和查看助手工作台任务。",
+        "- `tiyouju propose <publication_id> ...`：对已入库题目提交改字提案（等老师采纳，不直接篡改正式题库）。",
+        "- `tiyouju enrich tasks` / `prepare` / `submit`：按任务领取原图并交回标签候选或参考答案初稿。",
+        "- `tiyouju backup [--dest DIR]`：打包备份题库或指定试卷/文件夹。",
+        "",
+        "## 4. 关键安全规则与退出码",
+        "- 绝不索要、读取或输出真实 API 密钥；缺密钥请引导用户自己在「设置 → API 配置」填写。",
+        "- 已入库题目严禁直接篡改，一律走 `tiyouju propose` 提案；不做无人值守自动通过入库。",
+        "- 退出码：`0` 成功，`1` 执行错误，`2` 应用未启动（先运行 `tiyouju start`），`3` 需用户处理（停下并说明具体原因）。",
+        "- 如客户端只能使用 stdio MCP，可配置命令 `tiyouju mcp`；支持本机命令行时优先使用 `tiyouju` CLI。",
+        "",
+        f"[tiyouju:skill] end of guide (version {VERSION})",
+    ]
+    return {"version": VERSION, "guide": "\n".join(guide_lines)}
+
+
+def show_skill(result: dict) -> str:
+    return str(result.get("guide") or "")
+
+
+def show_setup_agents(result: dict) -> str:
+    if result.get("quiet"):
+        return ""
+    return setup.format_setup_agents_report(result)
+
+
 def paper_summary(item: dict) -> dict:
     counts = item.get("counts") or {}
     return {
@@ -1379,6 +1450,8 @@ SHOWERS = {
     "unapprove": show_unapprove, "reread": show_reread,
     "library": show_library,
     "backup": show_backup,
+    "skill": show_skill,
+    "setup-agents": show_setup_agents,
 }
 
 
@@ -1718,6 +1791,12 @@ def build_parser() -> argparse.ArgumentParser:
     finish.add_argument("--skill-dir", help="已确认的绝对技能父目录；确认安装后才填写，不猜测助手目录")
     finish.add_argument("--replace-skill", action="store_true", help="明确同意替换不同内容的技能，先保留恢复备份")
     finish.add_argument("--desktop", choices=["show", "hide"], help="使用者选择后显示或隐藏题有据自己的桌面图标")
+    sub.add_parser("skill", parents=[common], help="输出与当前安装版一致的 AI Agent 接管指南")
+    agents = sub.add_parser("setup-agents", parents=[common], help="自动同步技能到本机主流 AI Agent 并配置用户 PATH")
+    agents.add_argument("--home", help="指定用户主目录（默认当前用户目录）")
+    agents.add_argument("--no-path", action="store_true", help="只同步与链接技能，不修改用户 PATH")
+    agents.add_argument("--replace", action="store_true", help="替换已存在的自定义 tiyouju 技能（保留备份）")
+    agents.add_argument("--quiet", action="store_true", help="静默执行，安装器调用时隐藏文本输出")
     sub.add_parser("papers", parents=[common], help="列出试卷")
 
     upload = sub.add_parser("upload", parents=[common], help="上传 PDF、Word，或几张照片合成一份")
@@ -1854,6 +1933,8 @@ COMMANDS = {
     "cards": cmd_cards, "show": cmd_show, "fix": cmd_fix, "figures": cmd_figures, "approve": cmd_approve,
     "unapprove": cmd_unapprove, "reread": cmd_reread, "publish": cmd_publish, "library": cmd_library,
     "assistant-setup": cmd_assistant_setup,
+    "setup-agents": cmd_setup_agents,
+    "skill": cmd_skill,
     "features": cmd_features, "enrich": cmd_enrich,
     "claim": cmd_claim, "release": cmd_release, "propose": cmd_propose,
     "workbench": cmd_workbench, "whereami": cmd_whereami,
@@ -1880,7 +1961,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     # This command inspects the installed files even when the app is stopped.
     # Do not instantiate a client or look up a runtime service for it.
-    client = None if args.command == "assistant-setup" else Client(
+    offline_commands = {"assistant-setup", "setup-agents", "skill"}
+    client = None if args.command in offline_commands else Client(
         agent=" ".join(str(args.agent).split())[:40] or DEFAULT_AGENT)
     if args.command == "mcp":
         return run_mcp(client)
@@ -1896,7 +1978,9 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, indent=2))
     else:
         shower = setup.format_report if args.command == "assistant-setup" else SHOWERS.get(args.command)
-        print(shower(result) if shower else json.dumps(result, ensure_ascii=False, indent=2))
+        output = shower(result) if shower else json.dumps(result, ensure_ascii=False, indent=2)
+        if output:
+            print(output)
     return 0
 
 

@@ -797,6 +797,7 @@ class ShortcutTests(unittest.TestCase):
     def test_public_brand_is_used_without_changing_internal_launcher(self):
         self.assertEqual(app_window.APP_TITLE, "题有据")
         self.assertEqual(app_window.APP_SUBTITLE, "原卷可追溯的题库整理工具")
+        self.assertRegex(app_window._resolve_app_version(), r"^\d+\.\d+(?:\.\d+){0,2}$")
         self.assertEqual(create_shortcut.NAME, "题有据")
         self.assertEqual(create_shortcut.LEGACY_NAME, "题库题卡版")
         self.assertEqual(app_window.CONSOLE_LAUNCHER.name, "启动题有据.cmd")

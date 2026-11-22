@@ -3,6 +3,14 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.2.5
+
+**启动与首页版本号展示，及仿 egolite 的多 AI Agent 技能与命令行自动接管**
+
+- **启动与首页版本号直观展示（`app_window.py`、`eagle/index.html`、`index.html`、`styles.css`、`app.js`）**：桌面启动画面在标题旁新增版本号徽标；工作台（`/eagle`）左栏底部与 `≡` 主菜单底部、录题首页（`/`）顶栏品牌区同步展示实时版本号。
+- **安装即自动配置 AI Agent 技能与 PATH（`assistant_setup.py`、`tiyouju_cli.py`、`skills/tiyouju/`、`packaging/installer.iss`）**：安装器自动将规范技能目录同步至 `%LOCALAPPDATA%\QuestionBankCard\skills\tiyouju` 并通过目录联接接入 `.agents`、`.gemini/antigravity`、`.gemini/config`、`.claude`、`.codex`、`.cursor` 等主流 Agent 目录，同时将 `tiyouju.exe` 目录加入用户 `PATH`；新增 `tiyouju skill`（输出对齐当前安装版本的接管指南）与 `tiyouju setup-agents` 命令，并补充 `skills/tiyouju/agents/openai.yaml` 元数据与图标。
+
+
 ## 2.2.4
 
 **OneNote 唤起防卡死加固、工作台与录题界面视觉升级、精简为手动按需备份**
