@@ -49,14 +49,16 @@ class BackupDestCliTests(SimpleTestCase):
             client.post.assert_called_once_with("/api/backup/export", {"directory": str(Path(temp_dir).resolve())})
             self.assertEqual(res["file"], "题有据备份-test.zip")
 
-    def test_cmd_backup_without_dest_calls_auto(self):
+    def test_cmd_backup_without_dest_raises(self):
         client = MagicMock()
         args = MagicMock()
         args.dest = None
-        client.post.return_value = {"name": "题有据自动备份-test.zip", "size": 2048}
-        res = tiyouju_cli.cmd_backup(client, args)
-        client.post.assert_called_once_with("/api/backup/auto", {})
-        self.assertEqual(res["name"], "题有据自动备份-test.zip")
+        args.papers = None
+        args.folders = None
+        with self.assertRaises(tiyouju_cli.CliError) as ctx:
+            tiyouju_cli.cmd_backup(client, args)
+        self.assertIn("--dest", str(ctx.exception))
+        client.post.assert_not_called()
 
     def test_cmd_backup_with_papers_sends_paper_ids(self):
         client = MagicMock()

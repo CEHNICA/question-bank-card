@@ -363,3 +363,21 @@ class OneNoteLinkTests(TestCase):
             resp_default = self.client.post(f"/api/library/{self.item.id}/onenote/open")
         self.assertEqual(resp_default.status_code, 200)
         mock_open_async.assert_called_once_with(self.item, wait=False)
+
+    @patch("core.library_onenote.os.startfile", create=True)
+    @patch("core.library_onenote._ensure_desktop_window", return_value=True)
+    def test_shell_open_ensures_desktop_window_first(self, mock_ensure, mock_startfile):
+        """通过系统协议打开 OneNote 链接前应先确保桌面主窗口已存在，避免 /hyperlink 卡成无头进程。"""
+        ok = library_onenote.shell_open_onenote("onenote:https://d.docs.live.net/fake/page-shell")
+        self.assertTrue(ok)
+        mock_ensure.assert_called_once()
+        mock_startfile.assert_called_once_with("onenote:https://d.docs.live.net/fake/page-shell")
+
+    @patch("core.library_onenote.shell_open_onenote", return_value=False)
+    @patch("core.library_onenote.call_bridge")
+    def test_refine_open_returns_false_when_no_window_and_shell_fails(self, mock_call, mock_shell):
+        """没有可见窗口且协议兜底也失败时，不得假报已成功打开。"""
+        mock_call.return_value = {"id": "{page-none}", "navigated": True, "focused": False, "has_window": False}
+        ok = library_onenote._refine_open("{page-none}", "onenote:https://d.docs.live.net/fake/page-none")
+        self.assertFalse(ok)
+        mock_shell.assert_called_once_with("onenote:https://d.docs.live.net/fake/page-none")

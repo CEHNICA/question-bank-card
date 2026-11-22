@@ -44,8 +44,7 @@ function boot({ inspect = {}, merge = {}, records = { records: [] }, exportBody 
   catalog = {
     papers: [{ id: "p-1", title: "高中数学思想导引", filename: "高中数学思想导引.pdf", questions: 512, publications: 500 }],
     folders: [{ id: "t-1", name: "函数与导数", kind: "knowledge", path_label: "知识点 · 函数与导数", questions: 48 }],
-  },
-  auto = { backups: [{ id: "题有据自动备份-20261020-050000", name: "题有据自动备份-20261020-050000.zip", size: 12 * 1024 * 1024, created_at: "2026-10-20T05:00:00" }], due: false, keep: 2, total_bytes: 12 * 1024 * 1024 } } = {}) {
+  } } = {}) {
   const dom = makeDom();
   const calls = [];
   const context = vm.createContext({
@@ -61,11 +60,6 @@ function boot({ inspect = {}, merge = {}, records = { records: [] }, exportBody 
       if (url === "/api/backup/import") return { ok: true, json: async () => merge };
       if (url === "/api/backup/records" && options.method === "POST") return { ok: true, json: async () => ({ removed: { papers: 1, questions: 2, solutions: 3 } }) };
       if (url === "/api/backup/records") return { ok: true, json: async () => records };
-      if (url === "/api/backup/auto" && options.method === "POST") return { ok: true, json: async () => ({ name: "题有据自动备份-20261023-050000.zip", backups: auto.backups }) };
-      if (url === "/api/backup/auto") return { ok: true, json: async () => auto };
-      if (url === "/api/backup/auto/inspect") return { ok: true, json: async () => inspect };
-      if (url === "/api/backup/auto/import") return { ok: true, json: async () => merge };
-      if (url === "/api/settings/features") return { ok: true, json: async () => ({ features: { auto_backup: true } }) };
       return { ok: false, json: async () => ({ error: "不该到这里" }) };
     },
     setTimeout, clearTimeout, console,
@@ -185,7 +179,8 @@ assert.match(html, /<script src="\/static\/library-transfer\.js" defer><\/script
 // 7. 1.26.16：导入记录的时间写成人话 —— "3 天前 · 10 月 20 日 09:00"，
 // 而不是机器时间戳。合并记录往往是几天前的事，"几天前"才管用。
 {
-  const { dom, window } = boot({ records: { records: [{ id: "1", created_at: "2026-10-22T09:00:00Z", papers: 1, questions: 20, solutions: 2, tags: 4 }] } });
+  const threeDaysAgo = new Date(Date.now() - 3 * 86400_000).toISOString();
+  const { dom, window } = boot({ records: { records: [{ id: "1", created_at: threeDaysAgo, papers: 1, questions: 20, solutions: 2, tags: 4 }] } });
   window.LibraryTransfer.mount(dom.document.getElementById("transferSettingsMount"));
   await new Promise((resolve) => setTimeout(resolve, 0));
   const records = dom.document.getElementById("transferRecords");
@@ -203,75 +198,20 @@ assert.match(html, /<script src="\/static\/library-transfer\.js" defer><\/script
   assert.doesNotMatch(summary, /备份不联网，也不上传/, "页头已经说了这一区，区内不再重复");
 }
 
-// 9. 1.26.17：本机自动备份 —— 列出备份包、现在打一份、从某一份恢复。
-//    1.26.21：正中间不再摆程序里的文件名，改成「哪一天的那一份 + 多大」；
-//    并说明一共留几份、共占多少磁盘。
+// 9. 已移除「本机自动备份」区块，只保留手动「导出备份」「从备份合并」「导入记录」。
 {
   const { dom, calls, window } = boot();
   window.LibraryTransfer.mount(dom.document.getElementById("transferSettingsMount"));
   await new Promise((resolve) => setTimeout(resolve, 0));
-  const box = dom.document.getElementById("transferAuto");
-  const summary = text(box);
-  assert.match(summary, /从这一份恢复/, "每一份备份都能从这里恢复");
-  assert.match(summary, /现在备份一次/, "也能随时手动打一份");
-  assert.match(summary, /一共 1 份/, "要说清楚一共几份");
-  assert.match(summary, /12\.0 MB/, "要说清楚这些包一共占多少磁盘");
-  assert.doesNotMatch(summary, /题有据自动备份-20261020-050000\.zip/, "正中间不摆程序里的文件名");
-  const label = box.children[0].children[0].children[0];
-  assert.equal(label.title, "题有据自动备份-20261020-050000.zip", "文件名放在提示里，不占正中间");
-  const called = calls.filter((call) => call.url === "/api/backup/auto");
-  assert.ok(called.length, "读了一次自动备份列表");
-}
-
-// 9 之二 1.26.26：老师 10 月 24 日说这一区「介绍的太麻烦，简洁点，就是备份两次就可以了」。
-// 这一版量的是**页面上真印出来的那几句话**：说清留两份就够，同一件事别反复说。
-{
-  const { dom, window } = boot();
-  window.LibraryTransfer.mount(dom.document.getElementById("transferSettingsMount"));
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  const box = dom.document.getElementById("transferAuto");
-  const summary = text(box);
   const whole = text(dom.document.getElementById("transferSettingsMount"));
-  assert.match(whole, /只留最近两份。/, "一句话就说清留几份");
-  assert.match(summary, /一共 1 份，占 12\.0 MB。旧的自动删掉。/, "眼下有几份、多大，一句说完");
-  // 同一件事不许在三处各说一遍。
-  assert.equal((whole.match(/不联网、不上传/g) || []).length, 1, "「不联网、不上传」只说一次");
-  assert.doesNotMatch(whole, /今天和昨天/, "不能写死「今天和昨天」——手动打过一次备份，两份就都是今天的");
-  assert.doesNotMatch(whole, /题库再大十倍/, "「题库再大十倍」那句解释删掉");
-  assert.doesNotMatch(whole, /10 份/, "份数不能写死成别的数");
-  // 开关旁边那句也压短了，但「救什么」这件事还得说。
-  assert.match(summary, /救的是「题库自己坏了」/, "说清楚它到底救什么");
-  assert.doesNotMatch(summary, /升级出错/, "「升级出错」那句删掉");
-  // 打开开关后那句也得按真数说，不能再写死。
-  const toggle = box.children.find((child) => child.className === "settings-switch");
-  toggle.children[0].checked = true;
-  await toggle.children[0].listeners.change[0]();
-  assert.match(dom.document.getElementById("transferStatusauto").textContent, /留最近 2 份/,
-    "打开时说的是后台给的真实份数");
+  assert.doesNotMatch(whole, /本机自动备份|每天自动打一份备份|现在备份一次/, "界面不再展示自动备份区块");
+  assert.match(whole, /导出备份/, "保留手动导出备份");
+  assert.match(whole, /从备份合并/, "保留从备份合并");
+  assert.match(whole, /导入记录/, "保留导入记录");
+  assert.equal(calls.filter((call) => call.url.startsWith("/api/backup/auto")).length, 0, "不再请求自动备份接口");
 }
 
-// 10. 1.26.22：自动备份可以关掉 —— 用不上就别占磁盘；关掉以后手动那份照旧能用。
-{
-  const { dom, calls, window } = boot();
-  window.LibraryTransfer.mount(dom.document.getElementById("transferSettingsMount"));
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  const box = dom.document.getElementById("transferAuto");
-  const summary = text(box);
-  assert.match(summary, /每天自动打一份备份/, "有一个开关");
-  assert.match(summary, /题库自己坏了/, "说清楚它到底救什么");
-  const toggle = box.children.find((child) => child.className === "settings-switch");
-  assert.ok(toggle, "开关行在卡片里");
-  const input = toggle.children[0];
-  assert.equal(input.checked, true, "默认是开着的");
-  input.checked = false;
-  await input.listeners.change[0]();
-  const saved = calls.filter((call) => call.url === "/api/settings/features");
-  assert.equal(saved.length, 1, "关掉的时候要存到开关里");
-  assert.deepEqual(JSON.parse(saved[0].options.body), { features: { auto_backup: false } });
-  assert.match(dom.document.getElementById("transferStatusauto").textContent, /已关闭/);
-}
-
-// 11. 按卷/按书导出与按目录文件夹导出，以及预览显示书名/文件夹名。
+// 10. 按卷/按书导出与按目录文件夹导出，以及预览显示书名/文件夹名。
 {
   const { dom, calls, window } = boot({
     exportBody: { name: "题有据题包-高中数学思想导引-1.zip", file: "D:/备份/题有据题包-高中数学思想导引-1.zip", size: 8 * 1024 * 1024, papers: 1, questions: 512, paper_names: ["高中数学思想导引"] },

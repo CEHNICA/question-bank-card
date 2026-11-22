@@ -50,6 +50,11 @@
       </button>
       <span id="engineLine" class="engine-line" hidden></span>
     </div>
+    <div class="entry-topbar-brand" aria-hidden="true">
+      <img class="entry-topbar-logo" src="/favicon.png" width="20" height="20" alt="">
+      <span class="entry-topbar-name">题有据</span>
+      <span class="entry-topbar-tag">录入题目</span>
+    </div>
     <div class="review-top-actions review-top-actions-end topbar-tools">
       <nav class="topnav review-topnav" aria-label="页面">
         <a id="reviewReturnLibrary" class="review-nav-primary" href="/eagle" title="打开题库工作台">
@@ -236,26 +241,43 @@
     <main id="main" class="main">
       <div id="reviewTeachFallback" class="teaching-dock"></div>
       <section id="emptyState" class="empty-state">
-        <svg class="empty-art" viewBox="0 0 132 104" fill="none" aria-hidden="true">
-          <rect x="18" y="10" width="62" height="84" rx="8" fill="#fff" stroke="#cdd5cd"/>
-          <path d="M28 26h40M28 36h34M28 46h40M28 56h26" stroke="#dfe4dd" stroke-width="4" stroke-linecap="round"/>
-          <rect x="52" y="22" width="62" height="72" rx="8" fill="#fff" stroke="#1f6b5f" stroke-width="1.5"/>
-          <path d="M62 38h30M62 48h40M62 58h22" stroke="#cfe3db" stroke-width="4" stroke-linecap="round"/>
-          <circle cx="104" cy="82" r="14" fill="#1f6b5f"/>
-          <path d="m97.5 82 4.5 4.5 8.5-9" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+        <svg class="empty-art" viewBox="0 0 144 108" fill="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="emptyHalo" x1="20" y1="8" x2="124" y2="96" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#ecfdf5"/>
+              <stop offset="100%" stop-color="#e0f2fe" stop-opacity="0.55"/>
+            </linearGradient>
+            <linearGradient id="emptyBadge" x1="94" y1="68" x2="122" y2="96" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#059669"/>
+              <stop offset="100%" stop-color="#047857"/>
+            </linearGradient>
+          </defs>
+          <ellipse cx="72" cy="56" rx="58" ry="44" fill="url(#emptyHalo)"/>
+          <rect x="24" y="14" width="60" height="78" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+          <path d="M35 30h38M35 40h30M35 50h36M35 60h22" stroke="#e2e8f0" stroke-width="3.5" stroke-linecap="round"/>
+          <rect x="54" y="22" width="62" height="72" rx="10" fill="#ffffff" stroke="#059669" stroke-width="1.5"/>
+          <rect x="63" y="32" width="18" height="5" rx="2.5" fill="#d1fae5"/>
+          <path d="M64 46h40M64 56h34M64 66h24" stroke="#99f6e4" stroke-width="3.5" stroke-linecap="round"/>
+          <circle cx="108" cy="82" r="14" fill="url(#emptyBadge)" stroke="#ffffff" stroke-width="2.5"/>
+          <path d="m101.8 82 4.2 4.2 8.2-8.4" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         <h2>切题 · 录入 · 入库</h2>
-        <p>从左侧上传试卷或照片。录入通过后题目进入题库；做完的卷会从这里收起，不再跟题库混在一起。</p>
-        <div class="empty-learning">
-          <button id="emptyUploadButton" class="button primary" type="button">选择文件或照片上传</button>
-          <button id="emptyAutomaticGuide" class="button" type="button">自动切题入门</button>
-          <button id="emptyLearn" class="button" type="button">手工练习（不用密钥）</button>
-          <a class="button quiet" href="/eagle">先去题库看看</a>
+        <p class="empty-lead">从左侧上传试卷或照片，核对通过后题目自动进入题库；已完成的试卷可随时归档，保持桌面清爽。</p>
+        <div class="empty-actions-stack">
+          <div class="empty-primary-row">
+            <button id="emptyUploadButton" class="button primary" type="button">选择文件或照片上传</button>
+            <span class="empty-format-hint">支持 PDF · Word · 多张照片 · Ctrl+V 粘贴截图</span>
+          </div>
+          <div class="empty-learning">
+            <button id="emptyAutomaticGuide" class="button" type="button">自动切题入门</button>
+            <button id="emptyLearn" class="button" type="button">手工练习 · 免密钥</button>
+            <a class="button quiet" href="/eagle">先去题库看看 →</a>
+          </div>
         </div>
         <ol class="empty-steps">
-          <li><b>1</b>上传原卷，本机先切；切不出再手工框</li>
-          <li><b>2</b>识读成文字，或直接保留原图题卡</li>
-          <li><b>3</b>对照原卷通过，自动入库</li>
+          <li><b>1</b><strong>本机优先切题</strong><span>上传原卷，本机先切；切不出再手工框</span></li>
+          <li><b>2</b><strong>转文字或留原图</strong><span>可主动 AI 识读，也可直接保留原图题卡</span></li>
+          <li><b>3</b><strong>核对通过即入库</strong><span>左右分屏对照原卷，通过后自动入库</span></li>
         </ol>
       </section>
 

@@ -1,35 +1,25 @@
-"""1.26.17：本机自动备份。
+"""备份包通用安全不变量与自动备份下线验证。
 
-每周打一个备份包放在软件自己的文件夹里，旧的只留最近十份；老师也能随时
-"从这一份恢复"（走的是和上传备份包一样的合并流程：只增不减）。
+自动备份（后台定时打备份与界面开关）已下线，仅保留手动备份与恢复：
+- 备份包绝不能把 backups / imports 打进去；
+- 写坏的备份包当场清理，不留残骸；
+- 同一时刻只准一份备份在写；
+- 旧 features.json 里的 auto_backup 不再生效，/api/backup/auto 路由已下线。
 """
 
 from __future__ import annotations
 
 import json
-import time
+import os
 from pathlib import Path
 from unittest import mock
 
 from django.test import Client, TestCase
 
-from . import library_transfer
+from . import features, library_transfer
 
 
-class AutoBackupTests(TestCase):
-    class _Once:
-        """stop 事件：第一次 wait 返回假（让循环体跑一次），之后返回真（退出）。"""
-
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def wait(self, _interval):
-            self.calls += 1
-            return self.calls > 1
-
-        def is_set(self):
-            return self.calls > 1
-
+class BackupSafetyAndRetiredAutoBackupTests(TestCase):
     def setUp(self) -> None:
         self.client = Client()
         self.tmp = Path(self.enterClassContext(__import__("tempfile").TemporaryDirectory()))
@@ -39,163 +29,58 @@ class AutoBackupTests(TestCase):
         patch.start()
         self.addCleanup(patch.stop)
 
-    def _make_backup(self, stamp: int) -> Path:
-        root = library_transfer.backups_root()
-        root.mkdir(parents=True, exist_ok=True)
-        path = root / f"{library_transfer.AUTO_BACKUP_PREFIX}-202610{stamp:02d}-050000.zip"
-        path.write_bytes(b"x" * 16)
-        return path
+    def test_auto_backup_switch_is_retired_even_if_saved_true(self):
+        with mock.patch.dict(os.environ, {"QB_FEATURES_FILE": str(self.root / "features.json")}):
+            features.path().write_text('{"auto_backup": true, "origin_split": false}', encoding="utf-8")
+            self.assertNotIn("auto_backup", features.FEATURES)
+            self.assertFalse(features.enabled("auto_backup"))
+            response = self.client.get("/api/settings/features")
+            self.assertNotIn("auto_backup", {item["key"] for item in response.json()["features"]})
+            with self.assertRaises(features.FeatureError):
+                features.save({"auto_backup": True})
 
-    def test_backups_live_under_the_app_data_folder(self):
-        self.assertEqual(library_transfer.backups_root(), self.root / "backups")
-
-    def test_listing_is_newest_first(self):
-        for day in (1, 2, 3):
-            self._make_backup(day)
-        items = library_transfer.list_backups()
-        self.assertEqual(len(items), 3)
-        self.assertTrue(items[0]["created_at"] >= items[-1]["created_at"])
-        self.assertTrue(items[0]["name"].startswith(library_transfer.AUTO_BACKUP_PREFIX))
-
-    def test_no_backup_means_it_is_due(self):
-        self.assertTrue(library_transfer.backup_due())
-
-    def test_a_recent_backup_means_not_due(self):
-        self._make_backup(1)
-        self.assertFalse(library_transfer.backup_due())
-
-    def test_a_backup_from_earlier_today_is_enough(self):
-        """1.26.21：每天一份 —— 今天打过了，今天就别再打了。"""
-        path = self._make_backup(1)
-        import os
-
-        earlier = time.time() - 3 * 3600
-        os.utime(path, (earlier, earlier))
-        self.assertFalse(library_transfer.backup_due())
-
-    def test_a_backup_from_yesterday_is_due_again(self):
-        path = self._make_backup(1)
-        import os
-
-        yesterday = time.time() - 26 * 3600
-        os.utime(path, (yesterday, yesterday))
-        self.assertTrue(library_transfer.backup_due())
-
-    def test_the_interval_is_one_day(self):
-        self.assertEqual(library_transfer.BACKUP_INTERVAL_DAYS, 1)
-
-    def test_the_listing_reports_the_total_size(self):
-        """1.26.21：老师要知道这些包一共占了多少磁盘。"""
-        self._make_backup(1)
-        with mock.patch("core.features.enabled", return_value=True):
-            body = self.client.get("/api/backup/auto").json()
-        self.assertEqual(body["keep"], library_transfer.BACKUP_KEEP)
-        self.assertEqual(body["interval_days"], 1)
-        self.assertGreater(body["total_bytes"], 0)
-        self.assertIn("backups", body["folder"])
-        self.assertTrue(body["enabled"])
-
-    def test_the_auto_backup_switch_defaults_to_on(self):
-        """1.26.22：默认开着，但老师可以自己关掉。"""
-        from core import features
-
-        self.assertTrue(features.DEFAULTS["auto_backup"])
-
-    def test_the_switch_help_does_not_promise_which_days_the_two_copies_are(self):
-        """1.26.26：手动打过一次备份，留着的两份就都是今天的；隔几天没开软件，
-        两份比昨天还旧。所以话里不能写死「今天和昨天」。"""
-        from core import features
-
-        help_text = features.FEATURES["auto_backup"]["help"]
-        self.assertNotIn("今天和昨天", help_text)
-        self.assertIn("只留最近 2 份", help_text)
-
-    def test_the_worker_skips_the_backup_when_the_switch_is_off(self):
+    def test_worker_has_no_auto_backup_lane(self):
         from .management.commands import run_worker
 
-        with (
-            mock.patch("core.features.enabled", return_value=False),
-            mock.patch.object(library_transfer, "run_auto_backup") as run,
-        ):
-            run_worker.auto_backup_lane(self._Once())
-            run.assert_not_called()
+        self.assertFalse(hasattr(run_worker, "auto_backup_lane"))
 
-    def test_the_worker_takes_the_backup_when_the_switch_is_on(self):
-        from .management.commands import run_worker
-
-        with (
-            mock.patch("core.features.enabled", return_value=True),
-            mock.patch.object(library_transfer, "backup_due", return_value=True),
-            mock.patch.object(
-                library_transfer, "run_auto_backup", return_value={"name": "题有据自动备份-x.zip"}
-            ) as run,
-        ):
-            run_worker.auto_backup_lane(self._Once())
-            run.assert_called_once()
-
-    def test_a_week_old_backup_is_due_again(self):
-        path = self._make_backup(1)
-        old = time.time() - 8 * 86400
-        import os
-
-        os.utime(path, (old, old))
-        self.assertTrue(library_transfer.backup_due())
-
-    def test_only_the_newest_ones_are_kept(self):
-        root = library_transfer.backups_root()
-        root.mkdir(parents=True, exist_ok=True)
-        for index in range(12):
-            path = root / f"{library_transfer.AUTO_BACKUP_PREFIX}-2026{index:04d}-050000.zip"
-            path.write_bytes(b"x")
-            import os
-
-            os.utime(path, (1000000 + index, 1000000 + index))
-        removed = library_transfer.prune_backups()
-        self.assertEqual(len(removed), 12 - library_transfer.BACKUP_KEEP)
-        self.assertEqual(len(library_transfer.list_backups()), library_transfer.BACKUP_KEEP)
-
-    def test_a_backup_name_outside_the_folder_is_refused(self):
-        with self.assertRaises(library_transfer.TransferError):
-            library_transfer.backup_path("../../secrets.zip")
-        with self.assertRaises(library_transfer.TransferError):
-            library_transfer.backup_path("任意文件.zip")
-
-    def test_backup_path_only_resolves_inside_the_backups_folder(self):
-        path = self._make_backup(5)
-        self.assertEqual(library_transfer.backup_path(path.name), path)
+    def test_auto_backup_endpoints_are_removed(self):
+        self.assertEqual(self.client.get("/api/backup/auto").status_code, 404)
+        self.assertEqual(
+            self.client.post("/api/backup/auto", data=json.dumps({}), content_type="application/json").status_code, 404
+        )
+        self.assertEqual(
+            self.client.post(
+                "/api/backup/auto/inspect",
+                data=json.dumps({"id": "x"}),
+                content_type="application/json",
+                HTTP_X_QB_REQUEST="1",
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/api/backup/auto/import",
+                data=json.dumps({"id": "x"}),
+                content_type="application/json",
+                HTTP_X_QB_REQUEST="1",
+            ).status_code,
+            404,
+        )
 
     def test_a_backup_package_never_contains_another_backup(self):
-        """1.26.19：备份包绝不能把旧备份包打进去。
-
-        真出过事：自动备份把上一次的包也打了进去，每打一次包就大一倍，
-        最后写出 63 GB 把磁盘塞满，题库都打不开了。
-        """
+        """1.26.19：备份包绝不能把旧备份包打进去（存量旧包也不进手动备份包）。"""
         root = library_transfer.backups_root()
         root.mkdir(parents=True, exist_ok=True)
-        (root / f"{library_transfer.AUTO_BACKUP_PREFIX}-20261020-050000.zip").write_bytes(b"old")
+        (root / "题有据自动备份-20261020-050000.zip").write_bytes(b"old")
         bundle_files = list(library_transfer._bundle_files(self.root))
         assert not any(path.name.endswith(".zip") and "backups" in path.parts for path in bundle_files), (
             "备份包里不能有别的备份包"
         )
         assert not any("imports" in path.parts for path in bundle_files), "合并记录也不进包"
 
-    def test_a_full_disk_stops_the_backup(self):
-        """磁盘不够的时候，宁可不备份，也不能把盘塞满。"""
-        with mock.patch.object(library_transfer, "_free_bytes", return_value=1024):
-            with self.assertRaises(library_transfer.TransferError) as caught:
-                library_transfer.run_auto_backup()
-        assert "磁盘" in str(caught.exception)
-
-    def test_the_needed_size_covers_the_library(self):
-        needed = library_transfer._backup_bytes_needed()
-        assert needed >= 2 * 1024 * 1024 * 1024, "至少按 2 GB 算，别拿磁盘冒险"
-
     def test_a_failed_backup_leaves_nothing_behind(self):
-        """1.26.20：备份写坏了不能留残骸。
-
-        真出过事：备份写到一半软件被关掉，目录里留下一个 16.9 GB 的半个包 ——
-        程序打不开、还白占着磁盘。写坏了当场删掉。
-        """
+        """1.26.20：备份写坏了不能留残骸。"""
         out = self.tmp / "out"
         out.mkdir(parents=True, exist_ok=True)
         with mock.patch.object(library_transfer, "_manifest", side_effect=RuntimeError("断电了")):
@@ -216,40 +101,9 @@ class AutoBackupTests(TestCase):
         self.assertIn(library_transfer.DATABASE_NAME, names)
 
     def test_only_one_backup_runs_at_a_time(self):
-        """界面点「现在就打」和后台每周那次不能撞在一起。"""
+        """并发手动导出时用锁互斥，防止写出坏包。"""
         out = self.tmp / "out"
         out.mkdir(parents=True, exist_ok=True)
         with library_transfer._backup_lock():
             with self.assertRaises(library_transfer.TransferError):
                 library_transfer.export_bundle(out)
-
-
-class AutoBackupApiTests(TestCase):
-    def setUp(self) -> None:
-        self.client = Client()
-
-    def test_listing_is_local_only(self):
-        response = self.client.get("/api/backup/auto", REMOTE_ADDR="192.0.2.10")
-        self.assertEqual(response.status_code, 403)
-
-    def test_listing_reports_the_backups(self):
-        response = self.client.get("/api/backup/auto")
-        self.assertEqual(response.status_code, 200)
-        body = response.json()
-        self.assertIn("backups", body)
-        self.assertIn("due", body)
-        self.assertEqual(body["keep"], library_transfer.BACKUP_KEEP)
-
-    def test_running_one_now_is_refused_without_consent(self):
-        response = self.client.post("/api/backup/auto", data=json.dumps({}), content_type="application/json")
-        self.assertIn(response.status_code, {400, 403})
-
-    def test_restoring_an_unknown_backup_says_so(self):
-        response = self.client.post(
-            "/api/backup/auto/import",
-            data=json.dumps({"id": "题有据自动备份-19700101-000000.zip"}),
-            content_type="application/json",
-            HTTP_X_QB_REQUEST="1",
-        )
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("找不到", response.json()["error"])

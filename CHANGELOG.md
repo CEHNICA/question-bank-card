@@ -3,6 +3,15 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.2.4
+
+**OneNote 唤起防卡死加固、工作台与录题界面视觉升级、精简为手动按需备份**
+
+- **OneNote 桌面唤起与防卡死修复（`onenote_bridge.ps1`、`library_onenote.py`、`test_library_onenote.py`）**：改用 Win32 `EnumWindows` 精准识别可见的 `Framework::CFrame` 主窗口；在无可见主窗口时自动清理阻塞单实例锁的无头 `/hyperlink` 或 DCOM 宿主进程、归零 `ConsecutiveBootCrashes` / `ConsecutiveEarlyCrashes` 避免弹出恢复询问框，先拉起正常桌面窗口再建页/跳转，并在 `shell_open_onenote` 与 `_refine_open` 消除无窗口假成功反馈。
+- **工作台与录题首页体验升级（`eagle/index.html`、`index.html`、`styles.css`、`test_eagle_ui_scale_wheel.js`）**：工作台移除顶栏 `A− 100% A+` 改为全局 `Ctrl + 滚轮` 缩放界面（避让 `#opViewport` 原卷放大）、对齐三栏顶栏、新增右侧收起竖条导轨、区分空库引导卡，并重整左上角 `≡` 主菜单 5 层分区与视口高度适配；录题首页新增顶栏标识、消除多余外层滚动条并重排主卡片按钮与三步流程卡。
+- **精简自动备份为手动按需备份（`features.py`、`library_transfer.py`、`transfer_views.py`、`run_worker.py`、`urls.py`、`library-transfer.js`、`tiyouju_cli.py`）**：下线 `auto_backup` 开关、后台自动备份与 `/api/backup/auto*` 接口，保留手动整库/按卷/按目录文件夹备份导出（`tiyouju backup` 统一通过 `--dest` 指定保存目录）与合并恢复。
+
+
 ## 2.2.3
 
 **统一全站 API 配置与密钥池架构，并合入原图切题直入库、按需转文字及题卡排版修复**

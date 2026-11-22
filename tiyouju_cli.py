@@ -1345,7 +1345,7 @@ def cmd_whereami(client: Client, args) -> dict:
 
 
 def cmd_backup(client: Client, args) -> dict:
-    """备份题库（支持在线打包并指定导出目录、指定卷子/书籍或目录文件夹）。"""
+    """手动备份题库（支持打包整库、指定卷子/书籍或目录文件夹到指定目录）。"""
     dest = getattr(args, "dest", None)
     raw_papers = getattr(args, "papers", None)
     raw_folders = getattr(args, "folders", None)
@@ -1353,19 +1353,17 @@ def cmd_backup(client: Client, args) -> dict:
     folders = [str(item) for item in raw_folders] if isinstance(raw_folders, (list, tuple)) and raw_folders else None
     if papers and folders:
         raise CliError("一次只能指定 --paper 或 --folder 其中一种。")
-    if (papers or folders) and not dest:
-        raise CliError("按卷或按目录文件夹导出题包请用 --dest 指定保存文件夹。")
-    if dest:
-        dest_path = Path(dest).resolve()
-        if not dest_path.is_dir():
-            raise CliError(f"指定的目录不存在：{dest}")
-        payload: dict = {"directory": str(dest_path)}
-        if papers:
-            payload["paper_ids"] = papers
-        if folders:
-            payload["tag_ids"] = folders
-        return client.post("/api/backup/export", payload)
-    return client.post("/api/backup/auto", {})
+    if not dest:
+        raise CliError("请用 --dest 指定备份包保存文件夹。")
+    dest_path = Path(dest).resolve()
+    if not dest_path.is_dir():
+        raise CliError(f"指定的目录不存在：{dest}")
+    payload: dict = {"directory": str(dest_path)}
+    if papers:
+        payload["paper_ids"] = papers
+    if folders:
+        payload["tag_ids"] = folders
+    return client.post("/api/backup/export", payload)
 
 
 def show_backup(result: dict) -> str:

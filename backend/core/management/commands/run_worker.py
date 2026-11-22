@@ -293,37 +293,6 @@ def clean_saved_example_labels(out=None) -> None:
         )
 
 
-def auto_backup_lane(stop: threading.Event) -> None:
-    """1.26.17：每天给这台电脑上的题库打一个备份包。
-
-    放在软件自己的文件夹里（%LOCALAPPDATA%\\QuestionBankCard\\data\\backups），
-    旧的只留最近十份。**不联网、不上传** —— 备份就是一份本地的 zip。
-
-    单独一个线程，不挡处理试卷那条线；一次备份失败也不该让整个工作者退出。
-
-    1.26.22：老师可以在设置里关掉自动备份（"auto_backup" 开关）。关掉以后
-    就不再自动打，但「现在备份一次」照旧能用。
-    """
-    from core import features, library_transfer
-
-    last_error = ""
-    while not stop.wait(300):  # 每五分钟看一眼
-        try:
-            if not features.enabled("auto_backup"):
-                continue
-            if not library_transfer.backup_due():
-                continue
-            result = library_transfer.run_auto_backup()
-            logging.getLogger("core").info("自动备份完成：%s", result["name"])
-            last_error = ""
-        except Exception as error:
-            # 磁盘不够这类问题会一直存在，别每五分钟刷一遍同样的日志。
-            message = str(error)
-            if message != last_error:
-                logging.getLogger("core").warning("自动备份没做成：%s", message)
-                last_error = message
-
-
 class Command(BaseCommand):
     help = "处理排队的试卷和重读请求"
 
@@ -350,7 +319,6 @@ class Command(BaseCommand):
             threading.Thread(target=reread_lane, args=(stop,), name="reread-lane", daemon=True).start()
             threading.Thread(target=parse_lane, args=(stop,), name="parse-lane", daemon=True).start()
             threading.Thread(target=overlap_lane, args=(stop,), name="overlap-lane", daemon=True).start()
-            threading.Thread(target=auto_backup_lane, args=(stop,), name="auto-backup-lane", daemon=True).start()
         while True:
             close_old_connections()
             worked = False

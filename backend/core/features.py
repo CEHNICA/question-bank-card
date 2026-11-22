@@ -47,23 +47,10 @@ FEATURES = {
         "label": "AI 参考答案",
         "help": "默认关闭。开启后由当前豆包或 AI 助手为没有原卷答案的题生成参考并写回，无需额外豆包 API。可选独立模型；结果标着“AI 参考 · 未核对”，与原卷答案分开。",
     },
-    # 1.26.22：每天自动打一份本机备份（1.26.23 起只留最近 2 份）。
-    # 它救的是"题库自己坏了"——软件出 bug、迁移出错、磁盘写坏这类；
-    # 误删的题有回收站，原卷在老师自己手里，这两样它不管。
-    # 用不上可以关掉，随时能再打开。
-    # 1.26.26：不说「（今天和昨天）」——手动打过一次备份，两份就都是今天的；
-    # 隔几天没开软件，留着的两份比昨天还旧。写死那句话就是承诺兑现不了的事。
-    "auto_backup": {
-        "default": True,
-        "label": "每天自动备份",
-        "help": "每天在本机打一份题库备份包，只留最近 2 份。"
-        "软件出毛病、迁移出错或磁盘写坏时，能把题库救回来。不联网、不上传。"
-        "关掉以后仍可以点“现在备份一次”手动打。",
-    },
 }
-# Keep the removed switch readable as false so an old features.json cannot
-# silently re-enable a second model call after updating the app.
-DEFAULTS = {**{key: spec["default"] for key, spec in FEATURES.items()}, "double_read": False}
+# Keep removed switches readable as false so an old features.json cannot
+# silently re-enable retired behavior after updating the app.
+DEFAULTS = {**{key: spec["default"] for key, spec in FEATURES.items()}, "double_read": False, "auto_backup": False}
 PUBLIC_KEYS = frozenset(FEATURES)
 
 _lock = threading.Lock()
@@ -102,6 +89,7 @@ def load() -> dict[str, bool]:
     stored = _read(target) if mtime is not None else {}
     values = {key: stored[key] if isinstance(stored.get(key), bool) else default for key, default in DEFAULTS.items()}
     values["double_read"] = False
+    values["auto_backup"] = False
     with _lock:
         _cache.update(path=target, mtime=mtime, values=dict(values))
     return values
@@ -120,7 +108,7 @@ def save(changes) -> dict[str, bool]:
         raise FeatureError("没有这个开关：" + "、".join(sorted(unknown)))
     if not all(isinstance(value, bool) for value in changes.values()):
         raise FeatureError("开关只能是 true 或 false")
-    values = {**load(), **changes, "double_read": False}
+    values = {**load(), **changes, "double_read": False, "auto_backup": False}
     target = path()
     target.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary = tempfile.mkstemp(prefix=".features-", suffix=".json", dir=str(target.parent))

@@ -156,151 +156,9 @@ def records_root() -> Path:
     return data_root() / "imports"
 
 
-# ------------------------------------------------------- 本机自动备份
-
-# 1.26.17：每周自动打一个备份包，放在软件自己的文件夹里，旧的只留最近十份。
-# 备份只在本地，不联网、不上传 —— 和 AGENTS 里的规矩一样。
-#
-# 1.26.21：改成**每天**一份 —— 拿到的就是最近十天，而不是最近十周。
-#
-# 1.26.23：份数从十份改成**两份（今天和昨天）**。老师的理由很实在：
-# 备份包的大小跟着题库走 —— 现在一份 84 MB，十份就是 840 MB；题库再大十倍，
-# 十份就是十倍，硬盘会被这些包撑满。两份就封住了：不管题库长到多大，
-# 自动备份最多占两份的量。空间检查也按"新包 + 已经留着的旧包"一起算，
-# 磁盘真的不够时它会自己停下来。
-BACKUP_INTERVAL_DAYS = 1
-BACKUP_KEEP = 2
-AUTO_BACKUP_PREFIX = "题有据自动备份"
-
-
 def backups_root() -> Path:
+    """软件本机备份锁与历史备份所在目录（打包导出时已由 SKIP_DIRECTORIES 排除）。"""
     return data_root() / "backups"
-
-
-def list_backups() -> list[dict]:
-    """本机自动备份目录里的备份包，按时间倒序（新的在前）。"""
-
-    root = backups_root()
-    if not root.is_dir():
-        return []
-    items: list[dict] = []
-    for path in root.glob(f"{AUTO_BACKUP_PREFIX}-*.zip"):
-        try:
-            stat = path.stat()
-        except OSError:
-            continue
-        items.append(
-            {
-                "id": path.stem,
-                "name": path.name,
-                "size": stat.st_size,
-                "created_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(stat.st_mtime)),
-            }
-        )
-    items.sort(key=lambda item: item["created_at"], reverse=True)
-    return items
-
-
-def backup_due(now: float | None = None) -> bool:
-    """离上一次自动备份是不是已经过了一周（从来没有过就是该备份了）。"""
-
-    items = list_backups()
-    if not items:
-        return True
-    newest = max(item["created_at"] for item in items)
-    try:
-        stamp = time.mktime(time.strptime(newest, "%Y-%m-%dT%H:%M:%S"))
-    except ValueError:
-        return True
-    return (now if now is not None else time.time()) - stamp >= BACKUP_INTERVAL_DAYS * 86400
-
-
-def prune_backups(keep: int = BACKUP_KEEP) -> list[str]:
-    """只留最近 `keep` 份，其余删掉。返回删掉的文件名。"""
-
-    removed: list[str] = []
-    for item in list_backups()[keep:]:
-        try:
-            (backups_root() / item["name"]).unlink()
-        except OSError:
-            continue
-        removed.append(item["name"])
-    return removed
-
-
-def run_auto_backup() -> dict:
-    """现在打一个自动备份包，并把旧的清理到只剩最近十份。"""
-
-    root = backups_root()
-    root.mkdir(parents=True, exist_ok=True)
-    # 1.26.19：先腾地方，再看磁盘够不够。备份是整库的大小（还要加上压缩时的
-    # 临时副本），盘不够就别打 —— 塞满磁盘的后果比没有备份严重得多
-    # （题库会直接打不开）。
-    prune_backups()
-    needed = _backup_bytes_needed()
-    free = _free_bytes(root)
-    if free is not None and free < needed:
-        raise TransferError(
-            f"磁盘只剩 {free // (1024 * 1024)} MB 可用，打一份备份要 {needed // (1024 * 1024)} MB。"
-            "先腾点空间，或者把旧的备份包删掉。"
-        )
-    result = export_bundle(root, prefix=AUTO_BACKUP_PREFIX)
-    prune_backups()
-    return result
-
-
-def _free_bytes(folder: Path) -> int | None:
-    """这个文件夹所在盘还剩多少空间；问不到就不知道（返回 None）。"""
-
-    try:
-        usage = shutil.disk_usage(str(folder))
-    except OSError:
-        return None
-    return int(usage.free)
-
-
-def _backup_bytes_needed() -> int:
-    """打一份备份大概要多少空间。
-
-    算三笔账（1.26.23）：
-    1. 题库现在的体积（原卷文件 + 数据库）—— 新包大概这么大；
-    2. 再乘二 —— 压缩时的临时副本和数据库快照临时文件；
-    3. **已经留着的旧包也要算进去** —— 它们已经占了磁盘，写新包必须还有余量。
-
-    这样磁盘占用就被封住了：不管题库长到多大，自动备份最多占"份数 + 一份"的量，
-    绝不会把盘塞满。算不出来就按 2 GB 算 —— 宁可少打一次，也别把盘塞满。
-    """
-
-    total = 0
-    root = data_root()
-    if root.is_dir():
-        for path in root.rglob("*"):
-            if not path.is_file() or path.is_symlink():
-                continue
-            relative = path.relative_to(root)
-            if any(part in SKIP_DIRECTORIES for part in relative.parts):
-                continue
-            try:
-                total += path.stat().st_size
-            except OSError:
-                continue
-    try:
-        total += database_path().stat().st_size
-    except OSError:
-        pass
-    retained = sum(int(item.get("size") or 0) for item in list_backups())
-    return max(total * 2 + retained, 2 * 1024 * 1024 * 1024)
-
-
-def backup_path(identifier: str) -> Path:
-    """按名字取本机自动备份里的一个包；只认自己目录下的文件。"""
-    name = Path(str(identifier or "")).name
-    if not name.startswith(f"{AUTO_BACKUP_PREFIX}-") or not name.endswith(".zip"):
-        raise TransferError("找不到这个备份包。")
-    path = backups_root() / name
-    if not path.is_file():
-        raise TransferError("找不到这个备份包，可能已经被清理了。")
-    return path
 
 
 # ---------------------------------------------------------------- 导出
@@ -862,11 +720,9 @@ BACKUP_LOCK_STALE_SECONDS = 2 * 60 * 60
 
 @contextlib.contextmanager
 def _backup_lock():
-    """同一时刻只准一份备份在写。
+    """同一时刻只准一份备份在写，防止并发导出冲突或写出坏包。
 
-    界面上的「现在就打一份」和后台每周那次要是撞在一起，两边都往同一个
-    目录里写包，容易写出坏包。锁放在软件自己的文件夹里；超过两小时的锁
-    是上次意外留下的，接过来继续用。
+    锁放在软件自己的文件夹里；超过两小时的锁是上次意外留下的，接过来继续用。
     """
     lock_path = backups_root() / BACKUP_LOCK_NAME
     lock_path.parent.mkdir(parents=True, exist_ok=True)

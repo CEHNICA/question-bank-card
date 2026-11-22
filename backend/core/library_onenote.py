@@ -59,11 +59,24 @@ def get_bridge_script() -> Path:
     raise OneNoteError("未找到 OneNote PowerShell 桥接脚本，请检查配置文件。")
 
 
+def _ensure_desktop_window() -> bool:
+    """在 Windows 上清理卡死的无头 /hyperlink 进程并确保桌面版 OneNote 主窗口可见。"""
+    if os.name != "nt":
+        return True
+    try:
+        data = call_bridge("ensure_window", timeout_seconds=12)
+        return bool(data.get("ready")) if isinstance(data, dict) else False
+    except Exception as exc:
+        logger.warning("ensure OneNote desktop window failed: %s", exc)
+        return False
+
+
 def shell_open_onenote(url: str) -> bool:
-    """用系统协议打开 onenote: 链接。优先 os.startfile（少起一个 cmd）。"""
+    """用系统协议打开 onenote: 链接。先确保桌面主窗口存在，避免直接触发 /hyperlink 卡成无头进程。"""
     href = (url or "").strip()
     if not href:
         return False
+    _ensure_desktop_window()
     try:
         os.startfile(href)
         return True
@@ -726,18 +739,22 @@ def _refine_open(page_id: str | None, url: str | None) -> bool:
     """COM 切页并置前；若 COM 失败或未置前，再通过系统协议补开一次，返回是否至少有一种方式生效。"""
     navigated = False
     focused = False
+    has_window = False
     if page_id:
         try:
             data = call_bridge("navigate", id=str(page_id), timeout_seconds=12)
             navigated = bool(data.get("navigated", True)) if isinstance(data, dict) else True
             if isinstance(data, dict):
                 focused = bool(data.get("focused"))
+                has_window = bool(data.get("has_window", focused))
+            else:
+                has_window = focused
         except Exception as exc:
             logger.warning("Failed to navigate by page_id=%s: %s", page_id, exc)
     opened_by_shell = False
     if url and (not navigated or not focused):
         opened_by_shell = bool(shell_open_onenote(str(url)))
-    return navigated or opened_by_shell
+    return (navigated and (focused or has_window)) or opened_by_shell
 
 
 def open_page(publication: PublishedQuestion, *, wait: bool = False) -> dict[str, Any]:

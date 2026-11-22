@@ -21,18 +21,18 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
     ::-webkit-scrollbar {
-      width: 5px;
-      height: 5px;
+      width: 6px;
+      height: 6px;
     }
     ::-webkit-scrollbar-track {
       background: transparent;
     }
     ::-webkit-scrollbar-thumb {
-      background: #e2e8f0;
+      background: rgba(148, 163, 184, 0.35);
       border-radius: 9999px;
     }
     ::-webkit-scrollbar-thumb:hover {
-      background: #cbd5e1;
+      background: rgba(100, 116, 139, 0.55);
     }
     .dropdown-menu {
       animation: fadeIn 0.12s ease-out forwards;
@@ -590,6 +590,348 @@
       font-size: 13.5px;
       line-height: 1.7;
     }
+
+    /* ---- Eagle 工作台视觉精修（三栏顶栏齐平、收起导轨、空状态与题卡层次） ---- */
+    @media (min-width: 768px) {
+      #leftSidebarHead,
+      #rightInspectorHead {
+        height: 42px;
+        box-sizing: border-box;
+      }
+      .eagle-toolbar-row {
+        min-height: 42px;
+        box-sizing: border-box;
+      }
+      #leftSidebarHead button,
+      #leftSidebarHead input {
+        height: 28px;
+        border-radius: 7px;
+      }
+      .eagle-toolbar-row .eagle-search-slot input,
+      .eagle-toolbar-row #btnToggleFilterPanel,
+      .eagle-toolbar-row button[title="打开试题篮"],
+      .eagle-toolbar-row .eagle-save-view-btn {
+        height: 28px;
+        border-radius: 7px;
+      }
+    }
+    .eagle-kbd-slash {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 17px;
+      height: 17px;
+      padding: 0 4px;
+      border-radius: 4px;
+      border: 1px solid #cbd5e1;
+      background: rgba(255, 255, 255, 0.9);
+      color: #64748b;
+      font-size: 10px;
+      line-height: 1;
+      box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+    }
+    .eagle-save-view-btn {
+      padding: 0 8px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+    .eagle-save-view-btn:hover {
+      background-color: #ecfdf5;
+      border-color: #a7f3d0;
+      text-decoration: none;
+    }
+    .eagle-inspector-rail {
+      display: none;
+      flex: 1 1 auto;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding-top: 16px;
+      gap: 10px;
+      background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+      color: #64748b;
+      cursor: pointer;
+      user-select: none;
+      transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .eagle-inspector-rail:hover {
+      background: #f1f5f9;
+      color: #059669;
+    }
+    .eagle-inspector-rail-label {
+      writing-mode: vertical-rl;
+      letter-spacing: 0.16em;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    #rightInspectorPane.collapsed:not(.force-open) .eagle-inspector-rail {
+      display: flex;
+    }
+    #rightInspectorPane.collapsed:not(.force-open) #rightInspectorHead {
+      justify-content: center;
+      padding-left: 0;
+      padding-right: 0;
+    }
+    @media (min-width: 768px) and (max-width: 1100px) {
+      #rightInspectorPane:not(.force-open) .eagle-inspector-rail {
+        display: flex;
+      }
+      #rightInspectorPane:not(.force-open) #rightInspectorHead {
+        justify-content: center;
+        padding-left: 0;
+        padding-right: 0;
+      }
+    }
+    @media (max-width: 767px) {
+      #rightInspectorPane:not(.force-open) .eagle-inspector-rail {
+        display: none;
+      }
+    }
+    .eagle-empty-wrap {
+      min-height: calc(100% - 2rem);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 28px 16px;
+    }
+    .eagle-empty-card {
+      width: 100%;
+      max-width: 420px;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      padding: 28px 24px;
+      text-align: center;
+      box-shadow: 0 10px 28px -16px rgba(15, 23, 42, 0.14);
+    }
+    .eagle-empty-icon {
+      width: 48px;
+      height: 48px;
+      margin: 0 auto 14px;
+      border-radius: 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%);
+      border: 1px solid #bbf7d0;
+      color: #059669;
+    }
+    .eagle-empty-icon.is-filter {
+      background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+      border-color: #e2e8f0;
+      color: #64748b;
+    }
+    .eagle-question-card {
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+    }
+    .eagle-question-card:hover {
+      box-shadow: 0 6px 18px -10px rgba(15, 23, 42, 0.12);
+    }
+
+    /* ---- 左上角 ≡ 应用主菜单：分块卡片 + 明确字阶反差 + 对齐图标槽 ---- */
+    #eagleAppMainMenu.eagle-menu-panel {
+      width: 284px;
+      max-height: calc(100vh - 54px);
+      overflow-y: auto;
+      padding: 7px;
+      border-radius: 14px;
+      border: 1px solid rgba(203, 213, 225, 0.9);
+      background: rgba(255, 255, 255, 0.98);
+      box-shadow: 0 18px 42px -12px rgba(15, 23, 42, 0.22), 0 4px 12px -4px rgba(15, 23, 42, 0.08);
+    }
+    #eagleAppMainMenu .eagle-menu-cta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 7px 10px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%);
+      border: 1px solid #bbf7d0;
+      color: #065f46;
+      text-decoration: none;
+      transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    #eagleAppMainMenu .eagle-menu-cta:hover {
+      background: linear-gradient(135deg, #d1fae5 0%, #ecfdf5 100%);
+      border-color: #6ee7b7;
+      box-shadow: 0 4px 12px -6px rgba(5, 150, 105, 0.28);
+    }
+    #eagleAppMainMenu .eagle-menu-cta-title {
+      font-weight: 700;
+      font-size: 13px;
+      line-height: 1.25;
+      color: #064e3b;
+    }
+    #eagleAppMainMenu .eagle-menu-cta-sub {
+      font-size: 11px !important;
+      line-height: 1.25;
+      color: #047857;
+      margin-top: 2px;
+    }
+    #eagleAppMainMenu .eagle-menu-section {
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px solid #eef2f6;
+    }
+    #eagleAppMainMenu .eagle-menu-section-title {
+      padding: 0 8px 3px;
+      font-size: 10.5px !important;
+      line-height: 1.25;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: #94a3b8;
+    }
+    #eagleAppMainMenu .eagle-menu-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    #eagleAppMainMenu .eagle-menu-item {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 27px;
+      padding: 3.5px 8px;
+      border-radius: 7px;
+      font-size: 12.5px;
+      line-height: 1.3;
+      color: #1e293b;
+      text-align: left;
+      cursor: pointer;
+      transition: background-color 0.12s ease, color 0.12s ease;
+    }
+    #eagleAppMainMenu .eagle-menu-item.hidden {
+      display: none;
+    }
+    #eagleAppMainMenu .eagle-menu-item:hover {
+      background-color: #f1f5f9;
+      color: #0f172a;
+    }
+    #eagleAppMainMenu .eagle-menu-item.bg-emerald-50 {
+      background-color: #ecfdf5;
+      color: #065f46;
+      font-weight: 600;
+    }
+    #eagleAppMainMenu .eagle-menu-item-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1;
+    }
+    #eagleAppMainMenu .eagle-menu-icon {
+      width: 18px;
+      text-align: center;
+      flex-shrink: 0;
+      font-size: 13px;
+      line-height: 1;
+    }
+    #eagleAppMainMenu .eagle-menu-pill {
+      flex-shrink: 0;
+      padding: 1px 6px;
+      border-radius: 9999px;
+      background: #f1f5f9;
+      color: #64748b;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10.5px !important;
+      line-height: 1.4;
+      font-weight: 600;
+    }
+    #eagleAppMainMenu .eagle-menu-pill.is-warn {
+      background: #fef3c7;
+      color: #b45309;
+    }
+    #eagleAppMainMenu .eagle-menu-pill.is-accent {
+      background: #ecfdf5;
+      color: #047857;
+    }
+    #eagleAppMainMenu .eagle-menu-trash-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    #eagleAppMainMenu .eagle-menu-trash-clear {
+      flex-shrink: 0;
+      min-height: 30px;
+      padding: 0 9px;
+      border-radius: 8px;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: #e11d48;
+      background: transparent;
+      cursor: pointer;
+      transition: background-color 0.12s ease;
+    }
+    #eagleAppMainMenu .eagle-menu-trash-clear:hover {
+      background: #fff1f2;
+    }
+    #eagleAppMainMenu .eagle-menu-scale-card {
+      margin: 2px 2px 5px;
+      padding: 6px 9px;
+      border-radius: 9px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+    }
+    #eagleAppMainMenu .eagle-menu-dual-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 5px;
+      padding: 1px 2px;
+    }
+    #eagleAppMainMenu .eagle-menu-dual-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      min-height: 28px;
+      padding: 3px 8px;
+      border-radius: 7px;
+      border: 1px solid #e2e8f0;
+      background: #ffffff;
+      font-size: 12px;
+      font-weight: 500;
+      color: #334155;
+      cursor: pointer;
+      transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+    }
+    #eagleAppMainMenu .eagle-menu-dual-btn:hover {
+      background: #f1f5f9;
+      border-color: #cbd5e1;
+      color: #0f172a;
+    }
+    #eagleAppMainMenu .eagle-menu-footer-link {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 9px;
+      border-radius: 9px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      color: #0f172a;
+      text-decoration: none;
+      transition: background-color 0.12s ease, border-color 0.12s ease;
+    }
+    #eagleAppMainMenu .eagle-menu-footer-link:hover {
+      background: #f1f5f9;
+      border-color: #cbd5e1;
+    }
+    #eagleAppMainMenu .eagle-menu-footer-title {
+      font-weight: 600;
+      font-size: 12.5px;
+      line-height: 1.25;
+      color: #0f172a;
+    }
+    #eagleAppMainMenu .eagle-menu-footer-sub {
+      font-size: 11px !important;
+      line-height: 1.25;
+      color: #64748b;
+      margin-top: 2px;
+    }
   </style>
   <script>
     // 尽早套上上次的界面缩放，避免先出小字再猛跳一下。
@@ -629,7 +971,11 @@
     <aside id="leftFolderSidebar" class="eagle-chrome w-64 bg-[#fafafa] border-r border-slate-200/80 flex flex-col shrink-0 min-h-0">
       <div id="leftSidebarHead" class="px-2 py-1.5 border-b border-slate-200/60 shrink-0">
         <div class="flex items-center gap-1.5">
-          <button id="btnEagleAppMenu" type="button" onclick="toggleEagleAppMainMenu(event)" class="w-6 h-6 rounded-md flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 text-sm font-bold cursor-pointer transition-colors shrink-0" title="打开应用主菜单">≡</button>
+          <button id="btnEagleAppMenu" type="button" onclick="toggleEagleAppMainMenu(event)" class="w-7 h-7 rounded-md flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 cursor-pointer transition-colors shrink-0" title="打开应用主菜单" aria-label="打开应用主菜单">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+            </svg>
+          </button>
           <input
             id="treeSearchInput"
             type="text"
@@ -702,8 +1048,13 @@
               type="button"
               onclick="toggleEagleAppMainMenu(event)"
               title="打开应用主菜单"
-              class="hidden items-center justify-center w-6 h-6 text-sm font-bold rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer transition-colors shrink-0"
-            >≡</button>
+              aria-label="打开应用主菜单"
+              class="hidden items-center justify-center w-7 h-7 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer transition-colors shrink-0"
+            >
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+              </svg>
+            </button>
             <button
               id="btnReopenLeftSidebar"
               type="button"
@@ -722,10 +1073,10 @@
                 id="globalSearchInput"
                 type="text"
                 aria-label="搜索题目、名称、标签、文件夹"
-                placeholder="搜索题干、名称、标签、文件夹… (/)"
-                class="w-full h-6 pl-7 pr-6 text-[11px] bg-slate-100 hover:bg-slate-100/80 focus:bg-white text-slate-700 placeholder-slate-400 rounded-md border border-transparent focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 transition-all outline-hidden"
+                placeholder="搜索题干、名称、标签、文件夹…"
+                class="w-full h-6 pl-7 pr-7 text-[11px] bg-slate-100/90 hover:bg-slate-100 focus:bg-white text-slate-700 placeholder-slate-400 rounded-md border border-slate-200/70 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 transition-all outline-hidden"
               >
-              <span class="absolute right-1.5 top-1/2 -translate-y-1/2 text-[9px] text-slate-400 font-mono pointer-events-none">/</span>
+              <span class="eagle-kbd-slash absolute right-1.5 top-1/2 -translate-y-1/2 font-mono pointer-events-none">/</span>
             </div>
 
             <button
@@ -749,12 +1100,6 @@
           </div>
 
           <div class="flex items-center gap-2 text-[11px] text-slate-500 shrink-0 whitespace-nowrap eagle-toolbar-right">
-            <div class="inline-flex items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50/80 px-0.5 py-0.5" title="调整整个界面大小（字号、按钮、间距一起变）">
-              <button type="button" onclick="bumpEagleUiScale(-0.05)" class="w-5 h-5 inline-flex items-center justify-center rounded text-slate-600 hover:bg-white hover:text-slate-900 cursor-pointer" aria-label="缩小界面" title="缩小界面（Ctrl+-）">A−</button>
-              <button type="button" id="eagleUiScaleBadge" onclick="resetEagleUiScale()" class="min-w-[2.4rem] px-0.5 h-5 text-[10px] font-semibold text-slate-700 hover:bg-white rounded cursor-pointer" title="点一下恢复 100%">100%</button>
-              <button type="button" onclick="bumpEagleUiScale(0.05)" class="w-5 h-5 inline-flex items-center justify-center rounded text-slate-600 hover:bg-white hover:text-slate-900 cursor-pointer" aria-label="放大界面" title="放大界面（Ctrl+=）">A+</button>
-            </div>
-            <span class="text-slate-300">|</span>
             <button
               onclick="openBasketExportModal()"
               class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md transition-all"
@@ -771,12 +1116,13 @@
               <input id="selectAllCheckbox" onchange="toggleSelectAll(this.checked)" type="checkbox" class="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 focus:ring-0">
               <span>全选<span class="hidden lg:inline"> (<span id="selectedCountText">已勾选 0 题</span>)</span></span>
             </label>
+            <span class="text-slate-300">|</span>
             <button
               onclick="saveCurrentAsSmartFolder()"
-              class="text-emerald-700 hover:text-emerald-800 font-medium hover:underline flex items-center gap-1"
+              class="eagle-save-view-btn text-emerald-700 hover:text-emerald-800 font-medium inline-flex items-center gap-1 cursor-pointer"
               title="存为智能视图"
             >
-              <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/></svg>
               <span class="hidden lg:inline">存视图</span>
             </button>
           </div>
@@ -953,14 +1299,14 @@
     <!-- ================= 3. 右侧栏：Eagle 风格属性与打标检查器 ================= -->
     <aside id="rightInspectorPane" class="eagle-chrome w-72 bg-white border-l border-slate-200/80 flex flex-col shrink-0">
       
-      <div class="h-10 px-3 border-b border-slate-200/70 flex items-center gap-1.5 justify-between shrink-0">
+      <div id="rightInspectorHead" class="h-10 px-3 border-b border-slate-200/70 flex items-center gap-1.5 justify-between shrink-0">
         <div id="inspectorHead" class="flex items-center gap-2 min-w-0 flex-1">
           <span id="inspectorTitle" class="text-xs font-bold text-slate-800 truncate">题目属性</span>
           <span id="inspectorBadge" class="hidden text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 shrink-0"></span>
         </div>
         <button type="button" id="btnToggleInspector" onclick="toggleRightInspector()"
           title="收起题目属性面板" aria-label="收起题目属性面板"
-          class="shrink-0 w-5 h-5 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 text-sm leading-none cursor-pointer">›</button>
+          class="shrink-0 w-6 h-6 rounded-md inline-flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 text-sm leading-none cursor-pointer transition-colors">›</button>
       </div>
 
       <div id="inspectorBody" class="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
@@ -1085,6 +1431,12 @@
           </div>
         </div>
 
+      </div>
+      <div id="inspectorCollapsedRail" class="eagle-inspector-rail" onclick="toggleRightInspector()" title="展开题目属性面板" aria-label="展开题目属性面板">
+        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 7h10M7 12h6m-6 5h8M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"/>
+        </svg>
+        <span class="eagle-inspector-rail-label">题目属性</span>
       </div>
     </aside>
   </div>
@@ -1228,111 +1580,135 @@
     }
   </style>
 
-  <!-- ================= Eagle 左上角 ≡ 应用主菜单：去做题 / 专项视图 / 回收站 / 界面，底栏固定「设置」 ================= -->
+  <!-- ================= Eagle 左上角 ≡ 应用主菜单：录入主入口 / 专题视图 / 题库管理 / 视图与界面 / 设置 ================= -->
   <div
     id="eagleAppMainMenu"
-    class="eagle-chrome hidden fixed left-3 top-[92px] z-[9998] w-64 max-h-[82vh] overflow-y-auto rounded-xl border border-slate-200/90 bg-white/95 backdrop-blur-md shadow-2xl py-1.5 text-xs text-slate-700 select-none"
+    class="eagle-chrome eagle-menu-panel hidden fixed left-3 top-[92px] z-[9998] max-h-[84vh] overflow-y-auto backdrop-blur-md select-none"
     onclick="event.stopPropagation()"
   >
-    <div class="px-3 py-1 text-[10px] font-bold text-slate-400 tracking-wider">去做题</div>
-    <a href="/" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left" title="切图、录入题目、发布入库">
-      <span>📄 录入题目</span>
-      <span class="text-[10px] text-slate-400">切题 · 入库</span>
+    <!-- 1. 顶部主要动作入口 -->
+    <a href="/" class="eagle-menu-cta" title="切图、录入题目、发布入库">
+      <span class="flex items-center gap-2.5 min-w-0">
+        <span class="w-7 h-7 rounded-lg bg-white/90 border border-emerald-200/80 flex items-center justify-center text-sm shrink-0">📄</span>
+        <span class="flex flex-col min-w-0">
+          <span class="eagle-menu-cta-title">录入题目</span>
+          <span class="eagle-menu-cta-sub">上传试卷 · 切题与核对入库</span>
+        </span>
+      </span>
+      <span class="text-xs font-bold text-emerald-700 shrink-0">→</span>
     </a>
-    <div class="my-1 border-t border-slate-100"></div>
 
-    <div class="px-3 py-1 text-[10px] font-bold text-slate-400 tracking-wider">专项视图</div>
-    <button type="button" data-menu-node="smart:onenote" onclick="applyFolderNode('smart:onenote'); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
-      <span>📝 OneNote 中有笔记</span>
-      <span id="menuBadgeOneNote" class="font-mono text-[10px] text-slate-400">0</span>
-    </button>
-    <button type="button" data-menu-node="smart:uncategorized" onclick="applyFolderNode('smart:uncategorized'); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
-      <span>📂 未分类试题</span>
-      <span id="menuBadgeUncategorized" class="font-mono text-[10px] text-slate-400">0</span>
-    </button>
-    <button type="button" data-menu-node="smart:need_tags" onclick="applyFolderNode('smart:need_tags'); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
-      <span>● 待补充考点标签</span>
-      <span id="menuBadgeNeedTags" class="font-mono text-[10px] text-slate-400">0</span>
-    </button>
-    <button id="menuBtnAiUnverified" type="button" data-menu-node="smart:ai_unverified" onclick="applyFolderNode('smart:ai_unverified'); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
-      <span>⚡ AI生成未人工核对</span>
-      <span id="menuBadgeAiUnverified" class="font-mono text-[10px] text-amber-600">0</span>
-    </button>
-    <button type="button" data-menu-node="smart:random" onclick="applyFolderNode('smart:random'); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
-      <span>🔀 随机模式</span>
-    </button>
-    <button type="button" data-menu-node="smart:recent" onclick="applyFolderNode('smart:recent'); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
-      <span>🕑 最近浏览</span>
-      <span id="menuBadgeRecent" class="font-mono text-[10px] text-slate-400">0</span>
-    </button>
-    <button type="button" onclick="openTagManagerModal(); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
-      <span>🔖 标签管理中心</span>
-      <span id="menuBadgeTagCount" class="font-mono text-[10px] text-slate-400">0</span>
-    </button>
-    <button type="button" onclick="hideEagleAppMainMenu(); openSolutionEditorFromMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
-      <span>✎ 编辑当前题答案解析</span>
-      <span class="font-mono text-[10px] text-emerald-700">编辑器</span>
-    </button>
-    <div class="my-1 border-t border-slate-100"></div>
-
-    <div class="px-3 py-1 text-[10px] font-bold text-slate-400 tracking-wider">回收站</div>
-    <button type="button" onclick="openRecycleBinView(); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
-      <span>🗑️ 回收站</span>
-      <span id="menuBadgeTrash" class="font-mono text-[10px] text-slate-400">0</span>
-    </button>
-    <button type="button" onclick="hideEagleAppMainMenu(); confirmEmptyRecycleBin();" class="w-full flex items-center justify-between px-3 py-1.5 text-rose-600 hover:bg-rose-50 text-left cursor-pointer">
-      <span>🧹 清空回收站</span>
-    </button>
-    <div class="my-1 border-t border-slate-100"></div>
-
-    <div class="px-3 py-1 text-[10px] font-bold text-slate-400 tracking-wider">界面</div>
-    <div id="eagleUiScaleMenuRow" class="px-3 py-2" onclick="event.stopPropagation()">
-      <div class="flex items-center justify-between gap-2 mb-1.5">
-        <span class="text-slate-700 font-medium">界面大小</span>
-        <span id="eagleUiScaleMenuLabel" class="font-mono text-[10px] text-emerald-700">100%</span>
-      </div>
-      <div class="flex items-center gap-1.5">
-        <button type="button" onclick="bumpEagleUiScale(-0.05)" class="w-6 h-6 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 cursor-pointer" title="缩小" aria-label="缩小界面">−</button>
-        <input
-          id="eagleUiScaleRange"
-          type="range"
-          min="90"
-          max="150"
-          step="5"
-          value="100"
-          oninput="setEagleUiScale(Number(this.value) / 100)"
-          class="flex-1 min-w-0 h-1.5 cursor-pointer"
-          aria-label="界面缩放百分比"
-        >
-        <button type="button" onclick="bumpEagleUiScale(0.05)" class="w-6 h-6 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 cursor-pointer" title="放大" aria-label="放大界面">+</button>
-      </div>
-      <div class="mt-1.5 flex items-center justify-between text-[10px] text-slate-400">
-        <span>90%–150%，会记住</span>
-        <button type="button" onclick="resetEagleUiScale()" class="text-emerald-700 hover:underline cursor-pointer">恢复 100%</button>
+    <!-- 2. 专题视图（筛选视角） -->
+    <div class="eagle-menu-section">
+      <div class="eagle-menu-section-title">专题视图</div>
+      <div class="eagle-menu-list">
+        <button type="button" data-menu-node="smart:onenote" onclick="applyFolderNode('smart:onenote'); hideEagleAppMainMenu();" class="eagle-menu-item">
+          <span class="eagle-menu-item-left"><span class="eagle-menu-icon">📝</span><span class="truncate">OneNote 中有笔记</span></span>
+          <span id="menuBadgeOneNote" class="eagle-menu-pill">0</span>
+        </button>
+        <button type="button" data-menu-node="smart:uncategorized" onclick="applyFolderNode('smart:uncategorized'); hideEagleAppMainMenu();" class="eagle-menu-item">
+          <span class="eagle-menu-item-left"><span class="eagle-menu-icon">📂</span><span class="truncate">未分类试题</span></span>
+          <span id="menuBadgeUncategorized" class="eagle-menu-pill">0</span>
+        </button>
+        <button type="button" data-menu-node="smart:need_tags" onclick="applyFolderNode('smart:need_tags'); hideEagleAppMainMenu();" class="eagle-menu-item">
+          <span class="eagle-menu-item-left"><span class="eagle-menu-icon text-amber-500">●</span><span class="truncate">待补充考点标签</span></span>
+          <span id="menuBadgeNeedTags" class="eagle-menu-pill">0</span>
+        </button>
+        <button id="menuBtnAiUnverified" type="button" data-menu-node="smart:ai_unverified" onclick="applyFolderNode('smart:ai_unverified'); hideEagleAppMainMenu();" class="eagle-menu-item">
+          <span class="eagle-menu-item-left"><span class="eagle-menu-icon">⚡</span><span class="truncate">AI 生成未人工核对</span></span>
+          <span id="menuBadgeAiUnverified" class="eagle-menu-pill is-warn">0</span>
+        </button>
+        <button type="button" data-menu-node="smart:random" onclick="applyFolderNode('smart:random'); hideEagleAppMainMenu();" class="eagle-menu-item">
+          <span class="eagle-menu-item-left"><span class="eagle-menu-icon">🔀</span><span class="truncate">随机模式</span></span>
+        </button>
+        <button type="button" data-menu-node="smart:recent" onclick="applyFolderNode('smart:recent'); hideEagleAppMainMenu();" class="eagle-menu-item">
+          <span class="eagle-menu-item-left"><span class="eagle-menu-icon">🕑</span><span class="truncate">最近浏览</span></span>
+          <span id="menuBadgeRecent" class="eagle-menu-pill">0</span>
+        </button>
       </div>
     </div>
-    <button type="button" onclick="toggleLeftSidebar(); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
-      <span>◫ 折叠 / 展开左栏</span>
-    </button>
-    <button type="button" onclick="toggleRightInspector(); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
-      <span>◨ 折叠 / 展开右栏</span>
-    </button>
-    <button type="button" onclick="loadInitialLibraryData(); refreshPapersData(); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
-      <span>🔄 刷新题库数据</span>
-    </button>
-    <button type="button" onclick="openShortcutsModal(); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
-      <span>⌨️ 键盘快捷键一览</span>
-      <kbd class="text-[10px] text-slate-400 font-mono">?</kbd>
-    </button>
-    <button type="button" onclick="openEagleHelpModal(); hideEagleAppMainMenu();" class="w-full flex items-center justify-between px-3 py-1.5 hover:bg-slate-100 text-left cursor-pointer">
-      <span>📖 工作台使用指南</span>
-      <span class="text-[10px] text-emerald-700 font-mono">2.1</span>
-    </button>
 
-    <div class="mt-1.5 border-t border-slate-200/90 pt-1">
-      <a href="/settings" class="w-full flex flex-col gap-0.5 px-3 py-2 hover:bg-slate-100 text-left" title="API 密钥、显示与导出、备份与帮助">
-        <span class="font-semibold text-slate-800">⚙ 设置</span>
-        <span class="text-[10px] text-slate-400 leading-tight">API · 显示 · 备份 · 帮助</span>
+    <!-- 3. 题库管理与工具 -->
+    <div class="eagle-menu-section">
+      <div class="eagle-menu-section-title">题库管理</div>
+      <div class="eagle-menu-list">
+        <button type="button" onclick="openTagManagerModal(); hideEagleAppMainMenu();" class="eagle-menu-item">
+          <span class="eagle-menu-item-left"><span class="eagle-menu-icon">🔖</span><span class="truncate">标签管理中心</span></span>
+          <span id="menuBadgeTagCount" class="eagle-menu-pill">0</span>
+        </button>
+        <button type="button" onclick="hideEagleAppMainMenu(); openSolutionEditorFromMenu();" class="eagle-menu-item">
+          <span class="eagle-menu-item-left"><span class="eagle-menu-icon">✎</span><span class="truncate">编辑当前题答案解析</span></span>
+          <span class="eagle-menu-pill is-accent">编辑器</span>
+        </button>
+        <button type="button" onclick="loadInitialLibraryData(); refreshPapersData(); hideEagleAppMainMenu();" class="eagle-menu-item">
+          <span class="eagle-menu-item-left"><span class="eagle-menu-icon">🔄</span><span class="truncate">刷新题库数据</span></span>
+        </button>
+        <div class="eagle-menu-trash-row">
+          <button type="button" onclick="openRecycleBinView(); hideEagleAppMainMenu();" class="eagle-menu-item flex-1">
+            <span class="eagle-menu-item-left"><span class="eagle-menu-icon">🗑️</span><span class="truncate">回收站</span></span>
+            <span id="menuBadgeTrash" class="eagle-menu-pill">0</span>
+          </button>
+          <button type="button" onclick="hideEagleAppMainMenu(); confirmEmptyRecycleBin();" class="eagle-menu-trash-clear" title="清空回收站">清空</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. 视图与界面 -->
+    <div class="eagle-menu-section">
+      <div class="eagle-menu-section-title">视图与界面</div>
+      <div id="eagleUiScaleMenuRow" class="eagle-menu-scale-card" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between gap-2 mb-1">
+          <span class="text-[12px] font-semibold text-slate-700">界面缩放 <span class="text-[10px] font-normal text-slate-400">· Ctrl+滚轮</span></span>
+          <div class="flex items-center gap-2 shrink-0">
+            <span id="eagleUiScaleMenuLabel" class="font-mono text-[11px] font-bold text-emerald-700">100%</span>
+            <button type="button" onclick="resetEagleUiScale()" class="text-[11px] text-emerald-700 hover:underline font-medium cursor-pointer">恢复</button>
+          </div>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <button type="button" onclick="bumpEagleUiScale(-0.05)" class="w-6 h-5 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 cursor-pointer leading-none" title="缩小" aria-label="缩小界面">−</button>
+          <input
+            id="eagleUiScaleRange"
+            type="range"
+            min="90"
+            max="150"
+            step="5"
+            value="100"
+            oninput="setEagleUiScale(Number(this.value) / 100)"
+            class="flex-1 min-w-0 h-1.5 cursor-pointer"
+            aria-label="界面缩放百分比"
+          >
+          <button type="button" onclick="bumpEagleUiScale(0.05)" class="w-6 h-5 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 cursor-pointer leading-none" title="放大" aria-label="放大界面">+</button>
+        </div>
+      </div>
+      <div class="eagle-menu-dual-grid">
+        <button type="button" onclick="toggleLeftSidebar(); hideEagleAppMainMenu();" class="eagle-menu-dual-btn">
+          <span>◫</span><span>显隐左栏</span>
+        </button>
+        <button type="button" onclick="toggleRightInspector(); hideEagleAppMainMenu();" class="eagle-menu-dual-btn">
+          <span>◨</span><span>显隐右栏</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 5. 帮助与系统设置 -->
+    <div class="eagle-menu-section space-y-1.5">
+      <div class="eagle-menu-dual-grid">
+        <button type="button" onclick="openShortcutsModal(); hideEagleAppMainMenu();" class="eagle-menu-dual-btn">
+          <span>⌨️</span><span>快捷键</span><kbd class="text-[10px] text-slate-400 font-mono">?</kbd>
+        </button>
+        <button type="button" onclick="openEagleHelpModal(); hideEagleAppMainMenu();" class="eagle-menu-dual-btn">
+          <span>📖</span><span>使用指南</span>
+        </button>
+      </div>
+      <a href="/settings" class="eagle-menu-footer-link" title="API 密钥、显示与导出、备份与帮助">
+        <span class="flex items-center gap-2 min-w-0">
+          <span class="text-sm shrink-0">⚙</span>
+          <span class="flex flex-col min-w-0">
+            <span class="eagle-menu-footer-title">系统设置</span>
+            <span class="eagle-menu-footer-sub">API · 显示与导出 · 备份 · 帮助</span>
+          </span>
+        </span>
+        <span class="text-xs text-slate-400 shrink-0">›</span>
       </a>
     </div>
   </div>
@@ -1982,7 +2358,7 @@
           </div>
           <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
             <span class="text-slate-600">放大 / 缩小界面</span>
-            <kbd class="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 font-mono shadow-2xs font-bold">Ctrl + = / −</kbd>
+            <kbd class="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 font-mono shadow-2xs font-bold">Ctrl + 滚轮 / = / −</kbd>
           </div>
           <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
             <span class="text-slate-600">恢复界面 100%</span>
@@ -2021,7 +2397,7 @@
         </div>
         <div class="p-3 rounded-lg bg-slate-50 border border-slate-200/80 space-y-1">
           <div class="font-semibold text-slate-800">④ 全屏看题、界面缩放与保真组卷导出</div>
-          <p class="text-slate-600">选中题目按 <kbd class="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono">Space</kbd> 全屏审题（<kbd class="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono">← / →</kbd> 切题），<kbd class="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono">Ctrl + Shift + C</kbd> 一键复制高清排版题图，<kbd class="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono">Ctrl + = / - / 0</kbd> 调节工作台缩放；加入试题篮后可预览并导出排版一致的 Word / PDF。</p>
+          <p class="text-slate-600">选中题目按 <kbd class="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono">Space</kbd> 全屏审题（<kbd class="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono">← / →</kbd> 切题），<kbd class="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono">Ctrl + Shift + C</kbd> 一键复制高清排版题图，<kbd class="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono">Ctrl + 滚轮</kbd> 或 <kbd class="px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono">Ctrl + = / - / 0</kbd> 调节工作台缩放；加入试题篮后可预览并导出排版一致的 Word / PDF。</p>
         </div>
         <div class="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
           <a href="/settings#help" class="text-emerald-700 hover:underline font-medium">查看录题详细帮助与新手练习 →</a>
@@ -2207,8 +2583,45 @@
       return setEagleUiScale(EAGLE_UI_SCALE_DEFAULT, opts);
     }
 
+    /**
+     * 绑定 Ctrl + 鼠标滚轮调整整个工作台界面大小（字号、按钮与间距统一缩放）。
+     * 避让原卷图片预览视口（#opViewport），防止与图片独立缩放快捷键冲突。
+     */
+    function bindEagleUiScaleWheel() {
+      const WHEEL_STEP_THRESHOLD = 40;
+      let wheelDeltaAccum = 0;
+      let wheelResetTimer = 0;
+
+      window.addEventListener('wheel', (event) => {
+        if (!event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return;
+        // 原卷对照弹窗内 Ctrl+滚轮 专用于缩放原卷图片，不联动调整界面字号
+        if (event.defaultPrevented || (event.target && event.target.closest && event.target.closest('#opViewport'))) {
+          return;
+        }
+        event.preventDefault();
+        if (!event.deltaY) return;
+
+        const deltaPx = event.deltaY * (
+          event.deltaMode === 1 ? 16 : (event.deltaMode === 2 ? window.innerHeight : 1)
+        );
+        // 反向滚动时重置累积量，保证切方向立刻响应
+        if (wheelDeltaAccum && (wheelDeltaAccum > 0) !== (deltaPx > 0)) {
+          wheelDeltaAccum = 0;
+        }
+        wheelDeltaAccum += deltaPx;
+        clearTimeout(wheelResetTimer);
+        wheelResetTimer = setTimeout(() => { wheelDeltaAccum = 0; }, 250);
+
+        if (Math.abs(wheelDeltaAccum) < WHEEL_STEP_THRESHOLD) return;
+        const direction = wheelDeltaAccum < 0 ? 1 : -1;
+        wheelDeltaAccum = 0;
+        bumpEagleUiScale(direction * EAGLE_UI_SCALE_STEP, { toast: true });
+      }, { passive: false });
+    }
+
     // 控件晚于首屏脚本出现时，把当前缩放同步到按钮/滑块上。
     setEagleUiScale(readEagleUiScale());
+    bindEagleUiScaleWheel();
 
     function readRecentQuestions() {
       try {
@@ -5822,27 +6235,66 @@
         if (sentinel) {
           const isFavFilter = filterState.smartFilter === 'favorites';
           const isRecentFilter = filterState.smartFilter === 'recent';
+          const isBlankLibrary = questionsData.length === 0 && !hasActiveLibraryFilters();
           sentinel.outerHTML = isRecentFilter ? `
-            <div class="py-16 text-center text-slate-400 space-y-2">
-              <div class="text-2xl">🕑</div>
-              <div class="text-sm text-slate-500">还没有浏览过题目</div>
-              <div class="text-xs">点开任意题卡或空格快看后会出现在这里</div>
+            <div class="eagle-empty-wrap">
+              <div class="eagle-empty-card space-y-2.5">
+                <div class="eagle-empty-icon is-filter">
+                  <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                </div>
+                <div class="text-sm font-semibold text-slate-800">还没有浏览过题目</div>
+                <div class="text-xs text-slate-500 leading-relaxed">点开任意题卡或按 <kbd class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-mono text-[10px]">Space</kbd> 快速审题后，最近看过的题目会留在在这里。</div>
+              </div>
             </div>
           ` : isFavFilter ? `
-            <div class="py-16 text-center text-slate-400 space-y-2">
-              <div class="flex justify-center">${getHeartIconSvg(true, 'w-8 h-8')}</div>
-              <p class="text-sm font-semibold text-slate-700">暂无收藏的试题</p>
-              <p class="text-xs text-slate-400 max-w-md mx-auto">在试题列表点击题目卡片上的爱心 ${getHeartIconSvg(true, 'w-3.5 h-3.5 align-text-bottom')} 或按快捷键 <kbd class="px-1 py-0.5 rounded bg-slate-100 text-slate-600 font-mono text-[10px]">S</kbd>，即可快速将题目加入收藏。</p>
-              <div class="pt-2">
-                <button onclick="applyFolderNode('all')" class="inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-md font-medium cursor-pointer border border-emerald-200 transition-colors">
-                  <span>←</span><span>返回浏览全部题库</span>
-                </button>
+            <div class="eagle-empty-wrap">
+              <div class="eagle-empty-card space-y-2.5">
+                <div class="mx-auto flex justify-center">${getHeartIconSvg(true, 'w-9 h-9')}</div>
+                <p class="text-sm font-semibold text-slate-800">暂无收藏的试题</p>
+                <p class="text-xs text-slate-500 leading-relaxed">点击题卡上的爱心 ${getHeartIconSvg(true, 'w-3.5 h-3.5 align-text-bottom')} 或按快捷键 <kbd class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-mono text-[10px]">S</kbd>，即可快速收藏重点题目。</p>
+                <div class="pt-2">
+                  <button onclick="applyFolderNode('all')" class="inline-flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-3.5 py-1.5 rounded-lg font-semibold cursor-pointer border border-emerald-200 transition-colors">
+                    <span>←</span><span>返回浏览全部题库</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          ` : isBlankLibrary ? `
+            <div class="eagle-empty-wrap">
+              <div class="eagle-empty-card space-y-3">
+                <div class="eagle-empty-icon">
+                  <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+                  </svg>
+                </div>
+                <div class="space-y-1">
+                  <h2 class="text-sm font-bold text-slate-800">题库工作台还是空的</h2>
+                  <p class="text-xs text-slate-500 leading-relaxed">上传试卷完成切题与人工核对后，已入库的题目卡片会汇聚在这里，支持多维标签筛选、智能视图与一键组卷。</p>
+                </div>
+                <div class="pt-1 flex items-center justify-center gap-2 flex-wrap">
+                  <a href="/" class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition-colors">
+                    <span>前往上传 / 切题入库</span>
+                  </a>
+                  <button type="button" onclick="openEagleHelpModal()" class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium cursor-pointer transition-colors">
+                    <span>查看使用指南</span>
+                  </button>
+                </div>
               </div>
             </div>
           ` : `
-            <div class="py-16 text-center text-slate-400">
-              <p class="text-xs">无匹配试题</p>
-              <button onclick="resetAllFilters()" class="text-xs text-emerald-600 hover:underline mt-1 font-medium cursor-pointer">清空所有筛选条件</button>
+            <div class="eagle-empty-wrap">
+              <div class="eagle-empty-card space-y-2.5">
+                <div class="eagle-empty-icon is-filter">
+                  <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                  </svg>
+                </div>
+                <p class="text-sm font-semibold text-slate-800">无匹配试题</p>
+                <p class="text-xs text-slate-500">当前搜索或筛选条件没有命中题目，可以放宽条件后再试。</p>
+                <div class="pt-1">
+                  <button onclick="resetAllFilters()" class="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-lg text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 font-semibold cursor-pointer transition-colors">清空所有筛选条件</button>
+                </div>
+              </div>
             </div>
           `;
         }
@@ -5917,7 +6369,7 @@
           onclick="focusQuestion('${q.id}')"
           ondblclick="openQuickLookModal('${q.id}')"
           oncontextmenu="openQuestionContextMenu(event, '${q.id}')"
-          class="bg-white rounded-lg border transition-all duration-150 p-3 cursor-pointer relative group ${
+          class="eagle-question-card bg-white rounded-lg border transition-all duration-150 p-3 cursor-pointer relative group ${
             isFocused ? 'border-emerald-500 shadow-sm ring-1 ring-emerald-500/20' : 'border-slate-200/80 hover:border-slate-300'
           }"
         >
@@ -14196,13 +14648,11 @@
       applyFilters();
     }
 
-    function renderInlineActiveChips() {
-      const container = document.getElementById('inlineActiveChipsContainer');
-      const clearBtn = document.getElementById('btnClearAllFilters');
-      const strip = document.getElementById('activeFilterStrip');
-      if (!container || !clearBtn) return;
-
-      const hasActive = 
+    /**
+     * 判断当前是否激活了任意筛选、搜索或非「全部题库」范围。
+     */
+    function hasActiveLibraryFilters() {
+      return (
         Boolean(filterState.keyword) ||
         filterState.selectedTagIds.length > 0 ||
         filterState.excludedTagIds.length > 0 ||
@@ -14212,14 +14662,27 @@
         filterState.hasAnswer ||
         filterState.hasAnalysis ||
         filterState.hasOneNote ||
+        Boolean(filterState.bodyMode) ||
         Boolean(filterState.datePreset) ||
+        Boolean(filterState.dateFrom) ||
+        Boolean(filterState.dateTo) ||
         Boolean(filterState.chapter) ||
         Boolean(filterState.paperId) ||
         Boolean(filterState.smartFilter) ||
         Boolean(filterState.userFolderId) ||
         Boolean(filterState.folderTagIds && filterState.folderTagIds.length) ||
         Boolean(filterState.folderSections && filterState.folderSections.length) ||
-        (filterState.folderType === 'all' && folderTreeState.activeId !== 'all');
+        (filterState.folderType === 'all' && folderTreeState.activeId !== 'all')
+      );
+    }
+
+    function renderInlineActiveChips() {
+      const container = document.getElementById('inlineActiveChipsContainer');
+      const clearBtn = document.getElementById('btnClearAllFilters');
+      const strip = document.getElementById('activeFilterStrip');
+      if (!container || !clearBtn) return;
+
+      const hasActive = hasActiveLibraryFilters();
 
       updateFilterPillBadges();
 
