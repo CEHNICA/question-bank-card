@@ -41,6 +41,35 @@
       from { opacity: 0; transform: translateY(-4px); }
       to { opacity: 1; transform: translateY(0); }
     }
+    /* ---- 原卷核验：翻页控件 ----
+       一道题的答案常常印在下一页（题目在第 1 页、答案在第 2 页）。
+       以前「核验证据」只钉在题目所在的那一页，老师只能自己另开一份 PDF 对页码；
+       现在能直接翻到答案那一页。这些类名是自定义的：Tailwind 是本地预编译产物，
+       现成的工具类里没有这一组，别指望临时换个类名就有样式。 */
+    .op-page-nav { flex-wrap: wrap; row-gap: 4px; }
+    .op-page-btn {
+      min-width: 28px; height: 26px; padding: 0 6px; line-height: 1;
+      border: 1px solid #e2e8f0; border-radius: 6px; background: #ffffff;
+      color: #475569; font-size: 12px; cursor: pointer;
+    }
+    .op-page-btn:hover:not(:disabled) { background: #f1f5f9; color: #0f172a; }
+    .op-page-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .op-page-input {
+      width: 54px; height: 26px; padding: 0 4px; text-align: center;
+      border: 1px solid #e2e8f0; border-radius: 6px; background: #f8fafc;
+      color: #1e293b; font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      -moz-appearance: textfield;
+    }
+    .op-page-input::-webkit-outer-spin-button,
+    .op-page-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .op-page-input:focus { outline: 2px solid #059669; outline-offset: 1px; }
+    .op-page-total { color: #64748b; font-size: 11px; white-space: nowrap; }
+    .op-page-back {
+      border: 1px solid #6ee7b7; border-radius: 6px; background: #ecfdf5;
+      color: #047857; font-size: 11px; padding: 3px 8px; white-space: nowrap; cursor: pointer;
+    }
+    .op-page-back:hover { background: #d1fae5; }
     /* ---- 右侧「题目属性」面板：可收起（B3 之后 toggleRightInspector 的 id 丢了，
            面板永远收不起来，窄窗口把中栏挤成一条缝）---- */
     #rightInspectorPane { transition: width .15s ease; }
@@ -2361,6 +2390,17 @@
             适合窗口
           </button>
         </div>
+      </div>
+
+      <!-- 翻页条：题目的答案常常印在下一页，光看题目那一页核验不了一半 -->
+      <div id="opPageNav" class="op-page-nav flex items-center gap-1.5 px-5 py-1.5 border-b border-slate-100 bg-slate-50/70 text-xs">
+        <span class="text-slate-500 font-medium">原卷页:</span>
+        <button id="btnOpPrevPage" onclick="stepOpPage(-1)" class="op-page-btn" title="上一页 (←)" aria-label="上一页">◀</button>
+        <input id="opPageInput" type="number" min="1" step="1" value="1" class="op-page-input"
+               title="输入页码直接跳转" aria-label="原卷页码" onchange="jumpOpPageTo(this.value)">
+        <span id="opPageTotal" class="op-page-total">/ 共 ? 页</span>
+        <button id="btnOpNextPage" onclick="stepOpPage(1)" class="op-page-btn" title="下一页 (→)" aria-label="下一页">▶</button>
+        <button id="btnOpQuestionPage" onclick="goToOpQuestionPage()" class="op-page-back" title="回到这道题所在的那一页" hidden>回到本题页</button>
       </div>
 
       <!-- 画布视口区域 -->
@@ -8423,6 +8463,10 @@
       question: null,
       mode: 'page', // 'page' (整页位置) 或 'question' (只看本题)
       zoom: 1.0,
+      // 这份原卷实际有的页码（升序）。答案常常印在下一页，翻页得先知道有哪些页。
+      pageList: [],
+      // 这道题所在的那一页：翻到别处以后还能一键回来。
+      questionPageIdx: null,
       isPanning: false,
       panStartX: 0,
       panStartY: 0,
@@ -8430,6 +8474,9 @@
       scrollStartY: 0,
       pointerId: null
     };
+
+    // 同一份资料的页码清单不变，读一次就够（翻页时不用反复问后端）。
+    const opPageCache = new Map();
 
     function extractQuestionRegions(q, pageIdx) {
       if (!q) return [];
@@ -8575,6 +8622,126 @@
       }
     }
 
+    // ---------------- 原卷翻页 ----------------
+    // 一道题的答案常常印在下一页：题目在第 1 页、答案在第 2 页。
+    // 以前「核验证据」只给题目所在的那一页，老师只能自己另开一份 PDF 对页码；
+    // 这里把这份原卷的页码清单取回来，就能直接翻到答案所在的那一页。
+    function fetchOpPageList(paperId) {
+      if (!opPageCache.has(paperId)) {
+        const pending = fetch(`${API_BASE}/api/papers/${encodeURIComponent(paperId)}/pages`, {
+          headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
+          cache: 'no-store'
+        })
+          .then(res => (res.ok ? res.json() : null))
+          .then(body => (
+            body && Array.isArray(body.pages)
+              ? body.pages.filter(page => Number.isInteger(page)).sort((a, b) => a - b)
+              : []
+          ))
+          .catch(() => []);
+        opPageCache.set(paperId, pending);
+      }
+      return opPageCache.get(paperId);
+    }
+
+    async function loadOpPageList(paperId) {
+      if (!paperId) {
+        opState.pageList = [];
+        renderOpPageNav();
+        return;
+      }
+      const pages = await fetchOpPageList(paperId);
+      if (opState.paperId !== paperId) return;  // 期间换开了别的原卷
+      opState.pageList = pages;
+      renderOpPageNav();
+    }
+
+    function renderOpPageNav() {
+      const nav = document.getElementById('opPageNav');
+      const input = document.getElementById('opPageInput');
+      const total = document.getElementById('opPageTotal');
+      const prev = document.getElementById('btnOpPrevPage');
+      const next = document.getElementById('btnOpNextPage');
+      const back = document.getElementById('btnOpQuestionPage');
+      if (!nav || !input) return;
+      const list = opState.pageList;
+      const current = opState.pageIdx;
+      const position = list.indexOf(current);
+      input.value = String(current + 1);
+      if (total) total.textContent = list.length ? `/ 共 ${list.length} 页` : `第 ${current + 1} 页`;
+      if (prev) prev.disabled = position <= 0;
+      if (next) next.disabled = position < 0 || position >= list.length - 1;
+      if (back) {
+        const onQuestionPage = !Number.isInteger(opState.questionPageIdx) || opState.questionPageIdx === current;
+        back.hidden = onQuestionPage;
+        if (!onQuestionPage) back.textContent = `回到第 ${opState.questionPageIdx + 1} 页`;
+      }
+      // 只有一页可翻的时候，整条翻页条没有意义（跟以前一样不占地方）。
+      nav.classList.toggle('hidden', list.length < 2);
+    }
+
+    function goToOpPage(pageIdx) {
+      const target = Number(pageIdx);
+      if (!Number.isInteger(target) || target < 0 || !opState.paperId) return;
+      const list = opState.pageList;
+      if (list.length && !list.includes(target)) return;
+      if (target === opState.pageIdx) {
+        renderOpPageNav();
+        return;
+      }
+      opState.pageIdx = target;
+      const img = document.getElementById('opPaperImg');
+      const paperBadge = document.getElementById('opPaperNameBadge');
+      const rawLink = document.getElementById('opRawImgLink');
+      if (paperBadge) paperBadge.innerText = `${opState.paperName} · 第 ${target + 1} 页`;
+      const previewUrl = opState.paperId
+        ? `${API_BASE}/api/documents/${encodeURIComponent(opState.paperId)}/pages/${target}/preview`
+        : '';
+      if (rawLink) rawLink.href = previewUrl || '#';
+      if (img) {
+        img.style.display = 'block';
+        img.src = previewUrl;
+      }
+      const viewport = document.getElementById('opViewport');
+      if (viewport) viewport.scrollTo({ top: 0, left: 0 });
+      renderOpPageNav();
+    }
+
+    function stepOpPage(delta) {
+      const list = opState.pageList;
+      if (!list.length) return;
+      const position = list.indexOf(opState.pageIdx);
+      if (position < 0) {
+        goToOpPage(list[0]);
+        return;
+      }
+      const next = position + delta;
+      if (next < 0 || next >= list.length) return;
+      goToOpPage(list[next]);
+    }
+
+    function jumpOpPageTo(value) {
+      const wanted = Number.parseInt(value, 10);
+      const input = document.getElementById('opPageInput');
+      if (!Number.isInteger(wanted) || wanted < 1) {
+        if (input) input.value = String(opState.pageIdx + 1);
+        return;
+      }
+      const target = wanted - 1;  // 界面写的是「第 N 页」，内部是从 0 起的页序号
+      const list = opState.pageList;
+      if (list.length && !list.includes(target)) {
+        showToast(`这份原卷没有第 ${wanted} 页`, 'info');
+        renderOpPageNav();
+        return;
+      }
+      goToOpPage(target);
+    }
+
+    function goToOpQuestionPage() {
+      if (!Number.isInteger(opState.questionPageIdx)) return;
+      goToOpPage(opState.questionPageIdx);
+    }
+
     function openOriginalPaperModal(paperId, pageIdx = 0, paperName = '', questionId = null) {
       const modal = document.getElementById('originalPaperModal');
       const img = document.getElementById('opPaperImg');
@@ -8606,6 +8773,10 @@
       opState.question = q;
       opState.mode = 'page';
       opState.zoom = 1.0;
+      // 这道题所在的那一页：翻去答案页以后还能一键回来。
+      opState.questionPageIdx = effectivePageIdx;
+      opState.pageList = [];
+      renderOpPageNav();
 
       if (paperBadge) paperBadge.innerText = `${effectivePaperName} · 第 ${effectivePageIdx + 1} 页`;
       if (qBadge) {
@@ -8624,6 +8795,8 @@
 
       setOpMode('page');
       initOpGestures();
+      // 页码清单：取回来才知道能翻到哪一页（答案常常印在下一页）。
+      loadOpPageList(effectivePaperId);
 
       const canvasContent = document.getElementById('opCanvasContent');
       const errorNotice = document.getElementById('opErrorNotice');
@@ -17556,6 +17729,17 @@
             openQuickLookModal(filteredQuestions[0].id);
           }
           return;
+        }
+
+        // 原卷核验弹窗开着的时候，左右箭头用来翻原卷页：答案常常印在下一页。
+        // 这一层在最上面，所以它比快速审题的左右翻题优先。
+        const opModal = document.getElementById('originalPaperModal');
+        if (opModal && !opModal.classList.contains('hidden')) {
+          if (!e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+            e.preventDefault();
+            stepOpPage(e.key === 'ArrowRight' ? 1 : -1);
+            return;
+          }
         }
 
         // 审题模式下的左右箭头切换

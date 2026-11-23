@@ -125,6 +125,8 @@ urlpatterns = [
     path("api/papers/<uuid:paper_id>/blocks", views.paper_blocks),
     path("api/papers/<uuid:paper_id>/agent-cut", views.paper_agent_cut),
     path("api/papers/<uuid:paper_id>/pages/<int:page>/preview", views.page_preview),
+    # 原卷的页码清单：核验证据要能翻到答案所在的那一页。
+    path("api/papers/<uuid:paper_id>/pages", views.paper_page_index),
     path("api/papers/<uuid:paper_id>/processing", views.paper_processing),
     path("api/papers/<uuid:paper_id>/continue-ai-cut", views.paper_continue_ai_cut),
     path("api/papers/<uuid:paper_id>/retry", views.paper_retry),
@@ -150,6 +152,7 @@ urlpatterns = [
     path("api/papers/<uuid:paper_id>/question-trash/<uuid:batch_id>/restore", views.question_deletion_restore),
     # 正式题库页面沿用 M3 的地址查看出处
     path("api/documents/<uuid:paper_id>/pages/<int:page>/preview", views.page_preview),
+    path("api/documents/<uuid:paper_id>/pages", views.paper_page_index),
     path("api/questions/<int:question_id>", views.question_delete),
     path("api/questions/<int:question_id>/figures/<int:index>", views.question_figure),
     path("api/questions/<int:question_id>/question-images/<int:index>", views.question_image),

@@ -2058,6 +2058,26 @@ def page_preview(request, paper_id, page: int):
     return _file(preview_path, "image/jpeg")
 
 
+def paper_page_index(request, paper_id):
+    """这份原卷到底有哪些页。
+
+    核验证据以前只能看题目所在的那一页，可一道题的答案常常印在下一页，
+    老师只能自己另开一份 PDF 对页码。这里只给页码清单：一份 270 页的教材
+    走 ``/api/papers/<id>`` 要传 1.4 MB，而这个清单只有几 KB，翻页才有边界。
+    """
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    paper = get_object_or_404(Paper, pk=paper_id)
+    pages = sorted(
+        {
+            page["page_idx"]
+            for page in (paper.pages or [])
+            if isinstance(page, dict) and type(page.get("page_idx")) is int
+        }
+    )
+    return JsonResponse({"paper_id": str(paper.id), "name": paper.display_name, "pages": pages, "count": len(pages)})
+
+
 def paper_blocks(request, paper_id):
     """返回文档的版面块（MinerU 或本地文字层解析结果）及页/结构元信息，供外部助手探查切题方式。"""
     if request.method != "GET":
