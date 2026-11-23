@@ -453,6 +453,69 @@
     return out;
   }
 
+  // KaTeX 不原生支持 yhmath/mathabx 的 \wideparen、\overparen；改写为内置可拉伸
+  // 弧线 \overgroup，并兼容 OCR/题库常见的无花括号写法（如 \wideparen AB）。
+  const ARC_COMMANDS = new Set(["\\wideparen", "\\overparen"]);
+
+  function consumeArcCommand(inner, index, command, transformArg) {
+    const rest = inner.slice(index + command.length);
+    if (!/^\s*\{/.test(rest)) {
+      const bare = /^(\s*)((?:[A-Za-z0-9']|_\{[^{}]+\}|_[A-Za-z0-9])+)/.exec(rest);
+      if (bare) {
+        return {
+          latex: `\\overgroup{${transformArg(bare[2])}}`,
+          consumed: command.length + bare[0].length
+        };
+      }
+      const wrapped = /^(\s*)(\\(?:mathrm|text|mathbf|mathit)\s*\{[^{}]*\})/.exec(rest);
+      if (wrapped) {
+        return {
+          latex: `\\overgroup{${transformArg(wrapped[2])}}`,
+          consumed: command.length + wrapped[0].length
+        };
+      }
+    }
+    return { latex: "\\overgroup", consumed: command.length };
+  }
+
+  function normalizeArcInLatex(inner) {
+    if (!inner || !/\\(?:wide|over)paren\b/.test(inner)) return inner;
+    let out = "";
+    for (let index = 0; index < inner.length;) {
+      const command = /^\\[A-Za-z]+|^\\./.exec(inner.slice(index));
+      if (command) {
+        if (ARC_COMMANDS.has(command[0])) {
+          const rewritten = consumeArcCommand(inner, index, command[0], (arg) => arg);
+          out += rewritten.latex;
+          index += rewritten.consumed;
+          continue;
+        }
+        out += command[0];
+        index += command[0].length;
+        continue;
+      }
+      out += inner[index];
+      index += 1;
+    }
+    return out;
+  }
+
+  /**
+   * 仅把文本中显式数学分隔符内的 \wideparen / \overparen 改写为 \overgroup{...}，
+   * 供 auto-render 链路在 KaTeX 渲染前复用。
+   */
+  function normalizeArcInMathText(text) {
+    const source = String(text ?? "");
+    if (!source || !/\\(?:wide|over)paren\b/.test(source)) return source;
+    return source.replace(EXPLICIT_MATH, (raw) => {
+      const delimiter = raw.startsWith("$$") || raw.startsWith("\\[") || raw.startsWith("\\(") ? 2 : 1;
+      const open = raw.slice(0, delimiter);
+      const close = raw.slice(raw.length - delimiter);
+      const inner = raw.slice(delimiter, raw.length - delimiter);
+      return `${open}${normalizeArcInLatex(inner)}${close}`;
+    });
+  }
+
   // 已标记公式里偶尔混有 Unicode 符号（例如 AI 预览的 $∠BAD＝∠BCD$）；只在显示时换成 KaTeX 能排的写法。
   function explicitToLatex(inner) {
     let out = "";
@@ -461,7 +524,17 @@
       const wideBracket = ESCAPED_FULLWIDTH_ROUND_BRACKET.exec(inner.slice(index));
       if (wideBracket) { out += TO_LATEX[wideBracket[1]]; index += wideBracket[0].length; continue; }
       const command = /^\\[A-Za-z]+|^\\./.exec(inner.slice(index));
-      if (command) { out += command[0]; index += command[0].length; continue; }
+      if (command) {
+        if (ARC_COMMANDS.has(command[0])) {
+          const rewritten = consumeArcCommand(inner, index, command[0], explicitToLatex);
+          out += rewritten.latex;
+          index += rewritten.consumed;
+          continue;
+        }
+        out += command[0];
+        index += command[0].length;
+        continue;
+      }
       const character = String.fromCodePoint(inner.codePointAt(index));
       const mapped = character === "{" || character === "}" ? character : TO_LATEX[character];
       out += mapped ?? halfWidth(character);
@@ -539,8 +612,14 @@
     return segments;
   }
 
-  // 国内教材与试卷把平行号印成斜的“//”；排版视图照此显示，比对仍按 ∥ 处理。
-  const KATEX_MACROS = { "\\parallel": "\\mathrel{/\\mkern-6mu/}", "\\nparallel": "\\mathrel{/\\mkern-6mu/\\mkern-11mu\\backslash}" };
+  // 国内教材与试卷把平行号印成斜的“//”；排版视图照此显示，比对仍按 ∥ 处理；
+  // 圆弧 \wideparen / \overparen 兜底映射到内置可拉伸弧线 \overgroup。
+  const KATEX_MACROS = {
+    "\\parallel": "\\mathrel{/\\mkern-6mu/}",
+    "\\nparallel": "\\mathrel{/\\mkern-6mu/\\mkern-11mu\\backslash}",
+    "\\wideparen": "\\overgroup",
+    "\\overparen": "\\overgroup"
+  };
 
   function katexReady() {
     return typeof root.katex?.render === "function";
@@ -1546,7 +1625,7 @@
   return {
     OPTION_KEYS, shownOptionKeys, LEVEL_TEXT, TYPE_NAMES, KATEX_MACROS,
     comparisonUnits, compareTexts, comparisonHunks, stripQuestionNumber,
-    detectRuns, runToLatex, explicitToLatex, typesetSegments, colourLatex,
+    detectRuns, runToLatex, explicitToLatex, normalizeArcInMathText, typesetSegments, colourLatex,
     renderTypeset, renderLiteral, renderQuestion, answerRows, previewSelection, previewTextOffsets, optionColumns, displayWidth, fitScale, fitOptions, findTables, tidyText,
     tidiedMarks, subQuestionParts, renderInBatches, CARD_BATCH_SIZE
   };

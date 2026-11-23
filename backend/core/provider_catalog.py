@@ -43,7 +43,7 @@ VISION = {
         "environment": ("MODELSCOPE_API_KEY", "MODELSCOPE_API_KEYS_JSON"),
         "concurrency": (1, 2),
         "signup": "https://www.modelscope.cn/my/myaccesstoken",
-        "note": "每天免费几百次（要绑定实名的阿里云账号）",
+        "note": "每天免费几百次（需完成邮箱验证并绑定实名阿里云账号）",
     },
     "siliconflow": {
         "label": "硅基流动",
@@ -210,7 +210,9 @@ def catalog_payload() -> dict[str, object]:
                 "signup": spec["signup"],
                 "note": spec["note"],
                 "input_label": "新的访问令牌（留空就不改）" if key == "modelscope" else "新的 API Key（留空就不改）",
-                "placeholder": f"粘贴 {spec['label']} 的 API Key",
+                "placeholder": "粘贴魔搭访问令牌（多账号用 ; 隔开）"
+                if key == "modelscope"
+                else f"粘贴 {spec['label']} 的 API Key（多账号用 ; 隔开）",
                 "reading_default_model": spec["default_model"],
                 "reading_suggested_models": list(spec["suggested"]),
                 "answer_defaults": dict(ans),
@@ -229,7 +231,7 @@ def catalog_payload() -> dict[str, object]:
                 "signup": spec["signup"],
                 "note": spec["note"],
                 "input_label": "新的 API Key（留空就不改）",
-                "placeholder": f"粘贴 {spec['label']} 的 API Key",
+                "placeholder": f"粘贴 {spec['label']} 的 API Key（多账号用 ; 隔开）",
                 "answer_defaults": dict(ANSWER_DEFAULTS[key]),
                 "supports_test": True,
             }

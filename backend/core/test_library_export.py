@@ -618,6 +618,20 @@ class LibraryExportTests(ExportFixture, TestCase):
         self.assertTrue(math.findall(".//m:limUpp", NS))
         self.assertFalse(math.findall(".//m:acc", NS))
 
+    def test_stretchy_arc_overgroup_exports_as_native_word_group_chr(self):
+        # KaTeX 对 \overgroup{AB}（由 \wideparen / \overparen 规范化）生成带 accent="true" 的 ⏠。
+        value = math_field(
+            r"\overgroup{AB}",
+            '<mover accent="true"><mrow><mi>A</mi><mi>B</mi></mrow><mo stretchy="true">⏠</mo></mover>',
+        )
+        segment = export._field(value, value["source"], "合成圆弧公式")[0]["segments"][0]
+        self.assertIsNone(segment.get("fallback"), "圆弧公式应导出为 Word 原生公式，不退化成图片")
+        math = segment["omml"]
+        group_chr_props = math.findall(".//m:groupChrPr", NS)
+        self.assertTrue(group_chr_props)
+        self.assertEqual(group_chr_props[0].find("m:chr", NS).get(f"{{{export.OMML_NS}}}val"), "⏠")
+        self.assertIn("AB", "".join(math.itertext()))
+
     def test_cancellation_is_never_silently_turned_into_a_box(self):
         """上游会把每个 menclose 都画成方框，划消就丢了。
 

@@ -34,11 +34,16 @@
 | `assistant-setup [--skill-dir 绝对skills父目录] [--replace-skill] [--desktop show\|hide]` | **1.10.14 起支持，先检查安装版 `--help`**。默认只读核实安装并列出技能/图标选择；用户明确选择后才安装配套技能或显示/隐藏本软件桌面图标。技能覆盖须获明确同意，`--replace-skill` 保留备份 |
 | `start [--timeout 90]` | 打开题有据，等它就绪 |
 | `papers` | 列出试卷：编号、名字、状态、题数、通过数、入库数 |
-| `upload 文件… [--book] [--parse-mode auto\|manual\|native\|mineru] [--allow-cloud] [--wait] [--timeout 秒]` | 1.11.6 默认 `auto`，先本机处理文字 PDF，不能切出的题保留原页供框题。只有 `--allow-cloud` 才允许自动使用已配置 MinerU；失败仍保留本地结果。`manual`、`native` 可明确限定本地处理，`mineru` 明确选择云解析。`--book` 表示书或讲义。上传过的文件不会重复处理 |
+| `upload 文件… [--book] [--parse-mode auto\|manual\|native\|mineru] [--allow-cloud] [--cut-only] [--scan-only] [--wait] [--timeout 秒]` | 默认 `auto` 本地优先。加 `--scan-only` 时仅解析原页与版面块（`blocks`），跳过自动切题与 `NEEDS_GROUPING` 停在 `READY`，便于外部助手自主切题；`--cut-only` 只切题不调用内置看图识读 |
 | `wait <试卷> [--timeout 秒]` | 等试卷读完，打印进度。读完后告诉你有几道需要逐题核对 |
+| `pages <试卷> [--pages 0,1 \| 0-3] [--grid] [--out 目录]` | 导出原页高清图；加 `--grid` 在导出副本上叠加 `0–1000` 坐标网格便于视觉精确定位切题坐标（不改动本机原页缓存） |
+| `blocks <试卷> [--pages 0,1]` | 读取资料已提取的 MinerU / 本地文字层版面块（`seq`、`type`、`bbox`、`text`、`table_markdown`）及 `suggested_scopes` 结构 |
+| `cut <试卷> (--file JSON \| --region p:x0,y0,x1,y1…) [--replace-scope none\|page\|group\|paper\|question_ids]` | 助手批量切题：传入 `stem` 走直录轨跳过内置 OCR；不传 `stem` 存为 `source_image` 原图题卡。`--replace-scope` 仅替换未审核/未入库/未编辑草稿，支持 `layout undo` 整批撤销 |
+| `layout <regions\|renumber\|split\|merge\|undo> <试卷> …` | 调整已切题卡的原卷范围、改题号、拆题、合题或撤销最近一次原卷切题/布局操作 |
+| `read-cuts <试卷> [题号…] [--wait]` | 将已切好但仍是原图状态（`source_image`）的题卡提交给内置看图模型队列识读 |
 | `cards <试卷> [--filter F]` | 列出题卡和疑点。F 可以是 `todo`（需逐题核对）、`green`（识读完成、未通过）、`approved`、`ai`（AI 通过）、`human`（人工通过）、`all` |
 | `show <试卷> <题号> [--out 文件夹] [--no-images]` | 一道题的全部信息，原卷截图、候选图编号截图、配图都存成 PNG |
-| `fix <试卷> <题号> [--stem 文字 \| --stem-file 文件] [--option A=内容]… [--clear-option E]… [--type T] [--origin 题源] [--answer 文字] [--analysis 文字] [--force]` | 改字。没写的部分保持原样。`--stem -` 从标准输入读。只写 `--type` 时只改题型（其余疑点不动） |
+| `fix <试卷> <题号> [--stem 文字 \| --stem-file 文件] [--option A=内容]… [--clear-option E]… [--type T] [--origin 题源] [--section 章节] [--answer 文字] [--analysis 文字] [--force]` | 改字。没写的部分保持原样。`--stem -` 从标准输入读。只写 `--type` 时只改题型；只写 `--section` 时只改章节目录 |
 | `figures <试卷> <题号> (--use 1[:slot],… \| --keep \| --none) [--force]` | 配图。slot 是 `stem` 或 `A`–`E`，不写就是 `stem` |
 | `approve <试卷> <题号>…` / `approve <试卷> --green` | 打勾，记为 AI 通过。`--green` 一起通过识读完成的绿卡；仍须逐题对照原卷 |
 | `unapprove <试卷> <题号>` | 撤销 AI 打的勾。人工通过的不能撤 |
@@ -55,6 +60,7 @@
 | `propose 入库UUID [--stem 文字 \| --stem-file 文件] [--option A=内容]… [--type T] [--answer 文字] [--analysis 文字] [--origin 题源]` | 给**已经入库**的题交一份改动提案。题面一个字不动，等使用者在题库页点「采纳」。已入库的题不要直接用 `fix` |
 | `workbench` | 读助手工作台：助手交上来了几条待核对、谁在干活、老师此刻在哪 |
 | `whereami` | 问一句：老师此刻在看哪道题、有没有没保存的改动；你刚提的改动有没有被否决 |
+| `folders <list\|create\|rename\|move\|delete\|add\|remove\|sort\|set-section\|paper\|tag-group\|undo>` | 直接查看和整理「我的文件夹」、试卷/教材类型、教材章节目录（`section`）、排序方式及标签个人分组，支持撤销并与前端双向同步 |
 | `mcp` | 作为 stdio MCP 服务器运行 |
 
 ## 组卷导出（软件界面）
@@ -169,15 +175,58 @@ tiyouju whereami --json
 
 不给助手开这些权限：删除题卡、撤回入库、改标签目录、无人值守自动通过并入库。助手交上来的东西一律先落到「待核对」，由人点头。
 
+## 整理题库文件夹
+
+文件夹整理（自建文件夹树、题目归档、排序、教材 `section` 章节小节、试卷/教材名称与类型、标签管理里的个人分组）通过 `/api/library/folders`、`/api/library/tag-groups` 与 `PATCH /api/papers/<id>` **直接生效并支持撤销**，不会篡改正式题面或审核状态，且会与题库工作台网页自动双向同步。
+
+```powershell
+# 1. 查看完整文件夹树（我的文件夹、试卷、教材章节树、智能夹、排序、个人分组）
+tiyouju folders list --json
+
+# 2. 我的文件夹：新建 / 建子夹 / 重命名 / 移动层级 / 设排序 / 删除（最多 4 层）
+tiyouju folders create "专题一 · 三角函数" --json
+tiyouju folders create "恒等变换" --parent "专题一 · 三角函数" --json
+tiyouju folders rename "恒等变换" "三角恒等变换" --json
+tiyouju folders move "三角恒等变换" --json                     # 不传 --parent 移回根目录
+tiyouju folders sort section:folders name --json               # time_desc / time_asc / name / count_desc / default
+tiyouju folders delete "三角恒等变换" --json
+
+# 3. 批量归档 / 移出题目（支持入库 UUID 或 Q-xxxxxxxx 短码）
+tiyouju folders add "专题一 · 三角函数" Q-1a2b3c4d Q-5e6f7a8b --json
+tiyouju folders remove "专题一 · 三角函数" Q-1a2b3c4d --json
+
+# 4. 整理教材/教辅章节与小节目录（直接写入，不新建版本且保留原有审核，支持撤销）
+tiyouju folders set-section --section "第1节 公式法 · 例题" Q-1a2b3c4d Q-5e6f7a8b --json
+tiyouju folders set-section --map-file section-map.json --json
+
+# 5. 重命名试卷/教材或切换「试卷 ↔ 教材」
+tiyouju folders paper latest --name "高中数学思想方法导引" --type book --json
+
+# 6. 整理标签管理里的个人分组（不改动知识点上下级）
+tiyouju folders tag-group list --json
+tiyouju folders tag-group create "高一上期末复习" --tags "集合的概念" "基本不等式" --json
+tiyouju folders tag-group add-tags "高一上期末复习" "函数的概念" --json
+tiyouju folders tag-group remove-tags "高一上期末复习" "集合的概念" --json
+tiyouju folders tag-group undo --json
+
+# 7. 撤销最近一次文件夹或章节整理操作
+tiyouju folders undo --json
+```
+
 ## MCP 工具
 
 `tiyouju mcp` 提供这些工具：
 
 - `status`、`start_app`、`list_papers`
 - `configure_reading(reader, checker, minimax_plan)`：同 `config`，不传参数只看现状
-- `upload_paper(paths, book, parse_mode="auto"|"manual"|"native"|"mineru", allow_cloud=false)`、`wait_paper(paper, timeout≤600)`；默认自动准备，先尝试本机文字 PDF，未切出的内容保留原卷供手工框题。只有显式 `allow_cloud:true` 才允许自动使用已配置的 MinerU；明确选择 `mineru` 表示云解析。
+- `upload_paper(paths, book, parse_mode="auto"|"manual"|"native"|"mineru", allow_cloud=false, cut_only=false, scan_only=false)`、`wait_paper(paper, timeout≤600)`；`scan_only=true` 仅生成原页和 `blocks` 并停在 `READY`，跳过自动切题；只有显式 `allow_cloud:true` 或 `parse_mode="mineru"` 才调用 MinerU。
+- `get_paper_pages(paper, pages, grid=false)`：导出原页高清图（单次最多附加 8 张），`grid=true` 时叠加 `0–1000` 归一化网格。
+- `get_paper_blocks(paper, pages)`：返回 MinerU/本地文字版面块及 `bbox`、`table_markdown` 与 `structure`。
+- `cut_questions(paper, questions, replace_scope="none", ...)`：助手批量切题，双轨支持直接录入文字或保留原图；严格保护已通过/已入库/已编辑题卡，支持撤销。
+- `edit_question_layout(paper, action="regions"|"renumber"|"split"|"merge"|"undo", ...)`：微调原卷范围、改号、拆合或撤销布局/批量切题操作。
+- `read_cut_questions(paper, cards, wait=false)`：把原图题卡提交给软件内置看图模型进行识读。
 - `list_cards(paper, filter)`、`show_card(paper, card)`：返回文字，以及原卷截图（有候选图时是编号截图）和配图
-- `fix_card(paper, card, stem, options, type, answer, analysis)`：`options` 里值为空字符串，表示删掉这个选项
+- `fix_card(paper, card, stem, options, type, answer, analysis, origin, section)`：`options` 里值为空字符串，表示删掉这个选项；`section` 设置章节小节目录
 - `set_figures(paper, card, use | keep | none)`
 - `approve_cards(paper, cards | green)`、`unapprove_card(paper, card)`、`reread_card(paper, card)`
 - `publish_paper(paper)`、`search_library(keywords, review, limit)`
@@ -189,5 +238,10 @@ tiyouju whereami --json
 - `propose_question_change(publication_id, agent, stem, options, type, answer, analysis, origin)`：给**已经入库**的题交一份题面改动提案；题面不动，等人在题库页点采纳
 - `read_workbench()`：读助手工作台（待核对几条、谁在干活、采纳/不采纳各多少次、人此刻在哪）
 - `where_is_the_teacher()`：问人此刻在看哪道题、有没有没保存的改动，以及我提的改动有没有被否决
+- `list_folders()`：查看全部文件夹树（我的文件夹、试卷夹、教材章节树、智能夹、排序、标签个人分组）
+- `manage_folder(action, ...)`：直接新建/重命名/移动/删除我的文件夹或智能夹、批量归档/移出题目、设置排序、撤销
+- `set_question_sections(section, question_ids | items)`：批量整理已入库题目的教材章节/小节目录，直接生效且支持 `manage_folder(action="undo")` 撤销
+- `update_paper_folder(paper, name, material_type)`：重命名试卷/教材或切换 `exam` / `book`
+- `manage_tag_groups(action, ...)`：整理标签管理里的个人分组及组内标签（支持 `undo`）
 
 AI 的名字默认取 MCP 客户端的名字。

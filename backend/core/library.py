@@ -764,6 +764,80 @@ def rename_paper(paper: Paper, name: str) -> tuple[Paper, bool]:
     return paper, True
 
 
+def set_paper_material_type(paper: Paper, material_type: str) -> tuple[Paper, bool]:
+    """切换资料类型（exam 试卷 / book 教材教辅），不改动题卡与已入库版本。"""
+    if material_type not in Paper.MaterialType.values:
+        raise ValueError("资料类型只能是 exam（试卷）或 book（教材）")
+    with transaction.atomic():
+        paper = Paper.objects.select_for_update().get(pk=paper.pk)
+        if paper.material_type == material_type:
+            return paper, False
+        paper.material_type = material_type
+        paper.save(update_fields=["material_type", "updated_at"])
+    return paper, True
+
+
+def update_published_sections(section_by_pub_id: dict[str, str]) -> tuple[int, dict[str, str]]:
+    """批量修改已入库题目的章节小节归属（section），保持原审核状态且不生成新版本。
+
+    返回 (实际变更条数, {publication_id: 修改前 section}) 供撤销恢复。
+    """
+    if not section_by_pub_id:
+        return 0, {}
+    ordered_ids = list(section_by_pub_id.keys())
+    before_sections: dict[str, str] = {}
+    updated_publications: list[PublishedQuestion] = []
+    updated_questions: list[Question] = []
+    with transaction.atomic():
+        publications = {
+            str(pub.pk): pub
+            for pub in PublishedQuestion.objects.select_for_update().filter(
+                pk__in=ordered_ids, status=PublishedQuestion.Status.PUBLISHED
+            )
+        }
+        missing = [pid for pid in ordered_ids if pid not in publications]
+        if missing:
+            raise ValueError(f"找不到已入库题目：{missing[0]}")
+        question_ids = [pub.question_id for pub in publications.values() if pub.question_id]
+        questions_by_id = {
+            q.pk: q
+            for q in Question.all_objects.select_for_update()
+            .select_related("paper", "group")
+            .filter(pk__in=question_ids)
+        }
+        for pub_id in ordered_ids:
+            pub = publications[pub_id]
+            raw_section = str(section_by_pub_id[pub_id] or "").strip()[:120]
+            clean_section = prose.plain_markup(raw_section)
+            content = deepcopy(pub.content) if isinstance(pub.content, dict) else {}
+            old_section = str(content.get("section") or "")
+            question = questions_by_id.get(pub.question_id) if pub.question_id else None
+            before_sections[pub_id] = question.section if question is not None else old_section
+            if old_section == clean_section and (question is None or question.section == raw_section):
+                continue
+            old_hash = pub.content_hash
+            content["section"] = clean_section
+            new_hash = content_hash(content)
+            review = content.get("review")
+            if isinstance(review, dict) and review.get("approved_content_hash") == old_hash:
+                review["approved_content_hash"] = new_hash
+            pub.content = content
+            pub.content_hash = new_hash
+            pub.search_text = _search_text(content, pub.extras)
+            updated_publications.append(pub)
+            if question is not None:
+                was_current = approval_is_current(question) and question.approved_content_hash == old_hash
+                question.section = raw_section
+                if was_current:
+                    question.approved_content_hash = approval_hash(question)
+                updated_questions.append(question)
+        if updated_questions:
+            Question.all_objects.bulk_update(updated_questions, ["section", "approved_content_hash"])
+        if updated_publications:
+            PublishedQuestion.objects.bulk_update(updated_publications, ["content", "content_hash", "search_text"])
+    return len(updated_publications), before_sections
+
+
 LIVE_PUBLICATION_FIELDS = ("id", "question_id", "version", "content_hash", "status")
 
 

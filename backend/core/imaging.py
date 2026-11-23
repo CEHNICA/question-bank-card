@@ -401,3 +401,37 @@ def _font(size: int):
         font = ImageFont.load_default(size=size)
     _FONT_CACHE[size] = font
     return font
+
+
+def render_grid_overlay(path: Path) -> bytes:
+    """在内存副本上绘制 0–1000 归一化坐标网格，不修改磁盘上的原页缓存文件。"""
+    with Image.open(path) as raw:
+        canvas = ImageOps.exif_transpose(raw).convert("RGBA")
+    width, height = canvas.size
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    font = _font(max(16, min(width, height) // 55))
+    major_color = (220, 48, 48, 120)
+    minor_color = (220, 48, 48, 55)
+    label_bg = (255, 255, 255, 195)
+    label_fg = (180, 20, 20, 235)
+    for tick in range(50, 1000, 50):
+        x = round(tick * width / 1000)
+        y = round(tick * height / 1000)
+        is_major = tick % 100 == 0
+        color = major_color if is_major else minor_color
+        line_width = 2 if is_major else 1
+        draw.line([(x, 0), (x, height)], fill=color, width=line_width)
+        draw.line([(0, y), (width, y)], fill=color, width=line_width)
+        if is_major:
+            label = str(tick)
+            box_x = draw.textbbox((0, 0), label, font=font)
+            tw, th = box_x[2] - box_x[0], box_x[3] - box_x[1]
+            draw.rectangle([x + 2, 2, x + tw + 8, th + 8], fill=label_bg)
+            draw.text((x + 5, 4), label, fill=label_fg, font=font)
+            draw.rectangle([2, y + 2, tw + 8, y + th + 8], fill=label_bg)
+            draw.text((5, y + 4), label, fill=label_fg, font=font)
+    result = Image.alpha_composite(canvas, overlay).convert("RGB")
+    buffer = io.BytesIO()
+    result.save(buffer, format="JPEG", quality=88)
+    return buffer.getvalue()

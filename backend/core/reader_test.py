@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import base64
 import io
+import re
 
 import requests
 from PIL import Image, ImageDraw
 
-from . import credential_settings, readers
+from . import credential_settings, library_ai_settings, preferences, readers
 from .provider_catalog import VISION
 
 # 每家看图服务的官方接口地址（读题 worker 用的就是这几个）。
@@ -49,10 +50,31 @@ def _synthetic_image() -> str:
 
 
 def _saved_model(service: str) -> str:
-    # The credential store lives outside Django; credential_settings already
-    # loaded it by path, so reuse that module instead of importing again.
-    configuration = credential_settings.store.load_model_configuration()
+    try:
+        configuration = preferences.load_configuration()
+    except preferences.PreferenceError:
+        configuration = None
     return readers.provider_model(service, configuration)
+
+
+def _extract_response_text(body: object) -> tuple[str, bool]:
+    """从视觉接口返回中提取可见正文，并标记是否因思考/截断导致正文为空。"""
+
+    if not isinstance(body, dict):
+        raise ValueError("invalid response body")
+    choice = body["choices"][0]
+    message = choice["message"]
+    raw_content = message.get("content")
+    if isinstance(raw_content, list):
+        raw_text = "".join(part.get("text", "") for part in raw_content if isinstance(part, dict))
+    elif raw_content is None:
+        raw_text = ""
+    else:
+        raw_text = str(raw_content)
+    cleaned = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.S).strip()
+    has_reasoning = bool(str(message.get("reasoning_content") or "").strip()) or "<think>" in raw_text
+    truncated = choice.get("finish_reason") == "length"
+    return cleaned, (has_reasoning or truncated)
 
 
 def test_reading_connection(service: str) -> dict:
@@ -73,56 +95,87 @@ def test_reading_connection(service: str) -> dict:
         raise ReadingTestError("这家还没有保存密钥，先把密钥填进去保存，再来测。")
 
     model = _saved_model(service)
-    payload = {
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": PROMPT},
-                    {"type": "image_url", "image_url": {"url": _synthetic_image()}},
-                ],
-            }
-        ],
-        "max_tokens": 256,
-    }
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": PROMPT},
+                {"type": "image_url", "image_url": {"url": _synthetic_image()}},
+            ],
+        }
+    ]
+    # 复用正式读题请求构造：为魔搭关闭 enable_thinking、为 MiniMax 关闭 thinking，
+    # 避免思考模型在探测时把输出配额全耗在思维链里而返回空正文。
+    url, payload, optional = readers._request(readers.Engine(service, model), messages, 1024)
+    variants = [payload]
+    if optional:
+        variants.append({k: v for k, v in payload.items() if k not in optional})
+
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    response = None
     try:
-        response = requests.post(
-            SERVICE_URLS[service],
-            json=payload,
-            timeout=(10, 90),
-            allow_redirects=False,
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        )
+        for index, body_payload in enumerate(variants):
+            response = requests.post(url, json=body_payload, timeout=(10, 90), allow_redirects=False, headers=headers)
+            if response.status_code == 400 and index < len(variants) - 1:
+                continue
+            break
     except requests.Timeout:
         return {"ok": False, "model": model, "message": "连不上这家服务商：请求超时了。稍后再试一次，或先看看网络。"}
     except requests.ConnectionError:
         return {"ok": False, "model": model, "message": "连不上这家服务商：网络不通或地址被挡住了。"}
+    except requests.RequestException:
+        return {"ok": False, "model": model, "message": "连接测试请求未能发出：请检查本机网络或密钥格式。"}
 
+    assert response is not None
+    detail = library_ai_settings._upstream_error_detail(response)
     if response.status_code in (401, 403):
+        detail_lower = detail.lower()
+        if "email verification" in detail_lower or "complete your profile" in detail_lower:
+            return {
+                "ok": False,
+                "model": model,
+                "message": f"魔搭账号尚未完成邮箱验证：请先登录魔搭官网完善个人资料并完成邮箱验证，再回来测试（{detail}）。",
+            }
+        if (
+            "bind" in detail_lower and any(tok in detail_lower for tok in ("aliyun", "alibaba", "real"))
+        ) or "实名" in detail:
+            return {
+                "ok": False,
+                "model": model,
+                "message": f"魔搭账号尚未完成阿里云实名绑定：请先在魔搭官网绑定已实名的阿里云账号，再回来测试（{detail}）。",
+            }
+        suffix = f"（{detail}）" if detail else ""
         return {
             "ok": False,
             "model": model,
-            "message": "密钥没通过：这家服务商不认这串密钥（可能复制少了、有多余空格，或已经过期）。",
+            "message": f"密钥没通过：这家服务商不认这串密钥（可能复制少了、有多余空格，或已经过期）{suffix}。",
         }
     if response.status_code == 429:
+        suffix = f"（{detail}）" if detail else ""
         return {
             "ok": False,
             "model": model,
-            "message": "这家服务商现在不接请求：额度用完了，或者请求太频繁。稍后再试。",
+            "message": f"这家服务商现在不接请求：额度用完了，或者请求太频繁{suffix}。稍后再试。",
         }
     if response.status_code >= 400:
+        reason = f"：{detail}" if detail else ""
         return {
             "ok": False,
             "model": model,
-            "message": f"这家服务商拒绝了这次请求（HTTP {response.status_code}）。多半是模型名不对，或这个账号没开通这个模型。",
+            "message": f"这家服务商拒绝了这次请求（HTTP {response.status_code}{reason}）。多半是模型名不对，或这个账号没开通这个模型。",
         }
 
     try:
         body = response.json()
-        text = str(body["choices"][0]["message"]["content"] or "")
+        text, thinking_exhausted = _extract_response_text(body)
     except (ValueError, KeyError, IndexError, TypeError):
         return {"ok": False, "model": model, "message": "服务有回应，但没给出可读的答案。"}
+    if not text and thinking_exhausted:
+        return {
+            "ok": False,
+            "model": model,
+            "message": "服务有回应，但模型在思考过程中未输出正文答案；请检查所选模型是否为纯思考模型或改选非思考版本。",
+        }
     if "2" in text:
         return {
             "ok": True,

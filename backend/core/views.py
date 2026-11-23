@@ -33,6 +33,7 @@ from django.views.decorators.csrf import csrf_exempt
 from PIL import Image
 
 from . import (
+    agent_cutting,
     continue_ai_cut,
     credential_settings,
     cut_guard,
@@ -1144,7 +1145,10 @@ def papers(request):
     if mode not in intake.MODES:
         return _error("请选择自动准备、手工框题、本地文字 PDF 或 MinerU 自动解析")
     cut_only = request.POST.get("cut_only") == "1"
-    if mode == "mineru" and (not readers.configured("mineru") or (not cut_only and not _reading_ready())):
+    scan_only = request.POST.get("scan_only") == "1"
+    if mode == "mineru" and (
+        not readers.configured("mineru") or (not cut_only and not scan_only and not _reading_ready())
+    ):
         return _error(
             "上传新资料需要 MinerU Token，以及一家看图读题的密钥（魔搭有免费的）；"
             "也可以在“设置 → 读题模型”里选“AI 助手读题”，只用 MinerU。"
@@ -1184,6 +1188,8 @@ def papers(request):
     plan = {"schema": 1, "mode": mode, "revision": 0}
     if cut_only:
         plan["cut_only"] = True
+    if scan_only:
+        plan["scan_only"] = True
     paper = Paper(
         filename=filename,
         kind=kind,
@@ -1300,9 +1306,12 @@ def _upload_photos(
     first = Path(uploads[0].name).name
     name = first if len(uploads) == 1 else f"{Path(first).stem} 等 {len(uploads)} 张照片"
     cut_only = request.POST.get("cut_only") == "1"
+    scan_only = request.POST.get("scan_only") == "1"
     plan = {"schema": 1, "mode": parse_mode, "revision": 0}
     if cut_only:
         plan["cut_only"] = True
+    if scan_only:
+        plan["scan_only"] = True
     paper = Paper(
         filename=name[:255],
         kind="image",
@@ -1799,10 +1808,25 @@ def paper_detail(request, paper_id):
         if rejected:
             return rejected
         payload = _body(request)
-        name = _valid_paper_name(payload.get("name") if payload is not None else None)
-        if name is None:
+        if payload is None:
+            return _error("请求内容不正确")
+        has_name = "name" in payload and payload["name"] is not None
+        has_type = "material_type" in payload and payload["material_type"] is not None
+        if not has_name and not has_type:
             return _error("任务名需为 1–255 个字符，且不能包含换行或控制字符")
-        paper, changed = library.rename_paper(paper, name)
+        changed = False
+        if has_name:
+            name = _valid_paper_name(payload.get("name"))
+            if name is None:
+                return _error("任务名需为 1–255 个字符，且不能包含换行或控制字符")
+            paper, renamed = library.rename_paper(paper, name)
+            changed = changed or renamed
+        if has_type:
+            material_type = payload.get("material_type")
+            if material_type not in Paper.MaterialType.values:
+                return _error("资料类型只能是 exam（试卷）或 book（教材）")
+            paper, type_changed = library.set_paper_material_type(paper, material_type)
+            changed = changed or type_changed
         invalidate_paper_detail_cache(paper_id)
         return JsonResponse({"paper": paper_json(paper), "changed": changed})
     if request.method == "DELETE":
@@ -2026,7 +2050,45 @@ def page_preview(request, paper_id, page: int):
     paper = get_object_or_404(Paper, pk=paper_id)
     if page not in {p["page_idx"] for p in paper.pages}:
         raise Http404
-    return _file(PageStore(paper).preview(page), "image/jpeg")
+    preview_path = PageStore(paper).preview(page)
+    if request.GET.get("grid") in {"1", "true"}:
+        if not preview_path.is_file():
+            raise Http404
+        return HttpResponse(imaging.render_grid_overlay(preview_path), content_type="image/jpeg")
+    return _file(preview_path, "image/jpeg")
+
+
+def paper_blocks(request, paper_id):
+    """返回文档的版面块（MinerU 或本地文字层解析结果）及页/结构元信息，供外部助手探查切题方式。"""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    paper = get_object_or_404(Paper, pk=paper_id)
+    page_filter: set[int] | None = None
+    raw_pages = (request.GET.get("pages") or request.GET.get("page") or "").strip()
+    if raw_pages:
+        try:
+            page_filter = {int(item.strip()) for item in raw_pages.split(",") if item.strip()}
+        except ValueError:
+            return _error("页码参数格式不正确")
+    queryset = paper.blocks.all().order_by("page_idx", "seq", "id")
+    if page_filter is not None:
+        queryset = queryset.filter(page_idx__in=page_filter)
+    blocks = []
+    for block in queryset:
+        item = {
+            "seq": block.seq,
+            "type": block.type,
+            "page_idx": block.page_idx,
+            "bbox": block.bbox,
+            "text": block.text,
+        }
+        if block.html:
+            item["html"] = block.html
+            item["table_markdown"] = tables.to_text(block.html)
+        blocks.append(item)
+    return JsonResponse(
+        {"paper": paper_json(paper), "pages": paper.pages, "structure": paper.structure, "blocks": blocks}
+    )
 
 
 @csrf_exempt
@@ -2904,6 +2966,29 @@ def paper_question_layout_undo(request, paper_id, operation_id):
         return _layout_error(error, paper_id)
 
 
+@csrf_exempt
+def paper_agent_cut(request, paper_id):
+    """外部 AI 助手批量切题端口（支持直录双轨与安全重切）。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    paper = get_object_or_404(Paper, pk=paper_id)
+    try:
+        operation, repeated, created_ids, replaced_ids, skipped_protected = agent_cutting.apply_cuts(
+            paper.pk, _body(request)
+        )
+    except question_layout.LayoutError as error:
+        return _layout_error(error, paper.pk)
+    invalidate_paper_detail_cache(paper.pk)
+    response = _layout_response(paper.pk, operation, already_applied=repeated)
+    response["created_ids"] = created_ids
+    response["replaced_ids"] = replaced_ids
+    response["skipped_protected"] = skipped_protected
+    return JsonResponse(response)
+
+
 # ---------------------------------------------------------------- 题卡
 
 
@@ -3053,6 +3138,12 @@ def _apply_text_edit(question: Question, payload: dict, actor: tuple[str, str]) 
             raise ValueError("答案或解析格式不正确")
     if "origin" in payload and (not isinstance(payload["origin"], str) or len(payload["origin"]) > 400):
         raise ValueError("题源格式不正确")
+    if "section" in payload and (
+        not isinstance(payload["section"], str)
+        or len(payload["section"].strip()) > 120
+        or any(ord(c) < 32 for c in payload["section"])
+    ):
+        raise ValueError("章节目录格式不正确（最多 120 字）")
     origin = prose.clean_origin(payload["origin"]) if "origin" in payload else question.origin
     tidied = prose.tidy_fields(
         {
@@ -3071,6 +3162,8 @@ def _apply_text_edit(question: Question, payload: dict, actor: tuple[str, str]) 
     question.answer = tidied["answer"]
     question.analysis = tidied["analysis"]
     question.origin = tidied["origin"]
+    if "section" in payload:
+        question.section = payload["section"].strip()[:120]
     if question.question_type != previous_type and qtypes.decided(question.question_type):
         question.type_locked = True
     question.edited = True
@@ -3282,6 +3375,27 @@ def question_action(request, question_id, action: str):
                 question.origin = origin
                 # 题源进了审批的校验值（组卷时可能印在卷面上）：改了就得重新核对。
                 _clear_approval(question)
+        elif action == "section":
+            if (
+                "section" not in payload
+                or not isinstance(payload["section"], str)
+                or len(payload["section"].strip()) > 120
+                or any(ord(c) < 32 for c in payload["section"])
+            ):
+                return _error("章节目录格式不正确（最多 120 字）")
+            if (
+                actor[0] == "ai"
+                and library.approval_source(question) == "human"
+                and library.approval_is_current(question)
+                and payload.get("force") is not True
+            ):
+                return _error("这道题已由使用者人工通过；需要使用者明确要求修改时才加 --force。", 409)
+            next_section = payload["section"].strip()[:120]
+            if next_section != (question.section or ""):
+                was_current = library.approval_is_current(question)
+                question.section = next_section
+                if was_current:
+                    question.approved_content_hash = library.approval_hash(question)
         elif action == "type":
             # 只改题型（题卡头上的题型下拉、题库里“题型待核对”点进来）。改了题型，
             # 题目内容就变了，和改字一样要重新标记通过。

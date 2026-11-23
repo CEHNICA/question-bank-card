@@ -496,20 +496,20 @@
     .qb-parallelogram-symbol.is-display { display: block; text-align: center; margin-block: 0.3em; }
     .qb-figures { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; margin: 0.6rem 0 0.2rem; }
     .qb-figure { margin: 0; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px; background: #ffffff; }
-    .qb-figure img { display: block; max-width: min(100%, 300px); max-height: 210px; object-fit: contain; cursor: zoom-in; border-radius: 4px; }
+    .qb-figure img { display: block; max-width: min(100%, 300px); max-height: 210px; object-fit: contain; border-radius: 4px; }
     .qb-option .qb-figure { grid-column: 2; }
     .qb-option .qb-figure img { max-height: 140px; }
     .qb-figure-action { display: flex; justify-content: center; margin-top: 4px; font-size: 11px; color: #64748b; }
     .qb-question-images { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
     .qb-question-image { margin: 0; }
-    .qb-question-image img { display: block; max-width: 100%; max-height: 360px; object-fit: contain; cursor: zoom-in; border-radius: 6px; border: 1px solid #e2e8f0; }
+    .qb-question-image img { display: block; max-width: 100%; max-height: 360px; object-fit: contain; border-radius: 6px; border: 1px solid #e2e8f0; }
     .qb-image-error { font-size: 12px; color: #b45309; background: #fffbeb; border: 1px dashed #fcd34d; padding: 6px 8px; border-radius: 6px; }
-    .qb-table-wrap { display: block; max-width: 100%; margin: 0.45rem 0 0.55rem; overflow-x: auto; }
+    .qb-table-wrap { display: block; max-width: 100%; margin: 0.45rem 0 0.55rem; overflow-x: auto; overflow-y: hidden; }
     .qb-table { border-collapse: collapse; margin: 0; white-space: normal; line-height: 1.6; font-size: 13px; }
     .qb-table td, .qb-table th { min-width: 2.4em; height: 2em; padding: 0.25rem 0.65rem; border: 1px solid #cbd5e1; text-align: center; }
     .qb-table th { background: #f8fafc; font-weight: 600; }
     .qb-table .qb-cell-marked, .qb-table mark.qb-mark { background: #fef08a; }
-    .qb-math-display-group { display: inline-block; max-width: 100%; overflow-x: auto; vertical-align: middle; margin: 0.2rem 0; }
+    .qb-math-display-group { display: inline-block; max-width: 100%; overflow-x: auto; overflow-y: hidden; vertical-align: middle; margin: 0.2rem 0; }
     .qb-math-fallback { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #334155; background: #f8fafc; padding: 1px 4px; border-radius: 3px; }
     .qb-nobr { white-space: nowrap; }
     .qb-choice-answer { font-weight: 700; color: #047857; letter-spacing: 0.04em; }
@@ -586,9 +586,13 @@
     .eagle-chrome .text-\[10px\] { font-size: 12px !important; }
     .eagle-chrome .text-\[11px\] { font-size: 12.5px !important; }
     .eagle-chrome .text-xs { font-size: 13px !important; }
+    /* NOTE: 外层使用 overflow-x-auto 时，若不显式限制 overflow-y，CSS 会按规范将 overflow-y 计算为 auto，
+       导致 KaTeX 分数/上下标仅高出行框 1-2px 时就在卡片内部长出多余的纵向滚动条；上下留出少量内边距防止裁切。 */
     .eagle-q-stem {
       font-size: 13.5px;
       line-height: 1.7;
+      overflow-y: hidden;
+      padding-block: 4px;
     }
 
     /* ---- Eagle 工作台视觉精修（三栏顶栏齐平、收起导轨、空状态与题卡层次） ---- */
@@ -1322,23 +1326,8 @@
 
       <div id="inspectorBody" class="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
         
-        <!-- 0. Eagle 风格：题目身份证定位 + 题目名称 + 添加注释 + http:// 外部链接 + 所属文件夹（仅单题模式显示） -->
+        <!-- 0. Eagle 风格：题目名称 + 添加注释 + http:// 外部链接 + 所属文件夹（仅单题模式显示） -->
         <div id="inspectorEagleTopMeta" class="space-y-2 pb-3 border-b border-slate-100">
-          <!-- 题目身份证：一键复制完整定位串发给 AI Agent -->
-          <div id="inspectorLocatorRow" class="flex items-center justify-between gap-1.5 rounded-md bg-slate-50 border border-slate-200/80 px-2 py-1">
-            <div class="flex items-center gap-1.5 min-w-0">
-              <span class="text-[11px] shrink-0" aria-hidden="true">🪪</span>
-              <code id="inspectorLocatorCode" class="text-[11px] font-mono font-semibold text-slate-700 truncate">Q-</code>
-            </div>
-            <button
-              id="btnCopyInspectorLocator"
-              type="button"
-              onclick="copyQuestionLocator(currentActiveQuestionId)"
-              class="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-700 text-[10px] font-medium text-slate-600 cursor-pointer transition-colors"
-              title="复制题目定位码与来源发给 AI Agent"
-            >📋 复制给 AI</button>
-          </div>
-
           <!-- 题目名称（赋予每道题独立的对象名字） -->
           <div class="relative flex items-center">
             <input
@@ -1455,6 +1444,39 @@
         <div id="questionMetaCard" class="space-y-2 pt-2 border-t border-slate-100 text-[11px]">
           <span class="font-bold text-slate-700 uppercase tracking-wider text-[10px]">考题属性</span>
           <div class="space-y-1.5 text-slate-600 bg-slate-50/70 p-2.5 rounded-lg border border-slate-100">
+            <!-- 题目身份证：一键复制完整定位串发给 AI Agent -->
+            <div id="inspectorLocatorRow" class="flex justify-between items-center py-0.5 gap-2">
+              <span class="text-slate-400 shrink-0" title="题目唯一身份证定位码，点击右侧按钮可复制完整定位信息发给 AI Agent">题目 ID:</span>
+              <div class="flex items-center gap-1.5 min-w-0">
+                <code id="inspectorLocatorCode" class="text-[11px] font-mono font-semibold text-slate-700 truncate">Q-</code>
+                <button
+                  id="btnCopyInspectorLocator"
+                  type="button"
+                  onclick="copyQuestionLocator(currentActiveQuestionId)"
+                  class="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-700 text-[10px] font-medium text-slate-600 cursor-pointer transition-colors"
+                  title="复制题目定位码与来源发给 AI Agent"
+                >📋 复制</button>
+              </div>
+            </div>
+            <!-- 题目来源资料名称 -->
+            <div id="inspectorSourceRow" class="flex justify-between items-center py-0.5 gap-2">
+              <span class="text-slate-400 shrink-0">来源:</span>
+              <span id="inspectorSourceText" class="text-[11px] font-medium text-slate-700 truncate text-right" title="">—</span>
+            </div>
+            <!-- 原卷页码位置与核验证据入口 -->
+            <div id="inspectorPositionRow" class="flex justify-between items-center py-0.5 gap-2">
+              <span class="text-slate-400 shrink-0">原卷位置:</span>
+              <div class="flex items-center gap-1.5 min-w-0">
+                <span id="inspectorPositionText" class="text-[11px] font-mono text-slate-700 truncate">—</span>
+                <button
+                  id="btnInspectorEvidence"
+                  type="button"
+                  onclick="openCurrentQuestionEvidence()"
+                  class="qc-evidence-btn shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200/80 hover:bg-emerald-100 text-[10px] font-medium text-emerald-700 cursor-pointer transition-colors"
+                  title="查看该题所属试卷原卷高分辨率扫描裁片与定位选框"
+                ><span>📄</span><span>核验证据</span></button>
+              </div>
+            </div>
             <div class="flex justify-between items-center py-0.5">
               <span class="text-slate-400" title="点击右侧星星为题目打分，再次点击当前星级可取消评分">评分:</span>
               <div id="metaDifficultyStars" class="flex items-center gap-0.5 select-none" role="group" aria-label="评分调节" title="点击调节题目评分 (1~5★，再次点击当前星级可取消)">
@@ -3004,8 +3026,184 @@
 
 
     let currentPaperSort = localStorage.getItem('paper_sort_mode') || 'time_desc';
+    const FOLDER_SORT_MODES_STORAGE_KEY = 'folder_sort_modes_v1';
+    const VALID_FOLDER_SORT_MODES = new Set(['time_desc', 'time_asc', 'name', 'count_desc']);
+
+    /**
+     * 读取按文件夹记录的子文件夹排序偏好
+     * @returns {Record<string, string>} 文件夹节点 ID 到排序模式的映射
+     */
+    function readFolderSortModes() {
+      try {
+        const raw = localStorage.getItem(FOLDER_SORT_MODES_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+        const clean = {};
+        Object.entries(parsed).forEach(([key, val]) => {
+          if (key && VALID_FOLDER_SORT_MODES.has(val)) clean[String(key)] = val;
+        });
+        return clean;
+      } catch (e) {
+        return {};
+      }
+    }
+
+    /**
+     * 保存按文件夹记录的子文件夹排序偏好
+     * @param {Record<string, string>} map 排序映射表
+     */
+    function writeFolderSortModes(map) {
+      try {
+        localStorage.setItem(FOLDER_SORT_MODES_STORAGE_KEY, JSON.stringify(map || {}));
+      } catch (e) {}
+      if (typeof scheduleFoldersSync === 'function') scheduleFoldersSync();
+    }
+
+    let folderSortModes = readFolderSortModes();
+    let libraryFoldersRevision = 0;
+    let _suppressFoldersSync = false;
+    let _foldersSyncTimer = null;
+
+    function applyServerFoldersState(data) {
+      if (!data || typeof data !== 'object') return false;
+      const nextRev = Number(data.revision) || 0;
+      _suppressFoldersSync = true;
+      try {
+        if (Array.isArray(data.user_folders)) {
+          localStorage.setItem(USER_FOLDERS_STORAGE_KEY, JSON.stringify(data.user_folders));
+        }
+        if (data.doc_overrides && typeof data.doc_overrides === 'object') {
+          localStorage.setItem(EAGLE_DOC_FOLDER_OVERRIDES_KEY, JSON.stringify(data.doc_overrides));
+        }
+        if (Array.isArray(data.smart_folders)) {
+          localStorage.setItem(CUSTOM_SMART_FOLDERS_STORAGE_KEY, JSON.stringify(data.smart_folders));
+        }
+        if (data.sort_modes && typeof data.sort_modes === 'object') {
+          localStorage.setItem(FOLDER_SORT_MODES_STORAGE_KEY, JSON.stringify(data.sort_modes));
+          folderSortModes = readFolderSortModes();
+        }
+        if (typeof data.paper_sort_mode === 'string' && VALID_FOLDER_SORT_MODES.has(data.paper_sort_mode)) {
+          currentPaperSort = data.paper_sort_mode;
+          localStorage.setItem('paper_sort_mode', currentPaperSort);
+        }
+        libraryFoldersRevision = nextRev;
+      } catch (e) {
+      } finally {
+        _suppressFoldersSync = false;
+      }
+      return true;
+    }
+
+    function scheduleFoldersSync() {
+      if (_suppressFoldersSync || typeof fetch !== 'function') return;
+      clearTimeout(_foldersSyncTimer);
+      _foldersSyncTimer = setTimeout(() => { void syncFoldersToServer(); }, 180);
+    }
+
+    async function syncFoldersToServer() {
+      if (_suppressFoldersSync || typeof fetch !== 'function') return;
+      try {
+        const res = await fetch(`${API_BASE}/api/library/folders`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-QB-Request': '1',
+            'Referer': window.location.href
+          },
+          body: JSON.stringify({
+            action: 'sync',
+            revision: libraryFoldersRevision,
+            user_folders: typeof readUserFolders === 'function' ? readUserFolders() : [],
+            doc_overrides: typeof readDocFolderOverrides === 'function' ? readDocFolderOverrides() : {},
+            smart_folders: typeof readCustomSmartFolders === 'function' ? readCustomSmartFolders() : [],
+            sort_modes: readFolderSortModes(),
+            paper_sort_mode: currentPaperSort
+          })
+        });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (!data) return;
+        if (data.stale) {
+          applyServerFoldersState(data);
+          renderFolderTree();
+          sortAndRenderPapers(currentPaperSort);
+          renderRightInspector();
+          applyFilters();
+        } else if (typeof data.revision === 'number') {
+          libraryFoldersRevision = data.revision;
+        }
+      } catch (e) {}
+    }
+
+    async function loadFoldersFromServer({ rerender = true } = {}) {
+      if (typeof fetch !== 'function') return false;
+      try {
+        const res = await fetch(`${API_BASE}/api/library/folders?tree=0`, {
+          headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
+          cache: 'no-store'
+        });
+        if (!res.ok) return false;
+        const data = await res.json().catch(() => null);
+        if (!data) return false;
+        const serverRev = Number(data.revision) || 0;
+        if (serverRev > 0) {
+          const changed = serverRev !== libraryFoldersRevision;
+          applyServerFoldersState(data);
+          if (changed && rerender) {
+            renderFolderTree();
+            sortAndRenderPapers(currentPaperSort);
+            renderRightInspector();
+            applyFilters();
+          }
+          return changed;
+        }
+        // 后端尚未初始化而本地已有文件夹/排序时，自动上行迁移
+        const hasLocal = (typeof readUserFolders === 'function' && readUserFolders().length > 0)
+          || (typeof readCustomSmartFolders === 'function' && readCustomSmartFolders().length > 0)
+          || Object.keys(readFolderSortModes()).length > 0
+          || (typeof readDocFolderOverrides === 'function' && Object.keys(readDocFolderOverrides()).length > 0)
+          || currentPaperSort !== 'time_desc';
+        if (hasLocal) {
+          await syncFoldersToServer();
+        }
+      } catch (e) {}
+      return false;
+    }
+
+    /**
+     * 获取指定文件夹显式设置的排序方式（不含继承）
+     * @param {string|null} nodeId 树节点 ID
+     * @returns {string|null} 排序模式或 null
+     */
+    function getExplicitFolderSortMode(nodeId) {
+      if (!nodeId) return null;
+      const mode = folderSortModes[String(nodeId)];
+      return VALID_FOLDER_SORT_MODES.has(mode) ? mode : null;
+    }
+
+    /**
+     * 解析指定文件夹生效的排序方式（自身优先，其次沿父级向上继承，最终回退全局）
+     * @param {string|null} nodeId 树节点 ID
+     * @param {string} [fallbackMode] 回退排序模式
+     * @returns {string} 生效的排序模式
+     */
+    function resolveFolderSortMode(nodeId, fallbackMode = currentPaperSort) {
+      let cursor = nodeId ? String(nodeId) : null;
+      const visited = new Set();
+      while (cursor && !visited.has(cursor)) {
+        visited.add(cursor);
+        const explicit = getExplicitFolderSortMode(cursor);
+        if (explicit) return explicit;
+        cursor = (typeof folderParentRegistry !== 'undefined' && folderParentRegistry.has(cursor))
+          ? folderParentRegistry.get(cursor)
+          : null;
+      }
+      return VALID_FOLDER_SORT_MODES.has(fallbackMode) ? fallbackMode : currentPaperSort;
+    }
+
     let isPaperSectionCollapsed = localStorage.getItem('paper_section_collapsed') === 'true';
     let activeContextMenuPaperId = null;
+    let activeContextMenuSortTargetId = null;
 
     // 题目编辑与审题状态
     let activeEditingQuestionId = null;
@@ -3027,10 +3225,12 @@
       errorColor: '#dc2626',
       strict: false,
       trust: true,
-      macros: {
+      macros: Object.assign({
         "\\parallel": "\\mathrel{/\\mkern-6mu/}",
-        "\\nparallel": "\\mathrel{/\\mkern-6mu/\\mkern-11mu\\backslash}"
-      }
+        "\\nparallel": "\\mathrel{/\\mkern-6mu/\\mkern-11mu\\backslash}",
+        "\\wideparen": "\\overgroup",
+        "\\overparen": "\\overgroup"
+      }, (window.QBRender && window.QBRender.KATEX_MACROS) || {})
     };
 
     /**
@@ -3070,14 +3270,23 @@
       while ((node = walker.nextNode())) textNodes.push(node);
       textNodes.forEach((textNode) => {
         const value = textNode.nodeValue;
-        if (!value || !/[∥⊥∠≤≥≠≈≡≌∽△∵∴]/.test(value)) return;
-        // KaTeX 已经渲染过的（含 MathML 可访问性副本）不能再包一层
+        const hasUnicode = Boolean(value && /[∥⊥∠≤≥≠≈≡≌∽△∵∴]/.test(value));
+        const hasArc = Boolean(value && /\\(?:wide|over)paren\b/.test(value));
+        if (!hasUnicode && !hasArc) return;
+        // KaTeX 已经渲染过的（含 MathML 可访问性副本）不能再改写
         const parent = textNode.parentElement;
         if (parent && parent.closest && parent.closest('.katex')) return;
-        textNode.nodeValue = value.replace(
-          /[∥⊥∠≤≥≠≈≡≌∽△∵∴]/g,
-          (ch) => `$${MATH_UNICODE_TO_LATEX[ch]}$`
-        );
+        let nextValue = value;
+        if (hasArc && window.QBRender && typeof window.QBRender.normalizeArcInMathText === 'function') {
+          nextValue = window.QBRender.normalizeArcInMathText(nextValue);
+        }
+        if (hasUnicode) {
+          nextValue = nextValue.replace(
+            /[∥⊥∠≤≥≠≈≡≌∽△∵∴]/g,
+            (ch) => `$${MATH_UNICODE_TO_LATEX[ch]}$`
+          );
+        }
+        if (nextValue !== value) textNode.nodeValue = nextValue;
       });
     }
 
@@ -3431,7 +3640,10 @@
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) armDeepLinkPollingFromFocus();
       });
-      window.addEventListener('focus', armDeepLinkPollingFromFocus);
+      window.addEventListener('focus', () => {
+        armDeepLinkPollingFromFocus();
+        if (typeof loadFoldersFromServer === 'function') void loadFoldersFromServer();
+      });
       bindTagAutocomplete();
       updatePaperSectionCollapseUI();
       renderFolderTree();
@@ -3691,7 +3903,7 @@
           const safeUrl = escapeHtml(imgUrl);
           return `
             <div class="my-2 text-left">
-              <img src="${safeUrl}" alt="原图题第 ${imgIdx + 1} 段" loading="lazy" onclick="event.stopPropagation(); previewImageModal('${safeUrl}', '第 ${qNum} 题 原卷裁片')" title="点击放大查看高清原图" class="max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs cursor-zoom-in hover:shadow-xs transition-shadow" />
+              <img src="${safeUrl}" alt="原图题第 ${imgIdx + 1} 段" loading="lazy" class="max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs" />
             </div>
           `;
         }).join('');
@@ -3700,7 +3912,7 @@
           const imgUrl = (f.url && f.url.startsWith('/') && API_BASE) ? (API_BASE + f.url) : (f.url || '');
           return `
             <div class="my-3 text-right">
-              <img src="${imgUrl}" alt="第 ${qNum} 题配图" class="max-h-56 max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs cursor-zoom-in" onclick="event.stopPropagation(); previewImageModal('${imgUrl}', '第 ${qNum} 题 配图')" />
+              <img src="${imgUrl}" alt="第 ${qNum} 题配图" class="max-h-56 max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs" />
             </div>
           `;
         }).join('');
@@ -3827,7 +4039,7 @@
         formattedStem += stemFigures.map(f => {
           const imgUrl = (f.url && f.url.startsWith('/') && API_BASE) ? (API_BASE + f.url) : (f.url || f.file || '');
           if (!imgUrl) return '';
-          return `<div class="my-3 text-right"><img src="${imgUrl}" alt="第 ${qNum} 题配图" class="max-h-56 max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs cursor-zoom-in hover:shadow-xs transition-shadow" onclick="event.stopPropagation(); previewImageModal('${imgUrl}', '第 ${qNum} 题 题干配图')" title="点击查看高分辨率原图" /></div>`;
+          return `<div class="my-3 text-right"><img src="${imgUrl}" alt="第 ${qNum} 题配图" class="max-h-56 max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs" /></div>`;
         }).join('');
       }
       // 原图题的正文：把原卷裁片逐段贴出来。裁片本身就是题目，缺了它卡片就是空的。
@@ -3837,7 +4049,7 @@
           if (!imgUrl) return '';
           const pageHint = Number.isInteger(img.page_idx) ? ` · 原卷第 ${img.page_idx + 1} 页` : '';
           const safeUrl = escapeHtml(imgUrl);
-          return `<div class="my-2 text-left"><img src="${safeUrl}" alt="原图题第 ${idx + 1} 段${escapeHtml(pageHint)}" loading="lazy" onclick="event.stopPropagation(); previewImageModal('${safeUrl}', '第 ${qNum} 题 原卷裁片')" title="点击放大查看高清原图" class="max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs cursor-zoom-in hover:shadow-xs transition-shadow" /></div>`;
+          return `<div class="my-2 text-left"><img src="${safeUrl}" alt="原图题第 ${idx + 1} 段${escapeHtml(pageHint)}" loading="lazy" class="max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs" /></div>`;
         }).join('');
       }
       const optionsHtml = renderAdaptiveOptionsHtml(rawOptions, optionFiguresMap, qNum);
@@ -4013,6 +4225,8 @@
             headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
           })
         ]);
+        await loadFoldersFromServer({ rerender: false });
+        void loadPersonalTagGroups();
 
         // 1. 处理入库项目 (Papers)
         if (papersRes.ok) {
@@ -4287,6 +4501,8 @@
       updateSmartFolderCounts();
       updateFavoritesBadge();
       updateBatchActionBar();
+      renderFolderTree();
+      renderRightInspector();
       const sentinel = document.getElementById('chunkSentinel');
       if (sentinel) {
         if (libraryLoadIncomplete) {
@@ -4352,9 +4568,7 @@
                   <img 
                     src="${imgUrl}" 
                     alt="选项 ${escapeHtml(k)} 配图" 
-                    class="max-h-36 max-w-full object-contain cursor-zoom-in transition-transform duration-200 group-hover/opt:scale-105" 
-                    onclick="event.stopPropagation(); previewImageModal('${imgUrl}', '第 ${qNum} 题 选项 ${escapeHtml(k)} 配图')" 
-                    title="点击查看大图" 
+                    class="max-h-36 max-w-full object-contain" 
                   />
                 </div>
               ` : ''}
@@ -4432,6 +4646,10 @@
       if (!menuEl) return;
 
       const targetPaper = paperId ? papersData.find(p => p.id === paperId) : null;
+      const treeNodeId = (source === 'tree' && targetPaper)
+        ? ((targetPaper.materialType === 'book' ? 'book:' : 'paper:') + targetPaper.id)
+        : null;
+      activeContextMenuSortTargetId = treeNodeId ? resolveContextSortTargetId(treeNodeId) : null;
 
       // 排序与次要动作收进悬停飞出，主菜单只留高频项。
       let menuHtml = treeSortMenuBlock();
@@ -4444,6 +4662,7 @@
           itemsHtml: [
             treeMenuItem('📋', '复制项目完整名称', `copyPaperNameToClipboard('${targetPaper.id}'); hideEagleContextMenu();`),
             treeMenuItem('🔍', `仅查看该项目的试题 (${targetPaper.total} 题)`, `filterByPaper('${targetPaper.id}'); hideEagleContextMenu();`),
+            treeMenuItem('🔄', targetPaper.materialType === 'book' ? '转为「试卷」文件夹' : '转为「教材版本」文件夹', `togglePaperMaterialType('${targetPaper.id}'); hideEagleContextMenu();`),
             treeMenuItem('➕', '在此文件夹下新建子文件夹', `createUserFolder('${parentKey}')`)
           ].join('')
         });
@@ -4469,6 +4688,7 @@
       const menuEl = document.getElementById('eagleContextMenu');
       if (menuEl) menuEl.classList.add('hidden');
       activeContextMenuPaperId = null;
+      activeContextMenuSortTargetId = null;
     }
 
     function positionEagleContextMenu(menuEl, e, fallbackWidth = 240, fallbackHeight = 420) {
@@ -5517,21 +5737,115 @@
       );
     }
 
-    function treeSortMenuBlock() {
+    function treeSortModeOptions() {
+      return [
+        ['time_desc', '\u{1F552}', '按创建时间 (新\u2192旧)'],
+        ['time_asc', '\u{1F4C5}', '按创建时间 (旧\u2192新)'],
+        ['name', '\u{1F520}', '按名称升序 (A-Z)'],
+        ['count_desc', '\u{1F4CA}', '按包含试题数 (多到少)']
+      ];
+    }
+
+    /**
+     * 判断指定树节点是否处于教材默认章节序（未显式覆写排序模式）
+     * @param {string|null} targetNodeId 排序目标节点 ID
+     * @returns {boolean} 是否为教材默认章节序
+     */
+    function isBookNaturalSortDefault(targetNodeId) {
+      if (!targetNodeId) return false;
+      const id = String(targetNodeId);
+      if (!id.startsWith('book:') && !id.startsWith('bookchap:')) return false;
+      if (getExplicitFolderSortMode(id)) return false;
+      if (id.startsWith('bookchap:')) {
+        const parts = id.split(':');
+        if (parts[1] && getExplicitFolderSortMode('book:' + parts[1])) return false;
+      }
+      return true;
+    }
+
+    /**
+     * 根据右键点击的树节点解析实际排序目标（有子项则排自身子文件夹，叶节点则排所在父容器）
+     * @param {string|null} nodeId 被右键点击的节点 ID
+     * @returns {string|null} 目标容器节点 ID；null 表示全局默认
+     */
+    function resolveContextSortTargetId(nodeId) {
+      if (!nodeId) return null;
+      const node = folderNodeRegistry.get(nodeId);
+      if (!node) return null;
+      if (node.type === 'section' || node.type === 'group' || node.type === 'bookchapter') {
+        return node.id;
+      }
+      if (node.type === 'booksection') {
+        return (typeof folderParentRegistry !== 'undefined' && folderParentRegistry.get(node.id)) || null;
+      }
+      if (
+        node.type === 'paper' ||
+        node.type === 'book' ||
+        node.type === 'userfolder' ||
+        node.type === 'tag' ||
+        node.type === 'custom'
+      ) {
+        if (Array.isArray(node.children) && node.children.length > 0) return node.id;
+        return (typeof folderParentRegistry !== 'undefined' && folderParentRegistry.get(node.id)) || null;
+      }
+      return null;
+    }
+
+    function treeSortCurrentLabel(targetNodeId = activeContextMenuSortTargetId) {
+      if (isBookNaturalSortDefault(targetNodeId)) return '默认章节序';
+      const activeMode = targetNodeId ? resolveFolderSortMode(targetNodeId) : currentPaperSort;
+      const hit = treeSortModeOptions().find(([mode]) => mode === activeMode);
+      return hit ? hit[2] : '排序方式';
+    }
+
+    function eagleMenuFlyout({ icon, title, current, itemsHtml }) {
+      // 全站右键共用：主菜单只留一行，选项悬停再飞出。
+      return (
+        '<div class="eagle-menu-flyout-host" data-ctx-flyout="1" onmouseenter="orientEagleMenuFlyout(this)">' +
+          '<div class="eagle-menu-flyout-trigger" tabindex="0" data-ctx-item="1">' +
+            '<div class="flex items-center gap-2 min-w-0">' +
+              (icon ? `<span class="shrink-0">${icon}</span>` : '') +
+              `<span class="truncate">${escapeHtml(title || '')}</span>` +
+            '</div>' +
+            '<span class="flex items-center gap-1 shrink-0 text-[10px] text-slate-400">' +
+              (current ? `<span class="max-w-[7.5rem] truncate">${escapeHtml(current)}</span>` : '') +
+              '<span aria-hidden="true">\u25B8</span>' +
+            '</span>' +
+          '</div>' +
+          `<div class="eagle-menu-flyout space-y-0.5">${itemsHtml || ''}</div>` +
+        '</div>'
+      );
+    }
+
+    function treeSortMenuBlock(targetNodeId = activeContextMenuSortTargetId) {
       const modes = treeSortModeOptions();
+      const explicit = targetNodeId ? getExplicitFolderSortMode(targetNodeId) : null;
+      const bookNatural = isBookNaturalSortDefault(targetNodeId);
+      const activeMode = bookNatural ? null : (targetNodeId ? resolveFolderSortMode(targetNodeId) : currentPaperSort);
+      const safeTarget = targetNodeId ? escapeInlineJsArg(targetNodeId) : '';
       let itemsHtml = '';
       modes.forEach(([mode, icon, label]) => {
-        const active = currentPaperSort === mode;
+        const active = activeMode === mode;
         const cls = active
           ? 'bg-emerald-50 text-emerald-800 font-semibold'
           : 'text-slate-700 hover:bg-slate-100';
         const check = active ? '<span class="text-emerald-600 font-bold text-xs">\u2713</span>' : '';
-        itemsHtml += `<div data-ctx-item="1" onclick="setPaperSortMode('${mode}')" class="flex items-center justify-between px-2.5 py-1.5 rounded cursor-pointer transition-colors ${cls}"><div class="flex items-center gap-2 min-w-0"><span class="text-xs shrink-0">${icon}</span><span class="truncate">${label}</span></div>${check}</div>`;
+        const clickFn = targetNodeId
+          ? `setFolderSortMode('${safeTarget}', '${mode}')`
+          : `setPaperSortMode('${mode}')`;
+        itemsHtml += `<div data-ctx-item="1" onclick="${clickFn}" class="flex items-center justify-between px-2.5 py-1.5 rounded cursor-pointer transition-colors ${cls}"><div class="flex items-center gap-2 min-w-0"><span class="text-xs shrink-0">${icon}</span><span class="truncate">${label}</span></div>${check}</div>`;
       });
+      if (targetNodeId && explicit) {
+        const resetLabel = (String(targetNodeId).startsWith('book:') || String(targetNodeId).startsWith('bookchap:'))
+          ? '恢复默认章节序'
+          : '跟随全局默认';
+        itemsHtml += treeMenuDivider();
+        itemsHtml += `<div data-ctx-item="1" onclick="clearFolderSortMode('${safeTarget}')" class="flex items-center gap-2 px-2.5 py-1.5 rounded cursor-pointer transition-colors text-slate-600 hover:bg-slate-100"><span class="text-xs shrink-0">↩️</span><span class="truncate">${resetLabel}</span></div>`;
+      }
       return eagleMenuFlyout({
         icon: '\u2195\uFE0F',
         title: '排序方式',
-        current: treeSortCurrentLabel(),
+        current: treeSortCurrentLabel(targetNodeId),
         itemsHtml
       });
     }
@@ -5555,6 +5869,7 @@
       e.stopPropagation();
       const menuEl = document.getElementById('eagleContextMenu');
       if (!menuEl) return;
+      activeContextMenuSortTargetId = null;
       let html = treeMenuHeader('文件夹树');
       html += '<div class="space-y-0.5">';
       html += treeMenuItem('\u{2795}', '新建根文件夹', 'createUserFolder(null)');
@@ -5585,6 +5900,8 @@
 
       const menuEl = document.getElementById('eagleContextMenu');
       if (!menuEl) return;
+
+      activeContextMenuSortTargetId = resolveContextSortTargetId(nodeId);
 
       let html = '';
       if (node.type === 'trash') {
@@ -5624,6 +5941,8 @@
         html += manageFlyout;
         html += treeMenuItem('\u{1F5D1}\u{FE0F}', '删除标签…', "confirmDeleteTreeTag('" + safeTagId + "')");
         html += '</div>';
+        html += treeMenuDivider();
+        html += treeSortMenuBlock();
       } else if (node.type === 'userfolder') {
         const ufDepth = getFolderParentDepth(node.folderId, readUserFolders(), false);
         const moreItems = [];
@@ -5641,6 +5960,8 @@
         html += eagleMenuFlyout({ icon: '\u22EF', title: '更多', itemsHtml: moreItems.join('') });
         html += treeMenuItem('\u{1F5D1}\u{FE0F}', '删除（移入回收站）...', "hideEagleContextMenu(); confirmDeleteUserFolder('" + escapeInlineJsArg(node.folderId) + "')");
         html += '</div>';
+        html += treeMenuDivider();
+        html += treeSortMenuBlock();
       } else if (node.type === 'custom') {
         const csfDepth = getFolderParentDepth(node.customId, readCustomSmartFolders(), true);
         const moreItems = [];
@@ -5659,6 +5980,8 @@
         html += eagleMenuFlyout({ icon: '\u22EF', title: '更多', itemsHtml: moreItems.join('') });
         html += treeMenuItem('\u{1F5D1}\u{FE0F}', '删除（移入回收站）...', "hideEagleContextMenu(); confirmDeleteCustomSmartFolder('" + escapeInlineJsArg(node.customId) + "')");
         html += '</div>';
+        html += treeMenuDivider();
+        html += treeSortMenuBlock();
       } else if (node.type === 'section') {
         const expandKind = node.sectionKind === 'tags' ? 'tags'
           : (node.sectionKind === 'custom' ? 'custom' : 'folders');
@@ -5676,7 +5999,7 @@
         html += treeMenuItem('\u{1F4C2}', expandLabels.expand, 'expandAllFolderNodes()');
         html += treeMenuItem('\u{1F4C1}', expandLabels.collapse, 'collapseAllFolderNodes()');
         html += '</div>';
-        if (node.sectionKind === 'folders' || node.sectionKind === 'papers' || node.sectionKind === 'books' || node.sectionKind === 'tags') {
+        if (node.sectionKind === 'folders' || node.sectionKind === 'papers' || node.sectionKind === 'books' || node.sectionKind === 'tags' || node.sectionKind === 'custom') {
           html += treeMenuDivider();
           html += treeSortMenuBlock();
         }
@@ -5685,6 +6008,24 @@
         html += '<div class="space-y-0.5">';
         html += treeMenuItem('\u{1F441}', '设为当前视图', "applyFolderNode('" + nodeId + "'); hideEagleContextMenu();");
         html += '</div>';
+      } else if (node.type === 'bookchapter') {
+        const safeNodeArg = escapeInlineJsArg(nodeId);
+        html += treeMenuHeader('章节：' + escapeHtml(node.label));
+        html += '<div class="space-y-0.5">';
+        html += treeMenuItem('\u{1F441}', '查看此章节', "applyFolderNode('" + safeNodeArg + "'); hideEagleContextMenu();");
+        html += treeMenuItem('\u{1F4C2}', '展开全部子文件夹', 'expandAllFolderNodes()');
+        html += treeMenuItem('\u{1F4C1}', '收起全部子文件夹', 'collapseAllFolderNodes()');
+        html += '</div>';
+        html += treeMenuDivider();
+        html += treeSortMenuBlock();
+      } else if (node.type === 'booksection') {
+        const safeNodeArg = escapeInlineJsArg(nodeId);
+        html += treeMenuHeader('小节：' + escapeHtml(node.label));
+        html += '<div class="space-y-0.5">';
+        html += treeMenuItem('\u{1F441}', '查看此小节', "applyFolderNode('" + safeNodeArg + "'); hideEagleContextMenu();");
+        html += '</div>';
+        html += treeMenuDivider();
+        html += treeSortMenuBlock();
       } else {
         const groupIsTags = node.id === 'group:knowledge' || node.id === 'group:method';
         const expandLabels = treeExpandCollapseLabels(groupIsTags ? 'tags' : 'folders');
@@ -5729,10 +6070,46 @@
     function setPaperSortMode(mode) {
       currentPaperSort = mode;
       try { localStorage.setItem('paper_sort_mode', mode); } catch (e) {}
+      if (typeof scheduleFoldersSync === 'function') scheduleFoldersSync();
       sortAndRenderPapers(mode);
       renderFolderTree();
       const sel = document.getElementById('treeSortSelect');
       if (sel) sel.value = mode;
+      if (typeof hideEagleContextMenu === 'function') hideEagleContextMenu();
+    }
+
+    /**
+     * 为指定文件夹设置子文件夹排序方式
+     * @param {string|null} targetNodeId 文件夹节点 ID；为空时改全局默认
+     * @param {string} mode 排序模式
+     */
+    function setFolderSortMode(targetNodeId, mode) {
+      if (!targetNodeId) {
+        setPaperSortMode(mode);
+        return;
+      }
+      if (!VALID_FOLDER_SORT_MODES.has(mode)) return;
+      folderSortModes[String(targetNodeId)] = mode;
+      writeFolderSortModes(folderSortModes);
+      if (targetNodeId === 'group:papers') {
+        sortAndRenderPapers(mode);
+      }
+      renderFolderTree();
+      if (typeof hideEagleContextMenu === 'function') hideEagleContextMenu();
+    }
+
+    /**
+     * 清除指定文件夹的独立排序设置，恢复继承/默认顺序
+     * @param {string} targetNodeId 文件夹节点 ID
+     */
+    function clearFolderSortMode(targetNodeId) {
+      if (!targetNodeId) return;
+      delete folderSortModes[String(targetNodeId)];
+      writeFolderSortModes(folderSortModes);
+      if (targetNodeId === 'group:papers') {
+        sortAndRenderPapers(currentPaperSort);
+      }
+      renderFolderTree();
       if (typeof hideEagleContextMenu === 'function') hideEagleContextMenu();
     }
 
@@ -5752,8 +6129,37 @@
       }
     }
 
+    async function togglePaperMaterialType(paperId) {
+      const paper = papersData.find(p => p.id === paperId);
+      if (!paper) return;
+      const nextType = (paper.materialType || 'exam') === 'book' ? 'exam' : 'book';
+      try {
+        const res = await fetch(`${API_BASE}/api/papers/${paperId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-QB-Request': '1',
+            'Referer': window.location.href
+          },
+          body: JSON.stringify({ material_type: nextType })
+        });
+        if (!res.ok) {
+          const txt = await res.text();
+          showToast(`切换类型失败：${txt.slice(0, 120)}`, 'error');
+          return;
+        }
+        paper.materialType = nextType;
+        renderFolderTree();
+        sortAndRenderPapers(currentPaperSort);
+        showToast(nextType === 'book' ? '已转为教材版本文件夹' : '已转为试卷文件夹', 'success');
+      } catch (e) {
+        showToast('切换类型失败：' + e.message, 'error');
+      }
+    }
+
     async function refreshPapersData() {
       try {
+        await loadFoldersFromServer({ rerender: false });
         const res = await fetch(`${API_BASE}/api/papers?archived=1&slim=1`, {
           headers: { 'X-QB-Request': '1', 'Referer': window.location.href }
         });
@@ -5774,6 +6180,7 @@
             }));
             updateSmartFolderCounts();
             sortAndRenderPapers(currentPaperSort);
+            renderFolderTree();
             showToast('入库项目数据已刷新', 'success');
           }
         }
@@ -5791,13 +6198,13 @@
       }
 
       if (sortMode === 'time_desc') {
-        list.sort((a, b) => folderCreatedAtMs(b) - folderCreatedAtMs(a) || String(a.name).localeCompare(String(b.name), 'zh-CN'));
+        list.sort((a, b) => folderCreatedAtMs(b) - folderCreatedAtMs(a) || compareNaturalZhLabels(a.name, b.name));
       } else if (sortMode === 'time_asc') {
-        list.sort((a, b) => folderCreatedAtMs(a) - folderCreatedAtMs(b) || String(a.name).localeCompare(String(b.name), 'zh-CN'));
+        list.sort((a, b) => folderCreatedAtMs(a) - folderCreatedAtMs(b) || compareNaturalZhLabels(a.name, b.name));
       } else if (sortMode === 'name') {
-        list.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'));
+        list.sort((a, b) => compareNaturalZhLabels(a.name, b.name));
       } else if (sortMode === 'count_desc') {
-        list.sort((a, b) => (b.published || 0) - (a.published || 0));
+        list.sort((a, b) => (b.published || 0) - (a.published || 0) || compareNaturalZhLabels(a.name, b.name));
       }
 
       const listContainer = document.getElementById('paperProjectsList');
@@ -6162,8 +6569,24 @@
       for (const item of list) {
         if (item.paperId && q.documentId && item.paperId !== q.documentId) continue;
         if (item.kind === 'chapter') {
+          if (item.groupName) {
+            const parts = typeof parseBookSectionParts === 'function' ? parseBookSectionParts(sec) : { isCompound: false };
+            if (parts.isCompound && parts.groupName === item.groupName) return true;
+            continue;
+          }
           if (chapterOfQuestion(q) === item.value) return true;
         } else {
+          if (item.matchMode === 'toc_section') {
+            if (item.chapterNo !== null && item.chapterNo !== undefined && chapterOfQuestion(q) !== item.chapterNo) continue;
+            const tocSec = typeof sectionOfQuestion === 'function' ? sectionOfQuestion(q) : null;
+            if (tocSec === item.value) return true;
+            continue;
+          }
+          if (item.matchMode === 'sub') {
+            const parts = typeof parseBookSectionParts === 'function' ? parseBookSectionParts(sec) : { isCompound: false };
+            if (parts.isCompound && parts.groupName === (item.groupName || '') && parts.subName === item.value) return true;
+            continue;
+          }
           if (sec !== item.value) continue;
           // 同一个小节名可能跨章（「1. 选择题」第4章第5章都有），必须连章号一起比
           if (item.chapterNo !== null && item.chapterNo !== undefined) {
@@ -6569,7 +6992,6 @@
                 class="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 focus:ring-0 cursor-pointer"
               >
               <span class="font-bold text-slate-900 text-sm">${escapeHtml(questionIdentity(q))}</span>
-              ${questionPosition(q) ? `<span class="text-[11px] text-slate-500 font-mono shrink-0 whitespace-nowrap" title="在原卷上的位置">${escapeHtml(questionPosition(q))}</span>` : ''}
               ${qName ? `<span onclick="event.stopPropagation(); focusInspectorNameInput('${q.id}')" class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200/80 font-bold text-xs truncate max-w-[240px] cursor-pointer hover:bg-emerald-100 transition-colors" title="题目名称：${escapeHtml(qName)}（点击可修改）">${escapeHtml(qName)}</span>` : ''}
               <span class="text-slate-300">·</span>
               <span class="text-slate-600 font-medium">${escapeHtml(q.questionType)}</span>
@@ -6598,22 +7020,7 @@
               ` : ''}
             </div>
 
-            <div class="flex items-center gap-2 shrink-0 whitespace-nowrap qc-card-head-right">
-              <button
-                type="button"
-                onclick="event.stopPropagation(); copyQuestionLocator('${q.id}')"
-                class="px-1.5 py-0.5 rounded bg-slate-100/80 hover:bg-emerald-50 border border-slate-200/70 hover:border-emerald-300 text-[10px] font-mono text-slate-500 hover:text-emerald-700 cursor-pointer transition-colors shrink-0"
-                title="点击复制题目身份证定位码，可直接发给 AI Agent"
-              >${escapeHtml(getQuestionShortId(q))}</button>
-              <button 
-                onclick="event.stopPropagation(); openOriginalPaperModal('${q.documentId}', ${q.sourcePageIdx ?? (q.sourcePage ? q.sourcePage - 1 : 0)}, '${escapeHtml(q.source)}', '${q.id}')"
-                class="qc-evidence-btn opacity-0 group-hover:opacity-100 transition-opacity text-[11px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded hover:bg-emerald-100 flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap"
-                title="查看该题所属试卷原卷高分辨率扫描裁片与定位选框"
-              >
-                <span>📄</span><span>核验证据</span>
-              </button>
-              <span class="text-[11px] text-slate-400 font-mono shrink-0 max-w-[200px] truncate text-right cursor-help" title="${escapeHtml(q.source)}">${escapeHtml(q.source)}</span>
-            </div>
+            <div class="flex items-center gap-2 shrink-0 whitespace-nowrap qc-card-head-right"></div>
           </div>
 
           <!-- 题干与选项正文 (KaTeX 排版优雅呈现) -->
@@ -10458,9 +10865,28 @@
         };
       }
       const ch = typeof chapterOfQuestion === 'function' ? chapterOfQuestion(q) : null;
-      const sec = String((q && q.section) || '').trim();
+      const tocSec = typeof sectionOfQuestion === 'function' ? sectionOfQuestion(q) : null;
+      const sec = String(tocSec || (q && q.section) || '').trim();
+      if (ch === null || ch === undefined) {
+        const parts = typeof parseBookSectionParts === 'function' ? parseBookSectionParts(sec) : { isCompound: false };
+        if (parts.isCompound && parts.groupName) {
+          const sub = parts.subName || '';
+          const ck = typeof textbookGroupKey === 'function' ? textbookGroupKey(parts.groupName) : 'none';
+          return {
+            leafLabel: sub ? `${parts.groupName} · ${sub}` : parts.groupName,
+            fullPath: sub
+              ? `教材版本 / ${bookLabel} / ${parts.groupName} / ${sub}`
+              : `教材版本 / ${bookLabel} / ${parts.groupName}`,
+            chapterKey: ck,
+            sectionName: sub,
+            hasSectionNode: Boolean(sub)
+          };
+        }
+      }
       const ck = (ch === null || ch === undefined) ? 'none' : String(ch);
-      const chapLabel = (ch === null || ch === undefined) ? '其他小节' : ('第' + ch + '章');
+      const chapLabel = (ch === null || ch === undefined)
+        ? '其他小节'
+        : ((typeof textbookChapterTitleOf === 'function' && textbookChapterTitleOf(bookDoc, ch)) || ('第' + ch + '章'));
       if (sec) {
         return {
           leafLabel: sec,
@@ -10520,7 +10946,7 @@
       let targetNodeId = bookNodeId;
       if (sectionName) {
         for (const n of folderNodeRegistry.values()) {
-          const nCk = (n.chapterNo === null || n.chapterNo === undefined) ? 'none' : String(n.chapterNo);
+          const nCk = n.chapterKey || ((n.chapterNo === null || n.chapterNo === undefined) ? 'none' : String(n.chapterNo));
           if (
             n.type === 'booksection' &&
             String(n.paperId) === String(bookId) &&
@@ -10642,6 +11068,16 @@
       box.innerHTML = allPills + emptyHint + addBtn;
     }
 
+    function openCurrentQuestionEvidence() {
+      const curr = questionsData.find(q => q.id === currentActiveQuestionId) || questionsData[0];
+      if (!curr || !curr.documentId) {
+        showToast('当前试题暂无关联原卷图片', 'info');
+        return;
+      }
+      const pageIdx = curr.sourcePageIdx ?? (curr.sourcePage ? curr.sourcePage - 1 : 0);
+      openOriginalPaperModal(curr.documentId, pageIdx, curr.source || '原卷查看', curr.id);
+    }
+
     function renderRightInspector() {
       const isBatch = selectedQuestionIds.size > 1;
       const titleEl = document.getElementById('inspectorTitle');
@@ -10680,6 +11116,18 @@
           metaCard?.classList.remove('hidden');
           const locatorCodeEl = document.getElementById('inspectorLocatorCode');
           if (locatorCodeEl) locatorCodeEl.innerText = getQuestionShortId(curr);
+          const sourceTextEl = document.getElementById('inspectorSourceText');
+          if (sourceTextEl) {
+            const srcLabel = String(curr.source || '未命名资料').trim();
+            sourceTextEl.innerText = srcLabel;
+            sourceTextEl.title = srcLabel;
+          }
+          const posTextEl = document.getElementById('inspectorPositionText');
+          if (posTextEl) {
+            const posLabel = questionPosition(curr) || (curr.sourcePage ? `第 ${curr.sourcePage} 页` : '—');
+            posTextEl.innerText = posLabel;
+            posTextEl.title = posLabel;
+          }
           const ann = getQuestionAnnotation(curr.id);
           if (nameInput) nameInput.value = ann.name || '';
           titleEl.innerText = ann.name ? ann.name : '题目属性';
@@ -10694,6 +11142,7 @@
           titleEl.innerText = '题目属性';
           titleEl.title = '题目属性';
           topMetaEl?.classList.add('hidden');
+          metaCard?.classList.add('hidden');
           renderInspectorFolders(null);
           renderInspectorOneNoteBox(null);
         }
@@ -11557,6 +12006,7 @@
       search: ''
     };
     const folderNodeRegistry = new Map();
+    const folderParentRegistry = new Map();
     const USER_FOLDERS_STORAGE_KEY = 'eagle_user_folders_v1';
     const EAGLE_DOC_FOLDER_OVERRIDES_KEY = 'eagle_doc_folder_overrides_v1';
     const CUSTOM_SMART_FOLDERS_STORAGE_KEY = 'eagle_custom_smart_folders';
@@ -11645,10 +12095,14 @@
       };
 
       const questionsReady = Array.isArray(questionsData) && questionsData.length > 0;
-      const build = (t) => {
+      const sectionMode = resolveFolderSortMode('section:tags');
+      const groupMode = getExplicitFolderSortMode('group:' + kind) || sectionMode;
+      const build = (t, parentMode = groupMode) => {
         const tid = String(t.id);
+        const tagMode = getExplicitFolderSortMode('tag:' + tid) || parentMode;
         const kids = sortFolderTreeNodes(
-          (childMap.get(tid) || []).map(build).filter(Boolean)
+          (childMap.get(tid) || []).map(child => build(child, tagMode)).filter(Boolean),
+          tagMode
         );
         const descIds = collectDesc(tid);
         // 目录投影 subtree_count = 点选浏览能刷出的题数；题库已加载时再与本机列表对齐取大，避免投影滞后
@@ -11671,7 +12125,8 @@
         };
       };
       return sortFolderTreeNodes(
-        (childMap.get('__root__') || []).map(build).filter(Boolean)
+        (childMap.get('__root__') || []).map(rootTag => build(rootTag, groupMode)).filter(Boolean),
+        groupMode
       );
     }
 
@@ -12061,21 +12516,107 @@
       }
     }
 
+    const ZH_NUM_DIGITS = {
+      '零': 0, '〇': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4,
+      '五': 5, '六': 6, '七': 7, '八': 8, '九': 9
+    };
+    const ZH_NUM_UNITS = { '十': 10, '百': 100, '千': 1000 };
+
+    /**
+     * 解析常见中文数字（零至九千九百九十九），无法识别时返回 null
+     * @param {string} raw 中文数字串
+     * @returns {number|null} 对应整数或 null
+     */
+    function parseChineseNumeral(raw) {
+      const s = String(raw || '').trim();
+      if (!s) return null;
+      if (s === '零' || s === '〇') return 0;
+      let total = 0;
+      let section = 0;
+      let number = 0;
+      let hasAny = false;
+      for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (Object.prototype.hasOwnProperty.call(ZH_NUM_DIGITS, ch)) {
+          number = ZH_NUM_DIGITS[ch];
+          hasAny = true;
+        } else if (Object.prototype.hasOwnProperty.call(ZH_NUM_UNITS, ch)) {
+          const unit = ZH_NUM_UNITS[ch];
+          hasAny = true;
+          if (number === 0 && unit === 10 && total === 0 && section === 0) {
+            // 处理「十」「十一」这类省略「一」的写法
+            section += unit;
+          } else {
+            section += (number || 1) * unit;
+            number = 0;
+          }
+        } else {
+          return null;
+        }
+      }
+      if (!hasAny) return null;
+      return total + section + number;
+    }
+
+    /**
+     * 将章节/讲次/题型常见中文序号规整为阿拉伯数字，便于自然排序
+     * @param {string} raw 原始标题文本
+     * @returns {string} 规整后的比较文本
+     */
+    function normalizeLabelForNaturalSort(raw) {
+      let s = String(raw || '').trim();
+      if (!s) return '';
+      const toNum = (zh) => {
+        const val = parseChineseNumeral(zh);
+        return val === null ? zh : String(val);
+      };
+      // 1) 第X（第一讲、第十二章、第零节）
+      s = s.replace(/第\s*([零〇一二两三四五六七八九十百千]+)/g, (_, zh) => '第' + toNum(zh));
+      // 2) 括号/句首独立中文序号：（一）、(二)、一、...
+      s = s.replace(/(^|[\s(（【\[])([零〇一二三四五六七八九十百千]+)(?=[、.．:：\s)）】\]])/g, (_, pre, zh) => pre + toNum(zh));
+      // 3) 专题/单元/必修等前缀 + 中文数字（专题一、必修二）
+      s = s.replace(/(选择性必修|必修|选修|专题|单元|模块|部分|篇|章|节|讲|课|卷|册|步|关|例|题|组|类|型|级|轮|期|版)\s*([零〇一二两三四五六七八九十百千]+)/g, (_, kw, zh) => kw + toNum(zh));
+      // 4) 中文数字 + 单位后缀（一讲、十章、二次函数）
+      s = s.replace(/([零〇一二两三四五六七八九十百千]+)(?=(?:讲|章|节|课|篇|单元|部分|册|卷|题|问|步|关|组|类|次))/g, (_, zh) => toNum(zh));
+      // 5) 上/中/下 册/篇/卷
+      s = s.replace(/([上中下])(?=[册篇卷])/g, (_, pos) => (pos === '上' ? '1' : pos === '中' ? '2' : '3'));
+      return s;
+    }
+
+    /**
+     * 中文+数字自然序比较（支持 1 < 2 < 10、1.2 < 1.10、第一讲 < 第二讲 < 第十讲）
+     * @param {string} a 标签 A
+     * @param {string} b 标签 B
+     * @returns {number} 比较结果
+     */
+    function compareNaturalZhLabels(a, b) {
+      const sa = String(a || '').trim();
+      const sb = String(b || '').trim();
+      const isPlaceholder = (txt) => !txt || txt === '（未标注小节）' || txt === '其他小节';
+      const pa = isPlaceholder(sa);
+      const pb = isPlaceholder(sb);
+      if (pa !== pb) return pa ? 1 : -1;
+      const na = normalizeLabelForNaturalSort(sa);
+      const nb = normalizeLabelForNaturalSort(sb);
+      return na.localeCompare(nb, 'zh-CN', { numeric: true, sensitivity: 'base' })
+        || sa.localeCompare(sb, 'zh-CN', { numeric: true });
+    }
+
     /** 试卷 / 教材 / 自建夹共用同一套排序键（时间 / 名称 / 题量）。 */
     function compareFolderTreeNodes(a, b, mode = currentPaperSort) {
       if (mode === 'time_desc') {
         return (b.createdAtMs || 0) - (a.createdAtMs || 0)
-          || String(a.label || '').localeCompare(String(b.label || ''), 'zh-CN');
+          || compareNaturalZhLabels(a.label, b.label);
       }
       if (mode === 'time_asc') {
         return (a.createdAtMs || 0) - (b.createdAtMs || 0)
-          || String(a.label || '').localeCompare(String(b.label || ''), 'zh-CN');
+          || compareNaturalZhLabels(a.label, b.label);
       }
       if (mode === 'count_desc') {
         return (b.count || 0) - (a.count || 0)
-          || String(a.label || '').localeCompare(String(b.label || ''), 'zh-CN');
+          || compareNaturalZhLabels(a.label, b.label);
       }
-      return String(a.label || '').localeCompare(String(b.label || ''), 'zh-CN')
+      return compareNaturalZhLabels(a.label, b.label)
         || (b.createdAtMs || 0) - (a.createdAtMs || 0);
     }
 
@@ -12085,13 +12626,15 @@
       return list;
     }
 
-    function buildPaperTreeNodes() {
+    function buildPaperTreeNodes(inheritedMode = null) {
       const list = papersData.filter(p => (p.published || 0) > 0 && (p.materialType || 'exam') !== 'book');
       const overrides = readDocFolderOverrides();
       const foldersList = readUserFolders();
+      const papersMode = inheritedMode || resolveFolderSortMode('group:papers', resolveFolderSortMode('section:folders'));
       const nodes = list.map(p => {
         const nodeId = 'paper:' + p.id;
-        const attached = buildUserFolderTreeNodesForParent(nodeId);
+        const paperMode = getExplicitFolderSortMode(nodeId) || papersMode;
+        const attached = buildUserFolderTreeNodesForParent(nodeId, paperMode);
         const docSet = collectDocFolderQuestionIds(p.id, overrides, foldersList);
         const ov = overrides[String(p.id)] || { added: [], removed: [] };
         const delta = (Array.isArray(ov.added) ? ov.added.length : 0) - (Array.isArray(ov.removed) ? ov.removed.length : 0);
@@ -12110,7 +12653,7 @@
           children: attached
         };
       });
-      return sortFolderTreeNodes(nodes);
+      return sortFolderTreeNodes(nodes, papersMode);
     }
 
     // ================= 通用嵌套树辅助（循环检测 / 子树收集） =================
@@ -12327,6 +12870,7 @@
 
     function writeDocFolderOverrides(mapObj) {
       try { localStorage.setItem(EAGLE_DOC_FOLDER_OVERRIDES_KEY, JSON.stringify(mapObj || {})); } catch (e) {}
+      if (typeof scheduleFoldersSync === 'function') scheduleFoldersSync();
     }
 
     /**
@@ -12525,6 +13069,7 @@
         }));
         localStorage.setItem(USER_FOLDERS_STORAGE_KEY, JSON.stringify(normalized));
       } catch (e) {}
+      if (typeof scheduleFoldersSync === 'function') scheduleFoldersSync();
     }
 
     /**
@@ -12700,13 +13245,16 @@
       return { byId, childMap };
     }
 
-    function buildUserFolderTreeNodesForParent(parentKey) {
+    function buildUserFolderTreeNodesForParent(parentKey, inheritedMode = null) {
       const list = readUserFolders();
       if (!list.length) return [];
       const { childMap } = buildUserFolderChildMap(list);
-      const build = (item) => {
+      const effectiveParentKey = (!parentKey || parentKey === '__root__') ? 'section:folders' : String(parentKey);
+      const parentMode = inheritedMode || getExplicitFolderSortMode(effectiveParentKey) || resolveFolderSortMode('section:folders');
+      const build = (item, curParentMode = parentMode) => {
         const nodeId = 'userfolder:' + item.id;
-        const kids = sortFolderTreeNodes((childMap.get(item.id) || []).map(build));
+        const folderMode = getExplicitFolderSortMode(nodeId) || curParentMode;
+        const kids = sortFolderTreeNodes((childMap.get(item.id) || []).map(child => build(child, folderMode)), folderMode);
         const memberSet = collectUserFolderQuestionIds(item.id, list);
         const createdAtMs = folderCreatedAtMs(item);
         return {
@@ -12722,11 +13270,11 @@
           children: kids
         };
       };
-      return sortFolderTreeNodes((childMap.get(parentKey || '__root__') || []).map(build));
+      return sortFolderTreeNodes((childMap.get(parentKey || '__root__') || []).map(child => build(child, parentMode)), parentMode);
     }
 
-    function buildUserFolderTreeNodes() {
-      return buildUserFolderTreeNodesForParent('__root__');
+    function buildUserFolderTreeNodes(inheritedMode = null) {
+      return buildUserFolderTreeNodesForParent('__root__', inheritedMode);
     }
 
     // ================= 智能文件夹（多级嵌套 + 实时动态计数） =================
@@ -12749,6 +13297,7 @@
 
     function writeCustomSmartFolders(list) {
       try { localStorage.setItem(CUSTOM_SMART_FOLDERS_STORAGE_KEY, JSON.stringify(list)); } catch (e) {}
+      if (typeof scheduleFoldersSync === 'function') scheduleFoldersSync();
     }
 
     function snapshotCurrentFilter() {
@@ -12862,7 +13411,7 @@
       return true;
     }
 
-    function buildCustomSmartFolderTreeNodes() {
+    function buildCustomSmartFolderTreeNodes(inheritedMode = null) {
       const list = readCustomSmartFolders();
       if (!list.length) return [];
       const byId = new Map(list.map(x => [x.id, x]));
@@ -12872,20 +13421,26 @@
         if (!childMap.has(pid)) childMap.set(pid, []);
         childMap.get(pid).push(item);
       });
-      const build = (item) => {
-        const kids = (childMap.get(item.id) || []).map(build);
+      const sectionMode = inheritedMode || resolveFolderSortMode('section:custom');
+      const build = (item, parentMode = sectionMode) => {
+        const nodeId = 'custom:' + item.id;
+        const customMode = getExplicitFolderSortMode(nodeId) || parentMode;
+        const kids = sortFolderTreeNodes((childMap.get(item.id) || []).map(child => build(child, customMode)), customMode);
+        const createdAtMs = folderCreatedAtMs(item);
         return {
-          id: 'custom:' + item.id,
+          id: nodeId,
           type: 'custom',
           customId: item.id,
           parentId: item.parentId || null,
           label: item.name,
           icon: '🔖',
           count: countQuestionsForFilterSpec(item.filter),
+          createdAtMs,
+          createdLabel: formatFolderCreatedLabel(createdAtMs),
           children: kids
         };
       };
-      return (childMap.get('__root__') || []).map(build);
+      return sortFolderTreeNodes((childMap.get('__root__') || []).map(child => build(child, sectionMode)), sectionMode);
     }
 
     function applyCustomSmartFolder(id) {
@@ -12939,20 +13494,151 @@
       return null;
     }
 
-    // 题目 -> 所属章号（null = 归不進任何章）
+    function textbookGroupKey(label) {
+      const s = String(label || '');
+      let hash = 2166136261;
+      for (let i = 0; i < s.length; i++) {
+        hash ^= s.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+      }
+      return 'g_' + (hash >>> 0).toString(36);
+    }
+
+    // 拆分「节名 · 栏目+单题序号」（例如《高中数学思想方法导引》的「第1节 公式法 · 例题1」），
+    // 并剥离末尾单题号，避免 509 题炸出 509 个一题一夹。
+    function parseBookSectionParts(rawSection) {
+      const raw = String(rawSection || '').trim();
+      const sepIdx = raw.indexOf(' · ');
+      if (sepIdx <= 0) {
+        return { raw, groupName: '', subName: raw, isCompound: false };
+      }
+      const left = raw.slice(0, sepIdx).trim();
+      const rightRaw = raw.slice(sepIdx + 3).trim();
+      const cleanedSub = rightRaw
+        .replace(/\s*(?:第\s*)?[\d０-９]+(?:\s*[-—~～]\s*[\d０-９]+)?\s*$/, '')
+        .replace(/\s*[（(]\s*[\d０-９一二三四五六七八九十]+\s*[)）]\s*$/, '')
+        .trim();
+      return {
+        raw,
+        groupName: left,
+        subName: cleanedSub || rightRaw,
+        isCompound: Boolean(left)
+      };
+    }
+
+    function isCompoundBookQuestions(qs) {
+      return (qs || []).some(q => parseBookSectionParts(q && q.section).isCompound);
+    }
+
+    // 题目 -> 所属章号（null = 归不進任何章）与标准教材目录小节名
     const textbookChapterOf = new Map();
+    const textbookSectionOf = new Map();
+
+    // 人教A版《高中数学必修第一册》完整标准目录与原书页码区间（解决教材 OCR 小节名变成「练习/思考/2. 选择题/步骤长句」导致目录混乱）
+    const PEP_A_COMPULSORY_1_CHAPTERS = {
+      1: '第1章 集合与常用逻辑用语',
+      2: '第2章 一元二次函数、方程和不等式',
+      3: '第3章 函数的概念与性质',
+      4: '第4章 指数函数与对数函数',
+      5: '第5章 三角函数'
+    };
+    const PEP_A_COMPULSORY_1_SECTIONS = [
+      { ch: 1, lo: 1, hi: 13, label: '1.1 集合的概念' },
+      { ch: 1, lo: 14, hi: 16, label: '1.2 集合间的基本关系' },
+      { ch: 1, lo: 17, hi: 21, label: '1.3 集合的基本运算' },
+      { ch: 1, lo: 22, hi: 30, label: '1.4 充分条件与必要条件' },
+      { ch: 1, lo: 31, hi: 39, label: '1.5 全称量词与存在量词' },
+      { ch: 1, lo: 40, hi: 43, label: '本章小结与复习参考题1' },
+      { ch: 2, lo: 44, hi: 50, label: '2.1 等式性质与不等式性质' },
+      { ch: 2, lo: 51, hi: 56, label: '2.2 基本不等式' },
+      { ch: 2, lo: 57, hi: 62, label: '2.3 二次函数与一元二次方程、不等式' },
+      { ch: 2, lo: 63, hi: 66, label: '本章小结与复习参考题2' },
+      { ch: 3, lo: 67, hi: 81, label: '3.1 函数的概念及其表示' },
+      { ch: 3, lo: 82, hi: 94, label: '3.2 函数的基本性质' },
+      { ch: 3, lo: 95, hi: 99, label: '3.3 幂函数' },
+      { ch: 3, lo: 100, hi: 105, label: '3.4 函数的应用（一）' },
+      { ch: 3, lo: 106, hi: 110, label: '本章小结与复习参考题3' },
+      { ch: 4, lo: 111, hi: 117, label: '4.1 指数' },
+      { ch: 4, lo: 118, hi: 127, label: '4.2 指数函数' },
+      { ch: 4, lo: 128, hi: 135, label: '4.3 对数' },
+      { ch: 4, lo: 136, hi: 148, label: '4.4 对数函数' },
+      { ch: 4, lo: 149, hi: 164, label: '4.5 函数的应用（二）' },
+      { ch: 4, lo: 165, hi: 168, label: '本章小结与复习参考题4' },
+      { ch: 4, lo: 169, hi: 173, label: '数学建模 建立函数模型解决实际问题' },
+      { ch: 5, lo: 174, hi: 183, label: '5.1 任意角和弧度制' },
+      { ch: 5, lo: 184, hi: 193, label: '5.2 三角函数的概念' },
+      { ch: 5, lo: 194, hi: 202, label: '5.3 诱导公式' },
+      { ch: 5, lo: 203, hi: 221, label: '5.4 三角函数的图象与性质' },
+      { ch: 5, lo: 222, hi: 237, label: '5.5 三角恒等变换' },
+      { ch: 5, lo: 238, hi: 249, label: '5.6 函数 y=Asin(ωx+φ)' },
+      { ch: 5, lo: 250, hi: 257, label: '5.7 三角函数的应用' },
+      { ch: 5, lo: 258, hi: 320, label: '本章小结与复习参考题5' }
+    ];
+
+    function isPepACompulsory1Book(bookDoc, qs) {
+      if (!bookDoc) return false;
+      const title = parseTextbookTitle(bookDoc.name || bookDoc.filename);
+      const label = String(title.label || '');
+      const raw = String(title.raw || '');
+      const isCompulsory1 = /必修\s*第?\s*(?:一|1)\s*册/.test(label) || /必修\s*第?\s*(?:一|1)\s*册/.test(raw);
+      if (!isCompulsory1) return false;
+      const isEditionB = /[（(\s]B\s*版/.test(raw) || /^B版/.test(label);
+      if (isEditionB) return false;
+      if (/[（(\s]A\s*版/.test(raw) || /^A版/.test(label)) {
+        // 要求存在真实高页码（或全书多章页码分布）才启用原书页码目录映射，避免单页简单测试假数据误走整书区间
+        const maxPg = (qs || []).reduce((mx, q) => Math.max(mx, Number(q.paperPage || q.sourcePage || 0)), 0);
+        return maxPg >= 40;
+      }
+      return false;
+    }
+
+    function textbookChapterTitleOf(bookDoc, ch) {
+      if (ch === null || ch === undefined) return '';
+      if (bookDoc && PEP_A_COMPULSORY_1_CHAPTERS[ch]) {
+        const title = parseTextbookTitle(bookDoc.name || bookDoc.filename);
+        if (/必修\s*第?\s*(?:一|1)\s*册/.test(title.label) && !/^B版/.test(title.label)) {
+          return PEP_A_COMPULSORY_1_CHAPTERS[ch];
+        }
+      }
+      return '第' + ch + '章';
+    }
 
     function chapterOfQuestion(q) {
-      if (textbookChapterOf.has(q.id)) return textbookChapterOf.get(q.id);
+      if (q && textbookChapterOf.has(q.id)) return textbookChapterOf.get(q.id);
+      return null;
+    }
+
+    function sectionOfQuestion(q) {
+      if (q && textbookSectionOf.has(q.id)) return textbookSectionOf.get(q.id);
       return null;
     }
 
     // 按页码区间把每道题落到章里：锚点章节区间互不重叠，区间外的归「其他小节」。
     function assignTextbookChapters() {
       textbookChapterOf.clear();
+      textbookSectionOf.clear();
       papersData.filter(p => (p.materialType || 'exam') === 'book').forEach(p => {
         const qs = questionsData.filter(q => q.documentId === p.id && (p.published || 0) > 0);
         if (!qs.length) return;
+
+        if (isPepACompulsory1Book(p, qs)) {
+          qs.forEach(q => {
+            const pg = (q.paperPage && q.paperPage > 0) ? q.paperPage : (q.sourcePage || 0);
+            let matched = null;
+            for (const entry of PEP_A_COMPULSORY_1_SECTIONS) {
+              if (pg >= entry.lo && pg <= entry.hi) {
+                matched = entry;
+                break;
+              }
+            }
+            if (matched) {
+              textbookChapterOf.set(q.id, matched.ch);
+              textbookSectionOf.set(q.id, matched.label);
+            }
+          });
+          return;
+        }
+
         const pages = qs.map(q => q.paperPage || 0).filter(n => n > 0);
         if (!pages.length) return;
         const minPage = Math.min.apply(null, pages);
@@ -13010,53 +13696,104 @@
       return { label: parts.length ? parts.join(' · ') : raw, raw: raw };
     }
 
-    function buildTextbookTreeNodes() {
+    function buildTextbookTreeNodes(inheritedMode = null) {
       assignTextbookChapters();
       const books = papersData.filter(p => (p.published || 0) > 0 && (p.materialType || 'exam') === 'book');
       const overrides = readDocFolderOverrides();
       const foldersList = readUserFolders();
+      const booksGroupMode = inheritedMode || getExplicitFolderSortMode('group:books') || resolveFolderSortMode('section:folders');
       const nodes = [];
       books.forEach(p => {
         const qs = questionsData.filter(q => isQuestionInDocFolder(q, p.id, overrides));
         const docSet = collectDocFolderQuestionIds(p.id, overrides, foldersList);
         if (!qs.length && !docSet.size) return;
         const title = parseTextbookTitle(p.name || p.filename);
+        const bookNodeId = 'book:' + p.id;
+        const explicitBookMode = getExplicitFolderSortMode(bookNodeId);
+        const docCreatedMs = folderCreatedAtMs(p);
 
-        // 章 -> 小节 -> 题数（章归属按页码锚定算，不是按小节名里的数字）
-        const chapMap = new Map();
-        qs.forEach(q => {
-          const sec = String(q.section || '').trim();
-          const ch = chapterOfQuestion(q);
-          const ck = (ch === null || ch === undefined) ? 'none' : String(ch);
-          if (!chapMap.has(ck)) chapMap.set(ck, new Map());
-          const sm = chapMap.get(ck);
-          sm.set(sec, (sm.get(sec) || 0) + 1);
-        });
+        const hasNumericChapters = qs.some(q => chapterOfQuestion(q) !== null);
+        const useCompoundHierarchy = !hasNumericChapters && isCompoundBookQuestions(qs);
+        let chapNodes = [];
 
-        const chapNodes = [];
-        Array.from(chapMap.keys())
-          .sort((a, b) => (a === 'none' ? 1 : b === 'none' ? -1 : Number(a) - Number(b)))
-          .forEach(ck => {
-            const sm = chapMap.get(ck);
-            const ch = (ck === 'none') ? null : Number(ck);
-            const chapCount = Array.from(sm.values()).reduce((s, n) => s + n, 0);
-            if (!chapCount) return;          // 0 题的章不渲染：点进去是死路
-            const chapLabel = ch === null ? '其他小节' : ('第' + ch + '章');
-            const secNodes = Array.from(sm.entries())
-              .sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0]), 'zh-CN'))
-              .map(([sec, n], idx) => ({
-                id: 'booksec:' + p.id + ':' + ck + ':' + idx,
+        if (useCompoundHierarchy) {
+          // 复合教辅（如《高中数学思想方法导引》）：第一层直接建 72 节，第二层按栏目聚合（例题/变式/巩固练习）
+          const groupMap = new Map();
+          qs.forEach((q, qIdx) => {
+            const parts = parseBookSectionParts(q.section);
+            const groupName = parts.isCompound ? parts.groupName : '';
+            const subName = parts.isCompound ? parts.subName : parts.raw;
+            const ck = groupName ? textbookGroupKey(groupName) : 'none';
+            const pageNo = (q.paperPage && q.paperPage > 0)
+              ? q.paperPage
+              : ((q.sourcePage && q.sourcePage > 0) ? q.sourcePage : Infinity);
+            const numVal = (q.number !== null && q.number !== undefined && q.number !== '' && Number.isFinite(Number(q.number)))
+              ? Number(q.number)
+              : (qIdx + 1);
+            const pubMs = q.publishedAt ? Date.parse(q.publishedAt) : NaN;
+            const qCreatedMs = Number.isFinite(pubMs) ? pubMs : docCreatedMs;
+            if (!groupMap.has(ck)) {
+              groupMap.set(ck, { groupName, minPage: pageNo, minSeq: numVal, subs: new Map() });
+            }
+            const gInfo = groupMap.get(ck);
+            if (pageNo < gInfo.minPage) gInfo.minPage = pageNo;
+            if (numVal < gInfo.minSeq) gInfo.minSeq = numVal;
+            const prevSub = gInfo.subs.get(subName);
+            if (!prevSub) {
+              gInfo.subs.set(subName, { count: 1, minPage: pageNo, minSeq: numVal, maxCreatedMs: qCreatedMs });
+            } else {
+              prevSub.count += 1;
+              if (pageNo < prevSub.minPage) prevSub.minPage = pageNo;
+              if (numVal < prevSub.minSeq) prevSub.minSeq = numVal;
+              if (qCreatedMs > prevSub.maxCreatedMs) prevSub.maxCreatedMs = qCreatedMs;
+            }
+          });
+
+          groupMap.forEach((gInfo, ck) => {
+            const chapCount = Array.from(gInfo.subs.values()).reduce((s, info) => s + info.count, 0);
+            if (!chapCount) return;
+            const chapLabel = gInfo.groupName || '其他小节';
+            const chapNodeId = 'bookchap:' + p.id + ':' + ck;
+            const explicitChapMode = getExplicitFolderSortMode(chapNodeId) || explicitBookMode;
+
+            let secNodes = Array.from(gInfo.subs.entries()).map(([subName, info]) => {
+              const secSlug = subName ? textbookGroupKey(subName).slice(2) : 'empty';
+              const secCreatedMs = info.maxCreatedMs || docCreatedMs;
+              return {
+                id: 'booksec:' + p.id + ':' + ck + ':' + secSlug,
                 type: 'booksection',
-                label: sec || '（未标注小节）',
-                pathLabel: title.label + ' › ' + chapLabel + ' › ' + (sec || '（未标注小节）'),
+                label: subName || '（未标注栏目）',
+                pathLabel: title.label + ' › ' + chapLabel + ' › ' + (subName || '（未标注栏目）'),
                 icon: '📁',
                 paperId: p.id,
-                chapterNo: ch,
-                sectionName: sec,
-                count: n,
+                chapterNo: null,
+                chapterKey: ck,
+                chapterGroupName: gInfo.groupName,
+                sectionName: subName,
+                sectionMatchMode: 'sub',
+                count: info.count,
+                minPage: info.minPage,
+                minSeq: info.minSeq,
+                createdAtMs: secCreatedMs,
+                createdLabel: formatFolderCreatedLabel(secCreatedMs),
                 children: []
-              }));
-            const chapNodeId = 'bookchap:' + p.id + ':' + ck;
+              };
+            });
+
+            if (explicitChapMode) {
+              secNodes = sortFolderTreeNodes(secNodes, explicitChapMode);
+            } else {
+              secNodes.sort((a, b) => {
+                const aEmpty = !a.sectionName;
+                const bEmpty = !b.sectionName;
+                if (aEmpty !== bEmpty) return aEmpty ? 1 : -1;
+                if (a.minPage !== b.minPage) return a.minPage - b.minPage;
+                if (a.minSeq !== b.minSeq) return a.minSeq - b.minSeq;
+                return compareNaturalZhLabels(a.label, b.label);
+              });
+            }
+
+            const chapCreatedMs = secNodes.reduce((mx, s) => Math.max(mx, s.createdAtMs || 0), docCreatedMs);
             chapNodes.push({
               id: chapNodeId,
               type: 'bookchapter',
@@ -13064,20 +13801,135 @@
               pathLabel: title.label + ' › ' + chapLabel,
               icon: folderIconFor(chapNodeId, secNodes.length > 0),
               paperId: p.id,
-              chapterNo: ch,
+              chapterNo: null,
+              chapterKey: ck,
+              chapterGroupName: gInfo.groupName,
               count: chapCount,
+              minPage: gInfo.minPage,
+              minSeq: gInfo.minSeq,
+              createdAtMs: chapCreatedMs,
+              createdLabel: formatFolderCreatedLabel(chapCreatedMs),
               children: secNodes
             });
           });
 
-        const bookNodeId = 'book:' + p.id;
-        const attached = buildUserFolderTreeNodesForParent(bookNodeId);
-        const bookChildren = chapNodes.concat(attached);
+          if (!explicitBookMode) {
+            chapNodes.sort((a, b) => {
+              const aNone = a.chapterKey === 'none';
+              const bNone = b.chapterKey === 'none';
+              if (aNone !== bNone) return aNone ? 1 : -1;
+              if (a.minPage !== b.minPage) return a.minPage - b.minPage;
+              return compareNaturalZhLabels(a.label, b.label);
+            });
+          }
+        } else {
+          // 章 -> 小节 -> 统计元信息（章归属按页码锚定算，小节默认按书内页码与自然序排列）
+          const useTocSections = qs.some(q => sectionOfQuestion(q) !== null);
+          const chapMap = new Map();
+          qs.forEach((q, qIdx) => {
+            const tocSec = useTocSections ? sectionOfQuestion(q) : null;
+            const sec = String(tocSec || q.section || '').trim();
+            const ch = chapterOfQuestion(q);
+            const ck = (ch === null || ch === undefined) ? 'none' : String(ch);
+            if (!chapMap.has(ck)) chapMap.set(ck, new Map());
+            const sm = chapMap.get(ck);
+            const pageNo = (q.paperPage && q.paperPage > 0)
+              ? q.paperPage
+              : ((q.sourcePage && q.sourcePage > 0) ? q.sourcePage : Infinity);
+            const numVal = (q.number !== null && q.number !== undefined && q.number !== '' && Number.isFinite(Number(q.number)))
+              ? Number(q.number)
+              : (qIdx + 1);
+            const pubMs = q.publishedAt ? Date.parse(q.publishedAt) : NaN;
+            const qCreatedMs = Number.isFinite(pubMs) ? pubMs : docCreatedMs;
+            const prev = sm.get(sec);
+            if (!prev) {
+              sm.set(sec, { count: 1, minPage: pageNo, minSeq: numVal, maxCreatedMs: qCreatedMs, isTocSec: Boolean(tocSec) });
+            } else {
+              prev.count += 1;
+              if (pageNo < prev.minPage) prev.minPage = pageNo;
+              if (numVal < prev.minSeq) prev.minSeq = numVal;
+              if (qCreatedMs > prev.maxCreatedMs) prev.maxCreatedMs = qCreatedMs;
+            }
+          });
+
+          Array.from(chapMap.keys())
+            .sort((a, b) => (a === 'none' ? 1 : b === 'none' ? -1 : Number(a) - Number(b)))
+            .forEach(ck => {
+              const sm = chapMap.get(ck);
+              const ch = (ck === 'none') ? null : Number(ck);
+              const chapCount = Array.from(sm.values()).reduce((s, info) => s + info.count, 0);
+              if (!chapCount) return;          // 0 题的章不渲染：点进去是死路
+              const chapLabel = ch === null
+                ? (chapMap.size === 1 ? '目录小节' : '其他小节')
+                : textbookChapterTitleOf(p, ch);
+              const chapNodeId = 'bookchap:' + p.id + ':' + ck;
+              const explicitChapMode = getExplicitFolderSortMode(chapNodeId) || explicitBookMode;
+
+              let secNodes = Array.from(sm.entries()).map(([sec, info]) => {
+                // 生成与排序位置无关的稳定小节 ID，切换排序后选中态不丢失
+                const secSlug = sec ? textbookGroupKey(sec).slice(2) : 'empty';
+                const secCreatedMs = info.maxCreatedMs || docCreatedMs;
+                return {
+                  id: 'booksec:' + p.id + ':' + ck + ':' + secSlug,
+                  type: 'booksection',
+                  label: sec || '（未标注小节）',
+                  pathLabel: title.label + ' › ' + chapLabel + ' › ' + (sec || '（未标注小节）'),
+                  icon: '📁',
+                  paperId: p.id,
+                  chapterNo: ch,
+                  chapterKey: ck,
+                  chapterGroupName: '',
+                  sectionName: sec,
+                  sectionMatchMode: info.isTocSec ? 'toc_section' : 'exact',
+                  count: info.count,
+                  minPage: info.minPage,
+                  minSeq: info.minSeq,
+                  createdAtMs: secCreatedMs,
+                  createdLabel: formatFolderCreatedLabel(secCreatedMs),
+                  children: []
+                };
+              });
+
+              if (explicitChapMode) {
+                secNodes = sortFolderTreeNodes(secNodes, explicitChapMode);
+              } else {
+                secNodes.sort((a, b) => {
+                  const aEmpty = !a.sectionName;
+                  const bEmpty = !b.sectionName;
+                  if (aEmpty !== bEmpty) return aEmpty ? 1 : -1;
+                  if (a.minPage !== b.minPage) return a.minPage - b.minPage;
+                  if (a.minSeq !== b.minSeq) return a.minSeq - b.minSeq;
+                  return compareNaturalZhLabels(a.label, b.label);
+                });
+              }
+
+              const chapCreatedMs = secNodes.reduce((mx, s) => Math.max(mx, s.createdAtMs || 0), docCreatedMs);
+              chapNodes.push({
+                id: chapNodeId,
+                type: 'bookchapter',
+                label: chapLabel,
+                pathLabel: title.label + ' › ' + chapLabel,
+                icon: folderIconFor(chapNodeId, secNodes.length > 0),
+                paperId: p.id,
+                chapterNo: ch,
+                chapterKey: ck,
+                chapterGroupName: '',
+                count: chapCount,
+                createdAtMs: chapCreatedMs,
+                createdLabel: formatFolderCreatedLabel(chapCreatedMs),
+                children: secNodes
+              });
+            });
+        }
+
+        const attached = buildUserFolderTreeNodesForParent(bookNodeId, explicitBookMode || booksGroupMode);
+        const bookChildren = explicitBookMode
+          ? sortFolderTreeNodes(chapNodes.concat(attached), explicitBookMode)
+          : chapNodes.concat(attached);
         const ov = overrides[String(p.id)] || { added: [], removed: [] };
         const delta = (Array.isArray(ov.added) ? ov.added.length : 0) - (Array.isArray(ov.removed) ? ov.removed.length : 0);
         const adjustedPublished = Math.max(0, Number(p.published || qs.length) + delta);
         const count = Math.max(adjustedPublished, docSet.size);
-        const createdAtMs = folderCreatedAtMs(p);
         nodes.push({
           id: bookNodeId,
           type: 'book',
@@ -13086,12 +13938,12 @@
           icon: folderIconFor(bookNodeId, bookChildren.length > 0),
           paperId: p.id,
           count,
-          createdAtMs,
-          createdLabel: formatFolderCreatedLabel(createdAtMs),
+          createdAtMs: docCreatedMs,
+          createdLabel: formatFolderCreatedLabel(docCreatedMs),
           children: bookChildren
         });
       });
-      return sortFolderTreeNodes(nodes);
+      return sortFolderTreeNodes(nodes, booksGroupMode);
     }
 
     function getFolderTreeRoots() {
@@ -13126,6 +13978,7 @@
       const methTagIds = tagCatalogue.filter(t => t.kind === 'method' && t.active !== false).map(t => t.id);
       const knowQuestionCount = countQuestionsForTagIdSet(knowTagIds);
       const methQuestionCount = countQuestionsForTagIdSet(methTagIds);
+      const tagsSectionMode = resolveFolderSortMode('section:tags');
       const tagSectionChildren = sortFolderTreeNodes([
         {
           id: 'group:knowledge',
@@ -13165,7 +14018,7 @@
             children: []
           }]
         }
-      ]);
+      ], tagsSectionMode);
       roots.push({
         id: 'section:tags',
         type: 'section',
@@ -13208,12 +14061,15 @@
       });
 
       // 📁 文件夹（Eagle 统一文件夹分组：自定义文件夹 + 试卷 + 教材版本，均支持建子文件夹/拖放/右键删除）
-      const folderChildren = buildUserFolderTreeNodes().slice();
-      const papers = buildPaperTreeNodes();
-      const paperGroupSubfolders = buildUserFolderTreeNodesForParent('group:papers');
+      const folderSectionMode = resolveFolderSortMode('section:folders');
+      const papersGroupMode = getExplicitFolderSortMode('group:papers') || folderSectionMode;
+      const booksGroupMode = getExplicitFolderSortMode('group:books') || folderSectionMode;
+      const folderChildren = buildUserFolderTreeNodes(folderSectionMode).slice();
+      const papers = buildPaperTreeNodes(papersGroupMode);
+      const paperGroupSubfolders = buildUserFolderTreeNodesForParent('group:papers', papersGroupMode);
       if (papers.length || paperGroupSubfolders.length) {
         // 试卷与挂在「试卷」下的自建夹一起按当前排序键排，避免自建夹永远沉底。
-        const paperKids = sortFolderTreeNodes(papers.concat(paperGroupSubfolders));
+        const paperKids = sortFolderTreeNodes(papers.concat(paperGroupSubfolders), papersGroupMode);
         folderChildren.push({
           id: 'group:papers',
           type: 'group',
@@ -13224,10 +14080,10 @@
         });
       }
 
-      const books = buildTextbookTreeNodes();
-      const bookGroupSubfolders = buildUserFolderTreeNodesForParent('group:books');
+      const books = buildTextbookTreeNodes(booksGroupMode);
+      const bookGroupSubfolders = buildUserFolderTreeNodesForParent('group:books', booksGroupMode);
       if (books.length || bookGroupSubfolders.length) {
-        const bookKids = sortFolderTreeNodes(books.concat(bookGroupSubfolders));
+        const bookKids = sortFolderTreeNodes(books.concat(bookGroupSubfolders), booksGroupMode);
         folderChildren.push({
           id: 'group:books',
           type: 'group',
@@ -13278,8 +14134,9 @@
       return String(val || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     }
 
-    function renderFolderTreeNode(node, depth) {
+    function renderFolderTreeNode(node, depth, parentId = null) {
       folderNodeRegistry.set(node.id, node);
+      folderParentRegistry.set(node.id, parentId);
       const hasKids = !!(node.children && node.children.length);
       const isExpanded = folderTreeState.expanded.has(node.id);
       const isActive = folderTreeState.activeId === node.id;
@@ -13293,7 +14150,7 @@
         else if (node.hintAction === 'create_tag_knowledge') act = "promptCreateTreeTag(null, 'knowledge')";
         else if (node.hintAction === 'create_tag_method') act = "promptCreateTreeTag(null, 'method')";
         else if (node.hintAction === 'create_csf') act = 'saveCurrentAsSmartFolder(null)';
-        return `<div onclick="${act}" class="flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] text-slate-400 hover:text-emerald-700 hover:bg-slate-100/80 cursor-pointer select-none" style="padding-left:${4 + depth * 11}px"><span class="opacity-70">${node.icon}</span><span class="truncate">${escapeHtml(node.label)}</span></div>`;
+        return `<div onclick="${act}" class="flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] text-slate-400 hover:text-emerald-700 hover:bg-slate-100/80 cursor-pointer select-none"><span class="opacity-70">${node.icon}</span><span class="truncate">${escapeHtml(node.label)}</span></div>`;
       }
 
       let selfMatch = !kw || String(node.label).toLowerCase().includes(kw);
@@ -13302,7 +14159,7 @@
         const nextDepth = node.type === 'section' ? depth : depth + 1;
         const kidHtmls = [];
         node.children.forEach(c => {
-          const h = renderFolderTreeNode(c, nextDepth);
+          const h = renderFolderTreeNode(c, nextDepth, node.id);
           if (h) { kidHtmls.push(h); if (c.type !== 'hint') selfMatch = true; }
         });
         if (isExpanded || kw) {
@@ -13346,7 +14203,7 @@
         const badgeCls = isActive
           ? 'text-red-700'
           : (node.count > 0 ? 'text-red-500 font-semibold' : 'text-slate-400');
-        return `<div class="flex items-center justify-between rounded-md px-1.5 py-1 transition-colors cursor-pointer ${trashCls}" style="padding-left:${4 + depth * 11}px" onclick="applyFolderNode('${safeNodeId}')" oncontextmenu="handleFolderTreeContextMenu(event, '${safeNodeId}')">` +
+        return `<div class="flex items-center justify-between rounded-md px-1.5 py-1 transition-colors cursor-pointer ${trashCls}" onclick="applyFolderNode('${safeNodeId}')" oncontextmenu="handleFolderTreeContextMenu(event, '${safeNodeId}')">` +
           `<div class="flex items-center gap-1 min-w-0 flex-1">` +
             `<span class="w-3 inline-block shrink-0"></span>` +
             `<span class="text-[11px] shrink-0">${node.icon}</span>` +
@@ -13400,7 +14257,7 @@
 
       return '<div id="ftree-' + escapeHtml(node.id) + '" class="flex items-center justify-between rounded-md px-1.5 py-1 transition-colors ' +
         activeCls +
-        '" style="padding-left:' + (4 + depth * 11) + 'px"' +
+        '"' +
         dragAttr + dropAttr + timeTip +
         ' oncontextmenu="handleFolderTreeContextMenu(event, \'' + safeNodeId + '\')">' +
         '<div class="flex items-center gap-1 min-w-0 cursor-pointer flex-1" onclick="applyFolderNode(\'' + safeNodeId + '\')"' +
@@ -13421,8 +14278,9 @@
       const container = document.getElementById('folderTreeContainer');
       if (!container) return;
       folderNodeRegistry.clear();
+      folderParentRegistry.clear();
       const roots = getFolderTreeRoots();
-      const html = roots.map(r => renderFolderTreeNode(r, 0)).filter(Boolean).join('');
+      const html = roots.map(r => renderFolderTreeNode(r, 0, null)).filter(Boolean).join('');
       container.innerHTML = html || '<div class="py-2 text-center text-[11px] text-slate-400">没有匹配的文件夹</div>';
       const sel = document.getElementById('treeSortSelect');
       if (sel && sel.value !== currentPaperSort) sel.value = currentPaperSort;
@@ -13845,11 +14703,12 @@
         folderTreeState.expanded.add(nodeId);
         writeExpandedFolderNodes();
       } else if (node.type === 'bookchapter') {
-        // 章：用「章号 + 小节名」两条件筛，不能只挂 paperId（那会把整本教材都放出来）
+        // 章/节：用「章号/节名」筛选，不能只挂 paperId（那会把整本教材都放出来）
         filterState.folderSections = [{
           paperId: node.paperId,
           kind: 'chapter',
-          value: node.chapterNo
+          value: node.chapterNo,
+          groupName: node.chapterGroupName || ''
         }];
         expandFolderAncestors(nodeId);
       } else if (node.type === 'booksection') {
@@ -13857,7 +14716,9 @@
           paperId: node.paperId,
           kind: 'section',
           chapterNo: node.chapterNo,
-          value: node.sectionName
+          groupName: node.chapterGroupName || '',
+          value: node.sectionName,
+          matchMode: node.sectionMatchMode || 'exact'
         }];
         expandFolderAncestors(nodeId);
       } else if (node.type === 'group') {
@@ -15717,12 +16578,99 @@
       if (modal) modal.classList.add('hidden');
     }
 
-    // ---- 标签管理中心：真实目录 ----
+    // ---- 标签管理中心：真实目录与个人分组 ----
     let modalTagGroupKind = 'knowledge';
+    let personalTagGroups = [];
+    let personalTagGroupOps = [];
+
+    async function loadPersonalTagGroups() {
+      if (typeof fetch !== 'function') return;
+      try {
+        const res = await fetch(`${API_BASE}/api/library/tag-groups`, {
+          headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
+          cache: 'no-store'
+        });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (data && Array.isArray(data.groups)) {
+          personalTagGroups = data.groups;
+          personalTagGroupOps = Array.isArray(data.operations) ? data.operations : [];
+        }
+      } catch (e) {}
+    }
+
+    async function mutatePersonalTagGroup(payload) {
+      try {
+        const res = await fetch(`${API_BASE}/api/library/tag-groups`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-QB-Request': '1',
+            'Referer': window.location.href
+          },
+          body: JSON.stringify(payload || {})
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          showToast(data.error || `个人分组操作失败(${res.status})`, 'error');
+          return null;
+        }
+        if (Array.isArray(data.groups)) personalTagGroups = data.groups;
+        if (Array.isArray(data.operations)) personalTagGroupOps = data.operations;
+        renderModalTags();
+        return data;
+      } catch (e) {
+        showToast('个人分组操作失败：' + e.message, 'error');
+        return null;
+      }
+    }
+
+    async function createPersonalTagGroupPrompt() {
+      const name = window.prompt('新建个人分组名称：', '');
+      if (!name || !name.trim()) return;
+      const data = await mutatePersonalTagGroup({ action: 'create_group', name: name.trim() });
+      if (data) showToast(`已新建个人分组「${name.trim()}」`, 'success');
+    }
+
+    async function renamePersonalTagGroupPrompt(groupId, oldName) {
+      const name = window.prompt('重命名个人分组：', oldName || '');
+      if (!name || !name.trim() || name.trim() === oldName) return;
+      const data = await mutatePersonalTagGroup({ action: 'update_group', group_id: groupId, name: name.trim() });
+      if (data) showToast(`已重命名为「${name.trim()}」`, 'success');
+    }
+
+    async function deletePersonalTagGroupPrompt(groupId, name) {
+      if (!window.confirm(`删除个人分组「${name}」？（标签本身与题目标签不会受影响，可撤销）`)) return;
+      const data = await mutatePersonalTagGroup({ action: 'delete_group', group_id: groupId });
+      if (data) showToast(`已删除个人分组「${name}」`, 'info');
+    }
+
+    async function addTagToPersonalGroupPrompt(groupId) {
+      const name = window.prompt('输入要加入此分组的标签完整名称（多个用逗号分隔）：', '');
+      if (!name || !name.trim()) return;
+      const names = name.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+      if (!names.length) return;
+      const data = await mutatePersonalTagGroup({ action: 'add_tags', group_id: groupId, tag_ids: names });
+      if (data) showToast(data.message || '已添加标签到个人分组', 'success');
+    }
+
+    async function removeTagFromPersonalGroup(groupId, tagId) {
+      const data = await mutatePersonalTagGroup({ action: 'remove_tags', group_id: groupId, tag_ids: [tagId] });
+      if (data) showToast('已从个人分组移出标签', 'info');
+    }
+
+    async function undoPersonalTagGroupAction() {
+      const data = await mutatePersonalTagGroup({ action: 'undo' });
+      if (data) showToast(data.message || '已撤销个人分组操作', 'success');
+    }
 
     function setModalTagGroup(kind) {
       modalTagGroupKind = kind;
-      renderModalTags();
+      if (kind === 'personal_groups') {
+        void loadPersonalTagGroups().then(() => renderModalTags());
+      } else {
+        renderModalTags();
+      }
     }
 
     function renderModalTags() {
@@ -15731,21 +16679,59 @@
       if (!navEl || !listEl) return;
 
       const kinds = [
-        { kind: 'knowledge', label: '考点知识' },
-        { kind: 'method', label: '解题方法' },
-        { kind: 'custom', label: '自定义' },
-        { kind: 'legacy', label: '历史遗留' }
+        { kind: 'knowledge', label: '考点知识', count: tagCatalogue.filter(t => t.kind === 'knowledge').length },
+        { kind: 'method', label: '解题方法', count: tagCatalogue.filter(t => t.kind === 'method').length },
+        { kind: 'custom', label: '自定义', count: tagCatalogue.filter(t => t.kind === 'custom').length },
+        { kind: 'legacy', label: '历史遗留', count: tagCatalogue.filter(t => t.kind === 'legacy').length },
+        { kind: 'personal_groups', label: '个人分组', count: personalTagGroups.length }
       ];
       navEl.innerHTML = kinds.map(k => {
-        const n = tagCatalogue.filter(t => t.kind === k.kind).length;
         const active = modalTagGroupKind === k.kind;
         return `<div onclick="setModalTagGroup('${k.kind}')" class="flex items-center justify-between px-2 py-1.5 rounded cursor-pointer transition-colors ${active ? 'bg-emerald-50 text-emerald-900 font-semibold' : 'text-slate-600 hover:bg-slate-100'}">
-          <span>${k.label}</span><span class="font-mono text-[10px] opacity-60">${n}</span>
+          <span>${k.label}</span><span class="font-mono text-[10px] opacity-60">${k.count}</span>
         </div>`;
       }).join('');
 
       const searchEl = document.getElementById('modalSearchTagInput');
       const kw = ((searchEl && searchEl.value) || '').trim().toLowerCase();
+
+      if (modalTagGroupKind === 'personal_groups') {
+        const groups = personalTagGroups.filter(g =>
+          !kw
+          || String(g.name || '').toLowerCase().includes(kw)
+          || (g.tags || []).some(t => String(t.name || '').toLowerCase().includes(kw))
+        );
+        const canUndo = personalTagGroupOps.some(op => !op.undone);
+        const headerBar = `<div class="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-slate-100">
+          <span class="text-[11px] text-slate-400">个人分组仅用于整理，不等同知识上下级</span>
+          <div class="flex items-center gap-2 shrink-0">
+            ${canUndo ? '<button onclick="undoPersonalTagGroupAction()" class="text-[11px] text-slate-600 hover:text-emerald-700 hover:underline">撤销</button>' : ''}
+            <button onclick="createPersonalTagGroupPrompt()" class="px-2 py-1 text-[11px] bg-emerald-600 text-white rounded hover:bg-emerald-700">+ 新建分组</button>
+          </div>
+        </div>`;
+        if (!groups.length) {
+          listEl.innerHTML = headerBar + '<div class="py-8 text-center text-slate-400">暂无个人分组，可点击右上角「+ 新建分组」</div>';
+          return;
+        }
+        listEl.innerHTML = headerBar + groups.map(g => {
+          const safeId = escapeInlineJsArg(g.id);
+          const safeName = escapeInlineJsArg(g.name);
+          const chips = (g.tags || []).map(t => `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px]">${escapeHtml(t.name)}<button type="button" onclick="removeTagFromPersonalGroup('${safeId}', '${escapeInlineJsArg(t.id)}')" class="text-slate-400 hover:text-rose-500" title="移出分组">×</button></span>`).join('');
+          return `<div class="p-2.5 rounded-lg border border-slate-200/80 bg-slate-50/40 space-y-1.5 mb-2">
+            <div class="flex items-center justify-between gap-2">
+              <div class="font-semibold text-slate-800 truncate">${escapeHtml(g.name)} <span class="font-mono text-[10px] font-normal text-slate-400">(${(g.tags || []).length})</span></div>
+              <div class="flex items-center gap-2 shrink-0 text-[10px]">
+                <button onclick="addTagToPersonalGroupPrompt('${safeId}')" class="text-emerald-600 hover:underline">+ 加标签</button>
+                <button onclick="renamePersonalTagGroupPrompt('${safeId}', '${safeName}')" class="text-slate-600 hover:underline">重命名</button>
+                <button onclick="deletePersonalTagGroupPrompt('${safeId}', '${safeName}')" class="text-rose-500 hover:underline">删除</button>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-1">${chips || '<span class="text-[10px] text-slate-400">暂无标签</span>'}</div>
+          </div>`;
+        }).join('');
+        return;
+      }
+
       const list = tagCatalogue.filter(t => t.kind === modalTagGroupKind && (!kw || String(t.name).toLowerCase().includes(kw)));
       if (!list.length) {
         listEl.innerHTML = '<div class="py-8 text-center text-slate-400">没有匹配的标签</div>';
@@ -15896,6 +16882,7 @@
       if (!modal) return;
       modal.classList.remove('hidden');
       renderModalTags();
+      void loadPersonalTagGroups().then(() => renderModalTags());
     }
 
     function closeTagManagerModal() {

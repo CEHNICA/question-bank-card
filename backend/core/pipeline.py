@@ -1488,15 +1488,28 @@ def parse(paper: Paper, *, revision: int | None = None) -> None:
         # 下一步切题会把这一轮刚读出来的题整批当成手工页跳过。
         plan = deepcopy(current.processing_plan or {})
         plan["pages"] = _cloud_page_modes(plan, blocks, len(paper.pages))
+        scan_only = bool(plan.get("scan_only"))
+        if scan_only:
+            # scan_only 模式仅保留 MinerU 版面块与建议分组，不进入 NEEDS_GROUPING 或自动切题，
+            # 让外部助手可以立即读取 blocks / pages 并自行决策切题。
+            structure = dict(structure or {})
+            structure["scan_only"] = True
+            structure["needs_confirmation"] = False
         _set(
             paper,
             processing_plan=plan,
             zip_path=str(archive) if archive is not None else "",
             structure=structure,
-            status=Paper.Status.NEEDS_GROUPING if needs_confirmation else Paper.Status.SEGMENTING,
-            progress=0,
-            total=0,
+            status=(
+                Paper.Status.READY
+                if scan_only
+                else (Paper.Status.NEEDS_GROUPING if needs_confirmation else Paper.Status.SEGMENTING)
+            ),
+            progress=paper.questions.count() if scan_only else 0,
+            total=paper.questions.count() if scan_only else 0,
         )
+        if scan_only:
+            _ensure_question_groups(paper)
 
 
 # ---------------------------------------------------------------- 1½. 手机照片：合成、排页序
@@ -1703,14 +1716,25 @@ def reorder_photo_pages(paper: Paper, order: list[int]) -> None:
             structure_before["source_pages"] = [source_pages[old_page] for old_page in order]
         paper.structure = structure_before
         structure, needs_confirmation = _plan_structure(paper, remapped_blocks)
+        scan_only = bool((paper.processing_plan or {}).get("scan_only"))
+        if scan_only:
+            structure = dict(structure or {})
+            structure["scan_only"] = True
+            structure["needs_confirmation"] = False
         _set(
             paper,
             photos=info,
             pages=new_pages,
             structure=structure,
-            status=Paper.Status.NEEDS_GROUPING if needs_confirmation else Paper.Status.SEGMENTING,
+            status=(
+                Paper.Status.READY
+                if scan_only
+                else (Paper.Status.NEEDS_GROUPING if needs_confirmation else Paper.Status.SEGMENTING)
+            ),
             error="",
         )
+        if scan_only:
+            _ensure_question_groups(paper)
 
 
 # ---------------------------------------------------------------- 2. 切题
@@ -6791,6 +6815,8 @@ def process_paper(paper: Paper) -> None:
             parse(paper, revision=run_revision)
             paper.refresh_from_db()
             _check_run(paper.pk, run_revision)
+        if (paper.processing_plan or {}).get("scan_only") and paper.status == Paper.Status.READY:
+            return
         if paper.status == Paper.Status.SEGMENTING:
             segment_paper(paper)
             paper.refresh_from_db()

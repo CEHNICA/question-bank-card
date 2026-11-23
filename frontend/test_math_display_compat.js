@@ -79,4 +79,46 @@ for (const format of ["docx", "pdf"]) {
   assert.equal(item.content.answer, source);
 }
 assert.equal(value.answer, source);
-console.log("Escaped fullwidth round brackets: original failure, answer/analysis/solution display, PDF/Word MathML and source preservation: OK");
+
+// 圆弧记号 \wideparen / \overparen 兼容（含带花括号、无花括号及下标撇号写法）
+const arcCases = [
+  [String.raw`$\wideparen{AB}$`, String.raw`\overgroup{AB}`],
+  [String.raw`$\wideparen AB$`, String.raw`\overgroup{AB}`],
+  [String.raw`$\wideparen A'B'$`, String.raw`\overgroup{A'B'}`],
+  [String.raw`$\wideparen A_1B_1$`, String.raw`\overgroup{A_1B_1}`],
+  [String.raw`$\wideparen{\mathrm{AB}}$`, String.raw`\overgroup{\mathrm{AB}}`],
+  [String.raw`$\overparen{AB}$`, String.raw`\overgroup{AB}`],
+  [String.raw`$\overparen AB$`, String.raw`\overgroup{AB}`]
+];
+for (const [rawArc, expectedLatex] of arcCases) {
+  assert.throws(() => katex.renderToString(rawArc.slice(1, -1), options), /Undefined control sequence/,
+    `Original KaTeX lacks ${rawArc}`);
+  const segment = oneMath(rawArc);
+  assert.equal(segment.latex, expectedLatex);
+  assert.doesNotThrow(() => katex.renderToString(segment.latex, options));
+  assert.doesNotThrow(() => katex.renderToString(rawArc.slice(1, -1).replace(/AB|A'B'|A_1B_1|\\mathrm\{AB\}/, "{$&}"),
+    { ...options, macros: QB.KATEX_MACROS }));
+}
+assert.throws(() => katex.renderToString(oneMath(String.raw`$\wideparen$`).latex, options),
+  "Malformed standalone \\wideparen still fails strict KaTeX parsing");
+assert.equal(
+  QB.normalizeArcInMathText(String.raw`圆弧 $\wideparen AB$ 上运动，非数学区 \wideparen AB 保留`),
+  String.raw`圆弧 $\overgroup{AB}$ 上运动，非数学区 \wideparen AB 保留`
+);
+const arcStem = String.raw`以 $O$ 为圆心的圆弧 $\wideparen AB$ 上运动（含端点）.`;
+for (const format of ["docx", "pdf"]) {
+  const item = Object.freeze({ id: "synthetic-arc", content: Object.freeze({ stem: arcStem, answer: String.raw`$\wideparen{AB}$` }) });
+  const fields = Export.serializeFields([item], { document: "combined" }, format)[item.id];
+  assert.equal(fields.stem.source, arcStem, "Export preserves raw stem source");
+  const arcMath = fields.stem.blocks[0].segments.filter(seg => seg.type === "math")[1];
+  assert.equal(arcMath.latex, String.raw`\overgroup{AB}`);
+  assert.match(arcMath.mathml, /<math[\s\S]*⏠[\s\S]*<\/math>/);
+}
+
+const fs = require("node:fs");
+const path = require("node:path");
+const eagleHtml = fs.readFileSync(path.join(__dirname, "eagle", "index.html"), "utf8");
+assert.match(eagleHtml, /normalizeArcInMathText/, "Eagle auto-render preprocessing handles \\wideparen / \\overparen");
+assert.match(eagleHtml, /KATEX_MACROS/, "Eagle KATEX_OPTIONS shares QBRender.KATEX_MACROS");
+
+console.log("Escaped fullwidth round brackets & arc commands (\\wideparen/\\overparen): OK");

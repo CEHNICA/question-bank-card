@@ -138,6 +138,14 @@ class Client:
         with self._open(request, timeout) as response:
             return json.loads(response.read().decode("utf-8"))
 
+    def patch(self, path: str, body: dict | None = None, timeout: float = 60) -> dict:
+        data = json.dumps(body or {}, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(self.url + path, data=data, method="PATCH", headers={
+            "Content-Type": "application/json", "X-QB-Request": "1",
+        })
+        with self._open(request, timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+
     def upload(self, files: list[Path], fields: dict[str, str], timeout: float = 900) -> dict:
         boundary = f"----tiyouju{uuid.uuid4().hex}"
         parts: list[bytes] = []
@@ -586,16 +594,26 @@ def cmd_skill(_client, _args) -> dict:
         "- `tiyouju features`：查看或明确启用/关闭标签候选题、参考答案等开关。",
         "- `tiyouju setup-agents`：把技能重新同步并链接到所有本地 AI Agent 目录，并将命令目录加入用户 PATH。",
         "",
-        "## 2. 录入试卷与逐题核对入库",
+        "## 2. 录入试卷与自主探索切题",
         "- `tiyouju papers --json`：列出所有待处理或已导入的试卷与资料。",
-        "- `tiyouju upload <文件...> [--allow-cloud] [--book] [--wait]`：导入 PDF/Word/照片（默认本地优先；仅 `--allow-cloud` 才分流 MinerU）。",
+        "- `tiyouju upload <文件...> [--parse-mode auto|manual|native|mineru] [--allow-cloud] [--cut-only] [--scan-only] [--book] [--wait]`：导入 PDF/Word/照片；`--scan-only` 仅保留原页和版面扫描块(`blocks`)并停在就绪状态；`--cut-only` 只切图不识读。",
+        "- `tiyouju pages <paper> [--pages 0,1 | 0-3] [--grid] [--out DIR]`：导出原页高清图（加 `--grid` 叠加 0–1000 坐标网格便于精准框题）。",
+        "- `tiyouju blocks <paper> [--pages 0,1] --json`：读取 MinerU 或本地 PDF 提取出的文本/表格/图片块及 `bbox` 坐标与结构建议。",
+        "- `tiyouju cut <paper> --file <json>`（或 `--region/--stem/--figure`）：由助手自主切分题卡并支持双轨提交：传入 `stem` 则跳过内置 OCR 直接录文字（`assistant`）；不传 `stem` 则存为原图题卡，必要时用 `tiyouju read-cuts <paper>` 交给内置看图模型识读。",
+        "- `tiyouju layout <regions|renumber|split|merge|undo> <paper> ...`：精细调整范围、改题号、拆题、合题或整批撤销切题。",
         "- `tiyouju cards <paper> --filter todo --json`：列出待核对题卡与疑点。",
         "- `tiyouju show <paper> <n>`：导出原卷裁图与配图，必须先看图核对文字、公式、选项和配图后再修改或打勾。",
-        "- `tiyouju fix <paper> <n> --stem-file <path>`：修改未入库题卡（支持 `$...$` LaTeX）。",
+        "- `tiyouju fix <paper> <n> --stem-file <path>`：修改未入库题卡（支持 `$...$` LaTeX，可用 `--section` 设置章节小节）。",
         "- `tiyouju figures <paper> <n> --use <idx>`：指定或更新题卡配图。",
         "- `tiyouju approve <paper> <n>` / `tiyouju publish <paper>`：核对无误后标记 AI 通过并发布入库。",
         "",
-        "## 3. 组织题库内容与老师协同",
+        "## 3. 组织题库内容与整理文件夹",
+        "- `tiyouju folders list --json`：查看「我的文件夹」、试卷夹、教材章节树、智能文件夹、排序及标签个人分组。",
+        "- `tiyouju folders create/rename/move/delete/add/remove/sort`：直接建夹建子夹、归档移出题目、设置自然序/名称/时间排序（可撤销）。",
+        "- `tiyouju folders set-section`：批量整理已入库教材/教辅的章节与小节路径（直接生效且可撤销）。",
+        "- `tiyouju folders paper <paper> [--name 名称] [--type exam|book]`：重命名试卷/教材或切换「试卷 ↔ 教材」。",
+        "- `tiyouju folders tag-group ...`：整理标签管理里的个人分组及分组内标签。",
+        "- `tiyouju folders undo`：撤销最近一次文件夹或章节整理操作。",
         "- `tiyouju locate <定位码或位置文本> [--json]`：支持 `Q-xxxxxxxx`、UUID 或用户复制的一整段题目定位文本，秒查完整题干、标签与本机原图。",
         "- `tiyouju library [关键词] --json`：按题干、标签、题型检索正式题库内容（每条均带 `short_id`）。",
         "- `tiyouju whereami --json`：确认老师当前正在题库工作台查看/编辑哪道题，避免冲突。",
@@ -665,6 +683,10 @@ def cmd_upload(client: Client, args) -> dict:
         raise CliError("处理方式只能是 auto、manual、native 或 mineru")
     parameters["parse_mode"] = parse_mode
     parameters["allow_cloud"] = "1" if getattr(args, "allow_cloud", False) is True else "0"
+    if getattr(args, "cut_only", False) is True:
+        parameters["cut_only"] = "1"
+    if getattr(args, "scan_only", False) is True:
+        parameters["scan_only"] = "1"
     result = client.upload(files, parameters)
     paper = result["paper"]
     summary = {"paper": paper_summary(paper), "duplicate": bool(result.get("duplicate"))}
@@ -680,8 +702,11 @@ def show_upload(result: dict) -> str:
     if "wait" in result:
         text += "\n" + show_wait(result["wait"])
     else:
-        if paper.get("processing_plan", {}).get("mode") == "manual":
-            text += "\n原卷已在本机准备好，可在软件中手工框题；没有发起识读。"
+        plan = paper.get("processing_plan") or {}
+        if plan.get("scan_only"):
+            text += f"\n已启用仅扫描模式（scan_only）；就绪后可用 `tiyouju blocks {short(paper['id'])} --json` 或 `tiyouju pages {short(paper['id'])} --grid` 探查并切题。"
+        elif plan.get("mode") == "manual":
+            text += "\n原卷已在本机准备好，可在软件中手工框题或由助手 `tiyouju pages`/`cut`；没有发起识读。"
         else:
             text += f"\n用 `tiyouju wait {short(paper['id'])}` 等它读完。"
     return text
@@ -947,14 +972,20 @@ def cmd_fix(client: Client, args) -> dict:
     if kind not in TYPES:
         raise CliError("--type 只能是 " + "、".join(TYPES))
     origin = getattr(args, "origin", None)
+    section = getattr(args, "section", None)
     text_given = any(value is not None for value in (stem, args.answer, args.analysis, origin)) \
         or bool(args.option or args.clear_option)
-    if args.type and not text_given:
+    if args.type and not text_given and section is None:
         # Only the type: keep the text, its reading record and the other reminders.
         if args.type == "unknown":
             raise CliError("请选一个题型：" + "、".join(DECIDED_TYPES))
         saved = client.post(f"/api/questions/{question['id']}/type",
                             {"question_type": args.type, "by": "ai", "agent": client.agent})["question"]
+        return {"saved": True, **card_summary(saved), "options": saved.get("options") or {}}
+    if section is not None and not text_given and not args.type:
+        saved = client.post(f"/api/questions/{question['id']}/section", {
+            "section": section, "by": "ai", "agent": client.agent, "force": bool(args.force),
+        })["question"]
         return {"saved": True, **card_summary(saved), "options": saved.get("options") or {}}
     body = {
         "stem": stem if stem is not None else question.get("stem", ""),
@@ -966,6 +997,8 @@ def cmd_fix(client: Client, args) -> dict:
     }
     if origin is not None:
         body["origin"] = origin
+    if section is not None:
+        body["section"] = section
     saved = client.post(f"/api/questions/{question['id']}/text", body)["question"]
     return {"saved": True, **card_summary(saved), "options": saved.get("options") or {}}
 
@@ -1133,6 +1166,7 @@ def cmd_library(client: Client, args) -> dict:
         "type": item.get("question_type"), "version": item.get("version"),
         "review": (item.get("review") or {}).get("source", "human"),
         "origin": item.get("origin") or "",
+        "section": (item.get("content") or {}).get("section", ""),
         "stem": (item.get("content") or {}).get("stem", ""),
         "options": (item.get("content") or {}).get("options") or {},
         "answer": (item.get("content") or {}).get("answer", ""),
@@ -1495,13 +1529,584 @@ def show_backup(result: dict) -> str:
     return f"备份完成：{name}{size_str}"
 
 
+SORT_MODES = ("time_desc", "time_asc", "name", "count_desc", "default")
+
+
+def _load_section_map(path: str) -> list[dict]:
+    raw_text = Path(path).expanduser().read_text(encoding="utf-8-sig")
+    try:
+        parsed = json.loads(raw_text)
+    except ValueError as exc:
+        raise CliError(f"章节映射文件不是合法 JSON：{exc}") from None
+    if isinstance(parsed, dict):
+        return [{"publication_id": str(k), "section": str(v or "")} for k, v in parsed.items()]
+    if isinstance(parsed, list):
+        items = []
+        for entry in parsed:
+            if not isinstance(entry, dict) or not entry.get("publication_id"):
+                raise CliError("章节映射列表每项必须包含 publication_id 和 section")
+            items.append({"publication_id": str(entry["publication_id"]), "section": str(entry.get("section") or "")})
+        return items
+    raise CliError("章节映射文件格式应为 {题目ID: 章节名} 或 [{publication_id, section}]")
+
+
+def cmd_folders(client: Client, args) -> dict:
+    sub = getattr(args, "folders_command", None) or "list"
+    if sub in {"list", "tree"}:
+        return client.get("/api/library/folders")
+    if sub == "create":
+        payload: dict = {"action": "create", "name": args.name}
+        if getattr(args, "parent", None):
+            payload["parent_id"] = args.parent
+        if getattr(args, "questions", None):
+            payload["question_ids"] = list(args.questions)
+        return client.post("/api/library/folders", payload)
+    if sub == "rename":
+        return client.post("/api/library/folders", {
+            "action": "rename", "folder_id": args.folder, "name": args.name,
+        })
+    if sub == "move":
+        return client.post("/api/library/folders", {
+            "action": "move", "folder_id": args.folder, "parent_id": getattr(args, "parent", None),
+        })
+    if sub == "delete":
+        return client.post("/api/library/folders", {"action": "delete", "folder_id": args.folder})
+    if sub == "add":
+        return client.post("/api/library/folders", {
+            "action": "add_questions", "target_id": args.target, "question_ids": list(args.questions),
+        })
+    if sub == "remove":
+        return client.post("/api/library/folders", {
+            "action": "remove_questions", "target_id": args.target, "question_ids": list(args.questions),
+        })
+    if sub == "sort":
+        return client.post("/api/library/folders", {
+            "action": "set_sort", "target_id": args.target, "mode": args.mode,
+        })
+    if sub == "set-section":
+        if getattr(args, "map_file", None):
+            items = _load_section_map(args.map_file)
+            return client.post("/api/library/folders", {"action": "set_section", "items": items})
+        if args.section is None or not getattr(args, "questions", None):
+            raise CliError("请提供 --section 和至少一道题目编号，或使用 --map-file 指定映射 JSON")
+        return client.post("/api/library/folders", {
+            "action": "set_section", "section": args.section, "question_ids": list(args.questions),
+        })
+    if sub == "paper":
+        paper = find_paper(client, args.paper)
+        body: dict = {}
+        if getattr(args, "name", None) is not None:
+            body["name"] = args.name
+        if getattr(args, "type", None) is not None:
+            body["material_type"] = args.type
+        if not body:
+            raise CliError("请指定 --name 新名称或 --type exam|book")
+        return client.patch(f"/api/papers/{paper['id']}", body)
+    if sub == "tag-group":
+        tg_sub = getattr(args, "tag_group_command", None) or "list"
+        if tg_sub == "list":
+            return client.get("/api/library/tag-groups")
+        if tg_sub == "create":
+            payload = {"action": "create_group", "name": args.name}
+            if getattr(args, "color", None):
+                payload["color"] = args.color
+            if getattr(args, "tags", None):
+                payload["tag_ids"] = list(args.tags)
+            return client.post("/api/library/tag-groups", payload)
+        if tg_sub == "rename":
+            return client.post("/api/library/tag-groups", {
+                "action": "update_group", "group_id": args.group, "name": args.name,
+            })
+        if tg_sub == "delete":
+            return client.post("/api/library/tag-groups", {"action": "delete_group", "group_id": args.group})
+        if tg_sub == "add-tags":
+            return client.post("/api/library/tag-groups", {
+                "action": "add_tags", "group_id": args.group, "tag_ids": list(args.tags),
+            })
+        if tg_sub == "remove-tags":
+            return client.post("/api/library/tag-groups", {
+                "action": "remove_tags", "group_id": args.group, "tag_ids": list(args.tags),
+            })
+        if tg_sub == "set-tags":
+            return client.post("/api/library/tag-groups", {
+                "action": "set_tags", "group_id": args.group, "tag_ids": list(getattr(args, "tags", None) or []),
+            })
+        if tg_sub == "undo":
+            payload = {"action": "undo"}
+            if getattr(args, "operation_id", None):
+                payload["operation_id"] = args.operation_id
+            return client.post("/api/library/tag-groups", payload)
+        raise CliError(f"不支持的个人分组操作：{tg_sub}")
+    if sub == "undo":
+        payload = {}
+        if getattr(args, "operation_id", None):
+            payload["operation_id"] = args.operation_id
+        return client.post("/api/library/folders/undo", payload)
+    raise CliError(f"不支持的文件夹命令：{sub}")
+
+
+def _format_uf_tree(nodes: list[dict], indent: int = 2) -> list[str]:
+    lines: list[str] = []
+    pad = " " * indent
+    for node in nodes:
+        sort_tag = f" [排序:{node['sort_mode']}]" if node.get("sort_mode") else ""
+        lines.append(f"{pad}- 📁 {node['name']} ({node.get('count', 0)} 题){sort_tag}  id={node['id']}")
+        if node.get("children"):
+            lines.extend(_format_uf_tree(node["children"], indent + 2))
+    return lines
+
+
+def show_folders(result: dict) -> str:
+    if "paper" in result and "tree" not in result:
+        p = result["paper"]
+        kind = "教材" if p.get("material_type") == "book" else "试卷"
+        return f"已更新资料：{p.get('name')}（{kind}，id={short(p.get('id', ''))}）"
+    if "groups" in result and "tree" not in result:
+        lines = [result["message"]] if result.get("message") else []
+        groups = result.get("groups") or []
+        lines.append(f"个人分组（共 {len(groups)} 个）：")
+        for g in groups:
+            tag_names = "、".join(t["name"] for t in (g.get("tags") or [])) or "空"
+            lines.append(f"  - {g['name']}（id={short(g['id'])}）：{tag_names}")
+        return "\n".join(lines)
+    lines: list[str] = []
+    if result.get("message"):
+        lines.append(result["message"])
+    tree = result.get("tree")
+    if not isinstance(tree, dict):
+        return "\n".join(lines) or "文件夹已更新。"
+    lines.append(f"题库文件夹树（全局排序：{tree.get('global_sort_mode', 'time_desc')}，版本 rev={result.get('revision', 0)}）：")
+    lines.append("我的文件夹：")
+    uf_lines = _format_uf_tree(tree.get("user_folders") or [])
+    lines.extend(uf_lines or ["  （暂无自建文件夹）"])
+    papers_list = tree.get("papers") or []
+    lines.append(f"试卷（{len(papers_list)} 份）：")
+    for p in papers_list[:30]:
+        lines.append(f"  - 📄 {p['name']} ({p.get('folder_count', 0)} 题)  node={p['node_id']}")
+        lines.extend(_format_uf_tree(p.get("subfolders") or [], 4))
+    books_list = tree.get("books") or []
+    lines.append(f"教材版本（{len(books_list)} 本）：")
+    for b in books_list[:30]:
+        lines.append(f"  - 📚 {b['name']} ({b.get('folder_count', 0)} 题)  node={b['node_id']}")
+        for sec in (b.get("sections") or [])[:20]:
+            lines.append(f"    · {sec['name']} ({sec['count']} 题)")
+        lines.extend(_format_uf_tree(b.get("subfolders") or [], 4))
+    tgroups = tree.get("tag_groups") or []
+    lines.append(f"标签个人分组（{len(tgroups)} 个）：")
+    for g in tgroups:
+        tag_names = "、".join(t["name"] for t in (g.get("tags") or [])) or "空"
+        lines.append(f"  - 🏷 {g['name']}（id={short(g['id'])}）：{tag_names}")
+    return "\n".join(lines)
+
+
+def _parse_pages_arg(raw: str | None, total_pages: int) -> list[int]:
+    if total_pages <= 0:
+        return []
+    if raw is None or not str(raw).strip():
+        return list(range(total_pages))
+    pages: list[int] = []
+    seen: set[int] = set()
+    for part in str(raw).split(","):
+        token = part.strip()
+        if not token:
+            continue
+        if "-" in token:
+            start_s, _, end_s = token.partition("-")
+            try:
+                start, end = int(start_s.strip()), int(end_s.strip())
+            except ValueError:
+                raise CliError(f"页码范围格式不正确：{token}（例：0-3 或 0,2,4）") from None
+            if start < 0 or end >= total_pages or start > end:
+                raise CliError(f"页码范围越界：{token}（有效页码 0–{total_pages - 1}）")
+            for p in range(start, end + 1):
+                if p not in seen:
+                    seen.add(p)
+                    pages.append(p)
+        else:
+            try:
+                p = int(token)
+            except ValueError:
+                raise CliError(f"页码格式不正确：{token}") from None
+            if not 0 <= p < total_pages:
+                raise CliError(f"页码越界：{p}（有效页码 0–{total_pages - 1}）")
+            if p not in seen:
+                seen.add(p)
+                pages.append(p)
+    if not pages:
+        raise CliError("请至少指定一个有效页码")
+    return pages
+
+
+def _parse_region_spec(raw: str) -> dict:
+    page_part, sep, box_part = str(raw).strip().partition(":")
+    if not sep:
+        raise CliError(f"区域格式应为 页码:x0,y0,x1,y1，收到：{raw}")
+    try:
+        page_idx = int(page_part.strip())
+        coords = [float(v.strip()) for v in box_part.split(",")]
+    except ValueError:
+        raise CliError(f"区域数字格式不正确：{raw}") from None
+    if len(coords) != 4:
+        raise CliError(f"区域需要 4 个 0–1000 坐标值：{raw}")
+    return {"page_idx": page_idx, "bbox": coords}
+
+
+def _parse_figure_spec(raw: str) -> dict:
+    parts = [segment.strip() for segment in str(raw).strip().split(":")]
+    if len(parts) == 2:
+        slot = "stem"
+        region_str = f"{parts[0]}:{parts[1]}"
+    elif len(parts) == 3:
+        slot = parts[0]
+        region_str = f"{parts[1]}:{parts[2]}"
+    else:
+        raise CliError(f"配图格式应为 [槽位:]页码:x0,y0,x1,y1，收到：{raw}")
+    parsed = _parse_region_spec(region_str)
+    parsed["slot"] = slot
+    return parsed
+
+
+def cmd_pages(client: Client, args) -> dict:
+    paper = find_paper(client, args.paper)
+    detail = paper_detail(client, paper)
+    raw_pages = detail["paper"].get("pages") or []
+    total_pages = len(raw_pages)
+    if total_pages == 0:
+        raise CliError("这份资料还没有渲染出页面。")
+    selected = _parse_pages_arg(getattr(args, "pages", None), total_pages)
+    grid = bool(getattr(args, "grid", False))
+    folder = images_dir(detail["paper"], getattr(args, "out", None))
+    page_info = {p["page_idx"]: p for p in raw_pages if isinstance(p, dict) and "page_idx" in p}
+    saved_pages: list[dict] = []
+    image_paths: list[str] = []
+    suffix = "-grid" if grid else ""
+    query = "?grid=1" if grid else ""
+    for page_idx in selected:
+        target = folder / f"page-{page_idx + 1}{suffix}.jpg"
+        target.write_bytes(client.get_bytes(f"/api/papers/{paper['id']}/pages/{page_idx}/preview{query}"))
+        meta = page_info.get(page_idx, {})
+        path_str = str(target)
+        saved_pages.append({
+            "page_idx": page_idx,
+            "width": meta.get("width"),
+            "height": meta.get("height"),
+            "grid": grid,
+            "path": path_str,
+        })
+        image_paths.append(path_str)
+    return {
+        "paper": paper_summary(detail["paper"]),
+        "total_pages": total_pages,
+        "grid": grid,
+        "pages": saved_pages,
+        "image_paths": image_paths,
+    }
+
+
+def show_pages(result: dict) -> str:
+    tag = "（含 0–1000 网格）" if result.get("grid") else ""
+    lines = [f"{result['paper']['name']} · 共 {result['total_pages']} 页，已导出 {len(result['pages'])} 页{tag}："]
+    for item in result["pages"]:
+        lines.append(f"  第 {item['page_idx'] + 1} 页 (page_idx={item['page_idx']}): {item['path']}")
+    return "\n".join(lines)
+
+
+def cmd_blocks(client: Client, args) -> dict:
+    paper = find_paper(client, args.paper)
+    raw_pages = getattr(args, "pages", None)
+    query = ""
+    if raw_pages and str(raw_pages).strip():
+        total_pages = len(paper.get("pages") or []) or len((paper_detail(client, paper)["paper"]).get("pages") or [])
+        selected = _parse_pages_arg(raw_pages, total_pages) if total_pages else []
+        if selected:
+            query = "?pages=" + ",".join(str(p) for p in selected)
+    data = client.get(f"/api/papers/{paper['id']}/blocks{query}")
+    blocks = data.get("blocks") or []
+    return {
+        "paper": paper_summary(data["paper"]),
+        "pages": data.get("pages") or [],
+        "structure": data.get("structure") or {},
+        "count": len(blocks),
+        "blocks": blocks,
+    }
+
+
+def show_blocks(result: dict) -> str:
+    lines = [f"{result['paper']['name']} · 共 {len(result.get('pages') or [])} 页 · {result['count']} 个版面块："]
+    for block in result.get("blocks", [])[:60]:
+        preview = " ".join((block.get("table_markdown") or block.get("text") or "").split())[:90]
+        lines.append(f"  [p{block.get('page_idx')} #{block.get('seq')} {block.get('type')}] bbox={block.get('bbox')}  {preview}")
+    if result["count"] > 60:
+        lines.append(f"  …… 其余 {result['count'] - 60} 个块请用 --json 或按 --pages 分页查看。")
+    return "\n".join(lines)
+
+
+def cmd_cut(client: Client, args) -> dict:
+    paper = find_paper(client, args.paper)
+    if getattr(args, "file", None):
+        raw_text = sys.stdin.read() if args.file == "-" else Path(args.file).expanduser().read_text(encoding="utf-8-sig")
+        try:
+            loaded = json.loads(raw_text)
+        except json.JSONDecodeError as error:
+            raise CliError(f"JSON 文件解析失败：{error}") from None
+        body = {"questions": loaded} if isinstance(loaded, list) else dict(loaded or {})
+    else:
+        raw_regions = getattr(args, "region", None) or []
+        if not raw_regions:
+            raise CliError("请提供 --file <json> 或至少一个 --region 页码:x0,y0,x1,y1")
+        item: dict = {"regions": [_parse_region_spec(r) for r in raw_regions]}
+        if getattr(args, "figure", None):
+            item["figures"] = [_parse_figure_spec(f) for f in args.figure]
+        if getattr(args, "confirm_no_figure", False):
+            item["confirm_no_figure"] = True
+        if getattr(args, "number", None) is not None:
+            item["number"] = args.number
+        if getattr(args, "section", None) is not None:
+            item["section"] = args.section
+        if getattr(args, "group_id", None) is not None:
+            item["group_id"] = args.group_id
+        if getattr(args, "group_title", None) is not None:
+            item["group_title"] = args.group_title
+        if getattr(args, "source_kind", None):
+            item["source_kind"] = args.source_kind
+        if getattr(args, "type", None):
+            item["question_type"] = args.type
+        stem = read_text_arg(getattr(args, "stem", None), getattr(args, "stem_file", None))
+        if stem is not None:
+            item["stem"] = stem
+        if getattr(args, "option", None):
+            opts: dict[str, str] = {}
+            for opt in args.option:
+                key, sep, val = opt.partition("=")
+                key = key.strip().upper()
+                if not sep or key not in OPTION_KEYS:
+                    raise CliError(f"--option 写成 A=内容，收到：{opt}")
+                opts[key] = val
+            item["options"] = opts
+        if getattr(args, "answer", None) is not None:
+            item["answer"] = args.answer
+        if getattr(args, "analysis", None) is not None:
+            item["analysis"] = args.analysis
+        if getattr(args, "origin", None) is not None:
+            item["origin"] = args.origin
+        body = {"questions": [item]}
+
+    if getattr(args, "replace_scope", None) and args.replace_scope != "none":
+        body["replace_scope"] = args.replace_scope
+    if getattr(args, "replace_pages", None):
+        total_pages = len(paper.get("pages") or []) or len((paper_detail(client, paper)["paper"]).get("pages") or [])
+        body["replace_pages"] = _parse_pages_arg(args.replace_pages, total_pages)
+    if getattr(args, "replace_group_id", None) is not None:
+        body["replace_group_id"] = args.replace_group_id
+    if getattr(args, "replace_question_ids", None):
+        try:
+            body["replace_question_ids"] = [int(x.strip()) for x in str(args.replace_question_ids).split(",") if x.strip()]
+        except ValueError:
+            raise CliError("--replace-question-ids 需要逗号分隔的整数题目 ID") from None
+    if getattr(args, "layout_revision", None) is not None:
+        body["layout_revision"] = args.layout_revision
+    body.setdefault("agent", client.agent)
+
+    resp = client.post(f"/api/papers/{paper['id']}/agent-cut", body)
+    created_set = set(resp.get("created_ids") or [])
+    return {
+        "paper": paper_summary(resp["paper"]),
+        "layout_revision": resp.get("layout_revision"),
+        "operation_id": (resp.get("operation") or {}).get("id"),
+        "already_applied": bool(resp.get("already_applied")),
+        "created_ids": resp.get("created_ids") or [],
+        "replaced_ids": resp.get("replaced_ids") or [],
+        "skipped_protected": resp.get("skipped_protected") or [],
+        "questions": [card_summary(q) for q in (resp.get("questions") or []) if q.get("id") in created_set],
+    }
+
+
+def show_cut(result: dict) -> str:
+    lines = [
+        f"切题已保存（operation_id={result.get('operation_id')} · layout_revision={result.get('layout_revision')}）："
+        f"新建 {len(result.get('created_ids') or [])} 道，替换草稿 {len(result.get('replaced_ids') or [])} 道。"
+    ]
+    if result.get("skipped_protected"):
+        lines.append(f"受保护未覆盖（{len(result['skipped_protected'])} 道）：")
+        for item in result["skipped_protected"]:
+            lines.append(f"  - 第 {item.get('number')} 题 #{item.get('id')}：{item.get('reason')}")
+    for q in result.get("questions") or []:
+        mode = "原图待核对/识读" if q.get("body_mode") == "source_image" else "助手直录文字"
+        lines.append(f"  第 {q['number']} 题 #{q['id']}  [{mode}]  {q.get('section') or ''}".rstrip())
+    return "\n".join(lines)
+
+
+def cmd_layout(client: Client, args) -> dict:
+    paper = find_paper(client, args.paper)
+    layout_state = client.get(f"/api/papers/{paper['id']}/question-layout")
+    layout_revision = layout_state.get("layout_revision")
+    action = args.layout_action
+    if action == "undo":
+        op_id = getattr(args, "operation_id", None) or (layout_state.get("latest_operation") or {}).get("id")
+        if not op_id:
+            raise CliError("当前没有可撤销的原卷布局操作。")
+        resp = client.post(
+            f"/api/papers/{paper['id']}/question-layout/{op_id}/undo",
+            {"layout_revision": layout_revision, "client_request_id": str(uuid.uuid4())},
+        )
+        return {
+            "paper": paper_summary(resp["paper"]),
+            "layout_revision": resp.get("layout_revision"),
+            "operation": resp.get("operation"),
+            "already_undone": bool(resp.get("already_undone")),
+        }
+
+    def src_entry(card_row: dict) -> dict:
+        return {
+            "id": card_row["id"],
+            "revision": card_row["content_revision"],
+            "fingerprint": card_row["layout_fingerprint"],
+        }
+
+    if action == "regions":
+        card = find_card(layout_state, args.card)
+        regions = [_parse_region_spec(r) for r in (args.region or [])]
+        if not regions:
+            raise CliError("请提供至少一个 --region 页码:x0,y0,x1,y1")
+        payload = {
+            "kind": "regions",
+            "layout_revision": layout_revision,
+            "client_request_id": str(uuid.uuid4()),
+            "sources": [src_entry(card)],
+            "targets": [{"regions": regions}],
+        }
+    elif action == "renumber":
+        card = find_card(layout_state, args.card)
+        payload = {
+            "kind": "renumber",
+            "layout_revision": layout_revision,
+            "client_request_id": str(uuid.uuid4()),
+            "sources": [src_entry(card)],
+            "targets": [{"number": int(args.number)}],
+        }
+    elif action == "split":
+        card = find_card(layout_state, args.card)
+        if getattr(args, "file", None):
+            raw = sys.stdin.read() if args.file == "-" else Path(args.file).expanduser().read_text(encoding="utf-8-sig")
+            targets = json.loads(raw)
+        else:
+            parts = getattr(args, "part", None) or []
+            if len(parts) < 2:
+                raise CliError("split 需要至少 2 个 --part（或传 --file JSON 列表）")
+            used = {
+                int(q["number"])
+                for q in (layout_state.get("questions") or [])
+                if (q.get("group") or {}).get("id") == (card.get("group") or {}).get("id")
+                and q.get("id") != card.get("id")
+            }
+            next_num = max(used | {int(card.get("number") or 1)}) + 1
+            targets = []
+            for idx, part in enumerate(parts):
+                regions = [_parse_region_spec(seg.strip()) for seg in str(part).split(";") if seg.strip()]
+                num = card["number"] if idx == 0 and card["number"] not in used else next_num
+                if num == next_num:
+                    next_num += 1
+                targets.append({
+                    "number": num,
+                    "question_type": card.get("question_type") or "unknown",
+                    "regions": regions,
+                })
+        payload = {
+            "kind": "split",
+            "layout_revision": layout_revision,
+            "client_request_id": str(uuid.uuid4()),
+            "sources": [src_entry(card)],
+            "targets": targets,
+        }
+    elif action == "merge":
+        refs = getattr(args, "cards", None) or []
+        if len(refs) < 2:
+            raise CliError("merge 需要至少 2 个题卡编号")
+        source_cards = [find_card(layout_state, ref) for ref in refs]
+        combined_regions = [region for row in source_cards for region in (row.get("regions") or [])]
+        target_num = getattr(args, "number", None) or source_cards[0]["number"]
+        payload = {
+            "kind": "merge",
+            "layout_revision": layout_revision,
+            "client_request_id": str(uuid.uuid4()),
+            "sources": [src_entry(c) for c in source_cards],
+            "targets": [{
+                "number": target_num,
+                "question_type": source_cards[0].get("question_type") or "unknown",
+                "regions": combined_regions,
+            }],
+        }
+    else:
+        raise CliError(f"不支持的布局操作：{action}")
+
+    resp = client.post(f"/api/papers/{paper['id']}/question-layout", payload)
+    op = resp.get("operation") or {}
+    target_set = set(op.get("target_ids") or [])
+    return {
+        "paper": paper_summary(resp["paper"]),
+        "layout_revision": resp.get("layout_revision"),
+        "operation": op,
+        "already_applied": bool(resp.get("already_applied")),
+        "questions": [card_summary(q) for q in (resp.get("questions") or []) if q.get("id") in target_set],
+    }
+
+
+def show_layout(result: dict) -> str:
+    op = result.get("operation") or {}
+    if op.get("undone_at"):
+        return f"已撤销布局操作 {op.get('id')}（layout_revision={result.get('layout_revision')}）。"
+    lines = [f"布局操作完成（{op.get('kind')} · operation_id={op.get('id')} · layout_revision={result.get('layout_revision')}）："]
+    for q in result.get("questions") or []:
+        lines.append(f"  第 {q['number']} 题 #{q['id']}")
+    return "\n".join(lines)
+
+
+def cmd_read_cuts(client: Client, args) -> dict:
+    paper = find_paper(client, args.paper)
+    detail = paper_detail(client, paper)
+    plan_rev = int((detail["paper"].get("processing_plan") or {}).get("revision", 0))
+    body: dict = {"revision": plan_rev}
+    if getattr(args, "cards", None):
+        selected = [find_card(detail, ref) for ref in args.cards]
+        body["question_ids"] = [q["id"] for q in selected]
+        body["revisions"] = {str(q["id"]): int(q.get("content_revision") or 0) for q in selected}
+    else:
+        body["question_ids"] = []
+    resp = client.post(f"/api/papers/{paper['id']}/read-cut-questions", body)
+    result = {
+        "paper": paper_summary(resp["paper"]),
+        "queued": resp.get("queued", 0),
+        "queued_ids": resp.get("queued_ids") or [],
+        "converted_ids": resp.get("converted_ids") or [],
+        "skipped": resp.get("skipped") or [],
+        "message": resp.get("message") or "",
+    }
+    if getattr(args, "wait", False) and result["queued"] > 0:
+        result["wait"] = wait_for(client, resp["paper"], getattr(args, "timeout", 1800), quiet=args.json)
+    return result
+
+
+def show_read_cuts(result: dict) -> str:
+    lines = [result.get("message") or f"已提交 {result['queued']} 道原图题卡进行看图识读。"]
+    if result.get("skipped"):
+        lines.append(f"已跳过 {len(result['skipped'])} 道：")
+        for item in result["skipped"][:10]:
+            lines.append(f"  - #{item.get('id')}：{item.get('reason')}")
+    if "wait" in result:
+        lines.append(show_wait(result["wait"]))
+    return "\n".join(lines)
+
+
 SHOWERS = {
-    "status": show_status, "config": show_config, "papers": show_papers, "upload": show_upload, "wait": show_wait, "cards": show_cards,
+    "status": show_status, "config": show_config, "papers": show_papers, "upload": show_upload, "wait": show_wait,
+    "pages": show_pages, "blocks": show_blocks, "cut": show_cut, "layout": show_layout, "read-cuts": show_read_cuts,
+    "cards": show_cards,
     "show": show_card, "fix": show_fix, "figures": show_figures, "approve": show_approve, "publish": show_publish,
     "unapprove": show_unapprove, "reread": show_reread,
     "library": show_library,
     "locate": show_locate,
     "backup": show_backup,
+    "folders": show_folders,
     "skill": show_skill,
     "setup-agents": show_setup_agents,
 }
@@ -1510,11 +2115,14 @@ SHOWERS = {
 # ---------------------------------------------------------------- MCP（给支持 MCP 的 AI 用）
 
 MCP_INSTRUCTIONS = (
-    "题有据：把扫描/拍照的数学试卷变成核对过的题库。处理一份试卷：upload_paper → wait_paper → "
-    "list_cards(filter=todo) → 对每道 show_card（会给你原卷截图），逐字对照；不对就 fix_card / set_figures，"
-    "对了就 approve_cards；绿卡也要抽查后再 approve_cards(green=true)；最后 publish_paper。"
+    "题有据：把扫描/拍照的数学试卷变成核对过的题库。支持两条录题路线：\n"
+    "1) 传统流水线：upload_paper → wait_paper → list_cards(filter=todo) → show_card → fix_card / set_figures → approve_cards → publish_paper。\n"
+    "2) 助手自主探查与切题（推荐复杂教辅或无看图密钥时）：upload_paper(scan_only=true 或 manual) → wait_paper → "
+    "get_paper_blocks（读 MinerU/本地文字块及 bbox）与 get_paper_pages(grid=true，查看原页高清图与 0–1000 网格）→ "
+    "由你自己分析章节与题号规则后调用 cut_questions 批量切题；cut_questions 支持双轨：传入 stem 直接落库为 text（跳过内置 OCR 队列），"
+    "或不传 stem 只存切图范围（body_mode=source_image），之后可按需调用 read_cut_questions 交给内置看图模型识读；局部微调用 edit_question_layout。\n"
     "你打的勾记成“AI 通过”，使用者会再核对。不要碰密钥；缺密钥请使用者在软件“设置 → 常用”里填写"
-    "（status 会给出申请网址，费用与额度按当前账户规则）。题卡写着“MinerU 初稿”时（AI 助手读题），"
+    "（status 会给出申请网址，费用与额度按当前账户规则）。题卡写着“MinerU 初稿”或助手直录时（AI 助手读题），"
     "题面还没人看图核对过：每一道都要对照截图逐字核对。"
     "题型没读出来（type_blocked）的题不能通过：先用 fix_card 只传 type 选好题型。"
     "用户明确需要标签或参考答案时，当前助手自己完成，不需要豆包API：configure_features明确打开所需开关，"
@@ -1524,6 +2132,7 @@ MCP_INSTRUCTIONS = (
     "用户明确要以后新题入库时自动处理，可configure_enrichment_auto设置自动排队（默认关闭），所需feature仍需显式启用。"
     "自动任务在新题入库之后创建；助手模式由当前助手继续领取完成，不声称已在OCR前生成答案或已常驻豆包。"
     "已经入库的题不要直接改字：改法用 propose_question_change 交成提案，题面不动，等老师点采纳。"
+    "但整理文件夹（list_folders / manage_folder / set_question_sections / update_paper_folder / manage_tag_groups）直接生效并支持撤销。"
     "批量干活先 claim_work 领一批（每道活带到期时间，助手没了活会自己回到池子里），干不完 release_work 交回。"
     "where_is_the_teacher 告诉你老师此刻在哪、你刚提的有没有被否决。"
 )
@@ -1551,6 +2160,8 @@ MCP_TOOLS = [
         "parse_mode": {"type": "string", "enum": ["auto", "manual", "native", "mineru"],
                        "description": "默认auto先处理本地文字，无可靠题卡则手工；manual手工；native本地文字；mineru明确云解析"},
         "allow_cloud": {"type": "boolean", "description": "默认false；明确同意auto本地无可靠结果时尝试已配置MinerU，不另选付费服务"},
+        "cut_only": {"type": "boolean", "description": "默认false；只切题不调用看图识读，保留原图题卡"},
+        "scan_only": {"type": "boolean", "description": "默认false；仅保留原页及版面扫描块(blocks)，跳过自动切题与自动分组停在READY，供助手自主探查切题"},
     }, ["paths"])),
     ("wait_paper", "等一份试卷读完（最多等 timeout 秒，没读完可以再调一次）。", _schema({
         "paper": PAPER, "timeout": {"type": "integer", "minimum": 5, "maximum": 600},
@@ -1566,6 +2177,7 @@ MCP_TOOLS = [
         "type": {"type": "string", "enum": list(TYPES), "description": "只传 type 时只改题型"},
         "answer": {"type": "string"}, "analysis": {"type": "string"},
         "origin": {"type": "string", "description": "题源：题干前印的出处，如“2026××中学月考”"},
+        "section": {"type": "string", "description": "章节小节目录（如 第1章 / 1.1 或 第1节 公式法 · 例题）"},
     }, ["paper", "card"])),
     ("set_figures", "处理一道题的配图：use 选候选图（编号见 show_card，如 [\"1\", \"2:A\"]）、keep 保留现有配图、none 确认无图。",
      _schema({"paper": PAPER, "card": CARD, "use": {"type": "array", "items": {"type": "string"}},
@@ -1633,6 +2245,95 @@ MCP_TOOLS = [
     }, ["publication_id", "fields"])),
     ("read_workbench", "读助手工作台：助手交上来了什么待核对、谁在干活、老师此刻在哪。", _schema({})),
     ("where_is_the_teacher", "问一句老师此刻在哪、你刚提的改动有没有被否决。", _schema({})),
+    ("list_folders", "查看题库文件夹树（我的文件夹、试卷夹、教材章节树、智能文件夹、排序方式与标签个人分组）。", _schema({})),
+    ("manage_folder", "直接整理我的文件夹、智能文件夹、题目归档与排序方式（支持 undo 撤销）。", _schema({
+        "action": {"type": "string", "enum": [
+            "create", "rename", "move", "delete",
+            "add_questions", "remove_questions", "set_sort",
+            "create_smart", "rename_smart", "move_smart", "delete_smart", "undo",
+        ]},
+        "name": {"type": "string", "description": "文件夹名称（create/rename/create_smart/rename_smart 用）"},
+        "folder_id": {"type": "string", "description": "目标文件夹 ID 或名称"},
+        "parent_id": {"type": "string", "description": "父级节点 ID（为空表示根目录；也可传 group:papers / group:books / paper:<uuid> / book:<uuid>）"},
+        "target_id": {"type": "string", "description": "归档目标（folder_id、userfolder:<id>、paper:<uuid>、book:<uuid>）或排序节点 ID（global 表示全局默认）"},
+        "question_ids": {"type": "array", "items": {"type": "string"}, "description": "入库题目 UUID 或 Q-xxxxxxxx 短码列表"},
+        "mode": {"type": "string", "enum": list(SORT_MODES), "description": "排序方式（set_sort 用）"},
+        "filter": {"type": "object", "description": "智能文件夹筛选条件（create_smart 用）"},
+        "operation_id": {"type": "string", "description": "指定要撤销的操作 ID（undo 可选）"},
+    }, ["action"])),
+    ("set_question_sections", "批量整理已入库教材/教辅题目的章节小节目录（section），直接生效且可通过 manage_folder(action=undo) 撤销。", _schema({
+        "section": {"type": "string", "description": "统一设置的章节小节名（配合 question_ids 使用）"},
+        "question_ids": {"type": "array", "items": {"type": "string"}, "description": "入库题目 UUID 或 Q-xxxxxxxx 短码列表"},
+        "items": {
+            "type": "array",
+            "description": "逐题映射列表：[{publication_id, section}]（最多 500 项）",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "publication_id": {"type": "string"},
+                    "section": {"type": "string"},
+                },
+                "required": ["publication_id", "section"],
+            },
+        },
+    })),
+    ("update_paper_folder", "重命名试卷/教材显示名称，或在「试卷(exam) ↔ 教材(book)」之间切换资料类型。", _schema({
+        "paper": PAPER,
+        "name": {"type": "string", "description": "新的显示名称"},
+        "material_type": {"type": "string", "enum": ["exam", "book"], "description": "资料类型：exam 试卷，book 教材教辅"},
+    }, ["paper"])),
+    ("manage_tag_groups", "查看或整理标签管理里的「个人分组」（建组/改名/删组/增减标签/撤销），不改动知识上下级。", _schema({
+        "action": {"type": "string", "enum": [
+            "list", "create_group", "update_group", "delete_group",
+            "add_tags", "remove_tags", "set_tags", "undo",
+        ]},
+        "group_id": {"type": "string", "description": "个人分组 UUID 或名称"},
+        "name": {"type": "string", "description": "分组名称"},
+        "color": {"type": "string", "description": "#RRGGBB 颜色（可选）"},
+        "position": {"type": "integer", "minimum": 0, "description": "排序位置（可选）"},
+        "tag_ids": {"type": "array", "items": {"type": "string"}, "description": "标签 UUID 或精确标签名列表"},
+        "operation_id": {"type": "string", "description": "指定要撤销的个人分组操作 ID"},
+    }, ["action"])),
+    ("get_paper_pages", "导出指定页的原页高清截图（可选叠加 0–1000 网格），单次最多附加 8 张图片。", _schema({
+        "paper": PAPER,
+        "pages": {"type": "string", "description": "页码范围（从0起，如 \"0,1\" 或 \"0-3\"）；不传则从第0页起取最多8页"},
+        "grid": {"type": "boolean", "description": "是否在图像副本上绘制 0–1000 归一化坐标网格"},
+    }, ["paper"])),
+    ("get_paper_blocks", "获取资料已扫描的版面块（MinerU/本地文字层文本、表格Markdown、bbox坐标及suggested_scopes结构）。", _schema({
+        "paper": PAPER,
+        "pages": {"type": "string", "description": "可选，只看某几页（如 \"0,1\" 或 \"0-5\"）"},
+    }, ["paper"])),
+    ("cut_questions", "助手批量切分题卡，支持双轨：传入 stem 直接跳过OCR录为文字题；不传 stem 存为原图题卡（可后续调 read_cut_questions）。支持安全重切 replace_scope。", _schema({
+        "paper": PAPER,
+        "questions": {
+            "type": "array",
+            "description": "1–500 道待建题卡：每项需包含 regions:[{page_idx, bbox}]；可选 figures/confirm_no_figure/number/group_id/group_title/section/source_kind/question_type/stem/options/answer/analysis/origin",
+            "items": {"type": "object"},
+        },
+        "replace_scope": {"type": "string", "enum": ["none", "page", "group", "paper", "question_ids"],
+                          "description": "重切范围（默认none）。仅替换未审核、未入库、未编辑的旧草稿，受保护题卡绝不删除"},
+        "replace_pages": {"type": "array", "items": {"type": "integer"}, "description": "replace_scope=page 时指定页码"},
+        "replace_group_id": {"type": "integer", "description": "replace_scope=group 时指定题组 ID"},
+        "replace_question_ids": {"type": "array", "items": {"type": "integer"}, "description": "replace_scope=question_ids 时指定旧题 ID"},
+        "layout_revision": {"type": "integer", "description": "可选乐观锁版本号"},
+        "agent": {"type": "string"},
+    }, ["paper", "questions"])),
+    ("edit_question_layout", "调整已切题卡的原卷布局：改范围(regions)、改题号(renumber)、拆题(split)、合题(merge)或撤销(undo)。", _schema({
+        "paper": PAPER,
+        "action": {"type": "string", "enum": ["regions", "renumber", "split", "merge", "undo"]},
+        "card": {"type": "string", "description": "源题号或 #id（regions/renumber/split 用）"},
+        "cards": {"type": "array", "items": {"type": "string"}, "description": "待合并的多道题号或 #id（merge 用）"},
+        "regions": {"type": "array", "description": "新的 [{page_idx, bbox}]（regions 用）", "items": {"type": "object"}},
+        "number": {"type": "integer", "description": "新题号（renumber/merge 可用）"},
+        "targets": {"type": "array", "description": "拆题目标列表 [{number, regions, question_type}]（split 用）", "items": {"type": "object"}},
+        "operation_id": {"type": "string", "description": "要撤销的操作 UUID（undo 可选）"},
+    }, ["paper", "action"])),
+    ("read_cut_questions", "把已切好但还是原图状态（source_image）的题卡提交给软件内置看图模型进行识读。", _schema({
+        "paper": PAPER,
+        "cards": {"type": "array", "items": {"type": "string"}, "description": "指定题号或 #id；不传则识读该资料所有待识读原图题卡"},
+        "wait": {"type": "boolean", "description": "是否阻塞等待识读完成"},
+        "timeout": {"type": "integer", "minimum": 5, "maximum": 1800},
+    }, ["paper"])),
 ]
 
 
@@ -1656,6 +2357,7 @@ def mcp_call(client: Client, name: str, arguments: dict) -> tuple[dict | list, l
     if name == "upload_paper":
         return cmd_upload(client, _ns(files=a.get("paths") or [], book=bool(a.get("book")),
                                       parse_mode=a.get("parse_mode"), allow_cloud=a.get("allow_cloud") is True,
+                                      cut_only=bool(a.get("cut_only")), scan_only=bool(a.get("scan_only")),
                                       wait=False, timeout=0)), []
     if name == "wait_paper":
         return wait_for(client, find_paper(client, a.get("paper", "")), min(600, int(a.get("timeout") or 300)), quiet=True), []
@@ -1672,7 +2374,8 @@ def mcp_call(client: Client, name: str, arguments: dict) -> tuple[dict | list, l
             paper=a.get("paper", ""), card=a.get("card", ""), stem=a.get("stem"), stem_file=None,
             option=[f"{key}={value}" for key, value in options.items() if str(value).strip()],
             clear_option=[key for key, value in options.items() if not str(value).strip()],
-            type=a.get("type"), answer=a.get("answer"), analysis=a.get("analysis"), origin=a.get("origin"))), []
+            type=a.get("type"), answer=a.get("answer"), analysis=a.get("analysis"),
+            origin=a.get("origin"), section=a.get("section"))), []
     if name == "set_figures":
         return cmd_figures(client, _ns(paper=a.get("paper", ""), card=a.get("card", ""), use=a.get("use") or [],
                                        keep=bool(a.get("keep")), none=bool(a.get("none")))), []
@@ -1723,6 +2426,99 @@ def mcp_call(client: Client, name: str, arguments: dict) -> tuple[dict | list, l
         return cmd_workbench(client, _ns()), []
     if name == "where_is_the_teacher":
         return cmd_whereami(client, _ns()), []
+    if name == "list_folders":
+        return client.get("/api/library/folders"), []
+    if name == "manage_folder":
+        action = a.get("action")
+        if action == "undo":
+            body = {}
+            if a.get("operation_id"):
+                body["operation_id"] = a["operation_id"]
+            return client.post("/api/library/folders/undo", body), []
+        return client.post("/api/library/folders", a), []
+    if name == "set_question_sections":
+        return client.post("/api/library/folders", {
+            "action": "set_section",
+            "section": a.get("section"),
+            "question_ids": a.get("question_ids"),
+            "items": a.get("items"),
+        }), []
+    if name == "update_paper_folder":
+        paper = find_paper(client, a.get("paper", ""))
+        body = {}
+        if a.get("name") is not None:
+            body["name"] = a["name"]
+        if a.get("material_type") is not None:
+            body["material_type"] = a["material_type"]
+        if not body:
+            raise CliError("请提供 name 或 material_type")
+        return client.patch(f"/api/papers/{paper['id']}", body), []
+    if name == "manage_tag_groups":
+        if a.get("action") == "list":
+            return client.get("/api/library/tag-groups"), []
+        return client.post("/api/library/tag-groups", a), []
+    if name == "get_paper_pages":
+        result = cmd_pages(client, _ns(paper=a.get("paper", ""), pages=a.get("pages"),
+                                      grid=bool(a.get("grid")), out=None))
+        all_paths = list(result.get("image_paths") or [])
+        attached = all_paths[:8]
+        result["attached_count"] = len(attached)
+        result["truncated"] = len(all_paths) > 8
+        return result, attached
+    if name == "get_paper_blocks":
+        return cmd_blocks(client, _ns(paper=a.get("paper", ""), pages=a.get("pages"))), []
+    if name == "cut_questions":
+        paper = find_paper(client, a.get("paper", ""))
+        body = {k: v for k, v in a.items() if k != "paper" and v is not None}
+        body.setdefault("agent", client.agent)
+        resp = client.post(f"/api/papers/{paper['id']}/agent-cut", body)
+        created_set = set(resp.get("created_ids") or [])
+        return {
+            "paper": paper_summary(resp["paper"]),
+            "layout_revision": resp.get("layout_revision"),
+            "operation_id": (resp.get("operation") or {}).get("id"),
+            "already_applied": bool(resp.get("already_applied")),
+            "created_ids": resp.get("created_ids") or [],
+            "replaced_ids": resp.get("replaced_ids") or [],
+            "skipped_protected": resp.get("skipped_protected") or [],
+            "questions": [card_summary(q) for q in (resp.get("questions") or []) if q.get("id") in created_set],
+        }, []
+    if name == "edit_question_layout":
+        action = a.get("action")
+        region_strs = [
+            f"{r['page_idx']}:{','.join(str(v) for v in r['bbox'])}"
+            for r in (a.get("regions") or [])
+            if isinstance(r, dict) and "page_idx" in r and isinstance(r.get("bbox"), list)
+        ]
+        part_strs = []
+        if action == "split" and isinstance(a.get("targets"), list):
+            for t in a["targets"]:
+                if isinstance(t, dict) and isinstance(t.get("regions"), list):
+                    segs = [
+                        f"{r['page_idx']}:{','.join(str(v) for v in r['bbox'])}"
+                        for r in t["regions"]
+                        if isinstance(r, dict) and "page_idx" in r and isinstance(r.get("bbox"), list)
+                    ]
+                    if segs:
+                        part_strs.append(";".join(segs))
+        return cmd_layout(client, _ns(
+            paper=a.get("paper", ""),
+            layout_action=action,
+            card=a.get("card"),
+            cards=a.get("cards") or [],
+            region=region_strs,
+            part=part_strs,
+            number=a.get("number"),
+            operation_id=a.get("operation_id"),
+            file=None,
+        )), []
+    if name == "read_cut_questions":
+        return cmd_read_cuts(client, _ns(
+            paper=a.get("paper", ""),
+            cards=a.get("cards") or [],
+            wait=bool(a.get("wait")),
+            timeout=int(a.get("timeout") or 1800),
+        )), []
     raise CliError(f"没有这个工具：{name}")
 
 
@@ -1857,8 +2653,74 @@ def build_parser() -> argparse.ArgumentParser:
     upload.add_argument("--parse-mode", choices=["auto", "manual", "native", "mineru"], default="auto",
                         help="默认auto本地优先；manual手工；native本地文字PDF；mineru明确云解析")
     upload.add_argument("--allow-cloud", action="store_true", help="同意auto在本地无可靠题卡时尝试已配置的MinerU")
+    upload.add_argument("--cut-only", action="store_true", help="只切题不调用看图识读，保留原图题卡")
+    upload.add_argument("--scan-only", action="store_true", help="仅保留原页与版面扫描块(blocks)，跳过自动切题与分组停在READY")
     upload.add_argument("--wait", action="store_true", help="上传后等它读完")
     upload.add_argument("--timeout", type=int, default=3600)
+
+    pages_p = sub.add_parser("pages", parents=[common], help="导出原页高清图（可选叠加 0–1000 网格）")
+    pages_p.add_argument("paper")
+    pages_p.add_argument("--pages", help="页码或范围（从0起，如 0,1 或 0-3）")
+    pages_p.add_argument("--grid", action="store_true", help="在返回副本上叠加 0–1000 归一化坐标网格")
+    pages_p.add_argument("--out", help="图片存到哪个文件夹（默认临时文件夹）")
+
+    blocks_p = sub.add_parser("blocks", parents=[common], help="查看资料的 MinerU / 本地 PDF 版面扫描块及 bbox")
+    blocks_p.add_argument("paper")
+    blocks_p.add_argument("--pages", help="可选过滤页码（从0起，如 0,1 或 0-5）")
+
+    cut_p = sub.add_parser("cut", parents=[common], help="由助手自主批量切分题卡（支持直录文字跳过OCR或原图双轨）")
+    cut_p.add_argument("paper")
+    cut_p.add_argument("--file", help="UTF-8 JSON 路径（- 表示标准输入）：含 questions 列表及 replace_scope 等选项")
+    cut_p.add_argument("--region", action="append", help="单题框选区域：页码:x0,y0,x1,y1，可传多次表示跨栏/跨页")
+    cut_p.add_argument("--figure", action="append", help="配图框选：[槽位:]页码:x0,y0,x1,y1（槽位默认 stem）")
+    cut_p.add_argument("--confirm-no-figure", action="store_true", help="确认本题无印刷配图")
+    cut_p.add_argument("--number", type=int, help="题号（不传按题组自动递增）")
+    cut_p.add_argument("--section", help="章节小节目录（如 第1章/例题）")
+    cut_p.add_argument("--group-id", type=int, help="指定所属 QuestionGroup ID")
+    cut_p.add_argument("--group-title", help="按标题匹配或自动创建章节题组")
+    cut_p.add_argument("--source-kind", choices=["example", "exercise", "manual", "unknown"])
+    cut_p.add_argument("--type", choices=list(TYPES), help="题型")
+    cut_p.add_argument("--stem", help="助手直录题干（传入则跳过内置 OCR 队列，写为 text_source=assistant）")
+    cut_p.add_argument("--stem-file", help="从 UTF-8 文本文件读题干")
+    cut_p.add_argument("--option", action="append", help="选项：A=内容")
+    cut_p.add_argument("--answer", help="原卷参考答案")
+    cut_p.add_argument("--analysis", help="原卷参考解析")
+    cut_p.add_argument("--origin", help="题源")
+    cut_p.add_argument("--replace-scope", choices=["none", "page", "group", "paper", "question_ids"], default="none",
+                       help="重切旧草稿范围（绝不覆盖已审核、已入库或已编辑题卡）")
+    cut_p.add_argument("--replace-pages", help="replace-scope=page 时指定页码（如 0,1）")
+    cut_p.add_argument("--replace-group-id", type=int, help="replace-scope=group 时指定题组 ID")
+    cut_p.add_argument("--replace-question-ids", help="replace-scope=question-ids 时逗号分隔的题目 ID")
+    cut_p.add_argument("--layout-revision", type=int, help="乐观锁布局版本号")
+
+    layout_p = sub.add_parser("layout", parents=[common], help="调整已切题卡的原卷范围、题号、拆题、合题或撤销")
+    layout_sub = layout_p.add_subparsers(dest="layout_action", required=True, metavar="布局动作")
+    lr = layout_sub.add_parser("regions", parents=[common], help="调整一道题的原卷框选范围")
+    lr.add_argument("paper")
+    lr.add_argument("card")
+    lr.add_argument("--region", action="append", required=True, help="新区域：页码:x0,y0,x1,y1")
+    ln = layout_sub.add_parser("renumber", parents=[common], help="修改一道题的题号")
+    ln.add_argument("paper")
+    ln.add_argument("card")
+    ln.add_argument("number", type=int)
+    ls = layout_sub.add_parser("split", parents=[common], help="把一道题拆成多道")
+    ls.add_argument("paper")
+    ls.add_argument("card")
+    ls.add_argument("--part", action="append", help="拆出的一道题区域（多片段用 ; 分隔）：p:x0,y0,x1,y1[;p:x0,y0,x1,y1]")
+    ls.add_argument("--file", help="自定义 split targets JSON 文件")
+    lm = layout_sub.add_parser("merge", parents=[common], help="把同题组多道题合并成一道")
+    lm.add_argument("paper")
+    lm.add_argument("cards", nargs="+")
+    lm.add_argument("--number", type=int, help="合并后的题号（默认取首题）")
+    lu = layout_sub.add_parser("undo", parents=[common], help="撤销最近一次（或指定）原卷切题/布局操作")
+    lu.add_argument("paper")
+    lu.add_argument("--operation-id", help="指定操作 UUID")
+
+    rc_p = sub.add_parser("read-cuts", parents=[common], help="将已切好但还是原图（source_image）的题卡提交给内置看图模型识读")
+    rc_p.add_argument("paper")
+    rc_p.add_argument("cards", nargs="*", help="指定题号或 #id（不传则识读全部待识读原图题卡）")
+    rc_p.add_argument("--wait", action="store_true", help="提交后等待识读完成")
+    rc_p.add_argument("--timeout", type=int, default=1800)
 
     wait = sub.add_parser("wait", parents=[common], help="等一份试卷读完")
     wait.add_argument("paper")
@@ -1886,6 +2748,7 @@ def build_parser() -> argparse.ArgumentParser:
     fix.add_argument("--clear-option", action="append", help="删掉一个选项，例如 E")
     fix.add_argument("--type", choices=list(TYPES), help="只给 --type 时只改题型（题型没读出来的题要先选题型才能通过）")
     fix.add_argument("--origin", help="题源（题干前印的出处，如 2026××中学月考）；写空字符串清掉")
+    fix.add_argument("--section", help="章节小节目录（如 第1章 / 1.1 或 第1节 公式法 · 例题）")
     fix.add_argument("--answer")
     fix.add_argument("--analysis")
     fix.add_argument("--force", action="store_true", help="使用者已人工通过的题也改（只在使用者要求时用）")
@@ -1979,11 +2842,71 @@ def build_parser() -> argparse.ArgumentParser:
     backup.add_argument("--dest", metavar="DIR", help="备份包保存到的文件夹（如外部移动硬盘或网盘路径）")
     backup.add_argument("--paper", dest="papers", action="append", metavar="PAPER_ID", help="只打包指定的试卷或书籍 UUID（可多次指定）")
     backup.add_argument("--folder", dest="folders", action="append", metavar="FOLDER", help="只打包指定的目录文件夹 UUID 或名称（可多次指定）")
+
+    folders = sub.add_parser("folders", parents=[common], help="查看并整理软件内的文件夹、教材章节目录与个人标签分组（直接生效且可撤销）")
+    folders_sub = folders.add_subparsers(dest="folders_command", metavar="动作")
+    folders_sub.add_parser("list", parents=[common], help="查看全部文件夹树（我的文件夹、试卷、教材章节、智能夹、个人分组）")
+    folders_sub.add_parser("tree", parents=[common], help="同 list")
+    f_create = folders_sub.add_parser("create", parents=[common], help="新建文件夹或子文件夹")
+    f_create.add_argument("name", help="文件夹名称")
+    f_create.add_argument("--parent", help="父级节点 ID（省略则为根目录；也可传 group:papers / group:books / paper:<id> / book:<id>）")
+    f_create.add_argument("--questions", nargs="+", help="顺便放入的入库题目 UUID 或 Q-xxxxxxxx 短码")
+    f_rename = folders_sub.add_parser("rename", parents=[common], help="重命名我的文件夹")
+    f_rename.add_argument("folder", help="文件夹 ID 或名称")
+    f_rename.add_argument("name", help="新名称")
+    f_move = folders_sub.add_parser("move", parents=[common], help="移动我的文件夹层级")
+    f_move.add_argument("folder", help="文件夹 ID 或名称")
+    f_move.add_argument("--parent", help="新父级 ID；省略则移到根目录")
+    f_delete = folders_sub.add_parser("delete", parents=[common], help="删除我的文件夹（含子文件夹，不删正式题，可撤销）")
+    f_delete.add_argument("folder", help="文件夹 ID 或名称")
+    f_add = folders_sub.add_parser("add", parents=[common], help="将入库题目批量放入文件夹")
+    f_add.add_argument("target", help="目标文件夹 ID/名称，或 paper:<id> / book:<id>")
+    f_add.add_argument("questions", nargs="+", help="入库题目 UUID 或 Q-xxxxxxxx 短码")
+    f_remove = folders_sub.add_parser("remove", parents=[common], help="从文件夹批量移出题目")
+    f_remove.add_argument("target", help="目标文件夹 ID/名称，或 paper:<id> / book:<id>")
+    f_remove.add_argument("questions", nargs="+", help="入库题目 UUID 或 Q-xxxxxxxx 短码")
+    f_sort = folders_sub.add_parser("sort", parents=[common], help="设置文件夹排序方式")
+    f_sort.add_argument("target", help="节点 ID（如 global、section:folders、group:books、book:<id>、userfolder:<id>）")
+    f_sort.add_argument("mode", choices=list(SORT_MODES), help="time_desc / time_asc / name / count_desc / default")
+    f_sec = folders_sub.add_parser("set-section", parents=[common], help="批量整理已入库题目的教材章节/小节目录（可撤销）")
+    f_sec.add_argument("--section", help="统一的章节小节名")
+    f_sec.add_argument("--map-file", help="UTF-8 JSON 映射文件：{题目ID: 章节名} 或 [{publication_id, section}]")
+    f_sec.add_argument("questions", nargs="*", help="入库题目 UUID 或 Q-xxxxxxxx 短码")
+    f_paper = folders_sub.add_parser("paper", parents=[common], help="重命名试卷/教材或切换「试卷 ↔ 教材」类型")
+    f_paper.add_argument("paper", help="试卷/教材编号、latest 或名称片段")
+    f_paper.add_argument("--name", help="新的显示名称")
+    f_paper.add_argument("--type", choices=["exam", "book"], help="exam 试卷 / book 教材")
+    f_tg = folders_sub.add_parser("tag-group", parents=[common], help="整理标签管理里的个人分组")
+    tg_sub = f_tg.add_subparsers(dest="tag_group_command", metavar="分组动作")
+    tg_sub.add_parser("list", parents=[common], help="列出个人分组及所含标签")
+    tg_create = tg_sub.add_parser("create", parents=[common], help="新建个人分组")
+    tg_create.add_argument("name", help="分组名称")
+    tg_create.add_argument("--color", help="#RRGGBB 颜色")
+    tg_create.add_argument("--tags", nargs="+", help="初始加入的标签 UUID 或精确标签名")
+    tg_rename = tg_sub.add_parser("rename", parents=[common], help="重命名个人分组")
+    tg_rename.add_argument("group", help="分组 ID 或名称")
+    tg_rename.add_argument("name", help="新分组名称")
+    tg_del = tg_sub.add_parser("delete", parents=[common], help="删除个人分组（可撤销）")
+    tg_del.add_argument("group", help="分组 ID 或名称")
+    tg_add = tg_sub.add_parser("add-tags", parents=[common], help="往个人分组添加标签")
+    tg_add.add_argument("group", help="分组 ID 或名称")
+    tg_add.add_argument("tags", nargs="+", help="标签 UUID 或精确标签名")
+    tg_rem = tg_sub.add_parser("remove-tags", parents=[common], help="从个人分组移出标签")
+    tg_rem.add_argument("group", help="分组 ID 或名称")
+    tg_rem.add_argument("tags", nargs="+", help="标签 UUID 或精确标签名")
+    tg_set = tg_sub.add_parser("set-tags", parents=[common], help="覆盖设置个人分组所含标签")
+    tg_set.add_argument("group", help="分组 ID 或名称")
+    tg_set.add_argument("tags", nargs="*", help="标签 UUID 或精确标签名")
+    tg_undo = tg_sub.add_parser("undo", parents=[common], help="撤销个人分组操作")
+    tg_undo.add_argument("--operation-id", help="指定操作 ID")
+    f_undo = folders_sub.add_parser("undo", parents=[common], help="撤销最近一次文件夹或章节整理操作")
+    f_undo.add_argument("--operation-id", help="指定操作 ID")
     return parser
 
 
 COMMANDS = {
     "status": cmd_status, "config": cmd_config, "start": cmd_start, "papers": cmd_papers, "upload": cmd_upload, "wait": cmd_wait,
+    "pages": cmd_pages, "blocks": cmd_blocks, "cut": cmd_cut, "layout": cmd_layout, "read-cuts": cmd_read_cuts,
     "cards": cmd_cards, "show": cmd_show, "fix": cmd_fix, "figures": cmd_figures, "approve": cmd_approve,
     "unapprove": cmd_unapprove, "reread": cmd_reread, "publish": cmd_publish, "library": cmd_library,
     "locate": cmd_locate,
@@ -1994,6 +2917,7 @@ COMMANDS = {
     "claim": cmd_claim, "release": cmd_release, "propose": cmd_propose,
     "workbench": cmd_workbench, "whereami": cmd_whereami,
     "backup": cmd_backup,
+    "folders": cmd_folders,
 }
 
 

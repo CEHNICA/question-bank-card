@@ -214,5 +214,168 @@ function basePayload() {
   assert.equal(failHarness.windowObj.APISettings.hasUnsavedChanges(), true, "preserves unsaved changes on error");
   assert.match(failHarness.nodes.get("credentialResult").textContent, /API 凭据格式错误/);
 
+  // 3. 默认干净状态隐藏保存按钮；输入框按 Enter 直接保存（忽略输入法选词）；
+  //    连接测试返回 HTTP 409 时展示后端真实 message 而非「请求失败（HTTP 409）」。
+  let enterSaveCount = 0;
+  let testedReading = false;
+  const uxHarness = createHarness(async (url, options) => {
+    if (url === "/api/settings/api-config" && options.method === "POST") {
+      enterSaveCount += 1;
+      const updated = basePayload();
+      updated.credentials.modelscope = { configured: true, count: 1 };
+      updated.message = "API 配置已保存";
+      return { ok: true, status: 200, text: async () => JSON.stringify(updated) };
+    }
+    if (url === "/api/settings/api-config/test" && options.method === "POST") {
+      testedReading = true;
+      return {
+        ok: false,
+        status: 409,
+        text: async () => JSON.stringify({
+          target: "reading",
+          ok: false,
+          model: "Qwen/Qwen3.5-35B-A3B",
+          message: "密钥没通过：魔搭拒绝了该密钥。",
+          state: basePayload(),
+        }),
+      };
+    }
+    return { ok: true, status: 200, text: async () => JSON.stringify(basePayload()) };
+  });
+  await uxHarness.windowObj.APISettings.mount(uxHarness.host, {
+    mode: "inline",
+    toast: (m, t) => uxHarness.toasts.push({ m, t }),
+    confirm: async () => true,
+  });
+  assert.equal(uxHarness.nodes.get("credentialSave").hidden, true, "save button stays hidden when clean");
+  const msEnterIn = uxHarness.nodes.get("apiKeyInput-modelscope");
+  msEnterIn.value = "ms-enter-key";
+  msEnterIn.trigger("input");
+  assert.equal(uxHarness.nodes.get("credentialSave").hidden, false, "save button appears when dirty");
+  // 输入法组词态的 Enter 不得误提交
+  msEnterIn.trigger("keydown", { key: "Enter", isComposing: true });
+  assert.equal(enterSaveCount, 0);
+  // 正常 Enter 立即保存
+  msEnterIn.trigger("keydown", { key: "Enter", isComposing: false });
+  for (let i = 0; i < 8; i += 1) await Promise.resolve();
+  assert.equal(enterSaveCount, 1, "pressing Enter in an input saves immediately");
+  assert.equal(uxHarness.windowObj.APISettings.hasUnsavedChanges(), false);
+  assert.equal(uxHarness.nodes.get("credentialSave").hidden, true, "save button hides again after save");
+
+  // 触发读题连接测试返回 HTTP 409：不得吞掉后端 message
+  const readingPanel = uxHarness.nodes.get("apiSettingsReadingPanel");
+  const allButtons = [];
+  const allCheckboxes = [];
+  const collect = (n) => {
+    if (n.tagName === "BUTTON") allButtons.push(n);
+    if (n.tagName === "INPUT" && n.type === "checkbox") allCheckboxes.push(n);
+    for (const c of n.children || []) collect(c);
+  };
+  collect(readingPanel);
+  allCheckboxes[0].checked = true;
+  allCheckboxes[0].trigger("change");
+  const readingTestBtn = allButtons.find((b) => b.textContent.includes("看图连接"));
+  readingTestBtn.trigger("click");
+  for (let i = 0; i < 8; i += 1) await Promise.resolve();
+  assert.equal(testedReading, true);
+  assert.ok(uxHarness.toasts.some((t) => t.m.includes("密钥没通过：魔搭拒绝了该密钥")), "surfaces 409 message instead of generic HTTP 409");
+  assert.ok(!uxHarness.toasts.some((t) => t.m.includes("HTTP 409")), "does not show generic HTTP 409");
+
+  // 4. 未填密钥时禁用测试；填写后实时解锁并一步完成「保存并测试」（无需确认弹窗）；
+  //    密钥输入框显示/隐藏切换正常，保存与 hideSecrets() 自动恢复掩码；「放弃更改」按钮可回退改动。
+  let confirmPromptCalls = 0;
+  let step4Saves = 0;
+  let step4Tests = 0;
+  const step4Harness = createHarness(async (url, options) => {
+    if (url === "/api/settings/api-config" && options.method === "POST") {
+      step4Saves += 1;
+      const updated = basePayload();
+      updated.credentials.modelscope = { configured: true, count: 1 };
+      updated.reading.readiness = { ready: true };
+      updated.message = "API 配置已保存";
+      return { ok: true, status: 200, text: async () => JSON.stringify(updated) };
+    }
+    if (url === "/api/settings/api-config/test" && options.method === "POST") {
+      step4Tests += 1;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          target: "reading",
+          ok: true,
+          model: "Qwen/Qwen3.5-35B-A3B",
+          message: "连接成功",
+          state: { ...basePayload(), credentials: { ...basePayload().credentials, modelscope: { configured: true, count: 1 } } },
+        }),
+      };
+    }
+    return { ok: true, status: 200, text: async () => JSON.stringify(basePayload()) };
+  });
+  await step4Harness.windowObj.APISettings.mount(step4Harness.host, {
+    mode: "inline",
+    toast: (m, t) => step4Harness.toasts.push({ m, t }),
+    confirm: async () => {
+      confirmPromptCalls += 1;
+      return true;
+    },
+  });
+
+  const collectPanel = (panel) => {
+    const btns = [];
+    const checks = [];
+    const walk = (n) => {
+      if (n.tagName === "BUTTON") btns.push(n);
+      if (n.tagName === "INPUT" && n.type === "checkbox") checks.push(n);
+      for (const c of n.children || []) walk(c);
+    };
+    walk(panel);
+    return { btns, checks };
+  };
+
+  let readingUi = collectPanel(step4Harness.nodes.get("apiSettingsReadingPanel"));
+  let readTestBtn = readingUi.btns.find((b) => b.textContent.includes("看图连接"));
+  let readConsentBox = readingUi.checks[0];
+  assert.equal(readTestBtn.disabled, true, "reading test button disabled when key is missing");
+  assert.equal(readConsentBox.disabled, true, "reading consent checkbox disabled when key is missing");
+  assert.equal(step4Harness.nodes.get("credentialDiscard").hidden, true, "discard button hidden when clean");
+
+  // 切换本地密钥输入框显示/隐藏
+  const msInput4 = step4Harness.nodes.get("apiKeyInput-modelscope");
+  const visBtn4 = msInput4.parentElement.children[1];
+  assert.equal(msInput4.type, "password");
+  visBtn4.trigger("click");
+  assert.equal(msInput4.type, "text", "toggles input visibility locally");
+  assert.equal(visBtn4.textContent, "隐藏");
+
+  // 输入密钥后，实时解锁读题测试、出现「放弃更改」且按钮变为「保存并测试」
+  msInput4.value = "ms-one-click-key";
+  msInput4.trigger("input");
+  assert.equal(step4Harness.nodes.get("credentialDiscard").hidden, false, "discard button appears when dirty");
+  assert.equal(readConsentBox.disabled, false, "consent checkbox unlocks as soon as key is entered");
+  assert.match(readTestBtn.textContent, /保存并测试.*看图连接/);
+
+  // 放弃更改恢复干净状态并掩码输入
+  step4Harness.nodes.get("credentialDiscard").trigger("click");
+  for (let i = 0; i < 6; i += 1) await Promise.resolve();
+  assert.equal(step4Harness.windowObj.APISettings.hasUnsavedChanges(), false);
+  assert.equal(step4Harness.nodes.get("credentialDiscard").hidden, true);
+  assert.equal(step4Harness.nodes.get("apiKeyInput-modelscope").type, "password", "discard restores password masking");
+
+  // 再次输入并直接勾选同意 -> 一步保存并测试，不弹确认框
+  const msInput5 = step4Harness.nodes.get("apiKeyInput-modelscope");
+  msInput5.value = "ms-one-click-key";
+  msInput5.trigger("input");
+  readingUi = collectPanel(step4Harness.nodes.get("apiSettingsReadingPanel"));
+  readTestBtn = readingUi.btns.find((b) => b.textContent.includes("看图连接"));
+  readConsentBox = readingUi.checks[0];
+  readConsentBox.checked = true;
+  readConsentBox.trigger("change");
+  assert.equal(readTestBtn.disabled, false);
+  readTestBtn.trigger("click");
+  for (let i = 0; i < 16; i += 1) await Promise.resolve();
+  assert.equal(confirmPromptCalls, 0, "does not show redundant save-before-test confirm dialog");
+  assert.equal(step4Saves, 1, "saves automatically before testing");
+  assert.equal(step4Tests, 1, "runs connection test right after save");
+
   console.log("unified credentials UI tests: OK");
 })();

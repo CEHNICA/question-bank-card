@@ -23,6 +23,7 @@
 
   const SECRET_REVEAL_TIMEOUT_MS = 60000;
   const REQUEST_TIMEOUT_MS = 15000;
+  const TEST_REQUEST_TIMEOUT_MS = 100000;
   const CREDENTIAL_MASK = "****************";
 
   const state = {
@@ -44,6 +45,10 @@
     lastStatusTone: "",
     // key -> { value, timerId, pending, error }，key 形如 `${service}:${index}`
     revealedKeys: new Map(),
+    // 折叠面板展开态、输入框本地明文查看态与当前会话已测通的读题模型记录
+    openDetails: new Map(),
+    visibleInputs: new Set(),
+    readingVerified: new Map(),
     dom: null,
   };
 
@@ -69,6 +74,24 @@
     if (typeof window.showToast === "function") {
       window.showToast(message, tone);
     }
+  }
+
+  /**
+   * 在文本输入框内按 Enter 时直接触发保存（避开输入法选词与组合键）。
+   * @param {HTMLInputElement} input 输入框节点
+   */
+  function bindEnterToSave(input) {
+    input.addEventListener("keydown", (event) => {
+      if (!event || event.isComposing || event.keyCode === 229) return;
+      if (event.key !== "Enter" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (typeof event.preventDefault === "function") event.preventDefault();
+      if (isMutating()) return;
+      if (hasUnsavedChanges()) {
+        void save();
+      } else {
+        showToast("当前配置已是最新，无需保存", "success");
+      }
+    });
   }
 
   async function askConfirm(options) {
@@ -110,9 +133,12 @@
         payload = null;
       }
       if (!response.ok) {
-        const message = (payload && payload.error) || `请求失败（HTTP ${response.status}）`;
+        // 连接测试在探测失败时返回 HTTP 409 与 { ok: false, message, state }，
+        // 若仅读取 payload.error 会把真实诊断信息吞掉，只剩「请求失败（HTTP 409）」。
+        const message = (payload && (payload.error || payload.message)) || `请求失败（HTTP ${response.status}）`;
         const err = new Error(message);
         err.status = response.status;
+        err.payload = payload;
         throw err;
       }
       if (!payload || typeof payload !== "object") {
@@ -265,6 +291,52 @@
     for (const key of Array.from(state.revealedKeys.keys())) {
       hideSecretEntry(key);
     }
+    state.visibleInputs.clear();
+    if (state.dom?.inputRows) {
+      for (const row of state.dom.inputRows.values()) {
+        if (row.input) row.input.type = "password";
+        if (row.toggleBtn) {
+          row.toggleBtn.textContent = "显示";
+          row.toggleBtn.setAttribute("aria-pressed", "false");
+        }
+      }
+    }
+  }
+
+  /**
+   * 记忆 <details> 折叠面板的展开态，避免交互重绘时意外收起。
+   * @param {HTMLDetailsElement} detailsEl 折叠节点
+   * @param {string} key 状态键
+   * @param {boolean} defaultOpen 初始默认是否展开
+   */
+  function wireDetailsPersistence(detailsEl, key, defaultOpen = false) {
+    const stored = state.openDetails.get(key);
+    detailsEl.open = stored !== undefined ? stored : Boolean(defaultOpen);
+    detailsEl.addEventListener("toggle", () => {
+      state.openDetails.set(key, Boolean(detailsEl.open));
+    });
+  }
+
+  /**
+   * 展开（如需）并滚动聚焦到指定服务商的密钥输入框。
+   * @param {string} serviceKey 服务键名
+   */
+  function focusServiceKeyInput(serviceKey) {
+    if (ANSWER_ONLY_KEY_SERVICES.has(serviceKey)) {
+      state.openDetails.set("more-credentials", true);
+      if (state.dom?.moreCredentialsDetails) {
+        state.dom.moreCredentialsDetails.open = true;
+      }
+    }
+    const input = document.getElementById(`apiKeyInput-${serviceKey}`);
+    if (input) {
+      if (typeof input.scrollIntoView === "function") {
+        input.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      if (typeof input.focus === "function") {
+        input.focus({ preventScroll: true });
+      }
+    }
   }
 
   async function toggleSecretReveal(service, index) {
@@ -313,18 +385,104 @@
     return { configured: false, count: 0, label: "未配置", pending: false };
   }
 
-  function updateAnsweringStepTrack(data) {
-    const step = document.getElementById("apiStepTrack-answers");
-    if (!step || !data?.answering) return;
-    const ans = data.answering;
-    const ready = Boolean(ans.ready);
-    step.className = ready ? "done" : "todo";
-    const text = step.querySelector(".api-step-state");
-    if (!text) return;
-    if (ans.mode === "assistant") text.textContent = "AI 助手";
-    else if (ans.verified) text.textContent = `${ans.provider || "独立 API"} 已测通`;
-    else if (ans.configured) text.textContent = "待测试连接";
-    else text.textContent = "未配置";
+  function updateStepTracks(data) {
+    if (!data) return;
+    const mineruStep = document.getElementById("apiStepTrack-mineru");
+    if (mineruStep && data.credentials?.mineru) {
+      const mineruReady = Boolean(data.credentials.mineru.configured);
+      mineruStep.className = mineruReady ? "done" : "todo";
+      const mineruText = mineruStep.querySelector?.(".api-step-state");
+      if (mineruText) mineruText.textContent = mineruReady ? "已配置" : "还没配";
+    }
+
+    const readerStep = document.getElementById("apiStepTrack-reader");
+    if (readerStep && data.reading) {
+      const visionSpecs = (data.catalog?.services || []).filter((spec) => spec.roles?.includes("reading"));
+      const activeSpec = visionSpecs.find((spec) => spec.engine === data.reading.primary);
+      const assistantMode = Boolean(data.reading.assistant_mode || data.reading.primary === "assistant");
+      const ready = Boolean(data.reading?.readiness?.ready);
+      readerStep.className = ready || assistantMode ? "done" : "todo";
+      const readerText = readerStep.querySelector?.(".api-step-state");
+      if (readerText) {
+        if (assistantMode) {
+          readerText.textContent = "AI 助手";
+        } else if (activeSpec) {
+          const verifiedModel = state.readingVerified.get(activeSpec.key);
+          const savedModel = data.reading.models?.[activeSpec.key] ?? activeSpec.reading_default_model ?? "";
+          if (verifiedModel !== undefined && verifiedModel === savedModel) {
+            readerText.textContent = `${activeSpec.label} 已测通`;
+          } else if (ready) {
+            readerText.textContent = `${activeSpec.label}（已填密钥）`;
+          } else {
+            readerText.textContent = "还没配";
+          }
+        } else {
+          readerText.textContent = ready ? (data.reading?.readiness?.label || "已配置") : "还没配";
+        }
+      }
+    }
+
+    const ansStep = document.getElementById("apiStepTrack-answers");
+    if (ansStep && data.answering) {
+      const ans = data.answering;
+      const ready = Boolean(ans.ready);
+      ansStep.className = ready ? "done" : "todo";
+      const text = ansStep.querySelector?.(".api-step-state");
+      if (text) {
+        if (ans.mode === "assistant") text.textContent = "AI 助手";
+        else if (ans.verified) text.textContent = `${ans.provider || "独立 API"} 已测通`;
+        else if (ans.configured) text.textContent = "待测试连接";
+        else text.textContent = "未配置";
+      }
+    }
+  }
+
+  function readingBadgeState(data, draft, activeSpec) {
+    const serverReady = Boolean(data?.reading?.readiness?.ready);
+    if (!activeSpec || draft.reading.primary === "assistant") {
+      return { tone: "", text: "暂不调用云端" };
+    }
+    const st = serviceEffectiveState(activeSpec.key);
+    const currentModel = draft.reading.models[activeSpec.key] ?? activeSpec.reading_default_model ?? "";
+    const verifiedModel = state.readingVerified.get(activeSpec.key);
+    if (st.pending) {
+      return { tone: "is-pending", text: st.configured ? "待保存密钥" : "待清除密钥" };
+    }
+    if (verifiedModel !== undefined && verifiedModel === currentModel && st.configured) {
+      return { tone: "is-ready", text: "已测通 ✓" };
+    }
+    if (serverReady || st.configured) {
+      return { tone: "is-warn", text: "已填密钥（未测试）" };
+    }
+    return { tone: "", text: "未配密钥" };
+  }
+
+  function answeringBadgeState(data, draft) {
+    const ansData = data?.answering || {};
+    const ans = draft.answering;
+    const st = serviceEffectiveState(ans.provider);
+    if (st.pending) {
+      return { tone: "is-pending", text: st.configured ? "待保存密钥" : "待清除密钥" };
+    }
+    if (ansData.verified && ans.provider === ansData.provider) {
+      return { tone: "is-ready", text: "已测通 ✓" };
+    }
+    if (st.configured) {
+      return { tone: "is-warn", text: "待测试连接" };
+    }
+    return { tone: "", text: "未配密钥" };
+  }
+
+  function buildMissingKeyBar(serviceKey, label) {
+    const bar = createEl("div", "api-missing-key-bar");
+    bar.append(createEl("span", "", `尚未填写 ${label} 密钥，填入后即可测试连接。`));
+    const gotoBtn = createEl("button", "button small", "去填写密钥");
+    gotoBtn.type = "button";
+    gotoBtn.addEventListener("click", () => {
+      focusServiceKeyInput(serviceKey);
+    });
+    bar.append(gotoBtn);
+    return bar;
   }
 
   const ANSWER_SUGGESTED_MODELS = Object.freeze({
@@ -350,14 +508,16 @@
     return candidates.find((s) => serviceEffectiveState(s.key).configured) || null;
   }
 
-  function buildReadingSection(data, draft) {
+  function buildReadingSection(data, draft, refs) {
     const card = createEl("section", "credential-service api-unified-section");
     card.id = "apiSettingsReadingPanel";
     const head = createEl("div", "credential-service-head");
     const title = createEl("strong");
     title.append(createEl("span", "credential-step-number", "1"), " 看图读题设置");
-    const readingState = data.reading?.readiness?.ready ? "就绪" : "未就绪";
-    const badge = createEl("span", `api-state ${data.reading?.readiness?.ready ? "is-ready" : ""}`, readingState);
+    const visionServices = (data.catalog?.services || []).filter((spec) => spec.roles?.includes("reading"));
+    const activeSpec = visionServices.find((spec) => spec.engine === draft.reading.primary);
+    const badgeState = readingBadgeState(data, draft, activeSpec);
+    const badge = createEl("span", `api-state ${badgeState.tone}`, badgeState.text);
     head.append(title, badge);
     card.append(head);
 
@@ -366,7 +526,6 @@
     const fieldset = createEl("fieldset", "provider-picker");
     fieldset.id = "credentialVisionPicker";
     fieldset.append(createEl("legend", "field-legend", "选择看图读题服务"));
-    const visionServices = (data.catalog?.services || []).filter((spec) => spec.roles?.includes("reading"));
 
     for (const spec of visionServices) {
       const label = createEl("label", "provider-option");
@@ -385,7 +544,9 @@
       const span = createEl("span", "", spec.label);
       if (spec.recommended) span.append(createEl("small", "", "推荐"));
       const st = serviceEffectiveState(spec.key);
-      span.append(createEl("em", "provider-option-state", st.label));
+      const stateEm = createEl("em", "provider-option-state", st.label);
+      refs.visionOptionStates.set(spec.key, stateEm);
+      span.append(stateEm);
       label.append(radio, span);
       fieldset.append(label);
     }
@@ -408,13 +569,17 @@
     fieldset.append(assistantLabel);
     card.append(fieldset);
 
-    const activeSpec = visionServices.find((spec) => spec.engine === draft.reading.primary);
+    refs.readingBadge = badge;
+    refs.readingActiveSpec = activeSpec || null;
+
     if (activeSpec) {
       const currentModel = draft.reading.models[activeSpec.key] ?? activeSpec.reading_default_model ?? "";
       const advanced = createEl("details", "settings-advanced api-answer-advanced");
-      if (currentModel && currentModel !== activeSpec.reading_default_model) {
-        advanced.open = true;
-      }
+      wireDetailsPersistence(
+        advanced,
+        `reading-advanced:${activeSpec.key}`,
+        Boolean(currentModel && currentModel !== activeSpec.reading_default_model)
+      );
       advanced.append(createEl("summary", "", `模型与档位参数（当前：${currentModel || "默认"} · 一般不用改）`));
 
       const modelRow = createEl("label", "model-id-field");
@@ -439,6 +604,7 @@
         draft.reading.models[activeSpec.key] = input.value.trim();
         syncDirtyIndicator();
       });
+      bindEnterToSave(input);
       modelRow.append(input, datalist);
       advanced.append(modelRow);
 
@@ -463,23 +629,37 @@
       }
       card.append(advanced);
 
-      // 读题连接测试（明确确认才发送合成图）
+      // 读题连接测试（明确确认才发送合成图；未填密钥时先引导去填密钥）
+      const hasKey = serviceEffectiveState(activeSpec.key).configured;
       const probeBox = createEl("div", "credential-connection-test");
+      const missingBar = buildMissingKeyBar(activeSpec.key, activeSpec.label);
+      missingBar.hidden = hasKey;
+      probeBox.append(missingBar);
+
       const consentLabel = createEl("label", "credential-consent");
       const consentBox = createEl("input");
       consentBox.type = "checkbox";
       consentBox.checked = draft.reading.testConsent;
-      consentBox.disabled = isMutating();
+      consentBox.disabled = isMutating() || !hasKey;
       consentBox.addEventListener("change", () => {
         draft.reading.testConsent = consentBox.checked;
-        testBtn.disabled = isMutating() || !draft.reading.testConsent;
+        syncDirtyIndicator();
       });
       consentLabel.append(consentBox, createEl("span", "", `我同意测试 ${activeSpec.label} 看图读题连接（发送一张本地合成图，可能消耗极少额度）`));
 
       const actions = createEl("div", "credential-connection-actions");
-      const testBtn = createEl("button", "button", state.testingTarget === `reading:${activeSpec.key}` ? "正在测试…" : `测试 ${activeSpec.label} 看图连接`);
+      const dirty = hasUnsavedChanges();
+      const testBtn = createEl(
+        "button",
+        "button",
+        state.testingTarget === `reading:${activeSpec.key}`
+          ? "正在测试…"
+          : dirty
+            ? `保存并测试 ${activeSpec.label} 看图连接`
+            : `测试 ${activeSpec.label} 看图连接`
+      );
       testBtn.type = "button";
-      testBtn.disabled = isMutating() || !draft.reading.testConsent;
+      testBtn.disabled = isMutating() || !hasKey || !draft.reading.testConsent;
       testBtn.addEventListener("click", () => {
         void runConnectionTest("reading", activeSpec.key);
       });
@@ -487,15 +667,25 @@
       actions.append(testBtn, resultSpan);
       probeBox.append(consentLabel, actions);
       card.append(probeBox);
+      refs.readingProbe = {
+        serviceKey: activeSpec.key,
+        label: activeSpec.label,
+        missingBar,
+        consentBox,
+        testBtn,
+      };
     } else {
       card.append(createEl("p", "settings-footnote", "当前选择暂不调用云端看图模型：切题后直接原图审核或交由 AI 助手读取。"));
     }
     return card;
   }
 
-  function renderCredentialCard(spec, draft) {
+  function renderCredentialCard(spec, draft, refs) {
     const cred = draft.credentials[spec.key];
-    const card = createEl("article", "credential-service api-service-card");
+    const isReadingActive = Boolean(spec.engine && draft.reading.primary === spec.engine);
+    const isAnsweringActive = draft.answering.provider === spec.key;
+    const isActive = isReadingActive || isAnsweringActive;
+    const card = createEl("article", `credential-service api-service-card${isActive ? " is-active-service" : ""}`);
     card.dataset.service = spec.key;
 
     const cardHead = createEl("div", "credential-service-head");
@@ -505,16 +695,20 @@
     for (const role of spec.roles || []) {
       nameWrap.append(createEl("span", "api-role-pill", ROLE_LABELS[role] || role));
     }
+    if (isReadingActive) nameWrap.append(createEl("span", "api-active-pill", "当前读题"));
+    if (isAnsweringActive) nameWrap.append(createEl("span", "api-active-pill", "当前答题"));
     const st = serviceEffectiveState(spec.key);
-    const stateBadge = createEl("span", `api-state ${st.configured ? "is-ready" : ""}`, st.label);
+    const badgeTone = st.pending ? "is-pending" : st.configured ? "is-ready" : "";
+    const stateBadge = createEl("span", `api-state ${badgeTone}`, st.label);
     cardHead.append(nameWrap, stateBadge);
     card.append(cardHead);
+    refs.serviceCards.set(spec.key, { card, badge: stateBadge, spec });
 
     if (spec.note) {
       card.append(createEl("p", "credential-purpose", spec.note));
     }
 
-    // 已保存密钥行（按 count 渲染 0..N 行）
+    // 已保存密钥行（按 count 渲染 0..N 行；子节点顺序受 test_credential_saved_keys.js 契约保护）
     if (cred.configured && cred.count > 0 && !cred.clear) {
       const ul = createEl("ul", "credential-saved-list");
       ul.setAttribute("aria-label", `已保存的 ${spec.label} 密钥`);
@@ -536,7 +730,7 @@
       card.append(ul);
     }
 
-    // 输入新密钥
+    // 输入新密钥（支持本地显隐切换，绝不触碰后端明文接口）
     const inputId = `apiKeyInput-${spec.key}`;
     const labelRow = createEl("label");
     labelRow.htmlFor = inputId;
@@ -548,9 +742,11 @@
       link.rel = "noopener noreferrer";
       labelRow.append(" · ", link);
     }
+    const isInputVisible = state.visibleInputs.has(spec.key);
+    const inputWrap = createEl("div", "api-secret-input-wrap");
     const input = createEl("input");
     input.id = inputId;
-    input.type = "password";
+    input.type = isInputVisible ? "text" : "password";
     input.autocomplete = "off";
     input.setAttribute("autocapitalize", "off");
     input.setAttribute("autocorrect", "off");
@@ -565,7 +761,24 @@
       if (input.value.trim()) cred.clear = false;
       syncDirtyIndicator();
     });
-    card.append(labelRow, input);
+    bindEnterToSave(input);
+
+    const visToggleBtn = createEl("button", "button small api-secret-toggle", isInputVisible ? "隐藏" : "显示");
+    visToggleBtn.type = "button";
+    visToggleBtn.disabled = isMutating();
+    visToggleBtn.setAttribute("aria-pressed", isInputVisible ? "true" : "false");
+    visToggleBtn.setAttribute("aria-label", `${isInputVisible ? "隐藏" : "显示"}正在输入的 ${spec.label} 密钥`);
+    visToggleBtn.addEventListener("click", () => {
+      const nextVisible = !state.visibleInputs.has(spec.key);
+      if (nextVisible) state.visibleInputs.add(spec.key);
+      else state.visibleInputs.delete(spec.key);
+      input.type = nextVisible ? "text" : "password";
+      visToggleBtn.textContent = nextVisible ? "隐藏" : "显示";
+      visToggleBtn.setAttribute("aria-pressed", nextVisible ? "true" : "false");
+    });
+    inputWrap.append(input, visToggleBtn);
+    refs.inputRows.set(spec.key, { input, toggleBtn: visToggleBtn });
+    card.append(labelRow, inputWrap);
 
     if (cred.configured) {
       const actions = createEl("div", "credential-service-actions");
@@ -584,15 +797,19 @@
     return card;
   }
 
-  function buildCredentialsSection(data, draft) {
+  function buildCredentialsSection(data, draft, refs) {
     const section = createEl("section", "credential-service api-unified-section");
     section.id = "apiSettingsCredentialPanel";
     const head = createEl("div", "credential-service-head");
     const title = createEl("strong");
     title.append(createEl("span", "credential-step-number", "2"), " 填写服务密钥（填一次全站共用）");
-    const totalCount = Object.values(draft.credentials).reduce((acc, item) => acc + (item.configured ? item.count : 0), 0);
+    const totalCount = Object.keys(draft.credentials).reduce((acc, key) => {
+      const st = serviceEffectiveState(key);
+      return acc + (st.configured ? st.count : 0);
+    }, 0);
     const totalEl = createEl("span", "credential-saved-total", `已配 ${totalCount} 个账号`);
     totalEl.id = "credentialSavedTotal";
+    refs.totalEl = totalEl;
     head.append(title, totalEl);
     section.append(head);
     section.append(createEl("p", "credential-storage-note", "密钥全部加密保存在这台电脑里；读题和题库生成答案/标签同一家只填一次。"));
@@ -603,7 +820,7 @@
 
     const list = createEl("div", "api-credential-grid");
     for (const spec of primaryServices) {
-      list.append(renderCredentialCard(spec, draft));
+      list.append(renderCredentialCard(spec, draft, refs));
     }
     section.append(list);
 
@@ -611,21 +828,22 @@
       const more = createEl("details", "api-more-credentials");
       const anySecondaryUsed = secondaryServices.some((spec) => {
         const st = serviceEffectiveState(spec.key);
-        return st.configured || Boolean(draft.credentials[spec.key]?.input?.trim()) || draft.answering.provider === spec.key && st.configured;
+        return st.configured || Boolean(draft.credentials[spec.key]?.input?.trim()) || draft.answering.provider === spec.key;
       });
-      if (anySecondaryUsed) more.open = true;
+      wireDetailsPersistence(more, "more-credentials", anySecondaryUsed);
       more.append(createEl("summary", "", "更多仅用于题库答题/标签的独立模型密钥（DeepSeek / 豆包 / 其他自定义，可选）"));
       const secondaryGrid = createEl("div", "api-credential-grid");
       for (const spec of secondaryServices) {
-        secondaryGrid.append(renderCredentialCard(spec, draft));
+        secondaryGrid.append(renderCredentialCard(spec, draft, refs));
       }
       more.append(secondaryGrid);
+      refs.moreCredentialsDetails = more;
       section.append(more);
     }
     return section;
   }
 
-  function buildAnsweringSection(data, draft) {
+  function buildAnsweringSection(data, draft, refs) {
     const panel = createEl("section", "credential-service api-unified-section");
     panel.id = "credentialAnswerPanel";
     const ansData = data.answering || {};
@@ -634,27 +852,23 @@
     const head = createEl("div", "credential-service-head");
     const title = createEl("strong");
     title.append(createEl("span", "credential-step-number", "3"), " 题库生成答案与 AI 标签建议");
-    const activeProviderConfigured = serviceEffectiveState(ans.provider).configured;
-    const statusText = ansData.verified
-      ? "已测通 ✓"
-      : activeProviderConfigured
-        ? "待测试连接"
-        : "未配密钥";
-    head.append(title, createEl("span", `api-state ${ansData.verified ? "is-ready" : ""}`, statusText));
+    const badgeState = answeringBadgeState(data, draft);
+    const badge = createEl("span", `api-state ${badgeState.tone}`, badgeState.text);
+    head.append(title, badge);
     panel.append(head);
+    refs.answeringBadge = badge;
 
     // 若当前所选答题服务未配置，但用户已在上方填了其他服务密钥（如 MiniMax / 魔搭 / 硅基流动），给一键沿用按钮
+    const activeProviderConfigured = serviceEffectiveState(ans.provider).configured;
     const recommended = !activeProviderConfigured ? findRecommendedAnswerService(data, draft) : null;
     if (recommended) {
       const banner = createEl("div", "api-quick-reuse-banner");
-      const bannerText = createEl("span", "", `你已在上方填好「${recommended.label}」密钥，可直接用它来生成题库答案和 AI 标签。`);
-      const useBtn = createEl("button", "button small primary", `一键改用 ${recommended.label}（并开启功能）`);
+      const bannerText = createEl("span", "", `你已在上方填好「${recommended.label}」密钥，可直接切换使用它来生成题库答案和 AI 标签。`);
+      const useBtn = createEl("button", "button small primary", `一键改用 ${recommended.label}`);
       useBtn.type = "button";
       useBtn.disabled = isMutating();
       useBtn.addEventListener("click", () => {
         ans.provider = recommended.key;
-        ans.features.ai_answer = true;
-        ans.features.knowledge_tags = true;
         ans.testConsent = false;
         ans.testResult = "";
         renderContent();
@@ -736,20 +950,31 @@
       });
       providerRow.append(select);
       panel.append(providerRow);
+      refs.answeringSelect = select;
+      refs.answerServices = answerServices;
 
-      // 共用提示（第 2 步统一管理，不再需要重复复制密钥按钮）
+      // 共用提示（第 2 步统一管理，未填密钥时提供跳转填写入口）
       const activeKeyState = serviceEffectiveState(ans.provider);
       const activeSpec = answerServices.find((spec) => spec.key === ans.provider);
       const isSharedVision = activeSpec?.roles?.includes("reading");
-      panel.append(
-        createEl(
-          "p",
-          "settings-footnote",
-          activeKeyState.configured
-            ? `已关联上方第 2 步的 ${activeSpec?.label || ans.provider} 密钥（${activeKeyState.label}${isSharedVision ? " · 与读题全站共用，无需再次输入" : ""}）。`
-            : `尚未填写 ${activeSpec?.label || ans.provider} 密钥：请直接在上方第 2 步填写，或改选你已经填好密钥的服务商。`
-        )
+      const footnoteRow = createEl("div", "api-footnote-row");
+      const footnoteText = createEl(
+        "p",
+        "settings-footnote",
+        activeKeyState.configured
+          ? `已关联上方第 2 步的 ${activeSpec?.label || ans.provider} 密钥（${activeKeyState.label}${isSharedVision ? " · 与读题全站共用，无需再次输入" : ""}）。`
+          : `尚未填写 ${activeSpec?.label || ans.provider} 密钥：请直接在上方第 2 步填写，或改选你已经填好密钥的服务商。`
       );
+      const footnoteGotoBtn = createEl("button", "button small", "去填写密钥");
+      footnoteGotoBtn.type = "button";
+      footnoteGotoBtn.hidden = activeKeyState.configured;
+      footnoteGotoBtn.addEventListener("click", () => {
+        focusServiceKeyInput(ans.provider);
+      });
+      footnoteRow.append(footnoteText, footnoteGotoBtn);
+      panel.append(footnoteRow);
+      refs.answeringFootnote = footnoteText;
+      refs.answeringGotoBtn = footnoteGotoBtn;
 
       const profile = ans.profiles[ans.provider] || {
         model: "",
@@ -759,9 +984,11 @@
       };
 
       const advanced = createEl("details", "settings-advanced api-answer-advanced");
-      if (ans.provider === "custom" || ans.provider === "doubao" || !profile.model) {
-        advanced.open = true;
-      }
+      wireDetailsPersistence(
+        advanced,
+        `answering-advanced:${ans.provider}`,
+        ans.provider === "custom" || ans.provider === "doubao" || !profile.model
+      );
       advanced.append(createEl("summary", "", `高级模型参数（当前模型：${profile.model || "未填写"} · 一般保持默认即可）`));
 
       const modelField = createEl("label", "model-id-field");
@@ -786,6 +1013,7 @@
         profile.model = modelInput.value.trim();
         syncDirtyIndicator();
       });
+      bindEnterToSave(modelInput);
       modelField.append(modelInput, ansDatalist);
       advanced.append(modelField);
 
@@ -803,6 +1031,7 @@
         profile.base_url = baseInput.value.trim();
         syncDirtyIndicator();
       });
+      bindEnterToSave(baseInput);
       baseField.append(baseInput);
       advanced.append(baseField);
 
@@ -820,31 +1049,43 @@
       advanced.append(capsBox);
       panel.append(advanced);
 
-      // 独立解题连接测试
+      // 独立解题连接测试（未填密钥时先引导填写，禁止空发请求）
       const probeBox = createEl("div", "credential-connection-test");
-      if (activeProviderConfigured && !ansData.verified) {
-        probeBox.append(
-          createEl(
-            "p",
-            "api-inline-hint",
-            "还差一步：点下方「保存全部 API 配置」后，勾选确认框并点击「测试解题连接」，测通后题库即可生成答案和标签。"
-          )
-        );
-      }
+      const missingBar = buildMissingKeyBar(ans.provider, activeSpec?.label || ans.provider);
+      missingBar.hidden = activeProviderConfigured;
+      probeBox.append(missingBar);
+
+      const inlineHint = createEl(
+        "p",
+        "api-inline-hint",
+        "还差一步：确认配置已保存（输入后按 Enter 可直接保存），勾选确认框并点击「测试解题连接」，测通后题库即可生成答案和标签。"
+      );
+      inlineHint.hidden = !activeProviderConfigured || Boolean(ansData.verified);
+      probeBox.append(inlineHint);
+
       const consentLabel = createEl("label", "credential-consent");
       const consentBox = createEl("input");
       consentBox.type = "checkbox";
       consentBox.checked = ans.testConsent;
-      consentBox.disabled = isMutating();
+      consentBox.disabled = isMutating() || !activeProviderConfigured;
       consentBox.addEventListener("change", () => {
         ans.testConsent = consentBox.checked;
-        testBtn.disabled = isMutating() || !ans.testConsent;
+        syncDirtyIndicator();
       });
       consentLabel.append(consentBox, createEl("span", "", "我同意运行一次合成数学连接测试（已保存后可测，可能产生少量费用）"));
       const actions = createEl("div", "credential-connection-actions");
-      const testBtn = createEl("button", "button", state.testingTarget === "answering" ? "正在测试…" : "测试解题连接");
+      const dirty = hasUnsavedChanges();
+      const testBtn = createEl(
+        "button",
+        "button",
+        state.testingTarget === "answering"
+          ? "正在测试…"
+          : dirty
+            ? "保存并测试解题连接"
+            : "测试解题连接"
+      );
       testBtn.type = "button";
-      testBtn.disabled = isMutating() || !ans.testConsent;
+      testBtn.disabled = isMutating() || !activeProviderConfigured || !ans.testConsent;
       testBtn.addEventListener("click", () => {
         void runConnectionTest("answering", ans.provider);
       });
@@ -853,6 +1094,12 @@
       actions.append(testBtn, resSpan);
       probeBox.append(consentLabel, actions);
       panel.append(probeBox);
+      refs.answeringProbe = {
+        missingBar,
+        inlineHint,
+        consentBox,
+        testBtn,
+      };
     }
 
     return panel;
@@ -874,22 +1121,140 @@
   }
 
   function syncDirtyIndicator() {
-    if (!state.dom) return;
+    if (!state.dom || !state.draft) return;
     const dirty = hasUnsavedChanges();
-    const { saveBtn, dirtyTag } = state.dom;
+    const {
+      footer,
+      saveBtn,
+      discardBtn,
+      dirtyTag,
+      serviceCards,
+      totalEl,
+      visionOptionStates,
+      readingBadge,
+      readingActiveSpec,
+      readingProbe,
+      answeringBadge,
+      answeringSelect,
+      answerServices,
+      answeringFootnote,
+      answeringGotoBtn,
+      answeringProbe,
+    } = state.dom;
+
+    if (serviceCards) {
+      for (const [key, entry] of serviceCards.entries()) {
+        const st = serviceEffectiveState(key);
+        const tone = st.pending ? "is-pending" : st.configured ? "is-ready" : "";
+        entry.badge.className = `api-state ${tone}`;
+        entry.badge.textContent = st.label;
+      }
+    }
+    if (totalEl) {
+      const totalCount = Object.keys(state.draft.credentials).reduce((acc, key) => {
+        const st = serviceEffectiveState(key);
+        return acc + (st.configured ? st.count : 0);
+      }, 0);
+      totalEl.textContent = `已配 ${totalCount} 个账号`;
+    }
+    if (visionOptionStates) {
+      for (const [key, stateEm] of visionOptionStates.entries()) {
+        stateEm.textContent = serviceEffectiveState(key).label;
+      }
+    }
+    if (readingBadge) {
+      const rb = readingBadgeState(state.serverData, state.draft, readingActiveSpec);
+      readingBadge.className = `api-state ${rb.tone}`;
+      readingBadge.textContent = rb.text;
+    }
+    if (readingProbe) {
+      const hasKey = serviceEffectiveState(readingProbe.serviceKey).configured;
+      readingProbe.missingBar.hidden = hasKey;
+      readingProbe.consentBox.disabled = isMutating() || !hasKey;
+      readingProbe.testBtn.disabled = isMutating() || !hasKey || !state.draft.reading.testConsent;
+      readingProbe.testBtn.textContent = state.testingTarget === `reading:${readingProbe.serviceKey}`
+        ? "正在测试…"
+        : dirty
+          ? `保存并测试 ${readingProbe.label} 看图连接`
+          : `测试 ${readingProbe.label} 看图连接`;
+    }
+
+    const ans = state.draft.answering;
+    const ansHasKey = serviceEffectiveState(ans.provider).configured;
+    if (answeringBadge) {
+      const ab = answeringBadgeState(state.serverData, state.draft);
+      answeringBadge.className = `api-state ${ab.tone}`;
+      answeringBadge.textContent = ab.text;
+    }
+    if (answeringSelect && answerServices) {
+      const specByKey = new Map(answerServices.map((item) => [item.key, item]));
+      for (const opt of answeringSelect.children || []) {
+        const spec = specByKey.get(opt.value);
+        if (!spec) continue;
+        const st = serviceEffectiveState(spec.key);
+        opt.textContent = `${spec.label}${st.configured ? `（✓ ${st.label}）` : "（未填密钥）"}`;
+      }
+    }
+    if (answeringFootnote && answerServices) {
+      const activeSpec = answerServices.find((spec) => spec.key === ans.provider);
+      const activeKeyState = serviceEffectiveState(ans.provider);
+      const isSharedVision = activeSpec?.roles?.includes("reading");
+      answeringFootnote.textContent = activeKeyState.configured
+        ? `已关联上方第 2 步的 ${activeSpec?.label || ans.provider} 密钥（${activeKeyState.label}${isSharedVision ? " · 与读题全站共用，无需再次输入" : ""}）。`
+        : `尚未填写 ${activeSpec?.label || ans.provider} 密钥：请直接在上方第 2 步填写，或改选你已经填好密钥的服务商。`;
+    }
+    if (answeringGotoBtn) {
+      answeringGotoBtn.hidden = ansHasKey;
+    }
+    if (answeringProbe) {
+      answeringProbe.missingBar.hidden = ansHasKey;
+      answeringProbe.inlineHint.hidden = !ansHasKey || Boolean(state.serverData?.answering?.verified);
+      answeringProbe.consentBox.disabled = isMutating() || !ansHasKey;
+      answeringProbe.testBtn.disabled = isMutating() || !ansHasKey || !ans.testConsent;
+      answeringProbe.testBtn.textContent = state.testingTarget === "answering"
+        ? "正在测试…"
+        : dirty
+          ? "保存并测试解题连接"
+          : "测试解题连接";
+    }
+
     if (saveBtn) {
+      saveBtn.hidden = !dirty && !state.saving;
       saveBtn.disabled = isMutating();
-      saveBtn.textContent = state.saving ? "正在保存…" : dirty ? "保存全部 API 配置 *" : "保存全部 API 配置";
+      saveBtn.textContent = state.saving ? "正在保存…" : "保存更改";
+    }
+    if (discardBtn) {
+      discardBtn.hidden = !dirty || state.saving;
+      discardBtn.disabled = isMutating();
     }
     if (dirtyTag) {
       dirtyTag.hidden = !dirty;
-      dirtyTag.textContent = dirty ? "有未保存的改动" : "";
+      dirtyTag.textContent = dirty ? "有未保存的改动（输入后按 Enter 可直接保存）" : "";
+    }
+    if (footer) {
+      footer.className = `credential-actions${dirty ? " is-dirty" : ""}`;
+      footer.hidden = state.mode !== "modal" && !dirty && !state.saving && !state.lastStatusMessage;
     }
   }
 
   function renderContent() {
     if (!state.host) return;
+    const activeEl = typeof document !== "undefined" ? document.activeElement : null;
+    const activeId = activeEl && activeEl.id && typeof state.host.contains === "function" && state.host.contains(activeEl)
+      ? activeEl.id
+      : "";
+
     const root = createEl("div", "credential-ui api-unified-root");
+    root.addEventListener("keydown", (event) => {
+      if (!event || event.isComposing || event.keyCode === 229) return;
+      const key = String(event.key || "").toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && key === "s") {
+        if (typeof event.preventDefault === "function") event.preventDefault();
+        if (!isMutating() && hasUnsavedChanges()) {
+          void save();
+        }
+      }
+    });
 
     if (state.loading && !state.draft) {
       root.append(createEl("p", "settings-footnote", "正在读取全部 API 与密钥状态…"));
@@ -910,11 +1275,28 @@
       return;
     }
 
+    const refs = {
+      visionOptionStates: new Map(),
+      serviceCards: new Map(),
+      inputRows: new Map(),
+      readingBadge: null,
+      readingActiveSpec: null,
+      readingProbe: null,
+      totalEl: null,
+      moreCredentialsDetails: null,
+      answeringBadge: null,
+      answeringSelect: null,
+      answerServices: null,
+      answeringFootnote: null,
+      answeringGotoBtn: null,
+      answeringProbe: null,
+    };
+
     const body = createEl("div", "credential-body");
     body.append(
-      buildReadingSection(state.serverData, state.draft),
-      buildCredentialsSection(state.serverData, state.draft),
-      buildAnsweringSection(state.serverData, state.draft)
+      buildReadingSection(state.serverData, state.draft, refs),
+      buildCredentialsSection(state.serverData, state.draft, refs),
+      buildAnsweringSection(state.serverData, state.draft, refs)
     );
 
     const footer = createEl("footer", "credential-actions");
@@ -923,14 +1305,22 @@
     statusMsg.setAttribute("role", "status");
     const dirtyTag = createEl("span", "api-dirty-badge");
     dirtyTag.hidden = true;
-    const saveBtn = createEl("button", "button primary", "保存全部 API 配置");
+    const discardBtn = createEl("button", "button quiet", "放弃更改");
+    discardBtn.id = "credentialDiscard";
+    discardBtn.type = "button";
+    discardBtn.hidden = true;
+    discardBtn.addEventListener("click", () => {
+      void discard();
+    });
+    const saveBtn = createEl("button", "button primary", "保存更改");
     saveBtn.id = "credentialSave";
     saveBtn.type = "button";
+    saveBtn.hidden = true;
     saveBtn.addEventListener("click", () => {
       void save();
     });
 
-    footer.append(statusMsg, dirtyTag, saveBtn);
+    footer.append(statusMsg, dirtyTag, discardBtn, saveBtn);
     if (state.mode === "modal") {
       const cancelBtn = createEl("button", "button", "关闭");
       cancelBtn.id = "credentialCancel";
@@ -944,8 +1334,15 @@
 
     root.append(body, footer);
     state.host.replaceChildren(root);
-    state.dom = { saveBtn, statusMsg, dirtyTag };
+    state.dom = { ...refs, footer, saveBtn, discardBtn, statusMsg, dirtyTag };
     syncDirtyIndicator();
+
+    if (activeId) {
+      const restored = document.getElementById(activeId);
+      if (restored && !restored.disabled && typeof restored.focus === "function") {
+        restored.focus({ preventScroll: true });
+      }
+    }
   }
 
   async function loadConfig({ preserveDraftIfDirty = false } = {}) {
@@ -956,7 +1353,7 @@
       const data = await requestJson("/api/settings/api-config");
       if (epoch !== state.loadEpoch) return null;
       state.serverData = data;
-      updateAnsweringStepTrack(data);
+      updateStepTracks(data);
       if (!preserveDraftIfDirty || !hasUnsavedChanges()) {
         state.draft = cloneDraftFromServer(data);
         state.baselineSignature = draftDirtySignature(state.draft);
@@ -1047,13 +1444,24 @@
           updated.features = featRes.features;
         }
       }
+      for (const [service, op] of Object.entries(payload.credentials || {})) {
+        if (op.action === "replace" || op.action === "clear") {
+          state.readingVerified.delete(service);
+        }
+      }
+      const savedModels = payload.reading?.models || {};
+      for (const [service, verifiedModel] of Array.from(state.readingVerified.entries())) {
+        if (savedModels[service] !== verifiedModel) {
+          state.readingVerified.delete(service);
+        }
+      }
       hideSecrets();
       state.serverData = updated;
       state.draft = cloneDraftFromServer(updated);
       state.baselineSignature = draftDirtySignature(state.draft);
       state.lastStatusMessage = updated.message || "API 配置已保存";
       state.lastStatusTone = "is-success";
-      updateAnsweringStepTrack(updated);
+      updateStepTracks(updated);
       showToast(state.lastStatusMessage, "success");
       if (typeof state.options.onStatusChange === "function") {
         void state.options.onStatusChange(updated);
@@ -1075,13 +1483,6 @@
   async function runConnectionTest(target, service) {
     if (!state.draft || isMutating()) return;
     if (hasUnsavedChanges()) {
-      const savedFirst = await askConfirm({
-        title: "先保存当前修改再测试？",
-        text: "你修改的配置尚未保存。测试连接使用已保存的配置和密钥；是否立即保存后继续测试？",
-        ok: "保存并测试",
-        cancel: "取消",
-      });
-      if (!savedFirst) return;
       const ok = await save();
       if (!ok) return;
     }
@@ -1091,29 +1492,40 @@
       const res = await requestJson("/api/settings/api-config/test", {
         method: "POST",
         body: target === "reading" ? { target: "reading", service, confirm: true } : { target: "answering", confirm: true },
+        timeoutMs: TEST_REQUEST_TIMEOUT_MS,
       });
       if (res.state) {
         state.serverData = res.state;
-        updateAnsweringStepTrack(res.state);
       }
       const msg = res.message || (res.ok ? "连接测试通过" : "连接测试未通过");
       if (target === "reading") {
+        if (res.ok) {
+          state.readingVerified.set(service, res.model || state.draft.reading.models[service] || "");
+        } else {
+          state.readingVerified.delete(service);
+        }
         state.draft.reading.testResult = msg;
         state.draft.reading.testTone = res.ok ? "is-success" : "is-error";
       } else {
         state.draft.answering.testResult = msg;
         state.draft.answering.testTone = res.ok ? "is-success" : "is-error";
       }
+      if (state.serverData) updateStepTracks(state.serverData);
       showToast(msg, res.ok ? "success" : "error");
     } catch (error) {
+      if (error && error.payload && error.payload.state) {
+        state.serverData = error.payload.state;
+      }
       const msg = error.message || "连接测试失败";
       if (target === "reading") {
+        state.readingVerified.delete(service);
         state.draft.reading.testResult = msg;
         state.draft.reading.testTone = "is-error";
       } else {
         state.draft.answering.testResult = msg;
         state.draft.answering.testTone = "is-error";
       }
+      if (state.serverData) updateStepTracks(state.serverData);
       showToast(msg, "error");
     } finally {
       state.testingTarget = "";

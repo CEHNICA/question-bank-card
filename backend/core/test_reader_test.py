@@ -6,11 +6,14 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+from pathlib import Path
 from unittest import mock
 
 from django.test import Client, TestCase
 
-from . import credential_settings, reader_test
+from . import credential_settings, preferences, reader_test
 
 
 class ReaderConnectionTestTests(TestCase):
@@ -134,3 +137,70 @@ class ReaderConnectionCallTests(TestCase):
             result = reader_test.test_reading_connection("minimax")
         self.assertNotIn("offline-secret-key", result["message"])
         self.assertNotIn("offline-secret-key", json.dumps(result, ensure_ascii=False))
+
+    def test_modelscope_disables_thinking_and_retries_400_without_optional_flag(self):
+        err_400 = self._response(400, {"error": {"message": "enable_thinking is not supported"}})
+        ok_200 = self._response(200, {"choices": [{"message": {"content": "【答案】2"}}]})
+        with (
+            mock.patch.object(reader_test.credential_settings, "reveal_saved_key", return_value="ms-offline-key"),
+            mock.patch.object(reader_test, "_saved_model", return_value="Qwen/Qwen3.5-35B-A3B"),
+            mock.patch.object(reader_test.requests, "post", side_effect=[err_400, ok_200]) as post,
+        ):
+            result = reader_test.test_reading_connection("modelscope")
+        self.assertTrue(result["ok"])
+        self.assertEqual(post.call_count, 2)
+        self.assertIs(post.call_args_list[0].kwargs["json"]["enable_thinking"], False)
+        self.assertNotIn("enable_thinking", post.call_args_list[1].kwargs["json"])
+
+    def test_thinking_exhaustion_is_reported_clearly_and_upstream_detail_is_sanitized(self):
+        thinking_body = {
+            "choices": [{"finish_reason": "length", "message": {"content": "", "reasoning_content": "let me think..."}}]
+        }
+        with (
+            mock.patch.object(reader_test.credential_settings, "reveal_saved_key", return_value="ms-offline-key"),
+            mock.patch.object(reader_test, "_saved_model", return_value="Qwen/Qwen3.5-35B-A3B"),
+            mock.patch.object(reader_test.requests, "post", return_value=self._response(200, thinking_body)),
+        ):
+            result = reader_test.test_reading_connection("modelscope")
+        self.assertFalse(result["ok"])
+        self.assertIn("思考过程中未输出正文", result["message"])
+
+        err_400 = self._response(400, {"error": {"message": "Model Qwen/Bad not found with sk-secret-123"}})
+        with (
+            mock.patch.object(reader_test.credential_settings, "reveal_saved_key", return_value="ms-offline-key"),
+            mock.patch.object(reader_test, "_saved_model", return_value="Qwen/Bad"),
+            mock.patch.object(reader_test.requests, "post", return_value=err_400),
+        ):
+            bad_result = reader_test.test_reading_connection("modelscope")
+        self.assertFalse(bad_result["ok"])
+        self.assertIn("HTTP 400", bad_result["message"])
+        self.assertIn("not found", bad_result["message"])
+        self.assertNotIn("sk-secret-123", bad_result["message"])
+
+    def test_saved_model_reads_configured_preferences_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pref_file = Path(tmp) / "prefs.json"
+            with mock.patch.dict(os.environ, {"QB_MODEL_PREFERENCES_FILE": str(pref_file)}):
+                preferences.save_configuration(
+                    dict(preferences.DEFAULTS), {**preferences.DEFAULT_MODELS, "modelscope": "Qwen/Qwen3.5-122B-A10B"}
+                )
+                self.assertEqual(reader_test._saved_model("modelscope"), "Qwen/Qwen3.5-122B-A10B")
+
+    def test_modelscope_email_verification_error_returns_clear_chinese_guidance(self):
+        err_401 = self._response(
+            401,
+            {
+                "error": {
+                    "message": "For account security, please complete your profile via email verification. ModelScope Magi"
+                }
+            },
+        )
+        with (
+            mock.patch.object(reader_test.credential_settings, "reveal_saved_key", return_value="ms-secret-key"),
+            mock.patch.object(reader_test, "_saved_model", return_value="Qwen/Qwen3.5-35B-A3B"),
+            mock.patch.object(reader_test.requests, "post", return_value=err_401),
+        ):
+            result = reader_test.test_reading_connection("modelscope")
+        self.assertFalse(result["ok"])
+        self.assertIn("尚未完成邮箱验证", result["message"])
+        self.assertNotIn("ms-secret-key", result["message"])

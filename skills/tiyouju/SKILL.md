@@ -95,6 +95,22 @@ tiyouju publish latest
 
 题目任务结束时报告总题数、修改内容、待用户处理的题和原因、入库数。邀请用户继续发题；若识读服务未恢复，明确说可先核对已有题卡，恢复后再处理新资料。
 
+## 自主探查与直录切题（Agent-First）
+
+当遇到复杂教辅（如多栏、跨页、含思路/拓展讲解的书籍）、内置序号切题规则不适用的新题型，或当前环境未配置看图读题 API 时，外部助手可直接接管**切题与录题**全流程：
+
+1. **扫描入库（可选 `--scan-only`）**：
+   - `tiyouju upload <文件> --parse-mode manual`（纯本地直接看原页图，零云调用）；或征得云解析授权后 `tiyouju upload <文件> --parse-mode mineru --scan-only --wait`（仅跑 MinerU 扫描，保留 `Block`s 与 `suggested_scopes` 后停在 `READY`，**不跑内置切题和识读队列**）。
+2. **探查页面与版面块**：
+   - `tiyouju pages <paper> --pages 0-3 --grid`：导出高清原页 JPG（`--grid` 在副本上叠加 `0–1000` 归一化坐标网格，不污染原页缓存）。
+   - `tiyouju blocks <paper> --pages 0-3 --json`：直接获取 MinerU 或本地文字 PDF 的块序号、`type`、`bbox`、文字及 `table_markdown`，结合视觉观察归纳本题集的切题边界（跳过思路/答案/引言区）。
+3. **双轨批量落库（`tiyouju cut` / `cut_questions`）**：
+   - **直录轨（跳过内置 OCR）**：若助手已直接从原页图/块看清题面，传入 `stem`（及可选 `options`/`answer`/`analysis`/`figures`/`section`/`group_title`），题卡直接落库为 `body_mode="text"`、`text_source="assistant"`、`edited=True`、`state="yellow"`（绝不自动打勾或入库），绕过内置读题队列。
+   - **切图轨（可选回交内置 OCR）**：若只让助手切框、希望交给软件内置模型读文字，不传 `stem` 即可落库为 `body_mode="source_image"`，随后调用 `tiyouju read-cuts <paper>` 提交内置看图队列。
+4. **局部调整、安全重切与撤销**：
+   - 局部微调使用 `tiyouju layout <regions|renumber|split|merge|undo>`。
+   - 批量重切可加 `--replace-scope page|group|paper`，后端强制隔离**已通过、已入库或已编辑**的题卡，绝不覆盖人工成果，且整批切题操作均支持 `tiyouju layout undo` 原路撤销。
+
 ## 补标签和参考答案
 
 本节是用户明确调用 CLI/MCP 的助手流程：当前豆包工作版或当前助手自己看图、分类、解题，再用本地 `enrich` 命令或 MCP 交回候选或答案初稿；**不需要配置豆包 API**。先检测安装版命令，再启用所需开关并准备指定题目的任务。旧名称标签协议只提交当前目录的知识点候选，任务完成后仍需人工采纳；答案初稿仍需核对并保存，不改原答案或人工审核记录。细节见 [question-workflow.md](references/question-workflow.md#补知识点和参考答案)、[commands.md](references/commands.md#助手补标签与参考答案)。
@@ -114,6 +130,18 @@ tiyouju publish latest
 - 不做无人值守自动通过，不自动入库，不删题，不撤回入库。
 
 命令与字段见 [references/commands.md](references/commands.md) 的「助手和老师一起干活」一节。
+
+## 整理题库文件夹
+
+题面文字和答案仍按上文走 `propose` 提案；**文件夹归档、排序、资料名/类型、教材章节目录与标签个人分组**属于组织结构，可通过 `tiyouju folders`（或对应 MCP 工具）**直接生效并支持撤销**，且会自动与题库工作台网页双向同步：
+
+- **我的文件夹**：`tiyouju folders list` 查看全树（自建文件夹、试卷夹、教材章节树、智能夹、排序、标签个人分组）；`create` / `rename` / `move` / `delete` / `add` / `remove` / `sort` 建夹建子夹（最多 4 层）、归档移出题目、设置自然序/名称/时间排序。
+- **教材章节/小节目录**：未入库题卡可用 `tiyouju fix <paper> <n> --section "..."`；已入库教材可用 `tiyouju folders set-section` 批量按章节规整，不改动题干或审核状态。
+- **试卷/教材夹**：`tiyouju folders paper <paper> [--name 新名称] [--type exam|book]` 重命名或切换「试卷 ↔ 教材」。
+- **标签个人分组**：`tiyouju folders tag-group <list|create|rename|delete|add-tags|remove-tags|set-tags|undo>` 整理个人分组及组内标签，不改变知识点上下级。
+- **撤销**：`tiyouju folders undo` 撤销最近一次文件夹或章节整理；`tiyouju folders tag-group undo` 撤销个人分组改动。
+
+命令与参数细节见 [references/commands.md](references/commands.md#整理题库文件夹)。
 
 ## 不能运行命令时
 

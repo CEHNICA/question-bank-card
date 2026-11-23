@@ -82,6 +82,10 @@ ACCENTS = {
     "`": "̀",
     "ˋ": "̀",
 }
+# \overgroup（用于圆弧 \wideparen / \overparen）与 \undergroup 在 KaTeX 里也输出为
+# <mover accent="true">...</mover>，但字形是可随基底拉宽的顶弧/底弧；Word 里对应原生
+# 可伸展 <m:groupChr>，交给 mathml2omml 直接转换而非按单字重音 <m:acc> 拦截。
+STRETCHY_GROUP_ACCENTS = {"⏠", "⏝"}
 MATHML_ELEMENTS = {
     "math",
     "semantics",
@@ -423,6 +427,8 @@ def _convert_math_root(root):
         if len(node) != 2 or node[1].tag != f"{{{MATH_NS}}}mo" or len(node[1]):
             raise ValueError("unsupported accent")
         glyph = node[1].text or ""
+        if glyph in STRETCHY_GROUP_ACCENTS:
+            continue
         if glyph not in ACCENTS:
             raise ValueError("unsupported accent")
         base = etree.Element(f"{{{MATH_NS}}}math", nsmap={None: MATH_NS})
@@ -1261,7 +1267,7 @@ window.__qbPictureStatus = {ready:false};
       katex.render(item.latex, node, {
         displayMode: false, throwOnError: true, strict: 'ignore', trust: false,
         maxSize: 10, maxExpand: 1000,
-        macros: {"\\parallel":"\\mathrel{/\\mkern-6mu/}","\\nparallel":"\\mathrel{/\\mkern-6mu/\\mkern-11mu\\backslash}"}
+        macros: {"\\parallel":"\\mathrel{/\\mkern-6mu/}","\\nparallel":"\\mathrel{/\\mkern-6mu/\\mkern-11mu\\backslash}","\\wideparen":"\\overgroup","\\overparen":"\\overgroup"}
       });
       return node;
     }));

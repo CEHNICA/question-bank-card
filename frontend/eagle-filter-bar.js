@@ -1015,7 +1015,12 @@
                       solEl.style.whiteSpace = 'pre-wrap';
                       solEl.style.color = '#475569';
                       solEl.style.fontStyle = '';
-                      if (window.renderMathInElement) {
+                      if (window.QBRender && typeof window.QBRender.renderTypeset === 'function') {
+                        window.QBRender.renderTypeset(solEl, content);
+                      } else if (window.renderMathInElement) {
+                        if (window.QBRender && typeof window.QBRender.normalizeArcInMathText === 'function') {
+                          solEl.textContent = window.QBRender.normalizeArcInMathText(content);
+                        }
                         window.renderMathInElement(solEl, {
                           delimiters: [
                             {left: '$$', right: '$$', display: true},
@@ -1023,7 +1028,13 @@
                             {left: '\\(', right: '\\)', display: false},
                             {left: '\\[', right: '\\]', display: true}
                           ],
-                          throwOnError: false
+                          throwOnError: false,
+                          macros: (window.QBRender && window.QBRender.KATEX_MACROS) || {
+                            '\\parallel': '\\mathrel{/\\mkern-6mu/}',
+                            '\\nparallel': '\\mathrel{/\\mkern-6mu/\\mkern-11mu\\backslash}',
+                            '\\wideparen': '\\overgroup',
+                            '\\overparen': '\\overgroup'
+                          }
                         });
                       }
                     } else {

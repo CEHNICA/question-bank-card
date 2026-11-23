@@ -177,7 +177,7 @@ def prepare(paper: Paper, mode: str) -> Paper:
         )
         if extracted["blocks"]:
             Block.objects.bulk_create([Block(paper=paper, **block) for block in extracted["blocks"]], batch_size=300)
-        if extracted["blocks"] and plan["mode"] == "native":
+        if extracted["blocks"] and plan["mode"] == "native" and not plan.get("scan_only"):
             # Pure segmentation: gap location and cloud reading are deliberately
             # not called. A scan page remains available for manual completion.
             usable = {p["page_idx"] for p in plan["pages"] if p["mode"] == "native"}
@@ -286,6 +286,10 @@ def prepare_auto(paper: Paper, *, allow_cloud: bool = False, cloud_ready: bool =
         plan.update(requested_mode="auto", cloud_authorized=bool(allow_cloud), auto_fallback=True)
         if paper.questions.exists():
             plan["fallback_reason"] = "已从本地文字层准备题卡，请对照原卷核对；未切出的页面可手工补充。"
+        elif plan.get("scan_only") and paper.blocks.exists():
+            # scan_only 模式提取完本地版面块后直接停留 READY，由外部助手自主探查并切题。
+            plan["mode"] = "native"
+            plan["fallback_reason"] = "已提取本地文字与版面块（scan_only），等待助手探查与切题。"
         elif allow_cloud and cloud_ready:
             plan.update(mode="mineru", revision=int(plan.get("revision", 0)) + 1)
             plan["fallback_reason"] = "本地文字层没有可靠题卡，按本次授权尝试已配置的 MinerU。"
@@ -317,7 +321,7 @@ def prepare_auto(paper: Paper, *, allow_cloud: bool = False, cloud_ready: bool =
     # 1.25.36：书 / 讲义「保留原页、不自动切题」是预期结果，不该记成失败。
     # 它本来就等着人一题一题框；标成「处理失败」只会让人以为文件有问题。
     book_kept_manual = bool(plan.get("native_book_fallback"))
-    if plan.get("mode") != "mineru" and not book_kept_manual:
+    if plan.get("mode") != "mineru" and not book_kept_manual and not plan.get("scan_only"):
         # Nothing will be queued for this run, so the worker never comes back to
         # check it.  The reason the local attempt gave up is the sentence the
         # teacher actually needs, so it is not overwritten by the generic one.

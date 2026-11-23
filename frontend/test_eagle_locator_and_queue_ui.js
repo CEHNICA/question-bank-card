@@ -5,14 +5,26 @@ const { test } = require("node:test");
 
 const ROOT = __dirname;
 
-test("Eagle 工作台提供题目身份证一键复制与定位搜索支持", () => {
+test("Eagle 工作台提供题目身份证一键复制与定位搜索支持，且题目 ID、来源、原卷位置与核验证据均位于考题属性中", () => {
   const html = fs.readFileSync(path.join(ROOT, "eagle", "index.html"), "utf8");
   assert.match(html, /id="inspectorLocatorRow"/);
   assert.match(html, /id="inspectorLocatorCode"/);
   assert.match(html, /id="btnCopyInspectorLocator"/);
+  assert.match(html, /id="inspectorSourceRow"/);
+  assert.match(html, /id="inspectorSourceText"/);
+  assert.match(html, /id="inspectorPositionRow"/);
+  assert.match(html, /id="inspectorPositionText"/);
+  assert.match(html, /id="btnInspectorEvidence"/);
   assert.match(html, /function copyQuestionLocator\(/);
   assert.match(html, /function getQuestionShortId\(/);
   assert.match(html, /if \(sid && \(sid\.includes\(kw\) \|\| kw\.includes\(sid\)\)\) return true;/);
+  const metaIdx = html.indexOf('id="questionMetaCard"');
+  const locatorIdx = html.indexOf('id="inspectorLocatorRow"');
+  const sourceIdx = html.indexOf('id="inspectorSourceRow"');
+  const posIdx = html.indexOf('id="inspectorPositionRow"');
+  assert.ok(metaIdx !== -1 && locatorIdx > metaIdx, "题目 ID 应位于考题属性卡片内");
+  assert.ok(sourceIdx > metaIdx, "题目来源应位于考题属性卡片内");
+  assert.ok(posIdx > metaIdx, "原卷位置与核验证据应位于考题属性卡片内");
 });
 
 test("AI 标签建议移除禁用排队死胡同，支持插队、取消、后台补标开关与一键就绪引导", () => {

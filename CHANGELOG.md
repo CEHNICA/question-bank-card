@@ -3,6 +3,15 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.2.8
+
+**AI 助手自主探查与双轨切题、题库文件夹全量整理端口，以及圆弧公式渲染与导出兼容性升级**
+
+- **AI 助手自主探查与双轨批量切题（`agent_cutting.py`、`imaging.py`、`intake.py`、`pipeline.py`、`views.py`、`urls.py`、`tiyouju_cli.py`、`skills/tiyouju/`）**：支持 `--scan-only` 仅扫描原页与 `Block` 版面块停在 `READY`（跳过内置自动切题与读题）；新增 `/api/papers/<id>/blocks` 与 `?grid=1` 内存坐标网格预览；新增 `/api/papers/<id>/agent-cut` 批量切题端口，支持直录轨（传入 `stem` 跳过内置 OCR）与切图轨（`source_image` 可后续 `read-cuts` 识读），对已通过/已入库/已编辑题卡实施强制保护并支持 `layout undo` 整批撤销；同步扩展 `tiyouju pages / blocks / cut / layout / read-cuts` CLI 命令与 MCP 工具。
+- **题库文件夹全量整理与前后端双向同步（`library_folders.py`、`library_tag_groups.py`、`library.py`、`views.py`、`eagle/index.html`、`tiyouju_cli.py`）**：将工作台「我的文件夹」、智能文件夹、排序方式及标签「个人分组」持久化至后端并与前端双向同步；新增 `tiyouju folders` 及对应 MCP 工具，支持直接建夹/移动/排序、批量归档、教材章节（`section`）批量规整、重命名/切换「试卷 ↔ 教材」与操作撤销。
+- **圆弧公式渲染导出与 API 配置优化（`library_export.py`、`qb-render.js`、`eagle-filter-bar.js`、`provider_catalog.py`、`reader_test.py`、`api-settings.js`、`api-redesign.css`）**：补充 `\wideparen` / `\overparen` → `\overgroup` 与 Word `<m:groupChr>` 可伸展圆弧转换；完善多账号密钥分隔提示、模型连接测试与筛选栏公式渲染。
+
+
 ## 2.2.7
 
 **修复工作台生成答案与标签失败问题，精简 API 设置界面，并将「AI 语义推荐」正名为「AI 标签建议」**

@@ -43,8 +43,6 @@ python "<本技能目录>\scripts\book_structure_snapshot.py" --paper <完整资
 
 ## 获授权后的替换与回滚
 
-用户已明确授权的指定资料替换可继续准备并执行已验证的本机操作；先固定当前来源、布局版本、题卡指纹与可恢复备份，建立旧卡到候选的保留／改范围／新增／移除对应清单。人工题面、审核、标签、答案及历史版本按对应关系保留，不能用新 OCR 原文覆盖已核对内容。
+新资料推荐优先以 `--scan-only`（如 `tiyouju upload <书.pdf> --book --parse-mode mineru --scan-only --wait`）仅扫描版面块后由助手通过 `tiyouju blocks` + `tiyouju pages --grid` 自主切分并通过 `tiyouju cut` 一次按章节 `group_title` 与 `section` 落库。
 
-当前能力边界：CLI/MCP 的 `propose` 只交题面改动提案，不支持 `regions`；单题布局接口并非整书原子替换，范围变化会影响审核有效性；普通备份导入是合并，不是精确撤销。不要虚构 `replace` 命令，也不要用循环单题调用承诺整书原子性或完整回滚。若实际替换工具缺少所需能力，交付已准备好的候选与差异，准确说明缺口；不绕过版本校验或直接写生产数据库。
-
-执行后核对实际题数、来源范围、既有人工内容和审核／发布状态，保留操作收据及已验证的恢复方式。区分“候选已生成、范围已应用、文字已核对、已入库”四种结果。
+对已有题卡执行重切时，可用 `tiyouju cut <paper> --file <json> --replace-scope page|group`（按页或按题组替换未核对草稿），并可在需要时用 `tiyouju layout undo <paper>` 整批撤销该次切题布局变更；后端强制跳过任何 `approved=True`、`edited=True` 或存在在用 `PublishedQuestion` 的题卡，绝不覆盖人工成果。若需改已入库题面的正文，仍须走 `tiyouju propose` 提案。执行后核对实际题数、来源范围、既有人工内容和审核／发布状态，区分“候选已生成、范围已应用、文字已核对、已入库”四种结果。
