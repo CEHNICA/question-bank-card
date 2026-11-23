@@ -204,6 +204,9 @@
     const bgFeature = Array.isArray(data.features)
       ? data.features.find((item) => item && item.key === "auto_tag_background")
       : null;
+    const autoRouteFeature = Array.isArray(data.features)
+      ? data.features.find((item) => item && item.key === "ai_auto_route")
+      : null;
 
     return {
       reading: {
@@ -224,6 +227,7 @@
           knowledge_tags: Boolean(answering.features?.knowledge_tags),
         },
         autoTagBackground: Boolean(bgFeature?.enabled),
+        autoRoute: Boolean(autoRouteFeature?.enabled),
         on_intake: {
           answer: Boolean(answering.on_intake?.answer),
         },
@@ -258,6 +262,7 @@
         profiles: draft.answering.profiles,
         features: draft.answering.features,
         autoTagBackground: Boolean(draft.answering.autoTagBackground),
+        autoRoute: Boolean(draft.answering.autoRoute),
         on_intake: draft.answering.on_intake,
       },
     });
@@ -457,6 +462,14 @@
     return { tone: "", text: "未配密钥" };
   }
 
+  function answeringInlineHintText(ansData) {
+    const unverifiedReason = String(ansData?.unverified_reason || "").trim();
+    if (!ansData?.verified && unverifiedReason) {
+      return `上次连接校验已失效（${unverifiedReason}）；核对配置后勾选下方确认框重新「测试解题连接」即可恢复。`;
+    }
+    return "还差一步：确认配置已保存（输入后按 Enter 可直接保存），勾选确认框并点击「测试解题连接」，测通后题库即可生成答案和标签。";
+  }
+
   function answeringBadgeState(data, draft) {
     const ansData = data?.answering || {};
     const ans = draft.answering;
@@ -488,11 +501,19 @@
   const ANSWER_SUGGESTED_MODELS = Object.freeze({
     minimax: ["MiniMax-M3.1-Flash-Preview", "MiniMax-M3"],
     deepseek: ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro"],
+    nvidia: [
+      "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "nvidia/nemotron-3-ultra-550b-a55b",
+      "nvidia/nemotron-3.5-lightning-30b-a3b",
+    ],
+    zhipu: ["glm-4.5-flash", "glm-4-flash-250414", "glm-4.6v-flash"],
+    openrouter: ["openrouter/free"],
+    gemini: ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"],
     modelscope: ["Qwen/Qwen3.5-35B-A3B", "Qwen/Qwen3.5-122B-A10B", "Qwen/Qwen3.5-397B-A17B", "Qwen/Qwen3.5-27B"],
     siliconflow: ["Qwen/Qwen3-VL-32B-Instruct", "Qwen/Qwen3-VL-30B-A3B-Thinking", "Qwen/Qwen3-VL-30B-A3B-Instruct"],
   });
 
-  const ANSWER_ONLY_KEY_SERVICES = new Set(["deepseek", "doubao", "custom"]);
+  const ANSWER_ONLY_KEY_SERVICES = new Set(["deepseek", "openrouter", "doubao", "custom"]);
 
   function findRecommendedAnswerService(data, draft) {
     const services = data.catalog?.services || [];
@@ -831,7 +852,7 @@
         return st.configured || Boolean(draft.credentials[spec.key]?.input?.trim()) || draft.answering.provider === spec.key;
       });
       wireDetailsPersistence(more, "more-credentials", anySecondaryUsed);
-      more.append(createEl("summary", "", "更多仅用于题库答题/标签的独立模型密钥（DeepSeek / 豆包 / 其他自定义，可选）"));
+      more.append(createEl("summary", "", "更多仅用于题库答题/标签的独立模型密钥（DeepSeek / OpenRouter 免费池 / 豆包 / 其他自定义，可选）"));
       const secondaryGrid = createEl("div", "api-credential-grid");
       for (const spec of secondaryServices) {
         secondaryGrid.append(renderCredentialCard(spec, draft, refs));
@@ -922,7 +943,24 @@
       !ans.features.knowledge_tags
     );
     bgTagSwitch.className = "settings-switch api-sub-switch";
-    switchesBox.append(answerSwitch, intakeSwitch, tagSwitch, bgTagSwitch);
+    const poolProviders = (data.catalog?.answer_order || []).filter((key) => serviceEffectiveState(key).configured);
+    const poolLabels = poolProviders
+      .map((key) => (data.catalog?.services || []).find((spec) => spec.key === key)?.label || key)
+      .join(" · ");
+    const poolTotalKeys = poolProviders.reduce((sum, key) => sum + (serviceEffectiveState(key).count || 0), 0);
+    const autoRouteHint = poolProviders.length
+      ? `当前池子已配 ${poolProviders.length} 家 / ${poolTotalKeys} 个账号（${poolLabels}）；哪家有额度或未限流就自动走哪家`
+      : "开启后，第 2 步填过密钥的服务商自动组成统一 API 池，限流、拥堵或额度耗尽时自动切到下一家";
+    const autoRouteSwitch = createSwitchRow(
+      "自动路由（多免费 API 池）",
+      autoRouteHint,
+      ans.autoRoute,
+      (checked) => {
+        ans.autoRoute = checked;
+        syncDirtyIndicator();
+      }
+    );
+    switchesBox.append(answerSwitch, intakeSwitch, tagSwitch, bgTagSwitch, autoRouteSwitch);
     panel.append(switchesBox);
 
     {
@@ -1055,11 +1093,7 @@
       missingBar.hidden = activeProviderConfigured;
       probeBox.append(missingBar);
 
-      const inlineHint = createEl(
-        "p",
-        "api-inline-hint",
-        "还差一步：确认配置已保存（输入后按 Enter 可直接保存），勾选确认框并点击「测试解题连接」，测通后题库即可生成答案和标签。"
-      );
+      const inlineHint = createEl("p", "api-inline-hint", answeringInlineHintText(ansData));
       inlineHint.hidden = !activeProviderConfigured || Boolean(ansData.verified);
       probeBox.append(inlineHint);
 
@@ -1207,8 +1241,10 @@
       answeringGotoBtn.hidden = ansHasKey;
     }
     if (answeringProbe) {
+      const ansServer = state.serverData?.answering || {};
+      answeringProbe.inlineHint.textContent = answeringInlineHintText(ansServer);
       answeringProbe.missingBar.hidden = ansHasKey;
-      answeringProbe.inlineHint.hidden = !ansHasKey || Boolean(state.serverData?.answering?.verified);
+      answeringProbe.inlineHint.hidden = !ansHasKey || Boolean(ansServer.verified);
       answeringProbe.consentBox.disabled = isMutating() || !ansHasKey;
       answeringProbe.testBtn.disabled = isMutating() || !ansHasKey || !ans.testConsent;
       answeringProbe.testBtn.textContent = state.testingTarget === "answering"
@@ -1429,16 +1465,25 @@
           ? state.serverData.features.find((item) => item && item.key === "auto_tag_background")?.enabled
           : false
       );
+      const prevAutoRoute = Boolean(
+        Array.isArray(state.serverData?.features)
+          ? state.serverData.features.find((item) => item && item.key === "ai_auto_route")?.enabled
+          : false
+      );
       const nextBg = Boolean(state.draft.answering.autoTagBackground);
+      const nextAutoRoute = Boolean(state.draft.answering.autoRoute);
       const payload = buildSavePayload();
       const updated = await requestJson("/api/settings/api-config", {
         method: "POST",
         body: payload,
       });
-      if (nextBg !== prevBg) {
+      const featureUpdates = {};
+      if (nextBg !== prevBg) featureUpdates.auto_tag_background = nextBg;
+      if (nextAutoRoute !== prevAutoRoute) featureUpdates.ai_auto_route = nextAutoRoute;
+      if (Object.keys(featureUpdates).length > 0) {
         const featRes = await requestJson("/api/settings/features", {
           method: "POST",
-          body: { features: { auto_tag_background: nextBg } },
+          body: { features: featureUpdates },
         });
         if (featRes && Array.isArray(featRes.features)) {
           updated.features = featRes.features;

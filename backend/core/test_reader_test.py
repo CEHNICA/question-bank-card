@@ -152,6 +152,18 @@ class ReaderConnectionCallTests(TestCase):
         self.assertIs(post.call_args_list[0].kwargs["json"]["enable_thinking"], False)
         self.assertNotIn("enable_thinking", post.call_args_list[1].kwargs["json"])
 
+    def test_nvidia_reading_connection_uses_official_url_and_disables_thinking(self):
+        ok_200 = self._response(200, {"choices": [{"message": {"content": "【答案】2"}}]})
+        with (
+            mock.patch.object(reader_test.credential_settings, "reveal_saved_key", return_value="nvapi-offline-key"),
+            mock.patch.object(reader_test, "_saved_model", return_value="nvidia/nemotron-3.5-super-vl-120b-a12b"),
+            mock.patch.object(reader_test.requests, "post", return_value=ok_200) as post,
+        ):
+            result = reader_test.test_reading_connection("nvidia")
+        self.assertTrue(result["ok"])
+        self.assertEqual(post.call_args.args[0], reader_test.readers.NVIDIA_URL)
+        self.assertEqual(post.call_args.kwargs["json"]["chat_template_kwargs"], {"enable_thinking": False})
+
     def test_thinking_exhaustion_is_reported_clearly_and_upstream_detail_is_sanitized(self):
         thinking_body = {
             "choices": [{"finish_reason": "length", "message": {"content": "", "reasoning_content": "let me think..."}}]

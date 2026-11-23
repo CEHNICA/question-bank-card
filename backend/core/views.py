@@ -4702,6 +4702,7 @@ from .workbench_views import (  # noqa: F401
     library_assistant_complete,
     library_assistant_prepare,
     library_assistant_proposal_decide,
+    library_assistant_proposals_batch_decide,
     library_assistant_propose,
     library_assistant_release,
     library_assistant_tasks,

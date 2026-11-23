@@ -41,6 +41,8 @@ test("AI 标签建议移除禁用排队死胡同，支持插队、取消、后�
   assert.match(html, /id="aiTagPriorityBtn"/);
   assert.match(html, /queueLibraryJob\('tags', qid, \{ retry: true, api_only: true, priority: 'high' \}\)/);
   assert.doesNotMatch(html, /⏳ 排队中…/);
+  assert.match(html, /unverified_reason/);
+  assert.match(html, /上次连接校验失效/);
 });
 
 test("统一 API 设置页移除网页端助手模式单选框、支持后台慢跑开关并提供一键沿用引导", () => {

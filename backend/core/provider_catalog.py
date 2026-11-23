@@ -13,6 +13,12 @@ ARK_BASE = "https://ark.cn-beijing.volces.com/api/v3"
 MINIMAX_API_BASE = "https://api.minimax.cn/v1"
 MINIMAX_ANSWER_MODEL = "MiniMax-M3.1-Flash-Preview"
 MODELSCOPE_BASE = "https://api-inference.modelscope.cn/v1"
+NVIDIA_BASE = "https://integrate.api.nvidia.com/v1"
+NVIDIA_ANSWER_MODEL = "nvidia/nemotron-3.5-super-vl-120b-a12b"
+GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai"
+GEMINI_DEFAULT_MODEL = "gemini-2.5-flash"
+ZHIPU_BASE = "https://open.bigmodel.cn/api/paas/v4"
+OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 SILICONFLOW_BASE = "https://api.siliconflow.cn/v1"
 MINIMAX_TEXT_MODELS = {
     "MiniMax-M2",
@@ -57,11 +63,47 @@ VISION = {
         "signup": "https://cloud.siliconflow.cn/account/ak",
         "note": "按量付费（Qwen3-VL），可做复核和备用",
     },
+    "nvidia": {
+        "label": "英伟达 NIM",
+        "engine": "nvidia_nemotron",
+        "default_model": NVIDIA_ANSWER_MODEL,
+        "suggested": ["nvidia/nemotron-3.5-super-vl-120b-a12b", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"],
+        "free_models": ["nvidia/nemotron-3.5-super-vl-120b-a12b", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"],
+        "credential": ("nvidia_key", "nvidia_keys"),
+        "environment": ("NVIDIA_API_KEY", "NVIDIA_API_KEYS_JSON"),
+        "concurrency": (1, 2),
+        "signup": "https://build.nvidia.com",
+        "note": "免费版有并发/速率限制（自动从 1 并发起步）；支持多模态图文读题与解题",
+    },
+    "gemini": {
+        "label": "Google Gemini",
+        "engine": "gemini_flash",
+        "default_model": GEMINI_DEFAULT_MODEL,
+        "suggested": ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"],
+        "free_models": ["gemini-2.5-flash", "gemini-2.5-flash-lite"],
+        "credential": ("gemini_key", "gemini_keys"),
+        "environment": ("GEMINI_API_KEY", "GEMINI_API_KEYS_JSON"),
+        "concurrency": (1, 2),
+        "signup": "https://aistudio.google.com/apikey",
+        "note": "提供长期免费层，数学推理与看图识题均强（需网络可访问 Google API）",
+    },
+    "zhipu": {
+        "label": "智谱 BigModel",
+        "engine": "zhipu_glm",
+        "default_model": "glm-4.6v-flash",
+        "suggested": ["glm-4.6v-flash", "glm-4.1v-thinking-flash"],
+        "free_models": ["glm-4.6v-flash", "glm-4.1v-thinking-flash"],
+        "credential": ("zhipu_key", "zhipu_keys"),
+        "environment": ("ZHIPU_API_KEY", "ZHIPU_API_KEYS_JSON"),
+        "concurrency": (1, 2),
+        "signup": "https://open.bigmodel.cn/usercenter/apikeys",
+        "note": "免费不限总量；高峰期偶发 1305 拥堵，建议配合「跨服务自动路由」作免费兜底",
+    },
 }
 
 # 主读未配置密钥时的兜底优先级（MiniMax 优先保证付费用户默认体验，魔搭为免费主力）。
-PRIMARY_ORDER = ("minimax", "modelscope", "siliconflow")
-CHECKER_ORDER = ("modelscope", "siliconflow", "minimax")
+PRIMARY_ORDER = ("minimax", "modelscope", "siliconflow", "nvidia", "gemini", "zhipu")
+CHECKER_ORDER = ("modelscope", "siliconflow", "nvidia", "gemini", "zhipu", "minimax")
 ASSISTANT_ENGINE = "assistant"
 ENGINES = {spec["engine"]: key for key, spec in VISION.items()}
 
@@ -74,7 +116,7 @@ MINERU = {
 }
 
 # 传统“切题 + 读题”4 家服务（保留该精确元组以兼容历史凭据接口与环境变量契约）。
-SERVICES = ("mineru", *VISION)
+SERVICES = ("mineru", "minimax", "modelscope", "siliconflow")
 
 # 仅用于正式题库补充标签/参考答案的服务商。
 ANSWER_ONLY_SERVICES = {
@@ -87,6 +129,16 @@ ANSWER_ONLY_SERVICES = {
         "thinking": True,
         "signup": "https://platform.deepseek.com/api_keys",
         "note": "独立答题服务（纯文本推理；含配图题请选用支持图文的模型）",
+    },
+    "openrouter": {
+        "label": "OpenRouter 免费池",
+        "credential": ("openrouter_key", "openrouter_keys"),
+        "base_url": OPENROUTER_BASE,
+        "default_model": "openrouter/free",
+        "supports_images": True,
+        "thinking": False,
+        "signup": "https://openrouter.ai/keys",
+        "note": "openrouter/free 自动路由免费模型池；免费账号 50 次/天，历史充值 ≥$10 解锁 1000 次/天",
     },
     "doubao": {
         "label": "豆包",
@@ -118,6 +170,10 @@ ANSWER_DEFAULTS = {
         "supports_images": False,
         "thinking": True,
     },
+    "nvidia": {"base_url": NVIDIA_BASE, "model": NVIDIA_ANSWER_MODEL, "supports_images": True, "thinking": True},
+    "gemini": {"base_url": GEMINI_BASE, "model": GEMINI_DEFAULT_MODEL, "supports_images": True, "thinking": True},
+    "zhipu": {"base_url": ZHIPU_BASE, "model": "glm-4.5-flash", "supports_images": False, "thinking": True},
+    "openrouter": {"base_url": OPENROUTER_BASE, "model": "openrouter/free", "supports_images": True, "thinking": False},
     "doubao": {"base_url": ARK_BASE, "model": "", "supports_images": False, "thinking": True},
     "minimax": {"base_url": MINIMAX_API_BASE, "model": MINIMAX_ANSWER_MODEL, "supports_images": True, "thinking": True},
     "custom": {"base_url": "", "model": "", "supports_images": False, "thinking": True},
@@ -135,9 +191,20 @@ ANSWER_DEFAULTS = {
     },
 }
 
-ANSWER_ORDER = ("deepseek", "minimax", "doubao", "custom", "modelscope", "siliconflow")
-VISION_ORDER = ("modelscope", "minimax", "siliconflow")
-ALL_SERVICES = ("mineru", *VISION_ORDER, "deepseek", "doubao", "custom")
+ANSWER_ORDER = (
+    "deepseek",
+    "minimax",
+    "nvidia",
+    "zhipu",
+    "openrouter",
+    "gemini",
+    "doubao",
+    "custom",
+    "modelscope",
+    "siliconflow",
+)
+VISION_ORDER = ("modelscope", "minimax", "siliconflow", "nvidia", "gemini", "zhipu")
+ALL_SERVICES = ("mineru", *VISION_ORDER, "deepseek", "openrouter", "doubao", "custom")
 PROVIDER_NAMES = {
     "mineru": MINERU["label"],
     **{key: spec["label"] for key, spec in VISION.items()},
@@ -212,6 +279,10 @@ def catalog_payload() -> dict[str, object]:
                 "input_label": "新的访问令牌（留空就不改）" if key == "modelscope" else "新的 API Key（留空就不改）",
                 "placeholder": "粘贴魔搭访问令牌（多账号用 ; 隔开）"
                 if key == "modelscope"
+                else "粘贴英伟达 NIM API Key（nvapi- 开头，多账号用 ; 隔开）"
+                if key == "nvidia"
+                else "粘贴 Google AI Studio API Key（AIza 开头，多账号用 ; 隔开）"
+                if key == "gemini"
                 else f"粘贴 {spec['label']} 的 API Key（多账号用 ; 隔开）",
                 "reading_default_model": spec["default_model"],
                 "reading_suggested_models": list(spec["suggested"]),
@@ -219,7 +290,7 @@ def catalog_payload() -> dict[str, object]:
                 "supports_test": True,
             }
         )
-    for key in ("deepseek", "doubao", "custom"):
+    for key in ("deepseek", "openrouter", "doubao", "custom"):
         spec = ANSWER_ONLY_SERVICES[key]
         services.append(
             {
@@ -227,7 +298,7 @@ def catalog_payload() -> dict[str, object]:
                 "label": spec["label"],
                 "roles": ["answering"],
                 "recommended": False,
-                "free": False,
+                "free": key == "openrouter",
                 "signup": spec["signup"],
                 "note": spec["note"],
                 "input_label": "新的 API Key（留空就不改）",

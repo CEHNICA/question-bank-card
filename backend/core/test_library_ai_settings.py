@@ -123,12 +123,30 @@ class IndependentAISettingsTests(TestCase):
         before = {path.name: path.read_bytes() for path in self.root.iterdir() if path.is_file()}
         self.transform.reset_mock()
         result = self.client.get("/api/settings/library-ai").json()
-        self.assertEqual(list(result["keys"]), ["deepseek", "minimax", "doubao", "custom", "modelscope", "siliconflow"])
+        self.assertEqual(
+            list(result["keys"]),
+            [
+                "deepseek",
+                "minimax",
+                "nvidia",
+                "zhipu",
+                "openrouter",
+                "gemini",
+                "doubao",
+                "custom",
+                "modelscope",
+                "siliconflow",
+            ],
+        )
         self.assertEqual(
             result["keys"],
             {
                 "deepseek": {"configured": True, "count": 1, "shared_with_reading": False},
                 "minimax": {"configured": True, "count": 1, "shared_with_reading": False},
+                "nvidia": {"configured": False, "count": 0, "shared_with_reading": False},
+                "zhipu": {"configured": False, "count": 0, "shared_with_reading": False},
+                "openrouter": {"configured": False, "count": 0, "shared_with_reading": False},
+                "gemini": {"configured": False, "count": 0, "shared_with_reading": False},
                 "doubao": {"configured": False, "count": 0, "shared_with_reading": False},
                 "custom": {"configured": False, "count": 0, "shared_with_reading": False},
                 "modelscope": {"configured": False, "count": 0, "shared_with_reading": False},
@@ -1475,3 +1493,423 @@ class PerServiceKeyTests(IndependentAISettingsTests):
         self.assertTrue(body["keys"]["deepseek"]["configured"])
         self.assertEqual(body["provider"], "minimax")
         self.assertNotIn("offline-local-key", json.dumps(body, ensure_ascii=False))
+
+    def test_nvidia_nim_defaults_chat_template_kwargs_and_nvapi_redaction(self):
+        saved = service.save(
+            {
+                "mode": "api",
+                "provider": "nvidia",
+                "key": {"action": "replace", "value": "nvapi-synthetic-offline-test-key"},
+            }
+        )
+        self.assertEqual(saved["provider"], "nvidia")
+        self.assertEqual(saved["base_url"], "https://integrate.api.nvidia.com/v1")
+        self.assertEqual(saved["model"], "nvidia/nemotron-3.5-super-vl-120b-a12b")
+        self.assertTrue(saved["supports_images"])
+        self.assertTrue(saved["thinking"])
+
+        with self.assertRaises(service.SettingsError):
+            service.save({"provider": "nvidia", "base_url": "https://other.example.com/v1"})
+
+        self.network.side_effect = None
+        self.network.return_value = mock.Mock(
+            status_code=200,
+            json=lambda: {
+                "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+                "choices": [
+                    {"finish_reason": "stop", "message": {"content": "【答案】2【图示】2", "reasoning_content": "step"}}
+                ],
+            },
+        )
+        tested = service.test_connection({"confirm": True})
+        self.assertTrue(tested["api_ready"])
+        sent_payload = self.network.call_args.kwargs["json"]
+        self.assertEqual(sent_payload["chat_template_kwargs"], {"enable_thinking": True})
+        self.assertNotIn("reasoning_effort", sent_payload)
+
+        bad_resp = mock.Mock(
+            status_code=401,
+            json=lambda: {
+                "error": {"message": "Invalid key nvapi-synthetic-leaked-token at https://integrate.api.nvidia.com/v1"}
+            },
+        )
+        self.assertEqual(service._upstream_error_detail(bad_resp), "Invalid key [已脱敏] at [已脱敏]")
+
+        # 遇到 HTTP 429 时会有限退避重试，即使仍限流也不清空 verified（api_ready 保持 True）
+        rate_limited = mock.Mock(
+            status_code=429, headers={"Retry-After": "0"}, json=lambda: {"error": {"message": "Too many requests"}}
+        )
+        ok_reply = mock.Mock(
+            status_code=200,
+            json=lambda: {
+                "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+                "choices": [{"finish_reason": "stop", "message": {"content": "解析完成", "reasoning_content": "step"}}],
+            },
+        )
+        self.network.side_effect = [rate_limited, ok_reply]
+        text, _engine = service.chat("计算 1+1", [], kind=None, explicit_api=True)
+        self.assertEqual(text, "解析完成")
+        self.assertTrue(service.public_status()["api_ready"])
+
+        self.network.side_effect = [rate_limited, rate_limited, rate_limited]
+        with self.assertRaises(service.RateLimitError):
+            service.chat("计算 1+1", [], kind=None, explicit_api=True)
+        self.assertTrue(service.public_status()["api_ready"], "HTTP 429 限流不该把已测通清掉")
+
+    def test_multi_key_token_pool_rotates_on_429_and_supports_zhipu_openrouter_gemini(self):
+        # 1) 验证多密钥 Token 池在统一凭据存储下轮询与 429 自动切换备用密钥
+        with mock.patch.dict(os.environ, {"QB_LIBRARY_AI_CREDENTIAL_FILE": ""}):
+            service.credential_settings.save_all_actions(
+                {"nvidia": {"action": "replace", "accounts": ["nvapi-pool-k1", "nvapi-pool-k2"]}}
+            )
+            service.credential_settings.refresh_public_environment(include_all=True)
+            service.save({"mode": "api", "provider": "nvidia"})
+            self.network.side_effect = None
+            self.network.return_value = mock.Mock(
+                status_code=200,
+                json=lambda: {
+                    "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                            "message": {"content": "【答案】2【图示】2", "reasoning_content": "ok"},
+                        }
+                    ],
+                },
+            )
+            service.test_connection({"confirm": True})
+            service._KEY_COOLDOWN_UNTIL.clear()
+            service._KEY_POOL_CURSOR.clear()
+            rate_limited = mock.Mock(
+                status_code=429, headers={"Retry-After": "10"}, json=lambda: {"error": {"message": "rate limit"}}
+            )
+            ok_reply = mock.Mock(
+                status_code=200,
+                json=lambda: {
+                    "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+                    "choices": [{"finish_reason": "stop", "message": {"content": "解析OK", "reasoning_content": "ok"}}],
+                },
+            )
+            self.network.side_effect = [rate_limited, ok_reply]
+            text, _engine = service.chat("1+1=?", [], kind=None, explicit_api=True)
+            self.assertEqual(text, "解析OK")
+            auth_headers = [call.kwargs["headers"]["Authorization"] for call in self.network.call_args_list[-2:]]
+            self.assertEqual(auth_headers, ["Bearer nvapi-pool-k1", "Bearer nvapi-pool-k2"])
+
+        # 2) 验证智谱、OpenRouter、Gemini 默认配置与请求参数及 AIza 脱敏
+        for provider, expected_model, expected_thinking_field in (
+            ("zhipu", "glm-4.5-flash", ("thinking", {"type": "enabled"})),
+            ("openrouter", "openrouter/free", None),
+            ("gemini", "gemini-2.5-flash", ("reasoning_effort", "high")),
+        ):
+            with self.subTest(provider=provider):
+                saved = service.save(
+                    {"mode": "api", "provider": provider, "key": {"action": "replace", "value": f"key-{provider}-1"}}
+                )
+                self.assertEqual(saved["model"], expected_model)
+                self.network.side_effect = None
+                self.network.return_value = mock.Mock(
+                    status_code=200,
+                    json=lambda m=expected_model: {
+                        "model": m,
+                        "choices": [
+                            {
+                                "finish_reason": "stop",
+                                "message": {"content": "【答案】2【图示】2", "reasoning_content": "step"},
+                            }
+                        ],
+                    },
+                )
+                tested = service.test_connection({"confirm": True})
+                self.assertTrue(tested["api_ready"])
+                sent = self.network.call_args.kwargs["json"]
+                if expected_thinking_field is not None:
+                    self.assertEqual(sent[expected_thinking_field[0]], expected_thinking_field[1])
+                else:
+                    self.assertNotIn("thinking", sent)
+                    self.assertNotIn("reasoning_effort", sent)
+
+        bad_gemini = mock.Mock(
+            status_code=400, json=lambda: {"error": {"message": "API key not valid: AIzaSySyntheticTestKey123"}}
+        )
+        self.assertEqual(service._upstream_error_detail(bad_gemini), "API key not valid: [已脱敏]")
+
+    def test_auto_route_switch_forms_cross_provider_pool_and_respects_image_capability(self):
+        with mock.patch.dict(os.environ, {"QB_LIBRARY_AI_CREDENTIAL_FILE": ""}):
+            service.credential_settings.save_all_actions(
+                {
+                    "nvidia": {"action": "replace", "accounts": ["nvapi-route-1"]},
+                    "zhipu": {"action": "replace", "accounts": ["zhipu-route-1"]},
+                    "modelscope": {"action": "replace", "accounts": ["ms-route-1"]},
+                }
+            )
+            service.credential_settings.refresh_public_environment(include_all=True)
+            service.save({"mode": "api", "provider": "nvidia"})
+            self.network.side_effect = None
+            self.network.return_value = mock.Mock(
+                status_code=200,
+                json=lambda: {
+                    "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                            "message": {"content": "【答案】2【图示】2", "reasoning_content": "ok"},
+                        }
+                    ],
+                },
+            )
+            service.test_connection({"confirm": True})
+            service._PROVIDER_REST_UNTIL.clear()
+
+            # 1) 开关关闭时，不自动切换其他服务商
+            service.features.save({"ai_auto_route": False})
+            busy_429 = mock.Mock(
+                status_code=429, headers={"Retry-After": "0"}, json=lambda: {"error": {"message": "rate limit"}}
+            )
+            self.network.side_effect = [busy_429, busy_429, busy_429]
+            with self.assertRaises(service.RateLimitError):
+                service.chat("1+1=?", [], kind=None, explicit_api=True)
+
+            # 2) 打开「跨服务自动路由」后：纯文题从限流的 nvidia 自动切换到 zhipu，并保留 verified=True
+            service.features.save({"ai_auto_route": True})
+            service._PROVIDER_REST_UNTIL.clear()
+            zhipu_ok = mock.Mock(
+                status_code=200,
+                json=lambda: {
+                    "model": "glm-4.5-flash",
+                    "choices": [
+                        {"finish_reason": "stop", "message": {"content": "智谱解答", "reasoning_content": "ok"}}
+                    ],
+                },
+            )
+            self.network.side_effect = [busy_429, busy_429, busy_429, zhipu_ok]
+            text, engine = service.chat("纯文本题目", [], kind=None, explicit_api=True)
+            self.assertEqual(text, "智谱解答")
+            self.assertEqual(engine, "zhipu API · glm-4.5-flash")
+            self.assertTrue(service.public_status()["api_ready"])
+
+            # 3) 带图片题目自动跳过不支持看图的 zhipu，并绕开休息中的 nvidia，直接路由到 modelscope
+            ms_ok = mock.Mock(
+                status_code=200,
+                json=lambda: {
+                    "model": "Qwen/Qwen3.5-35B-A3B",
+                    "choices": [
+                        {"finish_reason": "stop", "message": {"content": "魔搭图文解答", "reasoning_content": "ok"}}
+                    ],
+                },
+            )
+            self.network.side_effect = [ms_ok]
+            img_text, img_engine = service.chat(
+                "带图题目", ["data:image/png;base64,QUJD"], kind=None, explicit_api=True
+            )
+            self.assertEqual(img_text, "魔搭图文解答")
+            self.assertEqual(img_engine, "modelscope API · Qwen/Qwen3.5-35B-A3B")
+
+    def test_nvidia_nim_reasoning_formats_and_transient_or_per_question_failures_preserve_verified(self):
+        service.save(
+            {
+                "mode": "api",
+                "provider": "nvidia",
+                "key": {"action": "replace", "value": "nvapi-synthetic-resilience-key"},
+            }
+        )
+        self.network.side_effect = None
+        self.network.return_value = answer_response(model="nvidia/nemotron-3.5-super-vl-120b-a12b", thinking=True)
+        tested = service.test_connection({"confirm": True})
+        self.assertTrue(tested["api_ready"])
+        self.assertEqual(tested["unverified_reason"], "")
+
+        # 1) 英伟达 NIM 在 JSON/标签任务中常省略 reasoning_content、改用 reasoning、或只带闭合 </think>
+        for variant_name, msg in (
+            ("omitted_reasoning", {"content": '{"status":"ok","suggestions":[]}'}),
+            ("reasoning_field", {"content": "【答案】2", "reasoning": "reasoning text"}),
+            ("template_open_think", {"content": "先分析条件再判断</think>\n【答案】2"}),
+        ):
+            with self.subTest(variant=variant_name):
+                self.network.side_effect = None
+                self.network.return_value = mock.Mock(
+                    status_code=200,
+                    json=lambda m=msg: {
+                        "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+                        "choices": [{"finish_reason": "stop", "message": m}],
+                    },
+                )
+                text, _engine = service.chat("计算 1+1", [], kind=None, explicit_api=True)
+                self.assertTrue(text)
+                self.assertTrue(service.public_status()["api_ready"])
+
+        # 2) 临时波动与单题异常（5xx / 400 非鉴权 / Timeout / 空正文 / 未闭合标签）均不能清空已测通
+        self.network.side_effect = None
+
+        def bad_payload(code, body):
+            return mock.Mock(status_code=code, json=lambda b=body: b)
+
+        null_content = mock.Mock(
+            status_code=200,
+            json=lambda: {
+                "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+                "choices": [{"finish_reason": "stop", "message": {"content": None}}],
+            },
+        )
+        unclosed_think = answer_response(text="<think>思考中断", model="nvidia/nemotron-3.5-super-vl-120b-a12b")
+        cases = [
+            ("http_502", bad_payload(502, {"error": {"message": "Bad Gateway"}}), service.TransientServiceError),
+            (
+                "http_503",
+                bad_payload(503, {"error": {"message": "Service Unavailable"}}),
+                service.TransientServiceError,
+            ),
+            ("http_504", bad_payload(504, {"error": {"message": "Gateway Timeout"}}), service.TransientServiceError),
+            (
+                "http_400_payload",
+                bad_payload(400, {"error": {"message": "Image exceeds max pixels"}}),
+                service.ResponseFormatError,
+            ),
+            (
+                "http_200_busy_err",
+                bad_payload(200, {"error": {"message": "upstream busy", "code": 1305}}),
+                service.TransientServiceError,
+            ),
+            ("timeout", requests.Timeout("read timed out"), service.TransientServiceError),
+            ("null_content", null_content, service.ResponseFormatError),
+            ("unclosed_think", unclosed_think, service.ResponseFormatError),
+        ]
+        for case_name, effect, expected_exc in cases:
+            with self.subTest(case=case_name):
+                self.network.side_effect = [effect]
+                with self.assertRaises(expected_exc):
+                    service.chat("单题测试", [], kind=None, explicit_api=True)
+                status = service.public_status()
+                self.assertTrue(status["api_ready"], f"{case_name} 不应清空 api_ready")
+                self.assertEqual(status["unverified_reason"], "")
+
+    def test_auto_route_failover_on_transient_errors_and_preserve_verified_if_pool_exhausted(self):
+        with mock.patch.dict(os.environ, {"QB_LIBRARY_AI_CREDENTIAL_FILE": ""}):
+            service.credential_settings.save_all_actions(
+                {
+                    "nvidia": {"action": "replace", "accounts": ["nvapi-route-t1"]},
+                    "zhipu": {"action": "replace", "accounts": ["zhipu-route-t1"]},
+                }
+            )
+            service.credential_settings.refresh_public_environment(include_all=True)
+            service.save({"mode": "api", "provider": "nvidia"})
+            self.network.side_effect = None
+            self.network.return_value = answer_response(model="nvidia/nemotron-3.5-super-vl-120b-a12b", thinking=True)
+            service.test_connection({"confirm": True})
+            service.features.save({"ai_auto_route": True})
+
+            # 主商遇到 504 / Timeout / null content 时自动转交智谱并保留已测通
+            zhipu_ok = answer_response(text="智谱接手解答", model="glm-4.5-flash", thinking=True)
+            for err in (
+                mock.Mock(status_code=504, json=lambda: {"error": {"message": "Gateway Timeout"}}),
+                requests.Timeout("timed out"),
+                mock.Mock(
+                    status_code=200,
+                    json=lambda: {
+                        "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+                        "choices": [{"finish_reason": "stop", "message": {"content": None}}],
+                    },
+                ),
+            ):
+                service._PROVIDER_REST_UNTIL.clear()
+                self.network.side_effect = [err, zhipu_ok]
+                text, engine = service.chat("纯文题", [], kind=None, explicit_api=True)
+                self.assertEqual(text, "智谱接手解答")
+                self.assertEqual(engine, "zhipu API · glm-4.5-flash")
+                self.assertTrue(service.public_status()["api_ready"])
+
+            # 池内所有商均遭遇瞬时故障时，仍保留已测通
+            service._PROVIDER_REST_UNTIL.clear()
+            err_503 = mock.Mock(status_code=503, json=lambda: {"error": {"message": "overloaded"}})
+            self.network.side_effect = [err_503, requests.Timeout("zhipu timeout")]
+            with self.assertRaises(service.TransientServiceError):
+                service.chat("纯文题", [], kind=None, explicit_api=True)
+            self.assertTrue(service.public_status()["api_ready"])
+
+    def test_real_auth_or_transport_failure_clears_verified_with_sanitized_reason_and_race_guard(self):
+        def make_verified(ts: str):
+            service.save(
+                {"mode": "api", "provider": "nvidia", "key": {"action": "replace", "value": "nvapi-synthetic-auth-key"}}
+            )
+            self.network.side_effect = None
+            self.network.return_value = answer_response(model="nvidia/nemotron-3.5-super-vl-120b-a12b", thinking=True)
+            with mock.patch.object(service.timezone, "now", return_value=mock.Mock(isoformat=lambda: ts)):
+                tested = service.test_connection({"confirm": True})
+            self.assertTrue(tested["api_ready"])
+            return service._load()
+
+        # 1) HTTP 401、含 API key 报错的 HTTP 400、以及真实网络断开仍会清空 verified 并写入脱敏原因
+        auth_401 = mock.Mock(status_code=401, json=lambda: {"error": {"message": "Invalid nvapi-secret-leak-123"}})
+        auth_400 = mock.Mock(
+            status_code=400, json=lambda: {"error": {"message": "API key not valid: nvapi-secret-leak-456"}}
+        )
+        for effect, secret in (
+            (auth_401, "nvapi-secret-leak-123"),
+            (auth_400, "nvapi-secret-leak-456"),
+            (requests.RequestException("offline network down"), ""),
+        ):
+            make_verified("2026-11-23T01:00:00+00:00")
+            self.network.side_effect = [effect]
+            with self.assertRaises(service.ConnectionError):
+                service.chat("测试真故障", [], kind=None, explicit_api=True)
+            status = service.public_status()
+            self.assertFalse(status["api_ready"])
+            self.assertTrue(status["unverified_reason"])
+            if secret:
+                self.assertNotIn(secret, status["unverified_reason"])
+                self.assertIn("[已脱敏]", status["unverified_reason"])
+
+        # 2) 旧在途任务在用户重新测通后才失败，不得把新的已测通状态覆盖回 False
+        old_config = make_verified("2026-11-23T01:00:00+00:00")
+        self.network.return_value = answer_response(model="nvidia/nemotron-3.5-super-vl-120b-a12b", thinking=True)
+        with mock.patch.object(
+            service.timezone, "now", return_value=mock.Mock(isoformat=lambda: "2026-11-23T02:00:00+00:00")
+        ):
+            newer = service.test_connection({"confirm": True})
+        self.assertEqual(newer["verified_at"], "2026-11-23T02:00:00+00:00")
+
+        service._mark_unverified(old_config, reason="旧任务 401")
+        after = service.public_status()
+        self.assertTrue(after["api_ready"], "旧在途任务不能擦除新一次连接测试的结果")
+        self.assertEqual(after["verified_at"], "2026-11-23T02:00:00+00:00")
+        self.assertEqual(after["unverified_reason"], "")
+
+    def test_connection_probe_stays_strict_on_transient_timeout_malformed_and_missing_reasoning(self):
+        service.save(
+            {"mode": "api", "provider": "nvidia", "key": {"action": "replace", "value": "nvapi-synthetic-probe-key"}}
+        )
+        self.network.side_effect = None
+        for effect in (
+            mock.Mock(status_code=504, json=lambda: {"error": {"message": "Gateway Timeout"}}),
+            requests.Timeout("timed out"),
+            mock.Mock(
+                status_code=200,
+                json=lambda: {
+                    "model": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+                    "choices": [{"finish_reason": "stop", "message": {"content": None}}],
+                },
+            ),
+            answer_response(text="<think>未闭合", model="nvidia/nemotron-3.5-super-vl-120b-a12b"),
+        ):
+            self.network.side_effect = [effect]
+            with self.assertRaises(service.ServiceError):
+                service.test_connection({"confirm": True})
+            status = service.public_status()
+            self.assertFalse(status["api_ready"])
+            self.assertTrue(status["unverified_reason"])
+
+        # doubao 仍必须返回思考过程才能通过连接测试
+        service.save(
+            {
+                "mode": "api",
+                "provider": "doubao",
+                "endpoint_id": "ep-offline-strict",
+                "thinking": True,
+                "supports_images": False,
+                "key": {"action": "replace", "value": "doubao-synthetic-key"},
+            }
+        )
+        self.network.side_effect = [answer_response(text="【答案】2", model="ep-offline-strict", thinking=False)]
+        with self.assertRaises(service.ServiceError):
+            service.test_connection({"confirm": True})
+        self.assertFalse(service.public_status()["api_ready"])

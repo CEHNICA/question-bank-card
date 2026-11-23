@@ -210,6 +210,76 @@ class TiyoujuCliTests(LiveServerTestCase):
         self.assertEqual(code, 0)
         self.assertFalse(where["teacher"]["here"])
 
+    def test_solutions_batch_import_undo_and_workbench_clear_cli_and_mcp(self):
+        from . import library_solutions
+
+        run_json("approve", "期中", "1", "3", "--agent", "豆包")
+        run_json("publish", "期中")
+        pub1 = PublishedQuestion.objects.get(number=1)
+        pub3 = PublishedQuestion.objects.get(number=3)
+
+        # 1) CLI 干跑 + 正式导入 + 列表 + 撤销
+        batch_file = self.temp / "answers.json"
+        batch_file.write_text(
+            json.dumps(
+                {
+                    "items": [
+                        {"publication_id": str(pub1.pk), "answer": "B", "analysis": "$1+1=2$"},
+                        {
+                            "publication_id": f"Q-{str(pub3.pk).replace('-', '')[:8]}",
+                            "answer": "4",
+                            "analysis": "$2+2=4$",
+                        },
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        code, dry = run_json("solutions", "import", "--file", str(batch_file), "--dry-run", "--agent", "书本整理")
+        self.assertEqual(code, 0, dry)
+        self.assertTrue(dry["dry_run"])
+        self.assertEqual(dry["would_create"], 2)
+
+        code, imported = run_json(
+            "solutions", "import", "--file", str(batch_file), "--note", "测试批次", "--agent", "书本整理"
+        )
+        self.assertEqual(code, 0, imported)
+        self.assertEqual(imported["created"], 2)
+        pub1.refresh_from_db()
+        self.q1.refresh_from_db()
+        self.assertTrue(self.q1.approved, "批量写解析不能打回源题卡")
+        self.assertEqual(library_solutions.selected(pub1).answer, "B")
+
+        code, batches = run_json("solutions", "batches")
+        self.assertEqual(code, 0, batches)
+        self.assertEqual(batches["batches"][0]["batch_id"], imported["batch_id"])
+
+        code, undone = run_json("solutions", "undo", "--batch-id", imported["batch_id"])
+        self.assertEqual(code, 0, undone)
+        self.assertEqual(undone["restored"], 2)
+        pub1.refresh_from_db()
+        self.assertIsNone(library_solutions.selected(pub1))
+
+        # 2) workbench --clear 批量清理指定助手的提案
+        run_json("propose", str(pub1.pk), "--analysis", "旧方案", "--agent", "海鸥")
+        run_json("propose", str(pub3.pk), "--stem", "保留这条", "--agent", "另一助手")
+        code, cleared = run_json("workbench", "--clear", "--from-agent", "海鸥", "--reason", "改走批量接口")
+        self.assertEqual(code, 0, cleared)
+        self.assertEqual(cleared["processed"], 1)
+        self.assertEqual(cleared["remaining"], 1)
+
+        # 3) MCP import_solutions 与 undo_solutions
+        client = cli.Client(self.live_server_url, agent="mcp-test")
+        mcp_res, _ = cli.mcp_call(
+            client,
+            "import_solutions",
+            {"items": [{"publication_id": str(pub1.pk), "answer": "B", "analysis": "MCP 导入"}], "note": "mcp"},
+        )
+        self.assertEqual(mcp_res["created"], 1)
+        mcp_undo, _ = cli.mcp_call(client, "undo_solutions", {"batch_id": mcp_res["batch_id"]})
+        self.assertEqual(mcp_undo["restored"], 1)
+
     def test_claiming_work_leases_it_and_an_expired_lease_comes_back(self):
         from . import library
         from .models import LibraryJob
@@ -414,10 +484,13 @@ class TiyoujuCliTests(LiveServerTestCase):
             self.assertFalse(status["automatic_parse_ready"])
             self.assertEqual([item["what"] for item in status["missing"]], ["mineru", "vision"])
             self.assertIn("mineru.net", status["missing"][0]["signup"])
-            self.assertEqual([item["service"] for item in status["missing"][1]["options"]], ["modelscope"])
+            self.assertEqual(
+                [item["service"] for item in status["missing"][1]["options"]],
+                ["modelscope", "nvidia", "gemini", "zhipu"],
+            )
             code, text, _err = run("status")
             self.assertIn("modelscope.cn", text)
-            self.assertNotIn("bigmodel", text)
+            self.assertIn("bigmodel.cn", text)
             self.assertIn("tiyouju config --reader assistant", text)
             # AI 助手读题 needs MinerU only.
             run_json("config", "--reader", "assistant")

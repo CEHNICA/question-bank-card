@@ -18,7 +18,7 @@ from django.utils import timezone
 
 from . import demo, features, imaging, prose, qtypes, source_images
 from .figure_policy import CONFIRMED_NO_FIGURE, DECISION_FLAGS, blocking_message, blocks_approval
-from .models import Paper, PublishedQuestion, Question, QuestionGroup
+from .models import LibrarySolution, Paper, PublishedQuestion, Question, QuestionGroup
 from .textnorm import strip_example_label, strip_type_label
 
 CHOICE_TYPES = set(qtypes.CHOICE_TYPES)
@@ -540,8 +540,18 @@ def needs_tags(extras: dict | None) -> bool:
     return not tags_of(extras)
 
 
+def has_saved_solution(extras: dict | None) -> bool:
+    """判断入库题是否绑定了已保存的解析版本。"""
+    return isinstance(extras, dict) and bool(str(extras.get("solution_id") or "").strip())
+
+
+def has_formal_answer(content: dict | None, extras: dict | None) -> bool:
+    """判断入库题是否已有正式答案（原卷答案或已保存解析版本）。"""
+    return bool(str((content or {}).get("answer") or "").strip()) or has_saved_solution(extras)
+
+
 def needs_answer(extras: dict | None, content: dict | None) -> bool:
-    return not (str((content or {}).get("answer") or "").strip() or (extras or {}).get("ai_answer"))
+    return not (has_formal_answer(content, extras) or bool((extras or {}).get("ai_answer")))
 
 
 def generation_backlog() -> dict:
@@ -967,13 +977,26 @@ def resolve_publication_ref(raw_ref: str) -> PublishedQuestion:
     return PublishedQuestion.objects.get(pk=matched[0].pk)
 
 
-def publication_json(publication: PublishedQuestion, *, include_tag_details: bool = True) -> dict:
+def publication_json(
+    publication: PublishedQuestion, *, include_tag_details: bool = True, prefetched_solutions: dict | None = None
+) -> dict:
     from . import library_solutions
 
     solution, solution_error = None, ""
-    if (publication.extras or {}).get("solution_id"):
+    raw_solution_id = (publication.extras or {}).get("solution_id") if isinstance(publication.extras, dict) else None
+    if raw_solution_id:
         try:
-            solution = library_solutions.solution_json(library_solutions.selected(publication))
+            expected_fp = generation_fingerprint(publication.content, publication.pk)
+            if prefetched_solutions is not None:
+                key = library_solutions.identity(raw_solution_id)
+                row = prefetched_solutions.get(key)
+                if row is None or row.publication_id != publication.pk:
+                    raise library_solutions.SolutionError("解析版本不属于这道题或已经不存在", 409)
+                if row.fingerprint != expected_fp:
+                    raise library_solutions.SolutionError("解析对应的题面或配图已变化，请重新核对并保存解析", 409)
+            else:
+                row = library_solutions.selected(publication)
+            solution = library_solutions.solution_json(row, fingerprint=expected_fp)
         except library_solutions.SolutionError as error:
             solution_error = str(error)
     content = _content_with_figure_state(publication)
@@ -995,7 +1018,7 @@ def publication_json(publication: PublishedQuestion, *, include_tag_details: boo
         "content": content,
         "page": first_page(content.get("sources")),
         "origin": str((publication.content or {}).get("origin") or ""),
-        "has_answer": bool(str((publication.content or {}).get("answer") or "").strip()),
+        "has_answer": bool(str((publication.content or {}).get("answer") or "").strip()) or bool(solution),
         "subquestions": qtypes.subquestion_count((publication.content or {}).get("stem")),
         "tags": tags_of(publication.extras),
         "ai_answer": (publication.extras or {}).get("ai_answer") if isinstance(publication.extras, dict) else None,
@@ -1023,7 +1046,21 @@ def publications_json(publications) -> list[dict]:
     from . import library_tagging
 
     publications = list(publications)
-    rows = [publication_json(item, include_tag_details=False) for item in publications]
+    solution_ids = []
+    for item in publications:
+        raw_sid = (item.extras or {}).get("solution_id") if isinstance(item.extras, dict) else None
+        if raw_sid:
+            try:
+                solution_ids.append(uuid.UUID(str(raw_sid)))
+            except (ValueError, AttributeError):
+                continue
+    prefetched_solutions = (
+        {str(row.pk): row for row in LibrarySolution.objects.filter(pk__in=set(solution_ids))} if solution_ids else {}
+    )
+    rows = [
+        publication_json(item, include_tag_details=False, prefetched_solutions=prefetched_solutions)
+        for item in publications
+    ]
     return library_tagging.attach_batch_to_publications(publications, rows)
 
 

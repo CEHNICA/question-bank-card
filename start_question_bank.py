@@ -830,6 +830,8 @@ def main() -> int:
         web_env.update(_credential_status_environment(credential_pools))
         web_env.update(model_env)
         worker_env = _worker_credential_environment(base_env, credential_pools)
+        # Worker 执行题库标签与答案任务时同样需要统一凭据的可用状态标记。
+        worker_env.update(_credential_status_environment(credential_pools))
         worker_env.update(model_env)
         del model_env
         assistant = preferences["primary_engine"] == provider_catalog.ASSISTANT_ENGINE

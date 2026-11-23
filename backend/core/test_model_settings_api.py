@@ -187,7 +187,8 @@ class ModelSettingsApiTests(TestCase):
             engines["models"], {**DEFAULT_MODELS, "minimax": "MiniMax-M3.1", "siliconflow": "Qwen/custom-vl"}
         )
         self.assertEqual(
-            [item["provider_key"] for item in engines["choices"]], ["minimax", "modelscope", "siliconflow"]
+            [item["provider_key"] for item in engines["choices"]],
+            ["minimax", "modelscope", "siliconflow", "nvidia", "gemini", "zhipu"],
         )
         modelscope = next(item for item in engines["choices"] if item["provider_key"] == "modelscope")
         self.assertTrue(modelscope["free"])

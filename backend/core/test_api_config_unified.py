@@ -267,3 +267,77 @@ class UnifiedApiConfigTests(TestCase):
             )
         self.assertEqual(ok.status_code, 200)
         probe.assert_called_once_with("modelscope")
+
+    def test_worker_sees_newly_saved_and_verified_unified_api_after_hot_reload(self) -> None:
+        from .management.commands import run_worker
+
+        api_config.save_payload(
+            {
+                "credentials": {"minimax": {"action": "replace", "accounts": ["sk-minimax-unified-1"]}},
+                "answering": {
+                    "mode": "api",
+                    "provider": "minimax",
+                    "model": "MiniMax-M3.1-Flash-Preview",
+                    "base_url": provider_catalog.MINIMAX_API_BASE,
+                    "supports_images": True,
+                    "thinking": True,
+                },
+            }
+        )
+        probe_response = mock.Mock(status_code=200)
+        probe_response.json.return_value = {
+            "model": "MiniMax-M3.1-Flash",
+            "choices": [
+                {"finish_reason": "stop", "message": {"content": "【答案】2【图示】2", "reasoning_content": "ok"}}
+            ],
+        }
+        with mock.patch("core.library_ai_settings.requests.post", return_value=probe_response):
+            tested = library_ai_settings.test_connection({"confirm": True})
+        self.assertTrue(tested["api_ready"])
+
+        # 模拟 Worker 进程在用户配置密钥前启动，初始环境里只有 QB_MINIMAX_CONFIGURED=0。
+        with mock.patch.dict(
+            os.environ, {"QB_CREDENTIAL_HOT_RELOAD": "1", "QB_MINIMAX_CONFIGURED": "0", "QB_MINIMAX_POOL_SIZE": "0"}
+        ):
+            with self.assertRaises(library_ai_settings.ServiceError):
+                library_ai_settings.ensure_api_ready()
+
+            run_worker.SETTINGS_APPLIED["signature"] = None
+            with mock.patch.object(run_worker, "apply_saved_model_preferences"):
+                self.assertTrue(run_worker.apply_saved_settings())
+
+            ready = library_ai_settings.ensure_api_ready()
+            self.assertTrue(ready["api_ready"])
+            self.assertEqual(ready["provider"], "minimax")
+            self.assertEqual(os.environ.get("QB_MINIMAX_CONFIGURED"), "1")
+            self.assertEqual(os.environ.get("QB_MINIMAX_POOL_SIZE"), "1")
+
+    def test_unified_save_supports_nvidia_nim_with_multimodal_defaults(self) -> None:
+        resp = self.client.post(
+            "/api/settings/api-config",
+            data=json.dumps(
+                {
+                    "credentials": {"nvidia": {"action": "replace", "accounts": ["nvapi-synthetic-unified-001"]}},
+                    "answering": {
+                        "mode": "api",
+                        "provider": "nvidia",
+                        "model": provider_catalog.NVIDIA_ANSWER_MODEL,
+                        "base_url": provider_catalog.NVIDIA_BASE,
+                        "supports_images": True,
+                        "thinking": True,
+                        "features": {"ai_answer": True, "knowledge_tags": True},
+                    },
+                }
+            ),
+            content_type="application/json",
+            **self._same_origin_headers(),
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        body = resp.json()
+        self.assertTrue(body["credentials"]["nvidia"]["configured"])
+        self.assertEqual(body["answering"]["provider"], "nvidia")
+        self.assertEqual(body["answering"]["model"], "nvidia/nemotron-3.5-super-vl-120b-a12b")
+        self.assertEqual(body["answering"]["base_url"], "https://integrate.api.nvidia.com/v1")
+        self.assertTrue(body["answering"]["supports_images"])
+        self.assertTrue(body["answering"]["thinking"])
+        self.assertNotIn("nvapi-synthetic", resp.content.decode("utf-8"))

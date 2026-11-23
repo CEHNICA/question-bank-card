@@ -166,5 +166,30 @@ function setup(fetcher) {
   checkboxes[0].trigger("change");
   assert.equal(draft.answering.on_intake.answer, false, "turning off ai_answer forces on_intake.answer=false");
 
+  // 4. 存在 unverified_reason 时显示失效原因，未测且无原因时保留首次连接提示
+  const collectTexts = (node) => {
+    const out = [];
+    if (node?.textContent) out.push(node.textContent);
+    for (const c of node?.children || []) out.push(...collectTexts(c));
+    return out;
+  };
+  const firstTime = setup(async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify(makePayload({ verified: false, unverified_reason: "" })),
+  }));
+  await firstTime.windowObj.APISettings.mount(firstTime.host);
+  const firstTexts = collectTexts(firstTime.nodes.get("credentialAnswerPanel")).join("\n");
+  assert.match(firstTexts, /还差一步：/);
+
+  const broken = setup(async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify(makePayload({ verified: false, unverified_reason: "独立 API 请求未完成（HTTP 401）" })),
+  }));
+  await broken.windowObj.APISettings.mount(broken.host);
+  const brokenTexts = collectTexts(broken.nodes.get("credentialAnswerPanel")).join("\n");
+  assert.match(brokenTexts, /上次连接校验已失效（独立 API 请求未完成（HTTP 401））/);
+
   console.log("unified answering settings & probe flow checks: OK");
 })();

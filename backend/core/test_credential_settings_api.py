@@ -307,6 +307,50 @@ class WorkerCredentialReloadTests(SimpleTestCase):
         reload_credentials.assert_called_once_with()
         reset.assert_called_once_with()
 
+    def test_worker_hot_reload_syncs_all_service_status_flags_and_library_lane_reloads_before_backfill(self):
+        environment = {
+            "QB_CREDENTIAL_FILE": str(self.path),
+            "QB_CREDENTIAL_HOT_RELOAD": "1",
+            "QB_MINIMAX_CONFIGURED": "0",
+            "QB_MINIMAX_POOL_SIZE": "0",
+            "QB_DEEPSEEK_CONFIGURED": "0",
+            "QB_DEEPSEEK_POOL_SIZE": "0",
+        }
+        with (
+            mock.patch.dict(os.environ, environment, clear=True),
+            mock.patch.object(credential_settings.store, "_transform", side_effect=identity_transform),
+        ):
+            credential_settings.store.save_credentials(
+                {"minimax_keys": ["mm-hot-1", "mm-hot-2"], "deepseek_keys": ["ds-hot-1"]}
+            )
+            run_worker.SETTINGS_APPLIED["signature"] = None
+            stop = mock.Mock()
+            stop.is_set.side_effect = [False, True]
+            order: list[tuple[str, str, str]] = []
+
+            def fake_enqueue():
+                order.append(
+                    (
+                        "enqueue",
+                        os.environ.get("QB_MINIMAX_CONFIGURED", ""),
+                        os.environ.get("QB_DEEPSEEK_CONFIGURED", ""),
+                    )
+                )
+                return 0
+
+            with (
+                mock.patch.object(run_worker.library_job_control, "touch_worker_heartbeat"),
+                mock.patch.object(run_worker.library_jobs, "enqueue_untagged_background", side_effect=fake_enqueue),
+                mock.patch.object(run_worker.library_jobs, "pending", return_value=False),
+                mock.patch.object(run_worker, "apply_saved_model_preferences"),
+            ):
+                run_worker.library_job_lane(stop, interval=0)
+
+            self.assertEqual(order, [("enqueue", "1", "1")])
+            self.assertEqual(os.environ.get("QB_MINIMAX_POOL_SIZE"), "2")
+            self.assertEqual(os.environ.get("QB_DEEPSEEK_POOL_SIZE"), "1")
+            self.assertEqual(os.environ.get("MINIMAX_API_KEY"), "mm-hot-1")
+
 
 @unittest.skipUnless(os.name == "nt", "Windows DPAPI only")
 class CredentialApiDpapiTests(SimpleTestCase):

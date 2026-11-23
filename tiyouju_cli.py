@@ -617,8 +617,9 @@ def cmd_skill(_client, _args) -> dict:
         "- `tiyouju locate <定位码或位置文本> [--json]`：支持 `Q-xxxxxxxx`、UUID 或用户复制的一整段题目定位文本，秒查完整题干、标签与本机原图。",
         "- `tiyouju library [关键词] --json`：按题干、标签、题型检索正式题库内容（每条均带 `short_id`）。",
         "- `tiyouju whereami --json`：确认老师当前正在题库工作台查看/编辑哪道题，避免冲突。",
-        "- `tiyouju claim` / `tiyouju release` / `tiyouju workbench`：领取和查看助手工作台任务。",
-        "- `tiyouju propose <publication_id> ...`：对已入库题目提交改字提案（等老师采纳，不直接篡改正式题库）。",
+        "- `tiyouju claim` / `tiyouju release` / `tiyouju workbench`：领取和查看助手工作台任务（支持 `workbench --clear` 批量清空提案）。",
+        "- `tiyouju solutions import --file <json> --dry-run`：批量将标准答案书/官方解析写入解析层（不动源题卡、不清通过勾、默认不覆盖已有解析；先干跑抽查，确认客观/填空题填好 `answer` 后再写入；支持 `tiyouju solutions undo` 整批撤销）。",
+        "- `tiyouju propose <publication_id> ...`：仅限单题题面勘误交成提案（等老师采纳；严禁用 `propose` 批量灌整本答案书）。",
         "- `tiyouju enrich tasks` / `prepare` / `submit`：按任务领取原图并交回标签候选或参考答案初稿。",
         "- `tiyouju backup [--dest DIR]`：打包备份题库或指定试卷/文件夹。",
         "",
@@ -1491,8 +1492,164 @@ def cmd_propose(client: Client, args) -> dict:
 
 
 def cmd_workbench(client: Client, args) -> dict:
-    """读助手工作台：助手交上来了什么、谁在干活、老师此刻在哪。"""
-    return client.get("/api/library/assistant/workbench?limit=50")
+    """读助手工作台，或按助手/范围批量清理待核对提案（CLI 仅允许批量拒绝清理，不代老师批量采纳）。"""
+    if getattr(args, "clear", False):
+        payload: dict = {
+            "action": "reject",
+            "scope": getattr(args, "scope", None) or "all",
+            "by": _enrichment_agent(client, args),
+        }
+        if getattr(args, "from_agent", None):
+            payload["agent"] = args.from_agent
+        if getattr(args, "reason", None):
+            payload["reason"] = args.reason
+        return client.post("/api/library/assistant/proposals/batch-decide", payload)
+
+    query: dict[str, str] = {"limit": str(int(getattr(args, "limit", None) or 50))}
+    if getattr(args, "from_agent", None):
+        query["agent"] = args.from_agent
+    if getattr(args, "scope", None):
+        query["scope"] = args.scope
+    return client.get("/api/library/assistant/workbench?" + urllib.parse.urlencode(query))
+
+
+def show_workbench(result: dict) -> str:
+    if "processed" in result and result.get("action") == "reject":
+        return f"{result.get('message', '已批量清理待核对提案。')}（剩余待核对：{result.get('remaining', 0)} 条）"
+    pending = result.get("pending") or {}
+    lines = [
+        f"助手工作台：共 {pending.get('text', 0)} 条待核对提案"
+        f"（仅改答案解析 {pending.get('solution_only', 0)} 条，涉及题面 {pending.get('face', 0)} 条；"
+        f"当前返回 {pending.get('shown', len(result.get('proposals') or []))} 条）"
+    ]
+    by_agent = result.get("by_agent") or []
+    if by_agent:
+        lines.append("按助手汇总：")
+        for item in by_agent:
+            lines.append(
+                f"  - {item.get('agent')}：{item.get('total', 0)} 条"
+                f"（纯答案解析 {item.get('solution_only', 0)}，题面 {item.get('face', 0)}）"
+            )
+    proposals = result.get("proposals") or []
+    for p in proposals[:20]:
+        flags = ["纯答案解析"] if p.get("solution_only") else ["改了题面"]
+        changed = "、".join(p.get("changed") or [])
+        lines.append(f"  · 第 {p.get('number')} 题（{p.get('source_filename')}）| {p.get('agent')} | {changed} | {'/'.join(flags)} | id={p.get('id')}")
+    if len(proposals) > 20:
+        lines.append(f"  ……其余 {len(proposals) - 20} 条可用 --json 查看")
+    teacher = result.get("teacher") or {}
+    if teacher.get("here"):
+        lines.append(f"老师当前位置：第 {teacher.get('number')} 题（{teacher.get('state_text')}）")
+    return "\n".join(lines)
+
+
+def _load_solutions_file(path: str) -> list[dict]:
+    try:
+        raw_text = Path(path).expanduser().read_text(encoding="utf-8-sig")
+    except OSError as exc:
+        raise CliError(f"无法读取答案解析 JSON 文件：{exc}") from None
+    try:
+        parsed = json.loads(raw_text)
+    except ValueError as exc:
+        raise CliError(f"答案解析文件不是合法 JSON：{exc}") from None
+
+    raw_items: list
+    if isinstance(parsed, dict) and "items" in parsed:
+        raw_items = parsed["items"]
+    elif isinstance(parsed, list):
+        raw_items = parsed
+    elif isinstance(parsed, dict):
+        raw_items = []
+        for pub_id, val in parsed.items():
+            if not isinstance(val, dict):
+                raise CliError("映射格式中每道题的值必须是包含 answer / analysis 的 JSON 对象")
+            raw_items.append({"publication_id": str(pub_id), **val})
+    else:
+        raise CliError("答案解析文件格式应为 {\"items\": [...]}、[...] 或 {题目ID: {\"answer\": ..., \"analysis\": ...}}")
+
+    if not isinstance(raw_items, list) or not raw_items:
+        raise CliError("答案解析列表不能为空")
+    if len(raw_items) > 500:
+        raise CliError(f"单批最多导入 500 条解析，请分批后重试（当前 {len(raw_items)} 条）")
+
+    items: list[dict] = []
+    for idx, entry in enumerate(raw_items):
+        if not isinstance(entry, dict):
+            raise CliError(f"第 {idx + 1} 条必须是 JSON 对象")
+        pub_id = entry.get("publication_id")
+        if pub_id is None:
+            pub_id = entry.get("id")
+        item: dict = {"publication_id": str(pub_id or "").strip()}
+        if "answer" in entry and entry["answer"] is not None:
+            item["answer"] = entry["answer"]
+        if "analysis" in entry and entry["analysis"] is not None:
+            item["analysis"] = entry["analysis"]
+        items.append(item)
+    return items
+
+
+def cmd_solutions(client: Client, args) -> dict:
+    """批量将标准答案解析直接写入版本化解析层（LibrarySolution），支持干跑与整批撤销。"""
+    sub = getattr(args, "solutions_command", None) or "batches"
+    if sub == "import":
+        items = _load_solutions_file(args.file)
+        payload: dict = {
+            "items": items,
+            "overwrite": bool(getattr(args, "overwrite", False)),
+            "dry_run": bool(getattr(args, "dry_run", False)),
+            "agent": _enrichment_agent(client, args),
+        }
+        if getattr(args, "note", None) is not None:
+            payload["note"] = args.note
+        return client.post("/api/library/solutions/batch", payload, timeout=120)
+    if sub == "batches":
+        limit = int(getattr(args, "limit", None) or 20)
+        return client.get(f"/api/library/solutions/batches?limit={limit}")
+    if sub == "undo":
+        payload = {}
+        if getattr(args, "batch_id", None):
+            payload["batch_id"] = args.batch_id
+        return client.post("/api/library/solutions/undo", payload)
+    raise CliError(f"不支持的 solutions 子命令：{sub}")
+
+
+def show_solutions(result: dict) -> str:
+    if "batches" in result:
+        batches = result.get("batches") or []
+        if not batches:
+            return "暂无批量解析导入记录。"
+        lines = [f"批量解析导入记录（共 {result.get('total', len(batches))} 批，展示最近 {len(batches)} 批）："]
+        for item in batches:
+            state = f"已撤销于 {item['undone_at']}" if item.get("undone_at") else "有效"
+            note = f" | 说明：{item['note']}" if item.get("note") else ""
+            lines.append(
+                f"  - {item['batch_id']} | {item.get('count', 0)} 题 | {item.get('agent') or '老师'} | {state}{note}"
+            )
+        return "\n".join(lines)
+    if "restored" in result:
+        return f"{result.get('message', '已撤销批量解析写入。')}（batch_id={result.get('batch_id')}）"
+    if result.get("dry_run"):
+        lines = [
+            f"干跑预览完成（共 {result.get('total', 0)} 题，未写入题库）："
+            f"拟新增 {result.get('would_create', 0)}，拟覆盖 {result.get('would_overwrite', 0)}，"
+            f"拟跳过已有 {result.get('would_skip_existing', 0)}，校验错误 {result.get('invalid', 0)}，"
+            f"仅解析无答案 {result.get('analysis_only_count', 0)}。"
+        ]
+        for warn in (result.get("warnings") or [])[:10]:
+            lines.append(f"  [提醒] {warn}")
+        for err in (result.get("errors") or [])[:10]:
+            lines.append(f"  [错误] 第 {err.get('index', 0) + 1} 条：{err.get('error')}")
+        return "\n".join(lines)
+    lines = [
+        f"批量解析写入完成（共 {result.get('total', 0)} 题）："
+        f"新增 {result.get('created', 0)}，覆盖 {result.get('overwritten', 0)}，"
+        f"跳过已有 {result.get('skipped_existing', 0)}，仅解析无答案 {result.get('analysis_only_count', 0)}。"
+    ]
+    if result.get("batch_id"):
+        lines.append(f"批次 ID：{result['batch_id']}（可用 `tiyouju solutions undo --batch-id {result['batch_id']}` 整批撤销）")
+    for warn in (result.get("warnings") or [])[:10]:
+        lines.append(f"  [提醒] {warn}")
+    return "\n".join(lines)
 
 
 def cmd_whereami(client: Client, args) -> dict:
@@ -2107,6 +2264,8 @@ SHOWERS = {
     "locate": show_locate,
     "backup": show_backup,
     "folders": show_folders,
+    "solutions": show_solutions,
+    "workbench": show_workbench,
     "skill": show_skill,
     "setup-agents": show_setup_agents,
 }
@@ -2131,7 +2290,8 @@ MCP_INSTRUCTIONS = (
     "用户要整批生成时，逐个入库题prepare，再按每个kind分别submit，不把多道题合成一段答案。"
     "用户明确要以后新题入库时自动处理，可configure_enrichment_auto设置自动排队（默认关闭），所需feature仍需显式启用。"
     "自动任务在新题入库之后创建；助手模式由当前助手继续领取完成，不声称已在OCR前生成答案或已常驻豆包。"
-    "已经入库的题不要直接改字：改法用 propose_question_change 交成提案，题面不动，等老师点采纳。"
+    "已经入库的题不要直接改字：单题题面勘误用 propose_question_change 交成提案，题面不动，等老师点采纳。"
+    "严禁用 propose_question_change 批量灌整本答案书：批量写入标准答案书/官方解析必须使用 import_solutions（直接写入版本化解析层、不打回黄卡、默认保护已有解析且支持 undo_solutions 整批撤销）。"
     "但整理文件夹（list_folders / manage_folder / set_question_sections / update_paper_folder / manage_tag_groups）直接生效并支持撤销。"
     "批量干活先 claim_work 领一批（每道活带到期时间，助手没了活会自己回到池子里），干不完 release_work 交回。"
     "where_is_the_teacher 告诉你老师此刻在哪、你刚提的有没有被否决。"
@@ -2227,7 +2387,7 @@ MCP_TOOLS = [
         "ids": {"type": "array", "minItems": 1, "maxItems": 500, "items": {"type": "string"}},
         "agent": {"type": "string", "description": "真实助手名称，缺省使用当前MCP客户端名"},
     }, ["ids"])),
-    ("propose_question_change", "交一份题面改动提案：题面一个字不动，等老师点采纳。已入库的题不要直接改字。", _schema({
+    ("propose_question_change", "交一份单题题面改动提案（仅限修正题干、选项、题型、题源或个别错字）：题面一个字不动，等老师点采纳。严禁用此工具批量灌整本答案书（批量导入标准答案解析请改用 import_solutions）。", _schema({
         "publication_id": {"type": "string", "description": "入库题 UUID"},
         "fields": {
             "type": "object",
@@ -2243,7 +2403,38 @@ MCP_TOOLS = [
         },
         "agent": {"type": "string", "description": "真实助手名称，缺省使用当前MCP客户端名"},
     }, ["publication_id", "fields"])),
-    ("read_workbench", "读助手工作台：助手交上来了什么待核对、谁在干活、老师此刻在哪。", _schema({})),
+    ("import_solutions", "批量将已有标准答案书/官方解析直接写入正式题库解析层（LibrarySolution），不动源题卡、不清通过勾、默认不覆盖已有解析且支持整批撤销。严禁用 propose_question_change 批量灌书本答案解析。建议先设 dry_run=true 预览并核对客观/填空题已填写 answer。", _schema({
+        "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 500,
+            "description": "待导入列表：每项含 publication_id（UUID 或 Q-xxxxxxxx 短码）及 answer / analysis（至少填一项）",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "publication_id": {"type": "string"},
+                    "answer": {"type": "string"},
+                    "analysis": {"type": "string"},
+                },
+                "required": ["publication_id"],
+            },
+        },
+        "overwrite": {"type": "boolean", "description": "是否覆盖已有保存解析（默认 false 保护已有解析）"},
+        "dry_run": {"type": "boolean", "description": "是否仅干跑校验和统计预览而不写入（建议首次先设为 true）"},
+        "note": {"type": "string", "description": "本次导入批次说明"},
+        "agent": {"type": "string", "description": "真实助手名称，缺省使用当前MCP客户端名"},
+    }, ["items"])),
+    ("list_solution_batches", "查看最近的批量解析导入历史批次（可用于核查或整批撤销）。", _schema({
+        "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+    })),
+    ("undo_solutions", "整批撤销指定（或最近一次）批量解析导入；若某题后续已被人工另行修改则自动跳过保护。", _schema({
+        "batch_id": {"type": "string", "description": "要撤销的批次 UUID（省略则撤销最近一次未撤销批次）"},
+    })),
+    ("read_workbench", "读助手工作台：待核对真实总数、按助手汇总、谁在干活、老师此刻在哪。", _schema({
+        "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+        "agent": {"type": "string", "description": "按指定助手名称筛选待核对提案"},
+        "scope": {"type": "string", "enum": ["all", "solution_only", "face"], "description": "筛选提案类型"},
+    })),
     ("where_is_the_teacher", "问一句老师此刻在哪、你刚提的改动有没有被否决。", _schema({})),
     ("list_folders", "查看题库文件夹树（我的文件夹、试卷夹、教材章节树、智能文件夹、排序方式与标签个人分组）。", _schema({})),
     ("manage_folder", "直接整理我的文件夹、智能文件夹、题目归档与排序方式（支持 undo 撤销）。", _schema({
@@ -2422,8 +2613,28 @@ def mcp_call(client: Client, name: str, arguments: dict) -> tuple[dict | list, l
             option=[f"{key}={value}" for key, value in options.items() if str(value).strip()],
             type=fields.get("question_type"), answer=fields.get("answer"),
             analysis=fields.get("analysis"), origin=fields.get("origin"))), []
+    if name == "import_solutions":
+        body = {
+            "items": list(a.get("items") or []),
+            "overwrite": bool(a.get("overwrite", False)),
+            "dry_run": bool(a.get("dry_run", False)),
+            "agent": a.get("agent") or client.agent,
+        }
+        if a.get("note") is not None:
+            body["note"] = a["note"]
+        return client.post("/api/library/solutions/batch", body, timeout=120), []
+    if name == "list_solution_batches":
+        limit = int(a.get("limit") or 20)
+        return client.get(f"/api/library/solutions/batches?limit={limit}"), []
+    if name == "undo_solutions":
+        body = {}
+        if a.get("batch_id"):
+            body["batch_id"] = a["batch_id"]
+        return client.post("/api/library/solutions/undo", body), []
     if name == "read_workbench":
-        return cmd_workbench(client, _ns()), []
+        return cmd_workbench(client, _ns(
+            limit=a.get("limit", 50), from_agent=a.get("agent"), scope=a.get("scope", "all"), clear=False,
+        )), []
     if name == "where_is_the_teacher":
         return cmd_whereami(client, _ns()), []
     if name == "list_folders":
@@ -2827,7 +3038,7 @@ def build_parser() -> argparse.ArgumentParser:
     claim.add_argument("--ids", nargs="+", help="只领这些入库题 UUID（最多500个）")
     release = sub.add_parser("release", parents=[common], help="把没干完的助手活交回池子")
     release.add_argument("--job-id", action="append", help="要交回的任务 UUID（可多次）")
-    propose = sub.add_parser("propose", parents=[common], help="交一份题面改动提案；题面不动，等老师采纳")
+    propose = sub.add_parser("propose", parents=[common], help="交一份单题题面勘误提案；题面不动，等老师采纳（批量导标准答案请用 solutions import）")
     propose.add_argument("publication_id", help="入库题 UUID")
     propose.add_argument("--stem", help="新题干；公式用 $...$ 包住的 LaTeX")
     propose.add_argument("--stem-file", help="从文件读新题干")
@@ -2836,7 +3047,23 @@ def build_parser() -> argparse.ArgumentParser:
     propose.add_argument("--answer", help="要改的参考答案")
     propose.add_argument("--analysis", help="要改的参考解析")
     propose.add_argument("--origin", help="要改的题源")
-    sub.add_parser("workbench", parents=[common], help="读助手工作台：助手交上来了什么、谁在干活")
+    wb = sub.add_parser("workbench", parents=[common], help="读助手工作台真实总数/按助手汇总，或批量清理待核对提案")
+    wb.add_argument("--limit", type=int, default=50, help="返回待核对提案条数上限（1–200，不影响真实总数统计）")
+    wb.add_argument("--from-agent", help="按来源助手名称过滤（如 海鸥）")
+    wb.add_argument("--scope", choices=["all", "solution_only", "face"], default="all", help="筛选类型：all / solution_only / face")
+    wb.add_argument("--clear", action="store_true", help="批量拒绝并清空匹配的待核对提案（不改动题面或解析）")
+    wb.add_argument("--reason", help="批量清理时记录的拒绝理由")
+    sol_p = sub.add_parser("solutions", parents=[common], help="批量导入标准答案解析（直写版本化解析层，保护人工解析且支持整批撤销）")
+    sol_sub = sol_p.add_subparsers(dest="solutions_command", metavar="动作")
+    sol_imp = sol_sub.add_parser("import", parents=[common], help="从 UTF-8 JSON 文件批量写入标准答案与解析")
+    sol_imp.add_argument("--file", required=True, help="UTF-8 JSON 文件路径（支持 {\"items\": [...]}、[...] 或 {题目ID: {answer, analysis}}）")
+    sol_imp.add_argument("--overwrite", action="store_true", help="允许覆盖该题已有的保存解析（默认跳过已有解析）")
+    sol_imp.add_argument("--dry-run", action="store_true", help="只做校验与预览统计，不写任何数据")
+    sol_imp.add_argument("--note", help="本次导入批次说明（最多 200 字）")
+    sol_batches = sol_sub.add_parser("batches", parents=[common], help="查看最近的批量解析导入批次")
+    sol_batches.add_argument("--limit", type=int, default=20, help="显示最近几批（1–50）")
+    sol_undo = sol_sub.add_parser("undo", parents=[common], help="整批撤销一次批量解析导入（保留后续人工编辑）")
+    sol_undo.add_argument("--batch-id", help="指定要撤销的批次 UUID（省略则撤销最近一次）")
     sub.add_parser("whereami", parents=[common], help="老师此刻在哪、我刚提的有没有被否决")
     backup = sub.add_parser("backup", parents=[common], help="备份题库（支持在线打包并指定导出目录）")
     backup.add_argument("--dest", metavar="DIR", help="备份包保存到的文件夹（如外部移动硬盘或网盘路径）")
@@ -2915,7 +3142,7 @@ COMMANDS = {
     "skill": cmd_skill,
     "features": cmd_features, "enrich": cmd_enrich,
     "claim": cmd_claim, "release": cmd_release, "propose": cmd_propose,
-    "workbench": cmd_workbench, "whereami": cmd_whereami,
+    "workbench": cmd_workbench, "whereami": cmd_whereami, "solutions": cmd_solutions,
     "backup": cmd_backup,
     "folders": cmd_folders,
 }

@@ -72,7 +72,9 @@ def library_assistant_workbench(request):
         return _error("助手工作台只能在本机查看", 403)
     try:
         limit = int(request.GET.get("limit", "50"))
-        return JsonResponse(assistant_workbench.workbench(limit=limit))
+        agent = str(request.GET.get("agent") or "").strip()
+        scope = str(request.GET.get("scope") or "all").strip() or "all"
+        return JsonResponse(assistant_workbench.workbench(limit=limit, agent=agent, scope=scope))
     except assistant_workbench.WorkbenchError as error:
         return _error(str(error), getattr(error, "status", 400))
     except (ValueError, TypeError):
@@ -121,6 +123,25 @@ def library_assistant_proposal_decide(request, proposal_id):
     payload = {**payload, "proposal_id": str(proposal_id)}
     try:
         return JsonResponse(assistant_workbench.decide(payload))
+    except assistant_workbench.WorkbenchError as error:
+        return _error(str(error), getattr(error, "status", 409))
+
+
+@csrf_exempt
+def library_assistant_proposals_batch_decide(request):
+    """批量处理待核对提案（仅本机与题库页面可调用）。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return _error("批量处理提案只能在本机使用", 403)
+    rejected = _guard(request)
+    if rejected is not None:
+        return rejected
+    payload = _body(request, limit=500_000)
+    if payload is None:
+        return _error("批量处理提案的请求必须是 JSON 对象")
+    try:
+        return JsonResponse(assistant_workbench.decide_batch(payload))
     except assistant_workbench.WorkbenchError as error:
         return _error(str(error), getattr(error, "status", 409))
 

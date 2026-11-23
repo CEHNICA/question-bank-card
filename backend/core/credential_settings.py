@@ -208,5 +208,7 @@ def apply_worker_environment() -> dict[str, dict[str, object]] | None:
     for name in removals:
         os.environ.pop(name, None)
     os.environ.update(updates)
+    # 同步全部 7 项服务的非涉密配置标记，避免 Worker 执行答题/标签任务时沿用启动前旧状态。
+    apply_public_environment(public_all_status(values))
     reset_account_pools()
     return public_status(values)

@@ -326,3 +326,36 @@ class LibraryFoldersAndTagGroupsTests(LiveServerTestCase):
         )
         self.assertFalse(reply5["result"]["isError"])
         self.assertEqual(LibraryTagGroup.objects.filter(name="MCP分组").count(), 1)
+
+    def test_sync_and_remove_preserve_doc_override_sections(self):
+        book_id = str(self.book.pk)
+        q1_id = str(self.q1.pk)
+        synced = library_folders.mutate(
+            {
+                "action": "sync",
+                "revision": 0,
+                "doc_overrides": {
+                    book_id: {
+                        "added": [q1_id],
+                        "removed": [],
+                        "sections": {
+                            q1_id: {
+                                "chapterKey": "1",
+                                "chapterNo": 1,
+                                "sectionName": "1.1 集合的概念",
+                                "sectionMatchMode": "exact",
+                                "label": "1.1 集合的概念",
+                            }
+                        },
+                    }
+                },
+            }
+        )
+        self.assertEqual(synced["doc_overrides"][book_id]["added"], [q1_id])
+        self.assertEqual(synced["doc_overrides"][book_id]["sections"][q1_id]["sectionName"], "1.1 集合的概念")
+
+        removed = library_folders.mutate(
+            {"action": "remove_questions", "target_id": f"book:{book_id}", "question_ids": [q1_id]}
+        )
+        self.assertEqual(removed["doc_overrides"][book_id]["removed"], [q1_id])
+        self.assertNotIn("sections", removed["doc_overrides"][book_id])

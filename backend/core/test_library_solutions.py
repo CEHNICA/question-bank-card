@@ -645,6 +645,167 @@ class LibrarySolutionTests(TransactionTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["previous"])
 
+    def test_batch_dry_run_validates_and_warns_without_writing_database(self):
+        choice_pub = self.publication(stem="选出正确选项", answer="", qtype="single_choice")
+        free_pub = self.publication(stem="求证某不等式", answer="", qtype="free_response")
+        existing_pub = self.publication(stem="已有解析的题", answer="", qtype="fill_blank")
+        self.save(pub=existing_pub, answer="42", analysis="已有人工解析", sync_library=True)
+        existing_pub.refresh_from_db()
+
+        res = self.post(
+            "/api/library/solutions/batch",
+            {
+                "dry_run": True,
+                "agent": "测试助手",
+                "note": "干跑预览",
+                "items": [
+                    {"publication_id": str(choice_pub.pk), "analysis": "只填了解析没填答案"},
+                    {"publication_id": library.short_id_for(free_pub.pk), "answer": "略", "analysis": "完整证明"},
+                    {"publication_id": str(existing_pub.pk), "answer": "99", "analysis": "不应覆盖"},
+                ],
+            },
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        body = res.json()
+        self.assertTrue(body["ok"])
+        self.assertTrue(body["dry_run"])
+        self.assertEqual(body["would_create"], 2)
+        self.assertEqual(body["would_skip_existing"], 1)
+        self.assertEqual(body["analysis_only_count"], 1)
+        self.assertTrue(any("单选题" in msg and "未填答案" in msg for msg in body["warnings"]))
+        self.assertEqual(LibrarySolution.objects.count(), 1)
+        choice_pub.refresh_from_db()
+        self.assertNotIn("solution_id", choice_pub.extras or {})
+
+    def test_batch_save_writes_solutions_protects_existing_and_supports_undo(self):
+        first = self.publication(stem="题目一", answer="", qtype="fill_blank")
+        second = self.publication(stem="题目二", answer="", qtype="free_response")
+        kept = self.publication(stem="已有解析", answer="", qtype="single_choice")
+        manual = self.save(pub=kept, answer="A", analysis="老师原解析", sync_library=True)
+        kept.refresh_from_db()
+
+        q1_before = Question.all_objects.filter(pk=first.question_id).values().get()
+        res = self.post(
+            "/api/library/solutions/batch",
+            {
+                "agent": "答案导入",
+                "note": "第一批",
+                "items": [
+                    {"publication_id": str(first.pk), "answer": "$\\frac{1}{2}$", "analysis": "直接计算"},
+                    {"publication_id": library.short_id_for(second.pk), "answer": "证明略", "analysis": "作差法"},
+                    {"publication_id": str(kept.pk), "answer": "B", "analysis": "试图覆盖"},
+                ],
+            },
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        body = res.json()
+        self.assertEqual((body["created"], body["overwritten"], body["skipped_existing"]), (2, 0, 1))
+        batch_id = body["batch_id"]
+        self.assertTrue(batch_id)
+
+        first.refresh_from_db()
+        second.refresh_from_db()
+        kept.refresh_from_db()
+        self.assertEqual(Question.all_objects.filter(pk=first.question_id).values().get(), q1_before)
+        self.assertEqual(library_solutions.selected(first).answer, "$\\frac{1}{2}$")
+        self.assertEqual(library_solutions.selected(second).analysis, "作差法")
+        self.assertEqual(kept.extras["solution_id"], str(manual.pk))
+
+        # 若用 overwrite=True 覆盖已有解析，会保留 parent 历史链
+        overwrite_res = self.post(
+            "/api/library/solutions/batch",
+            {
+                "overwrite": True,
+                "agent": "答案导入",
+                "items": [{"publication_id": str(kept.pk), "answer": "C", "analysis": "更新版"}],
+            },
+        )
+        self.assertEqual(overwrite_res.status_code, 200)
+        kept.refresh_from_db()
+        updated_sol = library_solutions.selected(kept)
+        self.assertEqual(updated_sol.parent_id, manual.pk)
+
+        # 如果老师在第一批后又手工编辑了 second，整批撤销第一批时 second 应被保护跳过，first 应恢复
+        self.save(
+            pub=second,
+            base_revision=second.extras["solution_id"],
+            answer="老师后改",
+            analysis="人工微调",
+            sync_library=True,
+        )
+        batches = self.client.get("/api/library/solutions/batches").json()
+        self.assertEqual(len(batches["batches"]), 2)
+        undo_res = self.post("/api/library/solutions/undo", {"batch_id": batch_id})
+        self.assertEqual(undo_res.status_code, 200, undo_res.content)
+        undo_body = undo_res.json()
+        self.assertEqual((undo_body["restored"], undo_body["skipped_modified"]), (1, 1))
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertNotIn("solution_id", first.extras or {})
+        self.assertEqual(library_solutions.selected(second).answer, "老师后改")
+
+    def test_batch_save_rejects_duplicates_and_unpaired_dollars_atomically(self):
+        first = self.publication(stem="原子校验一", answer="")
+        second = self.publication(stem="原子校验二", answer="")
+        for bad_items in (
+            [
+                {"publication_id": str(first.pk), "answer": "A", "analysis": "ok"},
+                {"publication_id": str(first.pk), "answer": "B", "analysis": "dup"},
+            ],
+            [
+                {"publication_id": str(first.pk), "answer": "A", "analysis": "ok"},
+                {"publication_id": str(second.pk), "answer": "$x+1", "analysis": "漏了美元符号"},
+            ],
+        ):
+            res = self.post("/api/library/solutions/batch", {"items": bad_items})
+            self.assertEqual(res.status_code, 400)
+            self.assertIn("errors", res.json())
+        self.assertEqual(LibrarySolution.objects.count(), 0)
+
+    def test_has_answer_facets_inventory_and_prefetch_query_count(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        from . import library_browse
+
+        # 去掉 setUp 默认造的那道带原卷答案的题，单独用纯洁数据集测口径
+        PublishedQuestion.objects.all().delete()
+        with_origin = self.publication(stem="有原卷答案", answer="A")
+        with_sol = self.publication(stem="仅解析版本有答案", answer="")
+        missing = self.publication(stem="真缺答案", answer="")
+        self.save(pub=with_sol, answer="C", analysis="书本解析", sync_library=True)
+        with_sol.refresh_from_db()
+
+        self.assertTrue(library.publication_json(with_sol)["has_answer"])
+        self.assertEqual(library_browse.answer_inventory(PublishedQuestion.Status.PUBLISHED), (1, 0))
+        self.assertEqual(library_browse.dimension_presence()["answer_missing"], 1)
+        yes_ids = {str(p.pk) for p in library_browse.library_rows({"answer": "yes"})}
+        no_ids = {str(p.pk) for p in library_browse.library_rows({"answer": "no"})}
+        self.assertEqual(yes_ids, {str(with_origin.pk), str(with_sol.pk)})
+        self.assertEqual(no_ids, {str(missing.pk)})
+        self.assertEqual(library_browse.facet_counts({})["answers"], {"yes": 2, "no": 1})
+
+        # 验证 publications_json 对 LibrarySolution 做批量预取：查询次数不随题目数量翻倍
+        batch_10 = []
+        for idx in range(10):
+            pub = self.publication(stem=f"预取测试 {idx}", answer="")
+            self.save(pub=pub, answer="1", analysis="解", sync_library=True)
+            pub.refresh_from_db()
+            batch_10.append(pub)
+        batch_20 = list(batch_10)
+        for idx in range(10, 20):
+            pub = self.publication(stem=f"预取测试 {idx}", answer="")
+            self.save(pub=pub, answer="1", analysis="解", sync_library=True)
+            pub.refresh_from_db()
+            batch_20.append(pub)
+
+        with CaptureQueriesContext(connection) as q10:
+            rows10 = library.publications_json(batch_10)
+        with CaptureQueriesContext(connection) as q20:
+            rows20 = library.publications_json(batch_20)
+        self.assertTrue(all(row["has_answer"] and row["solution"] for row in rows10))
+        self.assertEqual(len(q10), len(q20), "批量序列化带解析版本的题目时查询次数应恒定，不能 N+1")
+
 
 def create_export_fixture(folder):
     """Explicit synthetic-only fixture for UI/PDF inspection on a private QA DB.

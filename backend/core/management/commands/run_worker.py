@@ -196,9 +196,12 @@ def library_job_lane(stop: threading.Event, interval: float = 1.5) -> None:
         try:
             close_old_connections()
             library_job_control.touch_worker_heartbeat()
+            if settings_pending():
+                apply_saved_settings()
             library_jobs.enqueue_untagged_background()
             if library_jobs.pending():
-                apply_saved_settings()
+                if settings_pending():
+                    apply_saved_settings()
                 worked = library_jobs.process_parallel(stop=stop)
         except Exception:  # the lane must never take the worker down
             logger.exception("library job lane error")

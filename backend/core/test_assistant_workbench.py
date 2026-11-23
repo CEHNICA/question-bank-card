@@ -294,3 +294,107 @@ class WorkbenchTests(TempDataMixin, TransactionTestCase):
         workbench.set_presence({})
         self.assertFalse(workbench.teacher_now()["here"])
         self.assertEqual(TeacherActivity.objects.count(), 0)
+
+    # ------------------------------------------------------------ 真实总数与纯答案/解析直写
+
+    def _second_publication(self, number=2, stem="第二题", answer="", qtype="single_choice"):
+        q = self.card(self.paper, number=number, question_type=qtype, stem=stem, answer=answer)
+        self.approve(q)
+        return q, library.publish(q)[0]
+
+    def test_workbench_reports_true_total_and_by_agent_counts_beyond_limit(self):
+        _q2, pub2 = self._second_publication(2, stem="题二", answer="")
+        _q3, pub3 = self._second_publication(3, stem="题三", answer="")
+        workbench.propose(
+            {"publication_id": str(self.publication.pk), "agent": "海鸥", "fields": {"analysis": "解析一"}}
+        )
+        workbench.propose(
+            {"publication_id": str(pub2.pk), "agent": "海鸥", "fields": {"answer": "A", "analysis": "解析二"}}
+        )
+        workbench.propose({"publication_id": str(pub3.pk), "agent": "豆包", "fields": {"stem": "改过的题干"}})
+
+        board = workbench.workbench(limit=1)
+        self.assertEqual(board["pending"]["text"], 3)
+        self.assertEqual(board["pending"]["shown"], 1)
+        self.assertEqual(board["pending"]["solution_only"], 2)
+        self.assertEqual(board["pending"]["face"], 1)
+        self.assertEqual(len(board["proposals"]), 1)
+        self.assertEqual(
+            board["by_agent"],
+            [
+                {"agent": "海鸥", "total": 2, "solution_only": 2, "face": 0},
+                {"agent": "豆包", "total": 1, "solution_only": 0, "face": 1},
+            ],
+        )
+        filtered = workbench.workbench(limit=10, agent="海鸥", scope="solution_only")
+        self.assertEqual(len(filtered["proposals"]), 2)
+        self.assertTrue(all(item["solution_only"] for item in filtered["proposals"]))
+
+    def test_accepting_solution_only_proposal_writes_solution_without_touching_card(self):
+        from . import library_solutions
+        from .models import LibrarySolution
+
+        q_before = Question.all_objects.filter(pk=self.question.pk).values().get()
+        self.propose(agent="海鸥", answer="2", analysis="因为 $1+1=2$")
+        proposal = AssistantProposal.objects.get()
+        self.assertTrue(workbench.proposal_json(proposal)["solution_only"])
+
+        res = workbench.decide({"proposal_id": str(proposal.pk), "action": "accept", "by": "老师"})
+        self.assertTrue(res["applied"])
+        self.assertEqual(res["applied_target"], "solution")
+        self.question.refresh_from_db()
+        self.assertTrue(self.question.approved, "纯答案/解析提案采纳后源题卡审核勾必须保留")
+        self.assertEqual(Question.all_objects.filter(pk=self.question.pk).values().get(), q_before)
+        self.publication.refresh_from_db()
+        self.assertEqual(library_solutions.selected(self.publication).answer, "2")
+        self.assertEqual(library_solutions.selected(self.publication).analysis, "因为 $1+1=2$")
+
+        # 若已有保存解析，助手再提议仅改 analysis 时须保留原来的 answer
+        self.propose(agent="海鸥", analysis="更详细的解析")
+        proposal2 = AssistantProposal.objects.filter(status=AssistantProposal.Status.PENDING).get()
+        workbench.decide({"proposal_id": str(proposal2.pk), "action": "accept", "by": "老师"})
+        self.publication.refresh_from_db()
+        latest_sol = LibrarySolution.objects.get(pk=self.publication.extras["solution_id"])
+        self.assertEqual(latest_sol.answer, "2")
+        self.assertEqual(latest_sol.analysis, "更详细的解析")
+
+    def test_batch_decide_accepts_solution_only_and_rejects_face_proposals(self):
+        from . import library_solutions
+
+        q2, pub2 = self._second_publication(2, stem="题二", answer="")
+        q3, pub3 = self._second_publication(3, stem="题三", answer="")
+        workbench.propose({"publication_id": str(self.publication.pk), "agent": "海鸥", "fields": {"answer": "2"}})
+        workbench.propose(
+            {"publication_id": str(pub2.pk), "agent": "海鸥", "fields": {"answer": "C", "analysis": "解"}}
+        )
+        face_res = workbench.propose({"publication_id": str(pub3.pk), "agent": "海鸥", "fields": {"stem": "改题干"}})
+        face_id = face_res["proposal"]["id"]
+
+        # 安全红线：不允许批量采纳含题面改动的提案
+        with self.assertRaises(workbench.WorkbenchError):
+            workbench.decide_batch({"action": "accept", "scope": "all"})
+        with self.assertRaises(workbench.WorkbenchError):
+            workbench.decide_batch({"action": "accept", "proposal_ids": [face_id]})
+
+        # 只批量采纳纯答案/解析提案，并生成可撤销批次
+        accept_res = workbench.decide_batch({"action": "accept", "scope": "solution_only", "agent": "海鸥"})
+        self.assertEqual(accept_res["applied"], 2)
+        self.assertTrue(accept_res["batch_id"])
+        self.assertEqual(accept_res["remaining"], 1)
+        self.question.refresh_from_db()
+        q2.refresh_from_db()
+        self.assertTrue(self.question.approved)
+        self.assertTrue(q2.approved)
+        pub2.refresh_from_db()
+        self.assertEqual(library_solutions.selected(pub2).answer, "C")
+
+        # 整批撤销刚采纳的答案/解析
+        undo_res = library_solutions.undo_batch({"batch_id": accept_res["batch_id"]})
+        self.assertEqual(undo_res["restored"], 2)
+        pub2.refresh_from_db()
+        self.assertIsNone(library_solutions.selected(pub2))
+
+        # 剩余那条题面提案可用批量拒绝按助手清空
+        reject_res = workbench.decide_batch({"action": "reject", "agent": "海鸥", "reason": "重写"})
+        self.assertEqual(reject_res["processed"], 1)
+        self.assertEqual(reject_res["remaining"], 0)

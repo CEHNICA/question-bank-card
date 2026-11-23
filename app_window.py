@@ -1450,6 +1450,8 @@ def _main(arguments: list[str] | None = None) -> int:
             web_env.update(model_env)
             worker_env = launcher._worker_credential_environment(base_env, credential_pools)
             worker_env.pop("QB_DESKTOP_EXPORT", None)
+            # Worker 执行题库标签与答案任务时同样需要统一凭据的可用状态标记。
+            worker_env.update(launcher._credential_status_environment(credential_pools))
             worker_env.update(model_env)
             del credential_pools, preferences, model_env
             ui.say("正在启动后台服务…")

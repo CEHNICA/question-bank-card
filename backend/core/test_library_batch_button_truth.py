@@ -172,7 +172,7 @@ class BatchButtonTruthTests(TempDataMixin, TransactionTestCase):
         # 题库页要分清「还没填密钥」「填了但没测过」「测过了」，
         # 只给一个 api_ready，前端只能写一句笼统的话。
         payload = self.client.get("/api/library", HTTP_X_QB_REQUEST="1").json()
-        for key in ("api_ready", "key_configured", "configured", "status"):
+        for key in ("api_ready", "key_configured", "configured", "status", "unverified_reason"):
             self.assertIn(key, payload["ai"])
         self.assertIn(payload["ai"]["status"], ("assistant", "verified", "unverified", "missing"))
 

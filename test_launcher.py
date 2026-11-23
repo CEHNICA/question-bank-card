@@ -202,6 +202,8 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(json.loads(worker["MODELSCOPE_API_KEYS_JSON"]), ["s-key"])
         self.assertNotIn("MODELSCOPE_API_KEYS_JSON", web)
         self.assertEqual(web["QB_MODELSCOPE_CONFIGURED"], "1")
+        self.assertEqual(worker["QB_MODELSCOPE_CONFIGURED"], "1")
+        self.assertEqual(worker["QB_MINIMAX_CONFIGURED"], "0")
         self.assertIn("主读 魔搭 Qwen3.5-35B-A3B；复核 魔搭 Qwen3.5-35B-A3B", environments["_stdout"])
         self.assertEqual(worker["QB_PARALLEL"], "2")
 

@@ -57,8 +57,9 @@
 | `enrich submit 任务UUID --fingerprint 指纹 --result-file 结果.json` | 一次提交一种结果：旧名称知识点 `tags` 候选，或 `answer` 与可选 `analysis` 初稿；不成为正式标签，不改原卷或人工核对 |
 | `claim [--limit 1–50] [--kinds tags answer] [--ids 入库UUID…]` | 领一批待处理的活。每道活带一个到期时间：助手中途没了（断网、崩了、关掉了），这道活自动回到池子里，别的助手能接着领；别人还占着、租约没到的活不会被抢走 |
 | `release --job-id 任务UUID [--job-id …]` | 把没干完的活交回池子，别的助手能接着领 |
-| `propose 入库UUID [--stem 文字 \| --stem-file 文件] [--option A=内容]… [--type T] [--answer 文字] [--analysis 文字] [--origin 题源]` | 给**已经入库**的题交一份改动提案。题面一个字不动，等使用者在题库页点「采纳」。已入库的题不要直接用 `fix` |
-| `workbench` | 读助手工作台：助手交上来了几条待核对、谁在干活、老师此刻在哪 |
+| `propose 入库UUID [--stem 文字 \| --stem-file 文件] [--option A=内容]… [--type T] [--answer 文字] [--analysis 文字] [--origin 题源]` | 给**已经入库**的题交一份**单题勘误**提案（严禁用此命令批量灌整本答案书）。题面一个字不动，等使用者在题库页点「采纳」；纯改 `answer`/`analysis` 的提案采纳时直接写入解析层不打回黄卡 |
+| `solutions <import\|batches\|undo>` | **批量导入标准答案书/官方解析**到版本化解析层（不动源题卡、不清通过勾、默认不覆盖已有解析），支持 `--dry-run` 预览和整批 `undo` 撤销 |
+| `workbench [--limit N] [--from-agent 助手名] [--scope all\|solution_only\|face] [--clear]` | 读助手工作台真实总数、按助手统计、谁在干活、老师此刻在哪；加 `--clear` 可批量拒绝并清空指定助手/范围的待核对提案 |
 | `whereami` | 问一句：老师此刻在看哪道题、有没有没保存的改动；你刚提的改动有没有被否决 |
 | `folders <list\|create\|rename\|move\|delete\|add\|remove\|sort\|set-section\|paper\|tag-group\|undo>` | 直接查看和整理「我的文件夹」、试卷/教材类型、教材章节目录（`section`）、排序方式及标签个人分组，支持撤销并与前端双向同步 |
 | `mcp` | 作为 stdio MCP 服务器运行 |
@@ -163,14 +164,20 @@ tiyouju enrich submit <答案任务UUID> --fingerprint <该任务指纹> --resul
 tiyouju claim --limit 20 --kinds tags answer --agent 豆包 --json
 tiyouju release --job-id <任务UUID> --agent 豆包 --json
 tiyouju propose <入库UUID> --stem "新的题干" --agent 豆包 --json
+tiyouju solutions import --file answers.json --dry-run --agent 豆包 --json
+tiyouju solutions import --file answers.json --note "必修第一册" --agent 豆包 --json
+tiyouju solutions batches --json
+tiyouju solutions undo --batch-id <批次UUID> --json
 tiyouju workbench --json
+tiyouju workbench --clear --from-agent 海鸥 --reason "改走批量解析导入" --json
 tiyouju whereami --json
 ```
 
 - `claim` 领一批活，每道活带一个到期时间（30 分钟）。助手中途没了（断网、崩了、关掉了），这道活自动回到池子里，别的助手能接着领；别人还占着、租约没到的活不会被抢走。干不完的用 `release` 主动交回。
-- `propose` 给**已经入库**的题交一份题面改动的提案。**题面一个字不动**，等用户在题库页「助手工作台」点「采纳」才真的改。采纳后题卡改成助手提议的样子，卡上留一条提醒，并回到「待核对」；用户对照原卷点「通过」，题库才更新。不采纳也要记下来：同一个助手再提一模一样的改法会被直接拒掉，并带回老师的理由。
+- `propose` 给**已经入库**的题交一份**单题**勘误提案。**题面一个字不动**，等用户在题库页「助手工作台」点「采纳」才真的改。采纳纯答案/解析提案时直接写入版本化解析层，不动源题卡和审核勾；采纳题面提案后题卡改成助手提议的样子，卡上留一条提醒，并回到「待核对」，用户对照原卷点「通过」后题库才更新。不采纳也要记下来：同一个助手再提一模一样的改法会被直接拒掉，并带回老师的理由。
+- `solutions import` 用于**批量写入整本标准答案书/官方解析**（每次最多 500 条，支持 UUID 或 `Q-xxxxxxxx` 短码）。严禁用 `propose` 循环提交几百条答案提案。务必先加 `--dry-run` 预检并抽样请老师确认：单选/多选/填空/判断题要把最终结果写入 `answer` 字段、过程写入 `analysis` 字段，切勿全塞进 `analysis` 导致“仅解析无答案”。默认 `--overwrite` 关闭以保护已有人工解析；入错可随时用 `solutions undo` 整批撤销（自动跳过老师后续手工改过的题）。
 - 题卡后来改过、还没重新入库，或题库里的版本已经变了，这条提案就作废，要按现在的样子重提。
-- `workbench` 读助手工作台：待核对几条（题面改动、标签、答案各多少）、谁在干活、采纳多少次、不采纳多少次、用户此刻在哪。
+- `workbench` 读助手工作台：返回全库真实待核对总数（不被截断）、按助手/类型汇总、谁在干活、采纳多少次、不采纳多少次、用户此刻在哪；加 `--clear` 可批量拒绝清空待核对提案（CLI 仅允许拒绝清理，不代老师批量采纳）。
 - `whereami` 问一句：用户此刻在看哪道题、有没有没保存的改动；你刚提的改动有没有被否决。**用户正在改的题别去领、也别去提改法。**
 
 不给助手开这些权限：删除题卡、撤回入库、改标签目录、无人值守自动通过并入库。助手交上来的东西一律先落到「待核对」，由人点头。
@@ -235,8 +242,9 @@ tiyouju folders undo --json
 - `list_enrichment_tasks(ids, limit≤50)`、`prepare_enrichment(publication_id, kinds, agent)`：准备后当前助手自己看图、选标签或解题
 - `submit_enrichment(job_id, fingerprint, agent, tags | answer, analysis)`：只交一种任务的知识点候选或答案初稿；候选须人工采纳，初稿须核对并保存。
 - `claim_work(limit, kinds, agent, ids)`、`release_work(job_ids, agent)`：领活与交回；每道活带到期时间，别人租约没到的活抢不走
-- `propose_question_change(publication_id, agent, stem, options, type, answer, analysis, origin)`：给**已经入库**的题交一份题面改动提案；题面不动，等人在题库页点采纳
-- `read_workbench()`：读助手工作台（待核对几条、谁在干活、采纳/不采纳各多少次、人此刻在哪）
+- `propose_question_change(publication_id, agent, stem, options, type, answer, analysis, origin)`：给**已经入库**的题交一份**单题**勘误提案；题面不动，等人在题库页点采纳（严禁用此工具批量灌整本答案书）
+- `import_solutions(items, overwrite, dry_run, note, agent)` / `list_solution_batches(limit)` / `undo_solutions(batch_id)`：批量将标准答案书/官方解析写入解析层，不动源题卡、不清通过勾、默认不覆盖已有解析，支持先 `dry_run=true` 干跑预览及整批撤销
+- `read_workbench(limit, agent, scope)`：读助手工作台（真实总数、按助手汇总、谁在干活、人此刻在哪）
 - `where_is_the_teacher()`：问人此刻在看哪道题、有没有没保存的改动，以及我提的改动有没有被否决
 - `list_folders()`：查看全部文件夹树（我的文件夹、试卷夹、教材章节树、智能夹、排序、标签个人分组）
 - `manage_folder(action, ...)`：直接新建/重命名/移动/删除我的文件夹或智能夹、批量归档/移出题目、设置排序、撤销

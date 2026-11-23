@@ -52,6 +52,11 @@ FEATURES = {
         "label": "AI 参考答案",
         "help": "默认关闭。开启后由当前豆包或 AI 助手为没有原卷答案的题生成参考并写回，无需额外豆包 API。可选独立模型；结果标着“AI 参考 · 未核对”，与原卷答案分开。",
     },
+    "ai_auto_route": {
+        "default": False,
+        "label": "跨服务自动路由（多免费 API 池）",
+        "help": "开启后，已填写密钥的服务商自动组成统一路由池：某家触发限流、拥堵或额度不足时自动切换下一家可用服务继续生成或读题；无配图纯文题优先使用免费高配额服务。",
+    },
 }
 # Keep removed switches readable as false so an old features.json cannot
 # silently re-enable retired behavior after updating the app.

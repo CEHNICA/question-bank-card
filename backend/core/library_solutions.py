@@ -8,6 +8,8 @@ import json
 import math
 import os
 import re
+import tempfile
+import threading
 import uuid
 import warnings
 from copy import deepcopy
@@ -17,21 +19,27 @@ from django.conf import settings
 from django.db import OperationalError, transaction
 from django.http import HttpResponse, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from PIL import Image, ImageOps
 
-from . import imaging, library
+from . import imaging, library, library_jobs, qtypes
 from .models import LibrarySolution, PublishedQuestion
 
 MAX_UPLOAD_BYTES = 16 * 1024 * 1024
 MAX_PIXELS = 24_000_000
 MAX_FIGURES = 24
+MAX_BATCH_ITEMS = 500
+MAX_BATCH_HISTORY = 50
+OBJECTIVE_ANSWER_TYPES = frozenset({"single_choice", "multiple_choice", "fill_blank", "true_false"})
+_BATCH_LOCK = threading.RLock()
 
 
 class SolutionError(ValueError):
-    def __init__(self, message, status=400):
+    def __init__(self, message, status=400, *, errors=None):
         super().__init__(message)
         self.status = status
+        self.errors = list(errors) if errors is not None else None
 
 
 def identity(value, label="解析版本"):
@@ -488,3 +496,591 @@ def image_view(request, publication_id, asset_id):
         return response
     except SolutionError as error:
         return JsonResponse({"error": str(error)}, status=error.status)
+
+
+# ---------------------------------------------------------------- 批量解析导入与整批撤销
+
+
+def _batch_store_path() -> Path:
+    # 独立放在 DATA_ROOT 根目录，避免混入 library-solutions/ 资产目录触发传输或校验异常
+    return (Path(settings.DATA_ROOT) / "library-solution-batches.json").resolve()
+
+
+def _load_batches_unlocked() -> list[dict]:
+    path = _batch_store_path()
+    if not path.is_file():
+        return []
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return []
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, dict) and item.get("batch_id")]
+
+
+def _save_batches_unlocked(records: list[dict]) -> None:
+    path = _batch_store_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(records[-MAX_BATCH_HISTORY:], ensure_ascii=False, indent=2) + "\n"
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            prefix="library-solution-batches-",
+            suffix=".tmp",
+            dir=path.parent,
+            delete=False,
+        ) as stream:
+            temp_path = Path(stream.name)
+            stream.write(payload)
+        temp_path.replace(path)
+    except OSError as exc:
+        raise SolutionError("解析批次记录暂时无法写入磁盘", 500) from exc
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+
+
+def record_batch(agent: str, note: str, entries: list[dict]) -> str | None:
+    """持久化一次批量解析写入记录，供后续整批撤销。"""
+    if not entries:
+        return None
+    batch_id = str(uuid.uuid4())
+    clean_agent = " ".join(str(agent or "老师").split()).strip()[:120] or "老师"
+    clean_note = " ".join(str(note or "").split()).strip()[:200]
+    record = {
+        "batch_id": batch_id,
+        "agent": clean_agent,
+        "note": clean_note,
+        "count": len(entries),
+        "created_at": timezone.now().isoformat(),
+        "undone_at": None,
+        "entries": entries,
+    }
+    with _BATCH_LOCK:
+        records = _load_batches_unlocked()
+        records.append(record)
+        _save_batches_unlocked(records)
+    return batch_id
+
+
+def _batch_agent(raw) -> str:
+    if raw is None:
+        return "老师"
+    if not isinstance(raw, str):
+        raise SolutionError("助手或操作者名称必须是文字")
+    agent = " ".join(raw.split()).strip()
+    if not agent or len(agent) > 120:
+        raise SolutionError("助手或操作者名称需为 1–120 个字符")
+    return agent
+
+
+def _batch_note(raw) -> str:
+    if raw is None:
+        return ""
+    if not isinstance(raw, str):
+        raise SolutionError("批次说明必须是文字")
+    note = " ".join(raw.split()).strip()
+    if len(note) > 200:
+        raise SolutionError("批次说明最多 200 个字符")
+    return note
+
+
+def _type_label(question_type: str) -> str:
+    return qtypes.TYPE_LABELS.get(question_type, question_type or "未定")
+
+
+def _resolve_batch_targets(
+    items: list,
+) -> tuple[dict[str, PublishedQuestion], dict[int, tuple[str | None, str | None]]]:
+    """一次批量解析 UUID，其余短码/定位串回落到 resolve_publication_ref。"""
+    exact_uuids: list[uuid.UUID] = []
+    parsed_refs: dict[int, str] = {}
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+        raw_ref = item.get("publication_id")
+        if raw_ref is None:
+            raw_ref = item.get("id")
+        if not isinstance(raw_ref, str) or not raw_ref.strip():
+            continue
+        ref = raw_ref.strip()
+        parsed_refs[index] = ref
+        try:
+            exact_uuids.append(uuid.UUID(ref))
+        except ValueError:
+            continue
+
+    by_id: dict[str, PublishedQuestion] = {}
+    if exact_uuids:
+        for pub in PublishedQuestion.objects.filter(pk__in=set(exact_uuids)):
+            by_id[str(pub.pk)] = pub
+
+    resolved: dict[int, tuple[str | None, str | None]] = {}
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            resolved[index] = (None, "条目必须是 JSON 对象")
+            continue
+        target_ref = parsed_refs.get(index)
+        if not target_ref:
+            resolved[index] = (None, "缺少 publication_id（支持 UUID 或 Q-xxxxxxxx 短码）")
+            continue
+        try:
+            canonical = str(uuid.UUID(target_ref))
+        except ValueError:
+            canonical = None
+        if canonical is not None:
+            pub = by_id.get(canonical)
+            if pub is None:
+                resolved[index] = (None, f"找不到编号为 {canonical} 的入库题目")
+            else:
+                resolved[index] = (canonical, None)
+            continue
+        try:
+            pub = library.resolve_publication_ref(target_ref)
+        except ValueError as error:
+            resolved[index] = (None, str(error))
+            continue
+        pid = str(pub.pk)
+        by_id[pid] = pub
+        resolved[index] = (pid, None)
+    return by_id, resolved
+
+
+def batch_save(payload: dict) -> dict:
+    """批量将标准答案与解析写入正式题库解析层（LibrarySolution），支持干跑与整批撤销。"""
+    if not isinstance(payload, dict):
+        raise SolutionError("批量导入请求必须是 JSON 对象")
+    items = payload.get("items")
+    if not isinstance(items, list) or not items or len(items) > MAX_BATCH_ITEMS:
+        raise SolutionError(f"items 须为 1–{MAX_BATCH_ITEMS} 条的非空列表")
+    overwrite = payload.get("overwrite", False)
+    dry_run = payload.get("dry_run", False)
+    if type(overwrite) is not bool:
+        raise SolutionError("overwrite 只能是 true 或 false")
+    if type(dry_run) is not bool:
+        raise SolutionError("dry_run 只能是 true 或 false")
+    agent = _batch_agent(payload.get("agent"))
+    note = _batch_note(payload.get("note"))
+
+    by_id, resolved = _resolve_batch_targets(items)
+    seen_ids: set[str] = set()
+    validated: list[dict] = []
+    errors: list[dict] = []
+    warnings: list[str] = []
+    results: list[dict] = []
+    analysis_only_count = 0
+    would_create = would_overwrite = would_skip_existing = 0
+
+    for index, item in enumerate(items):
+        pid, resolve_err = resolved[index]
+        raw_ref = item.get("publication_id") or item.get("id") if isinstance(item, dict) else ""
+        if resolve_err is not None or pid is None:
+            msg = resolve_err or "无法识别的题目编号"
+            errors.append({"index": index, "publication_id": raw_ref, "error": msg})
+            results.append({"index": index, "publication_id": raw_ref, "status": "invalid", "error": msg})
+            continue
+        pub = by_id[pid]
+        if pid in seen_ids:
+            msg = f"同一批里重复出现了第 {pub.number} 题（{pid}）"
+            errors.append({"index": index, "publication_id": pid, "error": msg})
+            results.append(
+                {
+                    "index": index,
+                    "publication_id": pid,
+                    "number": pub.number,
+                    "source_filename": pub.source_filename,
+                    "status": "invalid",
+                    "error": msg,
+                }
+            )
+            continue
+        seen_ids.add(pid)
+        if pub.status != PublishedQuestion.Status.PUBLISHED:
+            msg = f"第 {pub.number} 题已撤回或被新版替代"
+            errors.append({"index": index, "publication_id": pid, "error": msg})
+            results.append(
+                {
+                    "index": index,
+                    "publication_id": pid,
+                    "number": pub.number,
+                    "source_filename": pub.source_filename,
+                    "status": "invalid",
+                    "error": msg,
+                }
+            )
+            continue
+
+        raw_answer = item.get("answer")
+        raw_analysis = item.get("analysis")
+        if raw_answer is not None and not isinstance(raw_answer, str):
+            msg = f"第 {pub.number} 题的 answer 必须是文字"
+            errors.append({"index": index, "publication_id": pid, "error": msg})
+            results.append(
+                {
+                    "index": index,
+                    "publication_id": pid,
+                    "number": pub.number,
+                    "source_filename": pub.source_filename,
+                    "status": "invalid",
+                    "error": msg,
+                }
+            )
+            continue
+        if raw_analysis is not None and not isinstance(raw_analysis, str):
+            msg = f"第 {pub.number} 题的 analysis 必须是文字"
+            errors.append({"index": index, "publication_id": pid, "error": msg})
+            results.append(
+                {
+                    "index": index,
+                    "publication_id": pid,
+                    "number": pub.number,
+                    "source_filename": pub.source_filename,
+                    "status": "invalid",
+                    "error": msg,
+                }
+            )
+            continue
+        try:
+            answer = _text(raw_answer or "", "答案", 8000)
+            analysis = _text(raw_analysis or "", "解析", 100000)
+        except SolutionError as error:
+            msg = f"第 {pub.number} 题：{error}"
+            errors.append({"index": index, "publication_id": pid, "error": msg})
+            results.append(
+                {
+                    "index": index,
+                    "publication_id": pid,
+                    "number": pub.number,
+                    "source_filename": pub.source_filename,
+                    "status": "invalid",
+                    "error": msg,
+                }
+            )
+            continue
+        if not answer and not analysis:
+            msg = f"第 {pub.number} 题的答案和解析不能同时为空"
+            errors.append({"index": index, "publication_id": pid, "error": msg})
+            results.append(
+                {
+                    "index": index,
+                    "publication_id": pid,
+                    "number": pub.number,
+                    "source_filename": pub.source_filename,
+                    "status": "invalid",
+                    "error": msg,
+                }
+            )
+            continue
+        if library_jobs.unpaired_dollar(answer) or library_jobs.unpaired_dollar(analysis):
+            msg = f"第 {pub.number} 题的公式存在未配对的 $"
+            errors.append({"index": index, "publication_id": pid, "error": msg})
+            results.append(
+                {
+                    "index": index,
+                    "publication_id": pid,
+                    "number": pub.number,
+                    "source_filename": pub.source_filename,
+                    "status": "invalid",
+                    "error": msg,
+                }
+            )
+            continue
+
+        if not answer and analysis:
+            analysis_only_count += 1
+            if pub.question_type in OBJECTIVE_ANSWER_TYPES:
+                warnings.append(f"第 {pub.number} 题（{_type_label(pub.question_type)}）仅填了解析未填答案")
+
+        has_existing = library.has_saved_solution(pub.extras)
+        if has_existing and not overwrite:
+            status = "would_skip_existing"
+            would_skip_existing += 1
+        elif has_existing:
+            status = "would_overwrite"
+            would_overwrite += 1
+        else:
+            status = "would_create"
+            would_create += 1
+        validated.append({"index": index, "publication_id": pid, "answer": answer, "analysis": analysis})
+        if dry_run:
+            results.append(
+                {
+                    "index": index,
+                    "publication_id": pid,
+                    "number": pub.number,
+                    "source_filename": pub.source_filename,
+                    "status": status,
+                }
+            )
+
+    if dry_run:
+        return {
+            "ok": not errors,
+            "dry_run": True,
+            "total": len(items),
+            "would_create": would_create,
+            "would_overwrite": would_overwrite,
+            "would_skip_existing": would_skip_existing,
+            "invalid": len(errors),
+            "analysis_only_count": analysis_only_count,
+            "warnings": warnings,
+            "errors": errors,
+            "results": results,
+        }
+
+    if errors:
+        raise SolutionError(f"有 {len(errors)} 条校验未通过，未写入任何题目：{errors[0]['error']}", 400, errors=errors)
+
+    created_count = overwritten_count = skipped_count = 0
+    batch_entries: list[dict] = []
+    commit_results: list[dict] = []
+    target_ids = [item["publication_id"] for item in validated]
+    with transaction.atomic():
+        locked = {str(pub.pk): pub for pub in PublishedQuestion.objects.select_for_update().filter(pk__in=target_ids)}
+        for item in validated:
+            locked_pub = locked.get(item["publication_id"])
+            if locked_pub is None or locked_pub.status != PublishedQuestion.Status.PUBLISHED:
+                raise SolutionError("写入期间有题目已撤回或被新版替代，整批未写入", 409)
+            extras = deepcopy(locked_pub.extras or {})
+            prev_sol_id = str(extras.get("solution_id") or "").strip() or None
+            prev_review_id = str(extras.get("solution_needs_review_id") or "").strip() or None
+            if prev_sol_id and not overwrite:
+                skipped_count += 1
+                commit_results.append(
+                    {
+                        "index": item["index"],
+                        "publication_id": item["publication_id"],
+                        "number": locked_pub.number,
+                        "source_filename": locked_pub.source_filename,
+                        "status": "skipped_existing",
+                    }
+                )
+                continue
+            parent_row = None
+            if prev_sol_id:
+                try:
+                    parent_row = LibrarySolution.objects.filter(
+                        pk=uuid.UUID(prev_sol_id), publication=locked_pub
+                    ).first()
+                except ValueError:
+                    parent_row = None
+            row = LibrarySolution.objects.create(
+                publication=locked_pub,
+                parent=parent_row,
+                fingerprint=library.generation_fingerprint(locked_pub.content, locked_pub.pk),
+                answer=item["answer"],
+                analysis=item["analysis"],
+                figures=[],
+            )
+            extras["solution_id"] = str(row.pk)
+            extras.pop("solution_needs_review_id", None)
+            library.save_extras(locked_pub, extras)
+            status = "overwritten" if prev_sol_id else "created"
+            if prev_sol_id:
+                overwritten_count += 1
+            else:
+                created_count += 1
+            batch_entries.append(
+                {
+                    "publication_id": str(locked_pub.pk),
+                    "new_solution_id": str(row.pk),
+                    "previous_solution_id": prev_sol_id,
+                    "previous_needs_review_id": prev_review_id,
+                }
+            )
+            commit_results.append(
+                {
+                    "index": item["index"],
+                    "publication_id": str(locked_pub.pk),
+                    "number": locked_pub.number,
+                    "source_filename": locked_pub.source_filename,
+                    "status": status,
+                    "solution_id": str(row.pk),
+                }
+            )
+
+    batch_id = record_batch(agent, note, batch_entries)
+    return {
+        "ok": True,
+        "dry_run": False,
+        "total": len(items),
+        "created": created_count,
+        "overwritten": overwritten_count,
+        "skipped_existing": skipped_count,
+        "analysis_only_count": analysis_only_count,
+        "warnings": warnings,
+        "errors": [],
+        "batch_id": batch_id,
+        "results": commit_results,
+    }
+
+
+def list_batches(limit: int = 20) -> dict:
+    """列出最近的批量解析导入批次摘要。"""
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_BATCH_HISTORY:
+        raise SolutionError(f"limit 应为 1–{MAX_BATCH_HISTORY}")
+    with _BATCH_LOCK:
+        records = _load_batches_unlocked()
+    ordered = list(reversed(records))
+    return {
+        "batches": [
+            {
+                "batch_id": item["batch_id"],
+                "agent": item.get("agent", ""),
+                "note": item.get("note", ""),
+                "count": int(item.get("count") or len(item.get("entries") or [])),
+                "created_at": item.get("created_at"),
+                "undone_at": item.get("undone_at"),
+            }
+            for item in ordered[:limit]
+        ],
+        "total": len(ordered),
+    }
+
+
+def undo_batch(payload: dict | None = None) -> dict:
+    """整批撤销指定（或最近一次未撤销的）批量解析导入；若题目后续已被人工另行修改则保护不覆盖。"""
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        raise SolutionError("撤销请求格式不正确")
+    raw_batch_id = payload.get("batch_id")
+    target_batch_id = identity(raw_batch_id, "解析批次") if raw_batch_id is not None else None
+
+    with _BATCH_LOCK:
+        records = _load_batches_unlocked()
+        target_index = None
+        if target_batch_id:
+            for idx, item in enumerate(records):
+                if item.get("batch_id") == target_batch_id:
+                    target_index = idx
+                    break
+            if target_index is None:
+                raise SolutionError("找不到指定的批量解析导入批次", 404)
+            if records[target_index].get("undone_at"):
+                raise SolutionError("这一批已经撤销过了", 409)
+        else:
+            for idx in range(len(records) - 1, -1, -1):
+                if not records[idx].get("undone_at"):
+                    target_index = idx
+                    break
+            if target_index is None:
+                raise SolutionError("没有可撤销的批量解析导入记录", 404)
+
+        record = records[target_index]
+        entries = list(record.get("entries") or [])
+        pub_ids = [item["publication_id"] for item in entries if isinstance(item, dict) and item.get("publication_id")]
+        restored = skipped_modified = 0
+        with transaction.atomic():
+            locked = {str(pub.pk): pub for pub in PublishedQuestion.objects.select_for_update().filter(pk__in=pub_ids)}
+            for entry in entries:
+                pid = entry.get("publication_id")
+                pub = locked.get(pid)
+                if pub is None or pub.status != PublishedQuestion.Status.PUBLISHED:
+                    skipped_modified += 1
+                    continue
+                extras = deepcopy(pub.extras or {})
+                current_sol_id = str(extras.get("solution_id") or "").strip() or None
+                if current_sol_id != entry.get("new_solution_id"):
+                    skipped_modified += 1
+                    continue
+                prev_sol_id = entry.get("previous_solution_id")
+                if prev_sol_id:
+                    extras["solution_id"] = prev_sol_id
+                else:
+                    extras.pop("solution_id", None)
+                prev_review_id = entry.get("previous_needs_review_id")
+                if prev_review_id:
+                    extras["solution_needs_review_id"] = prev_review_id
+                else:
+                    extras.pop("solution_needs_review_id", None)
+                library.save_extras(pub, extras)
+                restored += 1
+
+        record["undone_at"] = timezone.now().isoformat()
+        records[target_index] = record
+        _save_batches_unlocked(records)
+
+    return {
+        "ok": True,
+        "batch_id": record["batch_id"],
+        "restored": restored,
+        "skipped_modified": skipped_modified,
+        "message": (
+            f"已撤销批量解析写入：恢复 {restored} 题"
+            + (f"，另有 {skipped_modified} 题因后续已被修改或撤回而跳过" if skipped_modified else "")
+            + "。"
+        ),
+    }
+
+
+@csrf_exempt
+def batch_view(request):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return JsonResponse({"error": "批量解析操作只能在本机使用"}, status=403)
+    from .views import _body, _guard
+
+    rejected = _guard(request)
+    if rejected is not None:
+        return rejected
+    payload = _body(request, limit=8_000_000)
+    if payload is None:
+        return JsonResponse({"error": "批量解析请求必须是 JSON 对象，且不能超过 8 MB"}, status=400)
+    try:
+        return JsonResponse(batch_save(payload))
+    except SolutionError as error:
+        body = {"error": str(error)}
+        if error.errors is not None:
+            body["errors"] = error.errors
+        return JsonResponse(body, status=error.status)
+    except OSError:
+        return JsonResponse({"error": "解析批次记录没能保存，请检查本机数据目录"}, status=500)
+    except OperationalError:
+        return JsonResponse({"error": "解析正在被另一个操作保存，请稍后重试"}, status=409)
+
+
+@csrf_exempt
+def batches_view(request):
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return JsonResponse({"error": "解析批次记录只能在本机查看"}, status=403)
+    try:
+        raw_limit = request.GET.get("limit", "20")
+        limit = int(raw_limit)
+    except (ValueError, TypeError):
+        return JsonResponse({"error": "limit 必须是整数"}, status=400)
+    try:
+        return JsonResponse(list_batches(limit=limit))
+    except SolutionError as error:
+        return JsonResponse({"error": str(error)}, status=error.status)
+
+
+@csrf_exempt
+def undo_batch_view(request):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return JsonResponse({"error": "批量解析撤销只能在本机使用"}, status=403)
+    from .views import _body, _guard
+
+    rejected = _guard(request)
+    if rejected is not None:
+        return rejected
+    payload = _body(request)
+    if payload is None:
+        return JsonResponse({"error": "撤销请求必须是 JSON 对象"}, status=400)
+    try:
+        return JsonResponse(undo_batch(payload))
+    except SolutionError as error:
+        return JsonResponse({"error": str(error)}, status=error.status)
+    except OSError:
+        return JsonResponse({"error": "解析批次记录没能更新，请检查本机数据目录"}, status=500)
+    except OperationalError:
+        return JsonResponse({"error": "解析正在被另一个操作保存，请稍后重试"}, status=409)

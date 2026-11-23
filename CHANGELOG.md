@@ -3,6 +3,16 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.2.9
+
+**正式题库解析版本层批量导入与整批撤销、助手工作台升级、有答案统计口径统一及免费模型池扩展**
+
+- **解析版本层批量写入、干跑预览与整批撤销（`library_solutions.py`、`urls.py`、`tiyouju_cli.py`、`skills/tiyouju/`）**：新增 `/api/library/solutions/batch`、`batches`、`undo` 与 `tiyouju solutions <import|batches|undo>` CLI / `import_solutions`、`list_solution_batches`、`undo_solutions` MCP 工具，支持整本标准答案书/官方解析直写 `LibrarySolution`（不动源题卡、不清审核勾、默认不覆盖已有人工解析），内置重复与未配对 `$` 校验、客观/填空题漏填 `answer` 告警及按 `batch_id` 整批撤销（保护后续人工改动）。
+- **助手工作台真实总数、批量处理与纯答案/解析直写（`assistant_workbench.py`、`workbench_views.py`、`library.js`、`library.css`）**：修复工作台待核对总数被 `limit=50` 截断的问题，展示全库真实总数与按助手汇总；纯答案/解析提案单条或批量采纳直写 `LibrarySolution` 不再打回黄卡，支持一键/按助手批量拒绝清空工作台及 `tiyouju workbench --clear`。
+- **统一「有答案」统计与筛选口径并消除列表页 N+1 查询（`library.py`、`library_browse.py`、`eagle/index.html`）**：绑定有效 `LibrarySolution` 的题目统一纳入「有答案」计数与筛选；`publications_json` 批量预取整页解析版本，保持查询次数恒定。
+- **免费视觉与答题服务池扩展及体验优化（`provider_catalog.py`、`library_ai_settings.py`、`readers.py`、`api-settings.js`、`eagle/index.html`、`qb-render.js`）**：接入英伟达 NIM、Google Gemini、智谱 BigModel 免费多模态及 OpenRouter 免费池；补充校验失效原因展示与教辅解析段落换行保留渲染。
+
+
 ## 2.2.8
 
 **AI 助手自主探查与双轨切题、题库文件夹全量整理端口，以及圆弧公式渲染与导出兼容性升级**

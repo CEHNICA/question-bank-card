@@ -74,6 +74,13 @@ def normalize_ids(values) -> list[str]:
     return result
 
 
+def _missing_formal_answer_q() -> models.Q:
+    """匹配既没有原卷答案、也没有绑定已保存解析版本的题目。"""
+    no_origin = models.Q(content__answer="") | models.Q(content__answer__isnull=True)
+    no_solution = models.Q(extras__solution_id="") | models.Q(extras__solution_id__isnull=True)
+    return no_origin & no_solution
+
+
 def library_rows(params, *, omit: str = ""):
     """Each facet omits its own condition, retaining all other active filters."""
     rows = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
@@ -91,7 +98,7 @@ def library_rows(params, *, omit: str = ""):
         rows = rows.filter(review_source=review)
     answer = params.get("answer", "").strip()
     if answer in {"yes", "no"} and omit != "answer":
-        missing = models.Q(content__answer="") | models.Q(content__answer__isnull=True)
+        missing = _missing_formal_answer_q()
         rows = rows.exclude(missing) if answer == "yes" else rows.filter(missing)
     body_mode = params.get("body_mode", "").strip()
     if body_mode == "source_image" and omit != "body_mode":
@@ -247,12 +254,14 @@ def facet_counts(params) -> dict:
         reviews[key] += row["count"]
 
     answer_rows = rows_for("answer")
-    missing_answer = models.Q(content__answer="") | models.Q(content__answer__isnull=True)
+    missing_answer = _missing_formal_answer_q()
     total_answers = answer_rows.count()
     yes_answers = sum(
         1
-        for value in answer_rows.exclude(missing_answer).values_list("content__answer", flat=True)
-        if str(value or "").strip()
+        for answer_val, sol_id in answer_rows.exclude(missing_answer).values_list(
+            "content__answer", "extras__solution_id"
+        )
+        if str(answer_val or "").strip() or str(sol_id or "").strip()
     )
     answers["yes"] = yes_answers
     answers["no"] = total_answers - yes_answers
@@ -451,6 +460,7 @@ def answer_inventory(status) -> tuple[int, int]:
         "WHEN 'array' THEN json_array_length(content, '$.answer') "
         "WHEN 'object' THEN (SELECT count(*) FROM json_each(content, '$.answer')) "
         "ELSE NULL END, "
+        "json_extract(extras, '$.solution_id'), json_type(extras, '$.solution_id'), "
         "json_extract(extras, '$.ai_answer'), json_type(extras, '$.ai_answer'), "
         "CASE json_type(extras, '$.ai_answer') "
         "WHEN 'array' THEN json_array_length(extras, '$.ai_answer') "
@@ -466,8 +476,8 @@ def answer_inventory(status) -> tuple[int, int]:
         rows = None
     if rows is not None:
         missing = draft = 0
-        for answer, answer_kind, answer_length, ai_answer, ai_kind, ai_length in rows:
-            if _answer_present(answer_kind, answer, answer_length):
+        for answer, answer_kind, answer_length, sol_id, sol_kind, ai_answer, ai_kind, ai_length in rows:
+            if _answer_present(answer_kind, answer, answer_length) or _answer_present(sol_kind, sol_id, None):
                 continue
             if _json_truthy(ai_kind, ai_answer, ai_length):
                 draft += 1
@@ -476,7 +486,7 @@ def answer_inventory(status) -> tuple[int, int]:
         return missing, draft
     missing = draft = 0
     for content, extras in PublishedQuestion.objects.filter(status=status).values_list("content", "extras"):
-        if str((content or {}).get("answer") or "").strip():
+        if library.has_formal_answer(content, extras):
             continue
         if (extras or {}).get("ai_answer"):
             draft += 1
@@ -573,7 +583,7 @@ def dimension_presence() -> dict:
     有没有打上正式标签的题。改筛选动不了它。
     """
     papers = library_rows({})
-    missing = models.Q(content__answer="") | models.Q(content__answer__isnull=True)
+    missing = _missing_formal_answer_q()
     from .models import LibraryTagAssignment
 
     counts = papers.aggregate(
@@ -707,6 +717,7 @@ def library_list(request):
                     "configured",
                     "status",
                     "verified_at",
+                    "unverified_reason",
                 )
             },
             "sort": sort,

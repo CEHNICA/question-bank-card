@@ -129,3 +129,59 @@ rejectBtn.listeners.click[0]();
 const rejectCall = requests.find((r) => String(r.url).includes("/decide"));
 assert.ok(rejectCall, "点「不采纳这道改动」也要发请求");
 assert.equal(JSON.parse(rejectCall.options.body).action, "reject", "点不采纳就发 reject");
+
+// ── 五、真实总数不被截断、按助手汇总、纯答案解析徽标与批量处理 ──
+context.state.assistantBoard = {
+  pending: { text: 935, shown: 2, solution_only: 930, face: 5, tags: 0, answer: 0, total: 935 },
+  by_agent: [
+    { agent: "海鸥", total: 930, solution_only: 930, face: 0 },
+    { agent: "豆包", total: 5, solution_only: 0, face: 5 },
+  ],
+  proposals: [
+    {
+      id: "p-sol", publication_id: "pub-1", number: 1, source_filename: "必修第一册.pdf", agent: "海鸥",
+      changed: ["analysis"], solution_only: true,
+      before: { analysis: "" }, after: { analysis: "只有解析没有填答案" },
+    },
+    {
+      id: "p-face", publication_id: "pub-2", number: 2, source_filename: "必修第一册.pdf", agent: "豆包",
+      changed: ["stem"], solution_only: false,
+      before: { stem: "旧题干" }, after: { stem: "新题干" },
+    },
+  ],
+  running: [],
+  counts: { claimed: 0, done: 0, accepted: 0, rejected: 0 },
+  teacher: { here: false },
+};
+context.renderAssistantWorkbench();
+assert.equal(elements.assistantWorkbenchCount.textContent, "935 条待核对（当前展示前 2 条）", "角标必须写出真实总数和展示条数");
+const batchBodyText = texts(elements.assistantWorkbenchBody).join(" ");
+assert.ok(batchBodyText.includes("仅改答案解析 · 采纳直入正式题库"), "纯答案/解析提案要标出直入正式题库");
+assert.ok(batchBodyText.includes("未填答案（仅解析）"), "漏填答案仅改解析的提案要标出提醒");
+assert.ok(batchBodyText.includes("海鸥 930 条"), "汇总条要按助手列出真实条数");
+
+const batchButtons = walk(elements.assistantWorkbenchBody).filter((item) => item.tag === "button");
+const batchLabels = batchButtons.map((b) => b.textContent);
+assert.ok(!batchLabels.includes("采纳") && !batchLabels.includes("不采纳"), "任何按钮都不能只写裸「采纳/不采纳」");
+const acceptAllSolBtn = batchButtons.find((b) => b.textContent === "批量采纳全部 930 条答案解析");
+const rejectAllBtn = batchButtons.find((b) => b.textContent === "全部不采纳并清空（935 条）");
+const clearSeagullBtn = batchButtons.find((b) => b.textContent === "清空「海鸥」的 930 条提案");
+assert.ok(acceptAllSolBtn && rejectAllBtn && clearSeagullBtn, "批量采纳答案解析、全部清空与按助手清空按钮都要存在");
+
+requests.length = 0;
+acceptAllSolBtn.listeners.click[0]();
+let batchReq = requests.find((r) => String(r.url).includes("/proposals/batch-decide"));
+assert.ok(batchReq, "批量采纳要调用 batch-decide");
+assert.deepEqual(JSON.parse(batchReq.options.body), { by: "老师", action: "accept", scope: "solution_only" });
+
+requests.length = 0;
+rejectAllBtn.listeners.click[0]();
+batchReq = requests.find((r) => String(r.url).includes("/proposals/batch-decide"));
+assert.equal(JSON.parse(batchReq.options.body).action, "reject");
+assert.equal(JSON.parse(batchReq.options.body).scope, "all");
+
+requests.length = 0;
+clearSeagullBtn.listeners.click[0]();
+batchReq = requests.find((r) => String(r.url).includes("/proposals/batch-decide"));
+assert.equal(JSON.parse(batchReq.options.body).action, "reject");
+assert.equal(JSON.parse(batchReq.options.body).agent, "海鸥");

@@ -7,6 +7,7 @@ provider-specific DPAPI files; status reads only their non-secret metadata.
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import logging
@@ -14,6 +15,7 @@ import os
 import re
 import tempfile
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -66,6 +68,14 @@ class ConnectionError(ServiceError):
     """A credential or transport failure invalidates the API connection probe."""
 
 
+class TransientServiceError(ServiceError):
+    """上游临时拥堵、网关故障或单次请求超时（不清空已测通状态）。"""
+
+
+class ResponseFormatError(ServiceError):
+    """单题输入被拒、响应残缺或格式不符（仅当前题失败，不清空已测通状态）。"""
+
+
 class TruncationError(ServiceError):
     """The answer was cut off by the token budget.
 
@@ -76,9 +86,52 @@ class TruncationError(ServiceError):
     """
 
 
+class RateLimitError(ServiceError):
+    """临时并发或速率受限（HTTP 429），不清空已测通状态。"""
+
+    def __init__(self, message: str, *, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 # A truncated answer is retried once with a bigger budget on the same service.
 # It never falls back to another model, key or endpoint.
 TRUNCATION_RETRY_TOKEN_CAP = 32000
+RATE_LIMIT_BACKOFF = (2.0, 5.0)
+_TRANSIENT_HTTP_STATUS = frozenset({408, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529})
+_SECRET_REDACT = re.compile(r"https?://\S+|(?:sk|nvapi)-[A-Za-z0-9_\-]+|AIza[A-Za-z0-9_\-]+|Bearer\s+\S+")
+_AUTH_ERROR_PATTERN = re.compile(
+    r"(?:api[ _-]?key|invalid[ _-]?token|unauthorized|authentication|permission[ _-]?denied|access[ _-]?denied)", re.I
+)
+_PROVIDER_GATES: dict[tuple[str, int], threading.BoundedSemaphore] = {}
+_KEY_POOL_CURSOR: dict[str, int] = {}
+_KEY_COOLDOWN_UNTIL: dict[tuple[str, str], float] = {}
+_PROVIDER_REST_UNTIL: dict[str, float] = {}
+_RATE_LIMITED_FREE_PROVIDERS = frozenset({"zhipu", "openrouter"})
+AUTO_ROUTE_TEXT_ORDER = (
+    "zhipu",
+    "nvidia",
+    "modelscope",
+    "openrouter",
+    "gemini",
+    "siliconflow",
+    "deepseek",
+    "minimax",
+    "doubao",
+    "custom",
+)
+AUTO_ROUTE_VISION_ORDER = (
+    "nvidia",
+    "modelscope",
+    "gemini",
+    "openrouter",
+    "siliconflow",
+    "minimax",
+    "zhipu",
+    "deepseek",
+    "doubao",
+    "custom",
+)
 
 
 def path() -> Path:
@@ -127,6 +180,7 @@ def _load() -> dict:
         "verified": False,
         "verified_at": "",
         "resolved_model": "",
+        "unverified_reason": "",
         **value,
     }
     config["version"] = 2
@@ -166,7 +220,9 @@ def _load() -> dict:
     except (OSError, UnicodeError):
         pending = "unreadable"
     if pending:
-        config.update(revision=f"recovery-{pending}", verified=False, verified_at="", resolved_model="")
+        config.update(
+            revision=f"recovery-{pending}", verified=False, verified_at="", resolved_model="", unverified_reason=""
+        )
     return config
 
 
@@ -215,7 +271,9 @@ def _settings_transaction(previous: dict, providers, *, include_features: bool =
                     restored = dict(previous)
                 if not isinstance(restored, dict):
                     restored = dict(previous)
-                restored.update(revision=uuid.uuid4().hex, verified=False, verified_at="", resolved_model="")
+                restored.update(
+                    revision=uuid.uuid4().hex, verified=False, verified_at="", resolved_model="", unverified_reason=""
+                )
                 data = json.dumps(restored, ensure_ascii=False, indent=2).encode("utf-8")
             if data is None:
                 backups[target] = None
@@ -303,6 +361,20 @@ def _base_url(raw, provider) -> str:
         raise SettingsError("豆包 API 请使用火山方舟的官方服务地址。")
     if provider == "deepseek" and value != DEFAULTS["deepseek"]["base_url"]:
         raise SettingsError("DeepSeek 请使用官方服务地址；其他兼容地址请选自定义。")
+    if provider == "nvidia" and value != DEFAULTS["nvidia"]["base_url"]:
+        raise SettingsError(
+            "英伟达 NIM 请使用官方服务地址 https://integrate.api.nvidia.com/v1；其他兼容地址请选自定义。"
+        )
+    if provider == "gemini" and value != DEFAULTS["gemini"]["base_url"]:
+        raise SettingsError(
+            "Google Gemini 请使用官方 OpenAI 兼容地址 https://generativelanguage.googleapis.com/v1beta/openai；其他兼容地址请选自定义。"
+        )
+    if provider == "zhipu" and value != DEFAULTS["zhipu"]["base_url"]:
+        raise SettingsError(
+            "智谱 BigModel 请使用官方地址 https://open.bigmodel.cn/api/paas/v4；其他兼容地址请选自定义。"
+        )
+    if provider == "openrouter" and value != DEFAULTS["openrouter"]["base_url"]:
+        raise SettingsError("OpenRouter 请使用官方地址 https://openrouter.ai/api/v1；其他兼容地址请选自定义。")
     if provider == "minimax" and value not in {MINIMAX_BASE, "https://api.minimaxi.com/v1"}:
         raise SettingsError("MiniMax 请使用中国区官方 OpenAI 地址 https://api.minimax.cn/v1；其他兼容地址请选自定义。")
     if provider in {"modelscope", "siliconflow"} and value != DEFAULTS[provider]["base_url"]:
@@ -497,7 +569,12 @@ def share_reading_key(provider: str = "minimax") -> dict:
             # A copied key is a brand new credential: the previous “已测通”
             # verdict was about the key that was just replaced.
             config.update(
-                key_configured=True, verified=False, verified_at="", resolved_model="", revision=uuid.uuid4().hex
+                key_configured=True,
+                verified=False,
+                verified_at="",
+                resolved_model="",
+                unverified_reason="",
+                revision=uuid.uuid4().hex,
             )
             config["key_states"][provider] = {
                 "revision": config["key_revision"],
@@ -535,6 +612,7 @@ def public_status() -> dict:
         "status": "assistant" if assistant else "verified" if verified else "unverified" if configured else "missing",
         "verified_at": str(config.get("verified_at") or "") if verified else "",
         "resolved_model": str(config.get("resolved_model") or "") if verified else "",
+        "unverified_reason": "" if verified else str(config.get("unverified_reason") or ""),
         "features": {key: switches[key] for key in sorted(FEATURE_KEYS)},
         "knowledge": _knowledge_summary(switches["knowledge_tags"]),
         "on_intake": config["on_intake"],
@@ -673,7 +751,9 @@ def save(payload: dict) -> dict:
             or str(previous["revision"]).startswith("recovery-")
         )
         if changed:
-            config.update(revision=uuid.uuid4().hex, verified=False, verified_at="", resolved_model="")
+            config.update(
+                revision=uuid.uuid4().hex, verified=False, verified_at="", resolved_model="", unverified_reason=""
+            )
         config.pop("endpoint_id", None)
         _remember_profiles(config, previous)
         config["provider_profiles"].update(validated_profiles)
@@ -757,7 +837,9 @@ def sync_credential_change(changed_services: set[str], key_status: dict[str, dic
         current = _load()
         _sync_key_states_from_status(current, key_status)
         if current.get("provider") in changed_services:
-            current.update(revision=uuid.uuid4().hex, verified=False, verified_at="", resolved_model="")
+            current.update(
+                revision=uuid.uuid4().hex, verified=False, verified_at="", resolved_model="", unverified_reason=""
+            )
         current["keys_migrated_to_unified"] = True
         _write_settings(current)
 
@@ -860,7 +942,9 @@ def save_from_unified(
             or str(previous["revision"]).startswith("recovery-")
         )
         if api_changed:
-            config.update(revision=uuid.uuid4().hex, verified=False, verified_at="", resolved_model="")
+            config.update(
+                revision=uuid.uuid4().hex, verified=False, verified_at="", resolved_model="", unverified_reason=""
+            )
         config.pop("endpoint_id", None)
         _remember_profiles(config, previous)
         config["provider_profiles"].update(validated_profiles)
@@ -937,11 +1021,29 @@ def _same_configuration(left: dict, right: dict) -> bool:
     return all(left.get(key) == right.get(key) for key in (*API_FIELDS, "revision", "key_revision"))
 
 
-def _mark_unverified(config: dict) -> None:
+def _mark_unverified(config: dict, *, reason: str = "") -> None:
+    cleaned_reason = _sanitize_error_text(reason, limit=160)
     with _lock:
         current = _load()
-        if _same_configuration(config, current):
-            _write_settings({**current, "verified": False, "verified_at": "", "resolved_model": ""})
+        # 仅当配置参数与最近一次测通时间戳都一致时才允许置回未验证，
+        # 防止用户重新测通前发起的旧后台任务稍后失败把新的已测通状态覆盖掉。
+        if _same_configuration(config, current) and str(config.get("verified_at") or "") == str(
+            current.get("verified_at") or ""
+        ):
+            logger.warning(
+                "library_ai marked unverified (provider=%s, reason=%s)",
+                config.get("provider"),
+                cleaned_reason or "unknown",
+            )
+            _write_settings(
+                {
+                    **current,
+                    "verified": False,
+                    "verified_at": "",
+                    "resolved_model": "",
+                    "unverified_reason": cleaned_reason,
+                }
+            )
 
 
 def _response_content(message: dict) -> tuple[str, bool]:
@@ -952,6 +1054,8 @@ def _response_content(message: dict) -> tuple[str, bool]:
     if not isinstance(text, str):
         raise ValueError
     reasoning = message.get("reasoning_content")
+    if not (isinstance(reasoning, str) and reasoning.strip()):
+        reasoning = message.get("reasoning")
     details = message.get("reasoning_details")
     thinking = isinstance(reasoning, str) and bool(reasoning.strip())
     if isinstance(details, list):
@@ -959,28 +1063,36 @@ def _response_content(message: dict) -> tuple[str, bool]:
             isinstance(item, dict) and isinstance(item.get("text"), str) and bool(item["text"].strip())
             for item in details
         )
-    blocks = re.findall(r"<think>(.*?)</think>", text, flags=re.S)
+    blocks = re.findall(r"<(?:think|thought)>(.*?)</(?:think|thought)>", text, flags=re.S)
     thinking = thinking or any(part.strip() for part in blocks)
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
-    if not text or "<think>" in text or "</think>" in text:
+    text = re.sub(r"<(?:think|thought)>.*?</(?:think|thought)>", "", text, flags=re.S).strip()
+    # 部分推理模型因服务端模板预置起始 <think>，响应正文仅出现闭合 </think> 而省略开头标签。
+    if "<think>" not in text and "<thought>" not in text:
+        orphan_close = re.match(r"^(.*?)</(?:think|thought)>\s*(.+)$", text, flags=re.S)
+        if orphan_close:
+            if orphan_close.group(1).strip():
+                thinking = True
+            text = orphan_close.group(2).strip()
+    if not text or any(tag in text for tag in ("<think>", "</think>", "<thought>", "</thought>")):
         raise ValueError
     return text, thinking
 
 
 def _needs_reasoning_evidence(config: dict) -> bool:
-    # MiniMax's adaptive models choose how much reasoning to expose. A valid
-    # final answer to a trivial probe is not invalid merely because one SDK
-    # omitted the private reasoning field. The request still follows the
-    # model's documented thinking controls; image probes verify their result.
-    return config["thinking"] and config["provider"] != "minimax"
+    # MiniMax、Google Gemini、英伟达 NIM、智谱与 OpenRouter 在简单或 JSON 提示下
+    # 常省略显式 reasoning_content；连接探测仍严格核对数学与看图输出本身。
+    return config["thinking"] and config["provider"] not in {"minimax", "gemini", "nvidia", "zhipu", "openrouter"}
 
 
-def _upstream_error_detail(response) -> str:
-    """安全提取上游返回的简短错误原因（绝不包含密钥或网址）。"""
-    try:
-        payload = response.json()
-    except (ValueError, TypeError):
-        return ""
+def _sanitize_error_text(raw: str, *, limit: int = 160) -> str:
+    """脱敏并裁剪错误摘要，绝不泄露 URL、Bearer Token 或任何密钥片段。"""
+    cleaned = _SECRET_REDACT.sub("[已脱敏]", str(raw or "")).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned[:limit]
+
+
+def _extract_error_message(payload: object) -> str:
+    """从上游 JSON 响应体中安全提取简短可读错误信息（不含密钥或网址）。"""
     if not isinstance(payload, dict):
         return ""
     raw = ""
@@ -991,24 +1103,165 @@ def _upstream_error_detail(response) -> str:
         raw = err
     if not raw:
         raw = str(payload.get("message") or payload.get("msg") or "")
-    # 若上游误将鉴权串或 URL 附在报错里则直接裁掉，仅留安全可读摘要。
-    cleaned = re.sub(r"https?://\S+|sk-[A-Za-z0-9_\-]+|Bearer\s+\S+", "[已脱敏]", raw).strip()
-    cleaned = re.sub(r"\s+", " ", cleaned)
-    return cleaned[:90]
+    return _sanitize_error_text(raw, limit=90)
+
+
+def _looks_like_auth_error(detail: str) -> bool:
+    return bool(detail and _AUTH_ERROR_PATTERN.search(detail))
+
+
+def _upstream_error_detail(response) -> str:
+    """安全提取上游返回的简短错误原因（绝不包含密钥或网址）。"""
+    try:
+        payload = response.json()
+    except (ValueError, TypeError):
+        return ""
+    return _extract_error_message(payload)
+
+
+def _parse_retry_after(response) -> float | None:
+    headers = getattr(response, "headers", None)
+    raw = headers.get("Retry-After") if hasattr(headers, "get") else None
+    text = raw.strip() if isinstance(raw, str) else ""
+    if not re.fullmatch(r"[0-9]{1,4}(?:\.[0-9]{1,2})?", text):
+        return None
+    return min(15.0, max(0.0, float(text)))
+
+
+def _key_digest(secret: str) -> str:
+    return hashlib.sha256(secret.encode("utf-8")).hexdigest()[:16]
+
+
+def _key_pool(config: dict) -> list[str]:
+    provider = config["provider"]
+    if not _is_isolated_legacy_key_store():
+        try:
+            values = credential_settings.store.load_credentials()
+            accounts = credential_settings.store.credential_pool(values, provider)
+            valid = [k for k in accounts if isinstance(k, str) and k and not any(c.isspace() for c in k)]
+            if valid:
+                return valid
+        except (credential_settings.CredentialStoreError, credential_settings.CredentialValidationError):
+            pass
+    return [_key(config)]
+
+
+def _acquire_pool_key(config: dict) -> str:
+    keys = _key_pool(config)
+    if len(keys) == 1:
+        return keys[0]
+    provider = config["provider"]
+    now = time.monotonic()
+    with _lock:
+        start = _KEY_POOL_CURSOR.get(provider, 0) % len(keys)
+        for offset in range(len(keys)):
+            idx = (start + offset) % len(keys)
+            candidate = keys[idx]
+            ready_at = _KEY_COOLDOWN_UNTIL.get((provider, _key_digest(candidate)), 0.0)
+            if now >= ready_at:
+                _KEY_POOL_CURSOR[provider] = (idx + 1) % len(keys)
+                return candidate
+        # 若所有密钥均处于短暂冷却，选最早解锁的那个并推进游标。
+        best_idx = min(range(len(keys)), key=lambda i: _KEY_COOLDOWN_UNTIL.get((provider, _key_digest(keys[i])), 0.0))
+        _KEY_POOL_CURSOR[provider] = (best_idx + 1) % len(keys)
+        return keys[best_idx]
+
+
+def _mark_key_cooldown(provider: str, key: str, seconds: float) -> None:
+    until = time.monotonic() + max(0.5, min(60.0, float(seconds)))
+    with _lock:
+        _KEY_COOLDOWN_UNTIL[(provider, _key_digest(key))] = until
+
+
+def _has_ready_alternate_key(config: dict) -> bool:
+    keys = _key_pool(config)
+    if len(keys) <= 1:
+        return False
+    provider = config["provider"]
+    now = time.monotonic()
+    with _lock:
+        return any(now >= _KEY_COOLDOWN_UNTIL.get((provider, _key_digest(k)), 0.0) for k in keys)
+
+
+def _is_rate_limited_free_provider(provider: str) -> bool:
+    if provider in _RATE_LIMITED_FREE_PROVIDERS:
+        return True
+    spec = provider_catalog.VISION.get(provider)
+    return bool(spec is not None and spec.get("free_models"))
+
+
+@contextmanager
+def _provider_gate(config: dict):
+    provider = config.get("provider", "")
+    if not _is_rate_limited_free_provider(provider):
+        yield
+        return
+    # 免费/限流服务按密钥池数量收敛在途并发（单账号严格串行，多账号最多 4 并发）。
+    count = int(saved_key_status(config).get(provider, {}).get("count") or 1)
+    slots = max(1, min(4, count))
+    with _lock:
+        gate = _PROVIDER_GATES.get((provider, slots))
+        if gate is None:
+            gate = threading.BoundedSemaphore(slots)
+            _PROVIDER_GATES[(provider, slots)] = gate
+    with gate:
+        yield
+
+
+def _request_once_with_rate_limit(
+    config: dict,
+    prompt: str,
+    image_urls: list[str],
+    max_tokens: int,
+    *,
+    kind=None,
+    explicit_api=False,
+    live_snapshot: dict | None = None,
+) -> tuple[str, dict]:
+    total_attempts = len(RATE_LIMIT_BACKOFF) + 1
+    for attempt in range(total_attempts):
+        try:
+            return _request(
+                config,
+                prompt,
+                image_urls,
+                max_tokens,
+                kind=kind,
+                explicit_api=explicit_api,
+                live_snapshot=live_snapshot,
+            )
+        except RateLimitError as error:
+            if attempt >= total_attempts - 1:
+                raise
+            # 账号池里还有未冷却的备用 Key 时，无需等待直接切换下一把 Key。
+            if _has_ready_alternate_key(config):
+                continue
+            delay = RATE_LIMIT_BACKOFF[attempt] if error.retry_after is None else min(15.0, error.retry_after)
+            if delay > 0:
+                time.sleep(delay)
+    raise AssertionError("unreachable")
 
 
 def _request(
-    config: dict, prompt: str, image_urls: list[str], max_tokens: int, *, kind=None, explicit_api=False
+    config: dict,
+    prompt: str,
+    image_urls: list[str],
+    max_tokens: int,
+    *,
+    kind=None,
+    explicit_api=False,
+    live_snapshot: dict | None = None,
 ) -> tuple[str, dict]:
     if image_urls and not config["supports_images"]:
         raise ServiceError("这道题有配图，所选 API 未声明支持图片；已暂停，改用当前助手或明确支持图文的模型。")
-    if not _same_configuration(config, _load()) or (
-        not explicit_api and (config["mode"] != "api" or _load()["mode"] != "api")
+    expected = live_snapshot if live_snapshot is not None else config
+    if not _same_configuration(expected, _load()) or (
+        not explicit_api and (expected["mode"] != "api" or _load()["mode"] != "api")
     ):
         raise ServiceError("请求前执行方式或 API 设置已变化，旧任务未发起。")
     if kind:
         ensure_ready(kind)
-    key = _key(config)
+    key = _acquire_pool_key(config)
     content = [{"type": "text", "text": prompt}]
     content.extend({"type": "image_url", "image_url": {"url": url}} for url in image_urls)
     payload = {
@@ -1038,11 +1291,19 @@ def _request(
         # requests. Qwen models do not accept DeepSeek/MiniMax's effort format.
         # A model without reasoning cannot pass a thinking-enabled probe.
         payload["enable_thinking"] = config["thinking"]
+    elif config["provider"] == "nvidia":
+        # 英伟达 NIM 的 Nemotron 系列通过 chat_template_kwargs 控制思考过程开关。
+        payload["chat_template_kwargs"] = {"enable_thinking": bool(config["thinking"])}
+    elif config["provider"] == "gemini":
+        payload["reasoning_effort"] = "high" if config["thinking"] else "none"
+    elif config["provider"] == "openrouter":
+        if config["thinking"]:
+            payload["reasoning_effort"] = "high"
     elif config["thinking"]:
         payload["thinking"] = {"type": "enabled"}
-        if config["provider"] != "doubao":
+        if config["provider"] not in {"doubao", "zhipu"}:
             payload["reasoning_effort"] = "high"
-    elif config["provider"] in ("doubao", "deepseek"):
+    elif config["provider"] in ("doubao", "deepseek", "zhipu"):
         payload["thinking"] = {"type": "disabled"}
     if kind:
         ensure_ready(kind)
@@ -1054,13 +1315,39 @@ def _request(
             timeout=(15, 180),
             allow_redirects=False,
         )
-        if response.status_code != 200:
+        if response.status_code == 429:
+            retry_after = _parse_retry_after(response)
+            _mark_key_cooldown(config["provider"], key, retry_after if retry_after is not None else 15.0)
             detail = _upstream_error_detail(response)
             reason = f"：{detail}" if detail else ""
-            raise ConnectionError(
-                f"独立 API 请求未完成（HTTP {int(response.status_code)}{reason}），已暂停，请核对服务配置后显式重试。"
+            raise RateLimitError(
+                f"独立 API 当前触发并发或速率限制（HTTP 429{reason}），已保留已测通状态，请稍后重试或降低并发。",
+                retry_after=retry_after,
             )
+        if response.status_code != 200:
+            code = int(response.status_code)
+            detail = _upstream_error_detail(response)
+            reason = f"：{detail}" if detail else ""
+            if code in _TRANSIENT_HTTP_STATUS:
+                raise TransientServiceError(
+                    f"独立 API 上游暂时繁忙或超时（HTTP {code}{reason}），已保留已测通状态；该题未保存，请稍后重试。"
+                )
+            if code in {400, 413, 422} and not _looks_like_auth_error(detail):
+                raise ResponseFormatError(
+                    f"独立 API 未接受本题请求（HTTP {code}{reason}），已保留已测通状态；该题未保存，请核对题面或配图。"
+                )
+            raise ConnectionError(f"独立 API 请求未完成（HTTP {code}{reason}），已暂停，请核对服务配置后显式重试。")
         body = response.json()
+        if isinstance(body, dict) and body.get("error") and not body.get("choices"):
+            detail = _extract_error_message(body)
+            reason = f"：{detail}" if detail else ""
+            if _looks_like_auth_error(detail):
+                raise ConnectionError(
+                    f"独立 API 鉴权或账户状态异常（{detail or '未知错误'}），已暂停，请核对密钥后重新测试连接。"
+                )
+            raise TransientServiceError(
+                f"独立 API 上游暂时返回异常{reason}，已保留已测通状态；该题未保存，请稍后重试。"
+            )
         choice = body["choices"][0]
         if choice.get("finish_reason") == "length":
             raise TruncationError("答案超过本次长度限制，未保存不完整结果。")
@@ -1069,10 +1356,98 @@ def _request(
         return text, {"model": str(body.get("model") or config["model"]), "thinking": thinking}
     except ServiceError:
         raise
+    except requests.Timeout:
+        raise TransientServiceError("独立 API 本次响应超时，已保留已测通状态；该题未保存，请稍后重试。") from None
     except requests.RequestException:
         raise ConnectionError("独立 API 网络请求未完成，已暂停，请稍后显式重试。") from None
     except (ValueError, TypeError, KeyError, IndexError):
-        raise ConnectionError("独立 API 没有返回完整可用的答案，未保存结果。") from None
+        raise ResponseFormatError(
+            "独立 API 本次没有返回完整可用的答案，已保留已测通状态；该题未保存，请重试。"
+        ) from None
+
+
+def _rest_provider(provider: str, seconds: float = 90.0) -> None:
+    until = time.monotonic() + max(5.0, min(600.0, float(seconds)))
+    with _lock:
+        _PROVIDER_REST_UNTIL[provider] = until
+
+
+def _clear_provider_rest(provider: str) -> None:
+    with _lock:
+        _PROVIDER_REST_UNTIL.pop(provider, None)
+
+
+def _auto_route_candidates(config: dict, *, needs_images: bool) -> list[dict]:
+    """开启跨服务自动路由时，将所有已配置密钥且能力匹配的商组成统一路由池。"""
+    keys = saved_key_status(config)
+    order = AUTO_ROUTE_VISION_ORDER if needs_images else AUTO_ROUTE_TEXT_ORDER
+    ordered_names = [config["provider"], *[name for name in order if name != config["provider"]]]
+    now = time.monotonic()
+    fresh: list[dict] = []
+    resting: list[dict] = []
+    for name in ordered_names:
+        if not keys.get(name, {}).get("configured"):
+            continue
+        candidate = _select_provider(config, name)
+        if not candidate.get("model") or not candidate.get("base_url"):
+            continue
+        if needs_images and not candidate.get("supports_images"):
+            continue
+        with _lock:
+            rest_until = _PROVIDER_REST_UNTIL.get(name, 0.0)
+        if now >= rest_until:
+            fresh.append(candidate)
+        else:
+            resting.append(candidate)
+    return fresh + resting
+
+
+def _execute_candidate(
+    candidate: dict,
+    live_snapshot: dict,
+    prompt: str,
+    image_urls: list[str],
+    max_tokens: int,
+    *,
+    call_kind: str | None,
+    call_explicit: bool,
+) -> tuple[str, dict]:
+    with _provider_gate(candidate):
+        try:
+            text, evidence = _request_once_with_rate_limit(
+                candidate,
+                prompt,
+                image_urls,
+                max_tokens,
+                kind=call_kind,
+                explicit_api=call_explicit,
+                live_snapshot=live_snapshot,
+            )
+        except TruncationError:
+            # 内容太长不是服务坏了：同一个服务、同一把 key，把额度加大再试一次。
+            # 不换模型、不换端点、不动「已验证」状态。
+            budget = min(max_tokens * 2, TRUNCATION_RETRY_TOKEN_CAP)
+            if budget <= max_tokens:
+                raise
+            try:
+                text, evidence = _request_once_with_rate_limit(
+                    candidate,
+                    prompt,
+                    image_urls,
+                    budget,
+                    kind=call_kind,
+                    explicit_api=call_explicit,
+                    live_snapshot=live_snapshot,
+                )
+            except TruncationError:
+                raise TruncationError(
+                    "答案过长，两次生成都被长度上限截断，结果未保存；请缩短题干或减少配图后重试。"
+                ) from None
+    if _needs_reasoning_evidence(candidate) and not evidence["thinking"]:
+        raise ResponseFormatError(
+            "本次响应未返回所选思考内容，已保留已测通状态；该题未保存，请重试或核对模型思考配置。"
+        )
+    return text, evidence
 
 
 def chat(
@@ -1090,40 +1465,71 @@ def chat(
     config = _load()
     if not explicit_api and not manual_tag and config["mode"] != "api":
         raise ServiceError("当前是助手模式：请由当前 AI 助手通过本地工具领取并提交任务，不调用云 API。")
-    try:
-        if explicit_api or manual_tag:
-            call_kind = None if manual_tag else kind
-            call_explicit = True
-        else:
-            call_kind = kind
-            call_explicit = False
+    if explicit_api or manual_tag:
+        call_kind = None if manual_tag else kind
+        call_explicit = True
+    else:
+        call_kind = kind
+        call_explicit = False
+
+    if not features.enabled("ai_auto_route"):
         try:
-            text, evidence = _request(
-                config, prompt, image_urls, max_tokens, kind=call_kind, explicit_api=call_explicit
+            text, evidence = _execute_candidate(
+                config, config, prompt, image_urls, max_tokens, call_kind=call_kind, call_explicit=call_explicit
             )
-        except TruncationError:
-            # 内容太长不是服务坏了：同一个服务、同一把 key，把额度加大再试一次。
-            # 不换模型、不换端点、不动「已验证」状态。
-            budget = min(max_tokens * 2, TRUNCATION_RETRY_TOKEN_CAP)
-            if budget <= max_tokens:
-                raise
-            try:
-                text, evidence = _request(
-                    config, prompt, image_urls, budget, kind=call_kind, explicit_api=call_explicit
-                )
-            except TruncationError:
-                raise TruncationError(
-                    "答案过长，两次生成都被长度上限截断，结果未保存；请缩短题干或减少配图后重试。"
-                ) from None
-        if _needs_reasoning_evidence(config) and not evidence["thinking"]:
-            raise ConnectionError("本次响应未返回所选思考内容，结果未保存；请核对模型思考配置。")
-    except ConnectionError:
-        _mark_unverified(config)
-        raise
+        except ConnectionError as error:
+            _mark_unverified(config, reason=str(error))
+            raise
+        if not _same_configuration(config, _load()) or (
+            not explicit_api and not manual_tag and _load()["mode"] != "api"
+        ):
+            raise ServiceError("生成期间执行方式或 API 设置已变化，旧结果未保存。")
+        ensure_api_ready() if explicit_api or manual_tag else ensure_ready(kind)
+        return text, f"{config['provider']} API · {evidence['model']}"
+
+    candidates = _auto_route_candidates(config, needs_images=bool(image_urls)) or [config]
+    errors: list[tuple[str, Exception]] = []
+    chosen_provider = config["provider"]
+    text = ""
+    evidence: dict = {}
+    for candidate in candidates:
+        provider_name = candidate["provider"]
+        try:
+            text, evidence = _execute_candidate(
+                candidate, config, prompt, image_urls, max_tokens, call_kind=call_kind, call_explicit=call_explicit
+            )
+            _clear_provider_rest(provider_name)
+            chosen_provider = provider_name
+            break
+        except RateLimitError as error:
+            _rest_provider(provider_name, max(30.0, float(error.retry_after or 90.0)))
+            errors.append((provider_name, error))
+        except TransientServiceError as error:
+            _rest_provider(provider_name, 60.0)
+            errors.append((provider_name, error))
+        except ResponseFormatError as error:
+            _rest_provider(provider_name, 15.0)
+            errors.append((provider_name, error))
+        except ConnectionError as error:
+            _rest_provider(provider_name, 120.0)
+            errors.append((provider_name, error))
+    else:
+        # 池内全部服务商均失败：仅在当前主服务商触发真实连接/鉴权故障时重置验证状态；
+        # 限流、5xx 波动、单题超时与残缺响应全部保留已测通状态。
+        first_err = errors[0][1]
+        if all(isinstance(err, RateLimitError) for _, err in errors):
+            raise first_err
+        primary_conn_err = next(
+            (err for name, err in errors if name == config["provider"] and isinstance(err, ConnectionError)), None
+        )
+        if primary_conn_err is not None:
+            _mark_unverified(config, reason=str(primary_conn_err))
+        raise first_err
+
     if not _same_configuration(config, _load()) or (not explicit_api and not manual_tag and _load()["mode"] != "api"):
         raise ServiceError("生成期间执行方式或 API 设置已变化，旧结果未保存。")
     ensure_api_ready() if explicit_api or manual_tag else ensure_ready(kind)
-    return text, f"{config['provider']} API · {evidence['model']}"
+    return text, f"{chosen_provider} API · {evidence['model']}"
 
 
 def test_connection(payload: dict) -> dict:
@@ -1148,8 +1554,11 @@ def test_connection(payload: dict) -> dict:
         expected = r"【答案】\s*\$?2\$?\s*【图示】\s*\$?2\$?" if urls else r"【答案】\s*\$?2\$?"
         if not re.search(expected, text) or (_needs_reasoning_evidence(config) and not evidence["thinking"]):
             raise ServiceError("API 未通过所选合成数学/图像与思考响应测试，API 生成保持暂停；这不是答案质量评估。")
-    except ServiceError:
-        _mark_unverified(config)
+    except ServiceError as error:
+        probe_reason = str(error).replace("，已保留已测通状态；该题未保存", "，连接测试未通过")
+        _mark_unverified(config, reason=probe_reason)
+        if probe_reason != str(error):
+            raise type(error)(probe_reason) from None
         raise
     with _lock:
         current = _load()
@@ -1161,6 +1570,7 @@ def test_connection(payload: dict) -> dict:
                 "verified": True,
                 "verified_at": timezone.now().isoformat(),
                 "resolved_model": evidence["model"],
+                "unverified_reason": "",
             }
         )
     return public_status()

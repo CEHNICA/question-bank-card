@@ -685,13 +685,28 @@ def _finish(job: LibraryJob, status: str, error: str = "") -> None:
 
 
 def default_concurrency() -> int:
-    """后台并行处理题库任务（标签/答案）的并发线程数（默认 3，可通过环境变量调整 1~6）。"""
+    """后台并行处理题库任务（标签/答案）的并发线程数（默认 3；免费限流服务收敛至 1–2）。"""
     raw = os.environ.get("QB_LIBRARY_JOB_CONCURRENCY", "").strip()
     if raw:
         try:
             return max(1, min(MAX_JOB_CONCURRENCY, int(raw)))
         except ValueError:
             pass
+    try:
+        status = library_ai_settings.public_status()
+        provider = status.get("provider")
+        if features.enabled("ai_auto_route"):
+            keys = status.get("keys") or {}
+            configured_names = [name for name, info in keys.items() if info.get("configured")]
+            if any(not library_ai_settings._is_rate_limited_free_provider(name) for name in configured_names):
+                return DEFAULT_JOB_CONCURRENCY
+            total_slots = sum(int(keys[name].get("count") or 0) for name in configured_names)
+            return max(1, min(4, total_slots or 1))
+        if library_ai_settings._is_rate_limited_free_provider(str(provider or "")):
+            count = int((status.get("keys") or {}).get(provider, {}).get("count") or 1)
+            return max(1, min(4, count))
+    except (OSError, ValueError, TypeError, KeyError):
+        pass
     return DEFAULT_JOB_CONCURRENCY
 
 

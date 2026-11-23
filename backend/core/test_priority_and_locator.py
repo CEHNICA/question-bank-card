@@ -185,3 +185,43 @@ class ParallelJobWorkerTests(TransactionTestCase):
         self.assertEqual(len(seen_ids), 3)
         self.assertEqual(len(set(seen_ids)), 3)
         self.assertEqual(LibraryJob.objects.filter(status=LibraryJob.Status.DONE).count(), 3)
+
+    def test_default_concurrency_throttles_free_rate_limited_providers(self):
+        with mock.patch.object(
+            library_jobs.library_ai_settings,
+            "public_status",
+            return_value={"provider": "nvidia", "keys": {"nvidia": {"configured": True, "count": 1}}},
+        ):
+            self.assertEqual(library_jobs.default_concurrency(), 1)
+        with mock.patch.object(
+            library_jobs.library_ai_settings,
+            "public_status",
+            return_value={"provider": "nvidia", "keys": {"nvidia": {"configured": True, "count": 2}}},
+        ):
+            self.assertEqual(library_jobs.default_concurrency(), 2)
+        with mock.patch.object(
+            library_jobs.library_ai_settings,
+            "public_status",
+            return_value={"provider": "zhipu", "keys": {"zhipu": {"configured": True, "count": 4}}},
+        ):
+            self.assertEqual(library_jobs.default_concurrency(), 4)
+        features.save({"ai_auto_route": True})
+        with mock.patch.object(
+            library_jobs.library_ai_settings,
+            "public_status",
+            return_value={
+                "provider": "nvidia",
+                "keys": {
+                    "nvidia": {"configured": True, "count": 1},
+                    "zhipu": {"configured": True, "count": 1},
+                    "modelscope": {"configured": True, "count": 1},
+                },
+            },
+        ):
+            self.assertEqual(library_jobs.default_concurrency(), 3)
+        with mock.patch.object(
+            library_jobs.library_ai_settings,
+            "public_status",
+            return_value={"provider": "deepseek", "keys": {"deepseek": {"configured": True, "count": 1}}},
+        ):
+            self.assertEqual(library_jobs.default_concurrency(), library_jobs.DEFAULT_JOB_CONCURRENCY)

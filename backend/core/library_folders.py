@@ -81,18 +81,43 @@ def _clean_sort_modes(raw) -> dict[str, str]:
     return out
 
 
-def _clean_doc_overrides(raw) -> dict[str, dict[str, list[str]]]:
+def _clean_doc_overrides(raw) -> dict[str, dict]:
     if not isinstance(raw, dict):
         return {}
-    out: dict[str, dict[str, list[str]]] = {}
+    out: dict[str, dict] = {}
     for key, entry in raw.items():
         doc_id = str(key or "").strip()
         if not doc_id or not isinstance(entry, dict):
             continue
         added = list(dict.fromkeys(str(x) for x in (entry.get("added") or []) if str(x).strip()))
         removed = list(dict.fromkeys(str(x) for x in (entry.get("removed") or []) if str(x).strip()))
-        if added or removed:
-            out[doc_id] = {"added": added, "removed": removed}
+        raw_sections = entry.get("sections")
+        sections: dict[str, dict] = {}
+        if isinstance(raw_sections, dict):
+            for qid_raw, meta in raw_sections.items():
+                qid_str = str(qid_raw or "").strip()
+                if not qid_str or not isinstance(meta, dict):
+                    continue
+                sec_item: dict[str, object] = {}
+                if meta.get("chapterKey") is not None:
+                    sec_item["chapterKey"] = str(meta["chapterKey"])[:80]
+                if meta.get("chapterNo") is not None and isinstance(meta.get("chapterNo"), (int, float)):
+                    sec_item["chapterNo"] = int(meta["chapterNo"])
+                if meta.get("chapterGroupName"):
+                    sec_item["chapterGroupName"] = str(meta["chapterGroupName"])[:MAX_NAME_LEN]
+                if meta.get("sectionName") is not None:
+                    sec_item["sectionName"] = str(meta["sectionName"])[:MAX_NAME_LEN]
+                if meta.get("sectionMatchMode"):
+                    sec_item["sectionMatchMode"] = str(meta["sectionMatchMode"])[:40]
+                if meta.get("label"):
+                    sec_item["label"] = str(meta["label"])[:MAX_NAME_LEN]
+                if sec_item:
+                    sections[qid_str] = sec_item
+        if added or removed or sections:
+            cleaned_entry: dict = {"added": added, "removed": removed}
+            if sections:
+                cleaned_entry["sections"] = sections
+            out[doc_id] = cleaned_entry
     return out
 
 
@@ -702,10 +727,14 @@ def mutate(payload: dict) -> dict:
                         added_set.add(qid)
                     if not was_in:
                         changed += 1
-                if not added_set and not removed_set:
+                sections_map = dict(ov.get("sections") or {})
+                if not added_set and not removed_set and not sections_map:
                     state["doc_overrides"].pop(doc_uuid, None)
                 else:
-                    state["doc_overrides"][doc_uuid] = {"added": sorted(added_set), "removed": sorted(removed_set)}
+                    add_entry: dict[str, object] = {"added": sorted(added_set), "removed": sorted(removed_set)}
+                    if sections_map:
+                        add_entry["sections"] = sections_map
+                    state["doc_overrides"][doc_uuid] = add_entry
                 op_record = _record_history(state, "add_questions", f"将 {len(qids)} 道题归入资料文件夹", before)
                 message = f"已将 {len(qids)} 道题放入资料文件夹（新增 {changed} 题）"
             else:
@@ -742,10 +771,14 @@ def mutate(payload: dict) -> dict:
                 }
                 added_set = set(ov["added"]) - remove_qids
                 removed_set = set(ov["removed"]) | (remove_qids & pubs_in_doc)
-                if not added_set and not removed_set:
+                sections_map = {k: v for k, v in (ov.get("sections") or {}).items() if k not in remove_qids}
+                if not added_set and not removed_set and not sections_map:
                     state["doc_overrides"].pop(doc_uuid, None)
                 else:
-                    state["doc_overrides"][doc_uuid] = {"added": sorted(added_set), "removed": sorted(removed_set)}
+                    remove_entry: dict[str, object] = {"added": sorted(added_set), "removed": sorted(removed_set)}
+                    if sections_map:
+                        remove_entry["sections"] = sections_map
+                    state["doc_overrides"][doc_uuid] = remove_entry
                 op_record = _record_history(
                     state, "remove_questions", f"从资料文件夹移出 {len(remove_qids)} 道题", before
                 )

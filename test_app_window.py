@@ -730,6 +730,10 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(web["QB_SILICONFLOW_CONFIGURED"], "1")
         self.assertEqual(web["QB_MINIMAX_POOL_SIZE"], "0")
         self.assertEqual(web["QB_SILICONFLOW_POOL_SIZE"], "1")
+        self.assertEqual(worker["QB_MINIMAX_CONFIGURED"], "0")
+        self.assertEqual(worker["QB_SILICONFLOW_CONFIGURED"], "1")
+        self.assertEqual(worker["QB_MINIMAX_POOL_SIZE"], "0")
+        self.assertEqual(worker["QB_SILICONFLOW_POOL_SIZE"], "1")
         for environment in (worker, web):
             self.assertEqual(environment["QB_PRIMARY_ENGINE"], "siliconflow_qwen3")
             self.assertEqual(environment["QB_CHECKER_ENGINE"], "auto")

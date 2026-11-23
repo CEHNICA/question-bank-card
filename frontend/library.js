@@ -4125,6 +4125,31 @@
     }
   }
 
+  async function decideProposalBatch(payload, button, confirmMessage) {
+    if (confirmMessage && typeof window !== "undefined" && typeof window.confirm === "function" && !window.confirm(confirmMessage)) {
+      return;
+    }
+    const siblings = Array.from(button.closest(".library-assistant-toolbar")?.querySelectorAll("button") || []);
+    button.disabled = true;
+    siblings.forEach((other) => { other.disabled = true; });
+    try {
+      const response = await fetch("/api/library/assistant/proposals/batch-decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-QB-Request": "1" },
+        body: JSON.stringify({ by: "老师", ...payload }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "没能批量处理提案");
+      toast(body.message || "已批量处理提案。", payload.action === "accept" ? "success" : "");
+      await loadAssistantWorkbench();
+      if (payload.action === "accept") void load({ quiet: true });
+    } catch (error) {
+      toast(error.message || "没能批量处理提案", "error");
+      button.disabled = false;
+      siblings.forEach((other) => { other.disabled = false; });
+    }
+  }
+
   function renderAssistantWorkbench() {
     const board = $("assistantWorkbench");
     const body = $("assistantWorkbenchBody");
@@ -4133,7 +4158,8 @@
     if (!data) { board.hidden = true; return; }
     const proposals = data.proposals || [];
     const running = data.running || [];
-    if (!proposals.length && !running.length) {
+    const totalPending = Number.isInteger(data.pending?.text) ? data.pending.text : proposals.length;
+    if (!totalPending && !proposals.length && !running.length) {
       board.hidden = true;
       body.replaceChildren();
       $("assistantWorkbenchCount").textContent = "";
@@ -4141,7 +4167,11 @@
     }
     const wasHidden = board.hidden;
     board.hidden = false;
-    $("assistantWorkbenchCount").textContent = proposals.length ? `${proposals.length} 条待核对` : "助手在干活";
+    $("assistantWorkbenchCount").textContent = totalPending
+      ? (totalPending > proposals.length
+        ? `${totalPending} 条待核对（当前展示前 ${proposals.length} 条）`
+        : `${totalPending} 条待核对`)
+      : "助手在干活";
     body.replaceChildren();
 
     const teacher = data.teacher || {};
@@ -4154,6 +4184,65 @@
       body.append(node("p", "library-assistant-board-note", `正在干的活：${line}。`));
     }
 
+    const solutionOnlyCount = Number.isInteger(data.pending?.solution_only)
+      ? data.pending.solution_only
+      : proposals.filter((proposal) => proposal.solution_only).length;
+    const byAgent = Array.isArray(data.by_agent) ? data.by_agent : [];
+    if (totalPending > 0 && (totalPending > 1 || solutionOnlyCount > 0)) {
+      const toolbar = node("div", "library-assistant-toolbar");
+      const summaryParts = [`共 ${totalPending} 条待核对提案`];
+      if (solutionOnlyCount > 0) summaryParts.push(`其中 ${solutionOnlyCount} 条仅改答案/解析`);
+      if (byAgent.length) {
+        const agentSummary = byAgent
+          .map((entry) => `${entry.agent} ${entry.total} 条${entry.solution_only ? `（纯答案解析 ${entry.solution_only} 条）` : ""}`)
+          .join("、");
+        summaryParts.push(`来源：${agentSummary}`);
+      }
+      if (totalPending > proposals.length) {
+        summaryParts.push(`下方列表仅展示最新 ${proposals.length} 条，批量按钮作用于全部匹配提案`);
+      }
+      toolbar.append(node("p", "library-assistant-summary", `${summaryParts.join("；")}。`));
+
+      const batchActions = node("div", "library-assistant-batch-actions");
+      if (solutionOnlyCount > 0) {
+        const acceptSolutions = node("button", "button button-small", `批量采纳全部 ${solutionOnlyCount} 条答案解析`);
+        acceptSolutions.type = "button";
+        acceptSolutions.title = "仅批量采纳只改答案或解析的提案，直接写入正式题库解析版本，不动源题卡、不改变审核通过状态，且支持整批撤销。";
+        acceptSolutions.addEventListener("click", () => void decideProposalBatch(
+          { action: "accept", scope: "solution_only" },
+          acceptSolutions,
+          `确认直接采纳全部 ${solutionOnlyCount} 条仅改答案/解析的提案并写入正式题库吗？（不动原题卡、不改变审核勾；涉及题干、选项、题型或题源的提案不会被批量采纳。）`
+        ));
+        batchActions.append(acceptSolutions);
+      }
+      if (totalPending >= 2) {
+        const rejectAll = node("button", "button button-quiet button-small", `全部不采纳并清空（${totalPending} 条）`);
+        rejectAll.type = "button";
+        rejectAll.title = "将当前全部待核对提案标记为不采纳并清空工作台（题面和解析都不改动）。";
+        rejectAll.addEventListener("click", () => void decideProposalBatch(
+          { action: "reject", scope: "all", reason: "老师批量清空未采纳" },
+          rejectAll,
+          `确认将全部 ${totalPending} 条待核对提案标记为不采纳并清空工作台吗？此操作不会改动任何题面或解析。`
+        ));
+        batchActions.append(rejectAll);
+      }
+      if (byAgent.length > 1) {
+        byAgent.forEach((entry) => {
+          const clearAgent = node("button", "button button-quiet button-small", `清空「${entry.agent}」的 ${entry.total} 条提案`);
+          clearAgent.type = "button";
+          clearAgent.title = `仅拒绝并清空来自 ${entry.agent} 的 ${entry.total} 条待核对提案。`;
+          clearAgent.addEventListener("click", () => void decideProposalBatch(
+            { action: "reject", scope: "all", agent: entry.agent, reason: `老师批量清空「${entry.agent}」的提案` },
+            clearAgent,
+            `确认将「${entry.agent}」交上来的全部 ${entry.total} 条提案标记为不采纳并清空吗？`
+          ));
+          batchActions.append(clearAgent);
+        });
+      }
+      if (batchActions.children.length) toolbar.append(batchActions);
+      body.append(toolbar);
+    }
+
     proposals.forEach((proposal) => {
       const item = node("li", "library-assistant-item");
       const head = node("div", "library-assistant-item-head");
@@ -4161,14 +4250,21 @@
       title.type = "button";
       title.title = "打开这道题，对照原卷看";
       title.addEventListener("click", () => void openProposalQuestion(proposal, title));
+      const changed = proposal.changed || [];
       const meta = node("span", "library-assistant-item-meta",
-        `${proposal.source_filename || ""} · ${proposal.agent || "助手"} 交上来 · 改了${(proposal.changed || []).map((key) => ASSISTANT_FIELD_LABELS[key] || key).join("、")}`);
+        `${proposal.source_filename || ""} · ${proposal.agent || "助手"} 交上来 · 改了${changed.map((key) => ASSISTANT_FIELD_LABELS[key] || key).join("、")}`);
       head.append(title, meta);
+      if (proposal.solution_only) {
+        head.append(node("span", "library-assistant-badge", "仅改答案解析 · 采纳直入正式题库"));
+      }
+      if (changed.includes("analysis") && !changed.includes("answer")) {
+        head.append(node("span", "library-assistant-badge library-assistant-badge-warn", "未填答案（仅解析）"));
+      }
       item.append(head);
 
       const diff = node("details", "library-assistant-diff");
       diff.append(node("summary", "", "看改了什么"));
-      (proposal.changed || []).forEach((key) => {
+      changed.forEach((key) => {
         diff.append(assistantDiffRow(key, (proposal.before || {})[key], (proposal.after || {})[key]));
       });
       item.append(diff);
@@ -4176,7 +4272,9 @@
       const actions = node("div", "library-assistant-item-actions");
       const accept = node("button", "button button-small", "采纳这道改动");
       accept.type = "button";
-      accept.title = "把题卡改成助手提议的样子。改完卡上会留一条提醒，你对照原卷核对后再点通过，题库才更新。";
+      accept.title = proposal.solution_only
+        ? "直接写入正式题库答案解析，不动源题卡和审核状态。"
+        : "把题卡改成助手提议的样子。改完卡上会留一条提醒，你对照原卷核对后再点通过，题库才更新。";
       accept.addEventListener("click", () => void decideProposal(proposal, "accept", accept));
       const reject = node("button", "button button-quiet button-small", "不采纳这道改动");
       reject.type = "button";
@@ -4187,7 +4285,7 @@
       body.append(item);
     });
     // 有待核对的就把块展开：老师不用自己去找这一块。
-    if (wasHidden && proposals.length) board.open = true;
+    if (wasHidden && (proposals.length || totalPending > 0)) board.open = true;
   }
 
   // 1.26.34：报一声「老师此刻在这道题上做什么」，助手据此绕开。

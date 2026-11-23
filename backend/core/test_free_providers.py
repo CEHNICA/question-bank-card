@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import tempfile
+from pathlib import Path
 from unittest import mock
 
 from django.test import SimpleTestCase
@@ -55,7 +57,11 @@ class FreeProviderTests(SimpleTestCase):
             # A paying user keeps MiniMax first; the free service checks.
             self.assertEqual(readers.primary_engine().provider, "minimax")
             self.assertEqual(readers.checker_engine().provider, "modelscope")
-        self.assertNotIn("zhipu", provider_catalog.VISION)
+        # 智谱作为免费池兜底保留在视觉目录末尾，但主读与默认复核仍排在魔搭和英伟达之后
+        self.assertIn("zhipu", provider_catalog.VISION)
+        self.assertGreater(
+            provider_catalog.PRIMARY_ORDER.index("zhipu"), provider_catalog.PRIMARY_ORDER.index("modelscope")
+        )
 
     def test_requests_switch_reasoning_off(self):
         sent = []
@@ -197,8 +203,71 @@ class FreeProviderTests(SimpleTestCase):
         self.assertEqual(set(calls), {readers.MODELSCOPE_URL})
 
     def test_the_free_tier_starts_with_few_parallel_requests(self):
-        with mock.patch.dict("os.environ", {"QB_MODELSCOPE_ACCOUNT_CONCURRENCY": ""}):
+        with mock.patch.dict(
+            "os.environ", {"QB_MODELSCOPE_ACCOUNT_CONCURRENCY": "", "QB_NVIDIA_ACCOUNT_CONCURRENCY": ""}
+        ):
             self.assertEqual(account_pool.concurrency_range("modelscope"), (1, 2))
+            self.assertEqual(account_pool.concurrency_range("nvidia"), (1, 2))
+
+    def test_nvidia_nim_can_read_images_with_thinking_disabled_and_400_fallback(self):
+        sent = []
+        answers = [_Response(400), _Response(200, text="【题干】英伟达读的")]
+
+        def post(url, key, payload, timeout=(10, 150)):
+            sent.append((url, key, payload))
+            return answers.pop(0)
+
+        with keys(nvidia=1), mock.patch.object(readers, "_post", side_effect=post):
+            primary = readers.primary_engine()
+            self.assertEqual((primary.provider, primary.model), ("nvidia", "nvidia/nemotron-3.5-super-vl-120b-a12b"))
+            text = readers.chat(primary, "读题", ["data:image/png;base64,QUJD"])
+        self.assertEqual(text, "【题干】英伟达读的")
+        self.assertEqual(sent[0][0], readers.NVIDIA_URL)
+        self.assertEqual(sent[0][2]["chat_template_kwargs"], {"enable_thinking": False})
+        self.assertNotIn("chat_template_kwargs", sent[1][2])
+
+    def test_gemini_can_read_images_with_reasoning_effort_none(self):
+        sent = []
+
+        def post(url, key, payload, timeout=(10, 150)):
+            sent.append((url, key, payload))
+            return _Response(200, text="【题干】Gemini读的")
+
+        with keys(gemini=1), mock.patch.object(readers, "_post", side_effect=post):
+            primary = readers.primary_engine()
+            self.assertEqual((primary.provider, primary.model), ("gemini", "gemini-2.5-flash"))
+            text = readers.chat(primary, "读题", ["data:image/png;base64,QUJD"])
+        self.assertEqual(text, "【题干】Gemini读的")
+        self.assertEqual(sent[0][0], readers.GEMINI_URL)
+        self.assertEqual(sent[0][2]["reasoning_effort"], "none")
+
+    def test_zhipu_vision_disables_thinking_and_auto_route_allows_fallback_under_selected_only(self):
+        from . import features
+
+        sent = []
+
+        def post(url, key, payload, timeout=(10, 150)):
+            sent.append((url, key, payload))
+            if url == readers.NVIDIA_URL:
+                return _Response(503)
+            return _Response(200, text="【题干】智谱兜底读的")
+
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            keys(nvidia=1, zhipu=1),
+            mock.patch.object(readers, "_post", side_effect=post),
+            mock.patch.dict(
+                "os.environ",
+                {"QB_FEATURES_FILE": str(Path(folder) / "features.json"), "QB_PRIMARY_ENGINE": "nvidia_nemotron"},
+            ),
+            readers.selected_services_only(),
+        ):
+            features.save({"ai_auto_route": True})
+            primary = readers.primary_engine()
+            text = readers.chat(primary, "读题", ["data:image/png;base64,QUJD"])
+        self.assertEqual(text, "【题干】智谱兜底读的")
+        self.assertEqual(sent[-1][0], readers.ZHIPU_URL)
+        self.assertEqual(sent[-1][2]["thinking"], {"type": "disabled"})
 
     def test_assistant_mode_needs_no_vision_key(self):
         with keys(), mock.patch.dict("os.environ", {"QB_PRIMARY_ENGINE": "assistant"}):

@@ -28,6 +28,9 @@ SERVICE_URLS = {
     "minimax": readers.MINIMAX_DEFAULT_URL,
     "modelscope": readers.MODELSCOPE_URL,
     "siliconflow": readers.SILICONFLOW_URL,
+    "nvidia": readers.NVIDIA_URL,
+    "gemini": readers.GEMINI_URL,
+    "zhipu": readers.ZHIPU_URL,
 }
 
 PROMPT = "这是合成连接测试，不是用户试卷。图中一共有几个黑色圆点？只输出【答案】数字，不要解释。"

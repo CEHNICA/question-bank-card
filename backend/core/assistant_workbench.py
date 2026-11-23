@@ -20,7 +20,7 @@ import uuid
 from django.db import transaction
 from django.utils import timezone
 
-from . import library
+from . import library, library_solutions
 from .models import AssistantProposal, LibraryJob, LibraryTagSuggestion, PublishedQuestion, Question, TeacherActivity
 
 # 助手领一道活的租约：超时没交回来，活自己回到池子里。
@@ -29,6 +29,7 @@ LEASE_SECONDS = 30 * 60
 PRESENCE_SECONDS = 5 * 60
 # 提案里能动的字段。别的字段助手碰不到。
 FACE_KEYS = ("stem", "options", "question_type", "answer", "analysis", "origin")
+SOLUTION_ONLY_KEYS = frozenset({"answer", "analysis"})
 MAX_TEXT = 20000
 MAX_OPTION = 4000
 MAX_ORIGIN = 400
@@ -354,13 +355,26 @@ def propose(payload):
     return {"proposal": proposal_json(proposal), "message": "提案已交上来，题面还没动；等你在题库页点采纳。"}
 
 
-def proposal_json(proposal):
+def _proposal_changed(before: dict | None, after: dict | None) -> list[str]:
+    before = before or {}
+    after = after or {}
     changed = []
-    before = proposal.before or {}
-    after = proposal.payload or {}
     for key in FACE_KEYS:
         if before.get(key) != after.get(key):
             changed.append(key)
+    return changed
+
+
+def is_solution_only_proposal(proposal: AssistantProposal) -> bool:
+    """判断一条提案是否只修改了答案或解析（不动题干、选项、题型和题源）。"""
+    changed = _proposal_changed(proposal.before, proposal.payload)
+    return bool(changed) and set(changed) <= SOLUTION_ONLY_KEYS
+
+
+def proposal_json(proposal):
+    before = proposal.before or {}
+    after = proposal.payload or {}
+    changed = _proposal_changed(before, after)
     publication = proposal.publication
     return {
         "id": str(proposal.pk),
@@ -372,12 +386,61 @@ def proposal_json(proposal):
         "status": proposal.status,
         "message": proposal.message,
         "changed": changed,
+        "solution_only": bool(changed) and set(changed) <= SOLUTION_ONLY_KEYS,
         "before": {key: before.get(key) for key in FACE_KEYS},
         "after": {key: after.get(key) for key in FACE_KEYS},
         "created_at": proposal.created_at.isoformat(),
         "decided_at": proposal.decided_at.isoformat() if proposal.decided_at else None,
         "decided_by": proposal.decided_by,
     }
+
+
+def _apply_solution_proposal(publication: PublishedQuestion, proposal: AssistantProposal):
+    """把纯答案/解析提案直接写入版本化解析层（LibrarySolution），不动源题卡、不清通过勾。"""
+    extras = publication.extras or {}
+    prev_solution_id = str(extras.get("solution_id") or "").strip() or None
+    prev_needs_review_id = str(extras.get("solution_needs_review_id") or "").strip() or None
+    existing_sol = None
+    if prev_solution_id:
+        try:
+            existing_sol = library_solutions.LibrarySolution.objects.filter(
+                pk=uuid.UUID(prev_solution_id), publication=publication
+            ).first()
+        except ValueError:
+            existing_sol = None
+    if existing_sol is not None:
+        base_answer = existing_sol.answer or ""
+        base_analysis = existing_sol.analysis or ""
+        base_figures = [
+            {key: item[key] for key in ("id", "display_width", "position", "paragraph") if key in item}
+            for item in (existing_sol.figures or [])
+            if isinstance(item, dict) and item.get("id")
+        ]
+        base_revision = str(existing_sol.pk)
+    else:
+        content = publication.content or {}
+        base_answer = str(content.get("answer") or "")
+        base_analysis = str(content.get("analysis") or "")
+        base_figures = []
+        base_revision = None
+    changed = set(_proposal_changed(proposal.before, proposal.payload))
+    after = proposal.payload or {}
+    next_answer = str(after.get("answer") or "") if "answer" in changed else base_answer
+    next_analysis = str(after.get("analysis") or "") if "analysis" in changed else base_analysis
+    try:
+        row = library_solutions.save(
+            publication,
+            {
+                "answer": next_answer,
+                "analysis": next_analysis,
+                "figures": base_figures,
+                "base_revision": base_revision,
+                "sync_library": True,
+            },
+        )
+    except library_solutions.SolutionError as error:
+        raise WorkbenchError(str(error), error.status) from None
+    return row, prev_solution_id, prev_needs_review_id
 
 
 def decide(payload):
@@ -398,7 +461,6 @@ def decide(payload):
         if proposal.status != AssistantProposal.Status.PENDING:
             raise WorkbenchError("这条提案已经处理过了。", 409)
         publication = _live_publication(proposal.publication_id, lock=True)
-        question = _card(publication)
         if action == "reject":
             proposal.status = AssistantProposal.Status.REJECTED
             proposal.decided_by = by
@@ -410,7 +472,30 @@ def decide(payload):
                 "applied": False,
                 "message": "已记下不采纳；这条不会再出现在待核对里。",
             }
+        elif is_solution_only_proposal(proposal):
+            if library.generation_fingerprint(publication.content or {}, publication.pk) != proposal.fingerprint:
+                stale_reason = "题库里的版本已经变了，这条提议作废；请让助手按现在的版本重提。"
+            else:
+                row, _prev_sol_id, _prev_review_id = _apply_solution_proposal(publication, proposal)
+                proposal.status = AssistantProposal.Status.ACCEPTED
+                proposal.decided_by = by
+                proposal.decided_at = timezone.now()
+                proposal.message = "已采纳并写入正式题库解析版本；源题卡与原审核状态保持不变。"
+                proposal.save(update_fields=["status", "decided_by", "decided_at", "message", "updated_at"])
+                result = {
+                    "proposal": proposal_json(proposal),
+                    "applied": True,
+                    "applied_target": "solution",
+                    "solution_id": str(row.pk),
+                    "message": "已采纳并直接写入正式题库解析，原题卡和审核状态未受影响。",
+                }
+            if stale_reason:
+                proposal.status = AssistantProposal.Status.STALE
+                proposal.message = stale_reason
+                proposal.decided_at = timezone.now()
+                proposal.save(update_fields=["status", "message", "decided_at", "updated_at"])
         else:
+            question = _card(publication)
             # 采纳：题面在老师点下去的那一刻才动。
             if not _in_sync(publication, question):
                 stale_reason = "题卡后来改过，这条提议作废；请让助手按现在的题面重提。"
@@ -438,6 +523,7 @@ def decide(payload):
                 result = {
                     "proposal": proposal_json(proposal),
                     "applied": True,
+                    "applied_target": "question",
                     "message": "已采纳：题卡改成助手提议的样子，卡上留了提醒；对照原卷核对后再点通过，题库才会更新。",
                 }
             if stale_reason:
@@ -449,6 +535,155 @@ def decide(payload):
     if stale_reason:
         raise WorkbenchError(stale_reason, 409)
     return result
+
+
+def decide_batch(payload):
+    """批量处理待核对提案：批量拒绝可清理任意范围；批量采纳仅限纯答案/解析提案，严禁批量改动题面。"""
+    if not isinstance(payload, dict):
+        raise WorkbenchError("批量处理格式不正确。", 400)
+    action = payload.get("action")
+    if action not in ("accept", "reject"):
+        raise WorkbenchError("action 只能是 accept 或 reject。", 400)
+    by = _agent(payload.get("by") or "老师")
+    raw_agent = payload.get("agent")
+    agent_filter = _agent(raw_agent) if isinstance(raw_agent, str) and raw_agent.strip() else ""
+    scope = payload.get("scope") or ("solution_only" if action == "accept" else "all")
+    if scope not in ("all", "solution_only", "face"):
+        raise WorkbenchError("scope 只能是 all、solution_only 或 face。", 400)
+
+    raw_ids = payload.get("proposal_ids")
+    target_uuids = None
+    if raw_ids is not None:
+        if not isinstance(raw_ids, list) or not raw_ids or len(raw_ids) > 500:
+            raise WorkbenchError("proposal_ids 须为 1–500 条提案编号列表。", 400)
+        target_uuids = [_uuid(item, "提案") for item in raw_ids]
+
+    if action == "accept" and target_uuids is None and scope != "solution_only":
+        raise WorkbenchError("批量采纳仅支持仅改答案/解析的提案；涉及题干、选项、题型或题源的改动仍需逐题核对。", 400)
+
+    now = timezone.now()
+    if action == "reject":
+        reason_raw = payload.get("reason")
+        if reason_raw is not None and not isinstance(reason_raw, str):
+            raise WorkbenchError("拒绝理由必须是文字。", 400)
+        message = (reason_raw or "").strip()[:300] or "老师批量清空未采纳。"
+        with transaction.atomic():
+            rows = AssistantProposal.objects.select_for_update().filter(status=AssistantProposal.Status.PENDING)
+            if target_uuids is not None:
+                rows = rows.filter(pk__in=target_uuids)
+            if agent_filter:
+                rows = rows.filter(agent=agent_filter)
+            if scope == "all":
+                processed = rows.update(
+                    status=AssistantProposal.Status.REJECTED,
+                    decided_by=by,
+                    decided_at=now,
+                    message=message,
+                    updated_at=now,
+                )
+            else:
+                matched_pks = [
+                    row.pk
+                    for row in rows
+                    if (scope == "solution_only" and is_solution_only_proposal(row))
+                    or (scope == "face" and not is_solution_only_proposal(row))
+                ]
+                processed = (
+                    AssistantProposal.objects.filter(pk__in=matched_pks).update(
+                        status=AssistantProposal.Status.REJECTED,
+                        decided_by=by,
+                        decided_at=now,
+                        message=message,
+                        updated_at=now,
+                    )
+                    if matched_pks
+                    else 0
+                )
+        remaining = proposal_count()
+        return {
+            "ok": True,
+            "action": "reject",
+            "processed": processed,
+            "applied": 0,
+            "stale": 0,
+            "batch_id": None,
+            "remaining": remaining,
+            "message": f"已记下不采纳并清空 {processed} 条待核对提案。",
+        }
+
+    applied = stale = 0
+    batch_entries: list[dict] = []
+    with transaction.atomic():
+        rows = (
+            AssistantProposal.objects.select_for_update()
+            .filter(status=AssistantProposal.Status.PENDING)
+            .select_related("publication")
+            .order_by("-created_at", "-id")
+        )
+        if target_uuids is not None:
+            rows = rows.filter(pk__in=target_uuids)
+        if agent_filter:
+            rows = rows.filter(agent=agent_filter)
+        candidates = list(rows)
+        if target_uuids is not None and any(not is_solution_only_proposal(row) for row in candidates):
+            raise WorkbenchError(
+                "批量采纳仅支持仅改答案/解析的提案；涉及题干、选项、题型或题源的改动仍需逐题核对。", 400
+            )
+        targets = [row for row in candidates if is_solution_only_proposal(row)]
+        pub_ids = {row.publication_id for row in targets}
+        locked_pubs = (
+            {pub.pk: pub for pub in PublishedQuestion.objects.select_for_update().filter(pk__in=pub_ids)}
+            if pub_ids
+            else {}
+        )
+        for proposal in targets:
+            publication = locked_pubs.get(proposal.publication_id)
+            if publication is None or publication.status != PublishedQuestion.Status.PUBLISHED:
+                proposal.status = AssistantProposal.Status.STALE
+                proposal.message = "这道题已撤回或被新版替代；请按题库里现在的版本重新提。"
+                proposal.decided_at = now
+                proposal.save(update_fields=["status", "message", "decided_at", "updated_at"])
+                stale += 1
+                continue
+            if library.generation_fingerprint(publication.content or {}, publication.pk) != proposal.fingerprint:
+                proposal.status = AssistantProposal.Status.STALE
+                proposal.message = "题库里的版本已经变了，这条提议作废；请让助手按现在的版本重提。"
+                proposal.decided_at = now
+                proposal.save(update_fields=["status", "message", "decided_at", "updated_at"])
+                stale += 1
+                continue
+            sol_row, prev_sol_id, prev_review_id = _apply_solution_proposal(publication, proposal)
+            proposal.status = AssistantProposal.Status.ACCEPTED
+            proposal.decided_by = by
+            proposal.decided_at = now
+            proposal.message = "已批量采纳并写入正式题库解析版本；源题卡与原审核状态保持不变。"
+            proposal.save(update_fields=["status", "decided_by", "decided_at", "message", "updated_at"])
+            batch_entries.append(
+                {
+                    "publication_id": str(publication.pk),
+                    "new_solution_id": str(sol_row.pk),
+                    "previous_solution_id": prev_sol_id,
+                    "previous_needs_review_id": prev_review_id,
+                }
+            )
+            applied += 1
+
+    batch_id = library_solutions.record_batch(by, f"批量采纳助手解析提案（{len(batch_entries)} 条）", batch_entries)
+    remaining = proposal_count()
+    return {
+        "ok": True,
+        "action": "accept",
+        "processed": applied + stale,
+        "applied": applied,
+        "stale": stale,
+        "batch_id": batch_id,
+        "remaining": remaining,
+        "message": (
+            f"已批量采纳 {applied} 条答案/解析提案并直写正式题库"
+            + (f"（另有 {stale} 条因原题已变更自动标为过期）" if stale else "")
+            + "。"
+        ),
+    }
 
 
 # ---------------------------------------------------------------- 老师在场
@@ -520,16 +755,58 @@ def whereami():
 # ---------------------------------------------------------------- 工作台
 
 
-def workbench(limit=50):
+def workbench(limit=50, *, agent: str = "", scope: str = "all"):
     """题库页里那块「助手工作台」读的东西：一屏看完助手交上来了什么。"""
     if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 200:
         raise WorkbenchError("一次最多看 200 条。", 400)
+    if scope not in ("all", "solution_only", "face"):
+        raise WorkbenchError("scope 只能是 all、solution_only 或 face。", 400)
+    agent_filter = " ".join(str(agent or "").split()).strip()
     expire_leases()
     now = timezone.now()
-    proposals = list(
-        AssistantProposal.objects.filter(status=AssistantProposal.Status.PENDING)
-        .select_related("publication")
-        .order_by("-created_at")[:limit]
+
+    total_pending_proposals = 0
+    pending_solution_only = 0
+    pending_face = 0
+    by_agent_map: dict[str, dict] = {}
+    matched_pks: list = []
+
+    pending_rows = AssistantProposal.objects.filter(status=AssistantProposal.Status.PENDING).order_by(
+        "-created_at", "-id"
+    )
+    for pk, row_agent, before, payload in pending_rows.values_list("pk", "agent", "before", "payload"):
+        total_pending_proposals += 1
+        changed = _proposal_changed(before, payload)
+        sol_only = bool(changed) and set(changed) <= SOLUTION_ONLY_KEYS
+        if sol_only:
+            pending_solution_only += 1
+        else:
+            pending_face += 1
+        agent_key = row_agent or "助手"
+        bucket = by_agent_map.setdefault(agent_key, {"agent": agent_key, "total": 0, "solution_only": 0, "face": 0})
+        bucket["total"] += 1
+        if sol_only:
+            bucket["solution_only"] += 1
+        else:
+            bucket["face"] += 1
+        if len(matched_pks) < limit:
+            if agent_filter and row_agent != agent_filter:
+                continue
+            if scope == "solution_only" and not sol_only:
+                continue
+            if scope == "face" and sol_only:
+                continue
+            matched_pks.append(pk)
+
+    by_agent = sorted(by_agent_map.values(), key=lambda item: (-item["total"], item["agent"]))
+    proposals = (
+        list(
+            AssistantProposal.objects.filter(pk__in=matched_pks)
+            .select_related("publication")
+            .order_by("-created_at", "-id")
+        )
+        if matched_pks
+        else []
     )
     pending_tags = LibraryTagSuggestion.objects.filter(status=LibraryTagSuggestion.Status.PENDING).count()
     pending_answers = PublishedQuestion.objects.filter(extras__has_key="ai_answer").count()
@@ -547,11 +824,15 @@ def workbench(limit=50):
     accepted = AssistantProposal.objects.filter(status=AssistantProposal.Status.ACCEPTED).count()
     return {
         "pending": {
-            "text": len(proposals),
+            "text": total_pending_proposals,
+            "shown": len(proposals),
+            "solution_only": pending_solution_only,
+            "face": pending_face,
             "tags": pending_tags,
             "answer": pending_answers,
-            "total": len(proposals) + pending_tags + pending_answers,
+            "total": total_pending_proposals + pending_tags + pending_answers,
         },
+        "by_agent": by_agent,
         "proposals": [proposal_json(row) for row in proposals],
         "running": [
             {

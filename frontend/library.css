@@ -2256,6 +2256,35 @@ body.is-resizing, body.is-resizing * {
   border-radius: 3px;
 }
 .library-assistant-item-actions { display: flex; gap: 8px; margin-top: 8px; }
+.library-assistant-toolbar {
+  margin: 6px 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line, #e4e8ee);
+  border-radius: 8px;
+  background: var(--bg-sunken, #f8fafc);
+}
+.library-assistant-summary {
+  margin: 0 0 6px;
+  color: var(--ink-2, #334155);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.library-assistant-batch-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.library-assistant-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-dark, #065f46);
+  background: var(--accent-soft, #ecfdf5);
+  border: 1px solid color-mix(in srgb, var(--accent, #059669) 25%, transparent);
+}
+.library-assistant-badge-warn {
+  color: #92400e;
+  background: #fef3c7;
+  border-color: #fde68a;
+}
 
 
 /* ==========================================================================

@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 
 import requests
 
-from . import preferences, provider_catalog, qtypes
+from . import features, preferences, provider_catalog, qtypes
 from .account_pool import (
     MINIMAX_PLANS,
     AccountPoolCancelled,
@@ -39,6 +39,9 @@ MINIMAX_HOSTS = frozenset({"api.minimax.cn", "api.minimax.io", "api.minimaxi.com
 SILICONFLOW_URL = "https://api.siliconflow.cn/v1/chat/completions"
 SILICONFLOW_MODEL = preferences.DEFAULT_MODELS["siliconflow"]  # legacy public constant
 MODELSCOPE_URL = "https://api-inference.modelscope.cn/v1/chat/completions"
+NVIDIA_URL = provider_catalog.NVIDIA_BASE + "/chat/completions"
+GEMINI_URL = provider_catalog.GEMINI_BASE + "/chat/completions"
+ZHIPU_URL = provider_catalog.ZHIPU_BASE + "/chat/completions"
 # 529 is MiniMax's "overloaded" answer (seen live during benchmarking); 520-524
 # are CDN-edge failures.  All are transient server-side conditions.
 SERVER_RETRYABLE = frozenset({500, 502, 503, 504, 520, 521, 522, 523, 524, 529})
@@ -879,7 +882,11 @@ def answered_by(default: Engine) -> Engine:
 
 
 def _fallback_enabled() -> bool:
-    return not _SELECTED_SERVICES_ONLY.get() and os.environ.get("QB_PROVIDER_FALLBACK", "1").strip() != "0"
+    if os.environ.get("QB_PROVIDER_FALLBACK", "1").strip() == "0":
+        return False
+    if features.enabled("ai_auto_route"):
+        return True
+    return not _SELECTED_SERVICES_ONLY.get()
 
 
 def fallback_engines(engine: Engine) -> list[Engine]:
@@ -1009,6 +1016,24 @@ def _request(engine: Engine, messages: list[dict], max_tokens: int) -> tuple[str
             MODELSCOPE_URL,
             {**base, "temperature": 0, "max_tokens": max_tokens, "enable_thinking": False},
             ("enable_thinking",),
+        )
+    if engine.provider == "nvidia":
+        return (
+            NVIDIA_URL,
+            {**base, "temperature": 0, "max_tokens": max_tokens, "chat_template_kwargs": {"enable_thinking": False}},
+            ("chat_template_kwargs",),
+        )
+    if engine.provider == "gemini":
+        return (
+            GEMINI_URL,
+            {**base, "temperature": 0, "max_tokens": max_tokens, "reasoning_effort": "none"},
+            ("reasoning_effort",),
+        )
+    if engine.provider == "zhipu":
+        return (
+            ZHIPU_URL,
+            {**base, "temperature": 0, "max_tokens": max_tokens, "thinking": {"type": "disabled"}},
+            ("thinking",),
         )
     return SILICONFLOW_URL, {**base, "temperature": 0, "max_tokens": max_tokens}, ()
 
