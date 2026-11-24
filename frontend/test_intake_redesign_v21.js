@@ -133,4 +133,11 @@ test("2.1.0 前后端集成契约：三步条、分屏原卷、回收站安全�
   assert.match(indexHtml, /拍照暂存旋转调序与批量识读续读/);
   assert.match(eagleHtml, /id="eagleHelpModal"/);
   assert.match(eagleHtml, /openEagleHelpModal\(/);
+
+  // 0 题待切状态：隐藏筛选条与重复步骤条、允许错误按钮换行避免溢出
+  const stylesCss = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
+  assert.match(stylesCss, /\.cut-reading-steps\[hidden\] \{ display: none; \}/);
+  assert.match(stylesCss, /\.toolbar\[hidden\] \{ display: none; \}/);
+  assert.match(stylesCss, /\.error-actions \{[^}]*flex-wrap:\s*wrap/);
+  assert.match(appJs, /开始切题与校正/);
 });

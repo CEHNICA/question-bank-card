@@ -900,7 +900,7 @@ _MATH_SEGMENT = re.compile(r"\$[^$]*\$")
 
 # A student's answer letter written into the printed answer brackets
 # (“是（C）个”).  The letter must not follow a Latin letter, so P(A) stays.
-_WITNESS_ANSWER = re.compile(r"(?<![A-Za-z])[(（]\s*[A-E]{1,5}\s*[)）]")
+_WITNESS_ANSWER = re.compile(r"(?<![A-Za-z])[(（]\s*[A-H]{1,8}\s*[)）]")
 
 
 def _html_script(match: re.Match) -> str:
@@ -976,7 +976,7 @@ def _harmless_gap(text: str, start: int, end: int) -> bool:
     # “A.2√3” / “A 2√3”: the dot after an option letter.
     return (
         piece == "."
-        and before in "ABCDE"
+        and before in "ABCDEFGH"
         and start >= 1
         and (start < 2 or not text[start - 2].isalnum() or bool(_CJK.match(text[start - 2])))
     )
@@ -984,14 +984,14 @@ def _harmless_gap(text: str, start: int, end: int) -> bool:
 
 # MinerU repeats or strands option letters with nothing after them: “B. 48/5
 # B.C. 4” and, for picture options, a bare “A. B. C. D.” at the end.
-_BARE_LABELS = re.compile(r"(?:[A-E]\.)+")
+_BARE_LABELS = re.compile(r"(?:[A-H]\.)+")
 
 
 def _bare_option_labels(text: str, start: int, end: int) -> bool:
     if not _BARE_LABELS.fullmatch(text[start:end]):
         return False
     rest = text[end:]
-    return not rest or bool(re.match(r"[A-E]\.", rest))
+    return not rest or bool(re.match(r"[A-H]\.", rest))
 
 
 def _keys_agree(reading_key: str, witness_key_: str) -> bool:

@@ -128,7 +128,7 @@ FIGURE_WIDTH_MAX_MM = 178
 FIGURE_MAX_PER_QUESTION = 50
 # 预览量出来的图宽能记哪些位置：题干那一行，以及 A 到 E 各选项。
 # 原图题（正文整段是截图）走的是另一条路，不在这里。
-MEASURED_FIGURE_SLOTS = frozenset({"stem", "A", "B", "C", "D", "E"})
+MEASURED_FIGURE_SLOTS = frozenset({"stem", "A", "B", "C", "D", "E", "F", "G", "H"})
 # 预览量出来的表格位置能记哪儿：题干、答案正文、解析。
 MEASURED_TABLE_SLOTS = frozenset({"stem", "answer", "analysis"})
 TABLE_MAX_PER_QUESTION = 50

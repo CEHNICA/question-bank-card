@@ -106,8 +106,8 @@ function editor(guard, id, initial) {
   assert.match(js, /async function selectPaper\(id\) \{\s*if \(state\.paperId !== id && !\(await discardEdits\(\)\)\) return;/);
   assert.match(js, /window\.addEventListener\("beforeunload", \(event\) => \{\s*QBEdits\.protectBeforeUnload\(event, editGuard\)/);
   assert.match(js, /async function leaveFor\(url\) \{\s*if \(!\(await prepareSettingsLeave\(\)\) \|\| !\(await discardEdits\(\)\)\) return false;/);
-  assert.match(js, /const back = button\("← 返回", "", \(\) => discardEdits\(\[q\.id\]\)\);/);
-  assert.match(js, /event\.stopPropagation\(\); discardEdits\(\[q\.id\]\)/);
+  assert.match(js, /onBack:\s*\(\)\s*=>\s*discardEdits\(\[q\.id\]\)/);
+  assert.match(js, /event\.stopPropagation\(\);\s*discardEdits\(\[q\.id\]\)/);
   assert.match(js, /label: "去题库看看", onClick: \(\) => leaveFor\("\/eagle"\)/);
   for (const name of ["deletePaper", "archivePaper"]) {
     const body = js.slice(js.indexOf(`async function ${name}()`), js.indexOf("// ----------------------------------------------------------------", js.indexOf(`async function ${name}()`)));

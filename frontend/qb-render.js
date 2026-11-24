@@ -14,12 +14,18 @@
 })(typeof window !== "undefined" ? window : globalThis, (root) => {
   "use strict";
 
-  const OPTION_KEYS = ["A", "B", "C", "D", "E"];
-  // A–D are always shown for a choice question (an empty one says so); E only
-  // when the paper prints it.
+  const OPTION_KEYS = ["A", "B", "C", "D", "E", "F", "G", "H"];
+  // 默认至少展示 A–D（符合常规四选题习惯）；若题目包含或配图绑定了 E–H，则顺延展到最高出现项。
   function shownOptionKeys(options, figures = []) {
-    const hasE = String(options?.E ?? "").trim() || figures.some((figure) => figure.slot === "E");
-    return hasE ? OPTION_KEYS : OPTION_KEYS.slice(0, 4);
+    let last = 3;
+    for (let index = OPTION_KEYS.length - 1; index >= 4; index -= 1) {
+      const key = OPTION_KEYS[index];
+      if (String(options?.[key] ?? "").trim() || figures.some((figure) => figure.slot === key)) {
+        last = index;
+        break;
+      }
+    }
+    return OPTION_KEYS.slice(0, last + 1);
   }
   const EXPLICIT_MATH = /\$\$[\s\S]+?\$\$|\$[^$\n]+?\$|\\\([\s\S]+?\\\)|\\\[[\s\S]+?\\\]/g;
   const BLANK = /(?:\\_){2,}|_{3,}|（[ \u3000]*）|\([ \u3000]+\)/g;
@@ -1320,14 +1326,18 @@
     return width;
   }
 
-  // 仿照纸质试卷：选项短就一行排完（四个或五个），中等两个，长则一行一个。
+  // 仿照纸质试卷：选项短就一行排完（4–5 项排一行，6–8 项按 3/4 列排两行），中等两列，长则一行一个。
   function optionColumns(options, figures = []) {
     const keys = shownOptionKeys(options, figures);
     const values = keys.map((key) => options?.[key] ?? "");
     const optionFigures = figures.filter((figure) => OPTION_KEYS.includes(figure.slot));
-    if (optionFigures.length >= 3) return keys.length;
+    if (optionFigures.length >= 3) return keys.length >= 6 ? Math.min(4, Math.ceil(keys.length / 2)) : keys.length;
     const widest = Math.max(0, ...values.map(displayWidth));
-    if (widest <= (keys.length === 5 ? 8 : 10)) return keys.length;
+    if (widest <= (keys.length === 5 ? 8 : 10)) {
+      if (keys.length === 6) return 3;
+      if (keys.length >= 7) return 4;
+      return keys.length;
+    }
     if (widest <= 26) return 2;
     return 1;
   }
@@ -1367,10 +1377,11 @@
       const preferred = Number(list.dataset.cols || 1);
       const widest = Number(list.dataset.widest || 0);
       const need = (cols) => cols * (widest * fontSize * 0.5 + fontSize * 2.4) + (cols - 1) * fontSize;
-      const fitted = [5, 4, 2, 1].find((cols) => cols <= preferred && (cols === 1 || need(cols) <= width)) || 1;
-      const set = ["cols-1", "cols-2", "cols-4", "cols-5"].filter((name) => list.classList.contains(name));
+      const order = preferred === 3 ? [3, 2, 1] : [5, 4, 2, 1];
+      const fitted = order.find((cols) => cols <= preferred && (cols === 1 || need(cols) <= width)) || 1;
+      const set = ["cols-1", "cols-2", "cols-3", "cols-4", "cols-5"].filter((name) => list.classList.contains(name));
       if (set.length === 1 && set[0] === `cols-${fitted}`) return;  // already so: no style change
-      list.classList.remove("cols-1", "cols-2", "cols-4", "cols-5");
+      list.classList.remove("cols-1", "cols-2", "cols-3", "cols-4", "cols-5");
       list.classList.add(`cols-${fitted}`);
     });
   }
@@ -1516,10 +1527,15 @@
       if (!pieces.length) row.append(make("p", "qb-image-error", "原图范围尚未生成，请调整范围后保存。"));
       container.append(row);
       const answerMode = opts.showAnswer || "collapsed";
-      if (answerMode !== "none" && (String(content.answer ?? "").trim() || String(content.analysis ?? "").trim() || opts.showEmptyAnswer)) {
+      if (answerMode !== "none" && (String(content.answer ?? "").trim() || String(content.analysis ?? "").trim() || (opts.solutionFigures || []).length || opts.showEmptyAnswer)) {
         const answer = make("details", "qb-answer");
         if (answerMode === "open") answer.open = true;
-        answer.append(make("summary", "", "答案与解析"), ...answerRows(doc, content, { literal: opts.literal, trackSource: opts.trackSource }));
+        answer.append(make("summary", "", "答案与解析"), ...answerRows(doc, content, {
+          literal: opts.literal,
+          trackSource: opts.trackSource,
+          solutionFigures: opts.solutionFigures,
+          resolveSolutionUrl: opts.resolveSolutionUrl
+        }));
         container.append(answer);
       }
       return container;
@@ -1565,17 +1581,38 @@
       container.append(list);
     }
     const mode = opts.showAnswer || "collapsed";
-    if (mode !== "none" && (String(content.answer ?? "").trim() || String(content.analysis ?? "").trim() || opts.showEmptyAnswer)) {
+    if (mode !== "none" && (String(content.answer ?? "").trim() || String(content.analysis ?? "").trim() || (opts.solutionFigures || []).length || opts.showEmptyAnswer)) {
       const box = make("details", "qb-answer");
       if (mode === "open") box.open = true;
-      box.append(make("summary", "", "答案与解析"), ...answerRows(doc, content, { literal: opts.literal, trackSource: opts.trackSource }));
+      box.append(make("summary", "", "答案与解析"), ...answerRows(doc, content, {
+        literal: opts.literal,
+        trackSource: opts.trackSource,
+        solutionFigures: opts.solutionFigures,
+        resolveSolutionUrl: opts.resolveSolutionUrl
+      }));
       container.append(box);
     }
     return container;
   }
 
+  function splitAnalysisParagraphs(source) {
+    const text = String(source ?? "");
+    const parts = [];
+    const pattern = /\n\s*\n/g;
+    let cursor = 0;
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const chunk = text.slice(cursor, match.index);
+      if (chunk.trim()) parts.push({ text: chunk, offset: cursor });
+      cursor = match.index + match[0].length;
+    }
+    const tail = text.slice(cursor);
+    if (tail.trim()) parts.push({ text: tail, offset: cursor });
+    return parts;
+  }
+
   /* “答案”“解析”两行（题卡、题库的“看答案”共用）。empty：没有时写什么。 */
-  function answerRows(doc, content, { literal = false, empty = "原卷未提供", trackSource = false } = {}) {
+  function answerRows(doc, content, { literal = false, empty = "原卷未提供", trackSource = false, solutionFigures = [], resolveSolutionUrl } = {}) {
     const make = (tag, className, text) => {
       const element = doc.createElement(tag);
       if (className) element.className = className;
@@ -1587,8 +1624,8 @@
     answer.append(make("strong", "", "答案"));
     const answerBody = make("span");
     if (trackSource) answerBody.dataset.qbField = "answer";
-    // 选择题答案“B”“ACD”是选项标号，按正体显示，不当作数学变量排成斜体。
-    if (!literal && /^\s*[A-E]{1,5}\s*$/.test(String(content.answer ?? ""))) {
+    // 选择题答案“B”“ACDF”是选项标号，按正体显示，不当作数学变量排成斜体。
+    if (!literal && /^\s*[A-H]{1,8}\s*$/.test(String(content.answer ?? ""))) {
       answerBody.className = "qb-choice-answer";
       answerBody.textContent = String(content.answer).trim();
       if (trackSource) previewSource(answerBody, 0, String(content.answer).length, "text", previewTextOffsets(String(content.answer), answerBody.textContent));
@@ -1598,7 +1635,41 @@
     analysis.append(make("strong", "", "解析"));
     const analysisBody = make("div", "qb-analysis");
     if (trackSource) analysisBody.dataset.qbField = "analysis";
-    view(analysisBody, content.analysis, { empty, trackSource });
+    const figs = Array.isArray(solutionFigures) ? solutionFigures.filter((item) => item && (item.url || resolveSolutionUrl)) : [];
+    if (figs.length && !literal) {
+      const addFig = (fig) => {
+        const box = make("figure", "solution-figure qb-solution-figure");
+        const image = doc.createElement("img");
+        image.src = resolveSolutionUrl ? resolveSolutionUrl(fig) : fig.url;
+        image.alt = "答案解析配图";
+        image.loading = "eager";
+        const width = Math.max(5, Math.min(178, Number(fig.display_width) || 40));
+        image.style.width = `${width}mm`;
+        image.style.maxWidth = "100%";
+        image.style.height = "auto";
+        box.append(image);
+        analysisBody.append(box);
+      };
+      figs.filter((fig) => fig.position === "before").forEach(addFig);
+      const parts = splitAnalysisParagraphs(content.analysis);
+      if (!parts.length) {
+        if (!figs.some((fig) => fig.position === "before")) {
+          // 仅有配图时也要让光标定位保留一个可写域
+          const emptySpan = make("span", "qb-empty", "");
+          analysisBody.append(emptySpan);
+        }
+      } else {
+        parts.forEach((part, index) => {
+          const para = make("div", "solution-paragraph");
+          view(para, part.text, { trackSource, sourceOffset: part.offset });
+          analysisBody.append(para);
+          figs.filter((fig) => fig.position === "paragraph" && fig.paragraph === index).forEach(addFig);
+        });
+      }
+      figs.filter((fig) => fig.position === "after" || (fig.position === "paragraph" && fig.paragraph >= parts.length)).forEach(addFig);
+    } else {
+      view(analysisBody, content.analysis, { empty, trackSource });
+    }
     analysis.append(analysisBody);
     return [answer, analysis];
   }

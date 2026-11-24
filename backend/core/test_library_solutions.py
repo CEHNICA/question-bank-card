@@ -71,9 +71,11 @@ class LibrarySolutionTests(TransactionTestCase):
             analysis=analysis,
             question_type=qtype,
             options={"A": "1", "B": "2"},
-            approved=True,
-            approved_at=timezone.now(),
+            state=Question.State.GREEN,
+            figure_review={"status": "confirmed_no_figure", "source": "human", "reason": "人工确认无图"},
         )
+        library.approve(question, now=timezone.now())
+        question.save()
         content = library.final_content(question)
         return PublishedQuestion.objects.create(
             paper=paper,
@@ -805,6 +807,90 @@ class LibrarySolutionTests(TransactionTestCase):
             rows20 = library.publications_json(batch_20)
         self.assertTrue(all(row["has_answer"] and row["solution"] for row in rows10))
         self.assertEqual(len(q10), len(q20), "批量序列化带解析版本的题目时查询次数应恒定，不能 N+1")
+
+    def test_adopt_previous_publication_asset_when_editing_stem_and_solution_together(self):
+        uploaded = self.client.post(
+            f"/api/library/{self.pub.pk}/solution-images",
+            {"image": SimpleUploadedFile("step.png", self.png_bytes(), content_type="image/png")},
+            HTTP_X_QB_REQUEST="1",
+        )
+        self.assertEqual(uploaded.status_code, 201, uploaded.content)
+        asset_id = uploaded.json()["figure"]["id"]
+
+        data = editor.editor_data(self.pub)
+        updated, created, _ = editor.save(
+            self.pub,
+            {
+                "revision": data["revision"],
+                "content_hash": data["content_hash"],
+                "body_mode": "text",
+                "question_type": "multiple_choice",
+                "stem": "题干已修改并且新增扩展选项",
+                "options": {"A": "1", "B": "2", "C": "3", "D": "4", "F": "6"},
+                "figures": [],
+            },
+        )
+        self.assertTrue(created)
+        self.assertEqual(updated.content["options"]["F"], "6")
+
+        res = self.post(
+            f"/api/library/{updated.pk}/solution",
+            {
+                "answer": "ABF",
+                "analysis": "跨版本保留解析图",
+                "figures": [{"id": asset_id, "display_width": 40, "position": "after", "paragraph": 0}],
+                "base_revision": None,
+                "sync_library": True,
+            },
+        )
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual(res.json()["solution"]["figures"][0]["id"], asset_id)
+        self.assertTrue((self.root / "library-solutions" / str(updated.pk) / f"{asset_id}.png").is_file())
+
+    def test_library_recommend_answer_uses_unsaved_draft_options_a_to_h_and_requires_api(self):
+        from . import library_ai_settings
+
+        missing = self.post(
+            f"/api/library/{self.pub.pk}/recommend-answer",
+            {"stem": "未保存新题干", "options": {"A": "1", "F": "6"}, "question_type": "multiple_choice"},
+        )
+        self.assertEqual(missing.status_code, 409)
+        self.assertEqual(missing.json()["code"], "api_not_configured")
+
+        captured = {}
+
+        def fake_chat(prompt_text, urls, **kwargs):
+            captured["prompt"] = prompt_text
+            captured["urls"] = urls
+            captured["kwargs"] = kwargs
+            return "【答案】AF\n【解析】由未保存选项 F 推导得 AF。", "deepseek-test"
+
+        with (
+            mock.patch.object(library_ai_settings, "ensure_api_ready", return_value=None),
+            mock.patch.object(library_ai_settings, "chat", side_effect=fake_chat),
+        ):
+            res = self.post(
+                f"/api/library/{self.pub.pk}/recommend-answer",
+                {
+                    "stem": "草稿新题干",
+                    "options": {"A": "一", "B": "二", "C": "三", "D": "四", "F": "六", "H": "八"},
+                    "question_type": "multiple_choice",
+                    "body_mode": "text",
+                },
+            )
+        self.assertEqual(res.status_code, 200, res.content)
+        data = res.json()
+        self.assertEqual(data["answer"], "AF")
+        self.assertEqual(data["engine"], "deepseek-test")
+        self.assertIn("草稿新题干", captured["prompt"])
+        self.assertIn("F. 六", captured["prompt"])
+        self.assertIn("H. 八", captured["prompt"])
+        self.assertEqual(LibrarySolution.objects.count(), 0)
+
+    def png_bytes(self):
+        buf = io.BytesIO()
+        Image.new("RGB", (120, 80), "blue").save(buf, format="PNG")
+        return buf.getvalue()
 
 
 def create_export_fixture(folder):

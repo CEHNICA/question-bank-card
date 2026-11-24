@@ -1,10 +1,10 @@
 /*
  * 逐题核对页。
  * 一道题 = 一张卡：左边是原卷里这道题的截图，右边是 AI 给出的最终题面和配图。
- * 人只做三件事：对了点"通过"；字错了点"改字"；截图范围或配图不对就拖一下。
+ * 人只做三件事：对了点"通过"；字错了点"编辑"；截图范围或配图不对就拖一下。
  *
  * 交互：J/K 在题卡间移动，Enter 通过并跳到下一张，Space 放大对照原卷，
- * E 改字，U 撤销通过，? 查看全部快捷键。题卡原卷截图上悬停会出现放大镜。
+ * E 编辑，U 撤销通过，? 查看全部快捷键。题卡原卷截图上悬停会出现放大镜。
  */
 const QBUpload = (() => {
   "use strict";
@@ -472,69 +472,8 @@ const QBNotify = (() => {
 
 // Editing a Markdown table in the stem's text box: insert one, add a row or a
 // column to the table under the cursor.
-const QBTableText = (() => {
-  "use strict";
-
-  const isRow = (line) => line.trim().startsWith("|") && (line.match(/\|/g) || []).length >= 2;
-
-  function insert(value, cursor) {
-    const at = Math.max(0, Math.min(value.length, Number(cursor) || 0));
-    const before = value.slice(0, at);
-    const after = value.slice(at);
-    const lead = before && !before.endsWith("\n") ? "\n" : "";
-    const tail = after && !after.startsWith("\n") ? "\n" : "";
-    const table = "|  |  |  |\n|---|---|---|\n|  |  |  |\n|  |  |  |";
-    return { value: `${before}${lead}${table}${tail}${after}`, cursor: before.length + lead.length + 2 };
-  }
-
-  // The table whose lines hold the cursor (a cursor on the line right after a
-  // table also counts).
-  function around(value, cursor) {
-    const lines = value.split("\n");
-    let offset = 0;
-    let line = 0;
-    for (; line < lines.length; line += 1) {
-      if (cursor <= offset + lines[line].length) break;
-      offset += lines[line].length + 1;
-    }
-    let index = Math.min(line, lines.length - 1);
-    if (!isRow(lines[index] || "") && index > 0 && isRow(lines[index - 1])) index -= 1;
-    if (!isRow(lines[index] || "")) return null;
-    let first = index;
-    let last = index;
-    while (first > 0 && isRow(lines[first - 1])) first -= 1;
-    while (last + 1 < lines.length && isRow(lines[last + 1])) last += 1;
-    if (last === first) return null;
-    return { lines, first, last };
-  }
-
-  function grow(value, cursor, what) {
-    const table = around(value, cursor);
-    if (!table) return null;
-    const { lines, first, last } = table;
-    const cells = (line) => {
-      const text = line.trim().replace(/^\|/, "").replace(/\|$/, "");
-      return text.split("|").length;
-    };
-    const width = Math.max(...lines.slice(first, last + 1).map(cells));
-    let focus;
-    if (what === "row") {
-      lines.splice(last + 1, 0, `|${"  |".repeat(width)}`);
-      focus = last + 1;
-    } else {
-      for (let index = first; index <= last; index += 1) {
-        const separator = /^\s*\|?(\s*:?-{3,}:?\s*\|)+\s*$/.test(lines[index]);
-        lines[index] = `${lines[index].replace(/\s*$/, "").replace(/\|?$/, "|")}${separator ? "---|" : "  |"}`;
-      }
-      focus = first;
-    }
-    const next = lines.join("\n");
-    const cursorAt = lines.slice(0, focus).reduce((sum, line) => sum + line.length + 1, 0) + 2;
-    return { value: next, cursor: Math.min(cursorAt, next.length) };
-  }
-
-  return { insert, grow };
-})();
+const QBTableText = (typeof window !== "undefined" && window.QBEditorHelpers?.QBTableText)
+  || (typeof require === "function" ? require("./qb-editor-helpers.js").QBTableText : null);
 
 // 新手教学：在示例试卷上一步步做一遍。每一步什么时候算做对，由这里判断。
 const QBTeach = (() => {
@@ -547,7 +486,7 @@ const QBTeach = (() => {
     { key: "cutComplete", section: "basic", title: "完成这次切题",
       text: "第 1 题已保存。点“返回审核”（Ctrl+Enter），回到题卡。本练习保留原图，不调用 AI 识读。" },
     { key: "fix", section: "basic", title: "改好第 9 题的错字",
-      text: "原卷写的是“向右移动 5 个单位”。点第 9 题的“改字”，把 3 改成 5，再保存。" },
+      text: "原卷写的是“向右移动 5 个单位”。点第 9 题的“编辑”，把 3 改成 5，再保存。" },
     { key: "tick9", section: "basic", title: "核对并通过第 9 题",
       text: "对照原卷，确认刚改的题干、选项和配图都正确，再点第 9 题左边的方框。通过后自动进入练习题库。" },
     { key: "tick", section: "basic", title: "核对并通过第 1 题",
@@ -559,7 +498,7 @@ const QBTeach = (() => {
     { key: "export", section: "basic", title: "导出这份练习",
       text: "先核对实际 PDF 预览，再点击导出 PDF。" },
     { key: "finish", section: "basic", title: "练习完成", manual: true, final: true,
-      text: "你已实际切题、改字、核对通过、选题并导出。现在可以上传自己的试卷；遇到补图、跨页或答案问题时，再打开帮助中的对应说明。" },
+      text: "你已实际切题、编辑、核对通过、选题并导出。现在可以上传自己的试卷；遇到补图、跨页或答案问题时，再打开帮助中的对应说明。" },
     { key: "figure", section: "figure", title: "补上第 2 题的配图",
       text: "点“补选配图”，在原卷上点蓝色候选图，选择“题干”，再保存。保存后还需重新核对。" }
   ];
@@ -1028,10 +967,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
 
   const $ = (id) => document.getElementById(id);
   const R = window.QBRender;
-  const OPTION_KEYS = ["A", "B", "C", "D", "E"];
+  const OPTION_KEYS = R?.OPTION_KEYS || ["A", "B", "C", "D", "E", "F", "G", "H"];
   const CHOICE = new Set(["single_choice", "multiple_choice"]);
   const TYPE_NAMES = { single_choice: "单选题", multiple_choice: "多选题", fill_blank: "填空题", true_false: "判断题", free_response: "解答题", unknown: "题型未定" };
-  const SLOT_NAMES = { stem: "题干", A: "选项A", B: "选项B", C: "选项C", D: "选项D", E: "选项E" };
+  const SLOT_NAMES = { stem: "题干", ...Object.fromEntries(OPTION_KEYS.map((key) => [key, `选项${key}`])) };
   const FILTERS = [
     { key: "all", label: "全部" },
     { key: "todo", label: "需要核查" },
@@ -1085,6 +1024,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     },
     onSwitchToManual: () => void switchToManual()
   }) || null;
+  const splitUserToggledPapers = new Set();
   if (splitCanvas) {
     splitCanvas.bindEvents();
     const wideDesktop = typeof window.matchMedia === "function"
@@ -1093,9 +1033,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const savedSplit = readPref("qb-split-canvas", wideDesktop ? "1" : "0") === "1";
     splitCanvas.setOpen(wideDesktop && savedSplit, { render: false });
     $("splitCanvasToggle")?.addEventListener("click", () => {
+      if (state.paperId) splitUserToggledPapers.add(state.paperId);
       writePref("qb-split-canvas", splitCanvas.isOpen() ? "1" : "0");
     });
     $("splitCanvasClose")?.addEventListener("click", () => {
+      if (state.paperId) splitUserToggledPapers.add(state.paperId);
       writePref("qb-split-canvas", "0");
     });
   }
@@ -1302,7 +1244,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       return false;
     }
     return editGuard.discard((count) => confirmDialog({
-      title: "改字还没保存",
+      title: "编辑还没保存",
       text: `${count} 道题有未保存的改动。丢弃后不会修改题库里的题目；也可以继续编辑，再点保存。`,
       ok: "丢弃改动", cancel: "继续编辑", danger: true, focusCancel: true
     }), ids);
@@ -2019,30 +1961,36 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       statusText.textContent = `全部 ${c.all} 题已处理完。` + aiNote(c);
     }
     if (!isProcessing) {
-      // 1.12.7：这两行以前只在 parse_mode 还是「native」时显示，而失败时后台已经
-      // 把它改成「manual」了 —— 于是「这份资料没有 PDF 文字层」被吞掉，用户只看到
-      // 「本地文字层没有可靠题卡」，那句话像在说材料坏了。照片本来就没有文字层。
       const plan = paper.processing_plan || {};
       const manualPages = (plan.pages || []).filter((page) => page.mode === "manual");
       const noTextLayer = !paper.parse_mode || paper.parse_mode !== "mineru";
+      const reason = String(plan.fallback_reason || "").trim();
+      const inErrorBar = Boolean(reason) && String(paper.error || "").includes(reason);
+      const showReason = Boolean(reason) && !inErrorBar && !QBReviewGuidance.historicalParseReason(paper);
+      const rawWarnings = Array.isArray(plan.warnings)
+        ? plan.warnings.map((w) => String(w || "").trim()).filter(Boolean)
+        : [];
+      const seenDetails = new Set();
+      const details = [];
+      const pushDetail = (line) => {
+        const clean = String(line || "").trim();
+        if (!clean || seenDetails.has(clean)) return;
+        if (Array.from(seenDetails).some((item) => item.includes(clean) || clean.includes(item))) return;
+        seenDetails.add(clean);
+        details.push(clean);
+      };
+      if (showReason) pushDetail(reason);
+      rawWarnings.forEach(pushDetail);
       if (manualPages.length && noTextLayer) {
-        // 1.25.11：措辞和这句话和绿色完成条的关系都收在 QBProgress.manualPagesNote 里，
-        // 这样能直接测；别再把句子拼回这一行，免得哪天又改回「还有页没切出来」的口气。
         const note = QBProgress.manualPagesNote(manualPages.length, c.all);
-        if (note) statusText.append(el("span", "processing-detail", note));
+        if (!c.all && details.length && paper.pages?.length && paper.status === "ready") {
+          statusText.textContent = `共 ${paper.pages.length} 页，请从原卷手工选取题目。`;
+          if (note && !plan.native_book_fallback && !plan.native_numbering_fallback) pushDetail(note);
+        } else if (note) {
+          pushDetail(note);
+        }
       }
-      const warnings = plan.warnings;
-      if (Array.isArray(warnings) && warnings.length) statusText.append(el("span", "processing-detail", warnings.map(String).join("；")));
-    }
-    // Only known completed local/cloud route explanations move to history.
-    // Failures, missing pages, structure issues and unknown warnings stay visible.
-    // 后台拼那条红条时用的就是这句 fallback_reason（前面加「自动切题没有切出任何题目：」），
-    // 红条里已经有了就别在这儿再说一遍。判据用「红条是否包含这一句」，不要用
-    // 「状态是不是失败」—— worker 失败时红条可能是另一句话，那时这行仍然有用。
-    const reason = String(paper.processing_plan?.fallback_reason || "");
-    const inErrorBar = Boolean(reason) && String(paper.error || "").includes(reason);
-    if (reason && !inErrorBar && !QBReviewGuidance.historicalParseReason(paper)) {
-      statusText.append(el("span", "processing-detail", reason));
+      details.forEach((line) => statusText.append(el("span", "processing-detail", line)));
     }
     const processingPanel = $("processingPanel");
     processingPanel.hidden = !isProcessing;
@@ -2119,8 +2067,22 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     renderSettingsTask();
     renderIntakeStepper(paper, c);
     renderCutReadingStage();
+    const toolbarEl = $("toolbar");
+    if (toolbarEl) toolbarEl.hidden = !c.all && Boolean(paper.pages?.length);
     renderFilters(c);
     renderEntryChapterNav();
+    if (splitCanvas && !splitUserToggledPapers.has(paper.id)) {
+      const zeroReady = Boolean(!c.all && paper.pages?.length && !ACTIVE_STATUS.has(paper.status) && !paper.archived);
+      if (zeroReady) {
+        splitCanvas.setOpen(true, { render: false });
+      } else {
+        const wideDesktop = typeof window.matchMedia === "function"
+          ? window.matchMedia("(min-width: 1120px)").matches
+          : (window.innerWidth || 0) >= 1120;
+        const savedSplit = readPref("qb-split-canvas", wideDesktop ? "1" : "0") === "1";
+        splitCanvas.setOpen(wideDesktop && savedSplit, { render: false });
+      }
+    }
     splitCanvas?.syncPaper(paper);
     renderCards();
   }
@@ -2369,12 +2331,16 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     // 「继续切题与校正」保留 —— 还要从原卷补题时，那是入口。
     const allSettled = state.questions.length > 0 && state.questions.every((q) => Boolean(q.approved) || Boolean(q.publication && q.publication.up_to_date));
     host.dataset.stage = String(stage);
-    $("cutReadingSteps").replaceChildren(...["切题", "AI 识读", "审核"].map((label, index) => {
-      const step = el("li", index + 1 === stage ? "current" : index + 1 < stage ? "done" : "");
-      step.append(el("b", "", String(index + 1)), document.createTextNode(label));
-      if (index + 1 === stage) step.setAttribute("aria-current", "step");
-      return step;
-    }));
+    const stepsEl = $("cutReadingSteps");
+    if (stepsEl) {
+      stepsEl.hidden = Boolean($("intakeStepper") && !$("intakeStepper").hidden);
+      stepsEl.replaceChildren(...["切题", "AI 识读", "审核"].map((label, index) => {
+        const step = el("li", index + 1 === stage ? "current" : index + 1 < stage ? "done" : "");
+        step.append(el("b", "", String(index + 1)), document.createTextNode(label));
+        if (index + 1 === stage) step.setAttribute("aria-current", "step");
+        return step;
+      }));
+    }
     $("cutReadingTitle").textContent = allSettled ? "这份卷子的题都已入库"
       : stage === 1 ? "先切出每道题"
       : summary.pending ? (summary.saved
@@ -2389,15 +2355,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       ? "框出完整题目，跨页或跨栏可以添加多个片段。切题只保存原图范围，不调用 AI。"
       : summary.pending ? "AI 直接读取已保存的题目范围，无需重新框选。识读成功后文字会显示在原图旁，接着核对配图并审核。"
         : stage === 2 ? "题目范围已保存，尚未提交识读。你可以主动识读未完成题目，也可以直接原图审核或继续切题与校正。"
-          : "检查文字是否完整、题型及配图是否正确。读错可改字或重读这题；标签与参考答案仍默认关闭。";
+          : "检查文字是否完整、题型及配图是否正确。读错可编辑或重读这题；标签与参考答案仍默认关闭。";
     renderCutReadingProgress(summary, { allSettled, stage });
     const actions = $("cutReadingActions");
     actions.replaceChildren();
     const notReady = readerUnavailable();
     const configFailure = latestReaderConfigFailure();
     if (stage === 1) {
-      const cut = button(manualSwitches.has(paper.id) ? "正在准备原卷…" : "切题与校正", "primary", openManualCut,
-        "在同一原卷画布中补题、调框和改题号；完成后由你选择识读或直接审核");
+      const cut = button(manualSwitches.has(paper.id) ? "正在准备原卷…" : "开始切题与校正", "primary", openManualCut,
+        "在同一原卷画布中框选题目、调框和改题号；完成后由你选择识读或直接审核");
       cut.disabled = manualSwitches.has(paper.id) || aiCutContinuations.has(paper.id);
       actions.append(cut);
     } else if (summary.eligibleIds.length && !summary.pending) {
@@ -2512,7 +2478,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const ids = QBCutReading.cutReadingSummary(state.questions).eligibleIds;
     if (!ids.length) return;
     if (!state.status?.reader || state.status.assistant_mode) {
-      cutReadingErrors.set(paperId, "题目已切好并保留原图。自动 AI 识读需要看图读题服务，请在设置 → API 配置里配置；也可改字或直接原图审核。");
+      cutReadingErrors.set(paperId, "题目已切好并保留原图。自动 AI 识读需要看图读题服务，请在设置 → API 配置里配置；也可编辑或直接原图审核。");
       renderCutReadingStage();
       return;
     }
@@ -2707,7 +2673,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         : blocked ? "配图还没处理好，点一下去处理"
           : typeBlocked ? "题型还没定，点一下去选题型"
           : canApprove(q) ? "对照原卷无误就打勾：标记通过（Enter）"
-            : q.state === "red" ? "识读失败的题需先改字或重读，不能直接通过" : "请等待识读完成";
+            : q.state === "red" ? "识读失败的题需先编辑或重读，不能直接通过" : "请等待识读完成";
     tick.disabled = !(ticked || blocked || typeBlocked || canApprove(q));
     tick.append(icon("check"));
     tick.addEventListener("click", (event) => {
@@ -2820,11 +2786,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       container.querySelectorAll(".cards-empty").forEach((node) => node.remove());
       const empty = el("div", "cards-empty");
       if (!state.questions.length && state.paper?.pages?.length && !ACTIVE_STATUS.has(state.paper.status)) {
-        empty.append(el("strong", "", "原卷已保存"), el("span", "", "框出题目范围，跨栏或跨页可以继续添加片段。完成后可主动选择 AI 识读或直接原图审核。"));
-        // The cutting panel owns the main entry. The empty state is a fallback
-        // only when the panel is absent, independent of the previous render.
-        if (!QBCutReading.showCutReadingStage(state.paper, QBCutReading.cutReadingSummary(state.questions))) {
-          const cut = button("切题与校正", "primary", openManualCut);
+        const hasStageCard = QBCutReading.showCutReadingStage(state.paper, QBCutReading.cutReadingSummary(state.questions));
+        empty.append(
+          el("strong", "", hasStageCard ? "左侧可直接翻页浏览原卷" : "原卷已保存"),
+          el("span", "", hasStageCard
+            ? "点击上方「开始切题与校正」或画布工具栏「切题与校正」即可框选题目，完成后可自行选择 AI 识读或原图审核。"
+            : "框出题目范围，跨栏或跨页可以继续添加片段。完成后可主动选择 AI 识读或直接原图审核。")
+        );
+        if (!hasStageCard) {
+          const cut = button("开始切题与校正", "primary", openManualCut);
           cut.id = "emptyManualCut";
           cut.disabled = manualSwitches.has(state.paperId) || aiCutContinuations.has(state.paperId);
           empty.append(cut);
@@ -3281,7 +3251,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         else if (isAiApproved(q) || canApprove(q)) approveQuestion(q, true);
         else if (figureBlocksApproval(q)) focusFigureReview(q);
         else if (typeBlocksApproval(q)) focusTypePicker(q);
-        else toast(q.state === "red" ? "识读失败的题需先改字或重读，不能直接通过" : "请等待识读完成", "error");
+        else toast(q.state === "red" ? "识读失败的题需先编辑或重读，不能直接通过" : "请等待识读完成", "error");
         break;
       case " ":
         if (onControl) return;
@@ -4399,7 +4369,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const box = el("div", "reading-suggestion-actions");
     box.append(el("p", "hint", `${service ? `“${service}”` : "看图读题服务"}还没有 API Key，所以这次识读没有发出请求。`
       + "原卷、已切好的题目和人工改过的内容都保留着：配好密钥后可以直接重新识读，"
-      + "也可以先对照原图审核或改字，不影响这一份资料。"));
+      + "也可以先对照原图审核或编辑，不影响这一份资料。"));
     box.append(button("配置 API", "small primary", () => openCredentialSettings(),
       "在本机填写这家的 API Key；填好后回到题卡点“重新 AI 识读”即可"));
     return box;
@@ -4674,7 +4644,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       actions.append(pick);
     }
     actions.append(
-      button("改字", "", () => openEditor(card, q), "修改题干、选项、题型，也可以补答案和解析（E）"),
+      button("编辑", "", () => openEditor(card, q), "修改题干、选项、题型，也可以补答案和解析（E）"),
       button("调整范围", q.regions.length ? "" : "primary", () => openPageDialog("regions", q), rangeAdjustHint()),
       ...(q.body_mode === "source_image" ? [] : [button("配图", "", () => openPageDialog("figures", q), "增删配图，或调整配图的裁剪框（F）", { iconName: "image" })])
     );
@@ -4742,7 +4712,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     const preview = el("div", "reading-suggestion-body");
     R.renderQuestion(preview, { ...suggestion, body_mode: "text", figures: (suggestion.figures || []).filter((figure) => figure.url) }, { showNumber: false, showAnswer: "none" });
-    panel.append(preview, el("p", "hint", "请对照原图核对文字与配图。读错可以改字或重新识读。"));
+    panel.append(preview, el("p", "hint", "请对照原图核对文字与配图。读错可以编辑或重新识读。"));
     return panel;
   }
 
@@ -4759,7 +4729,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       try {
         const data = await api(`/api/questions/${q.id}/figure-table`, { method: "POST", body: { figure: index } });
         applyQuestion(data);
-        toast(`第 ${q.number} 题的表格已写进题干；请对照原卷逐格核对，位置不对可以在“改字”里挪`, "success");
+        toast(`第 ${q.number} 题的表格已写进题干；请对照原卷逐格核对，位置不对可以在“编辑”里挪`, "success");
         setCurrent(q.id, { focus: true });
       } catch (error) {
         toast(error.message, "error");
@@ -6045,18 +6015,19 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         const node = card.querySelector(selector);
         if (node) node.hidden = hidden;
       }
-      toast(`改字面板没能打开：${error && error.message ? error.message : error}`, "error");
+      toast(`编辑面板没能打开：${error && error.message ? error.message : error}`, "error");
     }
   }
 
   function openEditorPanel(card, q, { prefill = null, regionInsert = null } = {}) {
-    // 1.26.34：老师正在改这道题，助手别来动它。
+    // 1.26.34：老师正在编辑这道题，助手别来动它。
     reportTeacherActivity(q.id, "editing");
     if (card.querySelector(".editor")) {
-      if (prefill || regionInsert) toast("先保存或取消正在改的字，再填入框选识读的结果", "error");
+      if (prefill || regionInsert) toast("先保存或取消正在编辑的内容，再填入框选识读的结果", "error");
       card.querySelector(".stem-input")?.focus();
       return;
     }
+    const H = window.QBEditorHelpers;
     state.editing.add(q.id);
     setCurrent(q.id);
     const editor = el("form", "editor");
@@ -6071,12 +6042,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     stem.value = q.stem;
     stem.rows = 2;
     stem.spellcheck = false;
-    // The box is as tall as the text in it (up to 40% of the window), so the
-    // live preview right under it stays in sight.
-    const fitStem = () => {
-      stem.style.height = "auto";
-      stem.style.height = `${Math.min(stem.scrollHeight + 2, Math.round(window.innerHeight * 0.4))}px`;
-    };
+    const fitStem = () => H.fitAutoHeight(stem, { minRows: 2, maxHeightPx: Math.round(window.innerHeight * 0.4) });
     const stemRow = el("label", "field");
     stemRow.append(el("span", "", "题干（公式用 $…$ 包住的 LaTeX）"), stem);
     if (regionInsert) {
@@ -6092,119 +6058,63 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }));
       stemRow.append(insert);
     }
-    // Tables are text: pipe rows under the stem, previewed as a real table.
-    const tableTools = el("div", "table-tools");
-    const editTable = (change) => {
-      const next = change(stem.value, stem.selectionStart);
-      if (!next) return;
-      stem.value = next.value;
-      stem.focus();
-      stem.setSelectionRange(next.cursor, next.cursor);
-      stem.dispatchEvent(new Event("input", { bubbles: true }));
-    };
-    tableTools.append(
-      button("插入表格", "small", () => editTable(QBTableText.insert)),
-      button("表格加一行", "small", () => editTable((value, cursor) => QBTableText.grow(value, cursor, "row") || (toast("先把光标放在要加行的表格里", "error"), null))),
-      button("表格加一列", "small", () => editTable((value, cursor) => QBTableText.grow(value, cursor, "col") || (toast("先把光标放在要加列的表格里", "error"), null))),
-      el("small", "hint", "表格每行一行，格子用 | 隔开；第二行的 |---| 表示第一行是表头；空格子留空，预览里会排成表格")
-    );
 
-    const optionBox = el("div", "option-inputs");
-    const optionInputs = {};
-    OPTION_KEYS.forEach((key) => {
-      const row = el("label", "field inline");
-      const input = el("input");
-      input.value = (q.options || {})[key] || "";
-      input.spellcheck = false;
-      optionInputs[key] = input;
-      if (key === "E") {
-        // Most choice questions stop at D; E is there for the ones that print it.
-        input.placeholder = "原卷没有 E 选项就留空";
-        row.classList.add("optional");
-      }
-      row.append(el("span", "", key), input);
-      optionBox.append(row);
+    const stemToolbar = H.buildStemToolbar({
+      stemInput: stem,
+      typeSelect,
+      onToast: toast,
+      createEl: el
     });
-    const extra = el("details", "extra");
-    extra.append(el("summary", "", "原卷参考答案与解析（可选；入库后可在题库工作台单独编辑正式解析）"));
-    if ((q.answer || "").trim() || (q.analysis || "").trim()) extra.open = true;
-    const answer = el("input");
+    const tableTools = stemToolbar.element;
+
+    const optionEditor = H.buildDynamicOptionEditor({
+      optionKeys: OPTION_KEYS,
+      initialOptions: q.options || {},
+      initialFigures: q.figures || [],
+      createEl: el,
+      onAdd: (_key, input) => { cursorSync?.attachInput(input); update(); },
+      onRemove: () => { update(); }
+    });
+    const optionBox = optionEditor.container;
+    const optionInputs = optionEditor.inputs;
+
+    const extra = el("details", "extra editor-answer-section");
+    extra.open = true;
+    extra.append(el("summary", "", "答案与解析（可选；入库后可在题库工作台单独编辑解析配图与版本）"));
+    const answerHead = el("div", "editor-answer-head");
+    answerHead.append(el("span", "editor-answer-subtitle", "支持 $...$ 公式；填空题多个空按顺序写在一个输入框内即可"));
+
+    const answer = el("textarea", "editor-answer-input");
+    answer.rows = 2;
     answer.value = q.answer || "";
-    const analysis = el("textarea");
-    analysis.rows = 3;
+    answer.spellcheck = false;
+    const answerWrap = el("div", "editor-answer-field-wrap");
+    answerWrap.append(answer);
+    const answerRow = el("label", "field");
+    answerRow.append(el("span", "", "答案"), answerWrap);
+
+    const analysis = el("textarea", "editor-analysis-input");
+    analysis.rows = 4;
     analysis.value = q.analysis || "";
-    const answerRow = el("label", "field inline");
-    answerRow.append(el("span", "", "答案"), answer);
+    analysis.spellcheck = false;
+    const analysisWrap = el("div", "editor-answer-field-wrap");
+    analysisWrap.append(analysis);
     const analysisRow = el("label", "field");
-    analysisRow.append(el("span", "", "解析"), analysis);
-    extra.append(answerRow, analysisRow);
-    // 实时预览：边打字边排版成保存后的样子。并排布局时放在左栏原卷截图
-    // 下面，和原卷上下对照；截图太高、上下堆叠或窄屏时放在题干输入框下面。
-    const previewBox = el("div", "editor-preview-box");
-    const preview = el("div", "editor-preview");
-    // These two lines only explain what is already happening. They can be
-    // switched off permanently; the position markers they describe and the
-    // save shortcut they mention keep working either way.
-    const positionHint = window.QBShortcutHelp?.hintDismissed?.("editor-position")
-      ? el("p", "editor-position-hint", "") : el("p", "editor-position-hint", "点击输入框，预览会标出正在修改的位置。");
-    positionHint.hidden = !positionHint.textContent;
-    previewBox.append(el("p", "preview-label", "预览 · 随输入实时更新"), positionHint, preview);
-    // 顶栏是整张卡的直接子元素，不在 <form> 里，所以这个按钮不能是 submit ——
-    // 点了什么都不会发生。改成普通按钮，转手提交表单。
-    const saveButton = el("button", "button primary", "保存");
-    saveButton.type = "button";
-    saveButton.addEventListener("click", () => editor.requestSubmit());
-    const shortcutNote = window.QBShortcutHelp?.hintDismissed?.("editor-shortcut")
-      ? null : el("p", "hint", "Ctrl+Enter 保存 · Esc 取消");
-    // 1.12.7：改字占满整屏，顶栏一条操作栏收着返回、换题、题型和保存。
-    // 原来钉在面板顶部/底部的那种悬浮条取消，屏幕下半永远不会被压住。
-    // 全屏里也要能换题，否则藏起试卷列表后很容易不知道自己在第几题。
-    // 换题只能在展开着的题卡之间走：已通过而没展开的题渲染成一行摘要，根本没有
-    // 题干可改，从 DOM 里挑出真正能打开的那些，才不会跳过去扑个空。
-    // 这份名单**每次点的时候现算**。以前在构建操作栏那一刻抓一次存进闭包，可换题
-    // 会 discardEdits → 重画卡片列表 → 旧闭包里的下标和节点引用全都对不上：
-    // 实测「下一题」第一下没反应、「上一题」反而往前走一题。
-    const editableSiblings = () => [...document.querySelectorAll(".card:not(.compact)")]
-      .map(node => state.questions.find(item => String(item.id) === node.dataset.id)).filter(Boolean);
-    const siblings = editableSiblings();
-    const here = siblings.findIndex((item) => item.id === q.id);
-    const jump = async (delta) => {
-      const list = editableSiblings();
-      const from = list.findIndex((item) => item.id === q.id);
-      const other = list[from + delta];
-      if (!other) return;
-      if (state.editing.has(other.id)) { toast("那道题正在改字，先保存或取消", "error"); return; }
-      if (!(await discardEdits([q.id]))) return;
-      // 目标节点必须在这之后再找：那一步可能已经把卡片列表重画过了。
-      const target = document.querySelector(`.card[data-id="${other.id}"]`);
-      if (!target) { toast("那道题刚刚变了，请再点一次", "error"); return; }
-      openEditor(target, other);
+    analysisRow.append(el("span", "", "解析"), analysisWrap);
+
+    const fitAnswerBoxes = () => {
+      H.fitAutoHeight(answer, { minRows: 2, maxHeightPx: 180 });
+      H.fitAutoHeight(analysis, { minRows: 4, maxHeightPx: 320 });
     };
-    const back = button("← 返回", "", () => discardEdits([q.id]));
-    back.title = "回到审核列表；有未保存的改动会先问一句";
-    const place = el("div", "editor-bar-place");
-    place.append(el("span", "editor-bar-count", `第 ${q.number} 题 / 共 ${state.questions.length} 题`));
-    // 「共 N 题」数的是整份卷，可「换题」只在展开着的题卡之间走（见上面的说明）。
-    // 两边对不上时不说清楚，老师会以为漏看了：从 11 按下一题到了 13，
-    // 或者按到最后一道按不动了，屏幕上一个字都没有交代。
-    const folded = state.questions.length - siblings.length;
-    if (folded > 0) {
-      place.append(el("span", "editor-bar-folded", folded === 1
-        ? "另有 1 题已通过、折叠着，换题不会经过"
-        : `另有 ${folded} 题已通过、折叠着，换题不会经过`));
-    }
-    const prevButton = button("‹ 上一题", "small", () => jump(-1));
-    const nextButton = button("下一题 ›", "small", () => jump(1));
-    prevButton.disabled = here <= 0;
-    nextButton.disabled = here < 0 || here >= siblings.length - 1;
-    place.append(prevButton, nextButton);
-    const typeField = el("label", "editor-bar-type");
-    typeField.append(el("span", "", "题型"), typeSelect);
-    const bar = el("div", "editor-bar");
-    bar.append(back, place, el("span", "editor-bar-spacer"), typeField);
-    if (shortcutNote) bar.append(shortcutNote);
-    bar.append(saveButton);
-    editor.append(stemRow, tableTools, optionBox, extra);
+
+    answer.addEventListener("input", () => {
+      answerWrap.classList.remove("is-ai-suggested");
+      fitAnswerBoxes();
+    });
+    analysis.addEventListener("input", () => {
+      analysisWrap.classList.remove("is-ai-suggested");
+      fitAnswerBoxes();
+    });
 
     const collect = () => ({
       stem: stem.value,
@@ -6213,91 +6123,150 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       answer: answer.value,
       analysis: analysis.value
     });
-    editGuard.track(q.id, collect, () => close(), () => stem.focus({ preventScroll: true }));
-    const previewInputs = new Map([[stem, "stem"], [answer, "answer"], [analysis, "analysis"],
-      ...OPTION_KEYS.map((key) => [optionInputs[key], key])]);
-    const fieldName = (field) => ({ stem: "题干", answer: "答案", analysis: "解析" }[field] || `${field} 选项`);
-    let activePreviewInput = stem;
-    let composing = false;
-    let positionFrame = 0;
-    const showPosition = () => {
-      const input = activePreviewInput;
-      if (!input || !previewInputs.has(input)) return;
-      const field = previewInputs.get(input);
-      const shown = R.previewSelection(preview, { field, start: input.selectionStart ?? 0, end: input.selectionEnd ?? 0 });
-      const detail = composing ? "正在输入，预览会跟随输入内容更新。"
-        : shown?.kind === "math" ? (shown.automatic
-          ? "蓝框对应正在修改的数字或数学内容；实际输入位置请看输入框光标。"
-          : shown.exact
-          ? "绿色符号对应光标附近或所选范围，蓝框是这条公式；实际插入位置请看输入框光标。"
-          : "蓝框是正在修改的公式；公式内的位置请看输入框光标。$…$ 和反斜杠是公式写法。")
-        : shown?.kind === "table" ? "正在修改表格；分隔线和 | 用来排表格，输入框保留原写法。"
-        : shown?.kind === "blank" ? "正在修改这处填空；输入框保留原来的括号或下划线。"
-        : shown?.collapsed ? "绿线是当前输入位置。选中文字时，预览会标出对应范围。"
-        : "浅绿色是当前选中的文字；替换后预览会更新。";
-      positionHint.textContent = `${fieldName(field)} · ${detail}`;
-      preview.dataset.activeField = field;
-      // Reveal a position only inside this preview's own scroll area. Never
-      // move the page, and leave its scroll alone while the position is visible.
-      const symbol = Array.from(preview.querySelectorAll(".qb-preview-active-symbol [style]"))
-        .find((node) => node.style.color === "rgb(31, 107, 95)" || node.style.color === "#1f6b5f");
-      const target = symbol || preview.querySelector(".qb-preview-caret, .qb-preview-selection, .qb-preview-active-formula, .qb-preview-active-region");
-      if (target) {
-        const bounds = preview.getBoundingClientRect();
-        const rect = target.getBoundingClientRect();
-        if (preview.scrollHeight > preview.clientHeight) {
-          if (rect.top < bounds.top + 10) preview.scrollTop -= bounds.top + 10 - rect.top;
-          else if (rect.bottom > bounds.bottom - 10 && rect.height < preview.clientHeight - 20) preview.scrollTop += rect.bottom - bounds.bottom + 10;
-        }
-        if (preview.scrollWidth > preview.clientWidth) {
-          if (rect.left < bounds.left + 10) preview.scrollLeft -= bounds.left + 10 - rect.left;
-          else if (rect.right > bounds.right - 10 && rect.width < preview.clientWidth - 20) preview.scrollLeft += rect.right - bounds.right + 10;
-        }
+
+    const aiWidget = H.createAiRecommendWidget({
+      QB: R,
+      createEl: el,
+      onToast: toast,
+      getEndpoint: () => `/api/questions/${q.id}/recommend-answer`,
+      getPayload: () => {
+        const draft = collect();
+        return {
+          stem: draft.stem,
+          options: draft.options,
+          question_type: draft.question_type,
+          body_mode: q.body_mode || "text"
+        };
+      },
+      hasExistingContent: () => Boolean(answer.value.trim() || analysis.value.trim()),
+      applyResult: (result) => {
+        if (result.answer !== undefined) answer.value = result.answer || "";
+        if (result.analysis !== undefined) analysis.value = result.analysis || "";
+        fitAnswerBoxes();
+        update();
+      },
+      markAiDraft: (flag) => {
+        answerWrap.classList.toggle("is-ai-suggested", Boolean(flag) && Boolean(answer.value.trim()));
+        analysisWrap.classList.toggle("is-ai-suggested", Boolean(flag) && Boolean(analysis.value.trim()));
+        syncDirtyBadge();
+      },
+      onOpenSettings: async (url) => {
+        if (await discardEdits([q.id])) window.location.assign(url);
       }
-    };
-    const updatePosition = (event) => {
-      if (previewInputs.has(event?.target)) activePreviewInput = event.target;
-      if (positionFrame) return;
-      positionFrame = requestAnimationFrame(() => { positionFrame = 0; showPosition(); });
-    };
-    previewInputs.forEach((field, input) => {
-      ["focus", "click", "select", "keyup"].forEach((name) => input.addEventListener(name, updatePosition));
-      input.addEventListener("compositionstart", (event) => { composing = true; updatePosition(event); });
-      input.addEventListener("compositionend", (event) => { composing = false; updatePosition(event); });
     });
-    const selectionChanged = () => { if (previewInputs.has(document.activeElement)) updatePosition({ target: document.activeElement }); };
-    document.addEventListener("selectionchange", selectionChanged);
-    // One typeset per frame however fast the typing is.
+    answerHead.append(aiWidget.button);
+    extra.append(answerHead, aiWidget.status, aiWidget.previewBox, answerRow, analysisRow);
+
+    const previewBox = el("div", "editor-preview-box");
+    const preview = el("div", "editor-preview");
+    const positionHint = window.QBShortcutHelp?.hintDismissed?.("editor-position")
+      ? el("p", "editor-position-hint", "") : el("p", "editor-position-hint", "点击输入框，预览会标出正在修改的位置。");
+    positionHint.hidden = !positionHint.textContent;
+    previewBox.append(el("p", "preview-label", "预览 · 随输入实时更新"), positionHint, preview);
+
+    const editableSiblings = () => [...document.querySelectorAll(".card:not(.compact)")]
+      .map((node) => state.questions.find((item) => String(item.id) === node.dataset.id)).filter(Boolean);
+    const siblings = editableSiblings();
+    const here = siblings.findIndex((item) => item.id === q.id);
+    const jump = async (delta) => {
+      const list = editableSiblings();
+      const from = list.findIndex((item) => item.id === q.id);
+      const other = list[from + delta];
+      if (!other) return;
+      if (state.editing.has(other.id)) { toast("那道题正在编辑，先保存或取消", "error"); return; }
+      if (!(await discardEdits([q.id]))) return;
+      const target = document.querySelector(`.card[data-id="${other.id}"]`);
+      if (!target) { toast("那道题刚刚变了，请再点一次", "error"); return; }
+      openEditor(target, other);
+    };
+
+    const initialSnapshot = JSON.stringify(collect());
+    const folded = state.questions.length - siblings.length;
+    const barObj = H.buildEditorBar({
+      createEl: el,
+      backLabel: "← 返回",
+      backTitle: "回到审核列表；有未保存的改动会先确认（Esc）",
+      onBack: () => discardEdits([q.id]),
+      countText: `第 ${q.number} 题 / 共 ${state.questions.length} 题`,
+      foldedCount: folded,
+      onPrev: () => jump(-1),
+      onNext: () => jump(1),
+      prevDisabled: here <= 0,
+      nextDisabled: here < 0 || here >= siblings.length - 1,
+      typeSelect,
+      saveLabel: "保存",
+      saveTitle: "Ctrl+Enter / Ctrl+S 保存 · Esc 返回",
+      onSave: () => editor.requestSubmit()
+    });
+    const { bar, saveButton, setBadge } = barObj;
+    const syncDirtyBadge = () => {
+      const changed = JSON.stringify(collect()) !== initialSnapshot;
+      setBadge(changed ? "● 未保存修改" : "", changed ? "dirty" : "neutral");
+    };
+
+    editor.append(stemRow, tableTools, optionBox, extra);
+
+    editGuard.track(q.id, collect, () => close(), () => stem.focus({ preventScroll: true }));
+    const buildInputsMap = () => new Map([
+      [stem, "stem"],
+      [answer, "answer"],
+      [analysis, "analysis"],
+      ...OPTION_KEYS.map((key) => [optionInputs[key], key])
+    ]);
+    const fieldName = (field) => ({ stem: "题干", answer: "答案", analysis: "解析" }[field] || `${field} 选项`);
+    const cursorSync = H.bindPreviewCursorSync({
+      R,
+      preview,
+      positionHint,
+      fieldLabel: fieldName,
+      getInputsMap: buildInputsMap,
+      initialInput: stem
+    });
+
     let frame = 0;
     const update = (event) => {
-      if (previewInputs.has(event?.target)) activePreviewInput = event.target;
-      optionBox.hidden = !CHOICE.has(typeSelect.value) && !OPTION_KEYS.some((k) => optionInputs[k].value.trim());
+      const map = buildInputsMap();
+      if (event?.target && map.has(event.target)) cursorSync.setActiveInput(event.target);
+      optionEditor.syncVisibility(typeSelect.value, q.figures || []);
+      stemToolbar.syncTypeState();
+      syncDirtyBadge();
       if (frame) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
         const data = collect();
         const scroll = { top: preview.scrollTop, left: preview.scrollLeft };
-        R.renderQuestion(preview, { ...content(q), ...data, body_mode: "text", options: optionBox.hidden ? {} : data.options }, { showNumber: false, showAnswer: "open", trackSource: true });
+        R.renderQuestion(
+          preview,
+          { ...content(q), ...data, body_mode: "text", options: optionBox.hidden ? {} : data.options },
+          { showNumber: false, showAnswer: "open", trackSource: true }
+        );
         preview.scrollTop = scroll.top;
         preview.scrollLeft = scroll.left;
-        showPosition();
+        cursorSync.showPosition();
       });
     };
-    // 1.12.7：预览不再追着题干上下对齐。全屏三块区域是网格排的，顶边天然在
-    // 同一条线上，原来那套按差值算 margin 的微调（placePreview /
-    // alignPreviewWithStem）连同它对窗口尺寸、原卷图片加载时机的依赖一起去掉了。
+
+    const handleResize = () => {
+      fitStem();
+      fitAnswerBoxes();
+      cursorSync.updatePosition();
+    };
     editor.addEventListener("input", update);
+    editor.addEventListener("change", update);
     stem.addEventListener("input", fitStem);
-    window.addEventListener("resize", () => { fitStem(); updatePosition(); });
+    window.addEventListener("resize", handleResize);
     editor.addEventListener("keydown", (event) => {
       if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.altKey) return;
-      if (event.key === "Escape" && !event.ctrlKey && !event.metaKey && !event.shiftKey) { event.preventDefault(); event.stopPropagation(); discardEdits([q.id]); }
-      else if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.shiftKey) {
+      if (event.key === "Escape" && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        discardEdits([q.id]);
+      } else if (
+        ((event.key === "Enter" || event.key.toLowerCase() === "s") && (event.ctrlKey || event.metaKey) && !event.shiftKey)
+      ) {
         event.preventDefault();
         if (!event.repeat) editor.requestSubmit();
-      }
-      // 1.26.33：改字的时候也能去原卷上框一块，读到的字直接进剪贴板，再粘回来。
-      else if (event.key.toLowerCase() === "c" && !event.ctrlKey && !event.metaKey && !event.shiftKey
+      } else if (event.key.toLowerCase() === "c" && !event.ctrlKey && !event.metaKey && !event.shiftKey
         && !QBUpload.isEditingTarget(event.target)) {
         event.preventDefault();
         openClipboardRead(q);
@@ -6324,14 +6293,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }
     });
     function close(rerender = true) {
+      aiWidget.abort();
+      cursorSync.teardown();
       editGuard.release(q.id);
       state.editing.delete(q.id);
       card.classList.remove("editing");
       editor.dispatchEvent(new Event("qb:editor-teardown"));
       cancelAnimationFrame(frame);
-      cancelAnimationFrame(positionFrame);
-      document.removeEventListener("selectionchange", selectionChanged);
-      window.removeEventListener("resize", fitStem);
+      window.removeEventListener("resize", handleResize);
       previewBox.remove();
       bar.remove();
       editor.remove();
@@ -6348,17 +6317,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const originLine = card.querySelector(".card-origin");
     if (originLine) originLine.hidden = true;
     card.querySelector(".reads")?.remove();
-    // 1.12.7：顶栏和预览是整张卡的直接子元素 —— 全屏网格按它们排（左上原卷、
-    // 左下编辑、右边预览），不再塞进题卡的正文栏里跟别的块抢位置。
     card.append(bar, previewBox);
     card.querySelector(".card-body").append(editor);
-    // 点「改字」就占满整屏：左边的试卷列表和顶栏收起来，只剩这一道题。
     card.classList.add("editing");
     document.body.classList.add("qb-editing");
     let prefilled = null;
     let prefillSelection = null;
     if (prefill) {
-      const target = Array.from(previewInputs).find(([, field]) => field === prefill.field)?.[0];
+      if (OPTION_KEYS.includes(prefill.field)) optionEditor.ensureKeyVisible(prefill.field);
+      const target = Array.from(buildInputsMap()).find(([, field]) => field === prefill.field)?.[0];
       const replacement = target && QBEdits.reviewedPrefill(target.value, prefill);
       if (replacement) {
         prefilled = target;
@@ -6370,6 +6337,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       } else toast("原题文字或替换范围已经变化，未填入识读结果；请重新核对", "error");
     }
     fitStem();
+    fitAnswerBoxes();
     update();
     (prefilled || stem).focus({ preventScroll: true });
     if (prefillSelection) prefilled.setSelectionRange(...prefillSelection);
@@ -6417,8 +6385,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const wait = regionWaits.get(key);
     if (!wait || wait.error) return;
     wait.error = wait.read.status === "queued"
-      ? "读题后台没有及时开始，本次等待已结束。请检查软件是否仍在运行，或手动改字；原题没有改变。"
-      : "读题服务超过等待时限，本次识读已结束。可稍后重试或手动改字；原题没有改变。";
+      ? "读题后台没有及时开始，本次等待已结束。请检查软件是否仍在运行，或手动编辑；原题没有改变。"
+      : "读题服务超过等待时限，本次识读已结束。可稍后重试或手动编辑；原题没有改变。";
     clearTimeout(wait.timer);
     regionLocalFailures.set(questionId, { key, read: wait.read, error: wait.error });
     const current = questionById(questionId);
@@ -6622,7 +6590,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         const suggestion = el("div", "region-recommendation");
         if (prefill) {
           suggestion.append(el("strong", "", `建议替换：${prefill.field === "stem" ? "题干中的这一段" : `选项 ${prefill.field}`}`),
-            el("p", "hint", r.why || "请对照原卷与下面的替换内容，确认位置后填入改字。"));
+            el("p", "hint", r.why || "请对照原卷与下面的替换内容，确认位置后填入编辑。"));
           const comparison = el("div", "region-location-comparison");
           [["替换前", r.before || "（原选项为空）", "region-location-before"],
             ["替换后", r.after, "region-location-after"]].forEach(([label, value, className]) => {
@@ -6641,7 +6609,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
             marks: { [prefill.field]: [{ start: prefill.start, end: prefill.end, kind: "region-location", exact: true }] } });
           position.append(location);
           suggestion.append(position);
-          actions.append(button("确认位置并填入改字", "small primary", () => fillRegionRead(card, q)));
+          actions.append(button("确认位置并填入编辑", "small primary", () => fillRegionRead(card, q)));
         } else {
           suggestion.append(el("strong", "", r.status === "stale" ? "题目已改过，这次位置建议已失效" : "没有确定的替换位置"),
             el("p", "hint", r.why || "识读文字已保留。可以重新框选，或手动选择它属于哪一部分。"));
@@ -6650,10 +6618,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         manual.append(el("strong", "", "这段文字放在哪里？"));
         const destinations = el("div", "region-read-actions");
         destinations.append(button("放到题干", "small", () => fillRegionRead(card, q, "stem")));
-        OPTION_KEYS.filter(key => key !== "E" || q.options?.E || q.region_read?.target === "E").forEach(key => {
+        OPTION_KEYS.filter(key => ["A", "B", "C", "D"].includes(key) || q.options?.[key] || q.region_read?.target === key).forEach(key => {
           destinations.append(button(`填到选项 ${key}`, "small", () => fillRegionRead(card, q, key)));
         });
-        manual.append(destinations, el("p", "hint", "选项会替换整个选项；题干可在改字中选择替换的一段。填入后保存即可。"));
+        manual.append(destinations, el("p", "hint", "选项会替换整个选项；题干可在编辑中选择替换的一段。填入后保存即可。"));
         suggestion.append(manual);
         panel.append(suggestion);
       } else {
@@ -6661,7 +6629,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         actions.append(button(label, "small primary", () => fillRegionRead(card, q)));
       }
     }
-    if (read.status === "failed") actions.append(button("手动改字", "small", () => openEditor(card, q)));
+    if (read.status === "failed") actions.append(button("手动编辑", "small", () => openEditor(card, q)));
     actions.append(button("重新框", "small", () => openPageDialog("read", q)),
       button(regionReadPending(q) ? "取消识读" : "关闭", "small quiet", () => dismissRegionRead(q)));
     panel.append(actions);
@@ -7717,7 +7685,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("figureSlotMenu").querySelector("[data-figure-slot-cancel]").addEventListener("click", () => {
     closeFigureSlotMenu({ cancelPending: true, rerender: true });
   });
-  const SLOT_KEYS = { s: "stem", a: "A", b: "B", c: "C", d: "D", e: "E", x: "irrelevant", j: "join" };
+  const SLOT_KEYS = { s: "stem", a: "A", b: "B", c: "C", d: "D", e: "E", f: "F", g: "G", h: "H", x: "irrelevant", j: "join" };
   $("figureSlotMenu").addEventListener("keydown", (event) => {
     if (dialog.saving || event.isComposing || event.keyCode === 229) return;
     if (event.key === "Escape") {
@@ -8357,7 +8325,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         const hint = /无关候选图/.test(error.message)
           ? "有一张被标成「与本题无关」的图，后端对不上它的身份。请关掉这个窗口，重新打开「配图」再保存一次（那一步会重新核对候选图）。"
           : "请重试。";
-        showCropResult(dialog.mode === "read" ? `识读未开始：${error.message}。框选仍保留，可以重试或手动改字。`
+        showCropResult(dialog.mode === "read" ? `识读未开始：${error.message}。框选仍保留，可以重试或手动编辑。`
           : `未保存：${error.message}。框选仍保留。${hint}`, true);
         toast(error.message, "error");
       }
@@ -9471,7 +9439,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     { target: () => $("paperList"), title: "继续已有试卷",
       text: "每份试卷的进度写在列表里，点一下继续；原卷会一直保留。" },
     { target: () => firstTourCard()?.querySelector(".card-tick"), title: "核对后通过，自动入库",
-      text: "先对照原卷核对题面，错字用“改字”修正。确认完整正确后打勾，通过即入库。" },
+      text: "先对照原卷核对题面，错字用“编辑”修正。确认完整正确后打勾，通过即入库。" },
     { target: () => document.querySelector('.topnav a[href="/eagle"]'), title: "找题和组卷", drawer: true,
       text: "题库工作台可以搜索、贴标签和选题组卷；选好题后先看预览，再导出。" },
     { target: () => $("settingsButton"), title: "遇到问题时看帮助", drawer: true,

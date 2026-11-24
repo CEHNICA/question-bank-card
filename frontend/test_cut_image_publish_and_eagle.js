@@ -9,6 +9,7 @@ const path = require("node:path");
 const indexHtml = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 const appJs = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 const eagleHtml = fs.readFileSync(path.join(__dirname, "eagle", "index.html"), "utf8");
+const unifiedEditorJs = fs.readFileSync(path.join(__dirname, "library-unified-editor.js"), "utf8");
 
 test("录题页提供独立的原图批量入库入口与 MinerU 只切题选项", () => {
   assert.match(indexHtml, /id="publishCutImages"/);
@@ -27,7 +28,8 @@ test("Eagle 题库支持题型未定、原图筛选、空题干编辑保存与 A
   assert.match(eagleHtml, /id="btnBodySourceImage"/);
   assert.match(eagleHtml, /id="btnBodyText"/);
   assert.match(eagleHtml, /function toggleBodyModeFilter\(/);
-  assert.match(eagleHtml, /if \(!q\.isSourceImage && !newStem\)/);
+  assert.match(eagleHtml, /q\.isSourceImage = nextSourceImg/);
+  assert.match(unifiedEditorJs, /if \(qDraft\.body_mode === "text" && !qDraft\.stem\.trim\(\)\)/);
   assert.match(eagleHtml, /async function ocrUpgradeQuestion\(/);
   assert.match(eagleHtml, /async function batchOcrUpgrade\(/);
   assert.match(eagleHtml, /\/api\/library\/ocr-upgrade-batch/);

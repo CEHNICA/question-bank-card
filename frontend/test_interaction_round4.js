@@ -57,7 +57,7 @@ assert.doesNotMatch(html, /class="material-options"/, "资料类型选择已撤�
 assert.doesNotMatch(css, /\.material-type/, "对应的样式也删干净");
 
 // Figure owners by key; the viewer offers editing.
-assert.match(js, /const SLOT_KEYS = \{ s: "stem", a: "A", b: "B", c: "C", d: "D", e: "E", x: "irrelevant", j: "join" \}/);
+assert.match(js, /const SLOT_KEYS = \{ s: "stem", a: "A", b: "B", c: "C", d: "D", e: "E", f: "F", g: "G", h: "H", x: "irrelevant", j: "join" \};/);
 assert.match(html, /data-figure-slot="irrelevant" aria-keyshortcuts="X"/);
 assert.match(html, /id="viewerEdit"/);
 assert.match(js, /key\.toLowerCase\(\) === "r" \|\| key\.toLowerCase\(\) === "f"/);

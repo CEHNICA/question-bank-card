@@ -143,7 +143,7 @@ class HandwrittenReadingTests(SimpleTestCase):
 
         self.assertEqual(written_mock.call_count, 1)
         self.assertIn("手写题", result["error"])
-        self.assertIn("改字", result["error"])
+        self.assertIn("编辑", result["error"])
         self.assertEqual(result["state"], Question.State.YELLOW)
 
     def test_an_undecidable_range_gets_both_causes_and_no_transcription(self):
@@ -151,7 +151,7 @@ class HandwrittenReadingTests(SimpleTestCase):
 
         self.assertEqual(printed_mock.call_count, 1)
         self.assertEqual(written_mock.call_count, 0)
-        self.assertIn("改字", result["error"])
+        self.assertIn("编辑", result["error"])
         self.assertIn("调整范围", result["error"])
 
     def test_the_generic_empty_stem_flag_is_not_shown_next_to_the_explanation(self):

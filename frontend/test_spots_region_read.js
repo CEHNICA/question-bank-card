@@ -83,14 +83,14 @@ assert.match(js, /function openEditorPanel\(card, q, \{ prefill = null, regionIn
 const guard = js.slice(js.indexOf("function openEditor(card, q, options)"), js.indexOf("function openEditorPanel("));
 assert.match(guard, /state\.editing\.delete\(q\.id\)/);
 assert.match(guard, /editGuard\.release\(q\.id\)/);
-assert.match(guard, /toast\(`改字面板没能打开：/);
+assert.match(guard, /toast\(`(?:改字|编辑)面板没能打开：/);
 assert.match(js, /prefilled\.classList\.add\("prefilled"\);/);
 assert.match(js, /method: "DELETE", body, signal/);
 // Without a clipboard (an older browser) it says so instead of failing silently.
 assert.match(js, /openEditor\(card, q, \{ regionInsert: read\.text \}\)/);
 // 1.26.33：「自动推荐（AI）」那一档没有了 —— 这一路只抄剪贴板。
 assert.doesNotMatch(html, /<option value="auto">自动推荐（AI）<\/option>/);
-// 别的入口（比如 AI 助手）排出来的识读记录，仍旧能在题卡上填入改字。
-assert.match(js, /确认位置并填入改字/);
+// 别的入口（比如 AI 助手）排出来的识读记录，仍旧能在题卡上填入编辑。
+assert.match(js, /确认位置并填入编辑/);
 
 console.log("spots / region read checks: OK");

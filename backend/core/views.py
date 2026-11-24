@@ -43,6 +43,7 @@ from . import (
     import_planning,
     intake,
     library,
+    library_ai_settings,
     library_jobs,
     m3import,
     mineru,
@@ -109,7 +110,7 @@ UPLOAD_KINDS = {".pdf": "pdf", ".jpg": "image", ".jpeg": "image", ".png": "image
 # 原页完整保留，由老师框题；判错了可以在「试卷操作」里按教材重试或改回。
 AUTO_BOOK_MIN_PAGES = 40
 TYPES = set(qtypes.TYPES)
-SLOTS = {"stem", "A", "B", "C", "D", "E"}
+SLOTS = {"stem", *library.OPTION_KEYS}
 
 
 # ---------------------------------------------------------------- 工具
@@ -245,7 +246,7 @@ def _unclassified_candidate_details(
     import re as _re
 
     _foreign_q = _re.compile(r"^q\d+$")
-    _bound = {"stem", "A", "B", "C", "D", "E"}
+    _bound = {"stem", *library.OPTION_KEYS}
     resolved_elsewhere_labels = {
         label
         for label, role in assignments.items()
@@ -2276,7 +2277,7 @@ def paper_read_cut_questions(request, paper_id):
         if candidates and not _vision_ready(paper):
             return _error(
                 _reader_unavailable_sentence(paper) + "请在“设置 → 服务与密钥”里补上密钥；也可以直接原图审核，"
-                "或由当前 AI 助手对照原图改字。",
+                "或由当前 AI 助手对照原图编辑。",
                 409,
             )
         now = timezone.now()
@@ -2640,8 +2641,8 @@ def approve_green(request, paper_id):
                         {
                             **_skip_locate(question),
                             "category": "还没读出题干",
-                            "detail": "请先改字或重新识读",
-                            "reason": "还没读出题干，请先改字或重新识读",
+                            "detail": "请先编辑或重新识读",
+                            "reason": "还没读出题干，请先编辑或重新识读",
                         }
                     )
                     continue
@@ -3218,7 +3219,7 @@ def question_region_read(request, question_id):
         return _error("请求内容不正确")
     question = get_object_or_404(Question.objects.select_related("paper"), pk=question_id)
     if request.method == "POST" and demo.is_demo(question.paper):
-        return _error("示例练习不调用云服务。可以练习画框，再对照原卷手工改字。", 409)
+        return _error("示例练习不调用云服务。可以练习画框，再对照原卷手工编辑。", 409)
     request_id = payload.get("client_request_id")
     if request_id is not None and (
         not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", request_id)
@@ -3341,7 +3342,7 @@ def question_action(request, question_id, action: str):
             if value and question.state not in library.REVIEWABLE_STATES:
                 return _error("这道题尚未进入可审核状态，请先完成识读或人工修正")
             if value and not source_images.body_valid(question):
-                return _error("缺少有效正文或原卷裁片，请先修正范围或改字")
+                return _error("缺少有效正文或原卷裁片，请先修正范围或编辑")
             review = source_images.review(question)
             if value and blocks_approval(review):
                 return _error(f"这道题暂时不能通过：{blocking_message(review)}。请先补配图，或确认本题确实无图")
@@ -3361,7 +3362,7 @@ def question_action(request, question_id, action: str):
             if body_mode not in {"text", "source_image"}:
                 return _error("请选择原图正文或文字正文")
             if body_mode == "text" and not question.stem.strip():
-                return _error("文字正文还为空，请先改字填写题干，或完成 AI 识读")
+                return _error("文字正文还为空，请先编辑填写题干，或完成 AI 识读")
             if body_mode == "source_image" and not source_images.valid_regions(question.paper, question.regions):
                 return _error("原图正文需要有效的原卷范围")
             question.body_mode = body_mode
@@ -3431,7 +3432,7 @@ def question_action(request, question_id, action: str):
             question.type_locked = True
         elif action == "reread":
             if demo.is_demo(question.paper):
-                return _error("示例练习不调用云服务。请对照原卷手工改字。", 409)
+                return _error("示例练习不调用云服务。请对照原卷手工编辑。", 409)
             if source_images.is_image(question) and (
                 question.paper.archived or question.paper.status != Paper.Status.READY
             ):
@@ -3488,7 +3489,7 @@ def question_action(request, question_id, action: str):
             block = tables.table_for_figure(question.paper, question.figures[index], blocks)
             table_text = tables.to_text(block["html"]) if block else ""
             if not table_text:
-                return _error("这张图没有可用的表格文字；请用“改字”手动输入表格")
+                return _error("这张图没有可用的表格文字；请用“编辑”手动输入表格")
             pieces = [block, *tables.continuations(block, blocks)]
             removed, kept = [], []
             for figure in question.figures:
@@ -4055,6 +4056,161 @@ def library_source_page(request, publication_id, page):
     return page_preview(request, publication.paper_id, page)
 
 
+def _parse_recommend_draft(payload: dict, *, stem: str, options: dict, question_type: str, body_mode: str) -> dict:
+    raw_mode = payload.get("body_mode", body_mode)
+    if raw_mode not in {"text", "source_image"}:
+        raise ValueError("正文模式不正确")
+    raw_type = payload.get("question_type", question_type)
+    if raw_type not in TYPES:
+        raise ValueError("题型不正确")
+    raw_stem = payload.get("stem", stem)
+    if not isinstance(raw_stem, str) or len(raw_stem) > 20000:
+        raise ValueError("题干格式或长度不正确")
+    raw_options = payload.get("options", options) or {}
+    if (
+        not isinstance(raw_options, dict)
+        or set(raw_options) - set(library.OPTION_KEYS)
+        or not all(isinstance(v, str) and len(v) <= 4000 for v in raw_options.values())
+    ):
+        raise ValueError("选项格式不正确")
+    cleaned_options = {
+        key: fix_symbols(raw_options[key].strip())
+        for key in library.OPTION_KEYS
+        if isinstance(raw_options.get(key), str) and raw_options[key].strip()
+    }
+    return {
+        "body_mode": raw_mode,
+        "question_type": raw_type,
+        "stem": fix_symbols(raw_stem.strip()),
+        "options": cleaned_options,
+    }
+
+
+def _encode_image_paths(paths: list[Path], *, long_side: int) -> list[str]:
+    if len(paths) > 6:
+        raise library_jobs.JobError("这道题配图或原图片段超过 6 张，当前接口无法完整发送；请精简后重试。")
+    urls: list[str] = []
+    for path in paths:
+        if path.is_symlink() or not path.is_file():
+            raise library_jobs.JobError("题目配图缺失，未生成推荐答案；请先核对配图。")
+        try:
+            with Image.open(path) as image:
+                urls.append(imaging.jpeg_data_url(image, long_side=long_side))
+        except (OSError, ValueError):
+            raise library_jobs.JobError("题目配图无法打开，未生成推荐答案；请先核对配图。") from None
+    return urls
+
+
+def _run_recommend_answer(content: dict, image_urls: list[str]) -> JsonResponse:
+    if content.get("body_mode") == "text" and not content.get("stem") and not image_urls:
+        return _error("请先填写题干或保留原图后再让 AI 推荐答案")
+    try:
+        result = library_jobs.recommend_answer(content, image_urls)
+    except library_ai_settings.SettingsError as error:
+        return JsonResponse({"error": str(error), "code": "api_not_configured"}, status=409)
+    except (library_jobs.JobError, readers.ReaderError) as error:
+        return _error(str(error), 502)
+    return JsonResponse(result)
+
+
+@csrf_exempt
+def question_recommend_answer(request, question_id):
+    """按录题编辑框当前草稿实时调用答题 API 推荐参考答案与解析（不写库、不改动全局配置）。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request)
+    if payload is None:
+        return _error("请求内容不正确")
+    question = _question(question_id)
+    if demo.is_demo(question.paper):
+        return _error("示例练习不调用答题模型，请对照解析自行整理。", 409)
+    try:
+        content = _parse_recommend_draft(
+            payload,
+            stem=question.stem or "",
+            options=question.options or {},
+            question_type=question.question_type or "unknown",
+            body_mode=question.body_mode or "text",
+        )
+    except ValueError as error:
+        return _error(str(error))
+    try:
+        if content["body_mode"] == "source_image":
+            items = source_images.assets(question)
+            paths = [source_images.asset_file(question, idx) for idx in range(len(items))]
+            image_urls = _encode_image_paths(paths, long_side=2400)
+        else:
+            paths = [library.figure_file(question, idx) for idx in range(len(question.figures or []))]
+            image_urls = _encode_image_paths(paths, long_side=1400)
+    except library_jobs.JobError as error:
+        return _error(str(error), 409)
+    except (OSError, ValueError, IndexError, RuntimeError):
+        return _error("题目配图或原图无法读取，请核对后再试", 409)
+    return _run_recommend_answer(content, image_urls)
+
+
+@csrf_exempt
+def library_recommend_answer(request, publication_id):
+    """按题库编辑工作台当前草稿实时调用答题 API 推荐参考答案与解析（支持未保存的题干与选项改动）。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request)
+    if payload is None:
+        return _error("请求内容不正确")
+    publication = get_object_or_404(PublishedQuestion, pk=publication_id)
+    saved = publication.content or {}
+    try:
+        content = _parse_recommend_draft(
+            payload,
+            stem=str(saved.get("stem") or ""),
+            options=saved.get("options") if isinstance(saved.get("options"), dict) else {},
+            question_type=str(publication.question_type or saved.get("question_type") or "free_response"),
+            body_mode=str(saved.get("body_mode") or "text"),
+        )
+    except ValueError as error:
+        return _error(str(error))
+    folder = Path(settings.DATA_ROOT) / "library" / str(publication.pk)
+    try:
+        if content["body_mode"] == "source_image":
+            q_imgs = saved.get("question_images") or []
+            if q_imgs:
+                names = [str(item.get("file") or "") for item in q_imgs]
+                if any(not name or Path(name).name != name or "/" in name or "\\" in name for name in names):
+                    raise library_jobs.JobError("原图文件名无效，无法发送给答题模型")
+                image_urls = _encode_image_paths([folder / name for name in names], long_side=2400)
+            else:
+                from . import library_assistant
+
+                try:
+                    png = library_assistant.crop_png(publication_id)
+                except library_assistant.AssistantError as error:
+                    raise library_jobs.JobError(str(error)) from None
+                with Image.open(io.BytesIO(png)) as img:
+                    image_urls = [imaging.jpeg_data_url(img, long_side=2400)]
+        else:
+            saved_figs = [item for item in (saved.get("figures") or []) if isinstance(item, dict) and item.get("file")]
+            if isinstance(payload.get("figures"), list):
+                requested_files = [
+                    item.get("file")
+                    for item in payload["figures"]
+                    if isinstance(item, dict) and isinstance(item.get("file"), str)
+                ]
+                allowed = {item["file"] for item in saved_figs}
+                selected_names = [name for name in requested_files if name in allowed]
+            else:
+                selected_names = [item["file"] for item in saved_figs]
+            image_urls = _encode_image_paths([folder / name for name in selected_names], long_side=1400)
+    except (library_jobs.JobError, OSError, ValueError) as error:
+        return _error(str(error) or "无法读取题目配图，请稍后再试", 409)
+    return _run_recommend_answer(content, image_urls)
+
+
 def library_crop(request, publication_id):
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
@@ -4433,7 +4589,7 @@ def feature_settings(request):
         return _error(str(error))
     except OSError:
         return _error("开关没能保存，请检查数据目录是否可写", 500)
-    message = "已保存。题源和引号的整理对新读的题、改字保存的题立即生效；老题在下次启动时整理。"
+    message = "已保存。题源和引号的整理对新读的题、编辑保存的题立即生效；老题在下次启动时整理。"
     from .library_tagging import knowledge_directory
 
     points = knowledge_directory()

@@ -10,29 +10,26 @@ const eagleHtmlPath = path.resolve(__dirname, "eagle/index.html");
 test('Eagle 7大核心Bug修复综合验证套件', async (t) => {
   const content = fs.readFileSync(eagleHtmlPath, 'utf-8');
 
-  await t.test('Bug 1 & Bug 2: 题卡编辑分值与选项 E/F 完整性', () => {
-    // 1. DOM 存在 E 和 F 选项输入框
-    assert.ok(content.includes('id="editOptE"'), '应存在 editOptE 选项输入框');
-    assert.ok(content.includes('id="editOptF"'), '应存在 editOptF 选项输入框');
-    assert.ok(content.includes('id="editInputScore"'), '应存在 editInputScore 分值输入框');
+  const helpersJs = fs.readFileSync(path.join(__dirname, 'qb-editor-helpers.js'), 'utf8');
+  const unifiedJs = fs.readFileSync(path.join(__dirname, 'library-unified-editor.js'), 'utf8');
 
-    // 2. 光标联动字典完整注册
-    assert.ok(content.includes("'editOptE': 'E'"), 'EDIT_INPUT_FIELDS 应注册 editOptE');
-    assert.ok(content.includes("'editOptF': 'F'"), 'EDIT_INPUT_FIELDS 应注册 editOptF');
-    assert.ok(content.includes("'E': '选项 E'"), 'EDIT_FIELD_LABELS 应注册 选项 E');
-    assert.ok(content.includes("'F': '选项 F'"), 'EDIT_FIELD_LABELS 应注册 选项 F');
+  await t.test('Bug 1 & Bug 2: 题卡统一编辑保留分值与选项 A–H 完整性', () => {
+    // 1. 统一工作台样式与共享脚本接入（含 A–H 动态选项与预览光标联动）
+    assert.ok(content.includes('/question-editor.css'), 'Eagle 页应接入 /question-editor.css');
+    assert.ok(content.includes('/qb-editor-helpers.js'), 'Eagle 页应接入 /qb-editor-helpers.js');
+    assert.ok(content.includes('/library-unified-editor.js'), 'Eagle 页应接入 /library-unified-editor.js');
+    assert.match(helpersJs, /const OPTION_KEYS\s*=\s*\["A",\s*"B",\s*"C",\s*"D",\s*"E",\s*"F",\s*"G",\s*"H"\]/, '共享助手应声明 A–H 选项键');
 
-    // 3. openEditQuestionModal 赋初值
-    assert.ok(content.includes("document.getElementById('editOptE').value = opts.E"), '应给 editOptE 赋初值');
-    assert.ok(content.includes("document.getElementById('editOptF').value = opts.F"), '应给 editOptF 赋初值');
-    assert.ok(content.includes("scoreInput.value = (q.score != null"), '应给 editInputScore 回填题目分值');
+    // 2. 光标联动支持题干/答案/解析及全部动态选项输入
+    assert.ok(helpersJs.includes('bindPreviewCursorSync'), '共享助手应提供 bindPreviewCursorSync');
+    assert.ok(unifiedJs.includes('buildInputsMap'), '统一工作台应映射题干/答案/解析及动态选项输入框');
+    assert.ok(unifiedJs.includes('`${field} 选项`'), '应为选项输入框生成「X 选项」预览联动标签');
 
-    // 4. submitQuestionEdit 保存分值与 E/F 选项
-    assert.ok(content.includes("q.score = newScore"), '保存时应更新 q.score');
-    assert.ok(content.includes("const e = document.getElementById('editOptE')?.value.trim();"), '保存时应读取 editOptE');
-    assert.ok(content.includes("const f = document.getElementById('editOptF')?.value.trim();"), '保存时应读取 editOptF');
-    assert.ok(content.includes("if (e) newOpts.E = e;"), '保存时应把 E 写入 newOpts');
-    assert.ok(content.includes("if (f) newOpts.F = f;"), '保存时应把 F 写入 newOpts');
+    // 3. 统一保存同步与分值/选项持久化
+    assert.ok(content.includes('function applyUnifiedSaveToEagle('), '应定义 applyUnifiedSaveToEagle 同步题卡状态');
+    assert.ok(content.includes('function buildEagleCardContentHtml('), '应定义 buildEagleCardContentHtml 渲染卡片 A–H 选项');
+    assert.ok(content.includes("item?.score"), '统一保存同步应支持后端返回的题目分值同步');
+    assert.ok(content.includes("['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].includes(slot)"), '卡片选项与配图渲染应完整支持 A–H');
   });
 
   await t.test('Bug 3: 未入库题试题篮导出兜底转换', () => {
@@ -137,11 +134,13 @@ test('Eagle 7大核心Bug修复综合验证套件', async (t) => {
   });
 
   await t.test('试题卡片右键菜单与操作栏优雅收纳 (openQuestionContextMenu)', () => {
-    // 1. 试题专属右键菜单定义：只保留卡片上没有的动作
+    // 1. 试题专属右键菜单定义：已整合为单一「编辑」入口
     assert.ok(content.includes('function openQuestionContextMenu(e, qid)'), '应包含 openQuestionContextMenu 函数');
     assert.ok(content.includes('复制题目图片'), '右键菜单应包含复制题目图片选项');
     assert.ok(content.includes('全屏快速审题'), '右键菜单应包含全屏快速审题选项');
-    assert.ok(content.includes('修改与校订题目'), '右键菜单应包含编辑题目选项');
+    assert.ok(content.includes("openSolutionEditorForId('${q.id}', { focusField: 'stem' })"), '右键菜单应统一调用 openSolutionEditorForId 定位到题干编辑');
+    assert.ok(!content.includes('修改与校订题目'), '右键菜单不应保留分裂的「修改与校订题目」旧入口');
+    assert.ok(!content.includes('编辑答案与解析'), '右键菜单不应保留分裂的「编辑答案与解析」旧入口');
     // 核验证据在题卡按钮上，右键不再重复
     assert.ok(content.includes('核验证据'), '题卡应保留核验证据入口');
     assert.ok(!content.includes('核验证据 (原卷扫描件)'), '右键不应再重复核验证据');
@@ -151,26 +150,27 @@ test('Eagle 7大核心Bug修复综合验证套件', async (t) => {
     assert.ok(content.includes("openQuestionContextMenu(event, '${q.id}')"), '卡片更多按钮点击应触发 openQuestionContextMenu');
   });
 
-  await t.test('Eagle 统一答案编辑器接入与题干版本迁移持久化', () => {
-    assert.ok(content.includes('<script src="/eagle-solution-editor.js"'), 'Eagle 页必须加载 /eagle-solution-editor.js');
+  await t.test('Eagle 统一编辑工作台接入与题干版本迁移持久化', () => {
+    assert.ok(content.includes('eagle-solution-editor.js'), 'Eagle 页必须加载 /eagle-solution-editor.js');
+    assert.ok(content.includes('library-unified-editor.js'), 'Eagle 页必须加载 /library-unified-editor.js');
     assert.ok(content.includes('function openSolutionEditorFromQuickLook('), '应定义 openSolutionEditorFromQuickLook()');
+    assert.ok(content.includes('function openEditFromQuickLook('), '应定义 openEditFromQuickLook()');
     assert.ok(content.includes('function openSolutionEditorForId('), '应定义 openSolutionEditorForId()');
-    assert.ok(content.includes('window.renderQuickLook ='), '应暴露 window.renderQuickLook 供答案保存后联动刷新');
+    assert.ok(content.includes('window.renderQuickLook ='), '应暴露 window.renderQuickLook 供保存后联动刷新');
     assert.ok(content.includes("'quickLookQuestionId'"), '应暴露 window.quickLookQuestionId');
-    assert.ok(content.includes("onclick=\"openSolutionEditorFromQuickLook()\""), 'QuickLook 解析区按钮应接入统一答案编辑器');
-    assert.ok(content.includes("openSolutionEditorForId('${q.id}')"), '题卡与右键菜单应提供答案编辑器入口');
+    assert.ok(content.includes("onclick=\"openSolutionEditorFromQuickLook()\""), 'QuickLook 解析区按钮应接入统一编辑工作台并聚焦答案解析');
+    assert.ok(content.includes("openSolutionEditorForId('${q.id}')"), '题卡解析编辑入口应保留');
 
-    const editStart = content.indexOf('async function openEditQuestionModal(');
-    const submitStart = content.indexOf('async function submitQuestionEdit(');
-    const submitEnd = content.indexOf('// ================= 快捷键与弹窗通用逻辑', submitStart);
-    assert.ok(editStart > 0 && submitStart > editStart && submitEnd > submitStart);
-    const editSlice = content.slice(editStart, submitStart);
-    const submitSlice = content.slice(submitStart, submitEnd);
-    assert.ok(editSlice.includes('q.savedSolution'), 'openEditQuestionModal 应优先回填已保存的正式解析');
-    assert.ok(editSlice.includes('activeEditingRevisionPromise'), 'openEditQuestionModal 应跟踪修订信息请求避免竞态');
-    assert.ok(submitSlice.includes('migrateQuestionIdAfterEdit'), '题干改版生成新 UUID 后应迁移前端题卡 ID');
-    assert.ok(submitSlice.includes('base_revision: baseRevision'), '保存正式解析应携带 base_revision');
-    assert.ok(!submitSlice.includes('closeEditQuestionModal();\n      if (savedOk)'), '后端保存失败时不得关闭编辑弹窗丢弃用户输入');
+    const saveStart = content.indexOf('function applyUnifiedSaveToEagle(');
+    const saveEnd = content.indexOf('function openEditQuestionModal(', saveStart);
+    assert.ok(saveStart > 0 && saveEnd > saveStart, '应定义 applyUnifiedSaveToEagle 与转发兼容入口');
+    const saveSlice = content.slice(saveStart, saveEnd);
+    assert.ok(saveSlice.includes('migrateQuestionIdAfterEdit'), '题干改版生成新 UUID 后应迁移前端题卡 ID');
+    assert.ok(saveSlice.includes('buildEagleCardContentHtml'), '保存同步时应重建前端题卡排版正文');
+
+    assert.ok(unifiedJs.includes('nextBaseRevision = null'), '题干发布新版本后再保存解析应清空旧版 base_revision 触发安全资产迁移');
+    assert.ok(unifiedJs.includes('base_revision: nextBaseRevision ?? null'), '保存正式解析应携带 base_revision');
+    assert.ok(!unifiedJs.includes('close();\n      saveCurrent('), '后端保存失败时不得关闭工作台丢弃用户输入');
   });
 
   await t.test('打开已关联 OneNote 笔记期间必须显示等待条直到唤醒完成', () => {

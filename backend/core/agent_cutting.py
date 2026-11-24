@@ -27,7 +27,7 @@ from .pipeline import candidates_in
 from .textnorm import fix_symbols
 
 REPLACE_SCOPES = {"none", "page", "group", "paper", "question_ids"}
-SLOTS = {"stem", "A", "B", "C", "D", "E"}
+SLOTS = {"stem", *library.OPTION_KEYS}
 TYPES = set(qtypes.TYPES)
 
 

@@ -167,3 +167,16 @@ class TidySavedCardsTests(TestCase):
         again, created = library.publish(question)
         self.assertFalse(created)
         self.assertEqual(PublishedQuestion.objects.count(), 1)
+
+    def test_extended_options_f_to_h_preserve_four_option_content_and_save_when_present(self):
+        self.assertEqual(
+            library.option_content({"A": "1", "B": "2", "C": "3", "D": "4", "F": "   ", "H": ""}),
+            {"A": "1", "B": "2", "C": "3", "D": "4"},
+        )
+        self.assertEqual(
+            library.option_content({"A": "1", "B": "2", "C": "3", "D": "4", "F": "6", "H": "8"}),
+            {"A": "1", "B": "2", "C": "3", "D": "4", "F": "6", "H": "8"},
+        )
+        stem, inline = split_inline_options("多选（ ） A. 1 B. 2 C. 3 D. 4 E. 5 F. 6 G. 7 H. 8")
+        self.assertEqual(stem, "多选（ ）")
+        self.assertEqual(inline, {"A": "1", "B": "2", "C": "3", "D": "4", "E": "5", "F": "6", "G": "7", "H": "8"})

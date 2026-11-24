@@ -108,7 +108,7 @@ _EXAMPLE_SOLUTION_TEXT_RE = re.compile(
 # structure instead of inventing four missing image options.  This is kept
 # deliberately narrow so genuine image-choice questions are unaffected.
 _NUMERIC_SUBQUESTION_RE = re.compile(r"(?:^|\n|\s)[（(]\s*(\d{1,2})\s*[)）]")
-_EXPLICIT_OPTION_LABEL_RE = re.compile(r"(?:^|\n)\s*[A-EＡ-Ｅ]\s*[.．、:：)]", re.I)
+_EXPLICIT_OPTION_LABEL_RE = re.compile(r"(?:^|\n)\s*[A-HＡ-Ｈ]\s*[.．、:：)]", re.I)
 _EXERCISE_ACTION_RE = re.compile(r"(?:请|试)?(?:求|证明|判断|写出|列举|画出|作出|选择|说明|回答|解答|计算|表示|分析)")
 _DIRECT_EXERCISE_ACTION_RE = re.compile(
     r"(?:^|[\n。．.!！；;])\s*(?:请|试)?"
@@ -1767,7 +1767,7 @@ def _snap_to_gap(image: Image.Image, row: int, band_height: float) -> int:
     return best_row
 
 
-_OPTION_LINE = re.compile(r"^\s*[A-EＡ-Ｅ]\s*[.．、:：]")
+_OPTION_LINE = re.compile(r"^\s*[A-HＡ-Ｈ]\s*[.．、:：]")
 LOCATE_SNAP_RANGE = 30.0  # 页面坐标：定位结果向下吸附到题干行的最大距离
 
 
@@ -3246,7 +3246,7 @@ def reconcile_fill_blank_slot_flags(paper: Paper, dry_run: bool = False) -> int:
 
 # 配图被分到 A/B/C/D/E 槽时，两条导出路都会在那个位置印出字母，不管题型是什么。
 # 非选择题拿到这样的槽，成品卷上就凭空多出一组 A. B. C. D.，而原卷从来没有过。
-SLOT_OPTION_KEYS = frozenset({"A", "B", "C", "D", "E"})
+SLOT_OPTION_KEYS = frozenset({"A", "B", "C", "D", "E", "F", "G", "H"})
 
 
 def renders_as_choice(question: Question) -> bool:
@@ -3891,11 +3891,11 @@ FLAG_EMPTY_STEM = "这道题的题干一个字都没有读出来，请对照原�
 # 题（那两张题面读得好好的，只是内容类型判成未知）。
 FLAG_UNREADABLE_STEM = "识读没能读出这道题的内容，卡上留下的是它「无法识别」的原话，请对照原卷截图把题目录进去"
 # AI 助手读题（不用看图模型）：题面是 MinerU 自己识别的文字，等 AI 助手或使用者对照原卷核对。
-FLAG_MINERU_DRAFT = "题面是 MinerU 识别的初稿，还没有看图核对；请对照原卷截图逐字核对、改字"
+FLAG_MINERU_DRAFT = "题面是 MinerU 识别的初稿，还没有看图核对；请对照原卷截图逐字核对、编辑"
 FLAG_MINERU_DRAFT_EMPTY = "MinerU 没认出这道题的文字，请对照原卷截图把题目录进去"
 FLAG_READERS_DOWN = (
     "看图读题的服务这会儿用不了（多半是当天的免费额度用完了），先用了 MinerU 的初稿；"
-    "额度恢复后点“重新识读”，或者对照原卷直接改字"
+    "额度恢复后点“重新识读”，或者对照原卷直接编辑"
 )
 # 原卷在题后面印着答案，誊录提示词只读题面、根本没有答案这一栏，识读回来
 # 的卡上永远是空的，界面还照实写着「原卷未提供答案与解析。」——一句假话。
@@ -3962,7 +3962,7 @@ def mineru_draft(blocks: list[dict], table_html: dict[int, str], regions: list[d
     return "\n".join(lines)
 
 
-_BARE_OPTION_LETTERS = re.compile(r"(?:^|\s)[A-E]\s*[.．、:：]\s*(?=[A-E]\s*[.．、:：]|$)", re.M)
+_BARE_OPTION_LETTERS = re.compile(r"(?:^|\s)[A-H]\s*[.．、:：]\s*(?=[A-H]\s*[.．、:：]|$)", re.M)
 
 
 def _draft_figure_guess(stem: str, options: dict, candidates: list[dict]) -> dict[str, str]:
@@ -4617,10 +4617,10 @@ EMPTY_STEM_PRINTED = (
 )
 EMPTY_STEM_HANDWRITTEN = (
     "这道题没有印刷内容，是手写题或照片题，识读誊不出字。"
-    "请点「改字」对照原图把题干写下来 —— 这张图里的图形程序已经认好了，可以直接用。"
+    "请点「编辑」对照原图把题干写下来 —— 这张图里的图形程序已经认好了，可以直接用。"
 )
 EMPTY_STEM_UNKNOWN = (
-    "这道题没读到文字。对照原图看一眼：手写题或照片题请点「改字」自己写下来；"
+    "这道题没读到文字。对照原图看一眼：手写题或照片题请点「编辑」自己写下来；"
     "印刷题多半是范围框偏了或图太糊，点「调整范围」框准再识读一次。"
 )
 

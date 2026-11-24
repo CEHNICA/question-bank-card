@@ -51,8 +51,8 @@ RATE_LIMIT_ROUNDS = 3
 # out longer before the card is given up on.
 PATIENT_RATE_LIMIT_ROUNDS = 8
 MAX_RESPONSE_BYTES = 200_000
-OPTION_KEYS = ("A", "B", "C", "D", "E")
-TAG = re.compile(r"【\s*(内容类型|题号|题型|题干|A|B|C|D|E|配图|刻度)\s*】")
+OPTION_KEYS = ("A", "B", "C", "D", "E", "F", "G", "H")
+TAG = re.compile(r"【\s*(内容类型|题号|题型|题干|A|B|C|D|E|F|G|H|配图|刻度)\s*】")
 
 
 MAX_PARALLEL_CARDS = 16
@@ -152,7 +152,7 @@ def _request_cancelled() -> bool:
 
 def _check_request() -> None:
     if _request_cancelled():
-        raise ReaderRequestStopped("本次框选识读已取消或超过等待时限；原题未修改，可重新框选或手动改字")
+        raise ReaderRequestStopped("本次框选识读已取消或超过等待时限；原题未修改，可重新框选或手动编辑")
 
 
 def _reader_pause(seconds: float) -> None:
@@ -689,13 +689,13 @@ def parse_reading(text: str, number: int) -> dict:
             break
     figures: dict[str, str] = {}
     figure_text = tags.get("配图", "")
-    for label, role in re.findall(r"(\d{1,2})\s*[=＝:：]\s*(题干|无关|表格|第\s*\d{1,3}\s*题|[A-EＡ-Ｅ])", figure_text):
+    for label, role in re.findall(r"(\d{1,2})\s*[=＝:：]\s*(题干|无关|表格|第\s*\d{1,3}\s*题|[A-HＡ-Ｈ])", figure_text):
         if role.startswith("第"):
             other = int(re.search(r"\d+", role).group(0))
             figures[label] = "stem" if other == number else f"q{other}"
         else:
             figures[label] = {"题干": "stem", "无关": "none", "表格": "table"}.get(
-                role, role.translate(str.maketrans("ＡＢＣＤＥ", "ABCDE"))
+                role, role.translate(str.maketrans("ＡＢＣＤＥＦＧＨ", "ABCDEFGH"))
             )
     seen = re.findall(r"\d{1,2}", tags.get("题号", ""))
     stem = fix_symbols(clean_stem(tags["题干"], number))
@@ -739,7 +739,8 @@ def parse_reading(text: str, number: int) -> dict:
 _INLINE_OPTIONS = re.compile(
     r"(?:(?<=[\s)）　])|^)A\s*[.．、]\s*(?P<A>.+?)\s+B\s*[.．、]\s*(?P<B>.+?)\s+"
     r"C\s*[.．、]\s*(?P<C>.+?)\s+D\s*[.．、]\s*(?P<D>.+?)"
-    r"(?:\s+E\s*[.．、]\s*(?P<E>.+?))?\s*$",
+    r"(?:\s+E\s*[.．、]\s*(?P<E>.+?))?(?:\s+F\s*[.．、]\s*(?P<F>.+?))?"
+    r"(?:\s+G\s*[.．、]\s*(?P<G>.+?))?(?:\s+H\s*[.．、]\s*(?P<H>.+?))?\s*$",
     re.S,
 )
 
@@ -752,12 +753,13 @@ def split_inline_options(stem: str) -> tuple[str, dict[str, str]]:
     options = {key: fix_symbols(match.group(key).strip()) for key in ("A", "B", "C", "D")}
     if not all(options.values()):
         return stem, {}
-    if match.group("E"):
-        options["E"] = fix_symbols(match.group("E").strip())
+    for extra_key in ("E", "F", "G", "H"):
+        if match.group(extra_key):
+            options[extra_key] = fix_symbols(match.group(extra_key).strip())
     return stem[: match.start()].rstrip(), options
 
 
-FILLED_CHOICE = re.compile(r"(?<=[\u4e00-\u9fff\s，,。：:$=＝])([（(])\s*[A-EＡ-Ｅ]{1,5}\s*([)）])(?=\s*[。．.]?\s*$)")
+FILLED_CHOICE = re.compile(r"(?<=[\u4e00-\u9fff\s，,。：:$=＝])([（(])\s*[A-HＡ-Ｈ]{1,8}\s*([)）])(?=\s*[。．.]?\s*$)")
 
 
 def drop_filled_choice(stem: str) -> str:
@@ -1337,7 +1339,7 @@ def classify_figures(engine: Engine, image_url: str, number: int, labels: list[s
     raw = re.sub(r"<think>.*?</think>", "", str(raw or ""), flags=re.S)
     wanted = set(labels)
     result: dict[str, str] = {}
-    for label, role in re.findall(r"(\d{1,2})\s*[=＝:：]\s*(题干|无关|表格|第\s*\d{1,3}\s*题|[A-EＡ-Ｅ])", raw):
+    for label, role in re.findall(r"(\d{1,2})\s*[=＝:：]\s*(题干|无关|表格|第\s*\d{1,3}\s*题|[A-HＡ-Ｈ])", raw):
         if label not in wanted or label in result:
             continue
         if role.startswith("第"):
@@ -1345,7 +1347,7 @@ def classify_figures(engine: Engine, image_url: str, number: int, labels: list[s
             result[label] = "stem" if other == number else f"q{other}"
         else:
             result[label] = {"题干": "stem", "无关": "none", "表格": "table"}.get(
-                role, role.translate(str.maketrans("ＡＢＣＤＥ", "ABCDE"))
+                role, role.translate(str.maketrans("ＡＢＣＤＥＦＧＨ", "ABCDEFGH"))
             )
     return result
 

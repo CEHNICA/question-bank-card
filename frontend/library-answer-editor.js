@@ -302,7 +302,23 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
     function selectedActiveJobs() { return [...jobs.values()].filter(job => selection.has(job.publication_id || job.publication) && jobsPending.has(job.status)); }
     function isDirty() { return Boolean(current?.dirty); }
     function remember() { if (current) drafts.set(current.item.id, current); }
+    let unified = null;
+    const getUnified = () => {
+      if (unified) return unified;
+      const factory = root.LibraryUnifiedEditor?.create;
+      if (typeof factory !== "function") throw new Error("统一题目编辑模块未就绪");
+      unified = factory({ node, QB, S, W, api, post, formatStamp, notify, confirm, onSaved });
+      return unified;
+    };
     async function open(supplied, options = {}) {
+      if (options.allowQuestionEdit) {
+        if (dialog?.open) {
+          ++token; ++epoch; stopWaiting(); dialog.close();
+          loading = saving = uploading = queueing = cancelling = polling = closing = checkingApi = false;
+        }
+        return getUnified().open(supplied, options);
+      }
+      if (unified?.isOpen()) unified.forceClose();
       init(); ++token; ++epoch; stopWaiting(); current = null; drafts = new Map(); jobs = new Map(); requestedIds = new Set(); watchedSince = Date.now(); queueNote = "";
       apiSettings = null; checkingApi = false; apiSettingsError = "";
       loading = saving = uploading = queueing = cancelling = polling = closing = pollAgain = false;
@@ -771,10 +787,14 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
       });
     }
     root.addEventListener?.("beforeunload", event => {
-      if (!pendingSaves.size && (!dialog?.open || (!saving && !uploading && !isDirty() && ![...drafts.values()].some(record => record.dirty)))) return;
+      if (!pendingSaves.size && !unified?.isDirty?.() && (!dialog?.open || (!saving && !uploading && !isDirty() && ![...drafts.values()].some(record => record.dirty)))) return;
       event.preventDefault(); event.returnValue = "";
     });
-    return Object.freeze({ open, isOpen: () => Boolean(dialog?.open) });
+    return Object.freeze({
+      open,
+      close: () => (unified?.isOpen() ? unified.close() : closeEditor()),
+      isOpen: () => Boolean(dialog?.open || unified?.isOpen())
+    });
   }
   root.LibraryAnswerEditor = Object.freeze({ create });
 })(typeof window === "undefined" ? globalThis : window);

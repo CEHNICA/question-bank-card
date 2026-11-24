@@ -432,17 +432,17 @@ class StaticAssetTests(TestCase):
     def test_eagle_page_declares_tug_favicon(self):
         response = self.client.get("/eagle")
         self.assertEqual(response.status_code, 200)
-        body = b"".join(response.streaming_content).decode("utf-8", errors="replace")
+        raw = b"".join(response.streaming_content) if response.streaming else response.content
+        body = raw.decode("utf-8", errors="replace")
         self.assertIn('rel="icon"', body)
         self.assertIn("/favicon.ico", body)
         self.assertIn("/favicon.png", body)
 
     def test_new_frontend_modules_are_served(self):
-        """1.26.41 新增的两个脚本要能被页面取到。"""
-        for name in ("question-locator.js", "approve-result.js"):
+        """1.26.41 新增的两个脚本与统一工作台资源要能被页面取到。"""
+        for name in ("question-locator.js", "approve-result.js", "qb-editor-helpers.js", "question-editor.css"):
             response = self.client.get(f"/{name}")
             self.assertEqual(response.status_code, 200, name)
-            self.assertIn("javascript", response["Content-Type"], name)
             self.assertTrue(b"".join(response.streaming_content).strip(), name)
 
 
@@ -2060,7 +2060,7 @@ class ApiTests(TestCase):
         data = self.post(f"/api/papers/{self.paper.id}/approve-green").json()
         item = next(entry for entry in data["skipped"] if entry["number"] == self.q2.number)
         self.assertEqual(item["category"], "还没读出题干", data["skipped"])
-        self.assertEqual(item["detail"], "请先改字或重新识读", data["skipped"])
+        self.assertEqual(item["detail"], "请先编辑或重新识读", data["skipped"])
 
     def test_approve_green_skip_without_a_group_still_gives_a_page(self):
         """没有章节名的旧题，题号在书里重号，只能靠原卷页码认。"""
@@ -2387,6 +2387,67 @@ class ApiTests(TestCase):
         self.assertEqual(detail["paper"]["counts"]["yellow"], 1)
         self.assertEqual(len(detail["questions"]), 2)
 
+    def test_question_recommend_answer_with_draft_and_demo_guard(self):
+        from . import library_ai_settings
+
+        # 示例卷拦截
+        demo_paper = Paper.objects.create(
+            filename="示例练习.pdf",
+            kind="pdf",
+            sha256="d" * 64,
+            source_path=str(self.temp / "demo.pdf"),
+            status=Paper.Status.READY,
+            pages=[{"page_idx": 0, "width": 842, "height": 595}],
+            structure={"demo": True},
+        )
+        demo_q = Question.objects.create(paper=demo_paper, number=1, stem="示例题", question_type="free_response")
+        demo_res = self.post(f"/api/questions/{demo_q.id}/recommend-answer", {"stem": "示例题"})
+        self.assertEqual(demo_res.status_code, 409)
+
+        # 未配置 API 返回 409 + api_not_configured
+        with mock.patch.dict(
+            "os.environ",
+            {
+                "QB_LIBRARY_AI_SETTINGS_FILE": str(self.temp / "ai.json"),
+                "QB_LIBRARY_AI_CREDENTIAL_FILE": str(self.temp / "ai.dat"),
+            },
+        ):
+            unconfigured = self.post(
+                f"/api/questions/{self.q.id}/recommend-answer",
+                {"stem": "草稿题干", "options": {"A": "1", "F": "6"}, "question_type": "multiple_choice"},
+            )
+            self.assertEqual(unconfigured.status_code, 409)
+            self.assertEqual(unconfigured.json()["code"], "api_not_configured")
+
+            before_stem = self.q.stem
+            captured = {}
+
+            def fake_chat(prompt_text, urls, **kwargs):
+                captured["prompt"] = prompt_text
+                return "【答案】AFG\n【解析】临时草稿解析。", "mock-answer-model"
+
+            with (
+                mock.patch.object(library_ai_settings, "ensure_api_ready", return_value=None),
+                mock.patch.object(library_ai_settings, "chat", side_effect=fake_chat),
+            ):
+                ok_res = self.post(
+                    f"/api/questions/{self.q.id}/recommend-answer",
+                    {
+                        "stem": "实时编辑的题干",
+                        "options": {"A": "甲", "B": "乙", "C": "丙", "D": "丁", "F": "己", "G": "庚"},
+                        "question_type": "multiple_choice",
+                        "body_mode": "text",
+                    },
+                )
+            self.assertEqual(ok_res.status_code, 200, ok_res.content)
+            body = ok_res.json()
+            self.assertEqual(body["answer"], "AFG")
+            self.assertIn("实时编辑的题干", captured["prompt"])
+            self.assertIn("F. 己", captured["prompt"])
+            self.assertIn("G. 庚", captured["prompt"])
+            self.q.refresh_from_db()
+            self.assertEqual(self.q.stem, before_stem)
+
     def test_explicit_cloud_upload_needs_credentials(self):
         with mock.patch.dict("os.environ", {"MINERU_TOKEN": "", "MINIMAX_API_KEY": ""}):
             response = self.client.post(
@@ -2552,7 +2613,7 @@ class FrontendCacheTests(TestCase):
     """
 
     def test_pages_are_rechecked_and_carry_an_asset_version(self):
-        for path in ("/", "/library", "/eagle-print-preview.html"):
+        for path in ("/", "/library", "/eagle", "/eagle/", "/preview.html", "/eagle-print-preview.html"):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 200, path)
             self.assertEqual(response["Cache-Control"], "no-cache", path)

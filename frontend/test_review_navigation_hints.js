@@ -164,4 +164,10 @@ for (const status of ["queued", "parsing", "segmenting"]) {
   assert.equal(pending.stageButtons.length + pending.emptyButtons.length, 0, "The existing direct stop-and-manual recovery owns cloud wait states");
 }
 
+// 0 题状态清理：顶部三步条可见时收起 #cutReadingSteps，0 题有原卷页时隐藏 0/0/0 筛选条，并自动展开左侧原卷画布。
+assert.match(source, /stepsEl\.hidden = Boolean\(\$\("intakeStepper"\) && !\$\("intakeStepper"\)\.hidden\);/);
+assert.match(source, /if \(toolbarEl\) toolbarEl\.hidden = !c\.all && Boolean\(paper\.pages\?\.length\);/);
+assert.match(source, /const zeroReady = Boolean\(!c\.all && paper\.pages\?\.length && !ACTIVE_STATUS\.has\(paper\.status\) && !paper\.archived\);/);
+assert.match(source, /if \(zeroReady\) \{\s*splitCanvas\.setOpen\(true, \{ render: false \}\);/);
+
 console.log("Review N: the next question that still needs checking, skipping approved ones, wrapping at the end, naming a filter that hides the rest, first-card origin, scroll fencing, held-key and IME guards; review prompts removed, fault visibility, single cutting entry and automatic-approval tutorial: OK");

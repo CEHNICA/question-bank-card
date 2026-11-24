@@ -158,3 +158,98 @@ console.log("figure number checks: OK");
   }
 }
 console.log("missing figure notes: OK");
+
+// 1.27：选项扩展支持 A–H，含 6 选项 3 列（cols-3）、7–8 选项 4 列（cols-4）与解析配图内联预览。
+{
+  assert.deepEqual(
+    QB.shownOptionKeys({ A: "1", B: "2", C: "3", D: "4", E: "5", F: "6", G: "7", H: "8" }),
+    ["A", "B", "C", "D", "E", "F", "G", "H"]
+  );
+  assert.deepEqual(
+    QB.shownOptionKeys({ A: "1", B: "2", C: "3", D: "4" }, [{ slot: "F" }]),
+    ["A", "B", "C", "D", "E", "F"]
+  );
+  assert.deepEqual(
+    QB.shownOptionKeys({ A: "1", B: "2", C: "3", D: "4" }, [{ slot: "H" }]),
+    ["A", "B", "C", "D", "E", "F", "G", "H"]
+  );
+  assert.equal(QB.optionColumns({ A: "1", B: "2", C: "3", D: "4", E: "5", F: "6" }), 3);
+  assert.equal(QB.optionColumns({ A: "1", B: "2", C: "3", D: "4", E: "5", F: "6", G: "7" }), 4);
+  assert.equal(QB.optionColumns({ A: "1", B: "2", C: "3", D: "4", E: "5", F: "6", G: "7", H: "8" }), 4);
+
+  const mkDoc = () => {
+    const doc = {
+      createElement(tag) {
+        const node = {
+          tagName: String(tag).toUpperCase(),
+          children: [], dataset: {}, style: {}, className: "", textContent: "",
+          ownerDocument: doc,
+          classList: {
+            add(...cls) { node.className = [...new Set(`${node.className} ${cls.join(" ")}`.trim().split(/\s+/).filter(Boolean))].join(" "); },
+            remove(...cls) { node.className = node.className.split(/\s+/).filter(Boolean).filter((c) => !cls.includes(c)).join(" "); },
+            toggle(c, force) {
+              const has = node.className.split(/\s+/).includes(c);
+              const next = force === undefined ? !has : Boolean(force);
+              if (next) this.add(c); else this.remove(c);
+            },
+            contains(c) { return node.className.split(/\s+/).includes(c); },
+          },
+          append(...kids) { kids.forEach((kid) => node.children.push(kid)); },
+          appendChild(kid) { node.children.push(kid); return kid; },
+          prepend(kid) { node.children.unshift(kid); },
+          replaceChildren(...kids) { node.children = kids; },
+          remove() {}, setAttribute(k, v) { node[k] = v; }, getAttribute(k) { return node[k] ?? null; },
+          querySelectorAll(sel) {
+            const cls = sel.startsWith(".") ? sel.slice(1) : null;
+            const out = [];
+            const walk = (n) => {
+              if (!n || typeof n !== "object") return;
+              if (cls ? n.classList?.contains(cls) : n.tagName === sel.toUpperCase()) out.push(n);
+              (n.children || []).forEach(walk);
+            };
+            (node.children || []).forEach(walk);
+            return out;
+          },
+          querySelector(sel) { return this.querySelectorAll(sel)[0] || null; },
+          addEventListener() {},
+        };
+        return node;
+      },
+      createTextNode(text) { return { nodeType: 3, textContent: String(text) }; },
+    };
+    return doc;
+  };
+  const previousDocument = global.document;
+  global.document = mkDoc();
+  try {
+    const box6 = global.document.createElement("div");
+    QB.renderQuestion(box6, {
+      stem: "六选多选题",
+      options: { A: "1", B: "2", C: "3", D: "4", E: "5", F: "6" },
+      answer: "ABCF",
+      analysis: "解析正文",
+    }, {
+      showNumber: false,
+      showAnswer: "open",
+      solutionFigures: [{ url: "/media/sol-1.png", display_width: 45, position: "after" }],
+    });
+    const optList6 = box6.querySelector(".qb-options");
+    assert.ok(optList6.classList.contains("cols-3"), "6 个短选项应排成 3 列 (cols-3)");
+    assert.equal(optList6.querySelectorAll(".qb-option").length, 6);
+    const solImgs = box6.querySelectorAll("img").filter((img) => img.src === "/media/sol-1.png");
+    assert.equal(solImgs.length, 1, "预览应内联显示 solutionFigures 解析配图");
+
+    const box8 = global.document.createElement("div");
+    QB.renderQuestion(box8, {
+      stem: "八选多选题",
+      options: { A: "1", B: "2", C: "3", D: "4", E: "5", F: "6", G: "7", H: "8" },
+      answer: "ABGH",
+    }, { showNumber: false });
+    const optList8 = box8.querySelector(".qb-options");
+    assert.ok(optList8.classList.contains("cols-4"), "8 个短选项应排成 4 列 (cols-4)");
+    assert.equal(optList8.querySelectorAll(".qb-option").length, 8);
+  } finally {
+    global.document = previousDocument;
+  }
+}
+console.log("options A-H and solution figure preview checks: OK");

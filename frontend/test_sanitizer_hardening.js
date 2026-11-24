@@ -246,6 +246,8 @@ test("D3：解析正文不得当 HTML 塞进 DOM", () => {
 test("D1-6：题干渲染点必须仍然过净化器", () => {
   const src = fs.readFileSync(EAGLE, "utf8");
   const uses = (src.match(/sanitizeMathHtml\(/g) || []).length;
-  assert.ok(uses >= 5, `sanitizeMathHtml 只被用了 ${uses} 次，题干渲染点可能被绕过`);
+  // 1 处 sanitizer 定义 + 3 处题卡正文/QuickLook 渲染调用（原独立改题弹窗已合入统一工作台并改走 QB.renderQuestion DOM 渲染）
+  assert.ok(uses >= 4, `sanitizeMathHtml 只被用了 ${uses} 次，题干渲染点可能被绕过`);
   assert.ok(!/innerHTML\s*=\s*q\.content\b/.test(src), "题干被直接赋给 innerHTML，绕过了净化器");
+  assert.ok(!/innerHTML\s*=\s*q\.rawStem\b/.test(src), "原始题干文本不得直接赋给 innerHTML");
 });

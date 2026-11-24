@@ -11,6 +11,7 @@
   <link rel="apple-touch-icon" href="/app-icon-256.png?v=brand-tug-12658">
   <!-- Tailwind CSS：本地预编译产物（tailwindcss@3.4.17），断网/墙内也能出样式 -->
   <link rel="stylesheet" href="/eagle/tailwind.css?v=tw-20261116a">
+  <link rel="stylesheet" href="/question-editor.css">
   <!-- KaTeX 数学公式渲染 (本地优先，CDN 回退) -->
   <link rel="stylesheet" href="/vendor/katex/katex.min.css" onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css';">
   <script defer src="/vendor/katex/katex.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js';"></script>
@@ -230,45 +231,8 @@
       #basketExportModal #basketModalItemList button { min-width: 32px; min-height: 32px; }
     }
     /* ---- 其余浮层的窄屏体检修整（第三轮，390×844 实测）----
-       ① 答案解析编辑器：双栏实时预览的列是固定 w-[400px]，390px 下整列越界
-          （left 281 → right 681，超出屏幕 291px），左侧选题栏又占掉 256px。
-          → 窄屏改上下堆叠：选题栏压成顶部一条（限高），预览列改成自适应宽度。
-       ② 题目修改弹窗：左表单 w-1/2 + 右预览并排，窄屏下表单只剩 ~195px，
-          顶栏提示「光标实时联动 · 题干正文 · 第 141 字符」一路溢出到 x=442。
-          → 窄屏改上下堆叠，表单整栏吃满宽度。
-       ③ 一批弹窗的 ✕ 与小按钮在窄屏只有 18~26px 高，手指头根本点不准。 */
-    @media (max-width: 768px) {
-      #solutionEditorModal .se-body { flex-direction: column; overflow-y: auto; }
-      #solutionEditorModal .se-left {
-        width: 100%; max-height: 34vh; border-right: none;
-        border-bottom: 1px solid #f1f5f9;
-      }
-      #solutionEditorModal #solutionEditorColumns {
-        flex-direction: column; overflow-y: auto; gap: 12px;
-      }
-      #solutionEditorModal #solutionEditorColumns > div {
-        width: auto !important; flex: 1 1 auto !important; min-width: 0;
-      }
-      #editQuestionModal .eq-body { flex-direction: column; overflow-y: auto; }
-      #editQuestionModal .eq-left {
-        width: 100%; border-right: none; border-bottom: 1px solid #f1f5f9;
-        /* 堆叠后表单区不能被 flex 压扁成一条缝，要留出够用的高度 */
-        flex: 1 1 auto; min-height: 260px;
-      }
-      /* 预览区原来靠 w-1/2 定宽，堆叠后必须放开，否则右半屏一直空着 */
-      #editQuestionModal .eq-right {
-        width: 100%; flex: 1 1 auto; min-height: 240px; border-top: 1px solid #f1f5f9;
-      }
-      #editQuestionModal .eq-left * { overflow-wrap: anywhere; }
-      /* 头部：标题、题号徽章、✕ 挤在一行会把标题折成两行，窄屏允许换行 */
-      #editQuestionModal > div > div:first-child { flex-wrap: wrap; row-gap: 4px; }
-      #editQuestionModal > div > div:first-child > div { flex-wrap: wrap; min-width: 0; }
-      #editQuestionModal > div > div:first-child span { white-space: nowrap; }
-      /* 底部：说明文字别把「取消 / 保存」挤到换行 */
-      #editQuestionModal > div > div:last-child { flex-wrap: wrap; row-gap: 6px; }
-      #editQuestionModal > div > div:last-child > span { flex: 1 1 100%; }
-      #editQuestionModal > div > div:last-child button { white-space: nowrap; }
-    }
+       统一编辑工作台（dialog.qb-editor-shell）的响应式规则在 /question-editor.css；
+       这里保留其余模态框的触摸目标尺寸修整。 */
     @media (max-width: 640px) {
       /* 触摸目标统一抬到 32px（窄屏手指头最小能打中的尺寸） */
       .ql-head-actions button { min-height: 32px; }
@@ -328,12 +292,10 @@
       #globalSearchInput { min-height: 32px; }
       #btnToggleFilterPanel,
       button[title="打开试题篮"] { min-height: 32px; }
-      /* 弹窗关闭按钮：文件夹选择 / 删除确认 / 题目修改 / 原卷核验 / 答案解析编辑器 */
+      /* 弹窗关闭按钮：文件夹选择 / 删除确认 / 原卷核验 */
       #folderPickerModal .x-close,
       #deleteConfirmModal .x-close,
-      #editQuestionModal .x-close,
-      #originalPaperModal .x-close,
-      #solutionEditorModal .x-close { min-width: 32px; min-height: 32px; }
+      #originalPaperModal .x-close { min-width: 32px; min-height: 32px; }
       #eagleHelpModal .x-close { min-width: 32px; min-height: 32px; }
       /* 文件夹选择弹窗：树行与底部按钮 */
       #folderPickerModal #folderPickerTreeList button { min-height: 32px; }
@@ -342,12 +304,6 @@
       /* 删除确认弹窗 */
       #deleteConfirmModal #deleteConfirmBtn,
       #deleteConfirmModal > div > div:last-child button { min-height: 32px; }
-      /* 题目修改弹窗的输入控件 */
-      #editQuestionModal input,
-      #editQuestionModal select,
-      #editQuestionModal textarea { min-height: 32px; }
-      /* 底部「取消 / 保存并更新题目」按钮 */
-      #editQuestionModal > div > div:last-child button { min-height: 32px; }
       /* A4 试卷预览：窄屏下底部说明文字被 truncate 削剩「预览与导…」，
          徽章也被削成「A4 · 共 1…」→ 都改成完整显示（说明最多两行）。 */
       #basketPreviewModal > div > div:last-child { flex-wrap: wrap; row-gap: 6px; }
@@ -365,16 +321,10 @@
       #originalPaperModal button[title="把整页原卷缩到刚好放进窗口 (快捷键 0)"] { min-height: 32px; }
       #originalPaperModal button[title="缩小原卷"],
       #originalPaperModal button[title="放大原卷"] { min-width: 32px; }
-      /* 答案解析编辑器：列头里的 ✕ 与「保存本题 / 重新读取」也是小按钮 */
-      #solutionEditorModal #solutionEditorColumns button { min-width: 32px; min-height: 32px; }
       /* 图片灯箱 */
       #imageLightboxModal button { min-width: 32px; min-height: 32px; }
       /* A4 试卷预览弹窗：头部「重新排版 / ✕」与底部导出按钮 */
       #basketPreviewModal button { min-width: 32px; min-height: 32px; }
-      /* 答案解析编辑器 */
-      #solutionEditorModal #solutionEditorSearchInput { min-height: 32px; }
-      #solutionEditorModal .se-left button { min-height: 32px; }
-      #solutionEditorModal > div > div:last-child button { min-height: 32px; }
       /* 文件夹树分组标题行的「+」小按钮：w-4 h-4 = 16×16，手机上根本点不准
          （390px 抽屉展开态实测 3 个都是 16×16）→ 抬到 32px。
          用 class 钩子 .eagle-tree-action-btn 定位：Tailwind 是本地预编译产物，
@@ -508,9 +458,12 @@
     .qb-number { flex: none; font-weight: 700; }
     .qb-stem-body { white-space: pre-wrap; min-width: 0; overflow-wrap: anywhere; }
     .qb-options { list-style: none; margin: 0.5rem 0 0; padding: 0; display: grid; column-gap: 1.5rem; row-gap: 0.35rem; }
+    .qb-options.cols-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
     .qb-options.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .qb-options.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .qb-options.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .qb-options.cols-1 { grid-template-columns: 1fr; }
+    @media (min-width: 640px) { .sm\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
     .qb-option { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 0.4em; align-items: baseline; }
     .qb-option-label { font-weight: 700; color: #475569; }
     .qb-option-body { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -547,14 +500,6 @@
     .qb-subquestion-label { font-weight: 600; color: #334155; white-space: nowrap; }
     .qb-subquestion-body { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
     .qb-analysis { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; color: #1e293b; }
-    #solutionEditorModal .sol-live-preview { font-size: 13.5px; line-height: 1.82; color: #1e293b; }
-    #solutionEditorModal .sol-preview-section { padding-top: 0.6rem; border-top: 1px dashed #e2e8f0; }
-    #solutionEditorModal .sol-preview-section:first-child { border-top: 0; padding-top: 0; }
-    #solutionEditorModal .sol-preview-figures { display: flex; flex-wrap: wrap; gap: 0.65rem; align-items: flex-start; margin: 0.45rem 0; }
-    #solutionEditorModal .sol-preview-fig { margin: 0; max-width: 100%; border: 1px solid #e2e8f0; border-radius: 6px; padding: 4px; background: #ffffff; }
-    #solutionEditorModal .sol-preview-fig img { display: block; max-width: 100%; height: auto; border-radius: 4px; cursor: zoom-in; }
-    #solutionEditorModal .sol-rendered-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.75; }
-    #solutionEditorModal .katex-display { margin: 0.45rem 0; overflow-x: auto; overflow-y: hidden; }
 
     /* ---- 快速审题模态框 (Quick Look) 排版与附图约束 ---- */
     #quickLookModal .ql-question-body { font-size: 15px; line-height: 1.85; color: #0f172a; }
@@ -1734,8 +1679,8 @@
           <span id="menuBadgeTagCount" class="eagle-menu-pill">0</span>
         </button>
         <button type="button" onclick="hideEagleAppMainMenu(); openSolutionEditorFromMenu();" class="eagle-menu-item">
-          <span class="eagle-menu-item-left"><span class="eagle-menu-icon">✎</span><span class="truncate">编辑当前题答案解析</span></span>
-          <span class="eagle-menu-pill is-accent">编辑器</span>
+          <span class="eagle-menu-item-left"><span class="eagle-menu-icon">✏️</span><span class="truncate">编辑当前题目</span></span>
+          <span class="eagle-menu-pill is-accent">E</span>
         </button>
         <button type="button" onclick="loadInitialLibraryData(); refreshPapersData(); hideEagleAppMainMenu();" class="eagle-menu-item">
           <span class="eagle-menu-item-left"><span class="eagle-menu-icon">🔄</span><span class="truncate">刷新题库数据</span></span>
@@ -1844,151 +1789,6 @@
       </div>
       <div class="rounded-lg bg-white p-2 shadow-2xl overflow-hidden flex items-center justify-center max-h-[82vh]">
         <img id="lightboxImage" src="" alt="预览大图" class="max-h-[78vh] max-w-full object-contain select-none" />
-      </div>
-    </div>
-  </div>
-
-  <!-- ================= 题目修改与编辑模态框 (还原核心编辑功能) ================= -->
-  <div 
-    id="editQuestionModal" 
-    class="hidden fixed inset-0 z-[10001] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4"
-    onclick="closeEditQuestionModal()"
-  >
-    <div 
-      class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden border border-slate-200"
-      onclick="event.stopPropagation()"
-    >
-      <!-- 头部 -->
-      <div class="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50/80">
-        <div class="flex items-center gap-2">
-          <span class="text-base font-bold text-slate-800">✏️ 修改与校订题目</span>
-          <span id="editModalQBadge" class="text-xs font-mono px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold"></span>
-        </div>
-        <button onclick="closeEditQuestionModal()" class="x-close text-slate-400 hover:text-slate-600 p-1 rounded-md text-base">✕</button>
-      </div>
-
-      <!-- 编辑主体：左侧表单 + 右侧实时预览 -->
-      <div class="eq-body flex-1 flex overflow-hidden">
-        <!-- 左侧编辑表单 -->
-        <div class="eq-left w-1/2 p-5 overflow-y-auto space-y-4 border-r border-slate-100 text-xs text-slate-700">
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block font-semibold mb-1 text-slate-700">题型</label>
-              <select id="editInputType" aria-label="题型" onchange="handleEditTypeChange()" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none">
-                <option value="single_choice">单选题</option>
-                <option value="multiple_choice">多选题</option>
-                <option value="fill_blank">填空题</option>
-                <option value="true_false">判断题</option>
-                <option value="free_response">解答题</option>
-                <option value="unknown">题型未定</option>
-              </select>
-            </div>
-            <div>
-              <label class="block font-semibold mb-1 text-slate-700">试题评分</label>
-              <div id="editInputStars" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md bg-slate-50 flex items-center justify-between gap-2">
-                <span id="editInputStarsText" class="text-amber-500 font-bold whitespace-nowrap">未评分</span>
-                <span class="text-[10px] text-slate-400 text-right">可在右侧详情栏点击星星评分</span>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label class="block font-semibold mb-1 text-slate-700">题干正文 (支持 LaTeX，如 $f(x)=x^2$)</label>
-            <textarea 
-              id="editInputStem" 
-              rows="5"
-              aria-label="题干" 
-              oninput="updateEditLivePreview()"
-              class="w-full p-2.5 border border-slate-200 rounded-md font-mono text-xs focus:border-emerald-500 outline-none leading-relaxed"
-              placeholder="请输入题干内容..."
-            ></textarea>
-          </div>
-
-          <!-- 选项编辑区域 (选择题展示) -->
-          <div id="editOptionsGroup" class="space-y-2">
-            <div class="flex items-center justify-between">
-              <label class="block font-semibold text-slate-700">选项内容</label>
-              <span class="text-[11px] text-slate-400">支持 A~F 选项（多选题/竞赛题可填 E、F）</span>
-            </div>
-            <div class="grid grid-cols-1 gap-2">
-              <div class="flex items-center gap-2">
-                <span class="font-bold text-slate-600 w-5">A.</span>
-                <input id="editOptA" aria-label="选项 A" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 A 内容...">
-              </div>
-              <div class="flex items-center gap-2">
-                <span class="font-bold text-slate-600 w-5">B.</span>
-                <input id="editOptB" aria-label="选项 B" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 B 内容...">
-              </div>
-              <div class="flex items-center gap-2">
-                <span class="font-bold text-slate-600 w-5">C.</span>
-                <input id="editOptC" aria-label="选项 C" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 C 内容...">
-              </div>
-              <div class="flex items-center gap-2">
-                <span class="font-bold text-slate-600 w-5">D.</span>
-                <input id="editOptD" aria-label="选项 D" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 D 内容...">
-              </div>
-              <div class="flex items-center gap-2">
-                <span class="font-bold text-slate-600 w-5">E.</span>
-                <input id="editOptE" aria-label="选项 E" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 E 内容（选填）...">
-              </div>
-              <div class="flex items-center gap-2">
-                <span class="font-bold text-slate-600 w-5">F.</span>
-                <input id="editOptF" aria-label="选项 F" type="text" oninput="updateEditLivePreview()" class="flex-1 px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="选项 F 内容（选填）...">
-              </div>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block font-semibold mb-1 text-slate-700">参考答案</label>
-              <input id="editInputAnswer" aria-label="参考答案" type="text" oninput="updateEditLivePreview()" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none font-mono" placeholder="如: B 或 x>1">
-            </div>
-            <div>
-              <label class="block font-semibold mb-1 text-slate-700">分值</label>
-              <input id="editInputScore" aria-label="分值" type="number" oninput="updateEditLivePreview()" class="w-full px-2.5 py-1.5 border border-slate-200 rounded-md focus:border-emerald-500 outline-none" placeholder="分值，如 5">
-            </div>
-          </div>
-
-          <div>
-            <label class="block font-semibold mb-1 text-slate-700">参考解析 / 详细解题步骤</label>
-            <textarea 
-              id="editInputAnalysis" 
-              rows="4"
-              aria-label="答案解析" 
-              oninput="updateEditLivePreview()"
-              class="w-full p-2.5 border border-slate-200 rounded-md font-mono text-xs focus:border-emerald-500 outline-none leading-relaxed"
-              placeholder="参考解析内容..."
-            ></textarea>
-          </div>
-        </div>
-
-        <!-- 右侧实时排版预览 -->
-        <div class="eq-right w-1/2 p-5 overflow-y-auto bg-slate-50/50 flex flex-col">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">实时渲染排版预览</span>
-            <span class="text-[10px] text-emerald-600 font-medium">KaTeX 实时排版</span>
-          </div>
-          <!-- 既有题库 Devin 规范：光标与公式联动状态提示 -->
-          <div id="editLivePreviewHint" class="mb-2 px-2.5 py-1 text-[11px] bg-slate-100/90 text-slate-600 rounded border border-slate-200/60 truncate flex items-center gap-1.5 shrink-0">
-            <span>💡</span><span>输入或移动光标时，右侧预览将实时投射竖杠位置并高亮对应公式。</span>
-          </div>
-          <div id="editLivePreviewBox" class="flex-1 p-4 bg-white rounded-lg border border-slate-200/80 shadow-2xs overflow-y-auto relative">
-            <!-- 实时更新 -->
-          </div>
-        </div>
-      </div>
-
-      <!-- 底部操作栏 -->
-      <div class="flex items-center justify-between px-5 py-3 border-t border-slate-100 bg-slate-50">
-        <span class="text-xs text-slate-400">修改后将直接同步持久化保存至题库系统。</span>
-        <div class="flex items-center gap-2">
-          <button onclick="closeEditQuestionModal()" class="px-3.5 py-1.5 border border-slate-200 rounded-md text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors">
-            取消
-          </button>
-          <button id="btnSubmitQuestionEdit" onclick="submitQuestionEdit()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-semibold shadow-2xs transition-colors flex items-center gap-1.5">
-            <span>💾 保存并更新题目</span>
-          </button>
-        </div>
       </div>
     </div>
   </div>
@@ -3256,11 +3056,7 @@
     let activeContextMenuPaperId = null;
     let activeContextMenuSortTargetId = null;
 
-    // 题目编辑与审题状态
-    let activeEditingQuestionId = null;
-    let activeEditingRevisionInfo = null;
-    let activeEditingRevisionPromise = null;
-    let activeEditingInitialSnapshot = null;
+    // 审题状态
     let quickLookQuestionIndex = 0;
     let quickLookShowAnalysis = false;
 
@@ -3931,7 +3727,7 @@
       const stemFigures = [];
       rawFigures.forEach(f => {
         const slot = (f.slot || '').trim().toUpperCase();
-        if (['A', 'B', 'C', 'D', 'E', 'F'].includes(slot)) {
+        if (['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].includes(slot)) {
           optionFiguresMap[slot] = f;
         } else {
           stemFigures.push(f);
@@ -4081,7 +3877,7 @@
       const stemFigures = [];
       rawFigures.forEach(f => {
         const slot = (f.slot || '').trim().toUpperCase();
-        if (['A', 'B', 'C', 'D', 'E', 'F'].includes(slot)) optionFiguresMap[slot] = f;
+        if (['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].includes(slot)) optionFiguresMap[slot] = f;
         else stemFigures.push(f);
       });
       let formattedStem = rawStem
@@ -4640,8 +4436,12 @@
       }));
 
       let gridColsClass = 'grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2';
-      if (sortedKeys.length === 4 && maxOptLen <= 10) {
-        gridColsClass = 'grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2';
+      if (maxOptLen <= 10) {
+        if (sortedKeys.length === 4 || sortedKeys.length >= 7) {
+          gridColsClass = 'grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2';
+        } else if (sortedKeys.length === 6) {
+          gridColsClass = 'grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2';
+        }
       } else if (maxOptLen > 26) {
         gridColsClass = 'grid-cols-1 gap-y-2';
       }
@@ -5113,25 +4913,13 @@
         <div class="p-1 space-y-0.5">
           <div
             data-ctx-item="1"
-            onclick="openSolutionEditorForId('${q.id}'); hideEagleContextMenu();"
-            class="flex items-center justify-between px-2.5 py-1.5 rounded text-emerald-800 hover:bg-emerald-50 cursor-pointer transition-colors font-semibold"
-            title="打开图文答案解析编辑器（支持公式预览与配图）"
-          >
-            <div class="flex items-center gap-2 min-w-0">
-              <span class="text-sm shrink-0">✎</span>
-              <span class="truncate">编辑答案与解析</span>
-            </div>
-            <span class="text-[10px] text-emerald-600 font-mono shrink-0">正式解析</span>
-          </div>
-          <div
-            data-ctx-item="1"
-            onclick="openEditQuestionModal('${q.id}'); hideEagleContextMenu();"
+            onclick="openSolutionEditorForId('${q.id}', { focusField: 'stem' }); hideEagleContextMenu();"
             class="flex items-center justify-between px-2.5 py-1.5 rounded text-slate-800 hover:bg-emerald-50 cursor-pointer transition-colors font-semibold"
-            title="修改题干、答案与解析"
+            title="打开统一编辑工作台（修改题干、选项 A–H、题图与答案解析，快捷键: E）"
           >
             <div class="flex items-center gap-2 min-w-0">
               <span class="text-sm shrink-0">✏️</span>
-              <span class="truncate">修改与校订题目</span>
+              <span class="truncate">编辑</span>
             </div>
             <kbd class="text-[10px] text-slate-400 font-mono shrink-0">E</kbd>
           </div>
@@ -9416,12 +9204,12 @@
       toggleFavorite(q.id);
     }
 
-    function openSolutionEditorForId(qid) {
+    function openSolutionEditorForId(qid, options = {}) {
       if (!qid) return;
       if (typeof window.openSolutionEditor === 'function') {
-        window.openSolutionEditor([qid]);
+        window.openSolutionEditor([qid], { focusField: options.focusField || 'answer' });
       } else {
-        openEditQuestionModal(qid);
+        showToast('统一编辑工作台脚本尚未就绪，请稍后再试', 'error');
       }
     }
 
@@ -9429,14 +9217,14 @@
       const q = filteredQuestions[quickLookQuestionIndex];
       if (!q) return;
       closeQuickLookModal();
-      openSolutionEditorForId(q.id);
+      openSolutionEditorForId(q.id, { focusField: 'answer' });
     }
 
     function openEditFromQuickLook() {
       const q = filteredQuestions[quickLookQuestionIndex];
       if (!q) return;
       closeQuickLookModal();
-      openEditQuestionModal(q.id);
+      openSolutionEditorForId(q.id, { focusField: 'stem' });
     }
 
     /**
@@ -10166,306 +9954,7 @@
       showToast('试题篮就在本页面，点顶部「试题篮」即可查看与导出', 'info');
     }
 
-    // ================= 题目修改与校订（含 LaTeX 竖杠与公式光标实时联动） =================
-    const EDIT_INPUT_FIELDS = {
-      'editInputStem': 'stem',
-      'editOptA': 'A',
-      'editOptB': 'B',
-      'editOptC': 'C',
-      'editOptD': 'D',
-      'editOptE': 'E',
-      'editOptF': 'F',
-      'editInputAnswer': 'answer',
-      'editInputAnalysis': 'analysis'
-    };
-
-    const EDIT_FIELD_LABELS = {
-      'stem': '题干正文',
-      'A': '选项 A',
-      'B': '选项 B',
-      'C': '选项 C',
-      'D': '选项 D',
-      'E': '选项 E',
-      'F': '选项 F',
-      'answer': '参考答案',
-      'analysis': '参考解析'
-    };
-
-    let lastActiveEditInput = null;
-
-    function initEditPreviewInputs() {
-      Object.keys(EDIT_INPUT_FIELDS).forEach(id => {
-        const input = document.getElementById(id);
-        if (!input || input.dataset.previewTracked === 'true') return;
-        input.dataset.previewTracked = 'true';
-
-        const onCursor = () => {
-          lastActiveEditInput = input;
-          syncPreviewCursorPosition(input);
-        };
-
-        input.addEventListener('focus', onCursor);
-        input.addEventListener('click', onCursor);
-        input.addEventListener('keyup', onCursor);
-        input.addEventListener('select', onCursor);
-        input.addEventListener('input', () => {
-          lastActiveEditInput = input;
-          updateEditLivePreview();
-        });
-      });
-    }
-
-    function syncPreviewCursorPosition(targetInput) {
-      const previewEl = document.getElementById('editLivePreviewBox');
-      const hintEl = document.getElementById('editLivePreviewHint');
-      const qb = window.QBRender || window.QB;
-      if (!previewEl || !qb || typeof qb.previewSelection !== 'function') return;
-
-      const input = targetInput || lastActiveEditInput || (
-        document.activeElement && EDIT_INPUT_FIELDS[document.activeElement.id]
-          ? document.activeElement
-          : document.getElementById('editInputStem')
-      );
-      if (!input || !EDIT_INPUT_FIELDS[input.id]) return;
-
-      const field = EDIT_INPUT_FIELDS[input.id];
-      const start = Number.isInteger(input.selectionStart) ? input.selectionStart : 0;
-      const end = Number.isInteger(input.selectionEnd) ? input.selectionEnd : start;
-
-      const result = qb.previewSelection(previewEl, { field, start, end });
-
-      if (hintEl) {
-        const label = EDIT_FIELD_LABELS[field] || field;
-        if (result) {
-          if (result.kind === 'math') {
-            hintEl.innerHTML = `<span>🧮</span><span>公式编辑高亮 · <b>${label}</b> · ${result.exact ? '精确字符聚焦' : '公式段落聚焦'} (位置 ${start})</span>`;
-          } else if (result.kind === 'text') {
-            hintEl.innerHTML = `<span>📍</span><span>光标实时联动 · <b>${label}</b> · 第 ${start + 1} 字符处</span>`;
-          } else {
-            hintEl.innerHTML = `<span>📍</span><span>预览联动 · <b>${label}</b></span>`;
-          }
-        } else {
-          hintEl.innerHTML = `<span>📍</span><span>光标联动 · <b>${label}</b> (第 ${start + 1} 字符)</span>`;
-        }
-      }
-
-      // 平滑滚动预览容器，保持当前光标或高亮公式始终可见
-      const marker = previewEl.querySelector('.qb-preview-position') || previewEl.querySelector('.qb-preview-active-formula, .qb-preview-active-region');
-      if (marker) {
-        marker.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }
-    }
-
-    function normalizeQuestionOptionsForCompare(opts) {
-      const cleaned = {};
-      if (opts && typeof opts === 'object') {
-        Object.keys(opts).sort().forEach(k => {
-          const val = String(opts[k] ?? '').trim();
-          if (val) cleaned[k.toUpperCase()] = val;
-        });
-      }
-      return cleaned;
-    }
-
-    async function openEditQuestionModal(qid) {
-      activeEditingQuestionId = qid;
-      activeEditingRevisionInfo = null;
-      const q = questionsData.find(item => item.id === qid);
-      if (!q) return;
-
-      const modal = document.getElementById('editQuestionModal');
-      if (!modal) return;
-
-      document.getElementById('editModalQBadge').innerText = `${questionIdentity(q)} · ID: ${q.id.slice(0, 8)}`;
-      const initType = q.questionTypeCode || 'unknown';
-      const initStem = (q.rawStem || '').trim();
-      document.getElementById('editInputType').value = initType;
-      setEditStarsDisplay(q.difficultyStars || 0);
-      const stemInputEl = document.getElementById('editInputStem');
-      stemInputEl.value = q.rawStem || '';
-      stemInputEl.disabled = Boolean(q.isSourceImage);
-      stemInputEl.placeholder = q.isSourceImage
-        ? '当前为原图题面，如需改字请先在卡片菜单点击「AI 识别转文字」'
-        : '请输入题干内容...';
-
-      const opts = q.rawOptions || {};
-      document.getElementById('editOptA').value = opts.A || opts.a || '';
-      document.getElementById('editOptB').value = opts.B || opts.b || '';
-      document.getElementById('editOptC').value = opts.C || opts.c || '';
-      document.getElementById('editOptD').value = opts.D || opts.d || '';
-      document.getElementById('editOptE').value = opts.E || opts.e || '';
-      document.getElementById('editOptF').value = opts.F || opts.f || '';
-      ['A', 'B', 'C', 'D', 'E', 'F'].forEach((letter) => {
-        const optEl = document.getElementById(`editOpt${letter}`);
-        if (optEl) optEl.disabled = Boolean(q.isSourceImage);
-      });
-
-      const scoreInput = document.getElementById('editInputScore');
-      if (scoreInput) {
-        scoreInput.value = (q.score != null && !isNaN(q.score)) ? q.score : (q.difficultyStars >= 4 ? 12 : 5);
-      }
-
-      // 优先回填已保存的正式答案解析，其次才是原卷答案和 AI 初稿
-      const savedSol = q.savedSolution && (q.savedSolution.answer || q.savedSolution.analysis) ? q.savedSolution : null;
-      const initAnswer = (savedSol ? savedSol.answer : '') || q.rawAnswer || (q.aiAnswer ? q.aiAnswer.answer : '') || '';
-      const initAnalysis = (savedSol ? savedSol.analysis : '') || q.rawAnalysis || (q.aiAnswer ? q.aiAnswer.analysis : '') || '';
-      document.getElementById('editInputAnswer').value = initAnswer;
-      document.getElementById('editInputAnalysis').value = initAnalysis;
-
-      activeEditingInitialSnapshot = {
-        type: initType,
-        stem: initStem,
-        options: normalizeQuestionOptionsForCompare(opts),
-        answer: String(initAnswer || '').trim(),
-        analysis: String(initAnalysis || '').trim()
-      };
-
-      initEditPreviewInputs();
-      handleEditTypeChange();
-      updateEditLivePreview();
-      modal.classList.remove('hidden');
-
-      const stemInput = document.getElementById('editInputStem');
-      if (stemInput) {
-        lastActiveEditInput = stemInput;
-        setTimeout(() => {
-          // preventScroll：窄屏下焦点落在题干框时会把滚动祖先（表单区）滚到底，
-          // 导致弹窗一打开「题型 / 试题评分」就被顶出视野。
-          stemInput.focus({ preventScroll: true });
-          syncPreviewCursorPosition(stemInput);
-        }, 60);
-      }
-
-      activeEditingRevisionPromise = (async () => {
-        try {
-          const res = await fetch(`${API_BASE}/api/library/${qid}/question`, {
-            headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
-            cache: 'no-store'
-          });
-          if (res.ok) {
-            const info = await res.json();
-            if (activeEditingQuestionId === qid) {
-              activeEditingRevisionInfo = info;
-            }
-            return info;
-          }
-        } catch (e) {
-          console.warn('Pre-fetch revision error:', e);
-        }
-        return null;
-      })();
-      await activeEditingRevisionPromise;
-    }
-
-    function closeEditQuestionModal() {
-      const modal = document.getElementById('editQuestionModal');
-      if (modal) modal.classList.add('hidden');
-      activeEditingQuestionId = null;
-      activeEditingRevisionInfo = null;
-      activeEditingRevisionPromise = null;
-      activeEditingInitialSnapshot = null;
-      lastActiveEditInput = null;
-    }
-
-    function handleEditTypeChange() {
-      const type = document.getElementById('editInputType')?.value || 'single_choice';
-      const optGroup = document.getElementById('editOptionsGroup');
-      if (!optGroup) return;
-
-      if (type === 'single_choice' || type === 'multiple_choice') {
-        optGroup.classList.remove('hidden');
-      } else {
-        optGroup.classList.add('hidden');
-      }
-      updateEditLivePreview();
-    }
-
-    let activeEditingStars = 0;
-
-    function setEditStarsDisplay(stars) {
-      const raw = parseInt(stars, 10);
-      const n = (raw >= 1 && raw <= 5) ? raw : 0;
-      activeEditingStars = n;
-      const el = document.getElementById('editInputStarsText');
-      if (el) {
-        el.textContent = n > 0 ? ('★'.repeat(n) + '☆'.repeat(5 - n)) : '未评分';
-        el.className = n > 0 ? 'text-amber-500 font-bold whitespace-nowrap' : 'text-slate-400 font-normal whitespace-nowrap';
-      }
-      return n;
-    }
-
-    function updateEditLivePreview() {
-      const previewEl = document.getElementById('editLivePreviewBox');
-      if (!previewEl) return;
-
-      const stem = document.getElementById('editInputStem')?.value || '';
-      const type = document.getElementById('editInputType')?.value || 'single_choice';
-      const isChoice = (type === 'single_choice' || type === 'multiple_choice');
-
-      const options = {};
-      if (isChoice) {
-        const a = document.getElementById('editOptA')?.value;
-        const b = document.getElementById('editOptB')?.value;
-        const c = document.getElementById('editOptC')?.value;
-        const d = document.getElementById('editOptD')?.value;
-        const e = document.getElementById('editOptE')?.value;
-        const f = document.getElementById('editOptF')?.value;
-        if (a !== undefined && a !== '') options.A = a;
-        if (b !== undefined && b !== '') options.B = b;
-        if (c !== undefined && c !== '') options.C = c;
-        if (d !== undefined && d !== '') options.D = d;
-        if (e !== undefined && e !== '') options.E = e;
-        if (f !== undefined && f !== '') options.F = f;
-      }
-
-      const answer = document.getElementById('editInputAnswer')?.value || '';
-      const analysis = document.getElementById('editInputAnalysis')?.value || '';
-
-      const q = questionsData.find(item => item.id === activeEditingQuestionId);
-      const figures = (q && (q.figures || q.rawFigures)) || [];
-
-      const content = {
-        body_mode: q && q.isSourceImage ? 'source_image' : 'text',
-        question_images: (q && q.questionImages) || [],
-        stem: stem,
-        options: options,
-        answer: answer,
-        analysis: analysis,
-        figures: figures
-      };
-
-      const qb = window.QBRender || window.QB;
-      if (qb && typeof qb.renderQuestion === 'function') {
-        qb.renderQuestion(previewEl, content, {
-          showNumber: false,
-          showAnswer: 'open',
-          showEmptyAnswer: true,
-          trackSource: true
-        });
-      } else {
-        let formattedStem = stem
-          .split('\n')
-          .filter(p => p.trim())
-          .map(p => `<p class="font-serif leading-relaxed mb-2 text-slate-800 text-sm">${escapeHtml(p)}</p>`)
-          .join('');
-
-        if (isChoice && Object.keys(options).length > 0) {
-          formattedStem += renderAdaptiveOptionsHtml(options, {}, 1);
-        }
-
-        previewEl.innerHTML = `
-          <div class="p-3 bg-white rounded-lg border border-slate-200 text-xs">
-            <div class="text-slate-800 font-serif leading-relaxed">
-              ${sanitizeMathHtml(formattedStem || '<span class="text-slate-300 italic">在左侧输入题干以预览效果</span>')}
-            </div>
-          </div>
-        `;
-        triggerKaTeX(previewEl);
-      }
-
-      syncPreviewCursorPosition();
-    }
-
+    // ================= 统一编辑同步与 ID 迁移（由 LibraryUnifiedEditor 保存后触发） =================
     function replaceSetQuestionId(targetSet, oldId, newId) {
       if (!targetSet || !targetSet.has(oldId)) return;
       targetSet.delete(oldId);
@@ -10482,271 +9971,119 @@
       replaceSetQuestionId(selectedQuestionIds, oldId, newId);
       replaceSetQuestionId(expandedAnalysisQuestionIds, oldId, newId);
       if (currentActiveQuestionId === oldId) currentActiveQuestionId = newId;
-      activeEditingQuestionId = newId;
       const oldCard = document.getElementById(`qcard_${oldId}`);
       if (oldCard) oldCard.id = `qcard_${newId}`;
     }
 
-    function renderEditedQuestionContent(q, newStem, newOpts) {
-      let formattedStem = newStem
+    function buildEagleCardContentHtml(q, rawStem, rawOptions, rawFigures, rawQuestionImages) {
+      const qNum = q?.questionNumber || q?.number || 1;
+      const optionFiguresMap = {};
+      const stemFigures = [];
+      (Array.isArray(rawFigures) ? rawFigures : []).forEach(f => {
+        const slot = (f.slot || '').trim().toUpperCase();
+        if (['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].includes(slot)) optionFiguresMap[slot] = f;
+        else stemFigures.push(f);
+      });
+      let formattedStem = String(rawStem || '')
         .split('\n')
         .filter(p => p.trim())
         .map(p => `<p class="font-serif leading-relaxed mb-2 text-slate-800 text-sm sm:text-base">${escapeHtml(p)}</p>`)
         .join('');
-      const optHtml = renderAdaptiveOptionsHtml(newOpts, {}, q.questionNumber);
+      if (q?.isSourceImage && Array.isArray(rawQuestionImages) && rawQuestionImages.length > 0) {
+        formattedStem += rawQuestionImages.map((img, idx) => {
+          const imgUrl = (img.url && img.url.startsWith('/') && API_BASE) ? (API_BASE + img.url) : (img.url || '');
+          if (!imgUrl) return '';
+          const pageHint = Number.isInteger(img.page_idx) ? ` · 原卷第 ${img.page_idx + 1} 页` : '';
+          return `<div class="my-2 text-left"><img src="${escapeHtml(imgUrl)}" alt="原图题第 ${idx + 1} 段${escapeHtml(pageHint)}" loading="lazy" class="max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs" /></div>`;
+        }).join('');
+      } else if (stemFigures.length > 0) {
+        formattedStem += stemFigures.map(f => {
+          const imgUrl = (f.url && f.url.startsWith('/') && API_BASE) ? (API_BASE + f.url) : (f.url || f.file || '');
+          if (!imgUrl) return '';
+          return `<div class="my-3 text-right"><img src="${escapeHtml(imgUrl)}" alt="第 ${qNum} 题配图" class="max-h-56 max-w-full inline-block rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xs" /></div>`;
+        }).join('');
+      }
+      const optHtml = renderAdaptiveOptionsHtml(rawOptions || {}, optionFiguresMap, qNum);
       if (optHtml) formattedStem += optHtml;
       return formattedStem;
     }
 
-    async function submitQuestionEdit() {
-      if (!activeEditingQuestionId) return;
-      const qid = activeEditingQuestionId;
-      const q = questionsData.find(item => item.id === qid);
+    function applyUnifiedSaveToEagle(item, solution, meta = {}) {
+      const oldId = String(meta.previousId || item?.id || '');
+      const newPub = meta.publication || null;
+      const targetQid = String(newPub?.id || item?.id || oldId);
+      const q = questionsData.find(card => String(card.id) === oldId)
+        || questionsData.find(card => String(card.id) === targetQid);
       if (!q) return;
 
-      const newType = document.getElementById('editInputType')?.value || 'single_choice';
-      const newStars = (activeEditingStars >= 1 && activeEditingStars <= 5) ? activeEditingStars : 0;
-      const newStem = (document.getElementById('editInputStem')?.value || '').trim();
-      const parsedScore = parseFloat(document.getElementById('editInputScore')?.value);
-      const newScore = (!isNaN(parsedScore) && parsedScore > 0) ? parsedScore : (q.score || (newStars >= 4 ? 12 : 5));
+      if (targetQid && oldId && targetQid !== oldId) {
+        migrateQuestionIdAfterEdit(q, oldId, targetQid, newPub);
+      }
 
-      const newOpts = {};
-      const isChoice = (newType === 'single_choice' || newType === 'multiple_choice');
-      if (isChoice) {
-        // 保留可能存在的其余非 A~F 选项（防旧数据被覆盖）
-        if (q.rawOptions && typeof q.rawOptions === 'object') {
-          Object.keys(q.rawOptions).forEach(k => {
-            if (!['A', 'B', 'C', 'D', 'E', 'F', 'a', 'b', 'c', 'd', 'e', 'f'].includes(k)) {
-              newOpts[k] = q.rawOptions[k];
-            }
-          });
+      if (meta.questionChanged) {
+        const pubContent = newPub?.content || item?.content || {};
+        const nextType = newPub?.question_type || item?.question_type || q.questionTypeCode || 'free_response';
+        const nextStem = pubContent.stem ?? q.rawStem ?? '';
+        const nextOpts = (pubContent.options && typeof pubContent.options === 'object') ? pubContent.options : (q.rawOptions || {});
+        const nextFigs = Array.isArray(pubContent.figures) ? pubContent.figures : (q.figures || q.rawFigures || []);
+        const nextQImgs = Array.isArray(pubContent.question_images) ? pubContent.question_images : (q.questionImages || []);
+        const nextSourceImg = pubContent.body_mode === 'source_image' || (nextQImgs.length > 0 && !String(nextStem).trim());
+
+        q.isSourceImage = nextSourceImg;
+        q.questionImages = nextQImgs;
+        q.rawStem = nextStem;
+        q.rawOptions = nextOpts;
+        q.rawFigures = nextFigs;
+        q.figures = nextFigs;
+        q.questionTypeCode = nextType;
+        q.questionType = LIBRARY_TYPE_NAMES[nextType] || '题型未定';
+        if (newPub?.score != null || item?.score != null) {
+          q.score = Number(newPub?.score ?? item?.score);
         }
-        const a = document.getElementById('editOptA')?.value.trim();
-        const b = document.getElementById('editOptB')?.value.trim();
-        const c = document.getElementById('editOptC')?.value.trim();
-        const d = document.getElementById('editOptD')?.value.trim();
-        const e = document.getElementById('editOptE')?.value.trim();
-        const f = document.getElementById('editOptF')?.value.trim();
-        if (a) newOpts.A = a;
-        if (b) newOpts.B = b;
-        if (c) newOpts.C = c;
-        if (d) newOpts.D = d;
-        if (e) newOpts.E = e;
-        if (f) newOpts.F = f;
+        q.content = buildEagleCardContentHtml(q, nextStem, nextOpts, nextFigs, nextQImgs);
+        q.solutionNeedsReview = Boolean(newPub?.solution_needs_review ?? item?.solution_needs_review);
       }
 
-      const newAnswer = (document.getElementById('editInputAnswer')?.value || '').trim();
-      const newAnalysis = (document.getElementById('editInputAnalysis')?.value || '').trim();
-
-      if (!q.isSourceImage && !newStem) {
-        showToast('题干内容不能为空！', 'error');
-        return;
-      }
-      if (!q.isSourceImage && newType === 'unknown') {
-        showToast('文字题请选择具体题型！', 'error');
-        return;
-      }
-
-      const init = activeEditingInitialSnapshot || {
-        type: q.questionTypeCode || 'unknown',
-        stem: (q.rawStem || '').trim(),
-        options: normalizeQuestionOptionsForCompare(q.rawOptions || {}),
-        answer: String((q.savedSolution && q.savedSolution.answer) || q.rawAnswer || '').trim(),
-        analysis: String((q.savedSolution && q.savedSolution.analysis) || q.rawAnalysis || '').trim()
-      };
-
-      const questionBodyChanged = (
-        newType !== init.type
-        || newStem !== init.stem
-        || JSON.stringify(normalizeQuestionOptionsForCompare(newOpts)) !== JSON.stringify(init.options)
-      );
-      const solutionChanged = (
-        newAnswer !== init.answer
-        || newAnalysis !== init.analysis
-        || (Boolean(newAnswer || newAnalysis) && !q.savedSolution)
-      );
-
-      if (questionBodyChanged && isChoice && newOpts.F) {
-        showToast('后端题库仅支持 A–E 五个选项，请先合并或移除选项 F', 'error');
-        return;
-      }
-
-      const typeNames = {
-        single_choice: '单选题',
-        multiple_choice: '多选题',
-        fill_blank: '填空题',
-        true_false: '判断题',
-        free_response: '解答题'
-      };
-
-      let targetQid = qid;
-      let newPub = null;
-      let savedSolObj = null;
-
-      try {
-        if (questionBodyChanged) {
-          if (!activeEditingRevisionInfo && activeEditingRevisionPromise) {
-            await activeEditingRevisionPromise;
-          }
-          if (!activeEditingRevisionInfo || !activeEditingRevisionInfo.content_hash) {
-            const revRes = await fetch(`${API_BASE}/api/library/${qid}/question`, {
-              headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
-              cache: 'no-store'
-            });
-            if (revRes.ok) {
-              activeEditingRevisionInfo = await revRes.json();
-            }
-          }
-          if (activeEditingRevisionInfo && activeEditingRevisionInfo.editable === false) {
-            showToast(activeEditingRevisionInfo.reason || '当前题目暂不可修改，请先处理来源题卡', 'error');
-            return;
-          }
-          const rev = (activeEditingRevisionInfo && typeof activeEditingRevisionInfo.revision === 'number')
-            ? activeEditingRevisionInfo.revision
-            : 1;
-          const cHash = (activeEditingRevisionInfo && activeEditingRevisionInfo.content_hash) || '';
-          const editPayload = {
-            revision: rev,
-            content_hash: cHash,
-            body_mode: q.isSourceImage ? 'source_image' : 'text',
-            question_type: newType,
-            stem: q.isSourceImage ? (q.rawStem || '') : newStem,
-            options: q.isSourceImage ? {} : newOpts,
-            figures: activeEditingRevisionInfo?.figures || []
-          };
-
-          const resQuestion = await fetch(`${API_BASE}/api/library/${qid}/question`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-QB-Request': '1',
-              'Referer': window.location.href
-            },
-            body: JSON.stringify(editPayload)
-          });
-          if (!resQuestion.ok) {
-            const errData = await resQuestion.json().catch(() => ({}));
-            showToast(errData?.error || `题干保存失败 (HTTP ${resQuestion.status})`, 'error');
-            return;
-          }
-          const qData = await resQuestion.json();
-          newPub = qData?.publication || null;
-          targetQid = String(newPub?.id || qid);
-          activeEditingRevisionInfo = {
-            revision: qData?.revision ?? (rev + 1),
-            content_hash: qData?.content_hash || (newPub && newPub.content_hash) || cHash,
-            editable: true,
-            figures: (newPub && newPub.content && newPub.content.figures) || editPayload.figures
-          };
-          if (targetQid !== qid) {
-            migrateQuestionIdAfterEdit(q, qid, targetQid, newPub);
-          }
-          // 题干已经入库成功，同步更新本地基准，防止下一步失败重试时重复创建版本
-          const typeNames = {
-            single_choice: '单选题',
-            multiple_choice: '多选题',
-            fill_blank: '填空题',
-            true_false: '判断题',
-            free_response: '解答题',
-            unknown: '题型未定'
-          };
-          q.rawStem = (newPub && newPub.content && newPub.content.stem) || (q.isSourceImage ? (q.rawStem || '') : newStem);
-          q.rawOptions = (newPub && newPub.content && newPub.content.options) || (q.isSourceImage ? {} : newOpts);
-          q.questionTypeCode = (newPub && newPub.question_type) || newType;
-          q.questionType = typeNames[q.questionTypeCode] || '题型未定';
-          if (!q.isSourceImage) {
-            q.content = renderEditedQuestionContent(q, q.rawStem, q.rawOptions);
-          }
-          if (activeEditingInitialSnapshot) {
-            activeEditingInitialSnapshot.type = q.questionTypeCode;
-            activeEditingInitialSnapshot.stem = q.rawStem;
-            activeEditingInitialSnapshot.options = normalizeQuestionOptionsForCompare(q.rawOptions);
-          }
-        }
-
-        const shouldSaveSolution = (questionBodyChanged && (newAnswer || newAnalysis)) || (solutionChanged && (newAnswer || newAnalysis));
-        if (shouldSaveSolution) {
-          let baseRevision = null;
-          if (newPub && targetQid !== qid) {
-            baseRevision = (newPub.solution && newPub.solution.id) || null;
-          } else {
-            const solGetRes = await fetch(`${API_BASE}/api/library/${targetQid}/solution`, {
-              headers: { 'X-QB-Request': '1', 'Referer': window.location.href },
-              cache: 'no-store'
-            });
-            if (solGetRes.ok) {
-              const solGetData = await solGetRes.json();
-              baseRevision = solGetData?.base_revision || solGetData?.solution?.id || null;
-            } else {
-              baseRevision = (q.savedSolution && q.savedSolution.id) || null;
-            }
-          }
-
-          const resSolution = await fetch(`${API_BASE}/api/library/${targetQid}/solution`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-QB-Request': '1',
-              'Referer': window.location.href
-            },
-            body: JSON.stringify({
-              answer: newAnswer,
-              analysis: newAnalysis,
-              base_revision: baseRevision,
-              sync_library: true
-            })
-          });
-          if (!resSolution.ok) {
-            const errData = await resSolution.json().catch(() => ({}));
-            showToast(errData?.error || `答案解析保存失败 (HTTP ${resSolution.status})`, 'error');
-            return;
-          }
-          const solData = await resSolution.json().catch(() => ({}));
-          savedSolObj = solData?.solution || { answer: newAnswer, analysis: newAnalysis };
-        }
-      } catch (err) {
-        console.warn('Backend sync save:', err);
-        showToast(err?.message || '后端保存请求失败，当前修改保留在编辑框中', 'error');
-        return;
-      }
-
-      q.rawStem = q.rawStem || newStem;
-      q.rawOptions = questionBodyChanged ? (q.rawOptions || newOpts) : newOpts;
-      q.rawAnswer = newAnswer;
-      q.rawAnalysis = newAnalysis;
-      q.score = newScore;
-      q.questionTypeCode = newType;
-      q.questionType = typeNames[newType] || '解答题';
-      q.difficultyStars = newStars;
-      q.content = renderEditedQuestionContent(q, q.rawStem, q.rawOptions);
-      if (savedSolObj) {
-        q.savedSolution = savedSolObj;
-        const solHasFigs = Boolean(Array.isArray(savedSolObj.figures) && savedSolObj.figures.length);
-        q.hasAnswer = Boolean(savedSolObj.answer || savedSolObj.analysis || solHasFigs || newAnswer || q.rawAnswer);
-        q.hasAnalysis = Boolean(savedSolObj.analysis || solHasFigs || newAnalysis || q.rawAnalysis);
+      if (solution) {
+        q.savedSolution = solution;
+        const solHasFigs = Boolean(Array.isArray(solution.figures) && solution.figures.length);
+        q.hasAnswer = Boolean(solution.answer || solution.analysis || solHasFigs || q.rawAnswer);
+        q.hasAnalysis = Boolean(solution.analysis || solHasFigs || q.rawAnalysis);
+        q.solutionNeedsReview = false;
       }
 
       const cardEl = document.getElementById(`qcard_${targetQid}`);
       if (cardEl) {
-        if (currentViewMode === 'card') {
-          cardEl.outerHTML = renderSingleQuestionCardHtml(q);
-        } else {
-          cardEl.outerHTML = renderCompactQuestionRowHtml(q);
-        }
+        cardEl.outerHTML = currentViewMode === 'card'
+          ? renderSingleQuestionCardHtml(q)
+          : renderCompactQuestionRowHtml(q);
         const newCard = document.getElementById(`qcard_${targetQid}`);
         if (newCard) triggerKaTeX(newCard);
       }
+      if (typeof renderQuestions === 'function') renderQuestions();
       if (currentActiveQuestionId === targetQid && typeof renderRightInspector === 'function') {
         renderRightInspector();
+      }
+      if (typeof renderQuickLookModal === 'function' && window.quickLookQuestionId
+        && String(window.quickLookQuestionId) === targetQid) {
+        renderQuickLookModal();
       }
       if (typeof refreshQuestionSolution === 'function') {
         refreshQuestionSolution(q).then(() => {
           if (typeof renderQuestions === 'function') renderQuestions();
+          if (currentActiveQuestionId === targetQid && typeof renderRightInspector === 'function') {
+            renderRightInspector();
+          }
         }).catch(() => {});
       }
+    }
 
-      closeEditQuestionModal();
-      showToast(`${questionIdentity(q)}修改已保存！`, 'success');
+    function openEditQuestionModal(qid) {
+      openSolutionEditorForId(qid, { focusField: 'stem' });
+    }
+
+    function closeEditQuestionModal() {
+      if (typeof window.closeSolutionEditor === 'function') window.closeSolutionEditor();
     }
 
     // ================= 快捷键与弹窗通用逻辑 =================
@@ -17610,19 +16947,21 @@
         );
 
         if (e.key === 'Escape') {
+          if (document.getElementById('unifiedEditorDialog')?.open || document.getElementById('answerEditorDialog')?.open) {
+            if (typeof closeSolutionEditor === 'function') closeSolutionEditor();
+            return;
+          }
           hideEagleContextMenu();
           hideEagleAppMainMenu();
           closeDeleteConfirmModal();
           closeFolderPickerModal();
           closeImageLightboxModal();
-          closeEditQuestionModal();
           closeBasketExportModal();
           closeTagManagerModal();
           closeQuickLookModal();
           closeOriginalPaperModal();
           closeShortcutsModal();
           closeEagleHelpModal();
-          if (typeof closeSolutionEditor === 'function') closeSolutionEditor();
           clearBatchSelection();
           return;
         }
@@ -17812,7 +17151,7 @@
         if (e.key === 'e' || e.key === 'E') {
           if (currentActiveQuestionId) {
             e.preventDefault();
-            openEditQuestionModal(currentActiveQuestionId);
+            openSolutionEditorForId(currentActiveQuestionId, { focusField: 'stem' });
           }
           return;
         }
@@ -17876,8 +17215,12 @@
     window.refreshQuestionSolution = refreshQuestionSolution;
     window.renderQuestions = typeof renderQuestions === 'function' ? renderQuestions : undefined;
     window.renderQuickLook = typeof renderQuickLookModal === 'function' ? renderQuickLookModal : undefined;
+    window.applyUnifiedSaveToEagle = applyUnifiedSaveToEagle;
+    window.openOriginalPaperModal = openOriginalPaperModal;
     window.openSolutionEditorForId = openSolutionEditorForId;
     window.openSolutionEditorFromQuickLook = openSolutionEditorFromQuickLook;
+    window.openEditQuestionModal = openEditQuestionModal;
+    window.closeEditQuestionModal = closeEditQuestionModal;
     function openSolutionEditorFromMenu() {
       const id = currentActiveQuestionId
         || (filteredQuestions[0] && filteredQuestions[0].id)
@@ -17888,63 +17231,21 @@
         return;
       }
       if (typeof window.openSolutionEditor !== 'function') {
-        showToast('答案解析编辑器脚本还没加载，请刷新页面后再试', 'error');
+        showToast('统一编辑工作台脚本还没加载，请刷新页面后再试', 'error');
         return;
       }
-      window.openSolutionEditor([id]);
+      openSolutionEditorForId(id, { focusField: 'stem' });
     }
     window.openSolutionEditorFromMenu = openSolutionEditorFromMenu;
     window.addEventListener('DOMContentLoaded', init);
   </script>
-  <!-- ================= B5：答案解析编辑器（双栏实时预览 / 完整题面对照 / 原卷裁图 / AI 初稿对照） ================= -->
-  <div id="solutionEditorModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-3">
-    <div class="flex h-[90vh] w-full max-w-[1560px] flex-col rounded-xl bg-white shadow-2xl overflow-hidden border border-slate-200">
-      <div class="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-2.5 shrink-0">
-        <div class="flex items-center gap-2 min-w-0">
-          <span class="text-sm font-bold text-slate-900 shrink-0">✎ 答案解析编辑器</span>
-          <span class="text-[11px] text-slate-400 truncate hidden sm:inline">双栏实时预览 · 完整题面对照 · 原卷裁图 · AI 初稿一键采纳</span>
-        </div>
-        <div class="flex items-center gap-2.5 shrink-0">
-          <span id="solutionEditorStatus" class="text-[11px] text-slate-500"></span>
-          <button type="button" onclick="closeSolutionEditor()" class="x-close text-slate-400 hover:text-slate-700 text-sm px-2" title="关闭">✕</button>
-        </div>
-      </div>
-
-      <div class="se-body flex flex-1 min-h-0 overflow-hidden">
-        <!-- 左侧选题：快速定位 / 多题加入工作台 -->
-        <div class="se-left w-64 border-r border-slate-100 bg-slate-50/60 flex flex-col shrink-0 min-h-0">
-          <div class="p-2 space-y-1.5 border-b border-slate-100 shrink-0">
-            <input id="solutionEditorSearchInput" aria-label="搜索题号、出处或题干" type="text" placeholder="搜题号 / 出处 / 题干..."
-                   oninput="solutionEditorSearch(this.value)"
-                   class="w-full px-2 py-1 text-xs border border-slate-200 rounded-md focus:border-emerald-500 focus:outline-none">
-            <div class="flex flex-wrap gap-1">
-              <button type="button" onclick="solutionEditorPickBasket()" class="px-1.5 py-0.5 rounded border border-slate-200 bg-white text-[10px] text-slate-600 hover:bg-slate-100">试题篮</button>
-              <button type="button" onclick="solutionEditorPickFiltered()" class="px-1.5 py-0.5 rounded border border-slate-200 bg-white text-[10px] text-slate-600 hover:bg-slate-100">当前筛选</button>
-              <button type="button" onclick="solutionEditorPickMissing()" class="px-1.5 py-0.5 rounded border border-slate-200 bg-white text-[10px] text-slate-600 hover:bg-slate-100">缺解析</button>
-            </div>
-          </div>
-          <div id="solutionEditorList" class="flex-1 min-h-0 overflow-y-auto p-1.5 space-y-1"></div>
-        </div>
-
-        <!-- 右侧主工作区：顶部多题 Tab 带 + 双栏实时预览 -->
-        <div class="flex-1 min-w-0 min-h-0 flex flex-col bg-slate-50/40 overflow-hidden">
-          <div id="solutionEditorTabs" class="hidden flex items-center gap-1.5 px-3 py-1.5 border-b border-slate-200/80 bg-white overflow-x-auto shrink-0"></div>
-          <div id="solutionEditorColumns" class="flex-1 min-h-0 overflow-hidden p-3 flex gap-3"></div>
-        </div>
-      </div>
-
-      <div class="border-t border-slate-100 px-4 py-2 flex items-center justify-between gap-3 text-[11px] shrink-0">
-        <span class="text-slate-400 min-w-0">保存会写回题库正式解析（支持 Ctrl+S 保存当前题 · Ctrl+V 直接粘贴截图作为解析配图）</span>
-        <div class="flex gap-2 shrink-0">
-          <button type="button" onclick="saveAllSolutionColumns()" class="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold">保存全部</button>
-          <button type="button" onclick="closeSolutionEditor()" class="px-3 py-1.5 rounded-md border border-slate-200 text-xs text-slate-600 hover:bg-slate-50">关闭</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- B5：答案解析编辑器本体（双栏实时预览 / 完整题面对照 / 原卷裁图 / AI 初稿对照） -->
+  <!-- 统一全屏三区「编辑」工作台与答案解析内核 -->
   <!-- 禁用非输入区域的浏览器原生上下文菜单，保留文本框的复制粘贴功能 -->
+  <script src="/qb-editor-helpers.js" defer></script>
+  <script src="/library-solutions.js" defer></script>
+  <script src="/control-wording.js" defer></script>
+  <script src="/library-unified-editor.js" defer></script>
+  <script src="/library-answer-editor.js" defer></script>
   <script src="/eagle-solution-editor.js" defer></script>
   <script src="/browser-interactions.js" defer></script>
 </body>

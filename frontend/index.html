@@ -11,6 +11,7 @@
   <link rel="apple-touch-icon" href="/app-icon-256.png">
   <link rel="stylesheet" href="/vendor/katex/katex.min.css">
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/question-editor.css">
 <!-- 1.26.50：打开软件时试卷列表还在准备，这一行说明现在是什么状态。 -->
 <link rel="stylesheet" href="/startup-hint.css">
 <!-- 1.26.15：API 配置这一页的重新排版，单独一个文件，方便整页回退。 -->
@@ -127,7 +128,7 @@
             <h3 id="settingsReviewTitle">选择一种切题方式</h3>
             <div class="help-paths">
               <article class="help-path"><h4>自动切题</h4><p>导入自己的资料，先在本机尝试；需要 MinerU 时明确允许本次云处理。切好后可在左右分屏对照原卷核对，通过即自动入库。</p><button id="settingsAutomaticGuide" class="button primary" type="button">自动切题入门</button></article>
-              <article class="help-path"><h4>切题与校正</h4><p>在同一原卷画布中补题、调整范围和题号；保存只存范围不自动识读，完成后可主动批量识读或直接原图审核。用三道离线示例练框题、改字、通过，再实际选题导出。</p><button id="settingsLearn" class="button" type="button">开始手工练习</button><small>示例与正式题库独立，进度自动记住。</small></article>
+              <article class="help-path"><h4>切题与校正</h4><p>在同一原卷画布中补题、调整范围和题号；保存只存范围不自动识读，完成后可主动批量识读或直接原图审核。用三道离线示例练框题、编辑、通过，再实际选题导出。</p><button id="settingsLearn" class="button" type="button">开始手工练习</button><small>示例与正式题库独立，进度自动记住。</small></article>
             </div>
           </section>
           <section class="settings-section help-tasks" aria-labelledby="helpTasksTitle">
@@ -506,11 +507,14 @@
         <button type="button" role="menuitem" data-figure-slot="C" aria-keyshortcuts="C">C</button>
         <button type="button" role="menuitem" data-figure-slot="D" aria-keyshortcuts="D">D</button>
         <button type="button" role="menuitem" data-figure-slot="E" aria-keyshortcuts="E">E</button>
+        <button type="button" role="menuitem" data-figure-slot="F" aria-keyshortcuts="F">F</button>
+        <button type="button" role="menuitem" data-figure-slot="G" aria-keyshortcuts="G">G</button>
+        <button type="button" role="menuitem" data-figure-slot="H" aria-keyshortcuts="H">H</button>
         <button type="button" role="menuitem" class="irrelevant" data-figure-slot="irrelevant" aria-keyshortcuts="X">无关<kbd>X</kbd></button>
         <button type="button" role="menuitem" class="join" data-figure-slot="join" aria-keyshortcuts="J"
                 title="表格或图被分页切开时用：这一块接在前一张配图的下面，保存后拼成一张图">接在上一张图下面（拼成一张）<kbd>J</kbd></button>
       </div>
-      <small class="figure-slot-keys">按 S、A–E、X 或 J 直接选</small>
+      <small class="figure-slot-keys">按 S、A–H、X 或 J 直接选</small>
     </div>
   </dialog>
 
@@ -554,7 +558,7 @@
       <div id="viewerText" class="viewer-text"></div>
     </div>
     <div class="viewer-foot">
-      <button id="viewerEdit" class="button" type="button" title="关闭放大窗口并改这道题（E）">改字</button>
+      <button id="viewerEdit" class="button" type="button" title="关闭放大窗口并编辑这道题（E）">编辑</button>
       <button id="viewerPrev" class="button" type="button"><svg class="icon"><use href="#i-left"/></svg>上一题</button>
       <button id="viewerNext" class="button" type="button">下一题<svg class="icon"><use href="#i-right"/></svg></button>
       <button id="viewerApprove" class="button primary" type="button"><svg class="icon"><use href="#i-check"/></svg>通过</button>
@@ -757,7 +761,7 @@
       <p id="welcomeSetup" class="settings-ready">正在检查读题服务…</p>
       <div class="welcome-learn">
         <strong>想自己框题？用示例练习切题与校正</strong>
-        <span>用三道离线示例实际练框题、改字、通过、选题和导出。不调用 AI，也不会改动正式题库。</span>
+        <span>用三道离线示例实际练框题、编辑、通过、选题和导出。不调用 AI，也不会改动正式题库。</span>
         <button id="welcomeLearn" class="button" type="button">开始手工练习</button>
       </div>
     </div>
@@ -867,6 +871,7 @@
   <script src="/approve-result.js" defer></script>
   <!-- 1.26.50：列表还在准备时，在那一栏里说清楚，别让老师对着空白。 -->
   <script src="/startup-hint.js" defer></script>
+  <script src="/qb-editor-helpers.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

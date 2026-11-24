@@ -17,7 +17,7 @@ import re
 MARK = re.compile(r"[【\[（(]\s*(?:参考|标准)?答案\s*[】\]）)]\s*[:：]?\s*")
 # 紧接着的下一个标记，用来把「【答案】A【分析】…」切干净。
 NEXT = re.compile(r"[【\[（(]\s*(?:参考|标准)?(?:答案|解析|解答|详解|分析|点评)\s*[】\]）)]")
-LETTER = re.compile(r"^([A-Ea-e])$")
+LETTER = re.compile(r"^([A-Ha-h])$")
 MAX_VALUE = 300
 
 

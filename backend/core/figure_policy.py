@@ -285,7 +285,7 @@ _ENGLISH_CUE = re.compile(
 # Options may run to E (some textbook multiple-choice questions print five).
 # A picture-only choice question must still bind A–D; E is only checked when
 # the paper has one.
-OPTION_SLOTS = frozenset({"A", "B", "C", "D", "E"})
+OPTION_SLOTS = frozenset({"A", "B", "C", "D", "E", "F", "G", "H"})
 REQUIRED_OPTION_SLOTS = frozenset({"A", "B", "C", "D"})
 
 
@@ -297,8 +297,9 @@ def _question_text(stem: str, options: dict | None = None) -> str:
     values = [str(stem or "")]
     if isinstance(options, dict):
         values.extend(str(options.get(key, "") or "") for key in sorted(REQUIRED_OPTION_SLOTS))
-        if str(options.get("E", "") or "").strip():
-            values.append(str(options["E"]))
+        for key in ("E", "F", "G", "H"):
+            if str(options.get(key, "") or "").strip():
+                values.append(str(options[key]))
     return unicodedata.normalize("NFKC", "\n".join(values))
 
 

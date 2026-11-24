@@ -37,7 +37,7 @@ from django.core.exceptions import RequestDataTooBig
 from django.http import HttpResponseNotAllowed, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
-from . import library_export as word
+from . import library, library_export as word
 from .library_pdf import (
     _CDP,
     _assets,
@@ -461,7 +461,7 @@ def _collect(publication, mode="separated"):
     if body_mode not in {"text", "source_image"}:
         _fail("这道题的正文类型无法识别，无法出图", 409)
     options = content.get("options") or {}
-    if not isinstance(options, dict) or set(options) - set("ABCDE"):
+    if not isinstance(options, dict) or set(options) - set(library.OPTION_KEYS):
         _fail("这道题的选项快照不完整，无法出图", 409)
     for text in options.values():
         if not isinstance(text, str):

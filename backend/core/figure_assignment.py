@@ -12,15 +12,15 @@ import unicodedata
 
 from .figure_policy import has_figure_cue
 
-OPTION_SLOTS = frozenset("ABCDE")
+OPTION_SLOTS = frozenset("ABCDEFGH")
 CHOICE_KINDS = frozenset({"single_choice", "multiple_choice"})
 TEXT_TYPES = frozenset({"", "text", "paragraph", "list", "list_item", "image_caption"})
 MAX_CANDIDATES = 32
 MAX_BLOCKS = 1024
 MAX_MARKERS = 20
 AMBIGUITY_MARGIN = 12.0
-_MARKER = re.compile(r"^(?:\(([A-E])\)|([A-E])\s*[.、:)])(?:\s*|$)")
-_EMBEDDED_MARKER = re.compile(r"(?:^|\s)(?:\([A-E]\)|[A-E]\s*[.、:)])")
+_MARKER = re.compile(r"^(?:\(([A-H])\)|([A-H])\s*[.、:)])(?:\s*|$)")
+_EMBEDDED_MARKER = re.compile(r"(?:^|\s)(?:\([A-H]\)|[A-H]\s*[.、:)])")
 
 
 def _page(item: dict) -> int | None:

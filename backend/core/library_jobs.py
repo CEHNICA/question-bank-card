@@ -500,6 +500,25 @@ def trim_answer(text: str, limit: int) -> str:
     return value[: marks[-1]].rstrip()
 
 
+def recommend_answer(content: dict, image_urls: list[str] | None = None) -> dict:
+    """按当前编辑中的题面内容与配图实时调用答题 API 生成推荐答案与解析。"""
+    library_ai_settings.ensure_api_ready()
+    urls = list(image_urls or [])
+    if len(urls) > 6:
+        raise JobError("这道题配图或原图片段超过 6 张，当前接口无法完整发送；请精简后重试。")
+    raw, engine = library_ai_settings.chat(
+        answer_prompt(content, bool(urls), detailed=True), urls, kind=None, max_tokens=12000, explicit_api=True
+    )
+    tags = split_answer_tags(raw)
+    answer = trim_answer(str(tags.get("答案") or ""), 2000)
+    analysis = trim_answer(str(tags.get("解析") or ""), 6000)
+    if not answer:
+        raise JobError("模型没有按格式给出答案，请稍后再试")
+    if unpaired_dollar(answer) or unpaired_dollar(analysis):
+        raise JobError("模型给出的 $...$ 没有配对，请重新推荐或手动修改")
+    return {"answer": answer, "analysis": analysis, "engine": engine}
+
+
 def run_answer(publication: PublishedQuestion, *, explicit_once=False, force_api=False) -> dict:
     content = publication.content or {}
     figures = _figure_urls(publication)

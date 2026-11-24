@@ -3,6 +3,19 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.2.11
+
+**统一全屏三区「编辑」工作台、选项扩展至 A–H、AI 推荐答案与录题 0 题待切整理**
+
+- **统一全屏三区「编辑」工作台与题库整合（`qb-editor-helpers.js`、`question-editor.css`、`library-unified-editor.js`、`library-answer-editor.js`、`eagle-solution-editor.js`、`eagle/index.html`、`index.html`、`app.js`）**：
+  - 统一录题审核与题库工作台（`/eagle`）的全屏三区「编辑」体验，采用精简三分栏顶栏（`← 返回` + 状态徽标 / `‹ 上一题 │ 序号 │ 下一题 ›` / 题型 + `保存`），默认展开「答案与解析」区块；移除 `/eagle` 冗余的 `#editQuestionModal` 与 `#solutionEditorModal` 双弹窗，统一为单一「✏️ 编辑」入口，按场景定位至题干或答案字段，并内置 Top-Layer 原卷高清放大对照层；保留 `/library` 整卷批量解析编辑模式。
+  - 新增「插入填空线 ____」与纯文本表格工具栏、`✨ AI 推荐答案`（`/api/questions/<id>/recommend-answer` 与 `/api/library/<id>/recommend-answer`，空框直填标初稿、非空弹出对比确认），以及联合保存改版题干后向新版安全迁移解析配图资产（`library_solutions._adopt_previous_publication_asset`）。
+- **选项支持扩展至 `A–H` 并保持既有四选项兼容（`library.py`、`readers.py`、`library_question_editor.py`、`qb-render.js`、`exam-export.js`、`eagle/index.html`）**：
+  - 全链路支持 `A–H` 动态选项增删及对应选项配图槽位，`BASE_OPTION_KEYS` 保留 `A–D` 不破坏存量四选项题目哈希与审批状态；渲染与导出支持 6 选项 3 列（`cols-3`）、7–8 选项 4 列（`cols-4`）及多选答案直立输出。
+- **录题 0 题待切页面整理与「改字 → 编辑」文案统一（`intake.py`、`app.js`、`styles.css`、`control-wording.js`、`shortcut-help.js`、`readers.py`、`region_reads.py`）**：
+  - 去除重复警告提示、在有原卷待切且 0 题时自动展开分栏画布并隐藏无意义 `0/0/0` 工具栏与重复步骤条；将前端与相关界面交互文案中的「改字」统一改为「编辑」（快捷键保留 `E`）。
+
+
 ## 2.2.10
 
 **核验证据支持翻页：题目在第 1 页、答案在第 2 页也能核**

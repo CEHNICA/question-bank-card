@@ -13,13 +13,13 @@
     const note = "输入时不触发导航和画框快捷键；当前编辑器的保存组合键仍可使用。";
     if (scene === "review" && options.comparison) return { scene, title: "放大对照", note,
       primary: [row("上一题 / 下一题", "←", "→"), row("通过并继续", "Enter"), row("返回题卡", "Esc")],
-      more: [row("下一题 / 上一题", "N", "J", "K"), row("撤销当前题通过", "U"), row("改字", "E"), row("调整范围 / 配图", "R", "F"),
+      more: [row("下一题 / 上一题", "N", "J", "K"), row("撤销当前题通过", "U"), row("编辑", "E"), row("调整范围 / 配图", "R", "F"),
         row("框选识读到剪贴板", "C"), row("返回题卡", "Space"), row("全题 / 适宽", "0", "W"), row("缩小 / 放大原卷", "−", "+"), row("鼠标所在位置缩放", "Ctrl+滚轮"), row("打开快捷键说明", "?")],
       extra: "Enter 不撤销已通过的题；继续看下一题。撤销使用 U 或返回题卡取消勾选。" };
     if (scene === "review") return { scene, title: TITLES[scene], note,
       primary: [row("下一道需要核查的题", "N"), row("通过并继续", "Enter"), row("上一题", "K")],
       more: [row("下一张 / 上一张题卡", "J", "K"), row("放大对照原卷 / 返回", "Space"),
-        row("撤销当前题通过", "U"), row("改字", "E"), row("框选识读到剪贴板", "C"), row("审核改字中保存", "Ctrl+Enter"), row("取消改字", "Esc"),
+        row("撤销当前题通过", "U"), row("编辑", "E"), row("框选识读到剪贴板", "C"), row("编辑中保存", "Ctrl+Enter", "Ctrl+S"), row("返回审核", "Esc"),
         row("调整范围 / 配图", "R", "F"), row("打开切题与校正", "V"), row("收起 / 展开待录侧栏", "["),
         row("展开 / 收起已通过题", "O"), row("已通过题全部展开 / 收起", "Shift+O"),
         row("题卡放大镜开 / 关", "L"), row("全屏审核开 / 关", "Q"), row("退出全屏审核", "Esc"),
@@ -41,7 +41,7 @@
           ...(["new", "regions"].includes(mode) ? [row("撤销范围改动 / 重做", "Ctrl+Z", "Ctrl+Shift+Z")] : []),
           row("上一页 / 下一页", "PageUp", "PageDown"), row("适页 / 适宽", "0", "W"), row("缩小 / 放大", "−", "+"), row("画布缩放", "Ctrl+滚轮"),
           ...(editing ? [row("平移画布", "Space+拖动", "中键拖动")] : [row("平移画布", "左键拖动")]),
-          ...(mode === "figures" ? [row("归属菜单：题干 / 选项 / 无关 / 接上一图", "S", "A–E", "X", "J")] : [])],
+          ...(mode === "figures" ? [row("归属菜单：题干 / 选项 / 无关 / 接上一图", "S", "A–H", "X", "J")] : [])],
         extra: layoutWorkspace || mode === "new" ? "新增题画框时光标变为十字；两次点击固定范围后可直接调整。双击已保存题框返回对应审核卡。普通调整直接保存，拆题和合题会先显示影响并让你确认；保存和返回都不会自动识读。" : options.practiceRead ? "示例仅练习画框，不提交识读。" : mode === "view" ? "查看原卷不会改动题目。" : mode === "read" ? "框住要读的一块，点「识读并复制到剪贴板」；框里印刷和手写的字都会读出来，读完直接进剪贴板，原题一个字也不改。" : "先点选要调整的框；保存时会保留未保存提醒和核查要求。" };
     }
     if (scene === "library") return { scene, title: TITLES[scene], note,
@@ -77,7 +77,7 @@
     review: "录入审核快捷键", "review-compare": "放大对照快捷键", crop: "切题与配图快捷键",
     library: "题库与全屏看题提示", answers: "答案编辑快捷键", print: "组卷导出快捷键",
     "reading-overflow": "公式横向查看提示", "preview-note": "题卡全屏看题提示",
-    "editor-position": "改字预览位置说明", "editor-shortcut": "改字保存快捷键说明"
+    "editor-position": "编辑预览位置说明", "editor-shortcut": "编辑保存快捷键说明"
   };
   function store() { try { return root.localStorage || null; } catch { return null; } }
   // Not every host that loads this file has a full event target (the test

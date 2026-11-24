@@ -212,16 +212,6 @@ it("Eagle：表单控件不能只靠 placeholder 当名字", () => {
     "inspectorUrlInput",
     "tagAutocompleteInput",
     "modalSearchTagInput",
-    "editInputType",
-    "editInputStem",
-    "editOptA",
-    "editOptB",
-    "editOptC",
-    "editOptD",
-    "editOptE",
-    "editOptF",
-    "editInputAnswer",
-    "editInputScore",
     "contextMenuSearchInput",
   ];
   for (const id of mustHave) {
@@ -233,6 +223,16 @@ it("Eagle：表单控件不能只靠 placeholder 当名字", () => {
       tag[0],
       /aria-label="[^"]+"/,
       `#${id} 只有 placeholder，没有 aria-label：${tag[0].slice(0, 160)}`
+    );
+  }
+  assert.ok(!eagle.includes('id="editQuestionModal"'), "旧改题弹窗应已整合移除");
+  assert.ok(!eagle.includes('id="solutionEditorModal"'), "旧独立解析弹窗应已整合移除");
+
+  const unifiedJs = fs.readFileSync(path.join(__dirname, "library-unified-editor.js"), "utf8");
+  for (const label of ["题型", "正文形式", "题干", "答案", "解析", "解析图来源页", "选择原卷页码"]) {
+    assert.ok(
+      unifiedJs.includes(`setAttribute("aria-label", "${label}")`),
+      `统一编辑工作台控件缺少 aria-label="${label}"`
     );
   }
 });

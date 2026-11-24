@@ -1,0 +1,1006 @@
+/*
+ * 录题界面与正式题库共用的全屏三区「编辑」工作台视觉样式。
+ * 布局结构与变量保持一致，使两处打开的「编辑」窗口观感与交互完全统一。
+ */
+
+.qb-editor-shell,
+.card.editing {
+  --qe-bg: var(--bg, #f4f3ee);
+  --qe-surface: var(--surface, #ffffff);
+  --qe-surface-2: var(--surface-2, #faf9f5);
+  --qe-sunken: var(--bg-sunken, #ebe9e2);
+  --qe-line: var(--line, #e5e2d9);
+  --qe-line-strong: var(--line-strong, #d2cec2);
+  --qe-ink: var(--ink, #1f2320);
+  --qe-ink-2: var(--ink-2, #4a4e49);
+  --qe-muted: var(--muted, #7b7e76);
+  --qe-accent: var(--accent, #1f6b5f);
+  --qe-accent-soft: var(--accent-soft, #e4f1ec);
+  --qe-accent-ring: var(--accent-ring, rgba(31, 107, 95, 0.26));
+  --qe-amber: var(--amber, #93590b);
+  --qe-amber-soft: var(--amber-soft, #fbf3e2);
+  --qe-amber-line: var(--amber-line, #ecd3a2);
+  --qe-mono: var(--mono, "Cascadia Mono", Consolas, "Microsoft YaHei", monospace);
+}
+
+/* 精简三分栏顶栏：左返回与状态徽标 / 中分段切题器 / 右题型与保存 */
+.editor-bar {
+  grid-area: bar;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 14px;
+  padding: 9px 18px;
+  background: var(--qe-surface);
+  border-bottom: 1px solid var(--qe-line);
+  box-shadow: 0 8px 14px -14px rgba(22, 44, 39, 0.5);
+}
+
+.editor-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  justify-self: start;
+}
+
+.editor-bar-back {
+  flex: none;
+  font-weight: 600;
+}
+
+.editor-bar-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--qe-sunken);
+  color: var(--qe-ink-2);
+  border: 1px solid var(--qe-line);
+}
+
+.editor-bar-badge[hidden] {
+  display: none;
+}
+
+.editor-bar-badge.is-dirty,
+.editor-bar-badge.is-ai {
+  background: var(--qe-amber-soft);
+  color: var(--qe-amber);
+  border-color: var(--qe-amber-line);
+}
+
+.editor-bar-badge.is-locked {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #cbd5e1;
+}
+
+.editor-bar-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.editor-bar-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 10px;
+  border: 1px solid var(--qe-line);
+  background: var(--qe-surface-2);
+}
+
+.editor-bar-place {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+}
+
+.editor-bar-count {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--qe-ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.editor-bar-folded-pill {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--qe-sunken);
+  color: var(--qe-muted);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.editor-bar-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+  justify-self: end;
+}
+
+.editor-bar-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--qe-muted);
+  white-space: nowrap;
+}
+
+.editor-bar-type select {
+  width: auto;
+  min-width: 7.5em;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--qe-line-strong);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--qe-ink);
+}
+
+.editor-bar-type select:focus {
+  outline: none;
+  border-color: var(--qe-accent);
+  box-shadow: 0 0 0 3px var(--qe-accent-ring);
+}
+
+.editor-bar-save {
+  flex: none;
+  min-width: 76px;
+}
+
+@media (max-width: 960px) {
+  .editor-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .editor-bar-center {
+    order: 3;
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+/* 题干工具条：插入填空横线 + 表格工具 */
+.stem-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: -4px 0 2px;
+}
+
+.stem-blank-tool.is-recommended {
+  border-color: var(--qe-accent);
+  background: var(--qe-accent-soft);
+  color: var(--qe-accent);
+  font-weight: 650;
+}
+
+/* 动态 A–H 选项面板 */
+.option-inputs {
+  display: grid;
+  gap: 8px;
+  max-width: 38em;
+}
+
+.option-inputs[hidden] {
+  display: none;
+}
+
+.option-rows {
+  display: grid;
+  gap: 6px;
+}
+
+.option-row {
+  display: grid;
+  grid-template-columns: 2.2em minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.option-row[hidden] {
+  display: none;
+}
+
+.option-key-label {
+  font-weight: 700;
+  color: var(--qe-ink-2);
+  text-align: center;
+}
+
+.option-remove-btn {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 6px;
+  color: var(--qe-muted);
+}
+
+.option-remove-btn[hidden] {
+  display: none;
+}
+
+.option-add-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.option-add-row[hidden] {
+  display: none;
+}
+
+/* 默认展开的答案与解析独立区块 */
+.editor-answer-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--qe-line);
+  border-radius: 10px;
+  background: var(--qe-surface-2);
+}
+
+.editor-answer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.editor-answer-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--qe-ink);
+}
+
+.editor-answer-subtitle {
+  font-size: 11.5px;
+  color: var(--qe-muted);
+}
+
+.ai-recommend-btn {
+  border-color: #9cc2b5;
+  background: #f3faf7;
+  color: #165b4e;
+  font-weight: 600;
+}
+
+.ai-recommend-btn:hover:not(:disabled) {
+  background: var(--qe-accent-soft);
+  border-color: var(--qe-accent);
+}
+
+.ai-recommend-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--qe-line);
+  background: var(--qe-surface);
+  font-size: 12.5px;
+  color: var(--qe-ink-2);
+}
+
+.ai-recommend-status[hidden] {
+  display: none;
+}
+
+.ai-recommend-status.is-error {
+  border-color: #e4b6ac;
+  background: #fdf2ef;
+  color: #b3412e;
+}
+
+.ai-recommend-preview {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--qe-amber-line);
+  background: #fffcf5;
+}
+
+.ai-recommend-preview[hidden] {
+  display: none;
+}
+
+.ai-recommend-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--qe-amber);
+}
+
+.ai-recommend-preview-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.ai-recommend-preview-body {
+  display: grid;
+  gap: 6px;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--qe-ink);
+}
+
+.ai-recommend-preview-row {
+  display: grid;
+  gap: 2px;
+}
+
+.editor-answer-field-wrap {
+  position: relative;
+}
+
+.editor-answer-input,
+.editor-analysis-input {
+  width: 100%;
+  font-family: var(--qe-mono);
+  font-size: 14px;
+  line-height: 1.65;
+  resize: vertical;
+}
+
+.editor-answer-field-wrap.is-ai-suggested textarea {
+  background: linear-gradient(180deg, #fff7e6 0%, #fffaf0 100%);
+  border-color: var(--qe-amber-line);
+}
+
+.editor-answer-field-wrap.is-ai-suggested::after {
+  content: "AI 初稿";
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #f4d59c;
+  color: #6a4a14;
+  font-size: 10.5px;
+  font-weight: 650;
+  pointer-events: none;
+}
+
+/* 题库统一全屏对话壳 */
+dialog.qb-editor-shell {
+  width: 100vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--qe-bg);
+  color: var(--qe-ink);
+  overflow: hidden;
+}
+
+dialog.qb-editor-shell[open] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, auto) minmax(0, 1fr);
+  grid-template-areas:
+    "bar bar"
+    "source preview"
+    "body preview";
+}
+
+dialog.qb-editor-shell.no-source[open] {
+  grid-template-rows: auto 0 minmax(0, 1fr);
+}
+
+dialog.qb-editor-shell > .card-source {
+  grid-area: source;
+  min-height: 0;
+  display: grid;
+  padding: 14px 16px 12px 18px;
+  background: #f8f7f3;
+  border-right: 1px solid var(--qe-line);
+  border-bottom: 1px solid var(--qe-line);
+}
+
+dialog.qb-editor-shell.no-source > .card-source {
+  display: none;
+}
+
+dialog.qb-editor-shell .source-sticky {
+  position: static;
+  min-height: 0;
+  max-height: 42dvh;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+dialog.qb-editor-shell .source-crop-frame {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--qe-line), 0 1px 2px rgba(40, 36, 24, 0.05);
+}
+
+dialog.qb-editor-shell .source-crop-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: zoom-in;
+}
+
+dialog.qb-editor-shell > .card-body {
+  grid-area: body;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--qe-surface);
+  border-right: 1px solid var(--qe-line);
+}
+
+dialog.qb-editor-shell > .editor-preview-box {
+  grid-area: preview;
+  min-height: 0;
+  margin: 0;
+  padding: 14px 18px 18px;
+  background: var(--qe-surface-2);
+  border-left: 1px solid var(--qe-line);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 6px;
+}
+
+dialog.qb-editor-shell .editor-preview {
+  height: 100%;
+  max-height: none;
+}
+
+dialog.qb-editor-shell .editor-lock-banner {
+  padding: 9px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--qe-amber-line);
+  background: var(--qe-amber-soft);
+  color: var(--qe-amber);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+dialog.qb-editor-shell .editor-figure-manager {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--qe-line);
+  border-radius: 9px;
+  background: #fbfcfd;
+}
+
+dialog.qb-editor-shell .editor-figure-row {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--qe-line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+dialog.qb-editor-shell .editor-figure-row.is-removed {
+  opacity: 0.48;
+}
+
+dialog.qb-editor-shell .editor-figure-row img {
+  width: 80px;
+  max-height: 68px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+@media (max-width: 1100px) {
+  dialog.qb-editor-shell[open] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto;
+    grid-template-areas:
+      "bar"
+      "source"
+      "body"
+      "preview";
+    overflow-y: auto;
+  }
+  dialog.qb-editor-shell > .card-source,
+  dialog.qb-editor-shell > .card-body,
+  dialog.qb-editor-shell > .editor-preview-box {
+    border-right: 0;
+    border-left: 0;
+  }
+  dialog.qb-editor-shell > .card-body {
+    overflow: visible;
+  }
+  dialog.qb-editor-shell > .editor-preview-box {
+    border-top: 1px solid var(--qe-line);
+  }
+}
+
+/* 对话壳内基础按钮、输入框与排版类（保证脱离 styles.css 的页面如 eagle 也能一致呈现） */
+dialog.qb-editor-shell {
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+}
+
+dialog.qb-editor-shell *,
+dialog.qb-editor-shell *::before,
+dialog.qb-editor-shell *::after {
+  box-sizing: border-box;
+}
+
+dialog.qb-editor-shell .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 14px;
+  border: 1px solid var(--qe-line-strong);
+  border-radius: 8px;
+  background: var(--qe-surface);
+  color: var(--qe-ink);
+  font: 500 13.5px/1.2 "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+dialog.qb-editor-shell .button:hover:not(:disabled) {
+  border-color: #bdb8aa;
+  background: var(--qe-surface-2);
+}
+
+dialog.qb-editor-shell .button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+dialog.qb-editor-shell .button.primary,
+dialog.qb-editor-shell .button.button-primary {
+  background: var(--qe-accent);
+  border-color: var(--qe-accent);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+dialog.qb-editor-shell .button.primary:hover:not(:disabled),
+dialog.qb-editor-shell .button.button-primary:hover:not(:disabled) {
+  background: #175a4f;
+  border-color: #175a4f;
+}
+
+dialog.qb-editor-shell .button.small,
+dialog.qb-editor-shell .button.button-small {
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+  border-radius: 8px;
+}
+
+dialog.qb-editor-shell .button.quiet,
+dialog.qb-editor-shell .button.button-quiet {
+  border-color: transparent;
+  background: none;
+  color: var(--qe-ink-2);
+}
+
+dialog.qb-editor-shell .button.quiet:hover:not(:disabled),
+dialog.qb-editor-shell .button.button-quiet:hover:not(:disabled) {
+  background: var(--qe-sunken);
+  color: var(--qe-ink);
+}
+
+dialog.qb-editor-shell::backdrop {
+  background: rgba(24, 42, 38, 0.48);
+}
+
+dialog.qb-editor-shell .source-label,
+dialog.qb-editor-shell .preview-label {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--qe-muted);
+}
+
+dialog.qb-editor-shell .editor-position-hint {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--qe-accent);
+}
+
+dialog.qb-editor-shell .editor-position-hint[hidden] {
+  display: none;
+}
+
+dialog.qb-editor-shell .hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--qe-muted);
+}
+
+dialog.qb-editor-shell .editor {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+dialog.qb-editor-shell .field {
+  display: grid;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--qe-muted);
+}
+
+dialog.qb-editor-shell .field.inline {
+  grid-template-columns: 3.4em minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+dialog.qb-editor-shell .field.option-row {
+  grid-template-columns: 2.2em minmax(0, 1fr) auto;
+}
+
+dialog.qb-editor-shell .field input,
+dialog.qb-editor-shell .field textarea,
+dialog.qb-editor-shell .field select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--qe-line-strong);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--qe-ink);
+  font: 14px/1.6 var(--qe-mono);
+}
+
+dialog.qb-editor-shell .field select {
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  width: auto;
+  justify-self: start;
+  min-width: 9em;
+}
+
+dialog.qb-editor-shell .field input:focus,
+dialog.qb-editor-shell .field textarea:focus,
+dialog.qb-editor-shell .field select:focus {
+  outline: none;
+  border-color: var(--qe-accent);
+  box-shadow: 0 0 0 3px var(--qe-accent-ring);
+}
+
+dialog.qb-editor-shell .field input:disabled,
+dialog.qb-editor-shell .field textarea:disabled,
+dialog.qb-editor-shell .field select:disabled {
+  background: #f5f5f2;
+  color: var(--qe-muted);
+  cursor: not-allowed;
+}
+
+dialog.qb-editor-shell .editor-status-line {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--qe-ink-2);
+}
+
+dialog.qb-editor-shell .editor-status-line.is-error {
+  color: #b3412e;
+}
+
+dialog.qb-editor-shell .editor-preview {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px dashed rgba(31, 107, 95, 0.45);
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: #ffffff;
+  overflow: auto;
+  overflow-anchor: none;
+  overscroll-behavior: contain;
+}
+
+dialog.qb-editor-shell .editor-preview .qb-options.cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+dialog.qb-editor-shell .editor-preview .qb-options.cols-5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+dialog.qb-editor-shell .editor-preview .qb-figure {
+  position: relative;
+  display: inline-block;
+  padding: 4px;
+}
+
+dialog.qb-editor-shell .editor-preview .qb-figure::after {
+  content: "原卷";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(31, 35, 32, 0.65);
+  color: #ffffff;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+dialog.qb-editor-shell .editor-answer-section > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--qe-ink);
+}
+
+dialog.qb-editor-shell .answer-image-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+dialog.qb-editor-shell .answer-image-list {
+  display: grid;
+  gap: 8px;
+}
+
+dialog.qb-editor-shell .answer-image-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--qe-line);
+  border-radius: 9px;
+  background: #ffffff;
+}
+
+dialog.qb-editor-shell .answer-image-row > img {
+  width: 96px;
+  max-height: 92px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+dialog.qb-editor-shell .answer-image-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+dialog.qb-editor-shell .answer-image-fields label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--qe-ink-2);
+}
+
+dialog.qb-editor-shell .answer-image-fields input {
+  width: 72px;
+  padding: 4px 6px;
+  border: 1px solid var(--qe-line-strong);
+  border-radius: 6px;
+}
+
+dialog.qb-editor-shell .answer-image-fields select {
+  max-width: 145px;
+  padding: 4px 6px;
+  border: 1px solid var(--qe-line-strong);
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+dialog.qb-editor-shell .answer-crop {
+  border: 1px solid var(--qe-line);
+  border-radius: 10px;
+  padding: 10px;
+  background: #ffffff;
+}
+
+dialog.qb-editor-shell .answer-crop[hidden] {
+  display: none;
+}
+
+dialog.qb-editor-shell .answer-crop-scroll {
+  position: relative;
+  max-height: 360px;
+  overflow: auto;
+  margin-top: 8px;
+}
+
+dialog.qb-editor-shell .answer-crop-guidance {
+  position: sticky;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+dialog.qb-editor-shell .answer-crop-guidance[hidden] {
+  display: none;
+}
+
+dialog.qb-editor-shell .answer-crop-guidance > span {
+  padding: 6px 9px;
+  background: rgba(232, 244, 239, 0.95);
+  border: 1px solid var(--qe-accent);
+  border-radius: 7px;
+}
+
+dialog.qb-editor-shell .answer-crop-guidance > button {
+  pointer-events: auto;
+}
+
+dialog.qb-editor-shell .answer-crop-surface {
+  position: relative;
+  width: 100%;
+  touch-action: none;
+}
+
+dialog.qb-editor-shell .answer-crop-surface > img {
+  display: block;
+  width: 100%;
+  user-select: none;
+}
+
+dialog.qb-editor-shell .answer-crop-box {
+  position: absolute;
+  border: 2px solid var(--qe-accent);
+  background: rgba(29, 107, 94, 0.14);
+  pointer-events: none;
+}
+
+dialog.qb-editor-shell .answer-set-aside {
+  padding: 10px 12px;
+  border: 1px solid var(--qe-amber-line);
+  border-left: 3px solid var(--qe-amber);
+  border-radius: 9px;
+  background: var(--qe-amber-soft);
+}
+
+dialog.qb-editor-shell .answer-set-aside > strong {
+  display: block;
+  font-size: 12.5px;
+  color: var(--qe-ink);
+}
+
+dialog.qb-editor-shell .answer-set-aside > .paper,
+dialog.qb-editor-shell .answer-origin > .paper,
+dialog.qb-editor-shell .answer-version-body {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--qe-line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+dialog.qb-editor-shell .answer-versions,
+dialog.qb-editor-shell .answer-origin {
+  padding: 8px 12px;
+  border: 1px solid var(--qe-line);
+  border-radius: 9px;
+  background: #ffffff;
+}
+
+dialog.qb-editor-shell .answer-versions > summary,
+dialog.qb-editor-shell .answer-origin > summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--qe-ink-2);
+}
+
+dialog.qb-editor-shell .answer-version-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+dialog.qb-editor-shell .answer-version {
+  padding: 8px 10px;
+  border: 1px solid var(--qe-line);
+  border-radius: 8px;
+  background: var(--qe-surface-2);
+}
+
+dialog.qb-editor-shell .answer-version-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+}
+
+/* 统一工作台内置 Top-Layer 原卷高清放大核验层 */
+dialog.qb-editor-shell .editor-source-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: rgba(15, 23, 42, 0.78);
+  backdrop-filter: blur(2px);
+}
+
+dialog.qb-editor-shell .editor-source-lightbox[hidden] {
+  display: none;
+}
+
+dialog.qb-editor-shell .editor-source-lightbox-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 18px;
+  background: #ffffff;
+  border-bottom: 1px solid var(--qe-line);
+}
+
+dialog.qb-editor-shell .editor-source-lightbox-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+dialog.qb-editor-shell .editor-source-lightbox-stage {
+  min-height: 0;
+  overflow: auto;
+  padding: 18px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+dialog.qb-editor-shell .editor-source-lightbox-stage img {
+  display: block;
+  max-width: none;
+  height: auto;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+

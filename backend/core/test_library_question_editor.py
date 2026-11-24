@@ -265,7 +265,7 @@ class LibraryQuestionEditorTests(TestCase):
             [{"file": "../source.png", "slot": "stem"}],
             [{"file": "figure-1.png", "slot": "stem"}, {"file": "figure-1.png", "slot": "A"}],
             [{"file": "figure-1.png", "slot": []}],
-            [{"file": "figure-1.png", "slot": "F"}],
+            [{"file": "figure-1.png", "slot": "I"}],
             [{"file": "figure-1.png", "slot": "stem", "bbox": [0, 0, 2, 2]}],
             [{"file": "figure-999.png", "slot": "stem"}],
             None,
@@ -392,7 +392,7 @@ class LibraryQuestionEditorTests(TestCase):
             {"stem": "x" * 20001},
             {"stem": "\x00bad"},
             {"stem": "\ud800"},
-            {"options": {"F": "1"}},
+            {"options": {"I": "1"}},
             {"options": {"A": 1}},
             {"options": {"A": "x" * 4001}},
             {"question_type": "unknown"},
@@ -412,3 +412,21 @@ class LibraryQuestionEditorTests(TestCase):
         request = self.factory.post("/unused", "{}", content_type="text/plain", HTTP_X_QB_REQUEST="1")
         self.assertEqual(editor.question_editor(request, self.pub.pk).status_code, 415)
         self.assertEqual(editor.question_editor(self.factory.delete("/unused"), self.pub.pk).status_code, 405)
+
+    def test_options_up_to_h_and_figure_slots_save_while_four_option_hash_unchanged(self):
+        four_hash = self.pub.content_hash
+        self.assertEqual(library.content_hash(self.pub.content), four_hash)
+        _, _, pub_with_figs = self.fixture(figures=True)
+        response = self.request(
+            pub_with_figs,
+            payload=self.payload(
+                pub_with_figs,
+                question_type="multiple_choice",
+                options={"A": "1", "B": "2", "C": "3", "D": "4", "E": "5", "F": "6", "G": "7", "H": "8"},
+                figures=[{"file": "figure-1.png", "slot": "F"}, {"file": "figure-2.png", "slot": "H"}],
+            ),
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        saved = PublishedQuestion.objects.get(pk=json.loads(response.content)["publication"]["id"])
+        self.assertEqual(saved.content["options"]["H"], "8")
+        self.assertEqual([f["slot"] for f in saved.content["figures"]], ["F", "H"])

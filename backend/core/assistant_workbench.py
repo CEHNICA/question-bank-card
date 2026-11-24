@@ -124,7 +124,7 @@ def _check_fields(fields):
     for key, value in fields.items():
         if key == "options":
             if not isinstance(value, dict) or set(value) - set(library.OPTION_KEYS):
-                raise WorkbenchError("选项只能写 A 到 E。", 400)
+                raise WorkbenchError("选项只能写 A 到 H。", 400)
             if any(not isinstance(item, str) or len(item) > MAX_OPTION for item in value.values()):
                 raise WorkbenchError(f"选项内容过长（最多 {MAX_OPTION} 字）。", 400)
             checked[key] = {name: item.strip() for name, item in value.items()}

@@ -111,17 +111,20 @@ it("窄屏下标签管理说明文字不得被单行截断", () => {
   );
 });
 
-it("解答题编辑底部说明文字不得用 truncate 截断", () => {
-  const anchor = "保存会写回题库正式解析";
-  const idx = eagle.indexOf(anchor);
-  assert.ok(idx >= 0, "找不到解答题编辑底部的说明文字（HTML 结构变了？）");
-  // 往回找这个文字所属的标签开标签
-  const before = eagle.lastIndexOf("<", idx);
-  const tag = eagle.slice(before, eagle.indexOf(">", before));
-  assert.ok(
-    !/class\s*=\s*"[^"]*\btruncate\b/.test(tag),
-    "解答题编辑底部说明文字所在元素不能带 truncate 类：" + tag
-  );
+it("统一编辑工作台状态说明文字不得用 truncate 或 nowrap 截断", () => {
+  // 旧独立弹窗 #solutionEditorModal 已整合移除；新的统一工作台状态说明与答案提示不得做省略截断
+  assert.ok(!eagle.includes('id="solutionEditorModal"'), "旧独立解答题编辑弹窗应已整合移除");
+  const unifiedJs = fs.readFileSync(path.join(__dirname, "library-unified-editor.js"), "utf8");
+  const editorCss = fs.readFileSync(path.join(__dirname, "question-editor.css"), "utf8");
+  assert.ok(unifiedJs.includes('"editor-status-line"'), "统一编辑工作台应包含状态说明行 .editor-status-line");
+  assert.ok(unifiedJs.includes('"editor-answer-subtitle"'), "统一编辑工作台应包含答案副标题 .editor-answer-subtitle");
+  for (const cls of ["editor-status-line", "editor-answer-subtitle", "editor-position-hint"]) {
+    const m = editorCss.match(new RegExp(`\\.${cls}\\s*\\{([^}]*)\\}`));
+    if (m) {
+      assert.ok(!/white-space\s*:\s*nowrap/.test(m[1]), `.${cls} 不得使用 nowrap 强制单行截断`);
+      assert.ok(!/text-overflow\s*:\s*ellipsis/.test(m[1]), `.${cls} 不得使用 ellipsis 隐藏说明文字`);
+    }
+  }
 });
 
 it("窄屏媒体查询里不得存在作用在说明性 p 上的 ellipsis 截断", () => {

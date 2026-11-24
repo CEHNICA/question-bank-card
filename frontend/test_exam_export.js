@@ -161,5 +161,22 @@ console.log("Word export source coverage, editable formulas, tables, answer sepa
     await Export.download([item],{format:"pdf",preview_page_count:bad,print_options:{document:"questions"}});
     assert.equal(Object.hasOwn(JSON.parse(requests.at(-1).request.body),"preview_page_count"),false,`页数 ${bad} 不该送出去`);
   }
+  const multiOptItem = {
+    id: "publication-ah",
+    number: 20,
+    question_type: "multiple_choice",
+    origin: "期末",
+    content: {
+      stem: "已知多选题",
+      options: { A: "1", B: "2", C: "3", D: "4", E: "5", F: "6", G: "7", H: "8" },
+      answer: "ABFG",
+      analysis: "综合推理",
+    },
+  };
+  const multiSerialized = Export.serializeFields([multiOptItem], { document: "combined" });
+  assert.equal(multiSerialized[multiOptItem.id].answer.blocks[0].segments[0].type, "text", "多选答案 ABFG 保持直立文本");
+  assert.equal(multiSerialized[multiOptItem.id].answer.source, "ABFG");
+  assert.equal(Export.serializeField("$x$").source, "$x$");
+  assert.equal(multiOptItem.content.options.H, "8");
   console.log("Word download transport, failure containment and repeated-click protection: OK");
 })().catch(error => { console.error(error); process.exitCode = 1; });

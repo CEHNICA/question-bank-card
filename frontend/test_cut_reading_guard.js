@@ -86,7 +86,7 @@ for (const [reason, expect] of [
   assert.match(read.title, expect, `${reason} 的悬停说明要说清是哪一条`);
   assert.ok(hint, `${reason} 的题旁边要有一行常驻小字`);
   assert.match(hint.textContent, expect, `${reason} 的常驻小字要说清是哪一条`);
-  assert.match(hint.textContent, /改字|撤销|题库/, `${reason} 的常驻小字要说下一步去哪`);
+  assert.match(hint.textContent, /改字|编辑|撤销|题库/, `${reason} 的常驻小字要说下一步去哪`);
   assert.match(hint.className, /cut-reading-guard/, "常驻小字要认得出是护栏说明");
 }
 
@@ -118,7 +118,7 @@ for (const [reason, expect] of [
 for (const reason of ["approved", "published", "manual_text"]) {
   const text = Wording.cutReadingGuardText(reason);
   assert.ok(text && text.label && text.title && text.brief, `${reason} 要有 label/title/brief`);
-  assert.match(text.brief, /改字|撤销|题库/, `${reason} 的 brief 要说下一步去哪`);
+  assert.match(text.brief, /改字|编辑|撤销|题库/, `${reason} 的 brief 要说下一步去哪`);
 }
 assert.equal(Wording.cutReadingGuardText("approved").label, Wording.CUT_READING.approved.label);
 assert.ok(Wording.cutReadingGuardText("没听说过的理由").brief, "没听说过的理由也得有话");

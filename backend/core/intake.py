@@ -139,7 +139,6 @@ def prepare(paper: Paper, mode: str) -> Paper:
         # A book may restart them in each chapter (or example/exercise scope),
         # so keep its local text as evidence but do not build merged exam cards.
         plan.update(mode="manual", native_book_fallback=True, fallback_reason=BOOK_MANUAL_REASON)
-        plan.setdefault("warnings", []).append(BOOK_MANUAL_REASON)
         plan["pages"] = [{**page, "mode": "manual"} for page in plan["pages"]]
     elif mode == "native" and extracted["blocks"]:
         usable = {page["page_idx"] for page in plan["pages"] if page["mode"] == "native"}
@@ -155,7 +154,6 @@ def prepare(paper: Paper, mode: str) -> Paper:
                 local_scope_count=len(scopes),
                 fallback_reason=MULTI_PAPER_MANUAL_REASON,
             )
-            plan.setdefault("warnings", []).append(MULTI_PAPER_MANUAL_REASON)
             plan["pages"] = [{**page, "mode": "manual"} for page in plan["pages"]]
     with transaction.atomic():
         locked = Paper.objects.select_for_update().get(pk=paper.pk)

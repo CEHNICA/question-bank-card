@@ -106,7 +106,7 @@ const SKIPPED = [
   {
     number: 7,
     category: "还没读出题干",
-    detail: "请先改字或重新识读",
+    detail: "请先编辑或重新识读",
     group_title: "",
     section: "",
     stem: "",
@@ -163,7 +163,7 @@ const SKIPPED = [
 
   // 分组标题已经说了卡在哪一类，每行只补自己多出来的那一条
   const details = byClass(container, "approve-result-detail").map((node) => node.textContent);
-  assert.deepEqual(details, ["原审核记录保留在旧版本中", "请先在题号旁边选一下题型", "请先改字或重新识读"]);
+  assert.deepEqual(details, ["原审核记录保留在旧版本中", "请先在题号旁边选一下题型", "请先编辑或重新识读"]);
 }
 
 // 原因本身是一整句时，句尾不能再多一个句号（面板上会印成「。。」）。

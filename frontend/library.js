@@ -1386,9 +1386,9 @@
   const OPTION_PREVIEW_LIMIT = 28;
   function previewOptions(content) {
     const options = content?.options || {};
-    const keys = ["A", "B", "C", "D", "E"].filter((key) => String(options[key] ?? "").trim());
+    const keys = ["A", "B", "C", "D", "E", "F", "G", "H"].filter((key) => String(options[key] ?? "").trim());
     if (!keys.length) return {};
-    if ((content?.figures || []).some((figure) => ["A", "B", "C", "D", "E"].includes(figure.slot))) return {};
+    if ((content?.figures || []).some((figure) => ["A", "B", "C", "D", "E", "F", "G", "H"].includes(figure.slot))) return {};
     // 去掉 $ \ { } 再量长短：公式记号不占纸面宽度。
     const widest = Math.max(...keys.map((key) => String(options[key]).replace(/[$\\{}]/g, "").length));
     return widest <= OPTION_PREVIEW_LIMIT ? options : {};

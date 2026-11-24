@@ -181,7 +181,7 @@ def save(publication, payload):
     stem = _text(payload["stem"], "题干", 20000)
     options = payload["options"]
     if not isinstance(options, dict) or set(options) - set(library.OPTION_KEYS):
-        raise EditorError("选项只能使用 A、B、C、D、E")
+        raise EditorError("选项只能使用 A–H")
     options = {key: _text(value, "选项", 4000) for key, value in options.items()}
     kind = payload["question_type"]
     mode = payload.get("body_mode", (publication.content or {}).get("body_mode", "text"))

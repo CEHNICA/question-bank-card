@@ -401,5 +401,436 @@ const settle = async () => { for (let index = 0; index < 10; index++) await Prom
   await byId("answerEditorAi").emit("click"); await settle();
   assert.equal(requests.filter(value => value.opts.method === "POST").length, missingPosts, "Generation rechecks a configuration that was cleared after the button appeared");
   await byText("关闭").emit("click"); paint(); paint(); await new Promise(resolve => setTimeout(resolve, 5));
+  await runUnifiedWorkbenchTests();
   console.log("Answer editor: explicit selected AI, direct unsaved drafts, failure preservation, source protection, scope and repeated-save guards: OK");
 })().catch(error => { console.error(error); process.exitCode = 1; });
+
+/**
+ * 统一编辑工作台（allowQuestionEdit: true -> LibraryUnifiedEditor）行为回归测试
+ */
+async function runUnifiedWorkbenchTests() {
+  const mkClassList = (el) => ({
+    _set() {
+      return new Set(String(el.className || "").split(/\s+/).filter(Boolean));
+    },
+    add(...names) {
+      const set = this._set();
+      names.forEach((n) => set.add(n));
+      el.className = [...set].join(" ");
+    },
+    remove(...names) {
+      const set = this._set();
+      names.forEach((n) => set.delete(n));
+      el.className = [...set].join(" ");
+    },
+    toggle(name, force) {
+      const set = this._set();
+      const next = force === undefined ? !set.has(name) : Boolean(force);
+      if (next) set.add(name);
+      else set.delete(name);
+      el.className = [...set].join(" ");
+      return next;
+    },
+    contains(name) {
+      return this._set().has(name);
+    }
+  });
+
+  class UnifiedElement {
+    constructor(tag) {
+      this.tagName = tag.toUpperCase();
+      this.children = [];
+      this.listeners = {};
+      this.style = {};
+      this.dataset = {};
+      this.value = "";
+      this.checked = false;
+      this.disabled = false;
+      this.hidden = false;
+      this.open = false;
+      this.isConnected = true;
+      this.className = "";
+      this.selectionStart = 0;
+      this.selectionEnd = 0;
+      this.scrollHeight = 40;
+      this.classList = mkClassList(this);
+    }
+    append(...children) {
+      this.children.push(...children);
+      for (const value of children) {
+        if (value && typeof value === "object") value.parentNode = this;
+      }
+    }
+    replaceChildren(...children) {
+      this.children = [];
+      this.append(...children);
+    }
+    remove() {
+      if (this.parentNode && Array.isArray(this.parentNode.children)) {
+        this.parentNode.children = this.parentNode.children.filter((c) => c !== this);
+        this.parentNode = null;
+      }
+    }
+    setAttribute(name, value) {
+      this[name] = value;
+    }
+    removeAttribute(name) {
+      delete this[name];
+    }
+    addEventListener(name, fn) {
+      (this.listeners[name] ||= []).push(fn);
+    }
+    dispatchEvent(event = {}) {
+      const ev = { preventDefault() {}, stopPropagation() {}, ...event };
+      for (const fn of this.listeners[ev.type] || []) fn(ev);
+      return true;
+    }
+    async emit(name, event = {}) {
+      const ev = { type: name, preventDefault() {}, stopPropagation() {}, ...event };
+      await Promise.all((this.listeners[name] || []).map((fn) => fn(ev)));
+    }
+    showModal() {
+      this.open = true;
+    }
+    close() {
+      this.open = false;
+      void this.emit("close");
+    }
+    focus() {
+      uDoc.activeElement = this;
+    }
+    select() {}
+    setSelectionRange(start, end) {
+      this.selectionStart = start;
+      this.selectionEnd = end;
+    }
+    scrollIntoView() {}
+    querySelectorAll(selector) {
+      const parts = selector.split(",").map((s) => s.trim()).filter(Boolean);
+      const matchSingle = (el, sel) => {
+        if (!el || typeof el !== "object") return false;
+        if (sel.includes(" ")) {
+          const [anc, desc] = sel.split(/\s+/);
+          if (!matchSingle(el, desc)) return false;
+          let p = el.parentNode;
+          while (p) {
+            if (matchSingle(p, anc)) return true;
+            p = p.parentNode;
+          }
+          return false;
+        }
+        if (sel.startsWith(".")) return el.classList?.contains(sel.slice(1));
+        if (sel.startsWith("[")) {
+          const attrName = sel.slice(1, -1);
+          return el[attrName] !== undefined;
+        }
+        return el.tagName === sel.toUpperCase();
+      };
+      const all = uDescend(this).slice(1);
+      return all.filter((el) => parts.some((p) => matchSingle(el, p)));
+    }
+    querySelector(selector) {
+      return this.querySelectorAll(selector)[0] || null;
+    }
+    getBoundingClientRect() {
+      return { left: 0, top: 0, width: 100, height: 100 };
+    }
+    get textContent() {
+      return (this._text || "") + this.children.map((c) => (typeof c === "string" ? c : c.textContent || "")).join("");
+    }
+    set textContent(value) {
+      this._text = value;
+      this.children = [];
+    }
+  }
+
+  class MockEvent {
+    constructor(type) {
+      this.type = type;
+    }
+  }
+
+  const uDoc = {
+    body: new UnifiedElement("body"),
+    activeElement: null,
+    createElement: (tag) => new UnifiedElement(tag),
+    createTextNode: (text) => String(text),
+    addEventListener() {},
+    removeEventListener() {}
+  };
+  uDoc.activeElement = uDoc.body;
+  const uNode = (tag, className = "", text) => {
+    const el = new UnifiedElement(tag);
+    el.className = className;
+    if (text !== undefined) el.textContent = text;
+    return el;
+  };
+  const uDescend = (el) => [el, ...el.children.filter((c) => typeof c === "object").flatMap(uDescend)];
+  const uByClass = (cls) => uDescend(uDoc.body).find((el) => el.classList?.contains(cls));
+  const uByButtonText = (text) => uDescend(uDoc.body).find((el) => el.tagName === "BUTTON" && el.textContent === text);
+
+  const items = [
+    {
+      id: "pub-u1",
+      number: 1,
+      question_type: "multiple_choice",
+      content: { stem: "题一题干", options: { A: "1", B: "2", C: "3", D: "4" }, answer: "", analysis: "" }
+    },
+    {
+      id: "pub-u2",
+      number: 2,
+      question_type: "fill_blank",
+      content: { stem: "已知 x =", options: {}, answer: "5", analysis: "直接代入" }
+    }
+  ];
+
+  const reqs = [];
+  const savedEvents = [];
+  const toastLog = [];
+  const confirms = [];
+  let allowConfirm = true;
+  let recommendReply = { answer: "ABH", analysis: "AI 推导步骤", engine: "mock-model" };
+  let failQReadOnce = false;
+
+  const uRoot = {
+    document: uDoc,
+    innerHeight: 900,
+    LibrarySolutions: require("./library-solutions.js"),
+    QBControlWording: require("./control-wording.js"),
+    localStorage: { getItem: () => null, setItem() {} },
+    setTimeout,
+    clearTimeout,
+    requestAnimationFrame: (cb) => cb(),
+    fetch: async (url, opts = {}) => {
+      reqs.push({ url, opts });
+      if (url === "/api/library/pub-u1/question" && !opts.method) {
+        if (failQReadOnce) {
+          failQReadOnce = false;
+          return { ok: false, json: async () => ({ error: "题面服务临时不可用" }) };
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            editable: true,
+            revision: 3,
+            content_hash: "hash-u1",
+            question_type: items[0].question_type,
+            body_mode: "text",
+            stem: items[0].content.stem,
+            options: items[0].content.options,
+            figures: [],
+            publication: { id: "pub-u1", document_id: "doc-u1", question_type: items[0].question_type, content: items[0].content }
+          })
+        };
+      }
+      if (url === "/api/library/pub-u2/question" && !opts.method) {
+        return {
+          ok: true,
+          json: async () => ({
+            editable: true,
+            revision: 1,
+            content_hash: "hash-u2",
+            question_type: items[1].question_type,
+            body_mode: "text",
+            stem: items[1].content.stem,
+            options: {},
+            figures: [],
+            publication: { id: "pub-u2", document_id: "doc-u1", question_type: items[1].question_type, content: items[1].content }
+          })
+        };
+      }
+      if (url === "/api/library/pub-u1/solution" && !opts.method) {
+        return {
+          ok: true,
+          json: async () => ({
+            solution: null,
+            base_revision: null,
+            origin: { answer: "", analysis: "" },
+            history: []
+          })
+        };
+      }
+      if (url === "/api/library/pub-u2/solution" && !opts.method) {
+        return {
+          ok: true,
+          json: async () => ({
+            solution: { id: "sol-u2", publication_id: "pub-u2", answer: "5", analysis: "直接代入", figures: [] },
+            base_revision: "sol-u2",
+            origin: { answer: "5", analysis: "直接代入" },
+            history: [{ id: "sol-u2", publication_id: "pub-u2", answer: "5", analysis: "直接代入", figures: [] }]
+          })
+        };
+      }
+      if (opts.method === "POST" && url === "/api/library/pub-u1/recommend-answer") {
+        return { ok: true, json: async () => recommendReply };
+      }
+      if (opts.method === "POST" && url === "/api/library/pub-u1/question") {
+        const body = JSON.parse(opts.body);
+        const newPub = {
+          id: "pub-u1-v2",
+          document_id: "doc-u1",
+          question_type: body.question_type,
+          solution_needs_review: true,
+          content: {
+            body_mode: body.body_mode,
+            stem: body.stem,
+            options: body.options,
+            figures: body.figures || []
+          }
+        };
+        return {
+          ok: true,
+          json: async () => ({
+            publication: newPub,
+            revision: 4,
+            content_hash: "hash-u1-v2"
+          })
+        };
+      }
+      if (opts.method === "POST" && url === "/api/library/pub-u1-v2/solution") {
+        const body = JSON.parse(opts.body);
+        assert.equal(body.base_revision, null, "题干改版迁出新 ID 后，保存解析时应清空旧版 base_revision 以便后端安全迁移图片资产");
+        return {
+          ok: true,
+          json: async () => ({
+            solution: { id: "sol-u1-v2", publication_id: "pub-u1-v2", answer: body.answer, analysis: body.analysis, figures: [] },
+            base_revision: "sol-u1-v2"
+          })
+        };
+      }
+      if (opts.method === "POST" && url === "/api/library/pub-u2/solution") {
+        const body = JSON.parse(opts.body);
+        return {
+          ok: true,
+          json: async () => ({
+            solution: { id: "sol-u2-v2", publication_id: "pub-u2", answer: body.answer, analysis: body.analysis, figures: [] },
+            base_revision: "sol-u2-v2"
+          })
+        };
+      }
+      throw new Error("unexpected unified request: " + url);
+    }
+  };
+  const uQB = {
+    renderQuestion: (target, value) => {
+      target.replaceChildren(uNode("p", "", `${value.stem || ""}|opts=${Object.keys(value.options || {}).join("")}|ans=${value.answer || ""}`));
+    },
+    renderTypeset: (target, value) => target.replaceChildren(uNode("span", "", value)),
+    previewSelection: () => null,
+    fitOptions: () => {}
+  };
+  const uCtx = { window: uRoot, document: uDoc, fetch: uRoot.fetch, AbortController, FormData, Event: MockEvent, setTimeout, clearTimeout };
+  vm.createContext(uCtx);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "qb-editor-helpers.js"), "utf8"), uCtx);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "library-unified-editor.js"), "utf8"), uCtx);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "library-answer-editor.js"), "utf8"), uCtx);
+
+  const uEditor = uRoot.LibraryAnswerEditor.create({
+    node: uNode,
+    QB: uQB,
+    notify: (...args) => toastLog.push(args),
+    confirm: async (cfg) => {
+      confirms.push(cfg);
+      return allowConfirm;
+    },
+    onSaved: (...args) => savedEvents.push(args)
+  });
+
+  const uSettle = async () => {
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  };
+
+  // 1. 验证读取失败保留可读提示且不崩溃
+  failQReadOnce = true;
+  await uEditor.open(items, { allowQuestionEdit: true, focus: "pub-u1", focusField: "stem" });
+  await uSettle();
+  const lockBanner = uByClass("editor-lock-banner");
+  assert.equal(lockBanner.hidden, false, "读取题面失败时应在工作台明确提示锁定原因，不静默");
+  assert.ok(lockBanner.textContent.includes("题面服务临时不可用"));
+  await uByButtonText("← 返回").emit("click");
+  await uSettle();
+  assert.equal(uEditor.isOpen(), false, "无未保存改动时点 ← 返回应直接关闭工作台");
+
+  // 2. 正常打开并验证精简三分栏顶栏 + 动态选项 E~H + AI 推荐 + 联合原子保存迁移 ID
+  await uEditor.open(items, { allowQuestionEdit: true, focus: "pub-u1", focusField: "stem" });
+  await uSettle();
+  const dialog = uDescend(uDoc.body).find((el) => el.id === "unifiedEditorDialog");
+  assert.ok(dialog && dialog.open, "统一编辑工作台应挂载 #unifiedEditorDialog 并打开");
+  assert.equal(uByClass("editor-bar-count").textContent, "第 1 / 2 题", "顶栏中间切题计数器应准确");
+  assert.equal(uDoc.activeElement, uByClass("stem-input"), "focusField: 'stem' 时默认聚焦题干框");
+
+  const addOptBtn = uByClass("option-add-btn");
+  const addOptRow = uByClass("option-add-row");
+  const findOptRow = (k) => uDescend(dialog).find((el) => el.classList?.contains("option-row") && el.querySelector(".option-key-label")?.textContent === k);
+  for (const expectNext of ["E", "F", "G", "H"]) {
+    assert.equal(addOptRow.hidden, false);
+    assert.equal(addOptBtn.textContent, `+ 添加选项（${expectNext}）`);
+    await addOptBtn.emit("click");
+    const addedRow = findOptRow(expectNext);
+    assert.ok(addedRow && addedRow.hidden === false, `点击 + 添加选项后应显示选项 ${expectNext}`);
+  }
+  assert.equal(addOptRow.hidden, true, "添加至 H 后应隐藏继续加选项入口");
+  const optHInput = findOptRow("H").querySelector("input");
+  optHInput.value = "第八个选项";
+  await optHInput.emit("input");
+
+  // 测试「✨ AI 推荐答案」：空框直接填入并标为 AI 初稿
+  const aiBtn = uByButtonText("✨ AI 推荐答案");
+  await aiBtn.emit("click");
+  await uSettle();
+  const aiReq = reqs.filter((r) => r.url === "/api/library/pub-u1/recommend-answer").at(-1);
+  const aiReqBody = JSON.parse(aiReq.opts.body);
+  assert.equal(aiReqBody.options.H, "第八个选项", "AI 推荐应携带未保存的 A–H 选项草稿");
+  assert.equal(uByClass("editor-answer-input").value, "ABH");
+  assert.equal(uByClass("editor-bar-save").textContent, "采纳并保存", "仅填入 AI 初稿时保存按钮应提示采纳并保存");
+
+  // 测试已有答案时再点「✨ AI 推荐答案」弹出对照预览而不盲覆盖
+  recommendReply = { answer: "ABGH", analysis: "补充步骤", engine: "mock-model" };
+  await aiBtn.emit("click");
+  await uSettle();
+  assert.equal(uByClass("editor-answer-input").value, "ABH", "已有答案时 AI 推荐不直接覆写");
+  assert.equal(uByClass("ai-recommend-preview").hidden, false, "非空时应展现对照预览框");
+  await uByButtonText("填入并覆盖").emit("click");
+  assert.equal(uByClass("editor-answer-input").value, "ABGH");
+
+  // 触发保存：验证 /question 先发并迁出新 ID pub-u1-v2，紧接着清空 base_revision 保存 /solution
+  await uByClass("editor-bar-save").emit("click");
+  await uSettle();
+  const lastSaved = savedEvents.at(-1);
+  assert.equal(lastSaved[0].id, "pub-u1-v2");
+  assert.equal(lastSaved[2].previousId, "pub-u1");
+  assert.equal(lastSaved[2].questionChanged, true);
+  assert.equal(lastSaved[2].solutionChanged, true);
+  assert.equal(uByClass("editor-bar-count").textContent, "第 1 / 2 题");
+
+  // 3. 测试顶栏切题「下一题 ›」、填空横线工具及未保存离开确认
+  await uByButtonText("下一题 ›").emit("click");
+  await uSettle();
+  assert.equal(uByClass("editor-bar-count").textContent, "第 2 / 2 题");
+  const stemInput2 = uByClass("stem-input");
+  stemInput2.selectionStart = stemInput2.value.length;
+  stemInput2.selectionEnd = stemInput2.value.length;
+  const blankBtn = uByButtonText("插入填空线 ____");
+  assert.ok(blankBtn.classList.contains("is-recommended"), "填空题型下插入填空线按钮应标为推荐");
+  await blankBtn.emit("click");
+  assert.equal(stemInput2.value, "已知 x =______");
+
+  // 未保存状态下切回上一题应弹确认；取消则留在本题，确认则切换
+  allowConfirm = false;
+  await uByButtonText("‹ 上一题").emit("click");
+  assert.ok(confirms.length >= 1, "未保存切题前应触发确认询问");
+  assert.equal(uByClass("editor-bar-count").textContent, "第 2 / 2 题", "取消切题应留在当前第 2 题");
+
+  // 4. 验证 focusField: 'answer' 定位到答案框（有未保存改动先同意关闭再重开）
+  allowConfirm = true;
+  await uEditor.close();
+  await uSettle();
+  await uEditor.open(items, { allowQuestionEdit: true, focus: "pub-u2", focusField: "answer" });
+  await uSettle();
+  assert.equal(uDoc.activeElement, uByClass("editor-answer-input"), "focusField: 'answer' 时应聚焦答案框");
+  await uEditor.close();
+  await uSettle();
+  console.log("Unified editor workbench tests (allowQuestionEdit: true): OK");
+}

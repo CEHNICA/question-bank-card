@@ -23,9 +23,9 @@ from core import (
 urlpatterns = [
     path("", views.index_page),
     path("library", views.library_page),
-    path("eagle", views._frontend("eagle/index.html", "text/html; charset=utf-8")),
-    path("eagle/", views._frontend("eagle/index.html", "text/html; charset=utf-8")),
-    path("preview.html", views._frontend("eagle/index.html", "text/html; charset=utf-8")),
+    path("eagle", views._page("eagle/index.html")),
+    path("eagle/", views._page("eagle/index.html")),
+    path("preview.html", views._page("eagle/index.html")),
     # 试题篮的 A4 预览页：独立文档 + iframe 隔离（library.css 带 body 级全局样式）。
     # 必须走 _page 注入 ?v= 指纹：styles.css / exam-layout.js 等是一周长缓存，
     # 裸 _frontend 的 HTML 不带版本号时，改完靠右排版浏览器仍会吃旧 CSS/JS。
@@ -67,6 +67,12 @@ urlpatterns = [
     path("library-solutions.js", views.library_solutions_script),
     path("library-answer-editor.js", views.library_answer_editor_script),
     path("library-answer-editor.css", views._frontend("library-answer-editor.css", "text/css; charset=utf-8")),
+    path("qb-editor-helpers.js", views._frontend("qb-editor-helpers.js", "application/javascript; charset=utf-8")),
+    path("question-editor.css", views._frontend("question-editor.css", "text/css; charset=utf-8")),
+    path(
+        "library-unified-editor.js",
+        views._frontend("library-unified-editor.js", "application/javascript; charset=utf-8"),
+    ),
     path("library-question-editor.js", views.library_question_editor_script),
     path("library-question-viewer.js", views.library_question_viewer_script),
     path("exam-export.js", views.exam_export_script),
@@ -159,6 +165,7 @@ urlpatterns = [
     path("api/questions/<int:question_id>/ocr-figures/<int:index>", views.question_ocr_figure),
     path("api/questions/<int:question_id>/crop", views.question_crop),
     path("api/questions/<int:question_id>/region-read", views.question_region_read),
+    path("api/questions/<int:question_id>/recommend-answer", views.question_recommend_answer),
     path("api/questions/<int:question_id>/<str:action>", views.question_action),
     path("api/m3/papers", views.m3_papers),
     path("api/library", views.library_list),
@@ -216,6 +223,7 @@ urlpatterns = [
     path("api/library/<uuid:publication_id>/question-images/<str:name>", views.library_question_image),
     path("api/library/<uuid:publication_id>/pages/<int:page>", views.library_source_page),
     path("api/library/<uuid:publication_id>/crop", views.library_crop),
+    path("api/library/<uuid:publication_id>/recommend-answer", views.library_recommend_answer),
     path("api/library/<uuid:publication_id>/withdraw", views.library_withdraw),
     path("api/library/<uuid:publication_id>/ocr-upgrade", views.library_ocr_upgrade),
     path("api/library/<uuid:publication_id>/restore", library_trash.restore_view),

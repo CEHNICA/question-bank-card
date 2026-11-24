@@ -241,13 +241,20 @@ class RegionReadApiTests(v110.TempDataMixin, TestCase):
 
     def test_bad_requests_are_refused(self):
         for body in (
-            {"page_idx": 0, "bbox": [540, 846, 640, 875], "target": "F"},
+            {"page_idx": 0, "bbox": [540, 846, 640, 875], "target": "I"},
             {"page_idx": 7, "bbox": [540, 846, 640, 875], "target": "A"},
             {"page_idx": 0, "bbox": [540, 846, 542, 847], "target": "A"},
             {"page_idx": 0, "bbox": "x", "target": "A"},
         ):
             self.assertEqual(self.post(body).status_code, 400, body)
         self.assertFalse(RegionRead.objects.exists())
+
+    def test_extended_option_targets_f_to_h_are_accepted(self):
+        for target in ("F", "G", "H"):
+            response = self.post({"page_idx": 0, "bbox": [540, 846, 640, 875], "target": target})
+            self.assertEqual(response.status_code, 200, target)
+            shown = response.json()["question"]["region_read"]
+            self.assertEqual((shown["target"], shown["target_name"]), (target, f"选项 {target}"))
 
     def test_without_a_vision_service_it_says_so(self):
         with mock.patch.object(readers, "primary_engine", return_value=None):

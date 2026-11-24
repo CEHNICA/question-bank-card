@@ -39,6 +39,7 @@ assert.equal(QB.findTables(moreCols.value)[0].rows[0].length, 4);
 assert.equal(growTableText("没有表格", 2, "row"), null);
 
 const js = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
+const helpers = fs.readFileSync(path.join(__dirname, "qb-editor-helpers.js"), "utf8");
 const render = fs.readFileSync(path.join(__dirname, "qb-render.js"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
 // The typeset view lays tables out and keeps the rest of the text as before.
@@ -51,7 +52,9 @@ assert.match(css, /\.qb-table td, \.qb-table th \{[^}]*border: 1px solid var\(--
 // A crop MinerU read as a table offers the conversion on the card.
 assert.match(js, /figureAction: \(figure\) => tableAction\(q, figure\)/);
 assert.match(js, /api\(`\/api\/questions\/\$\{q\.id\}\/figure-table`, \{ method: "POST", body: \{ figure: index \} \}\)/);
-assert.match(js, /button\("插入表格", "small"/);
+assert.match(js, /H\.buildStemToolbar\(/);
+assert.match(helpers, /createEl\("button", "button small", "插入表格"\)/);
+assert.match(helpers, /createEl\("button", "button small stem-blank-tool", "插入填空线 ____"\)/);
 // A collapsed card shows the first line of words, not a table row.
 assert.match(js, /lines\.find\(\(item\) => item\.trim\(\) && !item\.trim\(\)\.startsWith\("\|"\)/);
 

@@ -118,7 +118,7 @@
     if (options.document !== "questions" || format === "split") {
       const selected = selectedAnswer(item, options)?.content || {};
       const answer = String(selected.answer ?? "");
-      add("answer", answer, /^\s*[A-E]{1,5}\s*$/.test(answer));
+      add("answer", answer, /^\s*[A-H]{1,8}\s*$/.test(answer));
       add("analysis", selected.analysis);
     }
     return fields;

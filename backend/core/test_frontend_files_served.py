@@ -65,3 +65,24 @@ class FrontendFilesAreServedTests(SimpleTestCase):
             if Client().get(path).status_code != 200:
                 missing.append(item)
         self.assertEqual(missing, [], "题库页引用的文件取不到：" + "、".join(missing))
+
+    def test_the_eagle_page_files_are_served_too(self):
+        """验证 Eagle 工作台页面引用的统一编辑器静态资源均可 HTTP 200 获取且带缓存指纹"""
+        html = Client().get("/eagle").content.decode("utf-8")
+        refs = self.referenced_files(html)
+        missing = []
+        for item in refs:
+            path = item.split("?")[0]
+            if Client().get(path).status_code != 200:
+                missing.append(item)
+        self.assertEqual(missing, [], "Eagle 页引用的文件取不到：" + "、".join(missing))
+        for expected in (
+            "/question-editor.css?v=",
+            "/qb-editor-helpers.js?v=",
+            "/library-unified-editor.js?v=",
+            "/eagle-solution-editor.js?v=",
+        ):
+            self.assertTrue(
+                any(ref.startswith(expected) for ref in refs),
+                f"Eagle 页缺少带版本指纹的静态资源引用：{expected}，实际引用：{refs}",
+            )

@@ -202,8 +202,8 @@ assert.match(Progress.manualPagesNote(4, 25), /这 25 道题/, "已入库的题�
 // 全绿，而页面上又变回「还有页没切出来」。所以要钉住调用点本身。
 assert.match(appSource, /const note = QBProgress\.manualPagesNote\(manualPages\.length, c\.all\);/,
   "这句要收在 manualPagesNote 里，别在渲染处就地拼");
-assert.match(appSource, /if \(note\) statusText\.append\(el\("span", "processing-detail", note\)\);/,
-  "空句子不该占一行");
+assert.match(appSource, /details\.forEach\(\(line\) => statusText\.append\(el\("span", "processing-detail", line\)\)\);/,
+  "空句子不该占一行，且需经 details 去重输出");
 assert.doesNotMatch(appSource, /尚未自动切出题目/,
   "旧口气「尚未自动切出题目」不许再回到页面上：它和下面的绿色完成条摆在一起像打架");
 

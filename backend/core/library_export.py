@@ -52,7 +52,7 @@ GROUPS = (
     ("true_false", "判断题"),
     ("free_response", "解答题"),
 )
-FIELDS = {"stem", "answer", "analysis", "origin", *(f"options.{key}" for key in "ABCDE")}
+FIELDS = {"stem", "answer", "analysis", "origin", *(f"options.{key}" for key in "ABCDEFGH")}
 # 答案文本的口径必须和预览、PDF 逐字一致。预览走 frontend/library-solutions.js，
 # PDF 走 backend/core/library_pdf.py 里的同一份模板，两边本来就对齐；Word 是唯一
 # 偏离的一方（标题多一个「 · 答案解析」、占位符少一半、答案没有「答案：」标签、
@@ -991,7 +991,7 @@ def _images(publication, where):
     for index, figure in enumerate(figures):
         label = f"{where} · {'题目片段' if image_body else '配图'} {index + 1}"
         if not isinstance(figure, dict) or (
-            not image_body and figure.get("slot") not in {"stem", *"ABCDE", *(f"option_{key}" for key in "ABCDE")}
+            not image_body and figure.get("slot") not in {"stem", *"ABCDEFGH", *(f"option_{key}" for key in "ABCDEFGH")}
         ):
             _fail(label, "配图位置无法识别，不能省略", 409)
         name = figure.get("file")
@@ -1091,7 +1091,7 @@ def _capture(ids, rendered, options, output_format, *, word_math=None, solutions
             if not image_body and not required["stem"].strip():
                 _fail(where, "题干为空，不能导出空题", 409)
             option_values = content.get("options") or {}
-            if not isinstance(option_values, dict) or set(option_values) - set("ABCDE"):
+            if not isinstance(option_values, dict) or set(option_values) - set("ABCDEFGH"):
                 _fail(where, "选项快照不完整", 409)
             for letter, text in option_values.items():
                 if not isinstance(text, str):
@@ -3517,7 +3517,7 @@ def _option_columns(item, options, *, text_width_mm=178):
     requested = options.get("option_overrides", {}).get(item["id"], options.get("option_layout", "auto"))
     letters = [
         key
-        for key in "ABCDE"
+        for key in "ABCDEFGH"
         if str(values.get(key) or "").strip() or any(image["slot"] == key for image in item["images"])
     ]
     if len(letters) < 2 or requested == "vertical":
@@ -3575,7 +3575,7 @@ def _write_compact_options(document, item, size, columns, *, text_width_mm=178, 
 
     letters = [
         key
-        for key in "ABCDE"
+        for key in "ABCDEFGH"
         if f"options.{key}" in item["fields"] or any(image["slot"] == key for image in item["images"])
     ]
     columns = max(1, int(columns or 1))
@@ -4432,7 +4432,7 @@ def _document(captured, title, options, mode):
                 # 选项里的图钉在正文列（.qb-option .qb-figure { grid-column: 2 }），
                 # 选项里的表在正文列里居中（.qb-table { margin: 0 auto }），
                 # 两样都按正文列算。
-                for letter in "" if image_body else "ABCDE":
+                for letter in "" if image_body else "ABCDEFGH":
                     has_field = f"options.{letter}" in item["fields"]
                     has_image = any(image["slot"] == letter for image in item["images"])
                     if not has_field and not has_image:
@@ -4628,20 +4628,20 @@ def export(payload, *, warnings=None):
             if (
                 type(measured) is not int
                 and wanted > actual
-                and (item["content"].get("options") or any(image["slot"] in "ABCDE" for image in item["images"]))
+                and (item["content"].get("options") or any(image["slot"] in "ABCDEFGH" for image in item["images"]))
             ):
                 warnings.append(
                     f"第 {number} 题选项较宽，Word 已使用{'两列' if actual == 2 else '竖排'}，内容和配图完整保留。"
                 )
             # ``_write_question`` prints ``f"{letter}. "`` for every slot in
-            # ABCDE whatever the question type is, so pictures the reader filed
+            # ABCDEFGH whatever the question type is, so pictures the reader filed
             # under option slots make those letters appear on the paper even
             # though the source never had them: 数学九上第 1 题 prints (1)(2)(3)(4)
             # and 括号 under four objects, and its 12 pictures came back slotted
             # A~D, so the student sheet invented A. B. C. D. and lost both the
             # numbering and the place to write the answer.
             if item["type"] not in {"single_choice", "multiple_choice"} and any(
-                image["slot"] in "ABCDE" for image in item["images"]
+                image["slot"] in "ABCDEFGH" for image in item["images"]
             ):
                 warnings.append(
                     f"{item['where']}：这不是选择题，但卷面上会出现 A. B. C. 等字母，"

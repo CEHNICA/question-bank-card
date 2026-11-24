@@ -22,19 +22,19 @@ from .models import LibrarySolution, Paper, PublishedQuestion, Question, Questio
 from .textnorm import strip_example_label, strip_type_label
 
 CHOICE_TYPES = set(qtypes.CHOICE_TYPES)
-OPTION_KEYS = ("A", "B", "C", "D", "E")
-# Every choice question carries A–D in its content, empty or not; E only when
-# printed.  A four-option question therefore keeps the exact content (and
-# approval hash) it had before E existed.
+OPTION_KEYS = ("A", "B", "C", "D", "E", "F", "G", "H")
+# 每道选择题固定保留 A–D 以保持既有四选题哈希完全兼容；E–H 按需仅在非空时写入。
 BASE_OPTION_KEYS = ("A", "B", "C", "D")
+EXTRA_OPTION_KEYS = ("E", "F", "G", "H")
 
 
 def option_content(options: dict | None, *, plain: bool = False) -> dict:
     options = options or {}
     text = prose.plain_markup if plain else (lambda value: value)
     content = {key: text(options.get(key, "")) for key in BASE_OPTION_KEYS}
-    if str(options.get("E") or "").strip():
-        content["E"] = text(options["E"])
+    for key in EXTRA_OPTION_KEYS:
+        if str(options.get(key) or "").strip():
+            content[key] = text(options[key])
     return content
 
 

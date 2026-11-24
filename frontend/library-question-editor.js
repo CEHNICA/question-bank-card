@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const TYPES = { single_choice: "单选题", multiple_choice: "多选题", fill_blank: "填空题", true_false: "判断题", free_response: "解答题" };
-  const KEYS = ["A", "B", "C", "D", "E"];
+  const KEYS = ["A", "B", "C", "D", "E", "F", "G", "H"];
   function create({ node, QB, notify, confirm, onSaved }) {
     let dialog, form, preview, status, save, fields, record, baseline, busy = false, epoch = 0, controller, focus;
     const pendingSaves = new Set();

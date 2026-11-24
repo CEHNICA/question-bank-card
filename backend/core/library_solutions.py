@@ -140,6 +140,28 @@ def _adopt_review_asset(publication, asset_id):
     return _asset(publication.pk, asset_id)
 
 
+def _adopt_previous_publication_asset(publication, asset_id):
+    """当用户在统一编辑工作台同时上传解析图并修改题干/选项时，题面会发布为新版
+    PublishedQuestion；刚上传到上一版目录、尚未进入新版目录的新解析图需要安全迁移。"""
+    if not publication.question_id:
+        return None
+    siblings = PublishedQuestion.objects.filter(
+        question_id=publication.question_id, version__lt=publication.version
+    ).order_by("-version")[:3]
+    for older in siblings:
+        try:
+            spec, data = _asset(older.pk, asset_id)
+        except SolutionError:
+            continue
+        folder = _folder(publication.pk)
+        folder.mkdir(parents=True, exist_ok=True)
+        spec = {**spec, "publication_id": str(publication.pk)}
+        (folder / (str(asset_id) + ".png")).write_bytes(data)
+        (folder / (str(asset_id) + ".json")).write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
+        return _asset(publication.pk, asset_id)
+    return None
+
+
 def _figure_json(publication_id, value):
     # Listing hundreds of library entries or historical versions must not
     # decode every full image. Retrieval, save and export verify actual bytes.
@@ -250,9 +272,8 @@ def save(publication, payload):
         try:
             spec, _data = _asset(publication.pk, key)
         except SolutionError:
-            # 上一版解析的图在旧目录里（老师正要点「填回编辑区」）。搬不过来就
-            # 保持原来那句报错，不要在这里静默把配图丢掉。
-            adopted = _adopt_review_asset(publication, key)
+            # 上一版解析的图（或刚同次改题面新发的上一版暂存图）在旧目录里，按同题安全搬过来。
+            adopted = _adopt_review_asset(publication, key) or _adopt_previous_publication_asset(publication, key)
             if adopted is None:
                 raise
             spec, _data = adopted
