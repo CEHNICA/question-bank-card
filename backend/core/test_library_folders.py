@@ -366,32 +366,11 @@ class LibraryFoldersAndTagGroupsTests(LiveServerTestCase):
                 "action": "sync",
                 "revision": 0,
                 "user_folders": [
-                    {
-                        "id": "uf_a",
-                        "name": "甲",
-                        "parentId": None,
-                        "questionIds": [],
-                        "createdAt": 1,
-                        "sortOrder": 20,
-                    },
-                    {
-                        "id": "uf_b",
-                        "name": "乙",
-                        "parentId": None,
-                        "questionIds": [],
-                        "createdAt": 2,
-                        "sortOrder": 10,
-                    },
+                    {"id": "uf_a", "name": "甲", "parentId": None, "questionIds": [], "createdAt": 1, "sortOrder": 20},
+                    {"id": "uf_b", "name": "乙", "parentId": None, "questionIds": [], "createdAt": 2, "sortOrder": 10},
                 ],
                 "smart_folders": [
-                    {
-                        "id": "csf_a",
-                        "name": "视图",
-                        "parentId": None,
-                        "filter": {},
-                        "createdAt": 3,
-                        "sortOrder": 5,
-                    }
+                    {"id": "csf_a", "name": "视图", "parentId": None, "filter": {}, "createdAt": 3, "sortOrder": 5}
                 ],
                 "sort_modes": {"section:folders": "manual"},
                 "paper_sort_mode": "manual",
@@ -404,7 +383,5 @@ class LibraryFoldersAndTagGroupsTests(LiveServerTestCase):
         self.assertEqual(synced["sort_modes"]["section:folders"], "manual")
         self.assertEqual(synced["paper_sort_mode"], "manual")
 
-        sorted_res = library_folders.mutate(
-            {"action": "set_sort", "target_id": "section:folders", "mode": "manual"}
-        )
+        sorted_res = library_folders.mutate({"action": "set_sort", "target_id": "section:folders", "mode": "manual"})
         self.assertEqual(sorted_res["sort_modes"]["section:folders"], "manual")
