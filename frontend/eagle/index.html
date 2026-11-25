@@ -3839,6 +3839,12 @@
         if (data.doc_overrides && typeof data.doc_overrides === 'object') {
           localStorage.setItem(EAGLE_DOC_FOLDER_OVERRIDES_KEY, JSON.stringify(data.doc_overrides));
         }
+        if (data.doc_placements && typeof data.doc_placements === 'object' && typeof EAGLE_DOC_PLACEMENTS_KEY === 'string') {
+          localStorage.setItem(EAGLE_DOC_PLACEMENTS_KEY, JSON.stringify(data.doc_placements));
+        }
+        if (Array.isArray(data.custom_tree_docs) && typeof EAGLE_CUSTOM_TREE_DOCS_KEY === 'string') {
+          localStorage.setItem(EAGLE_CUSTOM_TREE_DOCS_KEY, JSON.stringify(data.custom_tree_docs));
+        }
         if (Array.isArray(data.smart_folders)) {
           let smarts = data.smart_folders;
           if (typeof applyFolderSortOrdersMirror === 'function') {
@@ -3886,6 +3892,8 @@
             revision: libraryFoldersRevision,
             user_folders: typeof readUserFolders === 'function' ? readUserFolders() : [],
             doc_overrides: typeof readDocFolderOverrides === 'function' ? readDocFolderOverrides() : {},
+            doc_placements: typeof readDocPlacements === 'function' ? readDocPlacements() : {},
+            custom_tree_docs: typeof readCustomTreeDocs === 'function' ? readCustomTreeDocs() : [],
             smart_folders: typeof readCustomSmartFolders === 'function' ? readCustomSmartFolders() : [],
             sort_modes: readFolderSortModes(),
             paper_sort_mode: currentPaperSort
@@ -3933,6 +3941,8 @@
           || (typeof readCustomSmartFolders === 'function' && readCustomSmartFolders().length > 0)
           || Object.keys(readFolderSortModes()).length > 0
           || (typeof readDocFolderOverrides === 'function' && Object.keys(readDocFolderOverrides()).length > 0)
+          || (typeof readDocPlacements === 'function' && Object.keys(readDocPlacements()).length > 0)
+          || (typeof readCustomTreeDocs === 'function' && readCustomTreeDocs().length > 0)
           || currentPaperSort !== 'time_desc';
         if (hasLocal) {
           await syncFoldersToServer();
@@ -5938,15 +5948,26 @@
 
       if (targetPaper) {
         const parentKey = (targetPaper.materialType === 'book' ? 'book:' : 'paper:') + targetPaper.id;
+        const safeParentKey = escapeInlineJsArg(parentKey);
+        const isCustomBook = targetPaper.materialType === 'book' && typeof isCustomTreeDoc === 'function' && isCustomTreeDoc(targetPaper.id);
+        const moreItems = [
+          treeMenuItem('📋', '复制项目完整名称', `copyPaperNameToClipboard('${targetPaper.id}'); hideEagleContextMenu();`),
+          treeMenuItem('🔍', `仅查看该项目的试题 (${targetPaper.total} 题)`, `filterByPaper('${targetPaper.id}'); hideEagleContextMenu();`),
+          treeMenuItem('📦', '移动到...', `openFolderPickerForMove('doc', '${safeParentKey}')`),
+          treeMenuItem('🔄', targetPaper.materialType === 'book' ? '转为「试卷」文件夹' : '转为「教材版本」文件夹', `togglePaperMaterialType('${targetPaper.id}'); hideEagleContextMenu();`),
+          treeMenuItem('➕', '在此文件夹下新建子文件夹', `createUserFolder('${safeParentKey}')`)
+        ];
+        if (targetPaper.materialType === 'book') {
+          moreItems.push(treeMenuItem(
+            isCustomBook ? '🔄' : '🌲',
+            isCustomBook ? '恢复自动章节目录' : '启用自定义自由目录',
+            `toggleDocCustomTree('${escapeInlineJsArg(targetPaper.id)}'); hideEagleContextMenu();`
+          ));
+        }
         const moreFlyout = eagleMenuFlyout({
           icon: '⋯',
           title: '更多',
-          itemsHtml: [
-            treeMenuItem('📋', '复制项目完整名称', `copyPaperNameToClipboard('${targetPaper.id}'); hideEagleContextMenu();`),
-            treeMenuItem('🔍', `仅查看该项目的试题 (${targetPaper.total} 题)`, `filterByPaper('${targetPaper.id}'); hideEagleContextMenu();`),
-            treeMenuItem('🔄', targetPaper.materialType === 'book' ? '转为「试卷」文件夹' : '转为「教材版本」文件夹', `togglePaperMaterialType('${targetPaper.id}'); hideEagleContextMenu();`),
-            treeMenuItem('➕', '在此文件夹下新建子文件夹', `createUserFolder('${parentKey}')`)
-          ].join('')
+          itemsHtml: moreItems.join('')
         });
         menuHtml += treeMenuDivider();
         menuHtml += treeMenuHeader('项目: ' + escapeHtml(targetPaper.name));
@@ -13409,6 +13430,15 @@
      */
     function resolveQuestionTextbookLeafInfo(q, bookDoc) {
       const bookLabel = parseTextbookTitle(bookDoc.name || bookDoc.filename).label;
+      if (typeof isCustomTreeDoc === 'function' && isCustomTreeDoc(bookDoc.id)) {
+        return {
+          leafLabel: bookLabel,
+          fullPath: '教材版本 / ' + bookLabel,
+          chapterKey: '',
+          sectionName: '',
+          hasSectionNode: false
+        };
+      }
       if (typeof assignTextbookChapters === 'function') assignTextbookChapters();
       const overrides = typeof readDocFolderOverrides === 'function' ? readDocFolderOverrides() : {};
       const ov = overrides[String(bookDoc.id)];
@@ -14694,24 +14724,42 @@
     function expandFolderAncestors(nodeId) {
       if (!nodeId) return;
       folderTreeState.expanded.add('section:folders');
-      if (nodeId.startsWith('paper:')) {
-        folderTreeState.expanded.add('group:papers');
-        folderTreeState.expanded.add(nodeId);
-      } else if (nodeId.startsWith('book:')) {
-        folderTreeState.expanded.add('group:books');
-        folderTreeState.expanded.add(nodeId);
+      if (nodeId.startsWith('paper:') || nodeId.startsWith('book:')) {
+        let cur = nodeId;
+        const visited = new Set();
+        while (cur && !visited.has(cur)) {
+          visited.add(cur);
+          if (cur === 'section:folders') break;
+          if (cur === 'group:papers' || cur === 'group:books') {
+            folderTreeState.expanded.add(cur);
+            break;
+          }
+          if (cur.startsWith('paper:') || cur.startsWith('book:')) {
+            folderTreeState.expanded.add(cur);
+            if (typeof getEffectiveDocParentId === 'function') {
+              const docId = cur.slice(cur.indexOf(':') + 1);
+              const doc = (typeof papersData !== 'undefined' ? papersData : []).find(p => String(p.id) === docId);
+              const mtype = doc ? (doc.materialType || 'exam') : (cur.startsWith('book:') ? 'book' : 'exam');
+              cur = getEffectiveDocParentId(docId, mtype);
+              continue;
+            }
+            folderTreeState.expanded.add(cur.startsWith('paper:') ? 'group:papers' : 'group:books');
+            break;
+          }
+          folderTreeState.expanded.add('userfolder:' + cur);
+          const item = readUserFolders().find(x => x.id === cur);
+          cur = item ? (item.parentId || null) : null;
+        }
       } else if (nodeId.startsWith('bookchap:')) {
         const parts = nodeId.split(':');
         if (parts[1]) {
-          folderTreeState.expanded.add('group:books');
-          folderTreeState.expanded.add('book:' + parts[1]);
+          expandFolderAncestors('book:' + parts[1]);
         }
         folderTreeState.expanded.add(nodeId);
       } else if (nodeId.startsWith('booksec:')) {
         const parts = nodeId.split(':');
         if (parts[1]) {
-          folderTreeState.expanded.add('group:books');
-          folderTreeState.expanded.add('book:' + parts[1]);
+          expandFolderAncestors('book:' + parts[1]);
           if (parts[2]) folderTreeState.expanded.add('bookchap:' + parts[1] + ':' + parts[2]);
         }
       } else if (nodeId.startsWith('userfolder:')) {
@@ -14721,13 +14769,21 @@
         const visited = new Set();
         while (curId && !visited.has(curId)) {
           visited.add(curId);
+          if (curId === 'section:folders') break;
           if (curId === 'group:papers' || curId === 'group:books') {
             folderTreeState.expanded.add(curId);
             break;
           }
           if (curId.startsWith('paper:') || curId.startsWith('book:')) {
-            folderTreeState.expanded.add(curId.startsWith('paper:') ? 'group:papers' : 'group:books');
             folderTreeState.expanded.add(curId);
+            if (typeof getEffectiveDocParentId === 'function') {
+              const docId = curId.slice(curId.indexOf(':') + 1);
+              const doc = (typeof papersData !== 'undefined' ? papersData : []).find(p => String(p.id) === docId);
+              const mtype = doc ? (doc.materialType || 'exam') : (curId.startsWith('book:') ? 'book' : 'exam');
+              curId = getEffectiveDocParentId(docId, mtype, list);
+              continue;
+            }
+            folderTreeState.expanded.add(curId.startsWith('paper:') ? 'group:papers' : 'group:books');
             break;
           }
           folderTreeState.expanded.add('userfolder:' + curId);
@@ -14765,6 +14821,8 @@
     const folderParentRegistry = new Map();
     const USER_FOLDERS_STORAGE_KEY = 'eagle_user_folders_v1';
     const EAGLE_DOC_FOLDER_OVERRIDES_KEY = 'eagle_doc_folder_overrides_v1';
+    const EAGLE_DOC_PLACEMENTS_KEY = 'eagle_doc_placements_v1';
+    const EAGLE_CUSTOM_TREE_DOCS_KEY = 'eagle_custom_tree_docs_v1';
     const CUSTOM_SMART_FOLDERS_STORAGE_KEY = 'eagle_custom_smart_folders';
     const EAGLE_TRASH_STORAGE_KEY = 'eagle_trash_v1';
     const EAGLE_PAPER_TRASH_QIDS_KEY = 'eagle_paper_trash_qids_v1';
@@ -15392,38 +15450,159 @@
       return list;
     }
 
-    function buildPaperTreeNodes(inheritedMode = null) {
+    function buildPaperTreeNodes(inheritedMode = null, opts = null) {
       const list = papersData.filter(p => (p.published || 0) > 0 && (p.materialType || 'exam') !== 'book');
-      const overrides = readDocFolderOverrides();
-      const foldersList = readUserFolders();
+      const preloaded = opts && opts._preloaded;
+      const overrides = (preloaded && preloaded.overrides) || readDocFolderOverrides();
+      const foldersList = (preloaded && preloaded.foldersList) || readUserFolders();
+      const placements = (preloaded && preloaded.placements)
+        || (typeof readDocPlacements === 'function' ? readDocPlacements() : {});
       const papersMode = inheritedMode || resolveFolderSortMode('group:papers', resolveFolderSortMode('section:folders'));
-      const nodes = list.map(p => {
+      const targetParent = (opts && opts.targetParent) ? String(opts.targetParent) : 'group:papers';
+      const includeAll = !!(opts && opts.includeAllPapers);
+      const nodes = [];
+      list.forEach(p => {
+        if (!includeAll && typeof getEffectiveDocParentId === 'function') {
+          const eff = getEffectiveDocParentId(p.id, 'exam', foldersList, placements);
+          if (eff !== targetParent) return;
+        }
         const nodeId = 'paper:' + p.id;
         const paperMode = getExplicitFolderSortMode(nodeId) || papersMode;
         const attached = buildUserFolderTreeNodesForParent(nodeId, paperMode);
+        const childDocs = typeof buildPlacedDocTreeNodesForParent === 'function'
+          ? buildPlacedDocTreeNodesForParent(nodeId, paperMode, { overrides, foldersList, placements, chaptersAssigned: !!(preloaded && preloaded.chaptersAssigned) })
+          : [];
+        const children = sortFolderTreeNodes(attached.concat(childDocs), paperMode);
         const docSet = collectDocFolderQuestionIds(p.id, overrides, foldersList);
         const ov = overrides[String(p.id)] || { added: [], removed: [] };
         const delta = (Array.isArray(ov.added) ? ov.added.length : 0) - (Array.isArray(ov.removed) ? ov.removed.length : 0);
         const adjustedPublished = Math.max(0, Number(p.published || 0) + delta);
         const count = Math.max(adjustedPublished, docSet.size);
         const createdAtMs = folderCreatedAtMs(p);
-        return {
+        const placement = placements[String(p.id)];
+        const sortRaw = placement ? Number(placement.sortOrder) : NaN;
+        nodes.push({
           id: nodeId,
           type: 'paper',
           label: p.name,
-          icon: folderIconFor(nodeId, attached.length > 0),
+          icon: folderIconFor(nodeId, children.length > 0),
           paperId: p.id,
           count,
           createdAtMs,
           createdLabel: formatFolderCreatedLabel(createdAtMs),
-          children: attached
-        };
+          sortOrder: Number.isFinite(sortRaw) ? sortRaw : undefined,
+          children
+        });
       });
       return sortFolderTreeNodes(nodes, papersMode);
     }
 
     // ================= 通用嵌套树辅助（循环检测 / 子树收集） =================
-    var MAX_FOLDER_DEPTH = 4;
+    var MAX_FOLDER_DEPTH = 8;
+
+    function readDocPlacements() {
+      try {
+        const key = (typeof EAGLE_DOC_PLACEMENTS_KEY === 'string') ? EAGLE_DOC_PLACEMENTS_KEY : 'eagle_doc_placements_v1';
+        const raw = localStorage.getItem(key);
+        const obj = raw ? JSON.parse(raw) : {};
+        if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {};
+        const out = {};
+        Object.keys(obj).forEach(k => {
+          const entry = obj[k];
+          if (!entry || typeof entry !== 'object') return;
+          let pid = entry.parentId ? String(entry.parentId).trim() : null;
+          if (pid && pid.startsWith('userfolder:')) pid = pid.slice('userfolder:'.length) || null;
+          if (pid === '__root__' || pid === 'root') pid = 'section:folders';
+          if (pid === 'default' || pid === '') pid = null;
+          const sortRaw = Number(entry.sortOrder);
+          const cleaned = { parentId: pid };
+          if (Number.isFinite(sortRaw)) cleaned.sortOrder = sortRaw;
+          if (cleaned.parentId !== null || Number.isFinite(cleaned.sortOrder)) {
+            out[String(k)] = cleaned;
+          }
+        });
+        return out;
+      } catch (e) { return {}; }
+    }
+
+    function writeDocPlacements(mapObj) {
+      try {
+        const key = (typeof EAGLE_DOC_PLACEMENTS_KEY === 'string') ? EAGLE_DOC_PLACEMENTS_KEY : 'eagle_doc_placements_v1';
+        localStorage.setItem(key, JSON.stringify(mapObj || {}));
+      } catch (e) {}
+      if (typeof scheduleFoldersSync === 'function') scheduleFoldersSync();
+    }
+
+    function readCustomTreeDocs() {
+      try {
+        const key = (typeof EAGLE_CUSTOM_TREE_DOCS_KEY === 'string') ? EAGLE_CUSTOM_TREE_DOCS_KEY : 'eagle_custom_tree_docs_v1';
+        const raw = localStorage.getItem(key);
+        const arr = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(arr)) return [];
+        return Array.from(new Set(arr.map(x => String(x || '').trim()).filter(Boolean)));
+      } catch (e) { return []; }
+    }
+
+    function writeCustomTreeDocs(list) {
+      try {
+        const key = (typeof EAGLE_CUSTOM_TREE_DOCS_KEY === 'string') ? EAGLE_CUSTOM_TREE_DOCS_KEY : 'eagle_custom_tree_docs_v1';
+        const clean = Array.from(new Set((list || []).map(x => String(x || '').trim()).filter(Boolean)));
+        localStorage.setItem(key, JSON.stringify(clean));
+      } catch (e) {}
+      if (typeof scheduleFoldersSync === 'function') scheduleFoldersSync();
+    }
+
+    function isCustomTreeDoc(docId) {
+      if (!docId) return false;
+      return readCustomTreeDocs().includes(String(docId));
+    }
+
+    function toggleDocCustomTree(docId) {
+      if (!docId) return false;
+      const key = String(docId);
+      const list = readCustomTreeDocs();
+      const currently = list.includes(key);
+      const doc = (typeof papersData !== 'undefined' ? papersData : []).find(p => String(p.id) === key);
+      const label = doc ? doc.name : key;
+      const undoToken = beginFolderUndo((currently ? '恢复自动章节目录：' : '启用自定义自由目录：') + label);
+      const next = currently ? list.filter(x => x !== key) : list.concat([key]);
+      writeCustomTreeDocs(next);
+      commitFolderUndo(undoToken, true);
+      if (typeof renderFolderTree === 'function') renderFolderTree();
+      if (typeof renderRightInspector === 'function') renderRightInspector();
+      if (typeof showToast === 'function') {
+        showToast(
+          currently
+            ? `已为「${label}」恢复自动章节目录（Ctrl+Z 撤销）`
+            : `已为「${label}」启用自定义自由目录（Ctrl+Z 撤销）`,
+          'success'
+        );
+      }
+      return !currently;
+    }
+
+    function getEffectiveDocParentId(docId, materialType, preloadedFolders, preloadedPlacements) {
+      const defaultParent = (materialType === 'book') ? 'group:books' : 'group:papers';
+      if (!docId) return defaultParent;
+      const placements = preloadedPlacements || readDocPlacements();
+      const entry = placements[String(docId)];
+      const rawPid = entry && entry.parentId ? String(entry.parentId).trim() : '';
+      if (!rawPid) return defaultParent;
+      if (rawPid === '__root__' || rawPid === 'root' || rawPid === 'section:folders') return 'section:folders';
+      if (rawPid === 'group:papers' || rawPid === 'group:books') return rawPid;
+      const cleanUf = rawPid.startsWith('userfolder:') ? rawPid.slice('userfolder:'.length) : rawPid;
+      const folders = preloadedFolders || (typeof readUserFolders === 'function' ? readUserFolders() : []);
+      if (folders.some(f => String(f.id) === cleanUf)) return cleanUf;
+      if (rawPid.startsWith('paper:') || rawPid.startsWith('book:')) {
+        const targetDocId = rawPid.slice(rawPid.indexOf(':') + 1);
+        if (targetDocId && targetDocId !== String(docId)) {
+          const docs = typeof papersData !== 'undefined' ? papersData : [];
+          const targetDoc = docs.find(p => String(p.id) === targetDocId && (p.published || 0) > 0);
+          if (targetDoc) return ((targetDoc.materialType || 'exam') === 'book' ? 'book:' : 'paper:') + targetDoc.id;
+        }
+      }
+      return defaultParent;
+    }
 
     /**
      * 判断 targetParentId 是否等于 sourceId 或位于 sourceId 的子孙分支中（防止移动成环）
@@ -15432,11 +15611,26 @@
       if (!sourceId || !targetParentId) return false;
       if (sourceId === targetParentId) return true;
       const byId = new Map((list || []).map(x => [x.id, x]));
+      const placements = typeof readDocPlacements === 'function' ? readDocPlacements() : null;
+      const docs = typeof papersData !== 'undefined' ? papersData : [];
       const visited = new Set();
       let cursor = targetParentId;
       while (cursor && !visited.has(cursor)) {
         if (cursor === sourceId) return true;
         visited.add(cursor);
+        if (typeof cursor === 'string' && (cursor.startsWith('paper:') || cursor.startsWith('book:'))) {
+          if (typeof getEffectiveDocParentId === 'function' && placements) {
+            const docId = cursor.slice(cursor.indexOf(':') + 1);
+            const doc = docs.find(p => String(p.id) === docId);
+            const mtype = doc ? (doc.materialType || 'exam') : (cursor.startsWith('book:') ? 'book' : 'exam');
+            cursor = getEffectiveDocParentId(docId, mtype, list, placements);
+            continue;
+          }
+          break;
+        }
+        if (cursor === 'section:folders' || cursor === 'group:papers' || cursor === 'group:books') {
+          break;
+        }
         const node = byId.get(cursor);
         cursor = node ? (node.parentId || null) : null;
       }
@@ -15444,11 +15638,11 @@
     }
 
     /**
-     * 计算指定节点在文件夹树中的所在层级（0 表示顶层分段根，1..4 对应第 1..4 层）
+     * 计算指定节点在文件夹树中的所在层级（0 表示顶层分段根，1..8 对应第 1..8 层）
      * @param {string|null} parentId 父节点 ID 或前缀树节点 ID
      * @param {Array} [list] 可选文件夹数组
      * @param {boolean} [isCustom=false] 是否为智能文件夹树
-     * @returns {number} 当前节点所在层数（0..4+）
+     * @returns {number} 当前节点所在层数（0..8+）
      */
     function getFolderParentDepth(parentId, list, isCustom = false) {
       if (!parentId || parentId === '__root__' || parentId === 'section:folders' || parentId === 'section:custom') {
@@ -15460,23 +15654,35 @@
 
       if (!isCustom) {
         if (rawId === 'group:papers' || rawId === 'group:books') return 1;
-        if (rawId.startsWith('paper:') || rawId.startsWith('book:')) return 2;
         if (rawId.startsWith('bookchap:')) return 3;
         if (rawId.startsWith('booksec:')) return 4;
       }
 
       const items = list || (isCustom ? readCustomSmartFolders() : readUserFolders());
       const byId = new Map(items.map(x => [x.id, x]));
+      const placements = (!isCustom && typeof readDocPlacements === 'function') ? readDocPlacements() : null;
+      const docs = (!isCustom && typeof papersData !== 'undefined') ? papersData : [];
       let depth = 0;
       let curId = rawId;
       const visited = new Set();
       while (curId && !visited.has(curId)) {
         visited.add(curId);
         if (!isCustom) {
+          if (curId === 'section:folders') return depth;
           if (curId === 'group:papers' || curId === 'group:books') return depth + 1;
-          if (curId.startsWith('paper:') || curId.startsWith('book:')) return depth + 2;
           if (curId.startsWith('bookchap:')) return depth + 3;
           if (curId.startsWith('booksec:')) return depth + 4;
+          if (curId.startsWith('paper:') || curId.startsWith('book:')) {
+            depth += 1;
+            if (typeof getEffectiveDocParentId === 'function' && placements) {
+              const docId = curId.slice(curId.indexOf(':') + 1);
+              const doc = docs.find(p => String(p.id) === docId);
+              const mtype = doc ? (doc.materialType || 'exam') : (curId.startsWith('book:') ? 'book' : 'exam');
+              curId = getEffectiveDocParentId(docId, mtype, items, placements);
+              continue;
+            }
+            return depth + 1;
+          }
         }
         const item = byId.get(curId);
         if (!item) break;
@@ -15489,10 +15695,11 @@
     /**
      * 计算指定文件夹子树的最大高度（叶节点自身为 1）
      * @param {Array} list 文件夹数组
-     * @param {string} folderId 文件夹 ID
+     * @param {string} folderId 文件夹 ID（或 paper:/book: 节点 ID）
+     * @param {boolean} [isCustom=false] 是否为智能文件夹树
      * @returns {number} 子树高度（>= 1）
      */
-    function getFolderSubtreeHeight(list, folderId) {
+    function getFolderSubtreeHeight(list, folderId, isCustom = false) {
       if (!folderId) return 0;
       const childrenByParent = new Map();
       (list || []).forEach(item => {
@@ -15500,6 +15707,17 @@
         if (!childrenByParent.has(pid)) childrenByParent.set(pid, []);
         childrenByParent.get(pid).push(item.id);
       });
+      if (!isCustom && typeof getEffectiveDocParentId === 'function' && typeof papersData !== 'undefined') {
+        const placements = typeof readDocPlacements === 'function' ? readDocPlacements() : {};
+        papersData.forEach(p => {
+          if (!p || (p.published || 0) <= 0) return;
+          const mtype = p.materialType || 'exam';
+          const eff = getEffectiveDocParentId(p.id, mtype, list, placements);
+          const docNodeId = (mtype === 'book' ? 'book:' : 'paper:') + p.id;
+          if (!childrenByParent.has(eff)) childrenByParent.set(eff, []);
+          childrenByParent.get(eff).push(docNodeId);
+        });
+      }
       const visited = new Set();
       const walk = (id) => {
         if (!id || visited.has(id)) return 0;
@@ -15515,16 +15733,16 @@
     }
 
     /**
-     * 判断新建或移动后的文件夹树深度是否仍在 MAX_FOLDER_DEPTH (4 层) 以内
+     * 判断新建或移动后的文件夹树深度是否仍在 MAX_FOLDER_DEPTH (8 层) 以内
      * @param {Array} list 文件夹数组
      * @param {string|null} folderId 待移动文件夹 ID；为 null 时按新建 1 个子夹计算
      * @param {string|null} targetParentId 目标父节点 ID
      * @param {boolean} [isCustom=false] 是否为智能文件夹
-     * @returns {boolean} 是否符合 4 层上限
+     * @returns {boolean} 是否符合 8 层上限
      */
     function canPlaceFolderUnderParent(list, folderId, targetParentId, isCustom = false) {
       const parentDepth = getFolderParentDepth(targetParentId, list, isCustom);
-      const subtreeHeight = folderId ? getFolderSubtreeHeight(list, folderId) : 1;
+      const subtreeHeight = folderId ? getFolderSubtreeHeight(list, folderId, isCustom) : 1;
       return parentDepth + subtreeHeight <= MAX_FOLDER_DEPTH;
     }
 
@@ -15558,13 +15776,37 @@
     function getUserFolderFullPath(folderId, preloadedList) {
       const list = preloadedList || readUserFolders();
       const byId = new Map(list.map(x => [x.id, x]));
+      const placements = typeof readDocPlacements === 'function' ? readDocPlacements() : null;
+      const docs = typeof papersData !== 'undefined' ? papersData : [];
       const names = [];
       let curId = folderId;
       let topSystemId = null;
       const visited = new Set();
       while (curId && !visited.has(curId)) {
         visited.add(curId);
-        if (isSystemFolderParentId(curId)) {
+        if (curId === 'section:folders') break;
+        if (curId === 'group:papers' || curId === 'group:books') {
+          topSystemId = curId;
+          break;
+        }
+        if (curId.startsWith('paper:') || curId.startsWith('book:')) {
+          const docId = curId.slice(curId.indexOf(':') + 1);
+          const doc = docs.find(p => String(p.id) === String(docId));
+          const isBook = curId.startsWith('book:');
+          const docLabel = doc
+            ? (isBook ? parseTextbookTitle(doc.name || doc.filename).label : doc.name)
+            : docId;
+          if (typeof getEffectiveDocParentId === 'function' && placements) {
+            const effParent = getEffectiveDocParentId(docId, isBook ? 'book' : 'exam', list, placements);
+            if (effParent === 'group:papers' || effParent === 'group:books') {
+              names.unshift(docLabel);
+              topSystemId = effParent;
+              break;
+            }
+            names.unshift(docLabel);
+            curId = effParent;
+            continue;
+          }
           topSystemId = curId;
           break;
         }
@@ -15580,11 +15822,11 @@
         prefix = ['教材版本'];
       } else if (topSystemId && topSystemId.startsWith('paper:')) {
         const docId = topSystemId.slice('paper:'.length);
-        const doc = papersData.find(p => String(p.id) === String(docId));
+        const doc = docs.find(p => String(p.id) === String(docId));
         prefix = ['试卷', doc ? doc.name : docId];
       } else if (topSystemId && topSystemId.startsWith('book:')) {
         const docId = topSystemId.slice('book:'.length);
-        const doc = papersData.find(p => String(p.id) === String(docId));
+        const doc = docs.find(p => String(p.id) === String(docId));
         const bookLabel = doc ? parseTextbookTitle(doc.name || doc.filename).label : docId;
         prefix = ['教材版本', bookLabel];
       }
@@ -15667,6 +15909,8 @@
       return {
         user_folders: cloneFolderJson(typeof readUserFolders === 'function' ? readUserFolders() : []),
         doc_overrides: cloneFolderJson(typeof readDocFolderOverrides === 'function' ? readDocFolderOverrides() : {}),
+        doc_placements: cloneFolderJson(typeof readDocPlacements === 'function' ? readDocPlacements() : {}),
+        custom_tree_docs: cloneFolderJson(typeof readCustomTreeDocs === 'function' ? readCustomTreeDocs() : []),
         smart_folders: cloneFolderJson(typeof readCustomSmartFolders === 'function' ? readCustomSmartFolders() : []),
         sort_modes: cloneFolderJson(typeof readFolderSortModes === 'function' ? readFolderSortModes() : {}),
         paper_sort_mode: currentPaperSort || 'time_desc',
@@ -15701,6 +15945,8 @@
         if (typeof writeUserFolders === 'function') writeUserFolders(cloneFolderJson(snap.user_folders || []));
         if (typeof writeCustomSmartFolders === 'function') writeCustomSmartFolders(cloneFolderJson(snap.smart_folders || []));
         if (typeof writeDocFolderOverrides === 'function') writeDocFolderOverrides(cloneFolderJson(snap.doc_overrides || {}));
+        if (typeof writeDocPlacements === 'function' && snap.doc_placements) writeDocPlacements(cloneFolderJson(snap.doc_placements));
+        if (typeof writeCustomTreeDocs === 'function' && Array.isArray(snap.custom_tree_docs)) writeCustomTreeDocs(cloneFolderJson(snap.custom_tree_docs));
         if (typeof writeLocalTrash === 'function' && snap.trash) writeLocalTrash(cloneFolderJson(snap.trash));
         folderSortModes = cloneFolderJson(snap.sort_modes || {});
         try { localStorage.setItem(FOLDER_SORT_MODES_STORAGE_KEY, JSON.stringify(folderSortModes)); } catch (e) {}
@@ -15769,13 +16015,13 @@
      * @param {Array} [preloadedFolders] 可选预加载用户文件夹数组
      * @returns {Set<string>} 去重后的题目 ID 集合
      */
-    function collectMountedSubfolderQuestionIds(parentKey, preloadedFolders) {
+    function collectMountedSubfolderQuestionIds(parentKey, preloadedFolders, _visited) {
       const list = preloadedFolders || readUserFolders();
       const qset = new Set();
       if (!parentKey || !list.length) return qset;
       list.forEach(item => {
         if (item.parentId === parentKey) {
-          const subSet = collectUserFolderQuestionIds(item.id, list);
+          const subSet = collectUserFolderQuestionIds(item.id, list, _visited);
           subSet.forEach(qid => qset.add(String(qid)));
         }
       });
@@ -15789,12 +16035,15 @@
      * @param {Array} [preloadedFolders] 可选预加载用户文件夹数组
      * @returns {Set<string>} 去重后的题目 ID 集合
      */
-    function collectDocFolderQuestionIds(docId, preloadedOverrides, preloadedFolders) {
+    function collectDocFolderQuestionIds(docId, preloadedOverrides, preloadedFolders, _visited) {
       const overrides = preloadedOverrides || readDocFolderOverrides();
       const foldersList = preloadedFolders || readUserFolders();
       const qset = new Set();
       if (!docId) return qset;
       const key = String(docId);
+      const visited = _visited || new Set();
+      if (visited.has('doc:' + key)) return qset;
+      visited.add('doc:' + key);
       questionsData.forEach(q => {
         if (isQuestionInDocFolder(q, key, overrides)) qset.add(String(q.id));
       });
@@ -15802,8 +16051,18 @@
       if (ov && Array.isArray(ov.added)) {
         ov.added.forEach(qid => qset.add(String(qid)));
       }
-      collectMountedSubfolderQuestionIds('paper:' + key, foldersList).forEach(qid => qset.add(qid));
-      collectMountedSubfolderQuestionIds('book:' + key, foldersList).forEach(qid => qset.add(qid));
+      collectMountedSubfolderQuestionIds('paper:' + key, foldersList, visited).forEach(qid => qset.add(qid));
+      collectMountedSubfolderQuestionIds('book:' + key, foldersList, visited).forEach(qid => qset.add(qid));
+      if (typeof getEffectiveDocParentId === 'function' && typeof papersData !== 'undefined') {
+        const placements = typeof readDocPlacements === 'function' ? readDocPlacements() : {};
+        papersData.forEach(p => {
+          if (!p || (p.published || 0) <= 0 || String(p.id) === key) return;
+          const eff = getEffectiveDocParentId(p.id, p.materialType || 'exam', foldersList, placements);
+          if (eff === ('paper:' + key) || eff === ('book:' + key)) {
+            collectDocFolderQuestionIds(p.id, overrides, foldersList, visited).forEach(qid => qset.add(qid));
+          }
+        });
+      }
       return qset;
     }
 
@@ -15920,12 +16179,12 @@
           if (!alreadyIn) added++;
         });
         const label = meta.pathLabel || meta.label || '资料目录';
-        const undoToken = beginFolderUndo(`放入「${label}」`);
+        const undoToken = typeof beginFolderUndo === 'function' ? beginFolderUndo(`放入「${label}」`) : null;
         const nextEntry = { added: Array.from(addedSet), removed: Array.from(removedSet) };
         if (Object.keys(sectionsMap).length) nextEntry.sections = sectionsMap;
         overrides[key] = nextEntry;
         writeDocFolderOverrides(overrides);
-        commitFolderUndo(undoToken, true);
+        if (typeof commitFolderUndo === 'function') commitFolderUndo(undoToken, true);
         try { localStorage.setItem(EAGLE_LAST_FOLDER_KEY, tid); } catch (e) {}
         renderFolderTree();
         renderRightInspector();
@@ -15968,7 +16227,7 @@
           showToast(`所选 ${ids.length} 道试题已在「${label}」中`, 'info');
           return 0;
         }
-        const undoToken = beginFolderUndo(`放入「${label}」`);
+        const undoToken = typeof beginFolderUndo === 'function' ? beginFolderUndo(`放入「${label}」`) : null;
         if (!addedSet.size && !removedSet.size && !Object.keys(sectionsMap).length) delete overrides[key];
         else {
           const nextEntry = { added: Array.from(addedSet), removed: Array.from(removedSet) };
@@ -15976,7 +16235,7 @@
           overrides[key] = nextEntry;
         }
         writeDocFolderOverrides(overrides);
-        commitFolderUndo(undoToken, true);
+        if (typeof commitFolderUndo === 'function') commitFolderUndo(undoToken, true);
         try { localStorage.setItem(EAGLE_LAST_FOLDER_KEY, tid); } catch (e) {}
         renderFolderTree();
         renderRightInspector();
@@ -16021,7 +16280,7 @@
             if (Number.isFinite(sortRaw)) out.sortOrder = sortRaw;
             return out;
           });
-        return applyFolderSortOrdersMirror(rows, 'user');
+        return typeof applyFolderSortOrdersMirror === 'function' ? applyFolderSortOrdersMirror(rows, 'user') : rows;
       } catch (e) { return []; }
     }
 
@@ -16089,7 +16348,9 @@
           else delete row.sortOrder;
           return row;
         });
-        updateFolderSortOrdersMirrorFromList(normalized, 'user');
+        if (typeof updateFolderSortOrdersMirrorFromList === 'function') {
+          updateFolderSortOrdersMirrorFromList(normalized, 'user');
+        }
         localStorage.setItem(USER_FOLDERS_STORAGE_KEY, JSON.stringify(normalized));
       } catch (e) {}
       if (typeof scheduleFoldersSync === 'function') scheduleFoldersSync();
@@ -16153,6 +16414,263 @@
       return true;
     }
 
+    function moveDocFolder(docNodeId, newParentId) {
+      if (!docNodeId || (!String(docNodeId).startsWith('paper:') && !String(docNodeId).startsWith('book:'))) {
+        return false;
+      }
+      const docId = String(docNodeId).slice(String(docNodeId).indexOf(':') + 1);
+      const docs = typeof papersData !== 'undefined' ? papersData : [];
+      const doc = docs.find(p => String(p.id) === docId);
+      if (!doc) return false;
+      const mtype = doc.materialType || 'exam';
+      const defaultGroup = mtype === 'book' ? 'group:books' : 'group:papers';
+      const list = readUserFolders();
+      const placements = readDocPlacements();
+
+      let storedParent = null;
+      let checkParent = defaultGroup;
+      const rawTarget = (newParentId === undefined || newParentId === null) ? '' : String(newParentId).trim();
+      if (!rawTarget || rawTarget === '__default__' || rawTarget === 'default') {
+        storedParent = null;
+        checkParent = defaultGroup;
+      } else if (rawTarget === '__root__' || rawTarget === 'root' || rawTarget === 'section:folders') {
+        storedParent = 'section:folders';
+        checkParent = 'section:folders';
+      } else if (rawTarget === 'group:papers' || rawTarget === 'group:books') {
+        storedParent = (rawTarget === defaultGroup) ? null : rawTarget;
+        checkParent = rawTarget;
+      } else if (rawTarget.startsWith('paper:') || rawTarget.startsWith('book:')) {
+        if (rawTarget === docNodeId) return false;
+        storedParent = rawTarget;
+        checkParent = rawTarget;
+      } else {
+        const cleanUf = rawTarget.startsWith('userfolder:') ? rawTarget.slice('userfolder:'.length) : rawTarget;
+        if (!list.some(f => f.id === cleanUf)) return false;
+        storedParent = cleanUf;
+        checkParent = cleanUf;
+      }
+
+      if (storedParent && isFolderDescendantOrSelf(list, docNodeId, storedParent)) {
+        showToast('不能将资料移动到自身或其子文件夹下', 'warning');
+        return false;
+      }
+      if (!canPlaceFolderUnderParent(list, docNodeId, checkParent, false)) {
+        showToast(`移动后文件夹总层级将超过 ${MAX_FOLDER_DEPTH} 层上限`, 'warning');
+        return false;
+      }
+      const curEntry = placements[docId] || {};
+      const curParent = curEntry.parentId || null;
+      if (curParent === storedParent) return false;
+
+      const label = mtype === 'book' ? parseTextbookTitle(doc.name || doc.filename).label : doc.name;
+      const undoToken = beginFolderUndo('移动资料「' + label + '」');
+      if (storedParent === null) {
+        delete placements[docId];
+      } else {
+        placements[docId] = {
+          parentId: storedParent,
+          sortOrder: nextUnifiedSiblingSortOrder(checkParent, docNodeId, list, placements)
+        };
+      }
+      writeDocPlacements(placements);
+      commitFolderUndo(undoToken, true);
+      folderTreeState.expanded.add('section:folders');
+      if (typeof expandFolderAncestors === 'function') expandFolderAncestors(docNodeId);
+      writeExpandedFolderNodes();
+      renderFolderTree();
+      if (typeof renderRightInspector === 'function') renderRightInspector();
+      showToast('已移动资料「' + label + '」（Ctrl+Z 撤销）', 'success');
+      return true;
+    }
+
+    function nextUnifiedSiblingSortOrder(parentKey, excludeTreeId, preloadedFolders, preloadedPlacements) {
+      const list = preloadedFolders || readUserFolders();
+      const placements = preloadedPlacements || (typeof readDocPlacements === 'function' ? readDocPlacements() : {});
+      const effParent = (!parentKey || parentKey === '__root__' || parentKey === 'section:folders') ? 'section:folders' : String(parentKey);
+      const ufMatchParent = effParent === 'section:folders'
+        ? null
+        : (effParent.startsWith('userfolder:') ? effParent.slice('userfolder:'.length) : effParent);
+      let maxOrder = -10;
+      list.forEach(f => {
+        if ((f.parentId || null) === ufMatchParent && f.id !== excludeTreeId) {
+          const n = Number(f.sortOrder);
+          if (Number.isFinite(n) && n > maxOrder) maxOrder = n;
+        }
+      });
+      const docs = typeof papersData !== 'undefined' ? papersData : [];
+      if (typeof getEffectiveDocParentId === 'function') {
+        docs.forEach(p => {
+          if (!p || (p.published || 0) <= 0) return;
+          const mtype = p.materialType || 'exam';
+          const docNodeId = (mtype === 'book' ? 'book:' : 'paper:') + p.id;
+          if (docNodeId === excludeTreeId) return;
+          if (getEffectiveDocParentId(p.id, mtype, list, placements) === (ufMatchParent || 'section:folders')) {
+            const ent = placements[String(p.id)];
+            const n = ent ? Number(ent.sortOrder) : NaN;
+            if (Number.isFinite(n) && n > maxOrder) maxOrder = n;
+          }
+        });
+      }
+      return maxOrder + 10;
+    }
+
+    function reorderUnifiedSiblingNode(movedTreeId, anchorTreeId, position) {
+      if (!movedTreeId || !anchorTreeId || movedTreeId === anchorTreeId) return false;
+      if (position !== 'before' && position !== 'after') return false;
+      const list = readUserFolders();
+      const placements = typeof readDocPlacements === 'function' ? readDocPlacements() : {};
+      const docs = typeof papersData !== 'undefined' ? papersData : [];
+      const isDocId = (id) => String(id).startsWith('paper:') || String(id).startsWith('book:');
+
+      // Determine anchor's effective parent key
+      let targetParentKey = 'section:folders';
+      let ufParentValue = null;
+      if (isDocId(anchorTreeId)) {
+        const aDocId = anchorTreeId.slice(anchorTreeId.indexOf(':') + 1);
+        const aDoc = docs.find(p => String(p.id) === aDocId);
+        if (!aDoc) return false;
+        const eff = typeof getEffectiveDocParentId === 'function'
+          ? getEffectiveDocParentId(aDocId, aDoc.materialType || 'exam', list, placements)
+          : ((aDoc.materialType || 'exam') === 'book' ? 'group:books' : 'group:papers');
+        targetParentKey = eff;
+        ufParentValue = eff === 'section:folders' ? null : eff;
+      } else {
+        const anchorUf = list.find(x => x.id === anchorTreeId);
+        if (!anchorUf) return false;
+        ufParentValue = anchorUf.parentId || null;
+        targetParentKey = ufParentValue
+          ? (isSystemFolderParentId(ufParentValue) ? ufParentValue : ufParentValue)
+          : 'section:folders';
+      }
+
+      const sortParentKey = targetParentKey === 'section:folders'
+        ? 'section:folders'
+        : (isSystemFolderParentId(targetParentKey) ? targetParentKey : ('userfolder:' + targetParentKey));
+
+      // Validate cycle and depth if moved item changes parent
+      const checkParent = targetParentKey;
+      if (isDocId(movedTreeId)) {
+        const mDocId = movedTreeId.slice(movedTreeId.indexOf(':') + 1);
+        const mDoc = docs.find(p => String(p.id) === mDocId);
+        if (!mDoc) return false;
+        if (targetParentKey !== 'section:folders' && isFolderDescendantOrSelf(list, movedTreeId, targetParentKey)) {
+          showToast('不能将资料移动到自身或其子文件夹下', 'warning');
+          return false;
+        }
+        if (!canPlaceFolderUnderParent(list, movedTreeId, checkParent, false)) {
+          showToast(`移动后文件夹总层级将超过 ${MAX_FOLDER_DEPTH} 层上限`, 'warning');
+          return false;
+        }
+      } else {
+        const movedUf = list.find(x => x.id === movedTreeId);
+        if (!movedUf) return false;
+        if (ufParentValue && !isSystemFolderParentId(ufParentValue) && isFolderDescendantOrSelf(list, movedTreeId, ufParentValue)) {
+          return false;
+        }
+        if (ufParentValue && isSystemFolderParentId(ufParentValue) && isFolderDescendantOrSelf(list, movedTreeId, ufParentValue)) {
+          return false;
+        }
+        if (!canPlaceFolderUnderParent(list, movedTreeId, ufParentValue, false)) {
+          showToast(`移动后文件夹总层级将超过 ${MAX_FOLDER_DEPTH} 层上限`, 'warning');
+          return false;
+        }
+      }
+
+      const undoToken = beginFolderUndo('调整文件夹位置');
+
+      // Apply parent update to moved item
+      if (isDocId(movedTreeId)) {
+        const mDocId = movedTreeId.slice(movedTreeId.indexOf(':') + 1);
+        const mDoc = docs.find(p => String(p.id) === mDocId);
+        const defaultGroup = (mDoc && (mDoc.materialType || 'exam') === 'book') ? 'group:books' : 'group:papers';
+        const storedPid = (targetParentKey === defaultGroup) ? null : targetParentKey;
+        placements[mDocId] = { ...(placements[mDocId] || {}), parentId: storedPid };
+      } else {
+        const movedUf = list.find(x => x.id === movedTreeId);
+        movedUf.parentId = ufParentValue;
+      }
+
+      // Collect all direct siblings (user folders + docs) under targetParentKey
+      const siblings = [];
+      list.forEach(f => {
+        if ((f.parentId || null) === ufParentValue) {
+          siblings.push({
+            treeId: f.id,
+            kind: 'uf',
+            ref: f,
+            sortOrder: f.sortOrder,
+            createdAtMs: folderCreatedAtMs(f),
+            name: f.name || ''
+          });
+        }
+      });
+      if (typeof getEffectiveDocParentId === 'function') {
+        docs.forEach(p => {
+          if (!p || (p.published || 0) <= 0) return;
+          const mtype = p.materialType || 'exam';
+          const docNodeId = (mtype === 'book' ? 'book:' : 'paper:') + p.id;
+          const eff = getEffectiveDocParentId(p.id, mtype, list, placements);
+          if (eff === targetParentKey) {
+            const ent = placements[String(p.id)] || {};
+            siblings.push({
+              treeId: docNodeId,
+              kind: 'doc',
+              docId: String(p.id),
+              mtype,
+              sortOrder: ent.sortOrder,
+              createdAtMs: folderCreatedAtMs(p),
+              name: p.name || ''
+            });
+          }
+        });
+      }
+
+      siblings.sort((a, b) => {
+        const ao = Number(a.sortOrder);
+        const bo = Number(b.sortOrder);
+        const aHas = Number.isFinite(ao);
+        const bHas = Number.isFinite(bo);
+        if (aHas && bHas && ao !== bo) return ao - bo;
+        if (aHas !== bHas) return aHas ? -1 : 1;
+        return (a.createdAtMs || 0) - (b.createdAtMs || 0)
+          || compareNaturalZhLabels(a.name, b.name);
+      });
+
+      const movedEntry = siblings.find(s => s.treeId === movedTreeId);
+      const without = siblings.filter(s => s.treeId !== movedTreeId);
+      const anchorIdx = without.findIndex(s => s.treeId === anchorTreeId);
+      if (!movedEntry || anchorIdx < 0) return false;
+      without.splice(position === 'before' ? anchorIdx : anchorIdx + 1, 0, movedEntry);
+      without.forEach((entry, idx) => {
+        const orderVal = idx * 10;
+        if (entry.kind === 'uf') {
+          entry.ref.sortOrder = orderVal;
+        } else {
+          const defaultGroup = entry.mtype === 'book' ? 'group:books' : 'group:papers';
+          const storedPid = (targetParentKey === defaultGroup) ? null : targetParentKey;
+          placements[entry.docId] = { parentId: storedPid, sortOrder: orderVal };
+        }
+      });
+
+      writeUserFolders(list);
+      if (typeof writeDocPlacements === 'function') writeDocPlacements(placements);
+      folderTreeState.expanded.add('section:folders');
+      if (ufParentValue) {
+        if (isSystemFolderParentId(ufParentValue)) {
+          folderTreeState.expanded.add(ufParentValue);
+          if (String(ufParentValue).startsWith('paper:')) folderTreeState.expanded.add('group:papers');
+          if (String(ufParentValue).startsWith('book:')) folderTreeState.expanded.add('group:books');
+        } else {
+          folderTreeState.expanded.add('userfolder:' + ufParentValue);
+        }
+      }
+      writeExpandedFolderNodes();
+      setFolderSortMode(sortParentKey, 'manual');
+      commitFolderUndo(undoToken, true);
+      showToast('已调整文件夹位置（Ctrl+Z 撤销）', 'success');
+      return true;
+    }
+
     function reorderUserFolderAmongSiblings(folderId, anchorId, position) {
       const undoToken = beginFolderUndo('调整文件夹位置');
       const list = readUserFolders();
@@ -16206,17 +16724,31 @@
     }
 
     /**
-     * 汇总文件夹及其全部子文件夹内包含的去重试题 ID 集合
+     * 汇总文件夹及其全部子文件夹（含内部归档资料）的去重试题 ID 集合
      */
-    function collectUserFolderQuestionIds(folderId, preloadedList) {
+    function collectUserFolderQuestionIds(folderId, preloadedList, _visited) {
       const list = preloadedList || readUserFolders();
       const ids = collectFolderSubtreeIds(list, folderId);
       const qset = new Set();
+      const visited = _visited || new Set();
+      ids.forEach(fid => visited.add('uf:' + fid));
       list.forEach(item => {
         if (ids.has(item.id)) {
           (item.questionIds || []).forEach(qid => qset.add(String(qid)));
         }
       });
+      if (typeof getEffectiveDocParentId === 'function' && typeof collectDocFolderQuestionIds === 'function' && typeof papersData !== 'undefined') {
+        const placements = typeof readDocPlacements === 'function' ? readDocPlacements() : {};
+        papersData.forEach(p => {
+          if (!p || (p.published || 0) <= 0) return;
+          const docKey = 'doc:' + p.id;
+          if (visited.has(docKey)) return;
+          const eff = getEffectiveDocParentId(p.id, p.materialType || 'exam', list, placements);
+          if (ids.has(eff)) {
+            collectDocFolderQuestionIds(p.id, null, list, visited).forEach(qid => qset.add(qid));
+          }
+        });
+      }
       return qset;
     }
 
@@ -16394,10 +16926,17 @@
       const { childMap } = buildUserFolderChildMap(list);
       const effectiveParentKey = (!parentKey || parentKey === '__root__') ? 'section:folders' : String(parentKey);
       const parentMode = inheritedMode || getExplicitFolderSortMode(effectiveParentKey) || resolveFolderSortMode('section:folders');
+      const placements = typeof readDocPlacements === 'function' ? readDocPlacements() : {};
+      const overrides = typeof readDocFolderOverrides === 'function' ? readDocFolderOverrides() : {};
+      const preloaded = { overrides, foldersList: list, placements };
       const build = (item, curParentMode = parentMode) => {
         const nodeId = 'userfolder:' + item.id;
         const folderMode = getExplicitFolderSortMode(nodeId) || curParentMode;
-        const kids = sortFolderTreeNodes((childMap.get(item.id) || []).map(child => build(child, folderMode)), folderMode);
+        const ufKids = (childMap.get(item.id) || []).map(child => build(child, folderMode));
+        const docKids = typeof buildPlacedDocTreeNodesForParent === 'function'
+          ? buildPlacedDocTreeNodesForParent(item.id, folderMode, preloaded)
+          : [];
+        const kids = sortFolderTreeNodes(ufKids.concat(docKids), folderMode);
         const memberSet = collectUserFolderQuestionIds(item.id, list);
         const createdAtMs = folderCreatedAtMs(item);
         const sortRaw = Number(item.sortOrder);
@@ -16443,7 +16982,7 @@
             else delete out.sortOrder;
             return out;
           });
-        return applyFolderSortOrdersMirror(rows, 'smart');
+        return typeof applyFolderSortOrdersMirror === 'function' ? applyFolderSortOrdersMirror(rows, 'smart') : rows;
       } catch (e) { return []; }
     }
 
@@ -16456,7 +16995,9 @@
           else delete row.sortOrder;
           return row;
         });
-        updateFolderSortOrdersMirrorFromList(normalized, 'smart');
+        if (typeof updateFolderSortOrdersMirrorFromList === 'function') {
+          updateFolderSortOrdersMirrorFromList(normalized, 'smart');
+        }
         localStorage.setItem(CUSTOM_SMART_FOLDERS_STORAGE_KEY, JSON.stringify(normalized));
       } catch (e) {}
       if (typeof scheduleFoldersSync === 'function') scheduleFoldersSync();
@@ -16869,207 +17410,126 @@
       return { label: parts.length ? parts.join(' · ') : raw, raw: raw };
     }
 
-    function buildTextbookTreeNodes(inheritedMode = null) {
-      assignTextbookChapters();
+    function buildPlacedDocTreeNodesForParent(parentKey, inheritedMode = null, preloaded = null) {
+      if (typeof papersData === 'undefined' || !Array.isArray(papersData)) return [];
+      const targetParent = (!parentKey || parentKey === '__root__') ? 'section:folders' : String(parentKey);
+      const overrides = (preloaded && preloaded.overrides) || readDocFolderOverrides();
+      const foldersList = (preloaded && preloaded.foldersList) || readUserFolders();
+      const placements = (preloaded && preloaded.placements)
+        || (typeof readDocPlacements === 'function' ? readDocPlacements() : {});
+      const hasChapters = !!(preloaded && preloaded.chaptersAssigned);
+      const nextPreloaded = { overrides, foldersList, placements, chaptersAssigned: hasChapters };
+      const paperNodes = typeof buildPaperTreeNodes === 'function'
+        ? buildPaperTreeNodes(inheritedMode, { targetParent, _preloaded: nextPreloaded })
+        : [];
+      const bookNodes = typeof buildTextbookTreeNodes === 'function'
+        ? buildTextbookTreeNodes(inheritedMode, { targetParent, _preloaded: nextPreloaded, skipAssign: hasChapters })
+        : [];
+      return sortFolderTreeNodes(paperNodes.concat(bookNodes), inheritedMode || resolveFolderSortMode('section:folders'));
+    }
+
+    function buildTextbookTreeNodes(inheritedMode = null, opts = null) {
+      if (!(opts && opts.skipAssign) && typeof assignTextbookChapters === 'function') {
+        assignTextbookChapters();
+      }
       const books = papersData.filter(p => (p.published || 0) > 0 && (p.materialType || 'exam') === 'book');
-      const overrides = readDocFolderOverrides();
-      const foldersList = readUserFolders();
+      const preloaded = opts && opts._preloaded;
+      const overrides = (preloaded && preloaded.overrides) || readDocFolderOverrides();
+      const foldersList = (preloaded && preloaded.foldersList) || readUserFolders();
+      const placements = (preloaded && preloaded.placements)
+        || (typeof readDocPlacements === 'function' ? readDocPlacements() : {});
       const booksGroupMode = inheritedMode || getExplicitFolderSortMode('group:books') || resolveFolderSortMode('section:folders');
+      const targetParent = (opts && opts.targetParent) ? String(opts.targetParent) : 'group:books';
+      const includeAll = !!(opts && opts.includeAllBooks);
       const nodes = [];
       books.forEach(p => {
+        if (!includeAll && typeof getEffectiveDocParentId === 'function') {
+          const eff = getEffectiveDocParentId(p.id, 'book', foldersList, placements);
+          if (eff !== targetParent) return;
+        }
         const qs = questionsData.filter(q => isQuestionInDocFolder(q, p.id, overrides));
         const docSet = collectDocFolderQuestionIds(p.id, overrides, foldersList);
-        if (!qs.length && !docSet.size) return;
-        const title = parseTextbookTitle(p.name || p.filename);
         const bookNodeId = 'book:' + p.id;
         const explicitBookMode = getExplicitFolderSortMode(bookNodeId);
-        const docCreatedMs = folderCreatedAtMs(p);
+        const attached = buildUserFolderTreeNodesForParent(bookNodeId, explicitBookMode || booksGroupMode);
+        const childDocs = typeof buildPlacedDocTreeNodesForParent === 'function'
+          ? buildPlacedDocTreeNodesForParent(bookNodeId, explicitBookMode || booksGroupMode, { overrides, foldersList, placements, chaptersAssigned: true })
+          : [];
+        const customTree = (typeof isCustomTreeDoc === 'function') && isCustomTreeDoc(p.id);
+        if (!qs.length && !docSet.size && !(customTree && (attached.length || childDocs.length))) return;
 
-        const bookOv = overrides[String(p.id)] || { added: [], removed: [] };
-        const secOverrides = (bookOv && bookOv.sections && typeof bookOv.sections === 'object') ? bookOv.sections : {};
-        const hasNumericChapters = qs.some(q => {
-          const secOv = secOverrides[String(q.id)];
-          if (secOv) return secOv.chapterNo !== null && secOv.chapterNo !== undefined;
-          return chapterOfQuestion(q) !== null;
-        });
-        const useCompoundHierarchy = !hasNumericChapters && isCompoundBookQuestions(qs);
+        const title = parseTextbookTitle(p.name || p.filename);
+        const docCreatedMs = folderCreatedAtMs(p);
         let chapNodes = [];
 
-        if (useCompoundHierarchy) {
-          // 复合教辅（如《高中数学思想方法导引》）：第一层直接建 72 节，第二层按栏目聚合（例题/变式/巩固练习）
-          const groupMap = new Map();
-          qs.forEach((q, qIdx) => {
+        if (!customTree) {
+          const bookOv = overrides[String(p.id)] || { added: [], removed: [] };
+          const secOverrides = (bookOv && bookOv.sections && typeof bookOv.sections === 'object') ? bookOv.sections : {};
+          const hasNumericChapters = qs.some(q => {
             const secOv = secOverrides[String(q.id)];
-            const parts = parseBookSectionParts(q.section);
-            const groupName = secOv ? String(secOv.chapterGroupName || '') : (parts.isCompound ? parts.groupName : '');
-            const subName = secOv ? String(secOv.sectionName || '') : (parts.isCompound ? parts.subName : parts.raw);
-            const ck = secOv
-              ? String(secOv.chapterKey || (groupName ? textbookGroupKey(groupName) : 'none'))
-              : (groupName ? textbookGroupKey(groupName) : 'none');
-            const pageNo = (q.paperPage && q.paperPage > 0)
-              ? q.paperPage
-              : ((q.sourcePage && q.sourcePage > 0) ? q.sourcePage : Infinity);
-            const numVal = (q.number !== null && q.number !== undefined && q.number !== '' && Number.isFinite(Number(q.number)))
-              ? Number(q.number)
-              : (qIdx + 1);
-            const pubMs = q.publishedAt ? Date.parse(q.publishedAt) : NaN;
-            const qCreatedMs = Number.isFinite(pubMs) ? pubMs : docCreatedMs;
-            if (!groupMap.has(ck)) {
-              groupMap.set(ck, { groupName, minPage: pageNo, minSeq: numVal, subs: new Map() });
-            }
-            const gInfo = groupMap.get(ck);
-            if (pageNo < gInfo.minPage) gInfo.minPage = pageNo;
-            if (numVal < gInfo.minSeq) gInfo.minSeq = numVal;
-            const prevSub = gInfo.subs.get(subName);
-            if (!prevSub) {
-              gInfo.subs.set(subName, { count: 1, minPage: pageNo, minSeq: numVal, maxCreatedMs: qCreatedMs });
-            } else {
-              prevSub.count += 1;
-              if (pageNo < prevSub.minPage) prevSub.minPage = pageNo;
-              if (numVal < prevSub.minSeq) prevSub.minSeq = numVal;
-              if (qCreatedMs > prevSub.maxCreatedMs) prevSub.maxCreatedMs = qCreatedMs;
-            }
+            if (secOv) return secOv.chapterNo !== null && secOv.chapterNo !== undefined;
+            return chapterOfQuestion(q) !== null;
           });
+          const useCompoundHierarchy = !hasNumericChapters && isCompoundBookQuestions(qs);
 
-          groupMap.forEach((gInfo, ck) => {
-            const chapCount = Array.from(gInfo.subs.values()).reduce((s, info) => s + info.count, 0);
-            if (!chapCount) return;
-            const chapLabel = gInfo.groupName || '其他小节';
-            const chapNodeId = 'bookchap:' + p.id + ':' + ck;
-            const explicitChapMode = getExplicitFolderSortMode(chapNodeId) || explicitBookMode;
-
-            let secNodes = Array.from(gInfo.subs.entries()).map(([subName, info]) => {
-              const secSlug = subName ? textbookGroupKey(subName).slice(2) : 'empty';
-              const secCreatedMs = info.maxCreatedMs || docCreatedMs;
-              return {
-                id: 'booksec:' + p.id + ':' + ck + ':' + secSlug,
-                type: 'booksection',
-                label: subName || '（未标注栏目）',
-                pathLabel: title.label + ' › ' + chapLabel + ' › ' + (subName || '（未标注栏目）'),
-                icon: '📁',
-                paperId: p.id,
-                chapterNo: null,
-                chapterKey: ck,
-                chapterGroupName: gInfo.groupName,
-                sectionName: subName,
-                sectionMatchMode: 'sub',
-                count: info.count,
-                minPage: info.minPage,
-                minSeq: info.minSeq,
-                createdAtMs: secCreatedMs,
-                createdLabel: formatFolderCreatedLabel(secCreatedMs),
-                children: []
-              };
+          if (useCompoundHierarchy) {
+            // 复合教辅（如《高中数学思想方法导引》）：第一层直接建 72 节，第二层按栏目聚合（例题/变式/巩固练习）
+            const groupMap = new Map();
+            qs.forEach((q, qIdx) => {
+              const secOv = secOverrides[String(q.id)];
+              const parts = parseBookSectionParts(q.section);
+              const groupName = secOv ? String(secOv.chapterGroupName || '') : (parts.isCompound ? parts.groupName : '');
+              const subName = secOv ? String(secOv.sectionName || '') : (parts.isCompound ? parts.subName : parts.raw);
+              const ck = secOv
+                ? String(secOv.chapterKey || (groupName ? textbookGroupKey(groupName) : 'none'))
+                : (groupName ? textbookGroupKey(groupName) : 'none');
+              const pageNo = (q.paperPage && q.paperPage > 0)
+                ? q.paperPage
+                : ((q.sourcePage && q.sourcePage > 0) ? q.sourcePage : Infinity);
+              const numVal = (q.number !== null && q.number !== undefined && q.number !== '' && Number.isFinite(Number(q.number)))
+                ? Number(q.number)
+                : (qIdx + 1);
+              const pubMs = q.publishedAt ? Date.parse(q.publishedAt) : NaN;
+              const qCreatedMs = Number.isFinite(pubMs) ? pubMs : docCreatedMs;
+              if (!groupMap.has(ck)) {
+                groupMap.set(ck, { groupName, minPage: pageNo, minSeq: numVal, subs: new Map() });
+              }
+              const gInfo = groupMap.get(ck);
+              if (pageNo < gInfo.minPage) gInfo.minPage = pageNo;
+              if (numVal < gInfo.minSeq) gInfo.minSeq = numVal;
+              const prevSub = gInfo.subs.get(subName);
+              if (!prevSub) {
+                gInfo.subs.set(subName, { count: 1, minPage: pageNo, minSeq: numVal, maxCreatedMs: qCreatedMs });
+              } else {
+                prevSub.count += 1;
+                if (pageNo < prevSub.minPage) prevSub.minPage = pageNo;
+                if (numVal < prevSub.minSeq) prevSub.minSeq = numVal;
+                if (qCreatedMs > prevSub.maxCreatedMs) prevSub.maxCreatedMs = qCreatedMs;
+              }
             });
 
-            if (explicitChapMode) {
-              secNodes = sortFolderTreeNodes(secNodes, explicitChapMode);
-            } else {
-              secNodes.sort((a, b) => {
-                const aEmpty = !a.sectionName;
-                const bEmpty = !b.sectionName;
-                if (aEmpty !== bEmpty) return aEmpty ? 1 : -1;
-                if (a.minPage !== b.minPage) return a.minPage - b.minPage;
-                if (a.minSeq !== b.minSeq) return a.minSeq - b.minSeq;
-                return compareNaturalZhLabels(a.label, b.label);
-              });
-            }
-
-            const chapCreatedMs = secNodes.reduce((mx, s) => Math.max(mx, s.createdAtMs || 0), docCreatedMs);
-            chapNodes.push({
-              id: chapNodeId,
-              type: 'bookchapter',
-              label: chapLabel,
-              pathLabel: title.label + ' › ' + chapLabel,
-              icon: folderIconFor(chapNodeId, secNodes.length > 0),
-              paperId: p.id,
-              chapterNo: null,
-              chapterKey: ck,
-              chapterGroupName: gInfo.groupName,
-              count: chapCount,
-              minPage: gInfo.minPage,
-              minSeq: gInfo.minSeq,
-              createdAtMs: chapCreatedMs,
-              createdLabel: formatFolderCreatedLabel(chapCreatedMs),
-              children: secNodes
-            });
-          });
-
-          if (!explicitBookMode) {
-            chapNodes.sort((a, b) => {
-              const aNone = a.chapterKey === 'none';
-              const bNone = b.chapterKey === 'none';
-              if (aNone !== bNone) return aNone ? 1 : -1;
-              if (a.minPage !== b.minPage) return a.minPage - b.minPage;
-              return compareNaturalZhLabels(a.label, b.label);
-            });
-          }
-        } else {
-          // 章 -> 小节 -> 统计元信息（章归属按页码锚定算，小节默认按书内页码与自然序排列）
-          const useTocSections = qs.some(q => sectionOfQuestion(q) !== null);
-          const chapMap = new Map();
-          qs.forEach((q, qIdx) => {
-            const secOv = secOverrides[String(q.id)];
-            const tocSec = (!secOv && useTocSections) ? sectionOfQuestion(q) : null;
-            const sec = secOv ? String(secOv.sectionName || '').trim() : String(tocSec || q.section || '').trim();
-            const ch = secOv
-              ? ((secOv.chapterNo !== null && secOv.chapterNo !== undefined)
-                ? secOv.chapterNo
-                : (secOv.chapterKey && secOv.chapterKey !== 'none' && Number.isFinite(Number(secOv.chapterKey)) ? Number(secOv.chapterKey) : null))
-              : chapterOfQuestion(q);
-            const ck = secOv
-              ? String(secOv.chapterKey || ((ch === null || ch === undefined) ? 'none' : String(ch)))
-              : ((ch === null || ch === undefined) ? 'none' : String(ch));
-            if (!chapMap.has(ck)) chapMap.set(ck, new Map());
-            const sm = chapMap.get(ck);
-            const pageNo = (q.paperPage && q.paperPage > 0)
-              ? q.paperPage
-              : ((q.sourcePage && q.sourcePage > 0) ? q.sourcePage : Infinity);
-            const numVal = (q.number !== null && q.number !== undefined && q.number !== '' && Number.isFinite(Number(q.number)))
-              ? Number(q.number)
-              : (qIdx + 1);
-            const pubMs = q.publishedAt ? Date.parse(q.publishedAt) : NaN;
-            const qCreatedMs = Number.isFinite(pubMs) ? pubMs : docCreatedMs;
-            const prev = sm.get(sec);
-            if (!prev) {
-              sm.set(sec, { count: 1, minPage: pageNo, minSeq: numVal, maxCreatedMs: qCreatedMs, isTocSec: Boolean(tocSec) });
-            } else {
-              prev.count += 1;
-              if (pageNo < prev.minPage) prev.minPage = pageNo;
-              if (numVal < prev.minSeq) prev.minSeq = numVal;
-              if (qCreatedMs > prev.maxCreatedMs) prev.maxCreatedMs = qCreatedMs;
-            }
-          });
-
-          Array.from(chapMap.keys())
-            .sort((a, b) => (a === 'none' ? 1 : b === 'none' ? -1 : Number(a) - Number(b)))
-            .forEach(ck => {
-              const sm = chapMap.get(ck);
-              const ch = (ck === 'none') ? null : Number(ck);
-              const chapCount = Array.from(sm.values()).reduce((s, info) => s + info.count, 0);
-              if (!chapCount) return;          // 0 题的章不渲染：点进去是死路
-              const chapLabel = ch === null
-                ? (chapMap.size === 1 ? '目录小节' : '其他小节')
-                : textbookChapterTitleOf(p, ch);
+            groupMap.forEach((gInfo, ck) => {
+              const chapCount = Array.from(gInfo.subs.values()).reduce((s, info) => s + info.count, 0);
+              if (!chapCount) return;
+              const chapLabel = gInfo.groupName || '其他小节';
               const chapNodeId = 'bookchap:' + p.id + ':' + ck;
               const explicitChapMode = getExplicitFolderSortMode(chapNodeId) || explicitBookMode;
 
-              let secNodes = Array.from(sm.entries()).map(([sec, info]) => {
-                // 生成与排序位置无关的稳定小节 ID，切换排序后选中态不丢失
-                const secSlug = sec ? textbookGroupKey(sec).slice(2) : 'empty';
+              let secNodes = Array.from(gInfo.subs.entries()).map(([subName, info]) => {
+                const secSlug = subName ? textbookGroupKey(subName).slice(2) : 'empty';
                 const secCreatedMs = info.maxCreatedMs || docCreatedMs;
                 return {
                   id: 'booksec:' + p.id + ':' + ck + ':' + secSlug,
                   type: 'booksection',
-                  label: sec || '（未标注小节）',
-                  pathLabel: title.label + ' › ' + chapLabel + ' › ' + (sec || '（未标注小节）'),
+                  label: subName || '（未标注栏目）',
+                  pathLabel: title.label + ' › ' + chapLabel + ' › ' + (subName || '（未标注栏目）'),
                   icon: '📁',
                   paperId: p.id,
-                  chapterNo: ch,
+                  chapterNo: null,
                   chapterKey: ck,
-                  chapterGroupName: '',
-                  sectionName: sec,
-                  sectionMatchMode: info.isTocSec ? 'toc_section' : 'exact',
+                  chapterGroupName: gInfo.groupName,
+                  sectionName: subName,
+                  sectionMatchMode: 'sub',
                   count: info.count,
                   minPage: info.minPage,
                   minSeq: info.minSeq,
@@ -17100,25 +17560,145 @@
                 pathLabel: title.label + ' › ' + chapLabel,
                 icon: folderIconFor(chapNodeId, secNodes.length > 0),
                 paperId: p.id,
-                chapterNo: ch,
+                chapterNo: null,
                 chapterKey: ck,
-                chapterGroupName: '',
+                chapterGroupName: gInfo.groupName,
                 count: chapCount,
+                minPage: gInfo.minPage,
+                minSeq: gInfo.minSeq,
                 createdAtMs: chapCreatedMs,
                 createdLabel: formatFolderCreatedLabel(chapCreatedMs),
                 children: secNodes
               });
             });
+
+            if (!explicitBookMode) {
+              chapNodes.sort((a, b) => {
+                const aNone = a.chapterKey === 'none';
+                const bNone = b.chapterKey === 'none';
+                if (aNone !== bNone) return aNone ? 1 : -1;
+                if (a.minPage !== b.minPage) return a.minPage - b.minPage;
+                return compareNaturalZhLabels(a.label, b.label);
+              });
+            }
+          } else {
+            // 章 -> 小节 -> 统计元信息（章归属按页码锚定算，小节默认按书内页码与自然序排列）
+            const useTocSections = qs.some(q => sectionOfQuestion(q) !== null);
+            const chapMap = new Map();
+            qs.forEach((q, qIdx) => {
+              const secOv = secOverrides[String(q.id)];
+              const tocSec = (!secOv && useTocSections) ? sectionOfQuestion(q) : null;
+              const sec = secOv ? String(secOv.sectionName || '').trim() : String(tocSec || q.section || '').trim();
+              const ch = secOv
+                ? ((secOv.chapterNo !== null && secOv.chapterNo !== undefined)
+                  ? secOv.chapterNo
+                  : (secOv.chapterKey && secOv.chapterKey !== 'none' && Number.isFinite(Number(secOv.chapterKey)) ? Number(secOv.chapterKey) : null))
+                : chapterOfQuestion(q);
+              const ck = secOv
+                ? String(secOv.chapterKey || ((ch === null || ch === undefined) ? 'none' : String(ch)))
+                : ((ch === null || ch === undefined) ? 'none' : String(ch));
+              if (!chapMap.has(ck)) chapMap.set(ck, new Map());
+              const sm = chapMap.get(ck);
+              const pageNo = (q.paperPage && q.paperPage > 0)
+                ? q.paperPage
+                : ((q.sourcePage && q.sourcePage > 0) ? q.sourcePage : Infinity);
+              const numVal = (q.number !== null && q.number !== undefined && q.number !== '' && Number.isFinite(Number(q.number)))
+                ? Number(q.number)
+                : (qIdx + 1);
+              const pubMs = q.publishedAt ? Date.parse(q.publishedAt) : NaN;
+              const qCreatedMs = Number.isFinite(pubMs) ? pubMs : docCreatedMs;
+              const prev = sm.get(sec);
+              if (!prev) {
+                sm.set(sec, { count: 1, minPage: pageNo, minSeq: numVal, maxCreatedMs: qCreatedMs, isTocSec: Boolean(tocSec) });
+              } else {
+                prev.count += 1;
+                if (pageNo < prev.minPage) prev.minPage = pageNo;
+                if (numVal < prev.minSeq) prev.minSeq = numVal;
+                if (qCreatedMs > prev.maxCreatedMs) prev.maxCreatedMs = qCreatedMs;
+              }
+            });
+
+            Array.from(chapMap.keys())
+              .sort((a, b) => (a === 'none' ? 1 : b === 'none' ? -1 : Number(a) - Number(b)))
+              .forEach(ck => {
+                const sm = chapMap.get(ck);
+                const ch = (ck === 'none') ? null : Number(ck);
+                const chapCount = Array.from(sm.values()).reduce((s, info) => s + info.count, 0);
+                if (!chapCount) return;          // 0 题的章不渲染：点进去是死路
+                const chapLabel = ch === null
+                  ? (chapMap.size === 1 ? '目录小节' : '其他小节')
+                  : textbookChapterTitleOf(p, ch);
+                const chapNodeId = 'bookchap:' + p.id + ':' + ck;
+                const explicitChapMode = getExplicitFolderSortMode(chapNodeId) || explicitBookMode;
+
+                let secNodes = Array.from(sm.entries()).map(([sec, info]) => {
+                  // 生成与排序位置无关的稳定小节 ID，切换排序后选中态不丢失
+                  const secSlug = sec ? textbookGroupKey(sec).slice(2) : 'empty';
+                  const secCreatedMs = info.maxCreatedMs || docCreatedMs;
+                  return {
+                    id: 'booksec:' + p.id + ':' + ck + ':' + secSlug,
+                    type: 'booksection',
+                    label: sec || '（未标注小节）',
+                    pathLabel: title.label + ' › ' + chapLabel + ' › ' + (sec || '（未标注小节）'),
+                    icon: '📁',
+                    paperId: p.id,
+                    chapterNo: ch,
+                    chapterKey: ck,
+                    chapterGroupName: '',
+                    sectionName: sec,
+                    sectionMatchMode: info.isTocSec ? 'toc_section' : 'exact',
+                    count: info.count,
+                    minPage: info.minPage,
+                    minSeq: info.minSeq,
+                    createdAtMs: secCreatedMs,
+                    createdLabel: formatFolderCreatedLabel(secCreatedMs),
+                    children: []
+                  };
+                });
+
+                if (explicitChapMode) {
+                  secNodes = sortFolderTreeNodes(secNodes, explicitChapMode);
+                } else {
+                  secNodes.sort((a, b) => {
+                    const aEmpty = !a.sectionName;
+                    const bEmpty = !b.sectionName;
+                    if (aEmpty !== bEmpty) return aEmpty ? 1 : -1;
+                    if (a.minPage !== b.minPage) return a.minPage - b.minPage;
+                    if (a.minSeq !== b.minSeq) return a.minSeq - b.minSeq;
+                    return compareNaturalZhLabels(a.label, b.label);
+                  });
+                }
+
+                const chapCreatedMs = secNodes.reduce((mx, s) => Math.max(mx, s.createdAtMs || 0), docCreatedMs);
+                chapNodes.push({
+                  id: chapNodeId,
+                  type: 'bookchapter',
+                  label: chapLabel,
+                  pathLabel: title.label + ' › ' + chapLabel,
+                  icon: folderIconFor(chapNodeId, secNodes.length > 0),
+                  paperId: p.id,
+                  chapterNo: ch,
+                  chapterKey: ck,
+                  chapterGroupName: '',
+                  count: chapCount,
+                  createdAtMs: chapCreatedMs,
+                  createdLabel: formatFolderCreatedLabel(chapCreatedMs),
+                  children: secNodes
+                });
+              });
+          }
         }
 
-        const attached = buildUserFolderTreeNodesForParent(bookNodeId, explicitBookMode || booksGroupMode);
+        const combined = chapNodes.concat(attached).concat(childDocs);
         const bookChildren = explicitBookMode
-          ? sortFolderTreeNodes(chapNodes.concat(attached), explicitBookMode)
-          : chapNodes.concat(attached);
+          ? sortFolderTreeNodes(combined, explicitBookMode)
+          : (customTree ? sortFolderTreeNodes(combined, booksGroupMode) : combined);
         const ov = overrides[String(p.id)] || { added: [], removed: [] };
         const delta = (Array.isArray(ov.added) ? ov.added.length : 0) - (Array.isArray(ov.removed) ? ov.removed.length : 0);
         const adjustedPublished = Math.max(0, Number(p.published || qs.length) + delta);
         const count = Math.max(adjustedPublished, docSet.size);
+        const placement = placements[String(p.id)];
+        const sortRaw = placement ? Number(placement.sortOrder) : NaN;
         nodes.push({
           id: bookNodeId,
           type: 'book',
@@ -17127,8 +17707,10 @@
           icon: folderIconFor(bookNodeId, bookChildren.length > 0),
           paperId: p.id,
           count,
+          customTree,
           createdAtMs: docCreatedMs,
           createdLabel: formatFolderCreatedLabel(docCreatedMs),
+          sortOrder: Number.isFinite(sortRaw) ? sortRaw : undefined,
           children: bookChildren
         });
       });
@@ -17230,7 +17812,13 @@
       const folderSectionMode = resolveFolderSortMode('section:folders');
       const papersGroupMode = getExplicitFolderSortMode('group:papers') || folderSectionMode;
       const booksGroupMode = getExplicitFolderSortMode('group:books') || folderSectionMode;
-      const folderChildren = buildUserFolderTreeNodes(folderSectionMode).slice();
+      const rootPlacedDocs = typeof buildPlacedDocTreeNodesForParent === 'function'
+        ? buildPlacedDocTreeNodesForParent('section:folders', folderSectionMode)
+        : [];
+      const folderChildren = sortFolderTreeNodes(
+        buildUserFolderTreeNodes(folderSectionMode).concat(rootPlacedDocs),
+        folderSectionMode
+      );
       const papers = buildPaperTreeNodes(papersGroupMode);
       const paperGroupSubfolders = buildUserFolderTreeNodesForParent('group:papers', papersGroupMode);
       if (papers.length || paperGroupSubfolders.length) {
@@ -17260,7 +17848,8 @@
         });
       }
 
-      const totalFolderCount = readUserFolders().length + papers.length + books.length;
+      const allPublishedDocsCount = papersData.filter(p => (p.published || 0) > 0).length;
+      const totalFolderCount = readUserFolders().length + allPublishedDocsCount;
       roots.push({
         id: 'section:folders',
         type: 'section',
@@ -17375,7 +17964,7 @@
         ? '<span onclick="event.stopPropagation(); toggleFolderNode(\'' + safeNodeId + '\')" class="w-3 h-3 inline-flex items-center justify-center text-slate-400 hover:text-slate-700 cursor-pointer select-none shrink-0">' + (isExpanded ? '▾' : '▸') + '</span>'
         : '<span class="w-3 inline-block shrink-0"></span>';
 
-      const canDragFolder = (node.type === 'userfolder' || node.type === 'custom' || node.type === 'tag');
+      const canDragFolder = (node.type === 'userfolder' || node.type === 'custom' || node.type === 'tag' || node.type === 'paper' || node.type === 'book');
       const canAcceptDrop = (
         node.type === 'userfolder' ||
         node.type === 'custom' ||
@@ -17653,11 +18242,15 @@
       if (!payload || payload.kind !== 'folder') return 'into';
       if (payload.folderType === 'tag') return 'into';
       if (!targetNode) return 'into';
-      if (targetNode.type === 'section' || targetNode.type === 'group'
-          || targetNode.type === 'paper' || targetNode.type === 'book') {
+      if (targetNode.type === 'section' || targetNode.type === 'group') {
         return 'into';
       }
-      if (payload.folderType === 'userfolder' && targetNode.type !== 'userfolder') return 'into';
+      const isUnifiedSource = (payload.folderType === 'userfolder' || payload.folderType === 'paper' || payload.folderType === 'book');
+      const isUnifiedTarget = (targetNode.type === 'userfolder' || targetNode.type === 'paper' || targetNode.type === 'book');
+      if (isUnifiedSource) {
+        if (!isUnifiedTarget) return 'into';
+        return getFolderDropZoneFromEvent(e, el);
+      }
       if (payload.folderType === 'custom' && targetNode.type !== 'custom') return 'into';
       return getFolderDropZoneFromEvent(e, el);
     }
@@ -17681,12 +18274,14 @@
     function handleFolderDragStart(e, nodeId) {
       e.stopPropagation();
       const node = folderNodeRegistry.get(nodeId);
-      if (!node || (node.type !== 'userfolder' && node.type !== 'custom' && node.type !== 'tag')) return;
+      if (!node || (node.type !== 'userfolder' && node.type !== 'custom' && node.type !== 'tag' && node.type !== 'paper' && node.type !== 'book')) return;
       const payload = {
         kind: 'folder',
         nodeId,
         folderType: node.type,
-        itemId: node.type === 'tag' ? node.tagId : (node.folderId || node.customId)
+        itemId: node.type === 'tag'
+          ? node.tagId
+          : ((node.type === 'paper' || node.type === 'book') ? node.paperId : (node.folderId || node.customId))
       };
       window.__eagleDragPayload = payload;
       window.__eagleFolderDragEl = e && e.currentTarget ? e.currentTarget : null;
@@ -17724,35 +18319,48 @@
           if (!src || !dst || src.kind !== dst.kind) return false;
           return true;
         }
-        if (payload.folderType === 'userfolder') {
+        if (payload.folderType === 'userfolder' || payload.folderType === 'paper' || payload.folderType === 'book') {
           const list = readUserFolders();
+          const isDoc = payload.folderType === 'paper' || payload.folderType === 'book';
+          const movedTreeId = isDoc
+            ? (payload.nodeId || (payload.folderType + ':' + payload.itemId))
+            : payload.itemId;
           if (dropZone === 'before' || dropZone === 'after') {
-            if (targetNode.type !== 'userfolder' || targetNode.folderId === payload.itemId) return false;
-            const anchor = list.find(x => x.id === targetNode.folderId);
-            if (!anchor) return false;
-            const newParentId = anchor.parentId || null;
-            if (newParentId && !isSystemFolderParentId(newParentId)
-                && isFolderDescendantOrSelf(list, payload.itemId, newParentId)) {
+            if (targetNode.type !== 'userfolder' && targetNode.type !== 'paper' && targetNode.type !== 'book') return false;
+            const targetTreeId = targetNode.type === 'userfolder' ? targetNode.folderId : targetNode.id;
+            if (!targetTreeId || targetTreeId === movedTreeId) return false;
+            let newParentId = null;
+            if (targetNode.type === 'userfolder') {
+              const anchor = list.find(x => x.id === targetNode.folderId);
+              if (!anchor) return false;
+              newParentId = anchor.parentId || null;
+            } else {
+              const eff = typeof getEffectiveDocParentId === 'function'
+                ? getEffectiveDocParentId(targetNode.paperId, targetNode.type, list)
+                : (targetNode.type === 'book' ? 'group:books' : 'group:papers');
+              newParentId = eff === 'section:folders' ? null : eff;
+            }
+            if (newParentId && isFolderDescendantOrSelf(list, movedTreeId, newParentId)) {
               return false;
             }
-            return canPlaceFolderUnderParent(list, payload.itemId, newParentId, false);
+            return canPlaceFolderUnderParent(list, movedTreeId, newParentId, false);
           }
           let targetParentId = null;
           if (targetNode.type === 'section' && targetNode.sectionKind === 'folders') {
-            targetParentId = null;
-          } else if (targetNode.type === 'userfolder' && targetNode.folderId !== payload.itemId) {
+            targetParentId = isDoc ? 'section:folders' : null;
+          } else if (targetNode.type === 'userfolder' && targetNode.folderId !== movedTreeId) {
             targetParentId = targetNode.folderId;
-          } else if (targetNode.type === 'paper' || targetNode.type === 'book') {
+          } else if ((targetNode.type === 'paper' || targetNode.type === 'book') && targetNode.id !== movedTreeId) {
             targetParentId = targetNode.id;
           } else if (targetNode.type === 'group' && (targetNode.id === 'group:papers' || targetNode.id === 'group:books')) {
             targetParentId = targetNode.id;
           } else {
             return false;
           }
-          if (targetParentId && !isSystemFolderParentId(targetParentId) && isFolderDescendantOrSelf(list, payload.itemId, targetParentId)) {
+          if (targetParentId && targetParentId !== 'section:folders' && isFolderDescendantOrSelf(list, movedTreeId, targetParentId)) {
             return false;
           }
-          return canPlaceFolderUnderParent(list, payload.itemId, targetParentId, false);
+          return canPlaceFolderUnderParent(list, movedTreeId, targetParentId, false);
         }
         if (payload.folderType === 'custom') {
           const list = readCustomSmartFolders();
@@ -17830,12 +18438,35 @@
           reparentTagByDrop(payload.itemId, targetNode.tagId, addOnly);
         } else if (payload.folderType === 'userfolder') {
           if (zone === 'before' || zone === 'after') {
-            reorderUserFolderAmongSiblings(payload.itemId, targetNode.folderId, zone);
+            const anchorTreeId = targetNode.type === 'userfolder' ? targetNode.folderId : targetNode.id;
+            if (targetNode.type === 'userfolder' && typeof reorderUserFolderAmongSiblings === 'function' && typeof getEffectiveDocParentId !== 'function') {
+              reorderUserFolderAmongSiblings(payload.itemId, targetNode.folderId, zone);
+            } else if (typeof reorderUnifiedSiblingNode === 'function') {
+              reorderUnifiedSiblingNode(payload.itemId, anchorTreeId, zone);
+            } else {
+              reorderUserFolderAmongSiblings(payload.itemId, targetNode.folderId, zone);
+            }
           } else {
             let newParentId = null;
             if (targetNode.type === 'userfolder') newParentId = targetNode.folderId;
             else if (isSystemFolderParentId(targetNode.id)) newParentId = targetNode.id;
             moveUserFolder(payload.itemId, newParentId);
+          }
+        } else if (payload.folderType === 'paper' || payload.folderType === 'book') {
+          const movedDocNodeId = payload.nodeId || (payload.folderType + ':' + payload.itemId);
+          if (zone === 'before' || zone === 'after') {
+            const anchorTreeId = targetNode.type === 'userfolder' ? targetNode.folderId : targetNode.id;
+            if (typeof reorderUnifiedSiblingNode === 'function') {
+              reorderUnifiedSiblingNode(movedDocNodeId, anchorTreeId, zone);
+            }
+          } else {
+            let newParentId = 'section:folders';
+            if (targetNode.type === 'userfolder') newParentId = targetNode.folderId;
+            else if (isSystemFolderParentId(targetNode.id)) newParentId = targetNode.id;
+            else if (targetNode.type === 'section' && targetNode.sectionKind === 'folders') newParentId = 'section:folders';
+            if (typeof moveDocFolder === 'function') {
+              moveDocFolder(movedDocNodeId, newParentId);
+            }
           }
         } else if (payload.folderType === 'custom') {
           if (zone === 'before' || zone === 'after') {
@@ -17945,7 +18576,7 @@
       const searchEl = document.getElementById('folderPickerSearchInput');
       if (searchEl) searchEl.value = '';
       const list = readUserFolders();
-      const bookNodes = typeof buildTextbookTreeNodes === 'function' ? buildTextbookTreeNodes() : [];
+      const bookNodes = typeof buildTextbookTreeNodes === 'function' ? buildTextbookTreeNodes(null, { includeAllBooks: true }) : [];
       initFolderPickerExpandedState('assign', list, false, bookNodes, ids);
       const titleEl = document.getElementById('folderPickerTitle');
       const subEl = document.getElementById('folderPickerSubtitle');
@@ -17959,19 +18590,27 @@
 
     function openFolderPickerForMove(kind, sourceId) {
       hideEagleContextMenu();
-      const mode = kind === 'custom' ? 'move_custom' : 'move_user';
+      const mode = kind === 'custom' ? 'move_custom' : (kind === 'doc' ? 'move_doc' : 'move_user');
       folderPickerState = { mode, questionIds: [], sourceId };
       folderPickerSearch = '';
       const searchEl = document.getElementById('folderPickerSearchInput');
       if (searchEl) searchEl.value = '';
       const list = kind === 'custom' ? readCustomSmartFolders() : readUserFolders();
       initFolderPickerExpandedState(mode, list, kind === 'custom', [], []);
-      const src = list.find(x => x.id === sourceId);
+      let srcName = '';
+      if (kind === 'doc') {
+        const docId = String(sourceId || '').slice(String(sourceId || '').indexOf(':') + 1);
+        const doc = (typeof papersData !== 'undefined' ? papersData : []).find(p => String(p.id) === docId);
+        srcName = doc ? ((doc.materialType || 'exam') === 'book' ? parseTextbookTitle(doc.name || doc.filename).label : doc.name) : docId;
+      } else {
+        const src = list.find(x => x.id === sourceId);
+        srcName = src ? src.name : '';
+      }
       const titleEl = document.getElementById('folderPickerTitle');
       const subEl = document.getElementById('folderPickerSubtitle');
       const newBtn = document.getElementById('folderPickerNewBtn');
-      if (titleEl) titleEl.innerText = kind === 'custom' ? '📦 移动智能文件夹' : '📦 移动文件夹';
-      if (subEl) subEl.innerText = `将「${src ? src.name : ''}」移动到：`;
+      if (titleEl) titleEl.innerText = kind === 'custom' ? '📦 移动智能文件夹' : (kind === 'doc' ? '📦 移动资料文件夹' : '📦 移动文件夹');
+      if (subEl) subEl.innerText = `将「${srcName}」移动到：`;
       if (newBtn) newBtn.classList.add('hidden');
       renderFolderPickerTreeList();
       document.getElementById('folderPickerModal')?.classList.remove('hidden');
@@ -18003,7 +18642,10 @@
           const hasKids = kids.length > 0;
           const expandKey = 'uf:' + item.id;
           const isExpanded = Boolean(kw) || folderPickerExpanded.has(expandKey);
-          const isSelfOrChild = !!(excluded && excluded.has(item.id));
+          const isSelfOrChild = Boolean(
+            (excluded && excluded.has(item.id)) ||
+            (movedId && !isCustom && typeof isFolderDescendantOrSelf === 'function' && isFolderDescendantOrSelf(list, movedId, item.id))
+          );
           const exceedsDepth = !!(movedId && !isSelfOrChild && !canPlaceFolderUnderParent(list, movedId, item.id, isCustom));
           const pad = 8 + depth * 18;
           const icon = isCustom ? '🔖' : ((hasKids && isExpanded) ? '📂' : '📁');
@@ -18034,14 +18676,19 @@
       folderPickerNodeMeta.clear();
       const mode = folderPickerState.mode;
       const isCustom = mode === 'move_custom';
-      const isMove = (mode === 'move_user' || mode === 'move_custom');
+      const isMoveDoc = mode === 'move_doc';
+      const isMove = (mode === 'move_user' || mode === 'move_custom' || isMoveDoc);
       const movedId = isMove ? folderPickerState.sourceId : '';
       const list = isCustom ? readCustomSmartFolders() : readUserFolders();
-      const excluded = isMove ? collectFolderSubtreeIds(list, movedId) : null;
+      const excluded = (mode === 'move_user' || mode === 'move_custom') ? collectFolderSubtreeIds(list, movedId) : null;
       const kw = folderPickerSearch;
 
       let html = '';
-      if (isMove && !kw) {
+      if (isMoveDoc && !kw) {
+        const isBookMoved = String(movedId).startsWith('book:');
+        html += `<button type="button" onclick="selectFolderFromPicker('section:folders')" class="w-full text-left px-3 py-2 rounded-md border border-dashed border-slate-300 text-xs text-slate-700 hover:bg-emerald-50 hover:border-emerald-400 cursor-pointer mb-1">🏠 放到文件夹顶层（根目录）</button>`;
+        html += `<button type="button" onclick="selectFolderFromPicker('__default__')" class="w-full text-left px-3 py-2 rounded-md border border-dashed border-slate-300 text-xs text-slate-700 hover:bg-emerald-50 hover:border-emerald-400 cursor-pointer mb-1">↩️ 恢复默认分组（${isBookMoved ? '教材版本' : '试卷'}）</button>`;
+      } else if (isMove && !kw) {
         html += `<button type="button" onclick="selectFolderFromPicker('')" class="w-full text-left px-3 py-2 rounded-md border border-dashed border-slate-300 text-xs text-slate-700 hover:bg-emerald-50 hover:border-emerald-400 cursor-pointer mb-1">🏠 设为根目录（顶层，无父文件夹）</button>`;
       }
 
@@ -18058,7 +18705,7 @@
       const exams = papersData.filter(p => (p.published || 0) > 0 && (p.materialType || 'exam') !== 'book');
       const books = papersData.filter(p => (p.published || 0) > 0 && (p.materialType || 'exam') === 'book');
       const overrides = readDocFolderOverrides();
-      const bookTreeNodes = (!isMove && typeof buildTextbookTreeNodes === 'function') ? buildTextbookTreeNodes() : [];
+      const bookTreeNodes = (!isMove && typeof buildTextbookTreeNodes === 'function') ? buildTextbookTreeNodes(null, { includeAllBooks: true }) : [];
       const bookNodeByPaperId = new Map(bookTreeNodes.map(n => [String(n.paperId), n]));
 
       const renderBookChapterRowsHtml = (docId, chapNodes, baseDepth) => {
@@ -18133,7 +18780,10 @@
           const ov = overrides[String(doc.id)] || { added: [], removed: [] };
           const delta = (Array.isArray(ov.added) ? ov.added.length : 0) - (Array.isArray(ov.removed) ? ov.removed.length : 0);
           const docCount = Math.max(Math.max(0, Number(doc.published || 0) + delta), docSet.size);
-          const docAllowed = !isMove || canPlaceFolderUnderParent(list, movedId, targetKey, false);
+          const isSelfOrChildDoc = Boolean(
+            isMoveDoc && typeof isFolderDescendantOrSelf === 'function' && isFolderDescendantOrSelf(list, movedId, targetKey)
+          );
+          const docAllowed = !isMove || (!isSelfOrChildDoc && canPlaceFolderUnderParent(list, movedId, targetKey, false));
           const hasInnerFolders = Boolean(childUserHtml || chapNodes.length);
           const isDocExpanded = Boolean(kw) || folderPickerExpanded.has(targetKey);
           const docArrow = hasInnerFolders
@@ -18144,7 +18794,8 @@
           if (docAllowed) {
             docsHtml += `<div class="w-full flex items-center gap-0.5 rounded-md hover:bg-emerald-50 transition-colors" style="padding-left:20px">${docArrow}<button type="button" onclick="selectFolderFromPicker('${escapeInlineJsArg(targetKey)}')" class="flex-1 min-w-0 flex items-center justify-between px-1.5 py-1.5 rounded-md text-xs text-slate-700 hover:text-emerald-900 cursor-pointer text-left"><span class="truncate">${docIcon} ${escapeHtml(docLabel)}</span><span class="font-mono text-[11px] text-slate-400 shrink-0 ml-2">${docCount}</span></button></div>`;
           } else {
-            docsHtml += `<div class="w-full flex items-center gap-0.5 rounded-md text-xs text-slate-300 cursor-not-allowed select-none pr-2 py-1" style="padding-left:20px">${docArrow}<span class="truncate flex-1">${docIcon} ${escapeHtml(docLabel)}（超过${MAX_FOLDER_DEPTH}层上限）</span><span class="font-mono text-[11px] shrink-0 ml-2">${docCount}</span></div>`;
+            const docReason = isSelfOrChildDoc ? '当前目录' : `超过${MAX_FOLDER_DEPTH}层上限`;
+            docsHtml += `<div class="w-full flex items-center gap-0.5 rounded-md text-xs text-slate-300 cursor-not-allowed select-none pr-2 py-1" style="padding-left:20px">${docArrow}<span class="truncate flex-1">${docIcon} ${escapeHtml(docLabel)}（${docReason}）</span><span class="font-mono text-[11px] shrink-0 ml-2">${docCount}</span></div>`;
           }
           if (isDocExpanded) {
             docsHtml += childUserHtml;
@@ -18189,6 +18840,8 @@
         moveUserFolder(st.sourceId, targetId || null);
       } else if (st.mode === 'move_custom') {
         moveCustomSmartFolder(st.sourceId, targetId || null);
+      } else if (st.mode === 'move_doc') {
+        if (typeof moveDocFolder === 'function') moveDocFolder(st.sourceId, targetId || '__default__');
       }
       closeFolderPickerModal();
     }
@@ -18601,6 +19254,18 @@
         items: itemsToTrash
       });
       writeLocalTrash(trash);
+      if (typeof readDocPlacements === 'function' && typeof writeDocPlacements === 'function') {
+        const placements = readDocPlacements();
+        let placementChanged = false;
+        Object.keys(placements).forEach(docId => {
+          const pid = placements[docId] && placements[docId].parentId;
+          if (pid && subtree.has(pid)) {
+            delete placements[docId];
+            placementChanged = true;
+          }
+        });
+        if (placementChanged) writeDocPlacements(placements);
+      }
       writeUserFolders(list.filter(x => !subtree.has(x.id)));
       commitFolderUndo(undoToken, true);
 

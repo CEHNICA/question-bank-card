@@ -72,7 +72,7 @@ test("窄屏下左栏别再把正文挤成一条缝", async (t) => {
   });
 
   await t.test("4. 初始化和窗口缩放都要跟", () => {
-    const init = html.match(/async function init\([\s\S]{0,1500}?\n {4}\}/);
+    const init = html.match(/async function init\([\s\S]{0,6000}?\n {4}\}/);
     assert.ok(init, "应能找到 init");
     assert.ok(
       /applyResponsiveLeftSidebar\(\);/.test(init[0]),

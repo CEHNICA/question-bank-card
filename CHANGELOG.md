@@ -3,6 +3,19 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.3.4
+
+**大一统数据驱动文件夹树、书本自由目录接管、资料节点归组与整树原子提交（含 2.3.3 界面收口）**
+
+- **书本纯数据驱动自定义目录接管（`backend/core/library_folders.py`、`frontend/eagle/index.html`）**：
+  - 新增 `custom_tree_docs`：任一教材启用后，前端彻底跳过硬编码页码表、` · ` 拆两层与 `习题N.M` 猜章号，直接按 `user_folders` 数据树与 `sortOrder` 渲染任意多级目录（支持空目录）；未启用的老书保持完全兼容。
+- **大一统自由树与 8 层深度上限（`library_folders.py`、`frontend/eagle/index.html`）**：
+  - 层级上限从 `4` 层放宽至 `8` 层，容量上限提升至 `5000`；新增 `doc_placements`，支持把 `paper:` / `book:` 资料节点自由归入任意 `user_folder` 或文件夹根目录、与普通文件夹混合同级拖拽排序（`manual` / `sortOrder`），并在父夹自动汇总内部书/卷题目数量；删除包含资料的文件夹只释放资料回默认分组，绝不删资料或删题，且支持 `Ctrl+Z` / `undo` 完整撤销。
+- **整树 JSON 原子提交与 CLI / MCP 全量开放（`library_folders.py`、`tiyouju_cli.py`、`skills/tiyouju/`）**：
+  - 新增 `apply_tree`（CLI `tiyouju folders apply-tree` / MCP `apply_folder_tree`），支持 `--dry-run` 预览、按 `id` 或 `(parentId, name)` 稳定复用已有文件夹 ID、树内挂载资料、可选 `--sync-sections` 同步 `section`（不新建 `PublishedQuestion` 版本也不掉审核勾）及单步 `undo` 回滚目录与 `section`；同步开放 `tiyouju folders reorder`、`custom-tree`、`move <book:|paper:>` 及 `SORT_MODES` 中的 `manual`。
+- **一并包含 `2.3.3` 正式安装包**：包含 Eagle 工作台安静收口、统一毛玻璃悬浮提示、文件夹拖排撤销与详情页参考链接图标化。
+
+
 ## 2.3.3
 
 **Eagle 工作台安静收口、文件夹拖排撤销、统一悬浮提示、详情页链接图标化**

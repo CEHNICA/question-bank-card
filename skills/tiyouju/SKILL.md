@@ -136,7 +136,8 @@ tiyouju publish latest
 
 题面文字和答案仍按上文走 `propose` 提案；**文件夹归档、排序、资料名/类型、教材章节目录与标签个人分组**属于组织结构，可通过 `tiyouju folders`（或对应 MCP 工具）**直接生效并支持撤销**，且会自动与题库工作台网页双向同步：
 
-- **我的文件夹**：`tiyouju folders list` 查看全树（自建文件夹、试卷夹、教材章节树、智能夹、排序、标签个人分组）；`create` / `rename` / `move` / `delete` / `add` / `remove` / `sort` 建夹建子夹（最多 4 层）、归档移出题目、设置自然序/名称/时间排序。
+- **我的文件夹与大一统自由树**：`tiyouju folders list` 查看全树；`create` / `rename` / `move` / `delete` / `add` / `remove` / `sort` / `reorder` 建夹建子夹（最多 **8 层**）、移动文件夹或把 `paper:<id>` / `book:<id>` 资料夹自由归类到任意主题夹或根目录、手动排同级先后顺序（`manual`）。
+- **书本纯数据驱动目录与整树原子提交**：`tiyouju folders apply-tree --file tree.json [--root book:<id>] [--dry-run]` 一次性原子提交整本书或多级专题目录树（支持空目录、树内挂载资料、稳定 ID 复用、可选 `--sync-sections` 同步 `section` 且不改题面版本），并默认开启该书的纯数据驱动自定义目录接管（可用 `tiyouju folders custom-tree <paper> on|off` 单独切换），彻底摆脱前端硬编码页码表与正则限制；整批提交支持单步 `tiyouju folders undo` 撤销。
 - **教材章节/小节目录**：未入库题卡可用 `tiyouju fix <paper> <n> --section "..."`；已入库教材可用 `tiyouju folders set-section` 批量按章节规整，不改动题干或审核状态。
 - **试卷/教材夹**：`tiyouju folders paper <paper> [--name 新名称] [--type exam|book]` 重命名或切换「试卷 ↔ 教材」。
 - **标签个人分组**：`tiyouju folders tag-group <list|create|rename|delete|add-tags|remove-tags|set-tags|undo>` 整理个人分组及组内标签，不改变知识点上下级。

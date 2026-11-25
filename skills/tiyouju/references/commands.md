@@ -61,7 +61,7 @@
 | `solutions <import\|batches\|undo>` | **批量导入标准答案书/官方解析**到版本化解析层（不动源题卡、不清通过勾、默认不覆盖已有解析），支持 `--dry-run` 预览和整批 `undo` 撤销 |
 | `workbench [--limit N] [--from-agent 助手名] [--scope all\|solution_only\|face] [--clear]` | 读助手工作台真实总数、按助手统计、谁在干活、老师此刻在哪；加 `--clear` 可批量拒绝并清空指定助手/范围的待核对提案 |
 | `whereami` | 问一句：老师此刻在看哪道题、有没有没保存的改动；你刚提的改动有没有被否决 |
-| `folders <list\|create\|rename\|move\|delete\|add\|remove\|sort\|set-section\|paper\|tag-group\|undo>` | 直接查看和整理「我的文件夹」、试卷/教材类型、教材章节目录（`section`）、排序方式及标签个人分组，支持撤销并与前端双向同步 |
+| `folders <list\|create\|rename\|move\|delete\|add\|remove\|sort\|reorder\|apply-tree\|custom-tree\|set-section\|paper\|tag-group\|undo>` | 直接查看和整理「我的文件夹」、资料节点位置（`paper:`/`book:` 自由归组）、书本纯数据驱动自定义目录（最多 8 层）、同级手动排序、整树 JSON 原子提交、教材章节目录（`section`）及标签个人分组，支持撤销并与前端双向同步 |
 | `mcp` | 作为 stdio MCP 服务器运行 |
 
 ## 组卷导出（软件界面）
@@ -190,13 +190,21 @@ tiyouju whereami --json
 # 1. 查看完整文件夹树（我的文件夹、试卷、教材章节树、智能夹、排序、个人分组）
 tiyouju folders list --json
 
-# 2. 我的文件夹：新建 / 建子夹 / 重命名 / 移动层级 / 设排序 / 删除（最多 4 层）
+# 2. 我的文件夹与资料归组：新建 / 建子夹 / 重命名 / 移动层级 / 手动排序 / 删除（最多 8 层）
 tiyouju folders create "专题一 · 三角函数" --json
 tiyouju folders create "恒等变换" --parent "专题一 · 三角函数" --json
 tiyouju folders rename "恒等变换" "三角恒等变换" --json
 tiyouju folders move "三角恒等变换" --json                     # 不传 --parent 移回根目录
-tiyouju folders sort section:folders name --json               # time_desc / time_asc / name / count_desc / default
+tiyouju folders move book:<uuid> --parent "一轮复习" --json     # 把整本教材归入自定义主题夹
+tiyouju folders move book:<uuid> --parent default --json       # 恢复到默认「教材版本」分组
+tiyouju folders sort section:folders manual --json             # time_desc / time_asc / name / count_desc / manual / default
+tiyouju folders reorder "专题一 · 三角函数" "基础篇" "提高篇" --json
 tiyouju folders delete "三角恒等变换" --json
+
+# 2.5 书本自定义自由目录接管与整树原子提交（不改题目版本、支持 dry-run 与单步 undo）
+tiyouju folders custom-tree <paper> on --json                  # 启用纯数据驱动自由目录（跳过硬编码页码表）
+tiyouju folders apply-tree --file book-tree.json --root book:<uuid> --dry-run --json
+tiyouju folders apply-tree --file book-tree.json --root book:<uuid> --sync-sections --json
 
 # 3. 批量归档 / 移出题目（支持入库 UUID 或 Q-xxxxxxxx 短码）
 tiyouju folders add "专题一 · 三角函数" Q-1a2b3c4d Q-5e6f7a8b --json
@@ -246,8 +254,9 @@ tiyouju folders undo --json
 - `import_solutions(items, overwrite, dry_run, note, agent)` / `list_solution_batches(limit)` / `undo_solutions(batch_id)`：批量将标准答案书/官方解析写入解析层，不动源题卡、不清通过勾、默认不覆盖已有解析，支持先 `dry_run=true` 干跑预览及整批撤销
 - `read_workbench(limit, agent, scope)`：读助手工作台（真实总数、按助手汇总、谁在干活、人此刻在哪）
 - `where_is_the_teacher()`：问人此刻在看哪道题、有没有没保存的改动，以及我提的改动有没有被否决
-- `list_folders()`：查看全部文件夹树（我的文件夹、试卷夹、教材章节树、智能夹、排序、标签个人分组）
-- `manage_folder(action, ...)`：直接新建/重命名/移动/删除我的文件夹或智能夹、批量归档/移出题目、设置排序、撤销
+- `list_folders()`：查看全部文件夹树（我的文件夹、根目录资料、试卷夹、教材章节树/自定义目录、智能夹、排序、标签个人分组）
+- `manage_folder(action, ...)`：直接新建/重命名/移动我的文件夹或 `paper:`/`book:` 资料节点、同级手动排序(`reorder`)、切换书本自定义目录(`set_custom_tree`)、批量归档/移出题目、设置排序、撤销（最多 8 层）
+- `apply_folder_tree(tree, root, mode, takeover, set_manual_sort, sync_sections, dry_run)`：一次性原子提交整棵多级目录树（支持空目录、树内挂载资料、稳定复用 ID 及单步 `manage_folder(action="undo")` 撤销）
 - `set_question_sections(section, question_ids | items)`：批量整理已入库题目的教材章节/小节目录，直接生效且支持 `manage_folder(action="undo")` 撤销
 - `update_paper_folder(paper, name, material_type)`：重命名试卷/教材或切换 `exam` / `book`
 - `manage_tag_groups(action, ...)`：整理标签管理里的个人分组及组内标签（支持 `undo`）

@@ -609,7 +609,9 @@ def cmd_skill(_client, _args) -> dict:
         "",
         "## 3. 组织题库内容与整理文件夹",
         "- `tiyouju folders list --json`：查看「我的文件夹」、试卷夹、教材章节树、智能文件夹、排序及标签个人分组。",
-        "- `tiyouju folders create/rename/move/delete/add/remove/sort`：直接建夹建子夹、归档移出题目、设置自然序/名称/时间排序（可撤销）。",
+        "- `tiyouju folders create/rename/move/delete/add/remove/sort/reorder`：直接建夹建子夹（最多 8 层）、把试卷/教材移入任意主题夹或根目录、手动排同级顺序（可撤销）。",
+        "- `tiyouju folders apply-tree --file tree.json [--root book:<id>] [--dry-run]`：一次性原子提交整本书或整棵目录树（支持最多 8 层、空目录、嵌套资料、可选 `--sync-sections` 同步 `section`、单步 `undo` 撤销）。",
+        "- `tiyouju folders custom-tree <paper> <on|off>`：为教材开启/关闭纯数据驱动自定义目录接管（关闭前端硬编码页码表与正则猜章节）。",
         "- `tiyouju folders set-section`：批量整理已入库教材/教辅的章节与小节路径（直接生效且可撤销）。",
         "- `tiyouju folders paper <paper> [--name 名称] [--type exam|book]`：重命名试卷/教材或切换「试卷 ↔ 教材」。",
         "- `tiyouju folders tag-group ...`：整理标签管理里的个人分组及分组内标签。",
@@ -1688,7 +1690,7 @@ def show_backup(result: dict) -> str:
     return f"备份完成：{name}{size_str}"
 
 
-SORT_MODES = ("time_desc", "time_asc", "name", "count_desc", "default")
+SORT_MODES = ("time_desc", "time_asc", "name", "count_desc", "manual", "default")
 
 
 def _load_section_map(path: str) -> list[dict]:
@@ -1709,6 +1711,21 @@ def _load_section_map(path: str) -> list[dict]:
     raise CliError("章节映射文件格式应为 {题目ID: 章节名} 或 [{publication_id, section}]")
 
 
+def _load_tree_payload(path: str) -> dict:
+    raw_text = Path(path).expanduser().read_text(encoding="utf-8-sig")
+    try:
+        parsed = json.loads(raw_text)
+    except ValueError as exc:
+        raise CliError(f"目录树文件不是合法 JSON：{exc}") from None
+    if isinstance(parsed, list):
+        return {"tree": parsed}
+    if isinstance(parsed, dict):
+        if "tree" not in parsed or not isinstance(parsed["tree"], list):
+            raise CliError("目录树 JSON 对象必须包含 tree 数组")
+        return dict(parsed)
+    raise CliError("目录树文件应为节点数组 [...] 或包含 tree 字段的 JSON 对象")
+
+
 def cmd_folders(client: Client, args) -> dict:
     sub = getattr(args, "folders_command", None) or "list"
     if sub in {"list", "tree"}:
@@ -1719,15 +1736,28 @@ def cmd_folders(client: Client, args) -> dict:
             payload["parent_id"] = args.parent
         if getattr(args, "questions", None):
             payload["question_ids"] = list(args.questions)
+        if getattr(args, "sort_order", None) is not None:
+            payload["sort_order"] = args.sort_order
         return client.post("/api/library/folders", payload)
     if sub == "rename":
         return client.post("/api/library/folders", {
             "action": "rename", "folder_id": args.folder, "name": args.name,
         })
     if sub == "move":
-        return client.post("/api/library/folders", {
-            "action": "move", "folder_id": args.folder, "parent_id": getattr(args, "parent", None),
-        })
+        target = str(args.folder or "").strip()
+        raw_parent = getattr(args, "parent", None)
+        payload = {}
+        if getattr(args, "sort_order", None) is not None:
+            payload["sort_order"] = args.sort_order
+        if target.startswith(("paper:", "book:")):
+            payload["action"] = "move_doc"
+            payload["doc_id"] = target
+            payload["parent_id"] = "section:folders" if raw_parent is None else raw_parent
+        else:
+            payload["action"] = "move"
+            payload["folder_id"] = target
+            payload["parent_id"] = raw_parent
+        return client.post("/api/library/folders", payload)
     if sub == "delete":
         return client.post("/api/library/folders", {"action": "delete", "folder_id": args.folder})
     if sub == "add":
@@ -1741,6 +1771,39 @@ def cmd_folders(client: Client, args) -> dict:
     if sub == "sort":
         return client.post("/api/library/folders", {
             "action": "set_sort", "target_id": args.target, "mode": args.mode,
+        })
+    if sub == "reorder":
+        payload = {
+            "action": "reorder",
+            "parent_id": args.parent,
+            "order": list(args.children),
+            "set_manual": not getattr(args, "no_manual", False),
+        }
+        if getattr(args, "smart", False):
+            payload["kind"] = "smart"
+        return client.post("/api/library/folders", payload)
+    if sub == "apply-tree":
+        payload = _load_tree_payload(args.file)
+        payload["action"] = "apply_tree"
+        if getattr(args, "root", None) is not None:
+            payload["root"] = args.root
+        if getattr(args, "mode", None) is not None:
+            payload["mode"] = args.mode
+        if getattr(args, "no_takeover", False):
+            payload["takeover"] = False
+        if getattr(args, "no_manual_sort", False):
+            payload["set_manual_sort"] = False
+        if getattr(args, "sync_sections", False):
+            payload["sync_sections"] = True
+        if getattr(args, "dry_run", False):
+            payload["dry_run"] = True
+        return client.post("/api/library/folders", payload)
+    if sub == "custom-tree":
+        paper = find_paper(client, args.paper)
+        return client.post("/api/library/folders", {
+            "action": "set_custom_tree",
+            "doc_id": paper["id"],
+            "enabled": args.state == "on",
         })
     if sub == "set-section":
         if getattr(args, "map_file", None):
@@ -1804,6 +1867,22 @@ def cmd_folders(client: Client, args) -> dict:
     raise CliError(f"不支持的文件夹命令：{sub}")
 
 
+def _format_placed_doc(doc: dict, indent: int = 2) -> list[str]:
+    lines: list[str] = []
+    pad = " " * indent
+    icon = "📚" if doc.get("material_type") == "book" else "📄"
+    custom_tag = " [自定义目录]" if doc.get("custom_tree") else ""
+    sort_tag = f" [排序:{doc['sort_mode']}]" if doc.get("sort_mode") else ""
+    lines.append(
+        f"{pad}- {icon} {doc['name']} ({doc.get('folder_count', 0)} 题){custom_tag}{sort_tag}  node={doc['node_id']}"
+    )
+    if doc.get("subfolders"):
+        lines.extend(_format_uf_tree(doc["subfolders"], indent + 2))
+    for sub_doc in doc.get("placed_docs") or []:
+        lines.extend(_format_placed_doc(sub_doc, indent + 2))
+    return lines
+
+
 def _format_uf_tree(nodes: list[dict], indent: int = 2) -> list[str]:
     lines: list[str] = []
     pad = " " * indent
@@ -1812,10 +1891,34 @@ def _format_uf_tree(nodes: list[dict], indent: int = 2) -> list[str]:
         lines.append(f"{pad}- 📁 {node['name']} ({node.get('count', 0)} 题){sort_tag}  id={node['id']}")
         if node.get("children"):
             lines.extend(_format_uf_tree(node["children"], indent + 2))
+        for doc in node.get("placed_docs") or []:
+            lines.extend(_format_placed_doc(doc, indent + 2))
+    return lines
+
+
+def _format_preview_tree(nodes: list[dict], indent: int = 2) -> list[str]:
+    lines: list[str] = []
+    pad = " " * indent
+    for node in nodes:
+        lines.append(f"{pad}- 📁 {node['name']} ({node.get('question_count', 0)} 题)  id={node['id']}")
+        for doc in node.get("docs") or []:
+            lines.append(f"{pad}  - 📄 {doc['name']}  node={doc['node_id']}")
+        if node.get("children"):
+            lines.extend(_format_preview_tree(node["children"], indent + 2))
     return lines
 
 
 def show_folders(result: dict) -> str:
+    if result.get("dry_run"):
+        lines = [result.get("message") or "目录树干跑预览："]
+        s = result.get("summary") or {}
+        lines.append(
+            f"目标={result.get('root')} 模式={result.get('mode')} 自定义目录接管={result.get('takeover')} "
+            f"最大深度={s.get('max_depth_used', 0)}"
+        )
+        if result.get("preview_tree"):
+            lines.extend(_format_preview_tree(result["preview_tree"]))
+        return "\n".join(lines)
     if "paper" in result and "tree" not in result:
         p = result["paper"]
         kind = "教材" if p.get("material_type") == "book" else "试卷"
@@ -1837,19 +1940,26 @@ def show_folders(result: dict) -> str:
     lines.append(f"题库文件夹树（全局排序：{tree.get('global_sort_mode', 'time_desc')}，版本 rev={result.get('revision', 0)}）：")
     lines.append("我的文件夹：")
     uf_lines = _format_uf_tree(tree.get("user_folders") or [])
+    for doc in tree.get("root_placed_docs") or []:
+        uf_lines.extend(_format_placed_doc(doc, 2))
     lines.extend(uf_lines or ["  （暂无自建文件夹）"])
     papers_list = tree.get("papers") or []
     lines.append(f"试卷（{len(papers_list)} 份）：")
     for p in papers_list[:30]:
         lines.append(f"  - 📄 {p['name']} ({p.get('folder_count', 0)} 题)  node={p['node_id']}")
         lines.extend(_format_uf_tree(p.get("subfolders") or [], 4))
+        for doc in p.get("placed_docs") or []:
+            lines.extend(_format_placed_doc(doc, 4))
     books_list = tree.get("books") or []
     lines.append(f"教材版本（{len(books_list)} 本）：")
     for b in books_list[:30]:
-        lines.append(f"  - 📚 {b['name']} ({b.get('folder_count', 0)} 题)  node={b['node_id']}")
+        custom_tag = " [自定义目录]" if b.get("custom_tree") else ""
+        lines.append(f"  - 📚 {b['name']} ({b.get('folder_count', 0)} 题){custom_tag}  node={b['node_id']}")
         for sec in (b.get("sections") or [])[:20]:
             lines.append(f"    · {sec['name']} ({sec['count']} 题)")
         lines.extend(_format_uf_tree(b.get("subfolders") or [], 4))
+        for doc in b.get("placed_docs") or []:
+            lines.extend(_format_placed_doc(doc, 4))
     tgroups = tree.get("tag_groups") or []
     lines.append(f"标签个人分组（{len(tgroups)} 个）：")
     for g in tgroups:
@@ -2294,7 +2404,7 @@ MCP_INSTRUCTIONS = (
     "自动任务在新题入库之后创建；助手模式由当前助手继续领取完成，不声称已在OCR前生成答案或已常驻豆包。"
     "已经入库的题不要直接改字：单题题面勘误用 propose_question_change 交成提案，题面不动，等老师点采纳。"
     "严禁用 propose_question_change 批量灌整本答案书：批量写入标准答案书/官方解析必须使用 import_solutions（直接写入版本化解析层、不打回黄卡、默认保护已有解析且支持 undo_solutions 整批撤销）。"
-    "但整理文件夹（list_folders / manage_folder / set_question_sections / update_paper_folder / manage_tag_groups）直接生效并支持撤销。"
+    "但整理文件夹（list_folders / manage_folder / apply_folder_tree / set_question_sections / update_paper_folder / manage_tag_groups）直接生效并支持撤销。"
     "批量干活先 claim_work 领一批（每道活带到期时间，助手没了活会自己回到池子里），干不完 release_work 交回。"
     "where_is_the_teacher 告诉你老师此刻在哪、你刚提的有没有被否决。"
 )
@@ -2438,22 +2548,41 @@ MCP_TOOLS = [
         "scope": {"type": "string", "enum": ["all", "solution_only", "face"], "description": "筛选提案类型"},
     })),
     ("where_is_the_teacher", "问一句老师此刻在哪、你刚提的改动有没有被否决。", _schema({})),
-    ("list_folders", "查看题库文件夹树（我的文件夹、试卷夹、教材章节树、智能文件夹、排序方式与标签个人分组）。", _schema({})),
-    ("manage_folder", "直接整理我的文件夹、智能文件夹、题目归档与排序方式（支持 undo 撤销）。", _schema({
+    ("list_folders", "查看题库文件夹树（我的文件夹、试卷夹、教材章节树、自定义目录、资料归类、智能文件夹、排序方式与标签个人分组）。", _schema({})),
+    ("manage_folder", "直接整理我的文件夹、智能文件夹、资料位置、手动排序、书本自定义目录接管与题目归档（最多 8 层，支持 undo 撤销）。", _schema({
         "action": {"type": "string", "enum": [
-            "create", "rename", "move", "delete",
-            "add_questions", "remove_questions", "set_sort",
+            "create", "rename", "move", "move_doc", "delete",
+            "add_questions", "remove_questions", "set_sort", "reorder", "set_custom_tree",
             "create_smart", "rename_smart", "move_smart", "delete_smart", "undo",
         ]},
         "name": {"type": "string", "description": "文件夹名称（create/rename/create_smart/rename_smart 用）"},
         "folder_id": {"type": "string", "description": "目标文件夹 ID 或名称"},
-        "parent_id": {"type": "string", "description": "父级节点 ID（为空表示根目录；也可传 group:papers / group:books / paper:<uuid> / book:<uuid>）"},
+        "doc_id": {"type": "string", "description": "试卷/教材 UUID 或 paper:<uuid> / book:<uuid>（move_doc / set_custom_tree 用）"},
+        "parent_id": {"type": "string", "description": "父级节点 ID（为空或 section:folders 表示根目录；default 表示恢复默认分组；也可传 group:papers / group:books / paper:<uuid> / book:<uuid> / 文件夹ID）"},
         "target_id": {"type": "string", "description": "归档目标（folder_id、userfolder:<id>、paper:<uuid>、book:<uuid>）或排序节点 ID（global 表示全局默认）"},
         "question_ids": {"type": "array", "items": {"type": "string"}, "description": "入库题目 UUID 或 Q-xxxxxxxx 短码列表"},
+        "order": {"type": "array", "items": {"type": "string"}, "description": "同级子节点 ID 或名称的期望顺序列表（reorder 用）"},
+        "set_manual": {"type": "boolean", "description": "reorder 时是否同时将该父级切为 manual 手动排序（默认 true）"},
+        "sort_order": {"type": "integer", "description": "可选手动排序权重（create/move/move_doc 用）"},
+        "enabled": {"type": "boolean", "description": "是否启用书本自定义目录树接管（set_custom_tree 用，默认 true）"},
+        "kind": {"type": "string", "enum": ["folder", "smart"], "description": "reorder 对象类型，默认 folder"},
         "mode": {"type": "string", "enum": list(SORT_MODES), "description": "排序方式（set_sort 用）"},
         "filter": {"type": "object", "description": "智能文件夹筛选条件（create_smart 用）"},
         "operation_id": {"type": "string", "description": "指定要撤销的操作 ID（undo 可选）"},
     }, ["action"])),
+    ("apply_folder_tree", "一次性原子提交整棵多级文件夹或书本自定义目录树（最多 8 层，支持 dry_run 预览、稳定复用 ID、树内挂载资料、可选同步 section 及单步 undo 撤销）。", _schema({
+        "root": {"type": "string", "description": "挂载根（默认 section:folders；可传 book:<uuid>、paper:<uuid> 或文件夹 ID）"},
+        "tree": {
+            "type": "array",
+            "description": "目录树节点列表：每项含 name，及可选 id、questions、docs、sortOrder、children",
+            "items": {"type": "object"},
+        },
+        "mode": {"type": "string", "enum": ["replace", "merge"], "description": "replace（默认，替换该根下旧子目录）或 merge（保留未提及兄弟）"},
+        "takeover": {"type": "boolean", "description": "当 root 为 book:<uuid> 时是否开启自定义目录接管（默认 true）"},
+        "set_manual_sort": {"type": "boolean", "description": "是否按数组顺序写入 sortOrder 并开启 manual 排序（默认 true）"},
+        "sync_sections": {"type": "boolean", "description": "是否同步把路径写入题目的 section 字段（不新建题目版本，默认 false）"},
+        "dry_run": {"type": "boolean", "description": "为 true 时只预览变更摘要不落盘"},
+    }, ["tree"])),
     ("set_question_sections", "批量整理已入库教材/教辅题目的章节小节目录（section），直接生效且可通过 manage_folder(action=undo) 撤销。", _schema({
         "section": {"type": "string", "description": "统一设置的章节小节名（配合 question_ids 使用）"},
         "question_ids": {"type": "array", "items": {"type": "string"}, "description": "入库题目 UUID 或 Q-xxxxxxxx 短码列表"},
@@ -2649,6 +2778,10 @@ def mcp_call(client: Client, name: str, arguments: dict) -> tuple[dict | list, l
                 body["operation_id"] = a["operation_id"]
             return client.post("/api/library/folders/undo", body), []
         return client.post("/api/library/folders", a), []
+    if name == "apply_folder_tree":
+        body = {k: v for k, v in a.items() if v is not None}
+        body["action"] = "apply_tree"
+        return client.post("/api/library/folders", body), []
     if name == "set_question_sections":
         return client.post("/api/library/folders", {
             "action": "set_section",
@@ -3076,16 +3209,18 @@ def build_parser() -> argparse.ArgumentParser:
     folders_sub = folders.add_subparsers(dest="folders_command", metavar="动作")
     folders_sub.add_parser("list", parents=[common], help="查看全部文件夹树（我的文件夹、试卷、教材章节、智能夹、个人分组）")
     folders_sub.add_parser("tree", parents=[common], help="同 list")
-    f_create = folders_sub.add_parser("create", parents=[common], help="新建文件夹或子文件夹")
+    f_create = folders_sub.add_parser("create", parents=[common], help="新建文件夹或子文件夹（最多 8 层）")
     f_create.add_argument("name", help="文件夹名称")
     f_create.add_argument("--parent", help="父级节点 ID（省略则为根目录；也可传 group:papers / group:books / paper:<id> / book:<id>）")
     f_create.add_argument("--questions", nargs="+", help="顺便放入的入库题目 UUID 或 Q-xxxxxxxx 短码")
+    f_create.add_argument("--sort-order", type=int, help="可选手动排序权重")
     f_rename = folders_sub.add_parser("rename", parents=[common], help="重命名我的文件夹")
     f_rename.add_argument("folder", help="文件夹 ID 或名称")
     f_rename.add_argument("name", help="新名称")
-    f_move = folders_sub.add_parser("move", parents=[common], help="移动我的文件夹层级")
-    f_move.add_argument("folder", help="文件夹 ID 或名称")
-    f_move.add_argument("--parent", help="新父级 ID；省略则移到根目录")
+    f_move = folders_sub.add_parser("move", parents=[common], help="移动我的文件夹或资料（paper:<id> / book:<id>）层级")
+    f_move.add_argument("folder", help="文件夹 ID/名称，或 paper:<id> / book:<id>")
+    f_move.add_argument("--parent", help="新父级 ID；省略移到文件夹根，资料传 default 恢复默认分组")
+    f_move.add_argument("--sort-order", type=int, help="可选手动排序权重")
     f_delete = folders_sub.add_parser("delete", parents=[common], help="删除我的文件夹（含子文件夹，不删正式题，可撤销）")
     f_delete.add_argument("folder", help="文件夹 ID 或名称")
     f_add = folders_sub.add_parser("add", parents=[common], help="将入库题目批量放入文件夹")
@@ -3096,7 +3231,23 @@ def build_parser() -> argparse.ArgumentParser:
     f_remove.add_argument("questions", nargs="+", help="入库题目 UUID 或 Q-xxxxxxxx 短码")
     f_sort = folders_sub.add_parser("sort", parents=[common], help="设置文件夹排序方式")
     f_sort.add_argument("target", help="节点 ID（如 global、section:folders、group:books、book:<id>、userfolder:<id>）")
-    f_sort.add_argument("mode", choices=list(SORT_MODES), help="time_desc / time_asc / name / count_desc / default")
+    f_sort.add_argument("mode", choices=list(SORT_MODES), help="time_desc / time_asc / name / count_desc / manual / default")
+    f_reorder = folders_sub.add_parser("reorder", parents=[common], help="手动排定同级子文件夹或资料的先后顺序")
+    f_reorder.add_argument("parent", help="父节点 ID（如 section:folders、group:books、book:<id>、文件夹ID）")
+    f_reorder.add_argument("children", nargs="+", help="按期望顺序排列的同级子节点 ID 或名称")
+    f_reorder.add_argument("--no-manual", action="store_true", help="只更新 sortOrder，不切换为 manual 排序")
+    f_reorder.add_argument("--smart", action="store_true", help="对智能文件夹排序")
+    f_apply = folders_sub.add_parser("apply-tree", parents=[common], help="整棵树原子提交多级目录与题目归档（可干跑、可单步撤销）")
+    f_apply.add_argument("--file", required=True, help="UTF-8 目录树 JSON 文件路径")
+    f_apply.add_argument("--root", help="挂载根节点（如 section:folders、book:<id>、文件夹ID）")
+    f_apply.add_argument("--mode", choices=["replace", "merge"], help="replace（替换）或 merge（合并保留未提及兄弟）")
+    f_apply.add_argument("--no-takeover", action="store_true", help="挂到 book:<id> 时不自动启用自定义目录接管")
+    f_apply.add_argument("--no-manual-sort", action="store_true", help="不自动切换为 manual 排序")
+    f_apply.add_argument("--sync-sections", action="store_true", help="同步把树路径写入题目的 section 字段（不改题面版本）")
+    f_apply.add_argument("--dry-run", action="store_true", help="仅预览变更摘要，不落盘")
+    f_ct = folders_sub.add_parser("custom-tree", parents=[common], help="为教材开启/关闭纯数据驱动自定义目录接管")
+    f_ct.add_argument("paper", help="教材编号、latest 或名称片段")
+    f_ct.add_argument("state", choices=["on", "off"], help="on 启用自定义目录 / off 恢复自动章节")
     f_sec = folders_sub.add_parser("set-section", parents=[common], help="批量整理已入库题目的教材章节/小节目录（可撤销）")
     f_sec.add_argument("--section", help="统一的章节小节名")
     f_sec.add_argument("--map-file", help="UTF-8 JSON 映射文件：{题目ID: 章节名} 或 [{publication_id, section}]")

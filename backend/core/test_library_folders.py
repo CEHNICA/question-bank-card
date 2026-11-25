@@ -101,14 +101,15 @@ class LibraryFoldersAndTagGroupsTests(LiveServerTestCase):
         self.assertEqual(code, 0, res2)
         child_id = [f["id"] for f in res2["user_folders"] if f["name"] == "不等式专题"][0]
 
-        # 4-level max depth enforcement (root=1, child=2, g3=3, g4=4, g5 -> fail)
-        code, _, _ = _run_json("folders", "create", "第3层", "--parent", child_id)
-        self.assertEqual(code, 0)
-        code, _, _ = _run_json("folders", "create", "第4层", "--parent", "第3层")
-        self.assertEqual(code, 0)
-        code, err5, _ = _run_json("folders", "create", "第5层", "--parent", "第4层")
+        # 8-level max depth enforcement (1..8 allowed, 9 -> fail)
+        parent = child_id
+        for level in range(3, 9):
+            code, _, _ = _run_json("folders", "create", f"第{level}层", "--parent", parent)
+            self.assertEqual(code, 0)
+            parent = f"第{level}层"
+        code, err9, _ = _run_json("folders", "create", "第9层", "--parent", "第8层")
         self.assertEqual(code, 1)
-        self.assertIn("4 层", err5["error"])
+        self.assertIn("8 层", err9["error"])
 
         # 2. Prevent cycle move
         code, cycle_err, _ = _run_json("folders", "move", root_id, "--parent", child_id)
@@ -153,7 +154,7 @@ class LibraryFoldersAndTagGroupsTests(LiveServerTestCase):
 
         code, undo_del, _ = _run_json("folders", "undo")
         self.assertEqual(code, 0)
-        self.assertEqual(len(undo_del["user_folders"]), 4)
+        self.assertEqual(len(undo_del["user_folders"]), 8)
 
     def test_set_section_updates_book_tree_keeps_approval_and_supports_undo(self):
         map_file = self.temp / "sections.json"
@@ -385,3 +386,226 @@ class LibraryFoldersAndTagGroupsTests(LiveServerTestCase):
 
         sorted_res = library_folders.mutate({"action": "set_sort", "target_id": "section:folders", "mode": "manual"})
         self.assertEqual(sorted_res["sort_modes"]["section:folders"], "manual")
+
+    def test_move_doc_unified_tree_cycle_depth_and_delete_release(self):
+        book_node = f"book:{self.book.pk}"
+        exam_node = f"paper:{self.exam.pk}"
+        code, created, _ = _run_json("folders", "create", "一轮复习")
+        self.assertEqual(code, 0, created)
+        topic_id = created["user_folders"][0]["id"]
+
+        # Move book into topic folder -> tree shows it inside placed_docs, parent count includes book's questions
+        code, moved, _ = _run_json("folders", "move", book_node, "--parent", topic_id)
+        self.assertEqual(code, 0, moved)
+        self.assertEqual(moved["doc_placements"][str(self.book.pk)]["parentId"], topic_id)
+        topic_tree = moved["tree"]["user_folders"][0]
+        self.assertEqual(len(topic_tree["placed_docs"]), 1)
+        self.assertEqual(topic_tree["placed_docs"][0]["id"], str(self.book.pk))
+        self.assertEqual(topic_tree["count"], 2)
+
+        # Prevent cycle: cannot move topic folder inside book that is already inside topic folder
+        code, cycle_err, _ = _run_json("folders", "move", topic_id, "--parent", book_node)
+        self.assertEqual(code, 1)
+        self.assertIn("自身或其子文件夹", cycle_err["error"])
+
+        # Move exam to section:folders root
+        code, root_doc, _ = _run_json("folders", "move", exam_node)
+        self.assertEqual(code, 0, root_doc)
+        self.assertEqual(root_doc["doc_placements"][str(self.exam.pk)]["parentId"], "section:folders")
+        self.assertEqual([d["id"] for d in root_doc["tree"]["root_placed_docs"]], [str(self.exam.pk)])
+
+        # Deleting topic folder releases book back to default group without deleting book or questions
+        code, deleted, _ = _run_json("folders", "delete", topic_id)
+        self.assertEqual(code, 0, deleted)
+        self.assertNotIn(str(self.book.pk), deleted["doc_placements"])
+        self.assertEqual(PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED).count(), 3)
+
+        # Undo restores both folder and doc placement
+        code, undone, _ = _run_json("folders", "undo")
+        self.assertEqual(code, 0, undone)
+        self.assertEqual(undone["doc_placements"][str(self.book.pk)]["parentId"], topic_id)
+
+        # Reset back to default group
+        code, reset_doc, _ = _run_json("folders", "move", book_node, "--parent", "default")
+        self.assertEqual(code, 0, reset_doc)
+        self.assertNotIn(str(self.book.pk), reset_doc["doc_placements"])
+
+        # Depth limit guard when moving deep subtree into nested folder
+        cur_parent = topic_id
+        for idx in range(6):
+            code, res_c, _ = _run_json("folders", "create", f"深层{idx}", "--parent", cur_parent)
+            self.assertEqual(code, 0, res_c)
+            cur_parent = res_c["user_folders"][-1]["id"]
+        # topic(1) + 6 levels = 7 levels total; placing book under level 7 -> depth 8 ok; placing inside another child fails
+        code, deep_ok, _ = _run_json("folders", "move", book_node, "--parent", cur_parent)
+        self.assertEqual(code, 0, deep_ok)
+        code, err_over, _ = _run_json("folders", "create", "超限子夹", "--parent", book_node)
+        self.assertEqual(code, 1)
+        self.assertIn("8 层", err_over["error"])
+
+    def test_reorder_mixed_siblings_and_custom_tree_toggle(self):
+        code, r1, _ = _run_json("folders", "create", "专题甲")
+        self.assertEqual(code, 0, r1)
+        code, r2, _ = _run_json("folders", "create", "专题乙")
+        self.assertEqual(code, 0, r2)
+        exam_node = f"paper:{self.exam.pk}"
+        code, _, _ = _run_json("folders", "move", exam_node)
+        self.assertEqual(code, 0)
+
+        code, reordered, _ = _run_json("folders", "reorder", "section:folders", exam_node, "专题乙", "专题甲")
+        self.assertEqual(code, 0, reordered)
+        self.assertEqual(reordered["sort_modes"]["section:folders"], "manual")
+        self.assertEqual(reordered["doc_placements"][str(self.exam.pk)]["sortOrder"], 0)
+        by_name = {f["name"]: f for f in reordered["user_folders"]}
+        self.assertEqual(by_name["专题乙"]["sortOrder"], 10)
+        self.assertEqual(by_name["专题甲"]["sortOrder"], 20)
+
+        # Reject non-sibling item in reorder
+        code, err_non, _ = _run_json("folders", "reorder", "section:folders", "不存在的文件夹")
+        self.assertEqual(code, 1)
+        self.assertIn("不属于目标父级", err_non["error"])
+
+        # Custom tree toggle on book
+        code, ct_on, _ = _run_json("folders", "custom-tree", str(self.book.pk)[:8], "on")
+        self.assertEqual(code, 0, ct_on)
+        self.assertIn(str(self.book.pk), ct_on["custom_tree_docs"])
+        book_entry = [b for b in ct_on["tree"]["books"] if b["id"] == str(self.book.pk)][0]
+        self.assertTrue(book_entry["custom_tree"])
+        self.assertEqual(book_entry["sections"], [])
+
+        code, ct_off, _ = _run_json("folders", "custom-tree", str(self.book.pk)[:8], "off")
+        self.assertEqual(code, 0, ct_off)
+        self.assertNotIn(str(self.book.pk), ct_off["custom_tree_docs"])
+
+    def test_apply_tree_dry_run_id_stability_sync_sections_and_single_undo(self):
+        book_node = f"book:{self.book.pk}"
+        q1_short = library.short_id_for(self.q1.pk)
+        tree_file = self.temp / "book_tree.json"
+        tree_payload = [
+            {
+                "name": "第1篇 函数与不等式",
+                "children": [
+                    {
+                        "name": "第1章 基本不等式",
+                        "children": [
+                            {
+                                "name": "核心题型",
+                                "children": [
+                                    {"name": "最值问题", "children": [{"name": "例题组", "questions": [q1_short]}]}
+                                ],
+                            }
+                        ],
+                    },
+                    {"name": "第2章 空章节保留"},
+                ],
+            }
+        ]
+        tree_file.write_text(json.dumps(tree_payload, ensure_ascii=False), encoding="utf-8")
+
+        # 1. Dry run leaves state untouched
+        code, dry_res, _ = _run_json(
+            "folders", "apply-tree", "--file", str(tree_file), "--root", book_node, "--sync-sections", "--dry-run"
+        )
+        self.assertEqual(code, 0, dry_res)
+        self.assertTrue(dry_res["dry_run"])
+        self.assertEqual(dry_res["summary"]["folders_created"], 6)
+        self.assertEqual(dry_res["summary"]["questions_assigned"], 1)
+        self.assertEqual(dry_res["summary"]["sections_to_update"], 1)
+        self.assertEqual(dry_res["summary"]["max_depth_used"], 7)  # book(2) + 5 levels = 7 <= 8
+        self.assertEqual(library_folders.overview()["user_folders"], [])
+
+        # 2. Real apply with --sync-sections
+        code, applied, _ = _run_json(
+            "folders", "apply-tree", "--file", str(tree_file), "--root", book_node, "--sync-sections"
+        )
+        self.assertEqual(code, 0, applied)
+        self.assertIn(str(self.book.pk), applied["custom_tree_docs"])
+        self.assertEqual(applied["sort_modes"][book_node], "manual")
+        self.assertEqual(len(applied["user_folders"]), 6)
+
+        # Verify section synced without creating a new PublishedQuestion version or losing approval
+        self.q1.refresh_from_db()
+        self.assertIn("第1篇 函数与不等式 / 第1章 基本不等式", self.q1.content["section"])
+        self.assertEqual(PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED).count(), 3)
+        q1_card = Question.objects.get(pk=self.q1.question_id)
+        self.assertTrue(library.approval_is_current(q1_card))
+
+        # 3. Re-apply same tree preserves folder IDs (folders_updated=6, created=0)
+        old_ids = {f["name"]: f["id"] for f in applied["user_folders"]}
+        code, reapplied, _ = _run_json("folders", "apply-tree", "--file", str(tree_file), "--root", book_node)
+        self.assertEqual(code, 0, reapplied)
+        self.assertEqual(reapplied["summary"]["folders_updated"], 6)
+        self.assertEqual(reapplied["summary"]["folders_created"], 0)
+        new_ids = {f["name"]: f["id"] for f in reapplied["user_folders"]}
+        self.assertEqual(old_ids, new_ids)
+
+        # 4. Merge mode preserves unmentioned sibling
+        merge_file = self.temp / "merge_tree.json"
+        merge_file.write_text(
+            json.dumps([{"name": "第2篇 新增篇", "questions": [str(self.q2.pk)]}], ensure_ascii=False), encoding="utf-8"
+        )
+        code, merged, _ = _run_json(
+            "folders", "apply-tree", "--file", str(merge_file), "--root", book_node, "--mode", "merge"
+        )
+        self.assertEqual(code, 0, merged)
+        self.assertEqual(len(merged["user_folders"]), 7)
+
+        # Undo merge, undo reapplied, undo initial apply (which also rolls back section!)
+        _run_json("folders", "undo")
+        _run_json("folders", "undo")
+        code, final_undo, _ = _run_json("folders", "undo")
+        self.assertEqual(code, 0, final_undo)
+        self.assertEqual(final_undo["user_folders"], [])
+        self.assertNotIn(str(self.book.pk), final_undo["custom_tree_docs"])
+        self.q1.refresh_from_db()
+        self.assertEqual(self.q1.content["section"], "例1")
+
+    def test_mcp_apply_folder_tree_and_doc_tools(self):
+        client = cli.Client(self.live_server_url, agent="测试MCP")
+        reply = cli.mcp_handle(
+            client,
+            {
+                "jsonrpc": "2.0",
+                "id": 10,
+                "method": "tools/call",
+                "params": {
+                    "name": "apply_folder_tree",
+                    "arguments": {
+                        "root": "section:folders",
+                        "tree": [
+                            {
+                                "name": "高一数学总库",
+                                "docs": [f"book:{self.book.pk}"],
+                                "children": [{"name": "必刷题", "questions": [library.short_id_for(self.q3.pk)]}],
+                            }
+                        ],
+                    },
+                },
+            },
+        )
+        self.assertFalse(reply["result"]["isError"], reply)
+        res = json.loads(reply["result"]["content"][0]["text"])
+        root_uf = [f for f in res["user_folders"] if f["name"] == "高一数学总库"][0]
+        self.assertEqual(res["doc_placements"][str(self.book.pk)]["parentId"], root_uf["id"])
+
+        reply2 = cli.mcp_handle(
+            client,
+            {
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "tools/call",
+                "params": {
+                    "name": "manage_folder",
+                    "arguments": {
+                        "action": "reorder",
+                        "parent_id": root_uf["id"],
+                        "order": [f"book:{self.book.pk}", "必刷题"],
+                    },
+                },
+            },
+        )
+        self.assertFalse(reply2["result"]["isError"], reply2)
+        res2 = json.loads(reply2["result"]["content"][0]["text"])
+        self.assertEqual(res2["doc_placements"][str(self.book.pk)]["sortOrder"], 0)
+        child_uf = [f for f in res2["user_folders"] if f["name"] == "必刷题"][0]
+        self.assertEqual(child_uf["sortOrder"], 10)

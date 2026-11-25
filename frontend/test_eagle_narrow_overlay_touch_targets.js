@@ -199,7 +199,7 @@ assertInMedia(
 );
 assertInMedia(
   "max-width: 640px",
-  /button\[title="打开试题篮"\][^{]*\{[^}]*min-height:\s*32px/,
+  /(?:button\[title="打开试题篮"\]|#btnOpenBasket)[^{]*\{[^}]*min-height:\s*32px/,
   "顶栏试题篮入口按钮抬到 32px"
 );
 
