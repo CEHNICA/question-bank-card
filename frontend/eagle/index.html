@@ -1087,29 +1087,6 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
               </svg>
             </button>
-
-            <select
-              id="excludeUsedSelect"
-              aria-label="排除已用题目"
-              onchange="handleExcludeUsedChange(this.value)"
-              title="防撞车：排除近期已组卷印发的题目"
-              class="h-6 px-1.5 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-medium focus:border-emerald-500 outline-none cursor-pointer shrink-0"
-            >
-              <option value="">不排除已用</option>
-              <option value="30">排除近 30 天用题</option>
-              <option value="90">排除近 90 天用题</option>
-              <option value="all">排除全部历史用题</option>
-            </select>
-
-            <button
-              id="btnUsageHistoryModal"
-              type="button"
-              onclick="openUsageHistoryModal()"
-              title="查看或管理历史组卷用题记录（同卷多次导出已自动合并）"
-              class="inline-flex items-center gap-1 h-6 px-2 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-medium cursor-pointer transition-colors shrink-0 whitespace-nowrap"
-            >
-              <span>🕒</span><span class="hidden xl:inline">用题记录</span>
-            </button>
           </div>
 
           <div class="flex items-center gap-2 text-[11px] text-slate-500 shrink-0 whitespace-nowrap eagle-toolbar-right">
@@ -1201,6 +1178,13 @@
                   placeholder="搜索标签 (按住 Alt 点击设为排除)..."
                   class="w-full px-2.5 py-1 text-xs rounded-md border border-slate-200 bg-slate-50 focus:bg-white focus:outline-hidden focus:border-emerald-500"
                 >
+                <div class="pt-0.5 pb-1.5 border-b border-slate-100 space-y-1">
+                  <div class="flex items-center justify-between text-[10px] text-slate-400">
+                    <span class="font-bold">按打标时长筛选</span>
+                    <button type="button" onclick="setTagAgePreset('')" class="hover:text-rose-600 cursor-pointer">清除</button>
+                  </div>
+                  <div id="dropTagAgeRow" class="flex flex-wrap gap-1"></div>
+                </div>
                 <div id="dropTagListContainer" class="max-h-56 overflow-y-auto space-y-2 pr-1"></div>
               </div>
             </div>
@@ -1289,6 +1273,49 @@
                 <div class="text-[10px] font-bold text-slate-400 px-1 pt-0.5">题面形式</div>
                 <button id="btnBodySourceImage" onclick="toggleBodyModeFilter('source_image')" class="w-full text-left px-2 py-1.5 rounded-md border text-xs cursor-pointer transition-colors">仅看原图题</button>
                 <button id="btnBodyText" onclick="toggleBodyModeFilter('text')" class="w-full text-left px-2 py-1.5 rounded-md border text-xs cursor-pointer transition-colors">仅看文字题</button>
+              </div>
+            </div>
+
+            <!-- 6. 排除已用胶囊（从顶栏收纳至筛选面板） -->
+            <div class="relative dropdown-parent">
+              <button
+                id="pillBtnUsage"
+                type="button"
+                onclick="toggleFilterDropdown('usage', event)"
+                class="relative z-[60] flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer"
+                title="防撞车：排除近期已组卷印发的题目或管理用题记录"
+              >
+                <span>🕒</span>
+                <span id="pillLabelUsage">排除已用</span>
+                <span id="pillBadgeUsage" class="hidden min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold leading-none inline-flex items-center justify-center"></span>
+                <svg class="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+              </button>
+              <div id="dropdownUsage" onclick="event.stopPropagation()" class="hidden dropdown-menu absolute left-0 top-full mt-1.5 w-56 rounded-xl bg-white border border-slate-200 shadow-2xl p-2.5 z-50 space-y-2 text-xs">
+                <div class="text-[10px] font-bold text-slate-400 px-0.5">防撞车筛选</div>
+                <select
+                  id="excludeUsedSelect"
+                  aria-label="排除已用题目"
+                  onchange="handleExcludeUsedChange(this.value)"
+                  title="防撞车：排除近期已组卷印发的题目"
+                  class="w-full h-7 px-2 rounded-md border border-slate-200 bg-slate-50 hover:bg-white text-slate-700 text-xs font-medium focus:border-emerald-500 outline-none cursor-pointer"
+                >
+                  <option value="">不排除已用</option>
+                  <option value="30">排除近 30 天用题</option>
+                  <option value="90">排除近 90 天用题</option>
+                  <option value="all">排除全部历史用题</option>
+                </select>
+                <div class="border-t border-slate-100 pt-1.5">
+                  <button
+                    id="btnUsageHistoryModal"
+                    type="button"
+                    onclick="openUsageHistoryModal()"
+                    title="查看或管理历史组卷用题记录（同卷多次导出已自动合并）"
+                    class="w-full flex items-center justify-between px-2 py-1.5 rounded-md bg-slate-50 hover:bg-emerald-50 hover:text-emerald-800 border border-slate-200/80 text-slate-700 text-xs font-medium cursor-pointer transition-colors"
+                  >
+                    <span>🕒 查看 / 管理用题记录</span>
+                    <span class="text-[10px] text-slate-400">▸</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -2591,8 +2618,9 @@
       selectedTagIds: [],
       excludedTagIds: [],
       tagLogic: 'and',
+      tagAgePreset: '',          // '' | 'within_7d' | 'within_30d' | 'older_30d' | 'older_90d' | 'older_180d' | 'older_365d'
       difficultyMinStar: null,   // N★及以上；与 difficultyStars（精确匹配）互斥
-      sortBy: 'number', // number, difficulty, year
+      sortBy: 'number', // number, year, published_desc, tagged_desc, tagged_asc, difficulty
       // 文件夹树（B3）：试卷 / 知识点 / 方法 / 自定义文件夹 统一成 Eagle 式文件夹
       folderType: '',      // all | paper | tag | group | smart | custom | userfolder | book | bookchapter | booksection
       folderPaperIds: [],  // 选中的试卷子集
@@ -4031,6 +4059,27 @@
       return '';
     }
 
+    function extractQuestionYear(item, content, originSource) {
+      const candidates = [
+        originSource,
+        content && content.origin,
+        item && item.origin,
+        item && item.source_filename,
+        content && content.source_filename,
+        content && content.section
+      ];
+      for (const raw of candidates) {
+        const text = String(raw || '');
+        if (!text) continue;
+        const m = text.match(/(?:^|[^0-9])(199\d|20[0-3]\d)(?:[^0-9]|$)/);
+        if (m) {
+          const parsed = Number(m[1]);
+          if (Number.isInteger(parsed) && parsed >= 1990 && parsed <= 2039) return parsed;
+        }
+      }
+      return 0;
+    }
+
     function convertLibraryListItem(item, idx) {
       const c = item.content || {};
       const qNum = item.number || (idx + 1);
@@ -4093,6 +4142,8 @@
           color: a.tag.color || '',
           source: a.source || '',
           needsReview: !!a.needs_review,
+          createdAt: a.created_at || '',
+          updatedAt: a.updated_at || '',
           useCount: 0,
           isPinned: false
         }));
@@ -4129,7 +4180,7 @@
         sourcePageIdx,
         paperPage: (item.page && item.page > 0) ? item.page : 0,
         source: originSource,
-        year: 2024,
+        year: (typeof extractQuestionYear === 'function') ? extractQuestionYear(item, c, originSource) : 0,
         score: item.score || ((item.question_type === 'free_response') ? 12 : 5),
         rawStem,
         rawOptions,
@@ -4494,6 +4545,9 @@
       }
       if (Array.isArray(filterState.excludedTagIds) && filterState.excludedTagIds.length) {
         p.set('tag_not', filterState.excludedTagIds.join(','));
+      }
+      if (filterState.tagAgePreset) {
+        p.set('tag_age', filterState.tagAgePreset);
       }
       return p;
     }
@@ -5203,11 +5257,250 @@
       });
     }
 
+    const TAG_AGE_OPTIONS = [
+      { key: '', label: '不限', shortLabel: '不限' },
+      { key: 'within_7d', label: '近 7 天内打标', shortLabel: '近7天' },
+      { key: 'within_30d', label: '近 30 天内打标', shortLabel: '近30天' },
+      { key: 'older_30d', label: '超过 30 天前打标', shortLabel: '>30天' },
+      { key: 'older_90d', label: '超过 90 天前打标', shortLabel: '>90天' },
+      { key: 'older_180d', label: '超过半年（180 天）前打标', shortLabel: '>半年' },
+      { key: 'older_365d', label: '超过 1 年前打标', shortLabel: '>1年' }
+    ];
+
+    function tagAgePresetLabel(preset) {
+      const hit = TAG_AGE_OPTIONS.find(opt => opt.key === preset);
+      return hit ? hit.label : '';
+    }
+
+    function formatTagExactDateTime(isoStr) {
+      const ms = Date.parse(String(isoStr || ''));
+      if (!Number.isFinite(ms)) return '';
+      const d = new Date(ms);
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    function formatTagRelativeAndExactTime(isoStr, nowMs = Date.now()) {
+      const ms = Date.parse(String(isoStr || ''));
+      if (!Number.isFinite(ms)) {
+        return { relative: '打标时间未记录', exact: '', ms: 0 };
+      }
+      const d = new Date(ms);
+      const now = new Date(nowMs);
+      const pad = (n) => String(n).padStart(2, '0');
+      const hhmm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      const exact = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hhmm}`;
+      const diffMs = Math.max(0, nowMs - ms);
+      const diffDays = Math.floor(diffMs / 86400000);
+      const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+      const yest = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+      const isYesterday = d.getFullYear() === yest.getFullYear() && d.getMonth() === yest.getMonth() && d.getDate() === yest.getDate();
+
+      let relative = '';
+      if (sameDay) {
+        if (diffMs < 60000) relative = '刚刚';
+        else if (diffMs < 3600000) relative = `${Math.floor(diffMs / 60000)} 分钟前`;
+        else relative = `今天 ${hhmm}`;
+      } else if (isYesterday) {
+        relative = `昨天 ${hhmm}`;
+      } else if (diffDays < 30) {
+        relative = `${Math.max(1, diffDays)} 天前`;
+      } else if (diffDays < 365) {
+        const months = Math.max(1, Math.floor(diffDays / 30));
+        const remDays = diffDays - months * 30;
+        relative = remDays >= 10 ? `${months} 个月 ${remDays} 天前` : `${months} 个月前`;
+      } else {
+        const years = Math.floor(diffDays / 365);
+        const remMonths = Math.floor((diffDays - years * 365) / 30);
+        relative = remMonths > 0 ? `${years} 年 ${remMonths} 个月前` : `${years} 年前`;
+      }
+      return { relative, exact, ms };
+    }
+
+    function formatTagSourceLabel(source) {
+      const map = {
+        human: '人工添加',
+        ai_accepted: '人工采纳 AI 建议',
+        legacy_human: '旧版人工编辑',
+        legacy_unknown: '旧标签待核对'
+      };
+      return map[String(source || '')] || '人工添加';
+    }
+
+    function focusQuestionTagOnly(tagId) {
+      hideEagleContextMenu();
+      const tid = String(tagId || '');
+      if (!tid) return;
+      const nodeId = 'tag:' + tid;
+      if (typeof folderNodeRegistry !== 'undefined' && folderNodeRegistry.has(nodeId)) {
+        applyFolderNode(nodeId);
+        return;
+      }
+      filterState.selectedTagIds = [tid];
+      filterState.excludedTagIds = filterState.excludedTagIds.filter(id => id !== tid);
+      syncFilterDropdownStates();
+      applyFilters();
+    }
+
+    function filterByQuestionTag(tagId, mode) {
+      hideEagleContextMenu();
+      const tid = String(tagId || '');
+      if (!tid) return;
+      if (mode === 'exclude') {
+        if (!filterState.excludedTagIds.includes(tid)) filterState.excludedTagIds.push(tid);
+        filterState.selectedTagIds = filterState.selectedTagIds.filter(id => id !== tid);
+      } else {
+        if (!filterState.selectedTagIds.includes(tid)) filterState.selectedTagIds.push(tid);
+        filterState.excludedTagIds = filterState.excludedTagIds.filter(id => id !== tid);
+      }
+      syncFilterDropdownStates();
+      applyFilters();
+    }
+
+    function filterByQuestionTagWithAge(tagId, preset) {
+      hideEagleContextMenu();
+      const tid = String(tagId || '');
+      if (tid) {
+        if (!filterState.selectedTagIds.includes(tid)) filterState.selectedTagIds.push(tid);
+        filterState.excludedTagIds = filterState.excludedTagIds.filter(id => id !== tid);
+      }
+      filterState.tagAgePreset = String(preset || '');
+      syncFilterDropdownStates();
+      applyFilters();
+    }
+
+    function sortByQuestionTagTime(tagId, sortMode) {
+      hideEagleContextMenu();
+      const tid = String(tagId || '');
+      const alreadyTargeted = tid && (
+        (filterState.selectedTagIds || []).includes(tid) ||
+        (filterState.folderTagIds || []).includes(tid)
+      );
+      if (tid && !alreadyTargeted) {
+        filterState.selectedTagIds = [tid];
+        filterState.excludedTagIds = filterState.excludedTagIds.filter(id => id !== tid);
+      }
+      filterState.sortBy = sortMode === 'tagged_asc' ? 'tagged_asc' : 'tagged_desc';
+      syncFilterDropdownStates();
+      applyFilters();
+    }
+
+    async function copyTagNameToClipboard(name) {
+      hideEagleContextMenu();
+      const text = String(name || '').trim();
+      if (!text) return;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        }
+        showToast(`已复制标签「${text}」`, 'success');
+      } catch (err) {
+        showToast('复制标签名失败：' + (err?.message || err), 'error');
+      }
+    }
+
+    async function removeTagFromQuestion(qid, tagId) {
+      hideEagleContextMenu();
+      const targetQ = questionsData.find(item => String(item.id) === String(qid));
+      if (!targetQ || !tagId) return;
+      const ok = await assignTagsToQuestion(targetQ, [], [tagId]);
+      if (ok) showToast('已从本题移除标签', 'success');
+    }
+
+    function openQuestionTagContextMenu(e, qid, tagId) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      const q = questionsData.find(item => String(item.id) === String(qid));
+      if (!q) return;
+      const tagObj = (q.tags || []).find(t => t && String(t.id) === String(tagId));
+      if (!tagObj) return;
+
+      const menuEl = document.getElementById('eagleContextMenu');
+      if (!menuEl) return;
+
+      const timeInfo = formatTagRelativeAndExactTime(tagObj.createdAt);
+      const updInfo = tagObj.updatedAt ? formatTagRelativeAndExactTime(tagObj.updatedAt) : null;
+      const showUpdated = Boolean(
+        updInfo && updInfo.ms && timeInfo.ms && (updInfo.ms - timeInfo.ms > 60000)
+      );
+      const srcLabel = formatTagSourceLabel(tagObj.source);
+      const kindLabel = tagObj.kind === 'method' ? '解题方法' : (tagObj.kind === 'knowledge' ? '知识点' : '标签');
+      const dotColor = /^#[0-9a-fA-F]{6}$/.test(String(tagObj.color || '')) ? tagObj.color : '#10b981';
+      const safeQid = escapeInlineJsArg(q.id);
+      const safeTagId = escapeInlineJsArg(tagObj.id);
+      const safeTagName = escapeInlineJsArg(tagObj.name || '');
+
+      const ageItemsHtml = TAG_AGE_OPTIONS.map(opt => {
+        const active = (filterState.tagAgePreset || '') === opt.key && (filterState.selectedTagIds || []).includes(tagObj.id);
+        const cls = active ? 'bg-emerald-50 text-emerald-800 font-semibold' : 'text-slate-700 hover:bg-slate-100';
+        const check = active ? '<span class="text-emerald-600 font-bold text-xs">\u2713</span>' : '';
+        return `<div data-ctx-item="1" onclick="filterByQuestionTagWithAge('${safeTagId}', '${opt.key}')" class="flex items-center justify-between px-2.5 py-1.5 rounded cursor-pointer transition-colors ${cls}"><span class="truncate">${escapeHtml(opt.label)}</span>${check}</div>`;
+      }).join('');
+
+      const ageFlyout = eagleMenuFlyout({
+        icon: '🕒',
+        title: '按打标时长筛选',
+        current: filterState.tagAgePreset ? (TAG_AGE_OPTIONS.find(o => o.key === filterState.tagAgePreset)?.shortLabel || '') : '',
+        itemsHtml: ageItemsHtml
+      });
+
+      const sortFlyout = eagleMenuFlyout({
+        icon: '↕️',
+        title: '按此标签时间排序',
+        itemsHtml: `
+          <div data-ctx-item="1" onclick="sortByQuestionTagTime('${safeTagId}', 'tagged_desc')" class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">
+            <span class="text-sm shrink-0">🏷️</span><span class="truncate">最新打标优先</span>
+          </div>
+          <div data-ctx-item="1" onclick="sortByQuestionTagTime('${safeTagId}', 'tagged_asc')" class="flex items-center gap-2 px-2.5 py-1.5 rounded text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors">
+            <span class="text-sm shrink-0">⏳</span><span class="truncate">最早打标优先（翻旧账）</span>
+          </div>
+        `
+      });
+
+      menuEl.innerHTML = `
+        <div class="px-3 py-2 border-b border-slate-100 bg-slate-50/90 rounded-t-lg space-y-1">
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-1.5 min-w-0">
+              <span class="w-2 h-2 rounded-full shrink-0" style="background:${dotColor}"></span>
+              <span class="font-bold text-slate-900 text-xs truncate">${escapeHtml(tagObj.name || '')}</span>
+            </div>
+            <span class="px-1.5 py-0.5 rounded bg-slate-200/70 text-slate-600 text-[10px] font-medium shrink-0">${kindLabel}</span>
+          </div>
+          <div id="tagCtxTimestampInfo" class="rounded-md bg-white border border-slate-200/80 px-2 py-1.5 space-y-0.5 select-text">
+            <div class="flex items-center justify-between gap-2 text-[11px] font-semibold text-slate-800">
+              <span>🕒 ${escapeHtml(timeInfo.ms ? ('打标于 ' + timeInfo.relative) : timeInfo.relative)}</span>
+            </div>
+            ${timeInfo.exact ? `<div class="text-[10px] text-slate-500 font-mono">${escapeHtml(timeInfo.exact)} · ${escapeHtml(srcLabel)}</div>` : `<div class="text-[10px] text-slate-400">${escapeHtml(srcLabel)}</div>`}
+            ${showUpdated ? `<div class="text-[10px] text-slate-400 font-mono">最近更新：${escapeHtml(updInfo.exact)}</div>` : ''}
+          </div>
+        </div>
+        <div class="p-1 space-y-0.5">
+          ${treeMenuItem('📂', '只看该标签（含子标签）', `focusQuestionTagOnly('${safeTagId}')`)}
+          ${treeMenuItem('🔍', '在当前结果中筛选此标签', `filterByQuestionTag('${safeTagId}', 'select')`)}
+          ${treeMenuItem('🚫', '从当前结果排除此标签', `filterByQuestionTag('${safeTagId}', 'exclude')`)}
+          ${treeMenuItem('📋', '复制标签名', `copyTagNameToClipboard('${safeTagName}')`)}
+          <div data-ctx-sep="1" class="my-1 border-t border-slate-100"></div>
+          ${ageFlyout}
+          ${sortFlyout}
+          <div data-ctx-sep="1" class="my-1 border-t border-slate-100"></div>
+          <div data-ctx-item="1" onclick="removeTagFromQuestion('${safeQid}', '${safeTagId}')" class="flex items-center gap-2 px-2.5 py-1.5 rounded text-rose-600 hover:bg-rose-50 cursor-pointer transition-colors font-medium">
+            <span class="text-sm shrink-0">✕</span><span class="truncate">从本题移除此标签</span>
+          </div>
+        </div>
+      `;
+      positionEagleContextMenu(menuEl, e, 260, 340);
+    }
+
     function questionSortMenuBlock() {
       const modes = [
         ['number', '\u{1F522}', '题号升序'],
-        ['difficulty', '\u2B50', '评分由高到低'],
-        ['year', '\u{1F4C5}', '最新年份优先']
+        ['year', '\u{1F4C5}', '最新年份优先'],
+        ['published_desc', '\u{1F195}', '最近入库优先'],
+        ['tagged_desc', '\u{1F3F7}\uFE0F', '最近打标优先'],
+        ['tagged_asc', '\u23F3', '最早打标优先'],
+        ['difficulty', '\u2B50', '评分由高到低']
       ];
       const current = (modes.find(([mode]) => mode === filterState.sortBy) || modes[0])[2];
       let itemsHtml = '';
@@ -7245,7 +7538,66 @@
         }
       }
 
+      if (s.tagAgePreset && !questionMatchesTagAgePreset(q, s)) {
+        return false;
+      }
+
       return true;
+    }
+
+    function questionTagMatchesAge(tagObj, preset, nowMs = Date.now()) {
+      const p = String(preset || '').trim();
+      if (!p) return true;
+      const ms = Date.parse(String((tagObj && tagObj.createdAt) || ''));
+      if (!Number.isFinite(ms)) return false;
+      const ageMs = nowMs - ms;
+      const dayMs = 86400000;
+      if (p === 'within_7d') return ageMs <= 7 * dayMs;
+      if (p === 'within_30d') return ageMs <= 30 * dayMs;
+      if (p === 'older_30d') return ageMs >= 30 * dayMs;
+      if (p === 'older_90d') return ageMs >= 90 * dayMs;
+      if (p === 'older_180d') return ageMs >= 180 * dayMs;
+      if (p === 'older_365d') return ageMs >= 365 * dayMs;
+      return true;
+    }
+
+    function questionTargetTagsForSpec(q, spec) {
+      const allTags = (q && Array.isArray(q.tags)) ? q.tags.filter(t => t && !t.needsReview) : [];
+      const s = spec || filterState || {};
+      const sel = Array.isArray(s.selectedTagIds) ? s.selectedTagIds : [];
+      const folderTags = Array.isArray(s.folderTagIds) ? s.folderTagIds : [];
+      const targetedIds = sel.length ? sel : folderTags;
+      if (targetedIds.length) {
+        const idSet = new Set(targetedIds.map(String));
+        return allTags.filter(t => idSet.has(String(t.id)));
+      }
+      return allTags;
+    }
+
+    function questionMatchesTagAgePreset(q, spec, nowMs = Date.now()) {
+      const s = spec || {};
+      const preset = String(s.tagAgePreset || '').trim();
+      if (!preset) return true;
+      const sel = Array.isArray(s.selectedTagIds) ? s.selectedTagIds : [];
+      const targets = questionTargetTagsForSpec(q, s);
+      if (!targets.length) return false;
+      if (sel.length && (s.tagLogic || 'and') === 'and') {
+        const byId = new Map(targets.map(t => [String(t.id), t]));
+        return sel.every(id => {
+          const t = byId.get(String(id));
+          return t && questionTagMatchesAge(t, preset, nowMs);
+        });
+      }
+      return targets.some(t => questionTagMatchesAge(t, preset, nowMs));
+    }
+
+    function questionRelevantTagTimeMs(q, mode, spec) {
+      const targets = questionTargetTagsForSpec(q, spec || filterState);
+      const timestamps = targets
+        .map(t => Date.parse(String((t && t.createdAt) || '')))
+        .filter(ms => Number.isFinite(ms));
+      if (!timestamps.length) return null;
+      return mode === 'tagged_asc' ? Math.min(...timestamps) : Math.max(...timestamps);
     }
 
     /**
@@ -7330,9 +7682,29 @@
         const order = new Map(readRecentQuestions().map((x, i) => [String(x.id), i]));
         list.sort((a, b) => (order.get(String(a.id)) ?? 9999) - (order.get(String(b.id)) ?? 9999));
       } else if (filterState.sortBy === 'difficulty') {
-        list.sort((a, b) => b.difficultyStars - a.difficultyStars);
+        list.sort((a, b) => (b.difficultyStars - a.difficultyStars) || (a.questionNumber - b.questionNumber));
       } else if (filterState.sortBy === 'year') {
-        list.sort((a, b) => (b.year || 0) - (a.year || 0));
+        list.sort((a, b) => ((b.year || 0) - (a.year || 0)) || (a.questionNumber - b.questionNumber));
+      } else if (filterState.sortBy === 'published_desc') {
+        list.sort((a, b) => (questionPublishedMs(b) - questionPublishedMs(a)) || (a.questionNumber - b.questionNumber));
+      } else if (filterState.sortBy === 'tagged_desc') {
+        list.sort((a, b) => {
+          const ta = questionRelevantTagTimeMs(a, 'tagged_desc', filterState);
+          const tb = questionRelevantTagTimeMs(b, 'tagged_desc', filterState);
+          if (ta === null && tb === null) return a.questionNumber - b.questionNumber;
+          if (ta === null) return 1;
+          if (tb === null) return -1;
+          return (tb - ta) || (a.questionNumber - b.questionNumber);
+        });
+      } else if (filterState.sortBy === 'tagged_asc') {
+        list.sort((a, b) => {
+          const ta = questionRelevantTagTimeMs(a, 'tagged_asc', filterState);
+          const tb = questionRelevantTagTimeMs(b, 'tagged_asc', filterState);
+          if (ta === null && tb === null) return a.questionNumber - b.questionNumber;
+          if (ta === null) return 1;
+          if (tb === null) return -1;
+          return (ta - tb) || (a.questionNumber - b.questionNumber);
+        });
       } else {
         list.sort((a, b) => a.questionNumber - b.questionNumber);
       }
@@ -7624,6 +7996,7 @@
             <div class="flex flex-wrap gap-1 items-center">
               ${(q.tags || []).map(t => {
                 const tagName = typeof t === 'string' ? t : (t.name || '');
+                const tagId = (typeof t === 'object' && t && t.id) ? String(t.id) : '';
                 const tagColor = (typeof t === 'object' && t.color) ? t.color : 'slate';
                 const colorMap = {
                   emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200/80',
@@ -7633,8 +8006,11 @@
                   slate: 'bg-slate-100 text-slate-600 border-slate-200/80'
                 };
                 const badgeCls = colorMap[tagColor] || colorMap.slate;
+                const ctxAttr = tagId
+                  ? ` oncontextmenu="openQuestionTagContextMenu(event, '${escapeInlineJsArg(q.id)}', '${escapeInlineJsArg(tagId)}')"`
+                  : '';
                 return `
-                  <span class="px-2 py-0.5 rounded text-[11px] font-medium border ${badgeCls} transition-colors">
+                  <span${ctxAttr} class="px-2 py-0.5 rounded text-[11px] font-medium border ${badgeCls} transition-colors cursor-context-menu">
                     ${escapeHtml(tagName)}
                   </span>
                 `;
@@ -12276,7 +12652,7 @@
           tagsContainer.innerHTML = `<span class="text-slate-400 italic text-[11px]">${isBatch ? '在下方输入将批量追加标签' : '暂无标签'}</span>`;
         } else {
           tagsContainer.innerHTML = tags.map(t => `
-            <span class="inline-flex items-center gap-1 rounded bg-emerald-50 text-emerald-800 px-2 py-0.5 text-[11px] font-medium" title="${escapeHtml(t.name)}">
+            <span oncontextmenu="openQuestionTagContextMenu(event, '${escapeInlineJsArg(activeQ.id)}', '${escapeInlineJsArg(t.id)}')" class="inline-flex items-center gap-1 rounded bg-emerald-50 text-emerald-800 px-2 py-0.5 text-[11px] font-medium cursor-context-menu" title="${escapeHtml(t.name)}">
               <span>${escapeHtml(t.name)}</span>
               <button onclick="removeTagFromCurrent('${t.id}')" class="text-emerald-400 hover:text-emerald-800 cursor-pointer" title="移除该标签">×</button>
             </span>
@@ -12478,6 +12854,8 @@
           color: a.tag.color || '',
           source: a.source || '',
           needsReview: !!a.needs_review,
+          createdAt: a.created_at || '',
+          updatedAt: a.updated_at || '',
           useCount: 0,
           isPinned: false
         }));
@@ -14539,10 +14917,12 @@
         selectedTagIds: filterState.selectedTagIds.slice(),
         excludedTagIds: filterState.excludedTagIds.slice(),
         tagLogic: filterState.tagLogic,
+        tagAgePreset: filterState.tagAgePreset || '',
         sortBy: filterState.sortBy,
         datePreset: filterState.datePreset || '',
         dateFrom: filterState.dateFrom || '',
-        dateTo: filterState.dateTo || ''
+        dateTo: filterState.dateTo || '',
+        excludeUsedMode: filterState.excludeUsedMode || ''
       };
     }
 
@@ -14684,12 +15064,15 @@
       filterState.selectedTagIds = (f.selectedTagIds || []).slice();
       filterState.excludedTagIds = (f.excludedTagIds || []).slice();
       filterState.tagLogic = f.tagLogic || 'and';
+      filterState.tagAgePreset = f.tagAgePreset || '';
       filterState.sortBy = f.sortBy || 'number';
       filterState.datePreset = f.datePreset || '';
       filterState.dateFrom = f.dateFrom || '';
       filterState.dateTo = f.dateTo || '';
+      filterState.excludeUsedMode = f.excludeUsedMode || '';
       filterState.folderType = 'custom';
       folderTreeState.activeId = 'custom:' + id;
+      syncExcludeUsedSelectUi();
       syncFilterDropdownStates();
       renderFolderTree();
       renderInlineActiveChips();
@@ -17312,6 +17695,7 @@
       return (
         (filterState.selectedTagIds || []).length +
         (filterState.excludedTagIds || []).length +
+        (filterState.tagAgePreset ? 1 : 0) +
         (filterState.questionTypes || []).length +
         (filterState.difficultyStars || []).length +
         (filterState.difficultyMinStar ? 1 : 0) +
@@ -17319,7 +17703,8 @@
         (filterState.hasAnalysis ? 1 : 0) +
         (filterState.hasOneNote ? 1 : 0) +
         (filterState.bodyMode ? 1 : 0) +
-        (filterState.datePreset ? 1 : 0)
+        (filterState.datePreset ? 1 : 0) +
+        (filterState.excludeUsedMode ? 1 : 0)
       );
     }
 
@@ -17336,11 +17721,12 @@
           el.textContent = '';
         }
       };
-      setBadge('pillBadgeTag', filterState.selectedTagIds.length + filterState.excludedTagIds.length, 'bg-emerald-500');
+      setBadge('pillBadgeTag', filterState.selectedTagIds.length + filterState.excludedTagIds.length + (filterState.tagAgePreset ? 1 : 0), 'bg-emerald-500');
       setBadge('pillBadgeType', filterState.questionTypes.length, 'bg-sky-500');
       setBadge('pillBadgeStar', filterState.difficultyStars.length + (filterState.difficultyMinStar ? 1 : 0), 'bg-amber-500');
       setBadge('pillBadgeStatus', (filterState.hasAnswer ? 1 : 0) + (filterState.hasAnalysis ? 1 : 0) + (filterState.hasOneNote ? 1 : 0) + (filterState.bodyMode ? 1 : 0), 'bg-teal-500');
       setBadge('pillBadgeDate', filterState.datePreset ? 1 : 0, 'bg-violet-500');
+      setBadge('pillBadgeUsage', filterState.excludeUsedMode ? 1 : 0, 'bg-amber-500');
       setBadge('filterPanelBadge', countContentFilters(), 'bg-emerald-500');
     }
 
@@ -17438,6 +17824,7 @@
         Boolean(filterState.folderTagIds && filterState.folderTagIds.length) ||
         Boolean(filterState.folderSections && filterState.folderSections.length) ||
         (filterState.folderType === 'all' && folderTreeState.activeId !== 'all') ||
+        Boolean(filterState.tagAgePreset) ||
         Boolean(filterState.excludeUsedMode)
       );
     }
@@ -17542,6 +17929,9 @@
       filterState.excludedTagIds.forEach(id => {
         tagChips.push(renderFilterChip('tagx', '🏷 −' + escapeHtml(filterTagName(id)), "removeFilterChip('excltag', '" + id + "')"));
       });
+      if (filterState.tagAgePreset) {
+        tagChips.push(renderFilterChip('tag', '🕒 ' + escapeHtml(tagAgePresetLabel(filterState.tagAgePreset)), "removeFilterChip('tag_age', '')"));
+      }
       // 一个维度只有一个值时，只画那一颗具体值，不再多画「标签·全含 / 题型 / 评分」组头。
       // 多值时才加组头，方便一次清掉整维。
       if (tagChips.length) {
@@ -17629,6 +18019,9 @@
         case 'excltag':
           filterState.excludedTagIds = filterState.excludedTagIds.filter(id => id !== val);
           break;
+        case 'tag_age':
+          filterState.tagAgePreset = '';
+          break;
         case 'answer':
           filterState.hasAnswer = false;
           break;
@@ -17648,6 +18041,7 @@
           break;
         case 'exclude_used':
           filterState.excludeUsedMode = '';
+          syncExcludeUsedSelectUi();
           break;
         case 'keyword':
           filterState.keyword = '';
@@ -17661,6 +18055,7 @@
           if (val === 'tag') {
             filterState.selectedTagIds = [];
             filterState.excludedTagIds = [];
+            filterState.tagAgePreset = '';
           } else if (val === 'type') {
             filterState.questionTypes = [];
           } else if (val === 'star') {
@@ -17692,6 +18087,7 @@
     function resetAllFilters() {
       filterState.selectedTagIds = [];
       filterState.excludedTagIds = [];
+      filterState.tagAgePreset = '';
       filterState.questionTypes = [];
       filterState.difficultyStars = [];
       filterState.difficultyMinStar = null;
@@ -17713,6 +18109,7 @@
       filterState.dateFrom = '';
       filterState.dateTo = '';
       filterState.excludeUsedMode = '';
+      syncExcludeUsedSelectUi();
       resetServerLibrarySearchState();
       folderTreeState.activeId = 'all';
 
@@ -17813,9 +18210,33 @@
       // 否则首次打开是空的（而且勾选态会跟真实状态对不上）。
       if (name === 'type') renderTypeFilterDropdownList();
       if (name === 'star') renderStarFilterDropdownList();
-      if (name === 'tag') renderTagFilterDropdownList();
+      if (name === 'tag') {
+        renderTagAgeFilterRow();
+        renderTagFilterDropdownList();
+      }
       if (name === 'date') syncDateFilterUI();
+      if (name === 'usage') syncExcludeUsedSelectUi();
       if (isHidden) drop.classList.remove('hidden');
+    }
+
+    function renderTagAgeFilterRow() {
+      const row = document.getElementById('dropTagAgeRow');
+      if (!row) return;
+      row.innerHTML = TAG_AGE_OPTIONS.map(opt => {
+        const active = (filterState.tagAgePreset || '') === opt.key;
+        const cls = active
+          ? 'bg-emerald-600 text-white border-emerald-600 font-semibold'
+          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100';
+        return `<button type="button" onclick="setTagAgePreset('${opt.key}')" class="px-1.5 py-0.5 rounded border text-[10px] cursor-pointer transition-colors ${cls}">${escapeHtml(opt.shortLabel)}</button>`;
+      }).join('');
+    }
+
+    function setTagAgePreset(preset) {
+      const clean = String(preset || '').trim();
+      filterState.tagAgePreset = (filterState.tagAgePreset === clean && clean !== '') ? '' : clean;
+      renderTagAgeFilterRow();
+      syncFilterDropdownStates();
+      applyFilters();
     }
 
     function renderTagFilterDropdownList() {
@@ -17947,6 +18368,7 @@
     }
 
     function syncFilterDropdownStates() {
+      renderTagAgeFilterRow();
       renderTypeFilterDropdownList();
       renderStarFilterDropdownList();
       const ansBtn = document.getElementById('btnRequireAnswer');

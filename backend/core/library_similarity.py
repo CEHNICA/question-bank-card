@@ -805,7 +805,7 @@ def merge_library_publications(keep_id: str, merge_ids: list[str]) -> dict[str, 
 
             for assign in LibraryTagAssignment.objects.filter(publication=victim, needs_review=False):
                 if assign.tag_id not in existing_tag_ids:
-                    LibraryTagAssignment.objects.create(
+                    adopted_row = LibraryTagAssignment.objects.create(
                         publication=keep_pub,
                         tag_id=assign.tag_id,
                         scope=deepcopy(assign.scope or {}),
@@ -815,8 +815,15 @@ def merge_library_publications(keep_id: str, merge_ids: list[str]) -> dict[str, 
                         evidence=assign.evidence,
                         needs_review=False,
                     )
+                    library_tagging.restore_assignment_timestamps(adopted_row, assign.created_at, assign.updated_at)
                     existing_tag_ids.add(assign.tag_id)
                     tags_adopted = True
+                elif assign.created_at is not None:
+                    kept_row = LibraryTagAssignment.objects.filter(publication=keep_pub, tag_id=assign.tag_id).first()
+                    if kept_row is not None and (
+                        kept_row.created_at is None or assign.created_at < kept_row.created_at
+                    ):
+                        library_tagging.restore_assignment_timestamps(kept_row, created_at=assign.created_at)
 
             library.withdraw(victim)
 

@@ -3,6 +3,20 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.3.1
+
+**标签打标时间右键查看、打标时间全链路保真与改题继承、真实年份/时间排序、标签时效筛选及筛选栏收口**
+
+- **仿 Eagle 标签右键菜单与打标时间透传（`library_tagging.py`、`library_browse.py`、`frontend/eagle/index.html`）**：
+  - `LibraryTagAssignment` 原有的 `created_at` 与 `updated_at` 统一透传至全量接口、`/api/library?slim=1` 列表瘦身载荷与单题/批量标签接口，老题库无需迁移即可直接回溯历史打标时间。
+  - `/eagle` 题卡底栏与右侧属性栏保持悬停纯净（不显示时间），右键点击任意标签胶囊弹出仿 Eagle 风格菜单：顶部展示相对时长、精确日期时间与来源，下方提供只看/筛选/排除、按打标时长筛选、按此标签时间排序、复制标签名与从本题移除快捷动作。
+- **打标时间全链路保真与「改题干后丢标签」P0 修复（`library.py`、`library_tagging.py`、`pipeline.py`、`library_similarity.py`）**：
+  - 修复 `library.publish()` 在编辑已入库题干生成新版时未继承旧版 `LibraryTagAssignment` 导致标签与时间丢失的问题；同步在撤销打标、原图 AI 转文字升级、重复题合并与单/批量标签合并中精确保留原始（或更早）打标时间。
+- **真实年份排序、打标/入库时间排序、标签时效筛选与顶栏收口（`library_browse.py`、`frontend/eagle/index.html`）**：
+  - 修复前端写死 `year: 2024` 导致「最新年份优先」失效的问题；新增「最近入库优先 / 最近打标优先 / 最早打标优先」排序及 `tag_age` 标签时效筛选（支持智能文件夹持久化）。
+  - 将「不排除已用」与「🕒 用题记录」从顶栏移入「筛选」展开栏的 `🕒 排除已用` 胶囊中，同步计入「筛选」徽标。
+
+
 ## 2.3.0
 
 **Word 双轨直读与答案同拆、Eagle 虚拟滚动、本地查重与一题多源证据归档、A3 双栏密封线考卷及 FTS5 万题按需检索**

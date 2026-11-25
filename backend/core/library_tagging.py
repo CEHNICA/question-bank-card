@@ -411,6 +411,69 @@ def suggestion_json(row: LibraryTagSuggestion, *, retired_index=None, include_sn
 _NOT_GIVEN = object()
 
 
+def _assignment_timestamps(row: LibraryTagAssignment) -> dict[str, str]:
+    return {
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+        "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+    }
+
+
+def restore_assignment_timestamps(
+    row: LibraryTagAssignment, created_at: datetime | str | None = None, updated_at: datetime | str | None = None
+) -> None:
+    """绕过 auto_now_add/auto_now，在重建或合并标签关联后精确还原原始打标时间。"""
+    updates: dict[str, datetime] = {}
+    for field, value in (("created_at", created_at), ("updated_at", updated_at)):
+        if value is None or value == "":
+            continue
+        if isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value)
+            except ValueError:
+                continue
+            updates[field] = parsed
+        elif isinstance(value, datetime):
+            updates[field] = value
+    if updates:
+        LibraryTagAssignment.objects.filter(pk=row.pk).update(**updates)
+        for field, value in updates.items():
+            setattr(row, field, value)
+
+
+def carry_assignments(source_pub: PublishedQuestion | None, target_pub: PublishedQuestion) -> int:
+    """将旧版本入库题的正式标签（含原始打标时间）幂等继承到新版本。"""
+    if source_pub is None or source_pub.pk == target_pub.pk:
+        return 0
+    rows = list(
+        LibraryTagAssignment.objects.filter(publication=source_pub).select_related("tag").order_by("created_at", "id")
+    )
+    if not rows:
+        return 0
+    carried = 0
+    for row in rows:
+        created_row, created = LibraryTagAssignment.objects.get_or_create(
+            publication=target_pub,
+            tag=row.tag,
+            defaults={
+                "scope": copy.deepcopy(row.scope or {}),
+                "source": row.source,
+                "generation_source": row.generation_source,
+                "rationale": row.rationale,
+                "evidence": row.evidence,
+                "needs_review": row.needs_review,
+                "source_snapshot": copy.deepcopy(row.source_snapshot or {}),
+            },
+        )
+        if created:
+            restore_assignment_timestamps(created_row, row.created_at, row.updated_at)
+            carried += 1
+        elif row.created_at and (created_row.created_at is None or row.created_at < created_row.created_at):
+            restore_assignment_timestamps(created_row, created_at=row.created_at)
+    if carried:
+        _sync_projection(target_pub.pk)
+    return carried
+
+
 def attach_to_publication_json(
     publication: PublishedQuestion,
     data: dict,
@@ -446,6 +509,7 @@ def attach_to_publication_json(
             "rationale": row.rationale,
             "evidence": row.evidence,
             "needs_review": row.needs_review,
+            **_assignment_timestamps(row),
         }
         for row in assignments
     ]
@@ -566,6 +630,7 @@ def _snapshot_assignments(publication):
             "evidence": row.evidence,
             "needs_review": row.needs_review,
             "source_snapshot": copy.deepcopy(row.source_snapshot),
+            **_assignment_timestamps(row),
         }
         for row in LibraryTagAssignment.objects.filter(publication=publication).order_by("created_at", "id")
     ]
@@ -714,6 +779,7 @@ def _replacement_result(operation, publication, *, replayed=False):
                 "rationale": row.rationale,
                 "evidence": row.evidence,
                 "needs_review": row.needs_review,
+                **_assignment_timestamps(row),
             }
             for row in publication.tag_assignments.select_related("tag").order_by("created_at", "id")
         ],
@@ -967,6 +1033,7 @@ def _assignment_snapshot(row):
         "evidence": row.evidence,
         "needs_review": row.needs_review,
         "source_snapshot": copy.deepcopy(row.source_snapshot),
+        **_assignment_timestamps(row),
     }
 
 
@@ -1225,13 +1292,20 @@ def _merge_catalogue_tags(source_ids, target_id):
         }
         if legacy_only:
             fields["rationale"] = ((base.rationale + "；") if base.rationale else "") + "人工整理历史标签"
+        earliest_created = min((row.created_at for row in assignments if row.created_at), default=None)
         LibraryTagAssignment.objects.filter(publication_id=key, tag_id__in=ids).delete()
         if target_row is None:
-            LibraryTagAssignment.objects.create(publication_id=key, tag=target, **fields)
+            merged_row = LibraryTagAssignment.objects.create(publication_id=key, tag=target, **fields)
+            if earliest_created is not None:
+                restore_assignment_timestamps(merged_row, created_at=earliest_created)
         else:
             for field, value in fields.items():
                 setattr(target_row, field, value)
             target_row.save(update_fields=[*fields, "updated_at"])
+            if earliest_created is not None and (
+                target_row.created_at is None or earliest_created < target_row.created_at
+            ):
+                restore_assignment_timestamps(target_row, created_at=earliest_created)
         after_revisions[key] = publication.tag_revision + 1
         _sync_projection(key)
     alias_candidates = [*(target.aliases or [])]
@@ -1463,6 +1537,7 @@ def catalogue_mutation(payload: dict) -> dict:
                         "evidence": assignment.evidence,
                         "needs_review": assignment.needs_review,
                         "source_snapshot": assignment.source_snapshot,
+                        **_assignment_timestamps(assignment),
                     },
                 }
                 other = LibraryTagAssignment.objects.filter(
@@ -1478,16 +1553,25 @@ def catalogue_mutation(payload: dict) -> dict:
                         "evidence": other.evidence,
                         "needs_review": other.needs_review,
                         "source_snapshot": other.source_snapshot,
+                        **_assignment_timestamps(other),
                     }
                     if other
                     else None
                 )
                 before["assignments"].append(snapshot)
                 if other:
+                    earlier_created = (
+                        assignment.created_at
+                        if assignment.created_at
+                        and (other.created_at is None or assignment.created_at < other.created_at)
+                        else None
+                    )
                     other.needs_review = False
                     other.source = LibraryTagAssignment.Source.LEGACY_HUMAN
                     other.rationale = (other.rationale + "；" if other.rationale else "") + "人工整理历史标签"
                     other.save(update_fields=["needs_review", "source", "rationale", "updated_at"])
+                    if earlier_created is not None:
+                        restore_assignment_timestamps(other, created_at=earlier_created)
                     assignment.delete()
                 else:
                     assignment.tag = target
@@ -1825,6 +1909,7 @@ def assignments_view(request, publication_id):
                         "rationale": row.rationale,
                         "evidence": row.evidence,
                         "needs_review": row.needs_review,
+                        **_assignment_timestamps(row),
                     }
                     for row in LibraryTagAssignment.objects.filter(publication=publication)
                     .select_related("tag")
@@ -1876,6 +1961,7 @@ def batch_assignments_view(request):
                                 "scope": link.scope,
                                 "source": link.source,
                                 "needs_review": link.needs_review,
+                                **_assignment_timestamps(link),
                             }
                             for link in LibraryTagAssignment.objects.filter(publication=row).select_related("tag")
                         ],
@@ -2011,7 +2097,7 @@ def undo_view(request):
                 _bump_publication(publication, expected)
                 LibraryTagAssignment.objects.filter(publication=publication).delete()
                 for entry in before.get(publication_id, []):
-                    LibraryTagAssignment.objects.create(
+                    restored = LibraryTagAssignment.objects.create(
                         publication=publication,
                         tag=LibraryTag.objects.get(pk=entry["tag_id"]),
                         scope=entry.get("scope") or {},
@@ -2022,6 +2108,7 @@ def undo_view(request):
                         needs_review=entry.get("needs_review", False),
                         source_snapshot=entry.get("source_snapshot") or {},
                     )
+                    restore_assignment_timestamps(restored, entry.get("created_at"), entry.get("updated_at"))
                 _sync_projection(publication.pk)
                 undone[publication_id] = expected + 1
                 if operation.action.startswith("suggestion:"):
@@ -2148,8 +2235,9 @@ def undo_catalogue_operation(operation):
                     ):
                         setattr(existing, field, row.get(field, {} if field in {"scope", "source_snapshot"} else ""))
                     existing.save()
+                    restore_assignment_timestamps(existing, row.get("created_at"), row.get("updated_at"))
                 else:
-                    LibraryTagAssignment.objects.create(
+                    restored_src = LibraryTagAssignment.objects.create(
                         publication=publication,
                         tag=tag,
                         scope=row.get("scope") or {},
@@ -2160,6 +2248,7 @@ def undo_catalogue_operation(operation):
                         needs_review=row.get("needs_review", False),
                         source_snapshot=row.get("source_snapshot") or {},
                     )
+                    restore_assignment_timestamps(restored_src, row.get("created_at"), row.get("updated_at"))
                 target_before = item.get("target_before")
                 if target_before:
                     target_tag = LibraryTag.objects.get(pk=target_before["tag_id"])
@@ -2179,6 +2268,9 @@ def undo_catalogue_operation(operation):
                             target_before.get(field, {} if field in {"scope", "source_snapshot"} else ""),
                         )
                     target_row.save()
+                    restore_assignment_timestamps(
+                        target_row, target_before.get("created_at"), target_before.get("updated_at")
+                    )
                 _sync_projection(publication.pk)
             _restore_tag(LibraryTag.objects.get(pk=before["source"]["id"]), before["source"])
             _restore_tag(LibraryTag.objects.get(pk=before["target"]["id"]), before["target"])
@@ -2212,7 +2304,7 @@ def undo_catalogue_operation(operation):
             _restore_tag(target, before["target"])
             LibraryTagAssignment.objects.filter(publication_id__in=revisions, tag_id=target_id).delete()
             for row in before.get("assignments", []):
-                LibraryTagAssignment.objects.create(
+                restored_batch = LibraryTagAssignment.objects.create(
                     id=row["id"],
                     publication_id=row["publication_id"],
                     tag_id=row["tag_id"],
@@ -2224,6 +2316,7 @@ def undo_catalogue_operation(operation):
                     needs_review=row.get("needs_review", False),
                     source_snapshot=row.get("source_snapshot") or {},
                 )
+                restore_assignment_timestamps(restored_batch, row.get("created_at"), row.get("updated_at"))
             for publication_id, expected_revision in revisions.items():
                 if (
                     PublishedQuestion.objects.filter(pk=publication_id, tag_revision=expected_revision).update(
@@ -2329,7 +2422,7 @@ def undo_catalogue_operation(operation):
                 )
                 tag.groups.set(tag_data.get("group_ids", []))
             for row in before.get("assignments", []):
-                LibraryTagAssignment.objects.create(
+                restored_deleted = LibraryTagAssignment.objects.create(
                     id=row.get("id") or uuid.uuid4(),
                     publication_id=row["publication_id"],
                     tag_id=row["tag_id"],
@@ -2341,6 +2434,7 @@ def undo_catalogue_operation(operation):
                     needs_review=row.get("needs_review", False),
                     source_snapshot=row.get("source_snapshot") or {},
                 )
+                restore_assignment_timestamps(restored_deleted, row.get("created_at"), row.get("updated_at"))
             for publication_id, expected_revision in after_revisions.items():
                 publication = PublishedQuestion.objects.get(pk=publication_id)
                 if (

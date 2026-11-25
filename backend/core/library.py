@@ -738,6 +738,11 @@ def publish(question: Question, *, queue_enrichment: bool = True) -> tuple[Publi
                     status=PublishedQuestion.Status.SUPERSEDED
                 )
                 library_fts.delete_publications(superseded_ids)
+            if latest is not None:
+                from . import library_tagging
+
+                if library_tagging.carry_assignments(latest, publication):
+                    publication.refresh_from_db()
             _materialize_word_solution_figures(question, publication)
             from . import library_similarity
 

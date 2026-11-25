@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 
 from django.db import models
-from django.db.models import Count, Exists, F, Max, Min, OuterRef
+from django.db.models import Count, Exists, F, Max, Min, OuterRef, Subquery
 from django.http import HttpResponseNotAllowed
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from . import features, library, library_ai_settings, library_jobs, qtypes
@@ -30,7 +32,16 @@ BULK_LIMIT_CAP = 1000
 # 那条详情接口走的是完整载荷，一个字段都没少。
 SLIM_DROP_CONTENT_KEYS = ("review", "source_group")
 SLIM_TAG_KEYS = ("id", "name", "kind", "color")
-SLIM_ASSIGNMENT_KEYS = ("source", "needs_review")
+SLIM_ASSIGNMENT_KEYS = ("source", "needs_review", "created_at", "updated_at")
+TAG_AGE_PRESETS: dict[str, tuple[str, int]] = {
+    "within_7d": ("gte", 7),
+    "within_30d": ("gte", 30),
+    "older_30d": ("lt", 30),
+    "older_90d": ("lt", 90),
+    "older_180d": ("lt", 180),
+    "older_365d": ("lt", 365),
+}
+TAG_TIME_SORTS = {"tagged_desc", "tagged_asc"}
 # 「原卷顺序」承诺的是这份资料上印出来的先后。试卷的题号本身就是那个先后，
 # 教材不是：每章的习题都从 1 重新编，真库两本教材里「第 1 题」各有 94 / 82 张，
 # 按题号排等于把各章的「第 1 题」堆在一起（698 张里只有 14 张落在书上位置）。
@@ -129,8 +140,17 @@ def library_rows(params, *, omit: str = ""):
                 continue
         return list(dict.fromkeys(result))
 
+    def _tag_age_filter_kwargs(raw: str) -> dict:
+        spec = TAG_AGE_PRESETS.get(str(raw or "").strip())
+        if spec is None:
+            return {}
+        op, days = spec
+        cutoff = timezone.now() - timedelta(days=days)
+        return {f"created_at__{op}": cutoff}
+
     if omit != "tag":
         all_ids, any_ids, excluded = tag_ids("tag_all"), tag_ids("tag_any"), tag_ids("tag_not")
+        age_kwargs = _tag_age_filter_kwargs(params.get("tag_age", ""))
         from .library_tagging import descendant_ids, relation_context
 
         context = relation_context() if all_ids or any_ids or excluded else {}
@@ -142,6 +162,7 @@ def library_rows(params, *, omit: str = ""):
                             publication_id=OuterRef("pk"),
                             tag_id__in=descendant_ids([tag_id], context=context),
                             needs_review=False,
+                            **age_kwargs,
                         )
                     )
                 )
@@ -152,7 +173,14 @@ def library_rows(params, *, omit: str = ""):
                         publication_id=OuterRef("pk"),
                         tag_id__in=descendant_ids(any_ids, context=context),
                         needs_review=False,
+                        **age_kwargs,
                     )
+                )
+            )
+        if age_kwargs and not all_ids and not any_ids:
+            rows = rows.filter(
+                Exists(
+                    LibraryTagAssignment.objects.filter(publication_id=OuterRef("pk"), needs_review=False, **age_kwargs)
                 )
             )
         if excluded:
@@ -224,6 +252,7 @@ def _active_facets(params) -> set[str]:
         active.add("body_mode")
     if (
         str(params.get("tag", "")).strip()
+        or str(params.get("tag_age", "")).strip() in TAG_AGE_PRESETS
         or params.get("untagged_knowledge") == "true"
         or params.get("tag_review") == "true"
     ):
@@ -658,6 +687,34 @@ def selected_tag_names(params) -> dict:
     return {tag_id: names[tag_id] for tag_id in dict.fromkeys(ids) if tag_id in names}
 
 
+def _apply_sort(rows, sort: str, params=None):
+    """应用列表排序；打标时间排序在有选中标签时优先按命中标签的打标时间排。"""
+    if sort in TAG_TIME_SORTS:
+        target_ids: list[str] = []
+        if params is not None:
+            for key in ("tag_all", "tag_any"):
+                raw = params.get(key, "")
+                values = raw if isinstance(raw, list) else str(raw or "").split(",")
+                for value in values:
+                    try:
+                        target_ids.append(str(uuid.UUID(str(value))))
+                    except (ValueError, TypeError, AttributeError):
+                        continue
+        assign_qs = LibraryTagAssignment.objects.filter(publication_id=OuterRef("pk"), needs_review=False)
+        if target_ids:
+            from .library_tagging import descendant_ids, relation_context
+
+            assign_qs = assign_qs.filter(tag_id__in=descendant_ids(target_ids, context=relation_context()))
+        if sort == "tagged_desc":
+            subq = Subquery(assign_qs.order_by("-created_at", "-id").values("created_at")[:1])
+            return rows.annotate(_tag_sort_ts=subq).order_by(
+                F("_tag_sort_ts").desc(nulls_last=True), "-published_at", "-id"
+            )
+        subq = Subquery(assign_qs.order_by("created_at", "id").values("created_at")[:1])
+        return rows.annotate(_tag_sort_ts=subq).order_by(F("_tag_sort_ts").asc(nulls_last=True), "published_at", "id")
+    return rows.order_by(*SORTS[sort])
+
+
 def library_list(request):
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
@@ -672,7 +729,7 @@ def library_list(request):
     except ValueError:
         return json_response({"error": "limit 与 offset 必须是整数"}, status=400)
     sort = request.GET.get("sort", "recent")
-    if sort not in SORTS:
+    if sort not in SORTS and sort not in TAG_TIME_SORTS:
         return json_response({"error": "sort 只能是 recent、source 或 number"}, status=400)
     query_raw = str(request.GET.get("q", "") or "").strip()
     search_engine = None
@@ -682,9 +739,9 @@ def library_list(request):
         base_rows = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
         rows = library_rows(request.GET)
         _, search_engine = library_fts.apply_fts_search(base_rows, query_raw)
-        rows = rows.order_by(*SORTS[sort])
+        rows = _apply_sort(rows, sort, request.GET)
     else:
-        rows = library_rows(request.GET).order_by(*SORTS[sort])
+        rows = _apply_sort(library_rows(request.GET), sort, request.GET)
     # 1.25.31：只取指定的几道题。后台刷新任务进度时用它，只读有任务的那几行，
     # 不再把屏上几百道题整屏重读一遍。编号先校验，非法值直接 400，不交给 ORM。
     wanted_param = request.GET.get("ids", "").strip()
@@ -707,7 +764,7 @@ def library_list(request):
     # content 这些大字段也带着走。只排编号时排序器只带 id 和排序键，
     # 810 道题两毫秒排完，回表取 150 行七毫秒。
     batch_ids = list(rows.values_list("id", flat=True)[offset : offset + limit])
-    picked = rows.filter(id__in=batch_ids).order_by(*SORTS[sort])
+    picked = _apply_sort(rows.filter(id__in=batch_ids), sort, request.GET)
     items = serialize_items(picked, slim=slim)
     next_offset = offset + len(items)
     if wanted_param:

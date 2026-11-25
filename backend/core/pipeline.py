@@ -5477,43 +5477,14 @@ def _has_library_ocr_upgrade(question: Question) -> bool:
 
 
 def _carry_tag_assignments_on_upgrade(source_pub_id: str, target_pub) -> None:
-    """原图版升级为文字版 v2 时，继承 v1 已贴的正式标签（保留来源并标为待核对）。"""
-    from .models import LibraryTagAssignment, PublishedQuestion
+    """原图版升级为文字版 v2 时，继承 v1 已贴的正式标签（保留原始打标时间与来源）。"""
+    from . import library_tagging
+    from .models import PublishedQuestion
 
     source_pub = PublishedQuestion.objects.filter(pk=source_pub_id).first()
     if source_pub is None:
         return
-    assignments = list(LibraryTagAssignment.objects.filter(publication=source_pub).select_related("tag"))
-    if not assignments:
-        return
-    for row in assignments:
-        LibraryTagAssignment.objects.get_or_create(
-            publication=target_pub,
-            tag=row.tag,
-            defaults={
-                "scope": deepcopy(row.scope or {}),
-                "source": row.source,
-                "generation_source": row.generation_source,
-                "rationale": row.rationale,
-                "evidence": row.evidence,
-                "needs_review": row.needs_review,
-                "source_snapshot": deepcopy(row.source_snapshot or {}),
-            },
-        )
-    tag_names = [
-        row.tag.name
-        for row in LibraryTagAssignment.objects.filter(publication=target_pub).select_related("tag")
-        if not row.needs_review
-    ]
-    if tag_names:
-        from . import library
-
-        extras = dict(target_pub.extras or {})
-        extras["tags"] = tag_names
-        target_pub.extras = extras
-        target_pub.tags_text = library.tags_text(tag_names)
-        target_pub.search_text = library._search_text(target_pub.content, extras)
-        target_pub.save(update_fields=["extras", "tags_text", "search_text"])
+    library_tagging.carry_assignments(source_pub, target_pub)
 
 
 def _cut_to_text(question: Question, fields: dict) -> None:

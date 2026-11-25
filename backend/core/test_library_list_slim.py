@@ -127,7 +127,11 @@ class SlimLibraryListTests(TestCase):
         row = assignments[0]
         self.assertEqual(set(row["tag"]), {"id", "name", "kind", "color"}, "标签芯片只认这四样")
         self.assertEqual(row["tag"]["name"], "勾股定理")
-        self.assertEqual(set(row), {"tag", "source", "needs_review"}, "AI 那几摊理由列表不读")
+        self.assertEqual(
+            set(row),
+            {"tag", "source", "needs_review", "created_at", "updated_at"},
+            "AI 那几摊理由列表不读，保留标签打标时间供右键与时间排序使用",
+        )
 
     # ---------- 瘦身模式留什么 ----------
 
