@@ -222,12 +222,13 @@ test("Eagle 万题连续虚拟滚动与公式缓存引擎", async (t) => {
     assert.ok(container.scrollTop >= 340 * 2 + 188, `上方卡片实测变高时应自动补偿 scrollTop，实际: ${container.scrollTop}`);
   });
 
-  await t.test("3. /eagle 页面集成契约：位置指示器、回车秒跳、全量全选且无生硬分页按钮", () => {
+  await t.test("3. /eagle 页面集成契约：全量全选；顶栏不再常驻题序/总数", () => {
     const eagleHtml = fs.readFileSync(path.join(__dirname, "eagle", "index.html"), "utf8");
     assert.match(eagleHtml, /<script src="\/eagle-virtual-list\.js"><\/script>/);
-    assert.match(eagleHtml, /id="eaglePositionIndicator"/);
-    assert.match(eagleHtml, /id="jumpQuestionIndexInput"/);
     assert.match(eagleHtml, /id="matchedQuestionCount"/);
+    assert.doesNotMatch(eagleHtml, /id="eaglePositionIndicator"/);
+    assert.doesNotMatch(eagleHtml, /id="btnMatchedCountJump"/);
+    assert.doesNotMatch(eagleHtml, /当前第/);
     assert.match(eagleHtml, /function jumpToQuestionOrder\(/);
     assert.match(
       eagleHtml,

@@ -16,9 +16,8 @@
 //
 // 修法：
 //   1) 搜索框容器去掉 min-w-[10rem] 硬下限（min-w-0），窄屏时能被压窄；
-//   2) 右组在窄屏瘦身：「共 N 题」<1024 隐藏、「全选」的计数 <1024 隐藏、
-//      「存视图」只留图标（<1024）。
-// 桌面端观感不变：搜索框本来就是 flex-1 + max-w-md，右组文字在 ≥1024 全显示。
+//   2) 右组在窄屏瘦身：「存视图」只留图标（<1024）；顶栏不再显示「共 N 题」；
+//      「全选」旁不再常驻「已勾选 N 题」，改悬停提示。
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -37,19 +36,18 @@ assert.doesNotMatch(
   "搜索框容器不能再有 min-w-[10rem] 硬下限"
 );
 
-// 2) 右组瘦身：「共 N 题」窄屏隐藏
-assert.match(
-  html,
-  /<span class="text-slate-400 hidden md:inline">\s*共 <strong id="matchedQuestionCount"/,
-  "「共 N 题」要在窄屏隐藏，否则右组 288px 不让步，左组被挤爆"
-);
+// 2) 顶栏不再显示「共 N 题」（左侧文件夹已有数字）；命中数只留隐藏节点给内部更新
+assert.match(html, /id="matchedQuestionCount"/);
+assert.doesNotMatch(html, /id="matchedCountJumpWrap"/);
+assert.doesNotMatch(html, /id="btnMatchedCountJump"/);
+assert.doesNotMatch(html, />\s*共\s*<strong id="matchedQuestionCount"/);
 
-// 3) 全选的计数窄屏隐藏（「全选」二字留着，别让人看不懂）
-assert.match(
-  html,
-  /<span>全选<span class="hidden lg:inline"> \(<span id="selectedCountText">/,
-  "全选的计数要在窄屏隐藏，但「全选」两个字要留着"
-);
+// 3) 「全选」只留二字；勾选数改悬停提示，不常驻括号文案
+assert.match(html, /id="selectAllLabel"/);
+assert.match(html, /data-tip-title="已勾选 0 题"/);
+assert.match(html, /<span>全选<\/span>/);
+assert.doesNotMatch(html, /id="selectedCountText"/);
+assert.match(html, /function syncSelectAllCountTip\(/);
 
 // 4) 存视图窄屏只留图标
 assert.match(

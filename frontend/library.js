@@ -2072,14 +2072,9 @@
     const chipColor = workspace.tagColor(tag, tagCatalogue.tags || []);
     if (chipColor) chip.style.setProperty("--tag-color", chipColor);
     chip.setAttribute("aria-haspopup", "dialog"); chip.setAttribute("aria-controls", "libraryTagHover"); chip.setAttribute("aria-expanded", "false");
-    chip.title = "浏览上级、下级；点击名称校正当前题标签";
-    chip.addEventListener("pointerenter", event => {
-      if (event.pointerType === "touch") return;
-      cancelTagHoverClose(); window.clearTimeout(tagHoverOpenTimer);
-      tagHoverOpenTimer = window.setTimeout(() => openTagHover(item.id, link, chip), 220);
-    });
+    // 悬停不弹 tip、不自动打开层级浮层；点一下才打开。
+    chip.removeAttribute("title");
     chip.addEventListener("pointerleave", () => { window.clearTimeout(tagHoverOpenTimer); scheduleTagHoverClose(); });
-    chip.addEventListener("focus", () => { if (tagHoverSuppressFocus) return; cancelTagHoverClose(); void openTagHover(item.id, link, chip); });
     chip.addEventListener("blur", scheduleTagHoverClose);
     chip.addEventListener("click", event => { event.stopPropagation(); window.clearTimeout(tagHoverOpenTimer); void openTagHover(item.id, link, chip, true); });
     return chip;

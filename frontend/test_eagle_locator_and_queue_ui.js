@@ -29,8 +29,10 @@ test("Eagle 工作台提供题目身份证一键复制与定位搜索支持，�
 
 test("AI 标签建议移除禁用排队死胡同，支持插队、取消、后台补标开关与一键就绪引导", () => {
   const html = fs.readFileSync(path.join(ROOT, "eagle", "index.html"), "utf8");
-  assert.match(html, /AI 标签建议/);
+  assert.match(html, /AI 建议/);
+  assert.match(html, /eagle-ai-suggest/);
   assert.doesNotMatch(html, /AI 语义推荐/);
+  assert.doesNotMatch(html, /border-emerald-200\/80 bg-emerald-50\/35/);
   assert.match(html, /id="aiBgTagToggleBtn"/);
   assert.match(html, /async function toggleAutoTagBackground\(/);
   assert.match(html, /async function cancelTagSuggestionJob\(/);

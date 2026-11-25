@@ -57,20 +57,38 @@ test("Eagle UI places exclude-used controls inside #filterPillsPanel and keeps t
   assert.ok(panelSlice.includes('id="btnUsageHistoryModal"'), "filterPillsPanel must contain btnUsageHistoryModal");
   assert.ok(panelSlice.includes('id="dropTagAgeRow"'), "dropdownTag must include tag-age preset row");
 
-  // 3. Card & right-inspector tag pills bind openQuestionTagContextMenu and do NOT include timestamps in hover title
+  // 3. Card & right-inspector: left-click filters like Eagle; right-click opens menu; no hover tip
   const cardFn = extractFunctionSource(scriptSrc, "renderSingleQuestionCardHtml");
+  assert.ok(cardFn.includes("onQuestionTagClick(event,"), "card tag pill must bind left-click filter");
   assert.ok(cardFn.includes("openQuestionTagContextMenu(event,"), "card tag pill must bind right-click tag context menu");
   assert.equal(cardFn.includes("打标于"), false, "card tag pill must NOT render or hover-title timestamps");
 
   const inspFn = extractFunctionSource(scriptSrc, "renderRightInspector");
+  assert.ok(inspFn.includes("onQuestionTagClick(event,"), "inspector tag pill must bind left-click filter");
   assert.ok(inspFn.includes("openQuestionTagContextMenu(event,"), "inspector tag pill must bind right-click tag context menu");
-  assert.ok(
+  assert.equal(
     inspFn.includes('title="${escapeHtml(t.name)}"'),
-    "inspector tag pill hover title must remain clean tag name only"
+    false,
+    "inspector tag pill must not show any hover title"
   );
   assert.equal(inspFn.includes("打标于"), false, "inspector tag pill must NOT include timestamp text on hover");
 
-  // 4. Right-click tag menu itself displays relative + exact timestamp and Eagle actions
+  const clickFn = extractFunctionSource(scriptSrc, "onQuestionTagClick");
+  assert.ok(clickFn.includes("focusQuestionTagOnly"), "left-click must reuse Eagle-style focusQuestionTagOnly filter");
+
+  // 4. Left/right panes are drag-resizable; defaults follow Eagle proportions
+  assert.ok(eagleHtml.includes('id="inspectorResizeHandle"'), "inspector must expose a resize handle");
+  assert.ok(eagleHtml.includes('id="sidebarResizeHandle"'), "left sidebar must expose a resize handle");
+  assert.ok(scriptSrc.includes("function initInspectorResize"), "inspector resize must be initialized");
+  assert.ok(scriptSrc.includes("function initSidebarResize"), "sidebar resize must be initialized");
+  assert.ok(scriptSrc.includes("eagle_inspector_width_px"), "inspector width must persist");
+  assert.ok(scriptSrc.includes("eagle_sidebar_width_px"), "sidebar width must persist");
+  assert.match(scriptSrc, /INSPECTOR_WIDTH_DEFAULT = 320/, "right default matches Eagle ~20%");
+  assert.match(scriptSrc, /SIDEBAR_WIDTH_DEFAULT = 260/, "left default matches Eagle ~16%");
+  assert.match(eagleHtml, /--inspector-width/, "inspector width uses CSS variable");
+  assert.match(eagleHtml, /--sidebar-width/, "sidebar width uses CSS variable");
+
+  // 5. Right-click tag menu itself displays relative + exact timestamp and Eagle actions
   const menuFn = extractFunctionSource(scriptSrc, "openQuestionTagContextMenu");
   assert.ok(menuFn.includes("tagCtxTimestampInfo"), "tag context menu must include timestamp block");
   assert.ok(menuFn.includes("打标于"), "tag context menu must display 打标于 relative timestamp");

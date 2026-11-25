@@ -3,6 +3,15 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.3.2
+
+**Eagle 工作台安静收口、文件夹手动排序/拖排与撤销、统一毛玻璃悬浮提示**
+
+- **查虫遮罩、考题属性折叠、AI 建议安静化与顶栏收口（`frontend/eagle/index.html`）**：查虫中心不再挡整页；考题属性可折叠；后台补标与生成建议改图标/悬停说明；搜索缩短；去掉含糊「当前第几题」与重复「共 N 题」。
+- **文件夹手动排序、拖排、撤销与展开滚入视野（`backend/core/library_folders.py`、`frontend/eagle/index.html`）**：支持 `manual` / `sortOrder`；拖题有影子；展开后自动滚到眼前。
+- **统一自定义悬浮气泡（`frontend/eagle/index.html`）**：半透明毛玻璃；未截断不弹；左栏长名侧栏外窥；全选计数改悬停显示。
+
+
 ## 2.3.1
 
 **标签打标时间右键查看、打标时间全链路保真与改题继承、真实年份/时间排序、标签时效筛选及筛选栏收口**

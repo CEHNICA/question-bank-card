@@ -71,23 +71,72 @@
       color: #047857; font-size: 11px; padding: 3px 8px; white-space: nowrap; cursor: pointer;
     }
     .op-page-back:hover { background: #d1fae5; }
-    /* ---- 右侧「题目属性」面板：可收起（B3 之后 toggleRightInspector 的 id 丢了，
-           面板永远收不起来，窄窗口把中栏挤成一条缝）---- */
-    #rightInspectorPane { transition: width .15s ease; }
+    /* ---- 右侧「题目属性」面板：可收起 + 可拖左边调宽（仿 Eagle）---- */
+    #rightInspectorPane {
+      --inspector-width: 320px;
+      position: relative;
+      width: var(--inspector-width);
+      min-width: 0;
+      transition: width .15s ease;
+    }
     #rightInspectorPane.collapsed { width: 3rem; }
     #rightInspectorPane.collapsed #inspectorBody,
     #rightInspectorPane.collapsed #inspectorHead { display: none; }
-    #leftFolderSidebar { transition: width .15s ease, opacity .15s ease; }
+    #rightInspectorPane.resizing { transition: none; }
+    #inspectorResizeHandle {
+      position: absolute;
+      left: -3px;
+      top: 0;
+      bottom: 0;
+      width: 6px;
+      z-index: 8;
+      cursor: col-resize;
+      touch-action: none;
+      background: transparent;
+    }
+    #inspectorResizeHandle:hover,
+    #inspectorResizeHandle:focus-visible,
+    #rightInspectorPane.resizing #inspectorResizeHandle {
+      background: rgba(16, 185, 129, 0.35);
+    }
+    #rightInspectorPane.collapsed #inspectorResizeHandle { display: none; }
+    /* 左侧导航：默认可拖右边调宽；默认宽度按本机 Eagle 实测比例（左约 16%、右约 20%） */
+    #leftFolderSidebar {
+      --sidebar-width: 260px;
+      position: relative;
+      width: var(--sidebar-width);
+      min-width: 0;
+      transition: width .15s ease, opacity .15s ease;
+    }
     #leftFolderSidebar.collapsed { width: 0 !important; min-width: 0 !important; overflow: hidden; border-right-width: 0 !important; opacity: 0; }
+    #leftFolderSidebar.resizing { transition: none; }
+    #sidebarResizeHandle {
+      position: absolute;
+      right: -3px;
+      top: 0;
+      bottom: 0;
+      width: 6px;
+      z-index: 8;
+      cursor: col-resize;
+      touch-action: none;
+      background: transparent;
+    }
+    #sidebarResizeHandle:hover,
+    #sidebarResizeHandle:focus-visible,
+    #leftFolderSidebar.resizing #sidebarResizeHandle {
+      background: rgba(16, 185, 129, 0.35);
+    }
+    #leftFolderSidebar.collapsed #sidebarResizeHandle { display: none; }
     @media (max-width: 1100px) {
       #rightInspectorPane { width: 3rem; }
       #rightInspectorPane #inspectorBody,
       #rightInspectorPane #inspectorHead { display: none; }
+      #rightInspectorPane #inspectorResizeHandle { display: none; }
     }
     @media (max-width: 1100px) {
-      #rightInspectorPane.force-open { width: 18rem; }
       #rightInspectorPane.force-open #inspectorBody { display: block; }
       #rightInspectorPane.force-open #inspectorHead { display: flex; }
+      #rightInspectorPane.force-open #inspectorResizeHandle { display: block; }
       /* 窄屏下展开的属性栏浮在内容上面，别再把正文挤没了：
          它是 flex 占位时，390px 视口下正文从 342px 被挤到 102px，
          题卡只剩 78px，题干跟挤牙膏似的。 */
@@ -95,28 +144,26 @@
         position: fixed;
         right: 0; top: 0; bottom: 0;
         z-index: 60;
-        width: 18rem !important;
+        width: var(--inspector-width) !important;
         max-width: 85vw;
         box-shadow: -8px 0 32px rgba(15, 23, 42, 0.18);
       }
     }
     /* 窄屏（<768px）：左栏别再跟中栏抢宽度。
-       左栏固定 256px：768px 时正文只剩 440px；390px 时更惨 —— 正文只剩 62px，
-       题干被压成每行 3 个字，一张题卡能撑到 1350px 高。
        所以窄屏默认收起左栏；手动展开时左栏浮在内容上面，不再把正文挤成一条缝。 */
     @media (max-width: 767px) {
       #leftFolderSidebar:not(.collapsed) {
         position: fixed;
         left: 0; top: 0; bottom: 0;
         /* z-index 必须高于右侧属性浮层（60）：
-           390px 视口下左栏占 0..256px、右栏占 102..390px，两者重叠 154px。
            万一互斥逻辑没生效，抽屉也得压在属性栏上面 —— 不然抽屉自己的
-           「收起」按钮(223..247px)被盖住，用户点不到出口，只能刷新页面。 */
+           「收起」按钮被盖住，用户点不到出口，只能刷新页面。 */
         z-index: 70;
-        width: 16rem !important;
+        width: var(--sidebar-width) !important;
         max-width: 85vw;
         box-shadow: 0 8px 32px rgba(15, 23, 42, 0.18);
       }
+      #leftFolderSidebar:not(.collapsed) #sidebarResizeHandle { display: block; }
     }
     /* 窄屏（<768px）工具栏：别再挤成一团。
        390px 视口下中栏本来就只有 342px（右侧属性栏还占着 48px），
@@ -253,7 +300,7 @@
          手指头根本点不准 —— 窄屏统一抬到 32px。 */
       #btnCollapsedAppMenu,
       #btnToggleInspector { min-width: 32px; min-height: 32px; }
-      button[title="存为智能视图"] { min-width: 32px; min-height: 32px; }
+      .eagle-save-view-btn { min-width: 32px; min-height: 32px; }
       label:has(#selectAllCheckbox) { min-height: 32px; }
       #selectAllCheckbox { width: 18px; height: 18px; }
       #questionListContainer button[id^="star_btn_"] { min-width: 32px; min-height: 32px; }
@@ -287,11 +334,11 @@
          展开全部、树搜索、顶栏搜索、筛选按钮、试题篮入口），窄屏下同样难点。 */
       #btnEagleAppMenu,
       #btnToggleLeftSidebar,
-      button[title="一键展开 / 收起全部文件夹"] { min-width: 32px; min-height: 32px; }
+      #btnExpandCollapseFolders { min-width: 32px; min-height: 32px; }
       #treeSearchInput,
       #globalSearchInput { min-height: 32px; }
       #btnToggleFilterPanel,
-      button[title="打开试题篮"] { min-height: 32px; }
+      #btnOpenBasket { min-height: 32px; }
       /* 弹窗关闭按钮：文件夹选择 / 删除确认 / 原卷核验 */
       #folderPickerModal .x-close,
       #deleteConfirmModal .x-close,
@@ -316,11 +363,9 @@
       #originalPaperModal #opRawImgLink {
         min-height: 32px; display: inline-flex; align-items: center;
       }
-      #originalPaperModal button[title="缩小原卷"],
-      #originalPaperModal button[title="放大原卷"],
-      #originalPaperModal button[title="把整页原卷缩到刚好放进窗口 (快捷键 0)"] { min-height: 32px; }
-      #originalPaperModal button[title="缩小原卷"],
-      #originalPaperModal button[title="放大原卷"] { min-width: 32px; }
+      #originalPaperModal .op-zoom-btn,
+      #originalPaperModal .op-fit-btn { min-height: 32px; }
+      #originalPaperModal .op-zoom-btn { min-width: 32px; }
       /* 图片灯箱 */
       #imageLightboxModal button { min-width: 32px; min-height: 32px; }
       /* A4 试卷预览弹窗：头部「重新排版 / ✕」与底部导出按钮 */
@@ -331,10 +376,130 @@
          新增 utility class 不会生效，只能靠钩子写自定义规则。 */
       #folderTreeContainer .eagle-tree-action-btn { min-width: 32px; min-height: 32px; }
     }
+    /* Eagle 风格：长按拖文件夹时，上/下边插线 = 同级挪位，中间高亮 = 放进该夹 */
+    #folderTreeContainer [id^="ftree-"] { position: relative; }
+    #folderTreeContainer .ftree-drop-before::before,
+    #folderTreeContainer .ftree-drop-after::after {
+      content: '';
+      position: absolute;
+      left: 6px;
+      right: 6px;
+      height: 2px;
+      border-radius: 1px;
+      background: #10b981;
+      pointer-events: none;
+      z-index: 2;
+      box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.25);
+    }
+    #folderTreeContainer .ftree-drop-before::before { top: -1px; }
+    #folderTreeContainer .ftree-drop-after::after { bottom: -1px; }
+    #folderTreeContainer .ftree-drop-into {
+      box-shadow: inset 0 0 0 1.5px rgba(16, 185, 129, 0.55);
+      background: rgba(236, 253, 245, 0.72);
+    }
+    #folderTreeContainer .ftree-dragging { opacity: 0.45; }
+    #folderTreeContainer .ftree-drop-into.ftree-drop-tag-alt {
+      box-shadow: inset 0 0 0 1.5px rgba(139, 92, 246, 0.55);
+      background: rgba(245, 243, 255, 0.78);
+    }
+    /* 题目拖入文件夹：左侧色条 + 淡绿底，比整圈描边更干净 */
+    #folderTreeContainer .ftree-drop-receive {
+      background: linear-gradient(90deg, rgba(16, 185, 129, 0.16), rgba(16, 185, 129, 0.03) 72%);
+      box-shadow: inset 3px 0 0 #059669;
+      border-radius: 6px;
+    }
+    #folderTreeContainer .ftree-drop-receive-pulse {
+      animation: ftreeReceivePulse 0.42s ease-out;
+    }
+    @keyframes ftreeReceivePulse {
+      0% { background: rgba(16, 185, 129, 0.28); box-shadow: inset 3px 0 0 #059669; }
+      100% { background: transparent; box-shadow: none; }
+    }
+    /* 拖题时源卡片变淡，避免整卡被浏览器拖成半透明怪物 */
+    .eagle-question-card.q-dragging,
+    .compact-row.q-dragging {
+      opacity: 0.38;
+      filter: grayscale(0.15);
+      transition: opacity 0.12s ease, filter 0.12s ease;
+    }
+    /* Eagle 式拖拽角标：小卡片 + 数量徽章，跟手走 */
+    .eagle-q-drag-ghost {
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 100000;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: max-content;
+      max-width: 240px;
+      padding: 8px 12px 8px 8px;
+      border-radius: 12px;
+      background: #ffffff;
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      box-shadow:
+        0 1px 2px rgba(15, 23, 42, 0.05),
+        0 10px 28px rgba(15, 23, 42, 0.16);
+      color: #0f172a;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      pointer-events: none;
+      will-change: transform;
+    }
+    .eagle-q-drag-ghost .eqd-icon {
+      flex-shrink: 0;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #ecfdf5;
+      color: #047857;
+      font-size: 14px;
+      line-height: 1;
+    }
+    .eagle-q-drag-ghost .eqd-body {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .eagle-q-drag-ghost .eqd-label {
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.25;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 168px;
+    }
+    .eagle-q-drag-ghost .eqd-sub {
+      font-size: 10px;
+      color: #64748b;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+    .eagle-q-drag-ghost .eqd-badge {
+      position: absolute;
+      top: -7px;
+      right: -7px;
+      min-width: 20px;
+      height: 20px;
+      padding: 0 5px;
+      border-radius: 999px;
+      background: #047857;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      line-height: 20px;
+      text-align: center;
+      box-shadow: 0 0 0 2px #fff;
+    }
     /* 浅灰小字看不清（对比度，不是窄屏问题，所有宽度都要修）：
        Tailwind 的 text-slate-400 在白底上只有 2.56:1，WCAG AA 要 4.5:1。
        题卡上的来源文件名、目录里的计数、滚动提示、树上的「+」、右侧属性栏的
-       「评分:」「OneNote:」「按 T 快速打标」「常用高频考点」全都用它 → 整族抬到
+       「评分:」「OneNote:」「常用高频考点」全都用它 → 整族抬到
        #5b6574（白底 5.90:1 / slate-100 5.39:1 / slate-50 5.64:1，全部达标）。
        Tailwind 是本地预编译产物，改不了 utility class，只能用自定义规则盖过去；
        本规则写在 tailwind.css 之后、选择器权重相同 → 天然覆盖。 */
@@ -514,6 +679,132 @@
     .eagle-analysis-body { white-space: pre-line; overflow-wrap: anywhere; }
     #quickLookModal .katex-display { margin: 0.45rem 0; overflow-x: auto; overflow-y: hidden; }
 
+    /* ---- 右侧属性顶栏：名字/备注/链接收成「可选轻行」，别像三张表单 ---- */
+    .inspector-meta-quiet {
+      width: 100%;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: transparent;
+      padding: 4px 6px;
+      color: #1e293b;
+      transition: background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+    }
+    .inspector-meta-quiet::placeholder { color: #94a3b8; }
+    .inspector-meta-quiet:hover {
+      background: #f8fafc;
+      border-color: #e2e8f0;
+    }
+    .inspector-meta-quiet:focus {
+      background: #ffffff;
+      border-color: #10b981;
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.12);
+    }
+    .inspector-meta-name {
+      font-size: 13px;
+      font-weight: 650;
+      letter-spacing: -0.01em;
+      line-height: 1.35;
+    }
+    .inspector-meta-note {
+      font-size: 11px;
+      line-height: 1.5;
+      color: #475569;
+      resize: none;
+      min-height: 1.6em;
+    }
+    .inspector-meta-url {
+      font-size: 11px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: #64748b;
+      padding-right: 3.2rem;
+    }
+    .inspector-meta-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      min-width: 0;
+    }
+    .inspector-meta-glyph {
+      flex: none;
+      width: 1.1rem;
+      text-align: center;
+      font-size: 11px;
+      color: #94a3b8;
+      user-select: none;
+    }
+
+    /* Eagle 标签行末尾的「+」：小方钮，不是大输入框 */
+    .eagle-tag-add-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 22px;
+      height: 22px;
+      padding: 0;
+      border-radius: 6px;
+      border: 1px solid #e2e8f0;
+      background: #ffffff;
+      color: #64748b;
+      font-size: 15px;
+      font-weight: 500;
+      line-height: 1;
+      cursor: pointer;
+      transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+    }
+    .eagle-tag-add-btn:hover,
+    .eagle-tag-add-btn:focus-visible {
+      background: #f8fafc;
+      border-color: #cbd5e1;
+      color: #0f172a;
+      outline: none;
+    }
+    .eagle-tag-add-btn:focus-visible {
+      box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+    }
+
+    /* ---- 题卡/属性栏标签：仿 Eagle 软件标签悬停（克制抬升 + 色块加深，不抖、不弹 tip） ---- */
+    .eagle-q-tag {
+      display: inline-flex;
+      align-items: center;
+      position: relative;
+      cursor: pointer;
+      transform: translateY(0) scale(1);
+      transform-origin: center center;
+      transition:
+        transform 0.16s cubic-bezier(0.2, 0.8, 0.2, 1),
+        box-shadow 0.16s ease,
+        filter 0.16s ease,
+        border-color 0.16s ease,
+        background-color 0.16s ease,
+        color 0.16s ease;
+    }
+    .eagle-q-tag:hover,
+    .eagle-q-tag:focus-visible {
+      z-index: 2;
+      transform: translateY(-1px) scale(1.03);
+      filter: saturate(1.12) contrast(1.04);
+      box-shadow:
+        0 1px 0 rgba(255, 255, 255, 0.55) inset,
+        0 4px 12px rgba(15, 23, 42, 0.12);
+    }
+    .eagle-q-tag:active {
+      transform: translateY(0) scale(0.98);
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
+      filter: saturate(1.06);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .eagle-q-tag,
+      .eagle-q-tag:hover,
+      .eagle-q-tag:focus-visible,
+      .eagle-q-tag:active {
+        transition: none;
+        transform: none;
+        filter: none;
+        box-shadow: none;
+      }
+    }
+
     /* ---- 既有题库 Devin 规范：原卷出处高亮框 ---- */
     .source-box { position: absolute; border: 2.5px solid; border-radius: 3px; pointer-events: none; z-index: 10; transition: border-color .15s ease; box-sizing: border-box; }
     .source-box.text { border-color: #c47f1c; background: rgba(255, 196, 68, .2); box-shadow: 0 0 0 1px rgba(196, 127, 28, .25); }
@@ -588,26 +879,39 @@
       }
       .eagle-toolbar-row .eagle-search-slot input,
       .eagle-toolbar-row #btnToggleFilterPanel,
-      .eagle-toolbar-row button[title="打开试题篮"],
+      .eagle-toolbar-row #btnOpenBasket,
       .eagle-toolbar-row .eagle-save-view-btn {
         height: 28px;
         border-radius: 7px;
       }
     }
+    /* Eagle 式按键帽：实体键外观，不写「按 T 快速…」说明书灰字 */
+    .eagle-kbd,
     .eagle-kbd-slash {
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 5px;
+      border: 1px solid #d0d7e2;
+      border-bottom-width: 2px;
+      background: linear-gradient(180deg, #ffffff 0%, #f3f5f8 100%);
+      color: #64748b;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
+      font-size: 10px;
+      font-weight: 600;
+      line-height: 1;
+      letter-spacing: 0.02em;
+      box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
+      user-select: none;
+    }
+    .eagle-kbd-slash {
       min-width: 17px;
       height: 17px;
       padding: 0 4px;
       border-radius: 4px;
-      border: 1px solid #cbd5e1;
-      background: rgba(255, 255, 255, 0.9);
-      color: #64748b;
-      font-size: 10px;
-      line-height: 1;
-      box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
     }
     .eagle-save-view-btn {
       padding: 0 8px;
@@ -666,6 +970,349 @@
       #rightInspectorPane:not(.force-open) .eagle-inspector-rail {
         display: none;
       }
+    }
+    /* 查虫弹层兜底：本地 tailwind.css 若漏收 max-h-[88vh] / bg-slate-900/65，
+       白卡片会被重复组撑到数千像素高，垂直居中后只看见中间几组，
+       两侧栏透过透明遮罩露出来，看起来就像被右边「题目属性」挡住。 */
+    #dedupCenterModal {
+      z-index: 10008;
+      background-color: rgba(15, 23, 42, 0.65);
+      -webkit-backdrop-filter: blur(2px);
+      backdrop-filter: blur(2px);
+    }
+    #dedupCenterModal > .eagle-dedup-dialog {
+      max-height: 88vh;
+    }
+    /* 右侧「考题属性」：对齐 Eagle「基本信息」可折叠区块 */
+    .eagle-inspector-section-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      text-align: left;
+      color: #334155;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      line-height: 1.2;
+    }
+    .eagle-inspector-section-toggle:hover {
+      color: #0f172a;
+    }
+    .eagle-inspector-section-toggle:focus-visible {
+      outline: 2px solid rgba(16, 185, 129, 0.45);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
+    .eagle-inspector-section-chevron {
+      width: 12px;
+      height: 12px;
+      flex-shrink: 0;
+      color: #94a3b8;
+      transition: transform 0.15s ease;
+      transform: rotate(90deg);
+    }
+    #questionMetaCard.is-collapsed .eagle-inspector-section-chevron {
+      transform: rotate(0deg);
+    }
+    #questionMetaCard.is-collapsed #questionMetaCardBody {
+      display: none;
+    }
+    /* AI 建议：后台补标用图标按钮，汉字只进 title/悬浮提示 */
+    .eagle-ai-suggest .eagle-ai-bg-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      border: 1px solid #e2e8f0;
+      border-radius: 7px;
+      background: #ffffff;
+      color: #94a3b8;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .eagle-ai-suggest .eagle-ai-bg-toggle svg {
+      width: 13px;
+      height: 13px;
+      display: block;
+    }
+    .eagle-ai-suggest .eagle-ai-bg-toggle:hover {
+      color: #64748b;
+      border-color: #cbd5e1;
+      background: #f8fafc;
+    }
+    .eagle-ai-suggest .eagle-ai-bg-toggle:focus-visible {
+      outline: 2px solid rgba(16, 185, 129, 0.4);
+      outline-offset: 1px;
+    }
+    .eagle-ai-suggest .eagle-ai-bg-toggle.is-on {
+      color: #059669;
+      border-color: #a7f3d0;
+      background: #ecfdf5;
+      box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.08);
+    }
+    .eagle-ai-suggest .eagle-ai-bg-toggle.is-on:hover {
+      color: #047857;
+      border-color: #6ee7b7;
+      background: #d1fae5;
+    }
+    .eagle-ai-suggest .eagle-ai-bg-toggle:disabled {
+      opacity: 0.55;
+      cursor: wait;
+    }
+    .eagle-ai-chip {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      padding: 2px 8px;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      background: #fff;
+      color: #475569;
+      font-size: 11px;
+      line-height: 1.4;
+      cursor: pointer;
+      transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+    .eagle-ai-chip:hover {
+      border-color: #cbd5e1;
+      background: #f8fafc;
+      color: #0f172a;
+    }
+    .eagle-ai-action {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 10px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #64748b;
+      font-size: 11px;
+      font-weight: 500;
+      line-height: 1.2;
+      text-decoration: none;
+      cursor: pointer;
+      box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
+      transition: color 0.16s ease, border-color 0.16s ease, background-color 0.16s ease,
+        box-shadow 0.16s ease, transform 0.16s ease;
+    }
+    .eagle-ai-action:hover {
+      color: #0f172a;
+      border-color: #cbd5e1;
+      background: #f8fafc;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
+    }
+    .eagle-ai-action:active {
+      transform: translateY(0);
+      box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+    }
+    .eagle-ai-action.is-primary {
+      color: #047857;
+      border-color: #a7f3d0;
+      background: linear-gradient(180deg, #ecfdf5 0%, #d1fae5 100%);
+      box-shadow: 0 1px 0 rgba(16, 185, 129, 0.12);
+    }
+    .eagle-ai-action.is-primary:hover {
+      color: #065f46;
+      border-color: #6ee7b7;
+      background: linear-gradient(180deg, #d1fae5 0%, #a7f3d0 100%);
+      box-shadow: 0 6px 14px rgba(16, 185, 129, 0.18);
+    }
+    .eagle-ai-action.is-primary .eagle-ai-action-ico {
+      transition: transform 0.28s cubic-bezier(0.34, 1.45, 0.64, 1);
+    }
+    .eagle-ai-action.is-primary:hover .eagle-ai-action-ico {
+      transform: rotate(-18deg) scale(1.12);
+    }
+    .eagle-ai-action.is-danger {
+      color: #94a3b8;
+    }
+    .eagle-ai-action.is-danger:hover {
+      color: #be123c;
+      border-color: #fecdd3;
+      background: #fff1f2;
+    }
+    .eagle-ai-action-ico {
+      width: 12px;
+      height: 12px;
+      flex-shrink: 0;
+      display: block;
+    }
+    /* 自定义悬浮气泡：替代丑陋的系统 title */
+    #eagleHoverTip {
+      --eagle-tip-bg: rgba(255, 255, 255, 0.48);
+      --eagle-tip-border: rgba(148, 163, 184, 0.35);
+      position: fixed;
+      z-index: 10040;
+      max-width: min(320px, calc(100vw - 16px));
+      padding: 10px 12px;
+      border: 1px solid var(--eagle-tip-border);
+      border-radius: 12px;
+      background: var(--eagle-tip-bg);
+      box-shadow: 0 14px 32px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.05);
+      color: #334155;
+      font-size: 11px;
+      line-height: 1.45;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(4px) scale(0.98);
+      transition: opacity 0.14s ease, transform 0.14s ease;
+      backdrop-filter: blur(18px) saturate(1.25);
+      -webkit-backdrop-filter: blur(18px) saturate(1.25);
+    }
+    #eagleHoverTip.is-open {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    #eagleHoverTip .eagle-hover-tip-title {
+      display: block;
+      margin-bottom: 4px;
+      color: #0f172a;
+      font-size: 12px;
+      font-weight: 650;
+      letter-spacing: 0.01em;
+    }
+    #eagleHoverTip .eagle-hover-tip-body {
+      color: #475569;
+    }
+    #eagleHoverTip .eagle-hover-tip-arrow {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      background: var(--eagle-tip-bg);
+      border-right: 1px solid var(--eagle-tip-border);
+      border-bottom: 1px solid var(--eagle-tip-border);
+      transform: rotate(45deg);
+      backdrop-filter: blur(18px) saturate(1.25);
+      -webkit-backdrop-filter: blur(18px) saturate(1.25);
+    }
+    #eagleHoverTip[data-place="below"] .eagle-hover-tip-arrow {
+      top: -5px;
+      right: 14px;
+      border-right: 0;
+      border-bottom: 0;
+      border-left: 1px solid var(--eagle-tip-border);
+      border-top: 1px solid var(--eagle-tip-border);
+    }
+    #eagleHoverTip[data-place="above"] .eagle-hover-tip-arrow {
+      bottom: -5px;
+      right: 14px;
+    }
+    /* 左栏被截断的文件夹名：贴在侧栏右侧、与当前行对齐，别盖住下面的文件夹 */
+    #eagleHoverTip[data-place="right"] .eagle-hover-tip-arrow {
+      left: -5px;
+      top: 50%;
+      margin-top: -5px;
+      right: auto;
+      border-right: 0;
+      border-bottom: 0;
+      border-left: 1px solid var(--eagle-tip-border);
+      border-top: 1px solid var(--eagle-tip-border);
+    }
+    #eagleHoverTip[data-place="left"] .eagle-hover-tip-arrow {
+      right: -5px;
+      top: 50%;
+      margin-top: -5px;
+      left: auto;
+      border-left: 0;
+      border-top: 0;
+      border-right: 1px solid var(--eagle-tip-border);
+      border-bottom: 1px solid var(--eagle-tip-border);
+    }
+    #eagleHoverTip.is-tree-peek {
+      padding: 5px 10px;
+      border-radius: 8px;
+      max-width: min(380px, calc(100vw - 24px));
+      box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12), 0 1px 4px rgba(15, 23, 42, 0.05);
+    }
+    #eagleHoverTip.is-tree-peek .eagle-hover-tip-title {
+      margin-bottom: 0;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    #eagleHoverTip.is-tree-peek.is-tree-peek-rich .eagle-hover-tip-title {
+      margin-bottom: 2px;
+      white-space: normal;
+    }
+    #eagleHoverTip.is-tree-peek .eagle-hover-tip-body {
+      font-size: 10px;
+      line-height: 1.35;
+      color: #64748b;
+    }
+    .eagle-ai-status {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 10px;
+      line-height: 1.45;
+      color: #64748b;
+    }
+    .eagle-ai-status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+    .eagle-ai-status-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      color: #64748b;
+    }
+    .eagle-ai-status-label .eagle-ai-spinner {
+      width: 10px;
+      height: 10px;
+      flex-shrink: 0;
+      border: 1.5px solid #cbd5e1;
+      border-top-color: #64748b;
+      border-radius: 999px;
+      animation: eagle-ai-spin 0.7s linear infinite;
+    }
+    @keyframes eagle-ai-spin {
+      to { transform: rotate(360deg); }
+    }
+    .eagle-ai-elapsed {
+      flex-shrink: 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-variant-numeric: tabular-nums;
+      color: #94a3b8;
+    }
+    .eagle-ai-hint {
+      color: #94a3b8;
+    }
+    .eagle-ai-hint.is-warn {
+      color: #a16207;
+    }
+    .eagle-ai-hint.is-error {
+      color: #be123c;
+    }
+    .eagle-ai-setup {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: #64748b;
+      font-size: 10px;
+      line-height: 1.45;
+    }
+    .eagle-ai-setup-title {
+      color: #475569;
+      font-weight: 600;
     }
     .eagle-empty-wrap {
       min-height: calc(100% - 2rem);
@@ -947,7 +1594,15 @@
 
     <!-- ================= 1. 左侧栏：文件夹树（含标签特殊文件夹） ================= -->
     <!-- 标签管理只走左上角 ≡ 主菜单；侧栏底栏不再放「标签地图 / 管理」入口。 -->
-    <aside id="leftFolderSidebar" class="eagle-chrome w-64 bg-[#fafafa] border-r border-slate-200/80 flex flex-col shrink-0 min-h-0">
+    <aside id="leftFolderSidebar" class="eagle-chrome bg-[#fafafa] border-r border-slate-200/80 flex flex-col shrink-0 min-h-0">
+      <div
+        id="sidebarResizeHandle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="拖动调整左侧导航栏宽度"
+        title="拖动调整宽度"
+        tabindex="0"
+      ></div>
       <div id="leftSidebarHead" class="px-2 py-1.5 border-b border-slate-200/60 shrink-0">
         <div class="flex items-center gap-1.5">
           <button id="btnEagleAppMenu" type="button" onclick="toggleEagleAppMainMenu(event)" class="w-7 h-7 rounded-md flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 cursor-pointer transition-colors shrink-0" title="打开应用主菜单" aria-label="打开应用主菜单">
@@ -963,7 +1618,7 @@
             oninput="handleTreeSearch(this.value)"
             class="flex-1 min-w-0 h-6 text-[11px] px-2 rounded border border-slate-200 bg-white placeholder-slate-400 focus:border-emerald-500 outline-none transition-colors"
           >
-          <button onclick="toggleExpandCollapseAllFolders()" class="w-6 h-6 rounded flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-200/70 text-[11px] cursor-pointer shrink-0" title="一键展开 / 收起全部文件夹">⇄</button>
+          <button id="btnExpandCollapseFolders" onclick="toggleExpandCollapseAllFolders()" class="w-6 h-6 rounded flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-200/70 text-[11px] cursor-pointer shrink-0" title="一键展开 / 收起全部文件夹">⇄</button>
           <button id="btnToggleLeftSidebar" type="button" onclick="toggleLeftSidebar()" class="w-6 h-6 rounded flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-200/70 text-[11px] cursor-pointer shrink-0" title="收起左侧导航栏">◫</button>
         </div>
         <!-- 兼容：排序下拉已迁到右键菜单，保留隐藏 select 供旧脚本读写 -->
@@ -979,15 +1634,9 @@
         <div class="py-2 text-center text-[11px] text-slate-400">正在载入题库文件夹树...</div>
       </div>
 
-      <!-- 侧栏底部极简品牌与版本脚标：软件一打开即可看到当前版本号，不占用工作区卡片空间 -->
-      <div id="eagleSidebarVersionFooter" class="px-2.5 py-1.5 border-t border-slate-200/70 bg-[#fafafa] flex items-center justify-between gap-2 text-[10px] text-slate-400 shrink-0 select-none">
-        <span class="font-medium text-slate-500 truncate">题有据</span>
-        <a
-          id="eagleVersionBadge"
-          href="/settings#settingsAbout"
-          class="hidden font-mono px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200/80 hover:bg-emerald-100 transition-colors shrink-0"
-          title="查看版本、隐私与源码"
-        ></a>
+      <!-- 兼容旧脚本：左下角品牌/版本脚标已撤，版本改看 ≡ 主菜单 -->
+      <div id="eagleSidebarVersionFooter" class="hidden" hidden aria-hidden="true">
+        <a id="eagleVersionBadge" href="/settings#settingsAbout"></a>
       </div>
 
       <!-- 兼容旧脚本取节点；底栏可见入口已撤，标签管理只在 ≡ 主菜单 -->
@@ -1053,7 +1702,7 @@
               class="hidden items-center gap-1 px-1.5 py-0.5 text-[11px] font-medium rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer transition-colors shrink-0"
             >◫ 侧栏</button>
 
-            <div class="relative flex-1 min-w-0 max-w-md eagle-search-slot">
+            <div class="relative w-56 shrink-0 min-w-0 eagle-search-slot">
               <div class="absolute inset-y-0 left-0 pl-2 flex items-center pointer-events-none text-slate-400">
                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1063,7 +1712,7 @@
                 id="globalSearchInput"
                 type="text"
                 aria-label="搜索题目、名称、标签、文件夹"
-                placeholder="搜索题干、名称、标签、文件夹…"
+                placeholder="搜索题干、名称、标签…"
                 class="w-full h-6 pl-7 pr-7 text-[11px] bg-slate-100/90 hover:bg-slate-100 focus:bg-white text-slate-700 placeholder-slate-400 rounded-md border border-slate-200/70 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20 transition-all outline-hidden"
               >
               <span class="eagle-kbd-slash absolute right-1.5 top-1/2 -translate-y-1/2 font-mono pointer-events-none">/</span>
@@ -1091,6 +1740,7 @@
 
           <div class="flex items-center gap-2 text-[11px] text-slate-500 shrink-0 whitespace-nowrap eagle-toolbar-right">
             <button
+              id="btnOpenBasket"
               onclick="openBasketExportModal()"
               class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md transition-all"
               title="打开试题篮"
@@ -1099,27 +1749,15 @@
               <span>篮 <span id="headerBasketCount">1</span></span>
             </button>
             <span class="text-slate-300">|</span>
-            <span id="eaglePositionIndicator" class="text-slate-400 hidden lg:inline-flex items-center gap-1" title="实时位置（输入题序回车可直接跳转）">
-              <span>当前第</span>
-              <input
-                id="jumpQuestionIndexInput"
-                type="text"
-                inputmode="numeric"
-                aria-label="输入题序回车跳转"
-                value="0"
-                onkeydown="handleJumpQuestionIndexKey(event)"
-                onblur="syncJumpQuestionIndexDisplay()"
-                onfocus="this.select()"
-                class="w-11 h-5 px-1 text-center font-mono font-semibold text-slate-800 bg-slate-100/90 hover:bg-white focus:bg-white rounded border border-slate-200/80 focus:border-emerald-500 focus:outline-hidden transition-colors text-[11px]"
-              >
-              <span>/</span>
-            </span>
-            <span class="text-slate-400 hidden md:inline">
-              共 <strong id="matchedQuestionCount" class="font-bold text-slate-800">...</strong> 题
-            </span>
-            <label class="flex items-center gap-1.5 cursor-pointer select-none">
+            <!-- 命中总数只写在左侧文件夹数字里，顶栏不再重复「共 N 题」 -->
+            <span id="matchedQuestionCount" class="hidden" aria-hidden="true">0</span>
+            <label
+              id="selectAllLabel"
+              class="flex items-center gap-1.5 cursor-pointer select-none"
+              data-tip-title="已勾选 0 题"
+            >
               <input id="selectAllCheckbox" onchange="toggleSelectAll(this.checked)" type="checkbox" class="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 focus:ring-0">
-              <span>全选<span class="hidden lg:inline"> (<span id="selectedCountText">已勾选 0 题</span>)</span></span>
+              <span>全选</span>
             </label>
             <span class="text-slate-300">|</span>
             <button
@@ -1352,8 +1990,15 @@
     </main>
 
     <!-- ================= 3. 右侧栏：Eagle 风格属性与打标检查器 ================= -->
-    <aside id="rightInspectorPane" class="eagle-chrome w-72 bg-white border-l border-slate-200/80 flex flex-col shrink-0">
-      
+    <aside id="rightInspectorPane" class="eagle-chrome bg-white border-l border-slate-200/80 flex flex-col shrink-0">
+      <div
+        id="inspectorResizeHandle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="拖动调整题目属性栏宽度"
+        title="拖动调整宽度"
+        tabindex="0"
+      ></div>
       <div id="rightInspectorHead" class="h-10 px-3 border-b border-slate-200/70 flex items-center gap-1.5 justify-between shrink-0">
         <div id="inspectorHead" class="flex items-center gap-2 min-w-0 flex-1">
           <span id="inspectorTitle" class="text-xs font-bold text-slate-800 truncate">题目属性</span>
@@ -1366,53 +2011,56 @@
 
       <div id="inspectorBody" class="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
         
-        <!-- 0. Eagle 风格：题目名称 + 添加注释 + http:// 外部链接 + 所属文件夹（仅单题模式显示） -->
-        <div id="inspectorEagleTopMeta" class="space-y-2 pb-3 border-b border-slate-100">
-          <!-- 题目名称（赋予每道题独立的对象名字） -->
-          <div class="relative flex items-center">
+        <!-- 0. 题目可选元信息：安静轻行，不写成「每题必填表单」 -->
+        <div id="inspectorEagleTopMeta" class="space-y-0.5 pb-3 mb-1 border-b border-slate-100">
+          <div class="inspector-meta-row">
+            <span class="inspector-meta-glyph" aria-hidden="true">◇</span>
             <input
               id="inspectorNameInput"
               type="text"
-              aria-label="题目名称"
-              placeholder="给题目起个名字（如：阿氏圆最值母题）..."
+              aria-label="题目名称（可选）"
+              placeholder="名称（可选）"
               onchange="saveInspectorNoteAndUrl()"
               onblur="saveInspectorNoteAndUrl()"
               onkeydown="if(event.key==='Enter'){this.blur();}"
-              class="w-full rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-800 placeholder-slate-400 focus:bg-white focus:border-emerald-500 focus:outline-hidden transition-all"
+              class="inspector-meta-quiet inspector-meta-name"
             >
           </div>
 
-          <div>
+          <div class="inspector-meta-row items-start">
+            <span class="inspector-meta-glyph mt-1" aria-hidden="true">✎</span>
             <textarea
               id="inspectorNoteInput"
-              rows="2"
-              aria-label="题目注释"
-              placeholder="添加注释（如易错点、教学备注，自动保存）..."
+              rows="1"
+              aria-label="题目备注（可选）"
+              placeholder="备注"
+              onfocus="this.rows=3"
+              onblur="this.rows=this.value.trim()?2:1; saveInspectorNoteAndUrl()"
               onchange="saveInspectorNoteAndUrl()"
-              onblur="saveInspectorNoteAndUrl()"
-              class="w-full rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:border-emerald-500 focus:outline-hidden resize-none transition-all"
+              class="inspector-meta-quiet inspector-meta-note"
             ></textarea>
           </div>
 
-          <div class="relative flex items-center gap-1">
+          <div class="relative inspector-meta-row">
+            <span class="inspector-meta-glyph" aria-hidden="true">↗</span>
             <input
               id="inspectorUrlInput"
               type="url"
-              aria-label="参考链接"
-              placeholder="http:// 或 https:// 参考链接..."
+              aria-label="参考链接（可选）"
+              placeholder="链接"
               oninput="updateInspectorUrlActions()"
               onchange="saveInspectorNoteAndUrl()"
               onblur="saveInspectorNoteAndUrl()"
               onkeydown="if(event.key==='Enter'){this.blur();}"
-              class="w-full rounded-md border border-slate-200 bg-slate-50 pl-2.5 pr-12 py-1.5 text-xs text-slate-800 font-mono placeholder-slate-400 focus:bg-white focus:border-emerald-500 focus:outline-hidden transition-all"
+              class="inspector-meta-quiet inspector-meta-url"
             >
-            <div id="inspectorUrlActions" class="hidden absolute right-1.5 flex items-center gap-0.5">
-              <button type="button" onclick="openInspectorUrl()" title="在浏览器中打开链接" class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-[10px] font-semibold cursor-pointer">↗</button>
-              <button type="button" onclick="copyInspectorUrl()" title="复制链接" class="px-1 py-0.5 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 text-[10px] cursor-pointer">📋</button>
+            <div id="inspectorUrlActions" class="hidden absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+              <button type="button" onclick="openInspectorUrl()" title="在浏览器中打开链接" class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-[10px] font-semibold cursor-pointer">开</button>
+              <button type="button" onclick="copyInspectorUrl()" title="复制链接" class="px-1 py-0.5 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 text-[10px] cursor-pointer">复制</button>
             </div>
           </div>
 
-          <div class="pt-1 space-y-1.5">
+          <div class="pt-2 space-y-1.5">
             <div class="flex items-center justify-between text-[11px]">
               <span class="font-bold text-slate-700 uppercase tracking-wider">文件夹</span>
             </div>
@@ -1422,26 +2070,20 @@
           </div>
         </div>
 
-        <!-- 1. 打标核心区 -->
-        <div class="space-y-2">
-          <div class="flex items-center justify-between text-[11px]">
-            <span class="font-bold text-slate-700 uppercase tracking-wider">关联标签</span>
-            <span class="text-slate-400 text-[10px]">按 T 快速打标</span>
+        <!-- 1. 打标核心区（对齐 Eagle：安静「标签」+ 胶囊行 + 末尾「+」，平时不挂大输入框） -->
+        <div class="space-y-1.5">
+          <div class="text-[11px] font-medium text-slate-500">标签</div>
+          <div id="currentTagsContainer" class="flex flex-wrap gap-1.5 items-center min-h-[26px]">
+            <!-- 动态：标签胶囊… + -->
           </div>
-
-          <div id="currentTagsContainer" class="flex flex-wrap gap-1 min-h-6 items-center">
-            <!-- 动态渲染 -->
-          </div>
-
-          <!-- 快速联想打标框 -->
-          <div class="relative mt-2">
-            <input 
+          <div id="tagAutocompleteWrap" class="hidden relative">
+            <input
               id="tagAutocompleteInput"
               type="text"
-              aria-label="输入标签名或拼音" 
-              placeholder="输入标签名或拼音 (按 Enter 贴标)..." 
+              aria-label="添加标签"
+              placeholder="搜索或创建标签…"
               autocomplete="off"
-              class="w-full rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:border-emerald-500 focus:outline-hidden transition-all"
+              class="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:border-emerald-500 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/15 transition-all"
             >
             <div id="tagSuggestDropdown" class="hidden absolute left-0 right-0 z-40 mt-1 max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
               <!-- 动态填充 -->
@@ -1451,42 +2093,60 @@
 
         <!-- 2. 常用推荐标签 (Pinned) -->
         <div class="space-y-1.5 pt-2 border-t border-slate-100">
-          <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">常用高频考点</span>
+          <span class="text-[10px] font-medium text-slate-500">常用</span>
           <div id="pinnedTagsContainer" class="flex flex-wrap gap-1">
             <!-- 动态渲染 -->
           </div>
         </div>
 
-        <!-- 3. AI 标签建议卡片 -->
-        <div class="rounded-lg border border-emerald-200/80 bg-emerald-50/35 p-2.5 space-y-2">
-          <div class="flex items-center justify-between gap-1.5">
-            <div class="flex items-center gap-1 font-bold text-emerald-900 text-[11px] shrink-0">
-              <svg class="w-3 h-3 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-              <span>AI 标签建议</span>
-            </div>
-            <div class="flex items-center gap-1.5 min-w-0">
-              <span id="aiTagAdoptHint" class="hidden text-[10px] text-emerald-700/80 truncate">点标签即采纳</span>
-              <button
-                id="aiBgTagToggleBtn"
-                type="button"
-                onclick="toggleAutoTagBackground()"
-                class="px-1.5 py-0.5 rounded border border-slate-200 bg-white hover:bg-slate-50 text-[10px] text-slate-500 cursor-pointer transition-colors shrink-0"
-                title="开启后，无标签题目会在后台低优先级自动慢慢生成候选标签；点单题会立即插队到最前"
-              >后台补标: …</button>
-            </div>
+        <!-- 3. AI 建议：后台补标图标按钮；说明走自定义悬浮气泡，不用系统 title -->
+        <div id="aiTagSuggestSection" class="eagle-ai-suggest space-y-1.5 pt-2 border-t border-slate-100">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-[10px] font-medium text-slate-500">AI 建议</span>
+            <button
+              id="aiBgTagToggleBtn"
+              type="button"
+              onclick="toggleAutoTagBackground()"
+              class="eagle-ai-bg-toggle is-off"
+              aria-pressed="false"
+              aria-label="后台补标：关"
+              data-tip-title="后台补标 · 关"
+              data-tip-body="开启后，无标签题目会在后台慢慢生成候选标签；点单题会立即插队。"
+            >
+              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M2.5 3.25h7.2l3.8 3.8v5.7A1.25 1.25 0 0 1 12.25 14H2.5A1.25 1.25 0 0 1 1.25 12.75V4.5A1.25 1.25 0 0 1 2.5 3.25Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+                <circle cx="5.4" cy="9.1" r="1.15" fill="currentColor"/>
+                <path d="M10.2 2.2a3.1 3.1 0 0 1 2.95 2.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+                <path d="M13.55 3.05v1.55H12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
           </div>
+          <span id="aiTagAdoptHint" class="hidden" aria-hidden="true"></span>
           <div id="aiSuggestedTagsContainer" class="flex flex-col gap-1.5">
             <!-- 动态推荐 -->
           </div>
         </div>
 
-        <!-- 4. 试题基础属性（仅保留卡片未展示或需交互编辑的独有属性，避免与题卡标题/来源重复） -->
+        <!-- 4. 试题基础属性（对齐 Eagle「基本信息」：整块可折叠，默认展开） -->
         <div id="questionMetaCard" class="space-y-2 pt-2 border-t border-slate-100 text-[11px]">
-          <span class="font-bold text-slate-700 uppercase tracking-wider text-[10px]">考题属性</span>
-          <div class="space-y-1.5 text-slate-600 bg-slate-50/70 p-2.5 rounded-lg border border-slate-100">
+          <button
+            type="button"
+            id="btnToggleQuestionMetaCard"
+            class="eagle-inspector-section-toggle"
+            onclick="toggleQuestionMetaCard()"
+            aria-expanded="true"
+            aria-controls="questionMetaCardBody"
+            title="折叠或展开考题属性"
+          >
+            <svg class="eagle-inspector-section-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M6 3.5L10.5 8 6 12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>考题属性</span>
+          </button>
+          <div id="questionMetaCardBody" class="space-y-1.5 text-slate-600 bg-slate-50/70 p-2.5 rounded-lg border border-slate-100">
             <!-- 题目身份证：一键复制完整定位串发给 AI Agent -->
             <div id="inspectorLocatorRow" class="flex justify-between items-center py-0.5 gap-2">
-              <span class="text-slate-400 shrink-0" title="题目唯一身份证定位码，点击右侧按钮可复制完整定位信息发给 AI Agent">题目 ID:</span>
+              <span class="text-slate-400 shrink-0" data-tip-title="题目 ID" data-tip-body="唯一定位码；点右侧复制可发给 AI Agent。">题目 ID:</span>
               <div class="flex items-center gap-1.5 min-w-0">
                 <code id="inspectorLocatorCode" class="text-[11px] font-mono font-semibold text-slate-700 truncate">Q-</code>
                 <button
@@ -1494,14 +2154,15 @@
                   type="button"
                   onclick="copyQuestionLocator(currentActiveQuestionId)"
                   class="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-700 text-[10px] font-medium text-slate-600 cursor-pointer transition-colors"
-                  title="复制题目定位码与来源发给 AI Agent"
+                  data-tip-title="复制定位码"
+                  data-tip-body="复制题目定位码与来源，方便发给 AI Agent。"
                 >📋 复制</button>
               </div>
             </div>
             <!-- 题目来源资料名称 -->
             <div id="inspectorSourceRow" class="flex justify-between items-center py-0.5 gap-2">
               <span class="text-slate-400 shrink-0">来源:</span>
-              <span id="inspectorSourceText" class="text-[11px] font-medium text-slate-700 truncate text-right" title="">—</span>
+              <span id="inspectorSourceText" class="text-[11px] font-medium text-slate-700 truncate text-right">—</span>
             </div>
             <!-- 原卷页码位置与核验证据入口 -->
             <div id="inspectorPositionRow" class="flex justify-between items-center py-0.5 gap-2">
@@ -1513,13 +2174,14 @@
                   type="button"
                   onclick="openCurrentQuestionEvidence()"
                   class="qc-evidence-btn shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200/80 hover:bg-emerald-100 text-[10px] font-medium text-emerald-700 cursor-pointer transition-colors"
-                  title="查看该题所属试卷原卷高分辨率扫描裁片与定位选框"
+                  data-tip-title="核验证据"
+                  data-tip-body="查看本题在原卷上的高清裁片与定位框。"
                 ><span>📄</span><span>核验证据</span></button>
               </div>
             </div>
             <div class="flex justify-between items-center py-0.5">
-              <span class="text-slate-400" title="点击右侧星星为题目打分，再次点击当前星级可取消评分">评分:</span>
-              <div id="metaDifficultyStars" class="flex items-center gap-0.5 select-none" role="group" aria-label="评分调节" title="点击调节题目评分 (1~5★，再次点击当前星级可取消)">
+              <span class="text-slate-400" data-tip-title="评分" data-tip-body="点星星打 1～5 分；再点同一颗可取消。">评分:</span>
+              <div id="metaDifficultyStars" class="flex items-center gap-0.5 select-none" role="group" aria-label="评分调节" data-tip-title="评分" data-tip-body="点星星打 1～5 分；再点同一颗可取消。">
                 <span class="text-slate-300 text-base leading-none">★★★★★</span>
               </div>
             </div>
@@ -2338,11 +3000,11 @@
         <div class="flex items-center gap-2">
           <span class="text-[11px] text-slate-400 hidden sm:inline">Ctrl + 滚轮缩放 · 鼠标拖拽平移</span>
           <div class="flex items-center border border-slate-200 rounded-md bg-slate-50 overflow-hidden shadow-2xs">
-            <button onclick="changeOpZoom(-0.25)" class="px-2 py-1 hover:bg-slate-200 text-slate-700 font-bold cursor-pointer" title="缩小原卷">−</button>
+            <button onclick="changeOpZoom(-0.25)" class="op-zoom-btn px-2 py-1 hover:bg-slate-200 text-slate-700 font-bold cursor-pointer" title="缩小原卷">−</button>
             <span id="opZoomPercentBadge" class="px-2.5 py-1 text-slate-800 font-mono text-xs border-x border-slate-200 min-w-[50px] text-center font-semibold">100%</span>
-            <button onclick="changeOpZoom(0.25)" class="px-2 py-1 hover:bg-slate-200 text-slate-700 font-bold cursor-pointer" title="放大原卷">＋</button>
+            <button onclick="changeOpZoom(0.25)" class="op-zoom-btn px-2 py-1 hover:bg-slate-200 text-slate-700 font-bold cursor-pointer" title="放大原卷">＋</button>
           </div>
-          <button onclick="fitOpWindow()" class="px-2.5 py-1 rounded border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 text-xs font-medium shadow-2xs cursor-pointer" title="把整页原卷缩到刚好放进窗口 (快捷键 0)">
+          <button onclick="fitOpWindow()" class="op-fit-btn px-2.5 py-1 rounded border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 text-xs font-medium shadow-2xs cursor-pointer" title="把整页原卷缩到刚好放进窗口 (快捷键 0)">
             适合窗口
           </button>
         </div>
@@ -2411,12 +3073,18 @@
             <kbd class="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 font-mono shadow-2xs font-bold">S</kbd>
           </div>
           <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
-            <span class="text-slate-600">聚焦标签打标框</span>
-            <kbd class="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 font-mono shadow-2xs font-bold">T</kbd>
+            <span class="text-slate-600">添加标签</span>
+            <kbd class="eagle-kbd">T</kbd>
           </div>
           <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
             <span class="text-slate-600">聚焦全局搜索框</span>
             <kbd class="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-800 font-mono shadow-2xs font-bold">/</kbd>
+          </div>
+          <div class="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200/80 flex items-center justify-between col-span-2">
+            <span class="text-emerald-900 font-semibold flex items-center gap-1.5">
+              <span>↩️</span><span>撤销 / 重做整理（拖题进夹、挪文件夹等）</span>
+            </span>
+            <kbd class="px-2 py-0.5 rounded bg-white border border-emerald-300 text-emerald-800 font-mono shadow-2xs font-bold">Ctrl + Z / Y</kbd>
           </div>
           <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between">
             <span class="text-slate-600">关闭所有弹窗</span>
@@ -2445,7 +3113,7 @@
 
   <!-- ================= 3c. 全库查重与变式题组整理模态框 ================= -->
   <div id="dedupCenterModal" class="hidden fixed inset-0 z-[10008] flex items-center justify-center bg-slate-900/65 backdrop-blur-xs p-4" onclick="closeDedupCenterModal()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[88vh] flex flex-col overflow-hidden border border-slate-200" onclick="event.stopPropagation()">
+    <div class="eagle-dedup-dialog bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[88vh] flex flex-col overflow-hidden border border-slate-200" onclick="event.stopPropagation()">
       <div class="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-slate-50/90 shrink-0">
         <div class="flex items-center gap-2.5">
           <span class="text-sm font-bold text-slate-800">🔍 全库本地查重与同源变式整理</span>
@@ -3081,7 +3749,7 @@
 
     let currentPaperSort = localStorage.getItem('paper_sort_mode') || 'time_desc';
     const FOLDER_SORT_MODES_STORAGE_KEY = 'folder_sort_modes_v1';
-    const VALID_FOLDER_SORT_MODES = new Set(['time_desc', 'time_asc', 'name', 'count_desc']);
+    const VALID_FOLDER_SORT_MODES = new Set(['time_desc', 'time_asc', 'name', 'count_desc', 'manual']);
 
     /**
      * 读取按文件夹记录的子文件夹排序偏好
@@ -3124,13 +3792,27 @@
       _suppressFoldersSync = true;
       try {
         if (Array.isArray(data.user_folders)) {
-          localStorage.setItem(USER_FOLDERS_STORAGE_KEY, JSON.stringify(data.user_folders));
+          let folders = data.user_folders;
+          if (typeof applyFolderSortOrdersMirror === 'function') {
+            folders = applyFolderSortOrdersMirror(folders, 'user');
+            if (typeof updateFolderSortOrdersMirrorFromList === 'function') {
+              updateFolderSortOrdersMirrorFromList(folders, 'user');
+            }
+          }
+          localStorage.setItem(USER_FOLDERS_STORAGE_KEY, JSON.stringify(folders));
         }
         if (data.doc_overrides && typeof data.doc_overrides === 'object') {
           localStorage.setItem(EAGLE_DOC_FOLDER_OVERRIDES_KEY, JSON.stringify(data.doc_overrides));
         }
         if (Array.isArray(data.smart_folders)) {
-          localStorage.setItem(CUSTOM_SMART_FOLDERS_STORAGE_KEY, JSON.stringify(data.smart_folders));
+          let smarts = data.smart_folders;
+          if (typeof applyFolderSortOrdersMirror === 'function') {
+            smarts = applyFolderSortOrdersMirror(smarts, 'smart');
+            if (typeof updateFolderSortOrdersMirrorFromList === 'function') {
+              updateFolderSortOrdersMirrorFromList(smarts, 'smart');
+            }
+          }
+          localStorage.setItem(CUSTOM_SMART_FOLDERS_STORAGE_KEY, JSON.stringify(smarts));
         }
         if (data.sort_modes && typeof data.sort_modes === 'object') {
           localStorage.setItem(FOLDER_SORT_MODES_STORAGE_KEY, JSON.stringify(data.sort_modes));
@@ -3581,7 +4263,7 @@
     }
 
     /**
-     * 启动时异步读取当前软件版本号，分别填充到左栏底部脚标与左上角主菜单。
+     * 启动时异步读取当前软件版本号，填到左上角 ≡ 主菜单（左下脚标已撤）。
      */
     async function loadEagleAppVersion() {
       try {
@@ -3590,11 +4272,6 @@
         const payload = await resp.json();
         const ver = payload && payload.app_version ? String(payload.app_version).trim() : '';
         if (!ver) return;
-        const badge = document.getElementById('eagleVersionBadge');
-        if (badge) {
-          badge.textContent = `v${ver}`;
-          badge.classList.remove('hidden');
-        }
         const menuPill = document.getElementById('eagleMenuVersionPill');
         if (menuPill) {
           menuPill.textContent = `v${ver}`;
@@ -3608,16 +4285,261 @@
     let autoTagBackgroundEnabled = false;
     let autoTagBackgroundBusy = false;
 
+    function ensureEagleHoverTipEl() {
+      let tip = document.getElementById('eagleHoverTip');
+      if (tip) return tip;
+      tip = document.createElement('div');
+      tip.id = 'eagleHoverTip';
+      tip.setAttribute('role', 'tooltip');
+      tip.innerHTML = '<div class="eagle-hover-tip-arrow" aria-hidden="true"></div><strong class="eagle-hover-tip-title"></strong><div class="eagle-hover-tip-body"></div>';
+      document.body.appendChild(tip);
+      return tip;
+    }
+
+    function restoreNativeTitleFromTip(el) {
+      if (!el || !el.getAttribute) return;
+      const native = el.getAttribute('data-tip-native');
+      if (native == null) return;
+      el.setAttribute('title', native);
+      el.removeAttribute('data-tip-native');
+    }
+
+    function hideEagleHoverTip() {
+      const tip = document.getElementById('eagleHoverTip');
+      if (tip) tip.classList.remove('is-open');
+      if (eagleHoverTipAnchor) restoreNativeTitleFromTip(eagleHoverTipAnchor);
+    }
+
+    function setEagleTip(el, titleOrOpts, bodyMaybe) {
+      if (!el) return;
+      let title = '';
+      let body = '';
+      let whenTruncated = false;
+      if (titleOrOpts && typeof titleOrOpts === 'object') {
+        title = String(titleOrOpts.title || '').trim();
+        body = String(titleOrOpts.body || '').trim();
+        whenTruncated = Boolean(titleOrOpts.whenTruncated);
+      } else {
+        title = String(titleOrOpts || '').trim();
+        body = String(bodyMaybe || '').trim();
+      }
+      if (title) el.setAttribute('data-tip-title', title);
+      else el.removeAttribute('data-tip-title');
+      if (body) el.setAttribute('data-tip-body', body);
+      else el.removeAttribute('data-tip-body');
+      if (whenTruncated) el.setAttribute('data-tip-when-truncated', '1');
+      else el.removeAttribute('data-tip-when-truncated');
+      el.removeAttribute('title');
+    }
+
+    function isEagleTipHostTruncated(host) {
+      if (!host) return false;
+      const nodes = [host];
+      try {
+        host.querySelectorAll('.truncate').forEach((el) => nodes.push(el));
+      } catch (_) {}
+      for (let i = 0; i < nodes.length; i += 1) {
+        const el = nodes[i];
+        if (!el || el.nodeType !== 1) continue;
+        if (el.scrollWidth > el.clientWidth + 1) return true;
+        if (el.scrollHeight > el.clientHeight + 1) return true;
+      }
+      return false;
+    }
+
+    function shouldSkipRedundantNativeTip(anchor, text) {
+      if (!anchor || !text) return false;
+      if (anchor.getAttribute('data-tip-when-truncated') === '1') {
+        return !isEagleTipHostTruncated(anchor);
+      }
+      const visible = String(anchor.textContent || '').replace(/\s+/g, ' ').trim();
+      const tipText = String(text || '').replace(/\s+/g, ' ').trim();
+      if (!visible || !tipText) return false;
+      // 可见文字已经等于提示文案（或提示只是可见文字加括号说明）且并未截断 → 不必再弹。
+      if (!isEagleTipHostTruncated(anchor) && (tipText === visible || tipText.startsWith(visible + '（') || tipText.startsWith(visible + ' ('))) {
+        return true;
+      }
+      return false;
+    }
+
+    function showEagleHoverTip(anchor) {
+      if (!anchor) return false;
+      let title = (anchor.getAttribute('data-tip-title') || '').trim();
+      let body = (anchor.getAttribute('data-tip-body') || '').trim();
+      const nativeTitle = (
+        anchor.getAttribute('data-tip-native')
+        || anchor.getAttribute('title')
+        || ''
+      ).trim();
+      // 还没迁到 data-tip 的旧 title：统一收进毛玻璃气泡，并临时摘掉 title 防系统黄条抢戏。
+      if (!title && !body && nativeTitle) {
+        if (shouldSkipRedundantNativeTip(anchor, nativeTitle)) {
+          hideEagleHoverTip();
+          return false;
+        }
+        title = nativeTitle;
+      }
+      if (!title && !body) return false;
+      // 仅用于「看全被挡住的字」时：没被截断就不弹，避免「全部题库」这种完整可见还冒泡。
+      if (anchor.getAttribute('data-tip-when-truncated') === '1' && !isEagleTipHostTruncated(anchor)) {
+        hideEagleHoverTip();
+        return false;
+      }
+      if (anchor.hasAttribute('title')) {
+        anchor.setAttribute('data-tip-native', anchor.getAttribute('title') || '');
+        anchor.removeAttribute('title');
+      }
+      const tip = ensureEagleHoverTipEl();
+      const titleEl = tip.querySelector('.eagle-hover-tip-title');
+      const bodyEl = tip.querySelector('.eagle-hover-tip-body');
+      if (titleEl) {
+        // 只有一行原生 title 时，放进正文更像说明气泡；有独立 title/body 时保持分层。
+        if (!body && !(anchor.getAttribute('data-tip-title') || '').trim()) {
+          titleEl.textContent = '';
+          titleEl.style.display = 'none';
+          body = title;
+          title = '';
+        } else {
+          titleEl.textContent = title;
+          titleEl.style.display = title ? '' : 'none';
+        }
+      }
+      if (bodyEl) {
+        bodyEl.textContent = body;
+        bodyEl.style.display = body ? '' : 'none';
+      }
+      const rect = anchor.getBoundingClientRect();
+      tip.style.left = '0px';
+      tip.style.top = '0px';
+      const inFolderTree = Boolean(
+        anchor.closest && anchor.closest('#folderTreeContainer, #leftFolderSidebar')
+      );
+      const treePeek = inFolderTree && anchor.getAttribute('data-tip-when-truncated') === '1';
+      tip.classList.toggle('is-tree-peek', treePeek);
+      tip.classList.toggle('is-tree-peek-rich', treePeek && Boolean(body));
+      tip.classList.add('is-open');
+      const tipRect = tip.getBoundingClientRect();
+      const gap = 10;
+      let place = 'below';
+      let top = rect.bottom + gap;
+      let left = rect.right - tipRect.width;
+
+      if (treePeek) {
+        // 更好的办法：全名贴在左栏外侧，和当前行对齐，不再盖住下方文件夹。
+        const sidebar = document.getElementById('leftFolderSidebar');
+        const sideRect = sidebar ? sidebar.getBoundingClientRect() : rect;
+        place = 'right';
+        left = sideRect.right + 8;
+        top = rect.top + (rect.height - tipRect.height) / 2;
+        if (left + tipRect.width > window.innerWidth - 8) {
+          left = Math.max(8, sideRect.left - tipRect.width - 8);
+          place = 'left';
+        }
+        top = Math.max(8, Math.min(top, window.innerHeight - tipRect.height - 8));
+      } else {
+        if (top + tipRect.height > window.innerHeight - 8 && rect.top - gap - tipRect.height > 8) {
+          place = 'above';
+          top = rect.top - gap - tipRect.height;
+        }
+        left = Math.max(8, Math.min(left, window.innerWidth - tipRect.width - 8));
+      }
+      tip.dataset.place = place;
+      tip.style.left = `${Math.round(left)}px`;
+      tip.style.top = `${Math.round(top)}px`;
+      return true;
+    }
+
+    let eagleHoverTipAnchor = null;
+    function findEagleTipHost(node) {
+      if (!node || !node.closest) return null;
+      const dataHost = node.closest('[data-tip-title], [data-tip-body]');
+      if (dataHost) return dataHost;
+      const titleHost = node.closest('[title], [data-tip-native]');
+      if (!titleHost) return null;
+      if (titleHost.matches('input, textarea, select, option')) return null;
+      const text = (titleHost.getAttribute('data-tip-native') || titleHost.getAttribute('title') || '').trim();
+      if (!text) return null;
+      return titleHost;
+    }
+    function installEagleHoverTipDelegation() {
+      if (document.documentElement.dataset.eagleTipDelegation === '1') return;
+      document.documentElement.dataset.eagleTipDelegation = '1';
+      document.addEventListener('mouseover', (event) => {
+        const host = findEagleTipHost(event.target);
+        if (host === eagleHoverTipAnchor) return;
+        if (eagleHoverTipAnchor) restoreNativeTitleFromTip(eagleHoverTipAnchor);
+        eagleHoverTipAnchor = host;
+        if (host) {
+          if (!showEagleHoverTip(host)) eagleHoverTipAnchor = null;
+        } else {
+          hideEagleHoverTip();
+        }
+      }, true);
+      document.addEventListener('mouseout', (event) => {
+        if (!eagleHoverTipAnchor) return;
+        const to = event.relatedTarget;
+        if (to && eagleHoverTipAnchor.contains(to)) return;
+        if (to && findEagleTipHost(to) === eagleHoverTipAnchor) return;
+        const prev = eagleHoverTipAnchor;
+        eagleHoverTipAnchor = null;
+        restoreNativeTitleFromTip(prev);
+        hideEagleHoverTip();
+      }, true);
+      document.addEventListener('focusin', (event) => {
+        const host = findEagleTipHost(event.target);
+        if (!host) return;
+        if (eagleHoverTipAnchor && eagleHoverTipAnchor !== host) restoreNativeTitleFromTip(eagleHoverTipAnchor);
+        eagleHoverTipAnchor = host;
+        if (!showEagleHoverTip(host)) eagleHoverTipAnchor = null;
+      }, true);
+      document.addEventListener('focusout', (event) => {
+        if (!eagleHoverTipAnchor) return;
+        const to = event.relatedTarget;
+        if (to && findEagleTipHost(to) === eagleHoverTipAnchor) return;
+        const prev = eagleHoverTipAnchor;
+        eagleHoverTipAnchor = null;
+        restoreNativeTitleFromTip(prev);
+        hideEagleHoverTip();
+      }, true);
+      document.addEventListener('scroll', () => {
+        if (eagleHoverTipAnchor) restoreNativeTitleFromTip(eagleHoverTipAnchor);
+        eagleHoverTipAnchor = null;
+        hideEagleHoverTip();
+      }, true);
+      window.addEventListener('blur', () => {
+        if (eagleHoverTipAnchor) restoreNativeTitleFromTip(eagleHoverTipAnchor);
+        eagleHoverTipAnchor = null;
+        hideEagleHoverTip();
+      });
+    }
+    installEagleHoverTipDelegation();
+
     function renderAutoTagBackgroundToggle() {
       const btn = document.getElementById('aiBgTagToggleBtn');
       if (!btn) return;
       btn.disabled = autoTagBackgroundBusy;
-      if (autoTagBackgroundEnabled) {
-        btn.textContent = autoTagBackgroundBusy ? '后台补标: …' : '后台补标: 开';
-        btn.className = 'px-1.5 py-0.5 rounded border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-[10px] font-semibold text-emerald-800 cursor-pointer transition-colors shrink-0';
-      } else {
-        btn.textContent = autoTagBackgroundBusy ? '后台补标: …' : '后台补标: 关';
-        btn.className = 'px-1.5 py-0.5 rounded border border-slate-200 bg-white hover:bg-slate-50 text-[10px] text-slate-500 cursor-pointer transition-colors shrink-0';
+      const on = autoTagBackgroundEnabled;
+      const stateLabel = autoTagBackgroundBusy ? '切换中…' : (on ? '开' : '关');
+      const tipTitle = autoTagBackgroundBusy ? '后台补标 · 切换中' : `后台补标 · ${stateLabel}`;
+      const tipBody = autoTagBackgroundBusy
+        ? '正在切换后台补标，请稍候。'
+        : (on
+          ? '已开启。无标签题目会在后台慢慢生成候选标签；点单题会立即插队。再点一次可关闭。'
+          : '开启后，无标签题目会在后台慢慢生成候选标签；点单题会立即插队。');
+      btn.className = `eagle-ai-bg-toggle ${on ? 'is-on' : 'is-off'}`;
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.setAttribute('aria-label', `后台补标：${stateLabel}`);
+      setEagleTip(btn, tipTitle, tipBody);
+      // 图标留在按钮里，只更新状态，不往按钮上写汉字。
+      if (!btn.querySelector('svg')) {
+        btn.innerHTML = `
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M2.5 3.25h7.2l3.8 3.8v5.7A1.25 1.25 0 0 1 12.25 14H2.5A1.25 1.25 0 0 1 1.25 12.75V4.5A1.25 1.25 0 0 1 2.5 3.25Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+            <circle cx="5.4" cy="9.1" r="1.15" fill="currentColor"/>
+            <path d="M10.2 2.2a3.1 3.1 0 0 1 2.95 2.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+            <path d="M13.55 3.05v1.55H12" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        `;
       }
     }
 
@@ -3679,13 +4601,20 @@
 
     async function init() {
       syncFilterPanelUI();
+      syncQuestionMetaCardUI();
 
       setupEventListeners();
+      initInspectorResize();
+      initSidebarResize();
       // 窄屏先把左栏收起来，别让中栏被挤成一条缝（宽度变了也跟着走）
       applyResponsiveLeftSidebar();
       window.addEventListener('resize', () => {
         clearTimeout(leftSidebarResizeTimer);
-        leftSidebarResizeTimer = setTimeout(applyResponsiveLeftSidebar, 120);
+        leftSidebarResizeTimer = setTimeout(() => {
+          applyResponsiveLeftSidebar();
+          applyInspectorWidth(readStoredInspectorWidth(), { persist: false });
+          applySidebarWidth(readStoredSidebarWidth(), { persist: false });
+        }, 120);
       });
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) armDeepLinkPollingFromFocus();
@@ -4605,7 +5534,6 @@
             forceRemount: !append
           });
         }
-        syncJumpQuestionIndexDisplay();
         updateChunkSentinelStatus();
         updateBatchActionBar();
       } catch (err) {
@@ -4675,8 +5603,6 @@
         const cb = document.getElementById('selectAllCheckbox');
         if (cb && !cb.checked) return;
         data.ids.forEach(id => selectedQuestionIds.add(String(id)));
-        const txt = document.getElementById('selectedCountText');
-        if (txt) txt.innerText = `已勾选 ${selectedQuestionIds.size} 题`;
         updateBatchActionBar();
         renderRightInspector();
       } catch (err) {
@@ -4814,7 +5740,6 @@
       if (typeof eagleVirtualList !== 'undefined') {
         eagleVirtualList.setItems(filteredQuestions, currentViewMode, { resetScroll: false, forceRemount: false });
       }
-      syncJumpQuestionIndexDisplay();
       updateSmartFolderCounts();
       updateFavoritesBadge();
       updateBatchActionBar();
@@ -5340,6 +6265,25 @@
       filterState.excludedTagIds = filterState.excludedTagIds.filter(id => id !== tid);
       syncFilterDropdownStates();
       applyFilters();
+    }
+
+    /** 仿 Eagle：左键点标签 = 只看库中带这个标签的题（右键仍开菜单）。 */
+    function onQuestionTagClick(event, tagId) {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      const tid = String(tagId || '');
+      if (!tid) return;
+      const allFlat = (typeof tagGroupsData !== 'undefined' ? tagGroupsData : [])
+        .flatMap(g => g.tags || []);
+      const fromCatalogue = allFlat.find(t => t && String(t.id) === tid);
+      const fromCard = (questionsData || [])
+        .flatMap(q => q.tags || [])
+        .find(t => t && String(t.id) === tid);
+      const name = (fromCatalogue && fromCatalogue.name) || (fromCard && fromCard.name) || '';
+      focusQuestionTagOnly(tid);
+      showToast(name ? `已筛选标签「${name}」` : '已按该标签筛选', 'success');
     }
 
     function filterByQuestionTag(tagId, mode) {
@@ -6004,7 +6948,7 @@
         const titleEl = document.getElementById('inspectorTitle');
         if (titleEl) {
           titleEl.innerText = nextName ? nextName : '题目属性';
-          titleEl.title = nextName ? ('题目名称：' + nextName) : '题目属性';
+          setEagleTip(titleEl, nextName ? '题目名称' : '题目属性', nextName || '');
         }
         refreshQuestionCardNameInDom(qid);
       }
@@ -6274,7 +7218,8 @@
         ['time_desc', '\u{1F552}', '按创建时间 (新\u2192旧)'],
         ['time_asc', '\u{1F4C5}', '按创建时间 (旧\u2192新)'],
         ['name', '\u{1F520}', '按名称升序 (A-Z)'],
-        ['count_desc', '\u{1F4CA}', '按包含试题数 (多到少)']
+        ['count_desc', '\u{1F4CA}', '按包含试题数 (多到少)'],
+        ['manual', '\u{1F4CC}', '手动排序 (拖拽位置)']
       ];
     }
 
@@ -6307,7 +7252,8 @@
         ['time_desc', '\u{1F552}', '按创建时间 (新\u2192旧)'],
         ['time_asc', '\u{1F4C5}', '按创建时间 (旧\u2192新)'],
         ['name', '\u{1F520}', '按名称升序 (A-Z)'],
-        ['count_desc', '\u{1F4CA}', '按包含试题数 (多到少)']
+        ['count_desc', '\u{1F4CA}', '按包含试题数 (多到少)'],
+        ['manual', '\u{1F4CC}', '手动排序 (拖拽位置)']
       ];
     }
 
@@ -7715,56 +8661,19 @@
       getContainer: () => document.getElementById('questionListContainer'),
       isAnalysisExpanded: (qid) => expandedAnalysisQuestionIds.has(qid),
       renderItemHtml: (q, mode) => (mode === 'card' ? renderSingleQuestionCardHtml(q) : renderCompactQuestionRowHtml(q)),
-      triggerKaTeX: (el) => triggerKaTeX(el),
-      onPositionChange: (currentOneBased) => {
-        const input = document.getElementById('jumpQuestionIndexInput');
-        if (!input || document.activeElement === input) return;
-        input.value = String(currentOneBased || 0);
-        input.disabled = filteredQuestions.length === 0;
-      }
+      triggerKaTeX: (el) => triggerKaTeX(el)
     });
 
-    function syncJumpQuestionIndexDisplay() {
-      const input = document.getElementById('jumpQuestionIndexInput');
-      if (!input) return;
-      const total = filteredQuestions.length;
-      input.disabled = total === 0;
-      input.value = String(total === 0 ? 0 : (eagleVirtualList.currentOneBased || 1));
-    }
-
+    // 顶栏不再显示「共 N 题」；题序跳转仍留给定位/深链等程序调用。
     function jumpToQuestionOrder(rawValue) {
       const total = filteredQuestions.length;
-      if (total === 0) {
-        syncJumpQuestionIndexDisplay();
-        return null;
-      }
+      if (total === 0) return null;
       const parsed = Math.floor(Number(String(rawValue || '').trim()));
-      if (!Number.isFinite(parsed) || parsed < 1) {
-        syncJumpQuestionIndexDisplay();
-        return null;
-      }
+      if (!Number.isFinite(parsed) || parsed < 1) return null;
       const targetIdx = Math.max(1, Math.min(total, parsed));
       const targetQ = eagleVirtualList.scrollToOneBasedIndex(targetIdx);
-      if (targetQ) {
-        focusQuestion(targetQ.id);
-      }
-      syncJumpQuestionIndexDisplay();
+      if (targetQ) focusQuestion(targetQ.id);
       return targetQ;
-    }
-
-    function handleJumpQuestionIndexKey(event) {
-      if (!event) return;
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        event.stopPropagation();
-        jumpToQuestionOrder(event.target.value);
-        event.target.blur();
-      } else if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        syncJumpQuestionIndexDisplay();
-        event.target.blur();
-      }
     }
 
     function applyFilters() {
@@ -7795,7 +8704,6 @@
       container.innerHTML = '<div id="chunkSentinel" class="py-4 text-center text-xs text-slate-400">正在载入试题...</div>';
 
       renderNextQuestionChunk();
-      syncJumpQuestionIndexDisplay();
       renderInlineActiveChips();
       updateBatchActionBar();
     }
@@ -7929,6 +8837,7 @@
           id="qcard_${q.id}"
           draggable="true"
           ondragstart="handleQuestionDragStart(event, '${q.id}')"
+          ondragend="handleQuestionDragEnd(event)"
           onclick="focusQuestion('${q.id}')"
           ondblclick="openQuickLookModal('${q.id}')"
           oncontextmenu="openQuestionContextMenu(event, '${q.id}')"
@@ -8007,10 +8916,10 @@
                 };
                 const badgeCls = colorMap[tagColor] || colorMap.slate;
                 const ctxAttr = tagId
-                  ? ` oncontextmenu="openQuestionTagContextMenu(event, '${escapeInlineJsArg(q.id)}', '${escapeInlineJsArg(tagId)}')"`
+                  ? ` onclick="onQuestionTagClick(event, '${escapeInlineJsArg(tagId)}')" oncontextmenu="openQuestionTagContextMenu(event, '${escapeInlineJsArg(q.id)}', '${escapeInlineJsArg(tagId)}')"`
                   : '';
                 return `
-                  <span${ctxAttr} class="px-2 py-0.5 rounded text-[11px] font-medium border ${badgeCls} transition-colors cursor-context-menu">
+                  <span${ctxAttr} class="eagle-q-tag px-2 py-0.5 rounded text-[11px] font-medium border ${badgeCls}">
                     ${escapeHtml(tagName)}
                   </span>
                 `;
@@ -8068,6 +8977,7 @@
           id="qcard_${q.id}"
           draggable="true"
           ondragstart="handleQuestionDragStart(event, '${q.id}')"
+          ondragend="handleQuestionDragEnd(event)"
           onclick="focusQuestion('${q.id}')"
           ondblclick="openQuickLookModal('${q.id}')"
           oncontextmenu="openQuestionContextMenu(event, '${q.id}')"
@@ -8378,7 +9288,7 @@
         const elapsedMs = Math.max(0, Date.now() - (progress.startedAt || Date.now()));
         const elapsedEl = document.getElementById('aiTagElapsedText');
         if (elapsedEl) {
-          elapsedEl.innerText = `已耗时 ${formatAiElapsed(elapsedMs)}`;
+          elapsedEl.innerText = formatAiElapsed(elapsedMs);
         }
         const hintEl = document.getElementById('aiTagStatusHint');
         if (hintEl) {
@@ -8767,9 +9677,25 @@
         ? `⚡ 确认测试连接并立即生成${isTags ? '标签' : '解析'}`
         : `⚡ 一键改用 ${readyLabel} 并生成${isTags ? '标签' : '解析'}`;
 
+      if (isTags) {
+        return `
+          <div class="eagle-ai-setup">
+            <div class="eagle-ai-setup-title">需要先完成 API 就绪检查</div>
+            <div>${escapeHtml(headline)}</div>
+            <div class="flex flex-wrap items-center gap-3 pt-0.5">
+              ${(canSelfVerify || canSwitchAndVerify) ? `
+                <button type="button" onclick="${actionHandler}" class="eagle-ai-action is-primary">
+                  ${escapeHtml(actionLabel.replace(/^⚡\s*/, ''))}
+                </button>
+              ` : ''}
+              <a href="/settings#ai" class="eagle-ai-action">前往设置</a>
+            </div>
+          </div>
+        `;
+      }
       return `
-        <div class="${isTags ? 'space-y-1.5 rounded bg-amber-50/80 border border-amber-200 p-2 text-[10px] text-amber-900' : 'p-3.5 bg-amber-50/70 rounded-lg border border-amber-200 text-xs text-amber-950 space-y-2'}">
-          <div class="font-semibold">${isTags ? '需要完成一次 API 就绪检查' : 'AI 服务尚未就绪'}</div>
+        <div class="p-3.5 bg-amber-50/70 rounded-lg border border-amber-200 text-xs text-amber-950 space-y-2">
+          <div class="font-semibold">AI 服务尚未就绪</div>
           <div class="leading-relaxed">${escapeHtml(headline)}</div>
           <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
             ${(canSelfVerify || canSwitchAndVerify) ? `
@@ -10520,12 +11446,16 @@
     }
 
     // ================= 批量操作浮动工具栏 =================
+    function syncSelectAllCountTip(count = selectedQuestionIds.size) {
+      const label = document.getElementById('selectAllLabel');
+      if (label) setEagleTip(label, { title: `已勾选 ${count} 题` });
+    }
+
     function updateBatchActionBar() {
       const bar = document.getElementById('batchActionBar');
       const countBadge = document.getElementById('batchCountBadge');
       const count = selectedQuestionIds.size;
-      const selText = document.getElementById('selectedCountText');
-      if (selText) selText.innerText = `已勾选 ${count} 题`;
+      syncSelectAllCountTip(count);
       const selectAllCb = document.getElementById('selectAllCheckbox');
       if (selectAllCb) {
         const total = filteredQuestions.length;
@@ -10584,7 +11514,6 @@
 
     function clearBatchSelection() {
       selectedQuestionIds.clear();
-      document.getElementById('selectedCountText').innerText = `已勾选 0 题`;
       document.querySelectorAll('#questionListContainer input[type="checkbox"]').forEach(cb => cb.checked = false);
       updateBatchActionBar();
       renderRightInspector();
@@ -11635,6 +12564,205 @@
     // 窄窗（<1100px）默认把右栏收成窄条，否则中栏被挤成一条缝；
     // 窄窗下第一次点按钮 = 强制展开，第二次点 = 收回。
     const INSPECTOR_COLLAPSE_BREAKPOINT = 1100;
+    // 本机 Eagle（约 1600px 宽窗口）实测：左栏约 16%、右属性约 20% → 260 / 320
+    const INSPECTOR_WIDTH_STORAGE_KEY = 'eagle_inspector_width_px';
+    const INSPECTOR_WIDTH_DEFAULT = 320;
+    const INSPECTOR_WIDTH_MIN = 240;
+    const INSPECTOR_WIDTH_MAX = 560;
+    const SIDEBAR_WIDTH_STORAGE_KEY = 'eagle_sidebar_width_px';
+    const SIDEBAR_WIDTH_DEFAULT = 260;
+    const SIDEBAR_WIDTH_MIN = 180;
+    const SIDEBAR_WIDTH_MAX = 420;
+
+    function clampInspectorWidth(px) {
+      const raw = Number(px);
+      const fallback = INSPECTOR_WIDTH_DEFAULT;
+      const value = Number.isFinite(raw) ? raw : fallback;
+      const maxByViewport = Math.max(
+        INSPECTOR_WIDTH_MIN,
+        Math.min(INSPECTOR_WIDTH_MAX, Math.floor(window.innerWidth * 0.45))
+      );
+      return Math.max(INSPECTOR_WIDTH_MIN, Math.min(maxByViewport, Math.round(value)));
+    }
+
+    function applyInspectorWidth(px, { persist = true } = {}) {
+      const pane = document.getElementById('rightInspectorPane');
+      if (!pane) return INSPECTOR_WIDTH_DEFAULT;
+      const width = clampInspectorWidth(px);
+      pane.style.setProperty('--inspector-width', `${width}px`);
+      if (persist) {
+        try { localStorage.setItem(INSPECTOR_WIDTH_STORAGE_KEY, String(width)); } catch (_) {}
+      }
+      return width;
+    }
+
+    function readStoredInspectorWidth() {
+      try {
+        const raw = localStorage.getItem(INSPECTOR_WIDTH_STORAGE_KEY);
+        if (raw == null || raw === '') return INSPECTOR_WIDTH_DEFAULT;
+        const n = Number(raw);
+        return Number.isFinite(n) ? n : INSPECTOR_WIDTH_DEFAULT;
+      } catch (_) {
+        return INSPECTOR_WIDTH_DEFAULT;
+      }
+    }
+
+    function initInspectorResize() {
+      const pane = document.getElementById('rightInspectorPane');
+      const handle = document.getElementById('inspectorResizeHandle');
+      if (!pane || !handle || handle.dataset.bound === '1') return;
+      handle.dataset.bound = '1';
+      applyInspectorWidth(readStoredInspectorWidth(), { persist: false });
+
+      let dragging = false;
+      let startX = 0;
+      let startWidth = INSPECTOR_WIDTH_DEFAULT;
+
+      const onMove = (ev) => {
+        if (!dragging) return;
+        const clientX = ev.clientX != null ? ev.clientX : (ev.touches && ev.touches[0]?.clientX);
+        if (clientX == null) return;
+        // 右边栏：向左拖 = 变宽
+        const next = startWidth + (startX - clientX);
+        applyInspectorWidth(next, { persist: false });
+      };
+      const onUp = () => {
+        if (!dragging) return;
+        dragging = false;
+        pane.classList.remove('resizing');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        const computed = parseFloat(getComputedStyle(pane).getPropertyValue('--inspector-width')) || INSPECTOR_WIDTH_DEFAULT;
+        applyInspectorWidth(computed, { persist: true });
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+      };
+
+      handle.addEventListener('pointerdown', (ev) => {
+        if (pane.classList.contains('collapsed')) return;
+        if (window.innerWidth < INSPECTOR_COLLAPSE_BREAKPOINT && !pane.classList.contains('force-open')) return;
+        if (ev.button != null && ev.button !== 0) return;
+        ev.preventDefault();
+        dragging = true;
+        startX = ev.clientX;
+        startWidth = clampInspectorWidth(
+          parseFloat(getComputedStyle(pane).getPropertyValue('--inspector-width')) || pane.getBoundingClientRect().width
+        );
+        pane.classList.add('resizing');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        try { handle.setPointerCapture(ev.pointerId); } catch (_) {}
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        window.addEventListener('pointercancel', onUp);
+      });
+
+      handle.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+        ev.preventDefault();
+        const current = clampInspectorWidth(
+          parseFloat(getComputedStyle(pane).getPropertyValue('--inspector-width')) || INSPECTOR_WIDTH_DEFAULT
+        );
+        const step = ev.shiftKey ? 32 : 16;
+        const delta = ev.key === 'ArrowLeft' ? step : -step;
+        applyInspectorWidth(current + delta, { persist: true });
+      });
+    }
+
+    function clampSidebarWidth(px) {
+      const raw = Number(px);
+      const value = Number.isFinite(raw) ? raw : SIDEBAR_WIDTH_DEFAULT;
+      const maxByViewport = Math.max(
+        SIDEBAR_WIDTH_MIN,
+        Math.min(SIDEBAR_WIDTH_MAX, Math.floor(window.innerWidth * 0.36))
+      );
+      return Math.max(SIDEBAR_WIDTH_MIN, Math.min(maxByViewport, Math.round(value)));
+    }
+
+    function applySidebarWidth(px, { persist = true } = {}) {
+      const side = document.getElementById('leftFolderSidebar');
+      if (!side) return SIDEBAR_WIDTH_DEFAULT;
+      const width = clampSidebarWidth(px);
+      side.style.setProperty('--sidebar-width', `${width}px`);
+      if (persist) {
+        try { localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(width)); } catch (_) {}
+      }
+      return width;
+    }
+
+    function readStoredSidebarWidth() {
+      try {
+        const raw = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+        if (raw == null || raw === '') return SIDEBAR_WIDTH_DEFAULT;
+        const n = Number(raw);
+        return Number.isFinite(n) ? n : SIDEBAR_WIDTH_DEFAULT;
+      } catch (_) {
+        return SIDEBAR_WIDTH_DEFAULT;
+      }
+    }
+
+    function initSidebarResize() {
+      const side = document.getElementById('leftFolderSidebar');
+      const handle = document.getElementById('sidebarResizeHandle');
+      if (!side || !handle || handle.dataset.bound === '1') return;
+      handle.dataset.bound = '1';
+      applySidebarWidth(readStoredSidebarWidth(), { persist: false });
+
+      let dragging = false;
+      let startX = 0;
+      let startWidth = SIDEBAR_WIDTH_DEFAULT;
+
+      const onMove = (ev) => {
+        if (!dragging) return;
+        const clientX = ev.clientX != null ? ev.clientX : (ev.touches && ev.touches[0]?.clientX);
+        if (clientX == null) return;
+        // 左边栏：向右拖 = 变宽
+        applySidebarWidth(startWidth + (clientX - startX), { persist: false });
+      };
+      const onUp = () => {
+        if (!dragging) return;
+        dragging = false;
+        side.classList.remove('resizing');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        const computed = parseFloat(getComputedStyle(side).getPropertyValue('--sidebar-width')) || SIDEBAR_WIDTH_DEFAULT;
+        applySidebarWidth(computed, { persist: true });
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+      };
+
+      handle.addEventListener('pointerdown', (ev) => {
+        if (side.classList.contains('collapsed')) return;
+        if (ev.button != null && ev.button !== 0) return;
+        ev.preventDefault();
+        dragging = true;
+        startX = ev.clientX;
+        startWidth = clampSidebarWidth(
+          parseFloat(getComputedStyle(side).getPropertyValue('--sidebar-width')) || side.getBoundingClientRect().width
+        );
+        side.classList.add('resizing');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        try { handle.setPointerCapture(ev.pointerId); } catch (_) {}
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        window.addEventListener('pointercancel', onUp);
+      });
+
+      handle.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return;
+        ev.preventDefault();
+        const current = clampSidebarWidth(
+          parseFloat(getComputedStyle(side).getPropertyValue('--sidebar-width')) || SIDEBAR_WIDTH_DEFAULT
+        );
+        const step = ev.shiftKey ? 32 : 16;
+        const delta = ev.key === 'ArrowRight' ? step : -step;
+        applySidebarWidth(current + delta, { persist: true });
+      });
+    }
+
     function toggleRightInspector() {
       const pane = document.getElementById('rightInspectorPane');
       if (!pane) return;
@@ -11711,6 +12839,8 @@
       const modal = document.getElementById('dedupCenterModal');
       if (!modal) return;
       modal.classList.remove('hidden');
+      const body = document.getElementById('dedupCenterBody');
+      if (body) body.scrollTop = 0;
       switchDedupTab(initialTab || 'duplicates', false);
       loadDedupScanData();
     }
@@ -12056,8 +13186,6 @@
     function toggleSelectQuestion(qid, checked) {
       if (checked) selectedQuestionIds.add(qid);
       else selectedQuestionIds.delete(qid);
-
-      document.getElementById('selectedCountText').innerText = `已勾选 ${selectedQuestionIds.size} 题`;
       updateBatchActionBar();
       renderRightInspector();
     }
@@ -12065,8 +13193,6 @@
     function toggleSelectAll(checked) {
       if (checked) filteredQuestions.forEach(q => selectedQuestionIds.add(q.id));
       else selectedQuestionIds.clear();
-
-      document.getElementById('selectedCountText').innerText = `已勾选 ${selectedQuestionIds.size} 题`;
       const container = document.getElementById('questionListContainer');
       container.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = checked);
       updateBatchActionBar();
@@ -12512,8 +13638,8 @@
           if (coveredDocKeys.has(nodeId) && !leafInfo.sectionName && !leafInfo.chapterKey) return;
           docPills.push(`
             <span class="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium transition-colors max-w-full">
-              <button type="button" onclick="navigateToInspectorBookTarget('${escapeInlineJsArg(p.id)}', '${escapeInlineJsArg(leafInfo.chapterKey)}', '${escapeInlineJsArg(leafInfo.sectionName)}')" class="truncate cursor-pointer hover:text-emerald-700" title="${escapeHtml(leafInfo.fullPath)}（点击定位）">📁 ${escapeHtml(leafInfo.leafLabel)}</button>
-              <button type="button" onclick="event.stopPropagation(); removeQuestionsFromDocFolder(['${escapeInlineJsArg(q.id)}'], '${escapeInlineJsArg(p.id)}')" class="text-slate-400 hover:text-rose-600 font-bold leading-none px-0.5 cursor-pointer" title="从该文件夹移出">×</button>
+              <button type="button" onclick="navigateToInspectorBookTarget('${escapeInlineJsArg(p.id)}', '${escapeInlineJsArg(leafInfo.chapterKey)}', '${escapeInlineJsArg(leafInfo.sectionName)}')" class="truncate cursor-pointer hover:text-emerald-700" data-tip-title="${escapeHtml(leafInfo.leafLabel)}" data-tip-body="${escapeHtml(leafInfo.fullPath)} · 点击定位" data-tip-when-truncated="1">📁 ${escapeHtml(leafInfo.leafLabel)}</button>
+              <button type="button" onclick="event.stopPropagation(); removeQuestionsFromDocFolder(['${escapeInlineJsArg(q.id)}'], '${escapeInlineJsArg(p.id)}')" class="text-slate-400 hover:text-rose-600 font-bold leading-none px-0.5 cursor-pointer" data-tip-title="移出文件夹">×</button>
             </span>
           `);
           return;
@@ -12521,8 +13647,8 @@
         const fullPath = `试卷 / ${p.name}`;
         docPills.push(`
           <span class="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium transition-colors max-w-full">
-            <button type="button" onclick="navigateToInspectorFolderNode('${escapeInlineJsArg(nodeId)}')" class="truncate cursor-pointer hover:text-emerald-700" title="${escapeHtml(fullPath)}（点击定位）">📁 ${escapeHtml(p.name)}</button>
-            <button type="button" onclick="event.stopPropagation(); removeQuestionsFromDocFolder(['${escapeInlineJsArg(q.id)}'], '${escapeInlineJsArg(p.id)}')" class="text-slate-400 hover:text-rose-600 font-bold leading-none px-0.5 cursor-pointer" title="从该文件夹移出">×</button>
+            <button type="button" onclick="navigateToInspectorFolderNode('${escapeInlineJsArg(nodeId)}')" class="truncate cursor-pointer hover:text-emerald-700" data-tip-title="${escapeHtml(p.name)}" data-tip-body="${escapeHtml(fullPath)} · 点击定位" data-tip-when-truncated="1">📁 ${escapeHtml(p.name)}</button>
+            <button type="button" onclick="event.stopPropagation(); removeQuestionsFromDocFolder(['${escapeInlineJsArg(q.id)}'], '${escapeInlineJsArg(p.id)}')" class="text-slate-400 hover:text-rose-600 font-bold leading-none px-0.5 cursor-pointer" data-tip-title="移出文件夹">×</button>
           </span>
         `);
       });
@@ -12537,8 +13663,8 @@
           const fullPath = sec ? `${q.source} / ${sec}` : q.source;
           docPills.push(`
             <span class="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium transition-colors max-w-full">
-              <button type="button" onclick="locateQuestionFolderInTree('${escapeInlineJsArg(q.id)}')" class="truncate cursor-pointer hover:text-emerald-700" title="${escapeHtml(fullPath)}（点击定位）">📁 ${escapeHtml(leafLabel)}</button>
-              <button type="button" onclick="event.stopPropagation(); removeQuestionsFromDocFolder(['${escapeInlineJsArg(q.id)}'], '${escapeInlineJsArg(q.documentId)}')" class="text-slate-400 hover:text-rose-600 font-bold leading-none px-0.5 cursor-pointer" title="从该文件夹移出">×</button>
+              <button type="button" onclick="locateQuestionFolderInTree('${escapeInlineJsArg(q.id)}')" class="truncate cursor-pointer hover:text-emerald-700" data-tip-title="${escapeHtml(leafLabel)}" data-tip-body="${escapeHtml(fullPath)} · 点击定位" data-tip-when-truncated="1">📁 ${escapeHtml(leafLabel)}</button>
+              <button type="button" onclick="event.stopPropagation(); removeQuestionsFromDocFolder(['${escapeInlineJsArg(q.id)}'], '${escapeInlineJsArg(q.documentId)}')" class="text-slate-400 hover:text-rose-600 font-bold leading-none px-0.5 cursor-pointer" data-tip-title="移出文件夹">×</button>
             </span>
           `);
         }
@@ -12551,15 +13677,15 @@
           : `文件夹 / ${f.name}`;
         return `
           <span class="inline-flex items-center gap-1 rounded-md border border-emerald-200/80 bg-emerald-50/70 hover:bg-emerald-100/70 text-emerald-900 px-2 py-0.5 text-[11px] font-medium transition-colors max-w-full">
-            <button type="button" onclick="navigateToInspectorFolderNode('userfolder:${escapeInlineJsArg(f.id)}')" class="truncate cursor-pointer hover:text-emerald-700" title="${escapeHtml(fullPath)}（点击定位）">📁 ${escapeHtml(f.name)}</button>
-            <button type="button" onclick="event.stopPropagation(); removeQuestionsFromUserFolder(['${escapeInlineJsArg(q.id)}'], '${escapeInlineJsArg(f.id)}')" class="text-emerald-500 hover:text-rose-600 font-bold leading-none px-0.5 cursor-pointer" title="从该文件夹移出">×</button>
+            <button type="button" onclick="navigateToInspectorFolderNode('userfolder:${escapeInlineJsArg(f.id)}')" class="truncate cursor-pointer hover:text-emerald-700" data-tip-title="${escapeHtml(f.name)}" data-tip-body="${escapeHtml(fullPath)} · 点击定位" data-tip-when-truncated="1">📁 ${escapeHtml(f.name)}</button>
+            <button type="button" onclick="event.stopPropagation(); removeQuestionsFromUserFolder(['${escapeInlineJsArg(q.id)}'], '${escapeInlineJsArg(f.id)}')" class="text-emerald-500 hover:text-rose-600 font-bold leading-none px-0.5 cursor-pointer" data-tip-title="移出文件夹">×</button>
           </span>
         `;
       });
 
       const allPills = docPills.concat(userPills).join('');
       const emptyHint = allPills ? '' : `<span class="text-[11px] text-slate-400">未归入文件夹</span>`;
-      const addBtn = `<button type="button" onclick="openFolderPickerForQuestions(['${escapeInlineJsArg(q.id)}'])" class="inline-flex items-center justify-center w-6 h-6 rounded-md border border-dashed border-slate-300 text-slate-500 hover:border-emerald-500 hover:text-emerald-700 hover:bg-emerald-50 text-xs font-bold cursor-pointer transition-colors" title="添加到文件夹">+</button>`;
+      const addBtn = `<button type="button" onclick="openFolderPickerForQuestions(['${escapeInlineJsArg(q.id)}'])" class="inline-flex items-center justify-center w-6 h-6 rounded-md border border-dashed border-slate-300 text-slate-500 hover:border-emerald-500 hover:text-emerald-700 hover:bg-emerald-50 text-xs font-bold cursor-pointer transition-colors" data-tip-title="添加到文件夹">+</button>`;
       box.innerHTML = allPills + emptyHint + addBtn;
     }
 
@@ -12572,6 +13698,33 @@
       }
       const pageIdx = curr.sourcePageIdx ?? (curr.sourcePage ? curr.sourcePage - 1 : 0);
       openOriginalPaperModal(curr.documentId || '', pageIdx, curr.source || '原卷查看', curr.id);
+    }
+
+    // 考题属性折叠：对齐 Eagle「基本信息」可收起；记住本机偏好，默认展开。
+    let questionMetaCardOpen = true;
+    try {
+      const rawMetaOpen = localStorage.getItem('eagle_question_meta_open');
+      if (rawMetaOpen === '0') questionMetaCardOpen = false;
+      else if (rawMetaOpen === '1') questionMetaCardOpen = true;
+    } catch (_) {}
+
+    function syncQuestionMetaCardUI() {
+      const card = document.getElementById('questionMetaCard');
+      const btn = document.getElementById('btnToggleQuestionMetaCard');
+      const body = document.getElementById('questionMetaCardBody');
+      if (!card || !btn || !body) return;
+      card.classList.toggle('is-collapsed', !questionMetaCardOpen);
+      btn.setAttribute('aria-expanded', questionMetaCardOpen ? 'true' : 'false');
+      setEagleTip(btn, questionMetaCardOpen ? '折叠考题属性' : '展开考题属性');
+    }
+
+    function toggleQuestionMetaCard(event) {
+      if (event) event.stopPropagation();
+      questionMetaCardOpen = !questionMetaCardOpen;
+      try {
+        localStorage.setItem('eagle_question_meta_open', questionMetaCardOpen ? '1' : '0');
+      } catch (_) {}
+      syncQuestionMetaCardUI();
     }
 
     function renderRightInspector() {
@@ -12596,7 +13749,7 @@
 
       if (isBatch) {
         titleEl.innerText = '批量打标模式';
-        titleEl.title = '批量打标模式';
+        setEagleTip(titleEl, '批量打标模式');
         if (badgeEl) {
           badgeEl.innerText = `${selectedQuestionIds.size} 题`;
           badgeEl.classList.remove('hidden');
@@ -12616,18 +13769,18 @@
           if (sourceTextEl) {
             const srcLabel = String(curr.source || '未命名资料').trim();
             sourceTextEl.innerText = srcLabel;
-            sourceTextEl.title = srcLabel;
+            setEagleTip(sourceTextEl, { title: '来源', body: srcLabel, whenTruncated: true });
           }
           const posTextEl = document.getElementById('inspectorPositionText');
           if (posTextEl) {
             const posLabel = questionPosition(curr) || (curr.sourcePage ? `第 ${curr.sourcePage} 页` : '—');
             posTextEl.innerText = posLabel;
-            posTextEl.title = posLabel;
+            setEagleTip(posTextEl, { title: '原卷位置', body: posLabel, whenTruncated: true });
           }
           const ann = getQuestionAnnotation(curr.id);
           if (nameInput) nameInput.value = ann.name || '';
           titleEl.innerText = ann.name ? ann.name : '题目属性';
-          titleEl.title = ann.name ? ('题目名称：' + ann.name) : '题目属性';
+          setEagleTip(titleEl, ann.name ? '题目名称' : '题目属性', ann.name || '');
           if (noteInput) noteInput.value = ann.note || '';
           if (urlInput) urlInput.value = ann.url || '';
           updateInspectorUrlActions();
@@ -12636,7 +13789,7 @@
           renderInspectorOneNoteBox(curr);
         } else {
           titleEl.innerText = '题目属性';
-          titleEl.title = '题目属性';
+          setEagleTip(titleEl, '题目属性');
           topMetaEl?.classList.add('hidden');
           metaCard?.classList.add('hidden');
           renderInspectorFolders(null);
@@ -12648,16 +13801,17 @@
       const tags = (isBatch || !activeQ) ? [] : (activeQ.tags || []);
 
       if (tagsContainer) {
-        if (tags.length === 0) {
-          tagsContainer.innerHTML = `<span class="text-slate-400 italic text-[11px]">${isBatch ? '在下方输入将批量追加标签' : '暂无标签'}</span>`;
-        } else {
-          tagsContainer.innerHTML = tags.map(t => `
-            <span oncontextmenu="openQuestionTagContextMenu(event, '${escapeInlineJsArg(activeQ.id)}', '${escapeInlineJsArg(t.id)}')" class="inline-flex items-center gap-1 rounded bg-emerald-50 text-emerald-800 px-2 py-0.5 text-[11px] font-medium cursor-context-menu" title="${escapeHtml(t.name)}">
+        const chipHtml = tags.map(t => `
+            <span onclick="onQuestionTagClick(event, '${escapeInlineJsArg(t.id)}')" oncontextmenu="openQuestionTagContextMenu(event, '${escapeInlineJsArg(activeQ && activeQ.id || '')}', '${escapeInlineJsArg(t.id)}')" class="eagle-q-tag inline-flex items-center gap-1 rounded-md bg-slate-100 text-slate-700 px-2 py-0.5 text-[11px] font-medium border border-slate-200/80">
               <span>${escapeHtml(t.name)}</span>
-              <button onclick="removeTagFromCurrent('${t.id}')" class="text-emerald-400 hover:text-emerald-800 cursor-pointer" title="移除该标签">×</button>
+              <button type="button" onclick="event.stopPropagation(); removeTagFromCurrent('${t.id}')" class="text-slate-400 hover:text-slate-700 cursor-pointer leading-none" title="移除该标签" aria-label="移除标签">×</button>
             </span>
           `).join('');
-        }
+        const addTitle = isBatch ? '批量追加标签 (T)' : '添加标签 (T)';
+        const addBtn = `<button type="button" id="eagleTagAddBtn" class="eagle-tag-add-btn${tagComposeOpen ? ' hidden' : ''}" onclick="openTagCompose()" title="${escapeHtml(addTitle)}" aria-label="${escapeHtml(addTitle)}">+</button>`;
+        tagsContainer.innerHTML = chipHtml + addBtn;
+        const wrap = document.getElementById('tagAutocompleteWrap');
+        if (wrap) wrap.classList.toggle('hidden', !tagComposeOpen);
       }
 
       const allFlat = tagGroupsData.flatMap(g => g.tags);
@@ -12698,21 +13852,18 @@
             ? '正在插队提交…'
             : (progress.status === 'queued'
               ? (isLowPriority ? `后台低优排队${queueDetail}` : `优先排队中${queueDetail}`)
-              : '正在生成标签…');
+              : '正在生成…');
           const hintText = getAiTagStatusHintText(progress.status, elapsedMs, progress);
           parts.push(`
-            <div class="w-full space-y-1.5 text-[10px]">
-              <div class="flex items-center justify-between gap-2">
-                <span class="inline-flex items-center gap-1.5 font-medium text-emerald-900 min-w-0 truncate">
-                  <svg class="animate-spin h-3 w-3 text-emerald-600 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
+            <div class="eagle-ai-status">
+              <div class="eagle-ai-status-row">
+                <span class="eagle-ai-status-label min-w-0 truncate">
+                  <span class="eagle-ai-spinner" aria-hidden="true"></span>
                   <span class="truncate">${escapeHtml(phaseLabel)}</span>
                 </span>
-                <span id="aiTagElapsedText" class="font-mono font-semibold tabular-nums px-1.5 py-0.5 rounded bg-emerald-100/80 text-emerald-900 shrink-0">已耗时 ${elapsedText}</span>
+                <span id="aiTagElapsedText" class="eagle-ai-elapsed">${elapsedText}</span>
               </div>
-              <div id="aiTagStatusHint" class="text-[10px] leading-snug text-amber-700 ${hintText ? '' : 'hidden'}">${escapeHtml(hintText)}</div>
+              <div id="aiTagStatusHint" class="eagle-ai-hint is-warn ${hintText ? '' : 'hidden'}">${escapeHtml(hintText)}</div>
             </div>
           `);
         } else if (activeQ && activeQ.tagIssue) {
@@ -12720,63 +13871,65 @@
             parts.push(renderAiSetupActionCard(activeQ.tagIssue.cfg, activeQ.id, 'tags'));
           } else {
             parts.push(`
-              <div class="space-y-1.5 rounded bg-amber-50/80 border border-amber-200 p-2 text-[10px] text-amber-900">
-                <div class="font-semibold">「AI 标签建议」开关尚未开启</div>
-                <div>开启后即可从正式题库目录筛选推荐考点，后台也能自动补齐无标签题目。</div>
-                <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
-                  <button type="button" onclick="enableKnowledgeTagsAndGenerate('${activeQ.id}')" class="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-medium cursor-pointer transition-colors">
-                    ⚡ 开启并立即生成标签
-                  </button>
-                  <a href="/settings#ai" class="px-2 py-1 rounded bg-white border border-amber-300 hover:bg-amber-50 text-amber-900 font-medium inline-block">前往设置 →</a>
+              <div class="eagle-ai-setup">
+                <div class="eagle-ai-setup-title">尚未开启 AI 标签建议</div>
+                <div>开启后可从正式题库目录推荐考点，也可后台慢慢补齐无标签题目。</div>
+                <div class="flex flex-wrap items-center gap-3 pt-0.5">
+                  <button type="button" onclick="enableKnowledgeTagsAndGenerate('${activeQ.id}')" class="eagle-ai-action is-primary">开启并生成</button>
+                  <a href="/settings#ai" class="eagle-ai-action">前往设置</a>
                 </div>
               </div>
             `);
           }
         } else if (pending.length) {
           parts.push(`<div class="flex flex-wrap gap-1">${pending.map((sg) => `
-            <button onclick="acceptAiTagSuggestion(${sg._index})" class="px-1.5 py-0.5 rounded bg-white border border-emerald-200 text-emerald-800 text-[10px] hover:bg-emerald-50 transition-colors cursor-pointer" title="${escapeHtml(sg.rationale || 'AI 建议')}\n${escapeHtml(sg.evidence || '')}">
-              ✓ ${escapeHtml(sg.name)}
+            <button type="button" onclick="acceptAiTagSuggestion(${sg._index})" class="eagle-ai-chip" title="${escapeHtml(sg.rationale || 'AI 建议')}\n${escapeHtml(sg.evidence || '')}">
+              ${escapeHtml(sg.name)}
             </button>
           `).join('')}</div>`);
         } else if (failedSuggestion) {
           const failMsg = (suggestion.message || '').trim();
-          parts.push(`<span class="text-[10px] text-rose-700/90 leading-snug" title="${escapeHtml(failMsg)}">上次生成没成功${failMsg ? '：' + escapeHtml(failMsg.slice(0, 60)) : ''}</span>`);
+          parts.push(`<span class="eagle-ai-hint is-error" title="${escapeHtml(failMsg)}">上次生成没成功${failMsg ? '：' + escapeHtml(failMsg.slice(0, 60)) : ''}</span>`);
         } else if (suggestion && (suggestion.status === 'queued' || suggestion.status === 'running') && (aiTagPollingPausedQuestions.has(activeQ.id) || isTagSuggestionStale(suggestion))) {
-          parts.push(`<span class="text-[10px] text-amber-800 leading-snug">上次排队没有出结果 · 可点下方重新生成</span>`);
+          parts.push(`<span class="eagle-ai-hint is-warn">上次排队没有出结果 · 可重新生成</span>`);
         } else if (suggestion && suggestion.status === 'stale') {
-          parts.push(`<span class="text-[10px] text-amber-700/80">这批建议已过期 · 可点下方重新生成</span>`);
+          parts.push(`<span class="eagle-ai-hint is-warn">这批建议已过期 · 可重新生成</span>`);
         } else if (suggestion && suggestion.status === 'accepted') {
-          parts.push(`<span class="text-[10px] text-emerald-700/70">这批建议已全部处理完</span>`);
+          parts.push(`<span class="eagle-ai-hint">这批建议已全部处理完</span>`);
         } else if (suggestion && suggestion.status === 'rejected') {
-          parts.push(`<span class="text-[10px] text-slate-500/80">这批建议已被拒绝</span>`);
+          parts.push(`<span class="eagle-ai-hint">这批建议已被拒绝</span>`);
         } else if (suggestion && suggestion.status === 'no_match') {
-          parts.push(`<span class="text-[10px] text-slate-600/90">AI 未匹配到合适标签 · 可点下方重试</span>`);
+          parts.push(`<span class="eagle-ai-hint">未匹配到合适标签 · 可重试</span>`);
         } else if (suggestion && suggestion.status === 'review') {
-          parts.push(`<span class="text-[10px] text-amber-700/80">AI 暂不能判断 · 建议人工选择或重试</span>`);
+          parts.push(`<span class="eagle-ai-hint is-warn">暂不能判断 · 可人工选择或重试</span>`);
         } else if (activeQ && activeQ.tagJobReadError) {
           // 读不到任务状态，不是「没有建议」。
-          parts.push(`<span class="text-[10px] text-amber-800 leading-snug">读不到标签建议的任务状态（${escapeHtml(activeQ.tagJobReadError)}）：这里显示的是「读不到」，不是「没有建议」。过一会儿点下方「重新生成建议」再试一次。</span>`);
+          parts.push(`<span class="eagle-ai-hint is-warn">读不到任务状态（${escapeHtml(activeQ.tagJobReadError)}）：这里是「读不到」，不是「没有建议」。</span>`);
         } else if (activeQ && activeQ.detailReadError) {
           // 详情没读到，不是「没有建议」。
-          parts.push(`<span class="text-[10px] text-amber-800 leading-snug">这道题的详情没读到（${escapeHtml(activeQ.detailReadError)}）：这里显示的是「读不到」，不是「没有建议」。</span>`);
-          parts.push(`<button onclick="retryReadQuestionDetail('${activeQ.id}')" class="px-1.5 py-0.5 rounded bg-white border border-amber-200 text-amber-800 text-[10px] cursor-pointer">↻ 重新读取</button>`);
+          parts.push(`<span class="eagle-ai-hint is-warn">这道题的详情没读到（${escapeHtml(activeQ.detailReadError)}）。</span>`);
+          parts.push(`<button type="button" onclick="retryReadQuestionDetail('${activeQ.id}')" class="eagle-ai-action">重新读取</button>`);
         } else {
-          parts.push(`<span class="text-[10px] text-emerald-700/70">暂无待采纳建议 · 点下方按钮即可优先生成</span>`);
+          parts.push(`<span class="eagle-ai-hint">暂无待采纳建议</span>`);
         }
 
         if (activeQ && !isBatch) {
           if (progress) {
             const actionBtns = [];
             if (progress.status === 'queued' && Number(progress.priority || 0) < 10 && progress.executor !== 'assistant') {
-              actionBtns.push(`<button id="aiTagPriorityBtn" type="button" onclick="prioritizeTagSuggestionJob('${activeQ.id}')" class="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-medium cursor-pointer transition-colors">⚡ 优先插队</button>`);
+              actionBtns.push(`<button id="aiTagPriorityBtn" type="button" onclick="prioritizeTagSuggestionJob('${activeQ.id}')" class="eagle-ai-action is-primary"><svg class="eagle-ai-action-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2.5v7.2M8 9.7l-2.4-2.4M8 9.7l2.4-2.4M3.2 12.8h9.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span>优先插队</span></button>`);
             } else {
-              actionBtns.push(`<button id="aiTagRegenBtn" type="button" onclick="regenerateTagSuggestions('${activeQ.id}', { forceRestart: true })" class="px-2 py-0.5 rounded bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-[10px] cursor-pointer transition-colors">↻ 取消并重试</button>`);
+              actionBtns.push(`<button id="aiTagRegenBtn" type="button" onclick="regenerateTagSuggestions('${activeQ.id}', { forceRestart: true })" class="eagle-ai-action"><svg class="eagle-ai-action-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.2 8a4.8 4.8 0 0 1 8.2-3.3M12.8 8a4.8 4.8 0 0 1-8.2 3.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M11.1 2.4v2.8H8.3M4.9 13.6v-2.8h2.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg><span>取消并重试</span></button>`);
             }
-            actionBtns.push(`<button id="aiTagCancelBtn" type="button" onclick="cancelTagSuggestionJob('${activeQ.id}')" class="px-2 py-0.5 rounded bg-white border border-slate-200 hover:border-rose-300 hover:text-rose-700 text-slate-500 text-[10px] cursor-pointer transition-colors">× 取消</button>`);
-            parts.push(`<div class="flex flex-wrap items-center gap-1.5">${actionBtns.join('')}</div>`);
+            actionBtns.push(`<button id="aiTagCancelBtn" type="button" onclick="cancelTagSuggestionJob('${activeQ.id}')" class="eagle-ai-action is-danger"><span>取消</span></button>`);
+            parts.push(`<div class="flex flex-wrap items-center gap-2">${actionBtns.join('')}</div>`);
           } else {
-            const genLabel = tags.length === 0 && !pending.length ? '⚡ 生成标签建议' : '↻ 重新生成建议';
-            parts.push(`<div class="flex flex-wrap items-center gap-1.5"><button id="aiTagRegenBtn" type="button" onclick="regenerateTagSuggestions('${activeQ.id}')" class="px-2 py-0.5 rounded bg-white border border-emerald-200/90 hover:bg-emerald-50 text-emerald-800 text-[10px] font-medium transition-colors cursor-pointer">${genLabel}</button></div>`);
+            const isFresh = tags.length === 0 && !pending.length;
+            const genLabel = isFresh ? '生成建议' : '重新生成';
+            const genIcon = isFresh
+              ? '<svg class="eagle-ai-action-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2.4v2.2M8 11.4v2.2M2.4 8h2.2M11.4 8h2.2M4.1 4.1l1.5 1.5M10.4 10.4l1.5 1.5M11.9 4.1l-1.5 1.5M5.6 10.4l-1.5 1.5" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><circle cx="8" cy="8" r="2.1" stroke="currentColor" stroke-width="1.35"/></svg>'
+              : '<svg class="eagle-ai-action-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.2 8a4.8 4.8 0 0 1 8.2-3.3M12.8 8a4.8 4.8 0 0 1-8.2 3.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M11.1 2.4v2.8H8.3M4.9 13.6v-2.8h2.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            parts.push(`<div class="flex flex-wrap items-center gap-2"><button id="aiTagRegenBtn" type="button" onclick="regenerateTagSuggestions('${activeQ.id}')" class="eagle-ai-action is-primary">${genIcon}<span>${genLabel}</span></button></div>`);
           }
         }
         aiContainer.innerHTML = parts.join('');
@@ -13028,6 +14181,8 @@
     const TAG_SUGGEST_MAX = 12;
     let tagSuggestMatches = [];
     let tagSuggestHighlight = -1;
+    /** Eagle：平时只显示胶囊 +「+」；点 + / 按 T 才展开输入。 */
+    let tagComposeOpen = false;
     let tagSuggestBound = false;
 
     /** 取当前题已贴的标签 id 集合（联想时要把它们标成「已贴」）。 */
@@ -13274,6 +14429,7 @@
         input.value = '';
         hideTagSuggestDropdown();
         await addTagToCurrent(exact.id);
+        openTagCompose({ keepValue: false });
         return;
       }
       if (tagSuggestHighlight >= 0 && tagSuggestMatches[tagSuggestHighlight]) {
@@ -13282,9 +14438,11 @@
         input.value = '';
         hideTagSuggestDropdown();
         await addTagToCurrent(target.id);
+        openTagCompose({ keepValue: false });
         return;
       }
       await createTagAndApply(query);
+      openTagCompose({ keepValue: false });
     }
 
     /** 给联想框绑事件（只绑一次）。 */
@@ -13321,8 +14479,8 @@
         }
         if (evt.key === 'Escape') {
           evt.preventDefault();
-          hideTagSuggestDropdown();
-          input.blur();
+          closeTagCompose();
+          return;
         }
       });
       // 点下拉项：用 mousedown 抢在 blur 之前，否则先失焦就把下拉关了。
@@ -13342,21 +14500,60 @@
         input.value = '';
         hideTagSuggestDropdown();
         await addTagToCurrent(tag.id);
+        // Eagle：贴完一个标签仍留在输入态，方便连贴
+        openTagCompose({ keepValue: false });
       });
       input.addEventListener('blur', () => {
-        // 延后关闭，给点击留出时间
-        setTimeout(hideTagSuggestDropdown, 150);
+        // 延后关闭，给点击下拉项留出时间；空内容则收起回「+」态
+        setTimeout(() => {
+          hideTagSuggestDropdown();
+          const still = document.getElementById('tagAutocompleteInput');
+          if (!still) return;
+          if (document.activeElement === still) return;
+          if (String(still.value || '').trim()) return;
+          closeTagCompose({ silent: true });
+        }, 160);
       });
+    }
+
+    function openTagCompose(opts) {
+      tagComposeOpen = true;
+      const wrap = document.getElementById('tagAutocompleteWrap');
+      const addBtn = document.getElementById('eagleTagAddBtn');
+      const input = document.getElementById('tagAutocompleteInput');
+      if (wrap) wrap.classList.remove('hidden');
+      if (addBtn) addBtn.classList.add('hidden');
+      if (!input) return;
+      if (!(opts && opts.keepValue)) input.value = '';
+      if (wrap && typeof wrap.scrollIntoView === 'function') {
+        try { wrap.scrollIntoView({ block: 'nearest' }); } catch (err) {}
+      }
+      input.focus();
+      if (!(opts && opts.keepValue)) input.select();
+      tagSuggestHighlight = -1;
+      renderTagSuggestDropdown();
+    }
+
+    function closeTagCompose(opts) {
+      tagComposeOpen = false;
+      const wrap = document.getElementById('tagAutocompleteWrap');
+      const addBtn = document.getElementById('eagleTagAddBtn');
+      const input = document.getElementById('tagAutocompleteInput');
+      hideTagSuggestDropdown();
+      if (input) {
+        input.value = '';
+        try { input.blur(); } catch (err) {}
+      }
+      if (wrap) wrap.classList.add('hidden');
+      if (addBtn) addBtn.classList.remove('hidden');
+      if (!(opts && opts.silent) && typeof renderRightInspector === 'function') {
+        // 仅同步 + 按钮显隐时不必整栏重绘；这里轻量处理即可
+      }
     }
 
     /** 聚焦联想框（右键菜单「关联/修改标签」与 T 快捷键都走这里）。 */
     function focusTagAutocompleteInput() {
-      const input = document.getElementById('tagAutocompleteInput');
-      if (!input) return;
-      input.focus();
-      input.select();
-      tagSuggestHighlight = -1;
-      renderTagSuggestDropdown();
+      openTagCompose();
     }
 
     function applySmartFolder(key) {
@@ -13694,7 +14891,7 @@
       if (hasKids && (isExpanded || kw)) {
         const kidParts = node.children.map(c => renderKnowledgeTreeNode(c, depth + 1, kw)).filter(Boolean);
         if (kidParts.length) {
-          kidsHtml = '<div class="ml-2 border-l border-slate-100 pl-0.5 space-y-0.5">' + kidParts.join('') + '</div>';
+          kidsHtml = '<div class="ml-2 border-l border-slate-100 pl-0.5 space-y-0.5" data-ftree-kids="' + escapeHtml(node.id) + '">' + kidParts.join('') + '</div>';
         }
       }
       const arrow = hasKids
@@ -14103,8 +15300,18 @@
         || sa.localeCompare(sb, 'zh-CN', { numeric: true });
     }
 
-    /** 试卷 / 教材 / 自建夹共用同一套排序键（时间 / 名称 / 题量）。 */
+    /** 试卷 / 教材 / 自建夹共用同一套排序键（时间 / 名称 / 题量 / 手动）。 */
     function compareFolderTreeNodes(a, b, mode = currentPaperSort) {
+      if (mode === 'manual') {
+        const ao = Number(a.sortOrder);
+        const bo = Number(b.sortOrder);
+        const aHas = Number.isFinite(ao);
+        const bHas = Number.isFinite(bo);
+        if (aHas && bHas && ao !== bo) return ao - bo;
+        if (aHas !== bHas) return aHas ? -1 : 1;
+        return (a.createdAtMs || 0) - (b.createdAtMs || 0)
+          || compareNaturalZhLabels(a.label, b.label);
+      }
       if (mode === 'time_desc') {
         return (b.createdAtMs || 0) - (a.createdAtMs || 0)
           || compareNaturalZhLabels(a.label, b.label);
@@ -14387,6 +15594,100 @@
       if (typeof scheduleFoldersSync === 'function') scheduleFoldersSync();
     }
 
+    // ================= 文件夹整理撤销 / 重做（Ctrl+Z / Ctrl+Y） =================
+    // Eagle 前端走 localStorage + sync，后端 sync 不记 history，所以本机自建检查点。
+    const FOLDER_UNDO_LIMIT = 40;
+    let folderOrganizeUndoStack = [];
+    let folderOrganizeRedoStack = [];
+    let _suppressFolderUndoCapture = false;
+
+    function cloneFolderJson(value) {
+      try { return JSON.parse(JSON.stringify(value)); } catch (e) { return value; }
+    }
+
+    function snapshotFolderWorkspace() {
+      return {
+        user_folders: cloneFolderJson(typeof readUserFolders === 'function' ? readUserFolders() : []),
+        doc_overrides: cloneFolderJson(typeof readDocFolderOverrides === 'function' ? readDocFolderOverrides() : {}),
+        smart_folders: cloneFolderJson(typeof readCustomSmartFolders === 'function' ? readCustomSmartFolders() : []),
+        sort_modes: cloneFolderJson(typeof readFolderSortModes === 'function' ? readFolderSortModes() : {}),
+        paper_sort_mode: currentPaperSort || 'time_desc',
+        trash: cloneFolderJson(typeof readLocalTrash === 'function' ? readLocalTrash() : { folders: [], smartFolders: [], questions: [] })
+      };
+    }
+
+    function beginFolderUndo(label) {
+      if (_suppressFolderUndoCapture) return null;
+      return {
+        label: String(label || '整理操作'),
+        before: snapshotFolderWorkspace(),
+        at: Date.now()
+      };
+    }
+
+    function commitFolderUndo(token, changed) {
+      if (_suppressFolderUndoCapture || !token || !changed) return;
+      folderOrganizeUndoStack.push(token);
+      if (folderOrganizeUndoStack.length > FOLDER_UNDO_LIMIT) {
+        folderOrganizeUndoStack.splice(0, folderOrganizeUndoStack.length - FOLDER_UNDO_LIMIT);
+      }
+      folderOrganizeRedoStack = [];
+    }
+
+    function restoreFolderWorkspace(snap) {
+      if (!snap || typeof snap !== 'object') return false;
+      _suppressFolderUndoCapture = true;
+      const prevSyncSuppress = _suppressFoldersSync;
+      _suppressFoldersSync = true;
+      try {
+        if (typeof writeUserFolders === 'function') writeUserFolders(cloneFolderJson(snap.user_folders || []));
+        if (typeof writeCustomSmartFolders === 'function') writeCustomSmartFolders(cloneFolderJson(snap.smart_folders || []));
+        if (typeof writeDocFolderOverrides === 'function') writeDocFolderOverrides(cloneFolderJson(snap.doc_overrides || {}));
+        if (typeof writeLocalTrash === 'function' && snap.trash) writeLocalTrash(cloneFolderJson(snap.trash));
+        folderSortModes = cloneFolderJson(snap.sort_modes || {});
+        try { localStorage.setItem(FOLDER_SORT_MODES_STORAGE_KEY, JSON.stringify(folderSortModes)); } catch (e) {}
+        currentPaperSort = (snap.paper_sort_mode && VALID_FOLDER_SORT_MODES.has(snap.paper_sort_mode))
+          ? snap.paper_sort_mode
+          : 'time_desc';
+        try { localStorage.setItem('paper_sort_mode', currentPaperSort); } catch (e) {}
+      } finally {
+        _suppressFoldersSync = prevSyncSuppress;
+        _suppressFolderUndoCapture = false;
+      }
+      if (typeof scheduleFoldersSync === 'function') scheduleFoldersSync();
+      if (typeof renderFolderTree === 'function') renderFolderTree();
+      if (typeof sortAndRenderPapers === 'function') sortAndRenderPapers(currentPaperSort);
+      if (typeof renderRightInspector === 'function') renderRightInspector();
+      if (typeof applyFilters === 'function') applyFilters();
+      return true;
+    }
+
+    function undoLastFolderOrganizeAction() {
+      const entry = folderOrganizeUndoStack.pop();
+      if (!entry) {
+        showToast('没有可撤销的整理操作', 'info');
+        return false;
+      }
+      const current = snapshotFolderWorkspace();
+      folderOrganizeRedoStack.push({ label: entry.label, before: current, at: Date.now() });
+      restoreFolderWorkspace(entry.before);
+      showToast('已撤销：' + entry.label, 'success');
+      return true;
+    }
+
+    function redoLastFolderOrganizeAction() {
+      const entry = folderOrganizeRedoStack.pop();
+      if (!entry) {
+        showToast('没有可重做的整理操作', 'info');
+        return false;
+      }
+      const current = snapshotFolderWorkspace();
+      folderOrganizeUndoStack.push({ label: entry.label, before: current, at: Date.now() });
+      restoreFolderWorkspace(entry.before);
+      showToast('已重做：' + entry.label, 'success');
+      return true;
+    }
+
     /**
      * 判断试题是否属于指定试卷或教材文件夹（结合原始 documentId 与手动增删映射）
      * @param {Object} q 试题对象
@@ -14560,10 +15861,13 @@
           };
           if (!alreadyIn) added++;
         });
+        const label = meta.pathLabel || meta.label || '资料目录';
+        const undoToken = beginFolderUndo(`放入「${label}」`);
         const nextEntry = { added: Array.from(addedSet), removed: Array.from(removedSet) };
         if (Object.keys(sectionsMap).length) nextEntry.sections = sectionsMap;
         overrides[key] = nextEntry;
         writeDocFolderOverrides(overrides);
+        commitFolderUndo(undoToken, true);
         try { localStorage.setItem(EAGLE_LAST_FOLDER_KEY, tid); } catch (e) {}
         renderFolderTree();
         renderRightInspector();
@@ -14575,7 +15879,7 @@
         ) {
           applyFilters();
         }
-        showToast(`已将 ${ids.length} 道试题放入「${meta.pathLabel || meta.label}」`, 'success');
+        showToast(`已将 ${ids.length} 道试题放入「${label}」（Ctrl+Z 撤销）`, 'success');
         return added || ids.length;
       }
 
@@ -14598,6 +15902,15 @@
           }
           if (!alreadyIn) added++;
         });
+        const p = papersData.find(x => String(x.id) === key);
+        const label = p
+          ? ((p.materialType || 'exam') === 'book' ? parseTextbookTitle(p.name || p.filename).label : p.name)
+          : key;
+        if (!added) {
+          showToast(`所选 ${ids.length} 道试题已在「${label}」中`, 'info');
+          return 0;
+        }
+        const undoToken = beginFolderUndo(`放入「${label}」`);
         if (!addedSet.size && !removedSet.size && !Object.keys(sectionsMap).length) delete overrides[key];
         else {
           const nextEntry = { added: Array.from(addedSet), removed: Array.from(removedSet) };
@@ -14605,22 +15918,14 @@
           overrides[key] = nextEntry;
         }
         writeDocFolderOverrides(overrides);
+        commitFolderUndo(undoToken, true);
         try { localStorage.setItem(EAGLE_LAST_FOLDER_KEY, tid); } catch (e) {}
         renderFolderTree();
         renderRightInspector();
         if (filterState.paperId === key || (filterState.folderPaperIds || []).includes(key) || filterState.smartFilter === 'uncategorized') {
           applyFilters();
         }
-        const p = papersData.find(x => String(x.id) === key);
-        const label = p
-          ? ((p.materialType || 'exam') === 'book' ? parseTextbookTitle(p.name || p.filename).label : p.name)
-          : key;
-        showToast(
-          added > 0
-            ? `已将 ${ids.length} 道试题放入「${label}」（新增 ${added} 题）`
-            : `所选 ${ids.length} 道试题已在「${label}」中`,
-          added > 0 ? 'success' : 'info'
-        );
+        showToast(`已将 ${ids.length} 道试题放入「${label}」（新增 ${added} 题 · Ctrl+Z 撤销）`, 'success');
         return added;
       }
 
@@ -14634,7 +15939,7 @@
         const raw = localStorage.getItem(USER_FOLDERS_STORAGE_KEY);
         const arr = raw ? JSON.parse(raw) : [];
         if (!Array.isArray(arr)) return [];
-        return arr
+        const rows = arr
           .filter(x => x && x.id && x.name)
           .map(x => {
             const id = String(x.id);
@@ -14647,26 +15952,199 @@
             if (pid && pid.startsWith('userfolder:')) {
               pid = pid.slice('userfolder:'.length) || null;
             }
-            return {
+            const sortRaw = Number(x.sortOrder);
+            const out = {
               id,
               name: String(x.name),
               parentId: pid,
               questionIds: Array.isArray(x.questionIds) ? Array.from(new Set(x.questionIds.map(String))) : [],
               createdAt
             };
+            if (Number.isFinite(sortRaw)) out.sortOrder = sortRaw;
+            return out;
           });
+        return applyFolderSortOrdersMirror(rows, 'user');
       } catch (e) { return []; }
+    }
+
+    const FOLDER_SORT_ORDERS_MIRROR_KEY = 'eagle_folder_sort_orders_v1';
+
+    /** 旧安装包后端会剥掉 sortOrder：本机镜像兜底，避免手动排序被同步冲掉。 */
+    function readFolderSortOrdersMirror() {
+      try {
+        const raw = localStorage.getItem(FOLDER_SORT_ORDERS_MIRROR_KEY);
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { user: {}, smart: {} };
+        return {
+          user: (parsed.user && typeof parsed.user === 'object' && !Array.isArray(parsed.user)) ? parsed.user : {},
+          smart: (parsed.smart && typeof parsed.smart === 'object' && !Array.isArray(parsed.smart)) ? parsed.smart : {}
+        };
+      } catch (e) {
+        return { user: {}, smart: {} };
+      }
+    }
+
+    function writeFolderSortOrdersMirror(mirror) {
+      try {
+        localStorage.setItem(FOLDER_SORT_ORDERS_MIRROR_KEY, JSON.stringify(mirror || { user: {}, smart: {} }));
+      } catch (e) {}
+    }
+
+    function updateFolderSortOrdersMirrorFromList(list, kind) {
+      const key = kind === 'smart' ? 'smart' : 'user';
+      const mirror = readFolderSortOrdersMirror();
+      const prev = mirror[key] || {};
+      const bucket = {};
+      (list || []).forEach(f => {
+        if (!f || !f.id) return;
+        const id = String(f.id);
+        const n = Number(f.sortOrder);
+        if (Number.isFinite(n)) bucket[id] = n;
+        else if (Number.isFinite(Number(prev[id]))) bucket[id] = Number(prev[id]);
+      });
+      mirror[key] = bucket;
+      writeFolderSortOrdersMirror(mirror);
+    }
+
+    function applyFolderSortOrdersMirror(list, kind) {
+      const key = kind === 'smart' ? 'smart' : 'user';
+      const bucket = (readFolderSortOrdersMirror()[key]) || {};
+      return (list || []).map(f => {
+        if (!f || !f.id) return f;
+        const n = Number(f.sortOrder);
+        if (Number.isFinite(n)) return f;
+        const mirrored = Number(bucket[String(f.id)]);
+        if (!Number.isFinite(mirrored)) return f;
+        return { ...f, sortOrder: mirrored };
+      });
     }
 
     function writeUserFolders(list) {
       try {
-        const normalized = (list || []).map(x => ({
-          ...x,
-          createdAt: folderCreatedAtMs(x) || Date.now()
-        }));
+        const normalized = (list || []).map(x => {
+          const row = {
+            ...x,
+            createdAt: folderCreatedAtMs(x) || Date.now()
+          };
+          const sortRaw = Number(x && x.sortOrder);
+          if (Number.isFinite(sortRaw)) row.sortOrder = sortRaw;
+          else delete row.sortOrder;
+          return row;
+        });
+        updateFolderSortOrdersMirrorFromList(normalized, 'user');
         localStorage.setItem(USER_FOLDERS_STORAGE_KEY, JSON.stringify(normalized));
       } catch (e) {}
       if (typeof scheduleFoldersSync === 'function') scheduleFoldersSync();
+    }
+
+    /** 同级手动排序用的父容器 key（写入 folder_sort_modes）。 */
+    function folderSortParentKeyFromParentId(parentId, kind) {
+      if (!parentId) return kind === 'custom' ? 'section:custom' : 'section:folders';
+      if (kind === 'custom') return 'custom:' + parentId;
+      if (typeof isSystemFolderParentId === 'function' && isSystemFolderParentId(parentId)) return parentId;
+      return 'userfolder:' + parentId;
+    }
+
+    /** 给同级列表重写 0,10,20… 的 sortOrder。 */
+    function renumberSiblingSortOrders(siblings) {
+      (siblings || []).forEach((item, index) => {
+        item.sortOrder = index * 10;
+      });
+    }
+
+    /**
+     * 按锚点 before/after 调整同级顺序；可顺带改父级（跨夹挪位）。
+     * @returns {boolean} 是否改动了列表
+     */
+    function reorderFolderListByAnchor(list, movedId, anchorId, position, opts) {
+      const isCustom = !!(opts && opts.isCustom);
+      const item = (list || []).find(x => x.id === movedId);
+      const anchor = (list || []).find(x => x.id === anchorId);
+      if (!item || !anchor || item.id === anchor.id) return false;
+      if (position !== 'before' && position !== 'after') return false;
+      const newParentId = anchor.parentId || null;
+      if (newParentId) {
+        if (isCustom) {
+          if (!(list || []).some(x => x.id === newParentId)) return false;
+          if (isFolderDescendantOrSelf(list, movedId, newParentId)) return false;
+        } else {
+          if (!isValidUserFolderParent(list, newParentId)) return false;
+          if (!isSystemFolderParentId(newParentId) && isFolderDescendantOrSelf(list, movedId, newParentId)) {
+            return false;
+          }
+        }
+      }
+      if (!canPlaceFolderUnderParent(list, movedId, newParentId, isCustom)) return false;
+      item.parentId = newParentId;
+      const siblings = (list || []).filter(f => (f.parentId || null) === (newParentId || null));
+      siblings.sort((a, b) => {
+        const ao = Number(a.sortOrder);
+        const bo = Number(b.sortOrder);
+        const aHas = Number.isFinite(ao);
+        const bHas = Number.isFinite(bo);
+        if (aHas && bHas && ao !== bo) return ao - bo;
+        if (aHas !== bHas) return aHas ? -1 : 1;
+        return (folderCreatedAtMs(a) || 0) - (folderCreatedAtMs(b) || 0)
+          || compareNaturalZhLabels(a.name || '', b.name || '');
+      });
+      const without = siblings.filter(f => f.id !== item.id);
+      const idx = without.findIndex(f => f.id === anchor.id);
+      if (idx < 0) return false;
+      without.splice(position === 'before' ? idx : idx + 1, 0, item);
+      renumberSiblingSortOrders(without);
+      return true;
+    }
+
+    function reorderUserFolderAmongSiblings(folderId, anchorId, position) {
+      const undoToken = beginFolderUndo('调整文件夹位置');
+      const list = readUserFolders();
+      if (!reorderFolderListByAnchor(list, folderId, anchorId, position, { isCustom: false })) return false;
+      const item = list.find(x => x.id === folderId);
+      writeUserFolders(list);
+      folderTreeState.expanded.add('section:folders');
+      if (item && item.parentId) {
+        if (isSystemFolderParentId(item.parentId)) {
+          folderTreeState.expanded.add(item.parentId);
+          if (String(item.parentId).startsWith('paper:')) folderTreeState.expanded.add('group:papers');
+          if (String(item.parentId).startsWith('book:')) folderTreeState.expanded.add('group:books');
+        } else {
+          folderTreeState.expanded.add('userfolder:' + item.parentId);
+        }
+      }
+      writeExpandedFolderNodes();
+      const parentKey = folderSortParentKeyFromParentId(item && item.parentId, 'userfolder');
+      setFolderSortMode(parentKey, 'manual');
+      commitFolderUndo(undoToken, true);
+      showToast('已调整文件夹位置（Ctrl+Z 撤销）', 'success');
+      return true;
+    }
+
+    function reorderCustomSmartFolderAmongSiblings(customId, anchorId, position) {
+      const undoToken = beginFolderUndo('调整智能文件夹位置');
+      const list = readCustomSmartFolders();
+      if (!reorderFolderListByAnchor(list, customId, anchorId, position, { isCustom: true })) return false;
+      const item = list.find(x => x.id === customId);
+      writeCustomSmartFolders(list);
+      folderTreeState.expanded.add('section:custom');
+      if (item && item.parentId) folderTreeState.expanded.add('custom:' + item.parentId);
+      writeExpandedFolderNodes();
+      const parentKey = folderSortParentKeyFromParentId(item && item.parentId, 'custom');
+      setFolderSortMode(parentKey, 'manual');
+      commitFolderUndo(undoToken, true);
+      showToast('已调整智能文件夹位置（Ctrl+Z 撤销）', 'success');
+      return true;
+    }
+
+    function nextSiblingSortOrder(list, parentId, excludeId) {
+      const siblings = (list || []).filter(f =>
+        (f.parentId || null) === (parentId || null) && (!excludeId || f.id !== excludeId)
+      );
+      let maxOrder = -10;
+      siblings.forEach(f => {
+        const n = Number(f.sortOrder);
+        if (Number.isFinite(n) && n > maxOrder) maxOrder = n;
+      });
+      return maxOrder + 10;
     }
 
     /**
@@ -14695,15 +16173,18 @@
       const promptTitle = validParent ? '输入子文件夹名称：' : '输入新文件夹名称：';
       const rawName = window.prompt(promptTitle, validParent ? '新建子文件夹' : '我的错题本');
       if (!rawName || !rawName.trim()) return null;
+      const undoToken = beginFolderUndo('新建文件夹「' + rawName.trim() + '」');
       const created = {
         id: 'uf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
         name: rawName.trim(),
         parentId: validParent,
         questionIds: Array.from(new Set((initialQuestionIds || []).map(String))),
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        sortOrder: nextSiblingSortOrder(list, validParent, null)
       };
       list.push(created);
       writeUserFolders(list);
+      commitFolderUndo(undoToken, true);
       folderTreeState.expanded.add('section:folders');
       if (validParent) {
         if (isSystemFolderParentId(validParent)) {
@@ -14716,7 +16197,7 @@
       }
       writeExpandedFolderNodes();
       renderFolderTree();
-      showToast('已创建文件夹「' + created.name + '」', 'success');
+      showToast('已创建文件夹「' + created.name + '」（Ctrl+Z 撤销）', 'success');
       return created;
     }
 
@@ -14749,8 +16230,11 @@
         showToast(`移动后文件夹总层级将超过 ${MAX_FOLDER_DEPTH} 层上限`, 'warning');
         return false;
       }
+      const undoToken = beginFolderUndo('移动文件夹「' + item.name + '」');
       item.parentId = targetParent;
+      item.sortOrder = nextSiblingSortOrder(list, targetParent, folderId);
       writeUserFolders(list);
+      commitFolderUndo(undoToken, true);
       folderTreeState.expanded.add('section:folders');
       if (targetParent) {
         if (isSystemFolderParentId(targetParent)) {
@@ -14763,7 +16247,7 @@
       }
       writeExpandedFolderNodes();
       renderFolderTree();
-      showToast('已移动文件夹「' + item.name + '」', 'success');
+      showToast('已移动文件夹「' + item.name + '」（Ctrl+Z 撤销）', 'success');
       return true;
     }
 
@@ -14781,8 +16265,14 @@
           added++;
         }
       });
+      if (!added) {
+        showToast(`所选 ${ids.length} 道试题已在「${target.name}」中`, 'info');
+        return 0;
+      }
+      const undoToken = beginFolderUndo(`放入「${target.name}」`);
       target.questionIds = Array.from(existing);
       writeUserFolders(list);
+      commitFolderUndo(undoToken, true);
       try { localStorage.setItem(EAGLE_LAST_FOLDER_KEY, String(folderId)); } catch (e) {}
       renderFolderTree();
       renderRightInspector();
@@ -14792,12 +16282,7 @@
       } else if (filterState.smartFilter === 'uncategorized') {
         applyFilters();
       }
-      showToast(
-        added > 0
-          ? `已将 ${ids.length} 道试题放入「${target.name}」（新增 ${added} 题）`
-          : `所选 ${ids.length} 道试题已在「${target.name}」中`,
-        added > 0 ? 'success' : 'info'
-      );
+      showToast(`已将 ${ids.length} 道试题放入「${target.name}」（新增 ${added} 题 · Ctrl+Z 撤销）`, 'success');
       return added;
     }
 
@@ -14806,8 +16291,10 @@
       const removeSet = new Set((qids || []).map(String));
       if (!removeSet.size || !folderId) return;
       const list = readUserFolders();
+      const folderName = (list.find(x => x.id === folderId) || {}).name || '文件夹';
       const subtree = collectFolderSubtreeIds(list, folderId);
       let changed = 0;
+      const undoToken = beginFolderUndo(`移出「${folderName}」`);
       list.forEach(item => {
         if (subtree.has(item.id)) {
           const next = (item.questionIds || []).filter(qid => !removeSet.has(String(qid)));
@@ -14819,12 +16306,13 @@
       });
       if (!changed) return;
       writeUserFolders(list);
+      commitFolderUndo(undoToken, true);
       renderFolderTree();
       renderRightInspector();
       if ((filterState.userFolderId && subtree.has(filterState.userFolderId)) || filterState.smartFilter === 'uncategorized') {
         applyFilters();
       }
-      showToast(`已从文件夹移出 ${removeSet.size} 道试题`, 'info');
+      showToast(`已从文件夹移出 ${removeSet.size} 道试题（Ctrl+Z 撤销）`, 'info');
     }
 
     function buildUserFolderChildMap(list) {
@@ -14854,6 +16342,7 @@
         const kids = sortFolderTreeNodes((childMap.get(item.id) || []).map(child => build(child, folderMode)), folderMode);
         const memberSet = collectUserFolderQuestionIds(item.id, list);
         const createdAtMs = folderCreatedAtMs(item);
+        const sortRaw = Number(item.sortOrder);
         return {
           id: nodeId,
           type: 'userfolder',
@@ -14864,6 +16353,7 @@
           count: memberSet.size,
           createdAtMs,
           createdLabel: formatFolderCreatedLabel(createdAtMs),
+          sortOrder: Number.isFinite(sortRaw) ? sortRaw : undefined,
           children: kids
         };
       };
@@ -14880,20 +16370,37 @@
         const raw = localStorage.getItem(CUSTOM_SMART_FOLDERS_STORAGE_KEY);
         const arr = raw ? JSON.parse(raw) : [];
         if (!Array.isArray(arr)) return [];
-        return arr
+        const rows = arr
           .filter(x => x && x.id && x.name)
-          .map(x => ({
-            ...x,
-            id: String(x.id),
-            name: String(x.name),
-            parentId: x.parentId ? String(x.parentId) : null,
-            filter: x.filter || {}
-          }));
+          .map(x => {
+            const sortRaw = Number(x.sortOrder);
+            const out = {
+              ...x,
+              id: String(x.id),
+              name: String(x.name),
+              parentId: x.parentId ? String(x.parentId) : null,
+              filter: x.filter || {}
+            };
+            if (Number.isFinite(sortRaw)) out.sortOrder = sortRaw;
+            else delete out.sortOrder;
+            return out;
+          });
+        return applyFolderSortOrdersMirror(rows, 'smart');
       } catch (e) { return []; }
     }
 
     function writeCustomSmartFolders(list) {
-      try { localStorage.setItem(CUSTOM_SMART_FOLDERS_STORAGE_KEY, JSON.stringify(list)); } catch (e) {}
+      try {
+        const normalized = (list || []).map(x => {
+          const row = { ...x };
+          const sortRaw = Number(x && x.sortOrder);
+          if (Number.isFinite(sortRaw)) row.sortOrder = sortRaw;
+          else delete row.sortOrder;
+          return row;
+        });
+        updateFolderSortOrdersMirrorFromList(normalized, 'smart');
+        localStorage.setItem(CUSTOM_SMART_FOLDERS_STORAGE_KEY, JSON.stringify(normalized));
+      } catch (e) {}
       if (typeof scheduleFoldersSync === 'function') scheduleFoldersSync();
     }
 
@@ -14962,7 +16469,8 @@
         name: name.trim(),
         parentId: validParent,
         filter: snapshotCurrentFilter(),
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        sortOrder: nextSiblingSortOrder(list, validParent, null)
       };
       list.push(created);
       writeCustomSmartFolders(list);
@@ -15000,13 +16508,16 @@
         showToast(`移动后智能文件夹总层级将超过 ${MAX_FOLDER_DEPTH} 层上限`, 'warning');
         return false;
       }
+      const undoToken = beginFolderUndo('移动智能文件夹「' + item.name + '」');
       item.parentId = targetParent;
+      item.sortOrder = nextSiblingSortOrder(list, targetParent, customId);
       writeCustomSmartFolders(list);
+      commitFolderUndo(undoToken, true);
       folderTreeState.expanded.add('section:custom');
       if (targetParent) folderTreeState.expanded.add('custom:' + targetParent);
       writeExpandedFolderNodes();
       renderFolderTree();
-      showToast('已移动智能文件夹「' + item.name + '」', 'success');
+      showToast('已移动智能文件夹「' + item.name + '」（Ctrl+Z 撤销）', 'success');
       return true;
     }
 
@@ -15026,6 +16537,7 @@
         const customMode = getExplicitFolderSortMode(nodeId) || parentMode;
         const kids = sortFolderTreeNodes((childMap.get(item.id) || []).map(child => build(child, customMode)), customMode);
         const createdAtMs = folderCreatedAtMs(item);
+        const sortRaw = Number(item.sortOrder);
         return {
           id: nodeId,
           type: 'custom',
@@ -15036,6 +16548,7 @@
           count: countQuestionsForFilterSpec(item.filter),
           createdAtMs,
           createdLabel: formatFolderCreatedLabel(createdAtMs),
+          sortOrder: Number.isFinite(sortRaw) ? sortRaw : undefined,
           children: kids
         };
       };
@@ -15607,15 +17120,7 @@
           tagKind: 'knowledge',
           createdAtMs: 0,
           createdLabel: '已贴题 ' + knowQuestionCount + ' 道 · 考点标签 ' + knowTagIds.length + ' 个',
-          children: knowTags.length ? knowTags : [{
-            id: 'hint:empty_knowledge',
-            type: 'hint',
-            hintAction: 'create_tag_knowledge',
-            label: '点击 + 新建知识点标签',
-            icon: '＋',
-            count: 0,
-            children: []
-          }]
+          children: knowTags
         },
         {
           id: 'group:method',
@@ -15626,15 +17131,7 @@
           tagKind: 'method',
           createdAtMs: 0,
           createdLabel: '已贴题 ' + methQuestionCount + ' 道 · 方法标签 ' + methTagIds.length + ' 个',
-          children: methTags.length ? methTags : [{
-            id: 'hint:empty_method',
-            type: 'hint',
-            hintAction: 'create_tag_method',
-            label: '点击 + 新建方法标签',
-            icon: '＋',
-            count: 0,
-            children: []
-          }]
+          children: methTags
         }
       ], tagsSectionMode);
       roots.push({
@@ -15667,15 +17164,8 @@
         actionLabel: '+',
         actionTitle: '将当前筛选保存为智能文件夹',
         actionCall: 'event.stopPropagation(); saveCurrentAsSmartFolder(null)',
-        children: customSmartNodes.length ? customSmartNodes : [{
-          id: 'hint:empty_custom',
-          type: 'hint',
-          hintAction: 'create_csf',
-          label: '组合筛选后点击 + 存为智能视图',
-          icon: '＋',
-          count: 0,
-          children: []
-        }]
+        // 空着就空着：靠分区右侧 + 新建，不再塞「组合筛选后点击 + …」说明行。
+        children: customSmartNodes
       });
 
       // 📁 文件夹（Eagle 统一文件夹分组：自定义文件夹 + 试卷 + 教材版本，均支持建子文件夹/拖放/右键删除）
@@ -15724,15 +17214,7 @@
         actionLabel: '+',
         actionTitle: '新建文件夹',
         actionCall: 'event.stopPropagation(); createUserFolder(null)',
-        children: folderChildren.length ? folderChildren : [{
-          id: 'hint:empty_userfolders',
-          type: 'hint',
-          hintAction: 'create_uf',
-          label: '点击 + 新建文件夹或拖放题目至此',
-          icon: '＋',
-          count: 0,
-          children: []
-        }]
+        children: folderChildren
       });
 
       return roots;
@@ -15784,23 +17266,23 @@
           const wrapClass = node.type === 'section'
             ? 'space-y-0.5 mt-0.5'
             : 'ml-2.5 border-l border-slate-200 pl-1 space-y-0.5';
-          kidsHtml = '<div class="' + wrapClass + '">' + kidHtmls.join('') + '</div>';
+          kidsHtml = '<div class="' + wrapClass + '" data-ftree-kids="' + escapeHtml(node.id) + '">' + kidHtmls.join('') + '</div>';
         }
       }
       if (!selfMatch) return '';
 
       if (node.type === 'section') {
         const dropAttr = (node.sectionKind === 'folders' || node.sectionKind === 'custom')
-          ? ` ondragover="handleFolderDragOver(event, '${safeNodeId}', this)" ondragleave="handleFolderDragLeave(this)" ondrop="handleFolderDrop(event, '${safeNodeId}', this)"`
+          ? ` ondragover="handleFolderDragOver(event, '${safeNodeId}', this)" ondragleave="handleFolderDragLeave(event, this)" ondrop="handleFolderDrop(event, '${safeNodeId}', this)"`
           : '';
         const actionBtn = node.actionCall
-          ? `<button onclick="${node.actionCall}" class="eagle-tree-action-btn w-4 h-4 rounded flex items-center justify-center text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 text-xs font-bold leading-none cursor-pointer" title="${escapeHtml(node.actionTitle || '')}">${node.actionLabel || '+'}</button>`
+          ? `<button onclick="${node.actionCall}" class="eagle-tree-action-btn w-4 h-4 rounded flex items-center justify-center text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 text-xs font-bold leading-none cursor-pointer"${node.actionTitle ? ` data-tip-title="${escapeHtml(node.actionTitle)}"` : ''}>${node.actionLabel || '+'}</button>`
           : '';
         const sectionCount = node.folderCount !== undefined ? node.folderCount : node.count;
         const sectionCountLabel = (sectionCount !== null && sectionCount !== undefined && sectionCount !== '')
           ? ` (${sectionCount})`
           : '';
-        return `<div class="mt-2 pt-1.5 border-t border-slate-200/70 first:mt-0 first:pt-0 first:border-t-0">` +
+        return `<div id="ftree-${escapeHtml(node.id)}" class="mt-2 pt-1.5 border-t border-slate-200/70 first:mt-0 first:pt-0 first:border-t-0">` +
           `<div class="flex items-center justify-between px-1.5 py-0.5 rounded text-[10px] font-bold text-slate-400 hover:text-slate-700 hover:bg-slate-100/60 select-none" data-folder-drop="${escapeHtml(node.id)}" oncontextmenu="handleFolderTreeContextMenu(event, '${safeNodeId}')"${dropAttr}>` +
             `<div class="flex items-center gap-1 min-w-0 cursor-pointer flex-1" onclick="toggleFolderNode('${safeNodeId}')">` +
               `<span class="w-3 inline-flex items-center justify-center text-[9px]">${isExpanded ? '▾' : '▸'}</span>` +
@@ -15845,17 +17327,19 @@
         (node.type === 'group' && (node.id === 'group:papers' || node.id === 'group:books'))
       );
       const dragAttr = canDragFolder
-        ? ` draggable="true" ondragstart="handleFolderDragStart(event, '${safeNodeId}')"`
+        ? ` draggable="true" ondragstart="handleFolderDragStart(event, '${safeNodeId}')" ondragend="handleFolderDragEnd(event)"`
         : '';
       const dropAttr = canAcceptDrop
-        ? ` ondragover="handleFolderDragOver(event, '${safeNodeId}', this)" ondragleave="handleFolderDragLeave(this)" ondrop="handleFolderDrop(event, '${safeNodeId}', this)"`
+        ? ` ondragover="handleFolderDragOver(event, '${safeNodeId}', this)" ondragleave="handleFolderDragLeave(event, this)" ondrop="handleFolderDrop(event, '${safeNodeId}', this)"`
         : '';
       const countDisplay = (node.count === '' || node.count === null || node.count === undefined) ? '' : node.count;
-      const timeTip = node.createdLabel
-        ? ` title="${escapeHtml(node.label)} · ${escapeHtml(node.createdLabel)}"`
-        : (node.type === 'tag'
-          ? ` title="${escapeHtml(node.label || '')}（拖题贴标；拖标签改归属，Alt=多父）"`
-          : ` title="${escapeHtml(node.label || '')}"`);
+      const tipTitle = escapeHtml(node.label || '');
+      const tipBody = node.createdLabel
+        ? escapeHtml(node.createdLabel)
+        : (node.type === 'tag' ? '拖题贴标；拖标签改归属，按住 Alt 可多父' : '');
+      const timeTip = tipTitle
+        ? ` data-tip-title="${tipTitle}"${tipBody ? ` data-tip-body="${tipBody}"` : ''} data-tip-when-truncated="1"`
+        : '';
       const isMethodTag = node.type === 'tag' && node.tagKind === 'method';
       const activeCls = isActive
         ? (isMethodTag ? 'bg-violet-50 text-violet-900 font-semibold' : 'bg-emerald-50 text-emerald-900 font-semibold')
@@ -15905,11 +17389,62 @@
       updateEagleAppMainMenuCounts();
     }
 
+    function ensureExpandedFolderInView(nodeId) {
+      const container = document.getElementById('folderTreeContainer');
+      if (!container || !nodeId) return false;
+      const header = document.getElementById('ftree-' + nodeId);
+      if (!header) return false;
+      let kids = null;
+      try {
+        const safe = (window.CSS && typeof CSS.escape === 'function')
+          ? CSS.escape(nodeId)
+          : String(nodeId).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        kids = container.querySelector('[data-ftree-kids="' + safe + '"]');
+      } catch (_) {
+        kids = null;
+      }
+      const endEl = kids || header;
+      const cRect = container.getBoundingClientRect();
+      const hRect = header.getBoundingClientRect();
+      const eRect = endEl.getBoundingClientRect();
+      if (!cRect.height) return false;
+
+      const pad = 6;
+      let delta = 0;
+      const blockHeight = eRect.bottom - hRect.top;
+      if (blockHeight > cRect.height - pad * 2) {
+        // 子项比视口还高：把标题钉在顶部，先露出展开内容的开头。
+        delta = hRect.top - cRect.top - pad;
+      } else if (eRect.bottom > cRect.bottom - pad) {
+        // 只滚到刚好把整块展开内容收入视口，尽量少动。
+        delta = eRect.bottom - (cRect.bottom - pad);
+        if (hRect.top - delta < cRect.top + pad) {
+          delta = hRect.top - cRect.top - pad;
+        }
+      } else if (hRect.top < cRect.top + pad) {
+        delta = hRect.top - cRect.top - pad;
+      }
+      if (Math.abs(delta) < 1) return false;
+      if (typeof container.scrollBy === 'function') {
+        container.scrollBy({ top: delta, behavior: 'smooth' });
+      } else {
+        container.scrollTop = (container.scrollTop || 0) + delta;
+      }
+      return true;
+    }
+
     function toggleFolderNode(nodeId) {
-      if (folderTreeState.expanded.has(nodeId)) folderTreeState.expanded.delete(nodeId);
-      else folderTreeState.expanded.add(nodeId);
+      const willExpand = !folderTreeState.expanded.has(nodeId);
+      if (willExpand) folderTreeState.expanded.add(nodeId);
+      else folderTreeState.expanded.delete(nodeId);
       writeExpandedFolderNodes();
       renderFolderTree();
+      if (willExpand) {
+        // 等 DOM 落稳再滚：展开内容若在左栏下方屏幕外，自动滑到眼前。
+        const run = () => ensureExpandedFolderInView(nodeId);
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+        else run();
+      }
     }
 
     function handleTreeSearch(val) {
@@ -15927,18 +17462,162 @@
       return null;
     }
 
+    function clearQuestionDragGhost() {
+      const ghost = window.__eagleQDragGhost;
+      if (ghost && ghost.parentNode) {
+        try { ghost.parentNode.removeChild(ghost); } catch (err) {}
+      }
+      window.__eagleQDragGhost = null;
+    }
+
+    function clearQuestionDraggingSource() {
+      const ids = window.__eagleQDragIds || [];
+      ids.forEach(id => {
+        const el = document.getElementById('qcard_' + id);
+        if (el) el.classList.remove('q-dragging');
+      });
+      window.__eagleQDragIds = null;
+    }
+
+    /** Eagle 式拖题角标：题号/题名 + 数量，代替浏览器默认整卡半透明幽灵。 */
+    function buildQuestionDragGhost(ids) {
+      const list = Array.isArray(ids) ? ids.map(String) : [];
+      const count = list.length || 1;
+      const first = questionsData.find(q => String(q.id) === list[0]);
+      let title = '题目';
+      if (first) {
+        try {
+          title = (typeof getQuestionDisplayName === 'function' && getQuestionDisplayName(first))
+            || (typeof questionIdentity === 'function' && questionIdentity(first))
+            || title;
+        } catch (err) {}
+      }
+      title = String(title || '题目').replace(/\s+/g, ' ').trim();
+      if (title.length > 22) title = title.slice(0, 21) + '…';
+      const sub = count > 1 ? ('已选 ' + count + ' 道 · 拖到文件夹') : '拖到左侧文件夹归档';
+      const ghost = document.createElement('div');
+      ghost.className = 'eagle-q-drag-ghost';
+      ghost.setAttribute('aria-hidden', 'true');
+      ghost.innerHTML =
+        '<span class="eqd-icon" aria-hidden="true">📄</span>' +
+        '<span class="eqd-body">' +
+          '<span class="eqd-label"></span>' +
+          '<span class="eqd-sub"></span>' +
+        '</span>' +
+        (count > 1 ? ('<span class="eqd-badge">' + count + '</span>') : '');
+      ghost.querySelector('.eqd-label').textContent = title;
+      ghost.querySelector('.eqd-sub').textContent = sub;
+      // 先放在视口内让浏览器截到真实尺寸（含微旋转），截完立刻挪出屏幕。
+      ghost.style.top = '0px';
+      ghost.style.left = '0px';
+      ghost.style.transform = 'rotate(-2deg)';
+      document.body.appendChild(ghost);
+      return ghost;
+    }
+
+    function pulseFolderDropReceive(el) {
+      if (!el) return;
+      el.classList.remove('ftree-drop-receive-pulse');
+      // 强制重启动画
+      void el.offsetWidth;
+      el.classList.add('ftree-drop-receive-pulse');
+      window.setTimeout(() => {
+        try { el.classList.remove('ftree-drop-receive-pulse'); } catch (err) {}
+      }, 450);
+    }
+
     function handleQuestionDragStart(e, qid) {
       const ids = (selectedQuestionIds.has(qid) && selectedQuestionIds.size > 1)
         ? Array.from(selectedQuestionIds)
         : [qid];
       const payload = { kind: 'questions', ids };
       window.__eagleDragPayload = payload;
+      window.__eagleQDragIds = ids.map(String);
+      clearQuestionDragGhost();
+      ids.forEach(id => {
+        const el = document.getElementById('qcard_' + id);
+        if (el) el.classList.add('q-dragging');
+      });
       try {
         if (e && e.dataTransfer) {
           e.dataTransfer.effectAllowed = 'copyMove';
           e.dataTransfer.setData('text/plain', JSON.stringify(payload));
+          const ghost = buildQuestionDragGhost(ids);
+          window.__eagleQDragGhost = ghost;
+          // 热点偏左上，角标大致挂在指针右下，像 Eagle 捏着素材走
+          e.dataTransfer.setDragImage(ghost, 18, 14);
+          requestAnimationFrame(() => {
+            if (window.__eagleQDragGhost === ghost) {
+              ghost.style.top = '-9999px';
+              ghost.style.left = '-9999px';
+            }
+          });
         }
       } catch (err) {}
+    }
+
+    function handleQuestionDragEnd() {
+      clearQuestionDragGhost();
+      clearQuestionDraggingSource();
+      window.__eagleDragPayload = null;
+      clearAllFolderDropVisuals();
+    }
+
+    function clearFolderDropVisual(el) {
+      if (!el) return;
+      el.classList.remove(
+        'ring-2', 'ring-emerald-400', 'ring-violet-400', 'bg-emerald-50/80',
+        'ftree-drop-before', 'ftree-drop-after', 'ftree-drop-into', 'ftree-drop-tag-alt',
+        'ftree-drop-receive'
+      );
+    }
+
+    function clearAllFolderDropVisuals() {
+      try {
+        document.querySelectorAll(
+          '#folderTreeContainer .ftree-drop-before, #folderTreeContainer .ftree-drop-after, #folderTreeContainer .ftree-drop-into, #folderTreeContainer .ftree-drop-receive, #folderTreeContainer .ring-2'
+        ).forEach(clearFolderDropVisual);
+      } catch (err) {}
+    }
+
+    /** 指针落在行的上 30% / 下 30% / 中间 → before / after / into（Eagle 同级插线）。 */
+    function getFolderDropZoneFromEvent(e, el) {
+      if (!e || !el || typeof el.getBoundingClientRect !== 'function') return 'into';
+      const rect = el.getBoundingClientRect();
+      const h = Math.max(rect.height, 1);
+      const ratio = (e.clientY - rect.top) / h;
+      if (ratio < 0.3) return 'before';
+      if (ratio > 0.7) return 'after';
+      return 'into';
+    }
+
+    function resolveFolderDropZone(e, el, payload, targetNode) {
+      if (!payload || payload.kind !== 'folder') return 'into';
+      if (payload.folderType === 'tag') return 'into';
+      if (!targetNode) return 'into';
+      if (targetNode.type === 'section' || targetNode.type === 'group'
+          || targetNode.type === 'paper' || targetNode.type === 'book') {
+        return 'into';
+      }
+      if (payload.folderType === 'userfolder' && targetNode.type !== 'userfolder') return 'into';
+      if (payload.folderType === 'custom' && targetNode.type !== 'custom') return 'into';
+      return getFolderDropZoneFromEvent(e, el);
+    }
+
+    function applyFolderDropVisual(el, zone, payload, e) {
+      clearFolderDropVisual(el);
+      if (!el) return;
+      if (payload && payload.kind === 'questions') {
+        el.classList.add('ftree-drop-receive');
+        return;
+      }
+      if (payload && payload.kind === 'folder' && payload.folderType === 'tag' && e && e.altKey) {
+        el.classList.add('ftree-drop-into', 'ftree-drop-tag-alt');
+        return;
+      }
+      if (zone === 'before') el.classList.add('ftree-drop-before');
+      else if (zone === 'after') el.classList.add('ftree-drop-after');
+      else el.classList.add('ftree-drop-into');
     }
 
     function handleFolderDragStart(e, nodeId) {
@@ -15952,6 +17631,8 @@
         itemId: node.type === 'tag' ? node.tagId : (node.folderId || node.customId)
       };
       window.__eagleDragPayload = payload;
+      window.__eagleFolderDragEl = e && e.currentTarget ? e.currentTarget : null;
+      if (window.__eagleFolderDragEl) window.__eagleFolderDragEl.classList.add('ftree-dragging');
       try {
         if (e && e.dataTransfer) {
           e.dataTransfer.effectAllowed = 'move';
@@ -15960,8 +17641,18 @@
       } catch (err) {}
     }
 
-    function canAcceptFolderDrop(payload, targetNode) {
+    function handleFolderDragEnd() {
+      if (window.__eagleFolderDragEl) {
+        try { window.__eagleFolderDragEl.classList.remove('ftree-dragging'); } catch (err) {}
+      }
+      window.__eagleFolderDragEl = null;
+      window.__eagleDragPayload = null;
+      clearAllFolderDropVisuals();
+    }
+
+    function canAcceptFolderDrop(payload, targetNode, zone) {
       if (!payload || !targetNode) return false;
+      const dropZone = zone || 'into';
       if (payload.kind === 'questions') {
         return targetNode.type === 'userfolder' || targetNode.type === 'paper' || targetNode.type === 'book' || targetNode.type === 'tag';
       }
@@ -15977,6 +17668,17 @@
         }
         if (payload.folderType === 'userfolder') {
           const list = readUserFolders();
+          if (dropZone === 'before' || dropZone === 'after') {
+            if (targetNode.type !== 'userfolder' || targetNode.folderId === payload.itemId) return false;
+            const anchor = list.find(x => x.id === targetNode.folderId);
+            if (!anchor) return false;
+            const newParentId = anchor.parentId || null;
+            if (newParentId && !isSystemFolderParentId(newParentId)
+                && isFolderDescendantOrSelf(list, payload.itemId, newParentId)) {
+              return false;
+            }
+            return canPlaceFolderUnderParent(list, payload.itemId, newParentId, false);
+          }
           let targetParentId = null;
           if (targetNode.type === 'section' && targetNode.sectionKind === 'folders') {
             targetParentId = null;
@@ -15996,6 +17698,14 @@
         }
         if (payload.folderType === 'custom') {
           const list = readCustomSmartFolders();
+          if (dropZone === 'before' || dropZone === 'after') {
+            if (targetNode.type !== 'custom' || targetNode.customId === payload.itemId) return false;
+            const anchor = list.find(x => x.id === targetNode.customId);
+            if (!anchor) return false;
+            const newParentId = anchor.parentId || null;
+            if (newParentId && isFolderDescendantOrSelf(list, payload.itemId, newParentId)) return false;
+            return canPlaceFolderUnderParent(list, payload.itemId, newParentId, true);
+          }
           let targetParentId = null;
           if (targetNode.type === 'section' && targetNode.sectionKind === 'custom') {
             targetParentId = null;
@@ -16016,55 +17726,66 @@
     function handleFolderDragOver(e, targetNodeId, el) {
       const targetNode = folderNodeRegistry.get(targetNodeId);
       const payload = readDragPayload(e);
-      if (!canAcceptFolderDrop(payload, targetNode)) return;
+      const zone = resolveFolderDropZone(e, el, payload, targetNode);
+      if (!canAcceptFolderDrop(payload, targetNode, zone)) {
+        clearFolderDropVisual(el);
+        return;
+      }
       e.preventDefault();
       if (e.dataTransfer) {
         if (payload.kind === 'questions') e.dataTransfer.dropEffect = 'copy';
         else if (payload.folderType === 'tag' && e.altKey) e.dataTransfer.dropEffect = 'copy';
         else e.dataTransfer.dropEffect = 'move';
       }
-      if (el) {
-        el.classList.add('ring-2', 'ring-emerald-400', 'bg-emerald-50/80');
-        if (payload.folderType === 'tag' && e.altKey) {
-          el.classList.add('ring-violet-400');
-          el.classList.remove('ring-emerald-400');
-        }
-      }
+      applyFolderDropVisual(el, zone, payload, e);
     }
 
-    function handleFolderDragLeave(el) {
-      if (el) el.classList.remove('ring-2', 'ring-emerald-400', 'bg-emerald-50/80');
+    function handleFolderDragLeave(e, el) {
+      if (e && el && e.relatedTarget && typeof el.contains === 'function' && el.contains(e.relatedTarget)) return;
+      clearFolderDropVisual(el);
     }
 
     function handleFolderDrop(e, targetNodeId, el) {
       e.preventDefault();
       e.stopPropagation();
-      if (el) el.classList.remove('ring-2', 'ring-emerald-400', 'bg-emerald-50/80');
       const payload = readDragPayload(e);
-      window.__eagleDragPayload = null;
       const targetNode = folderNodeRegistry.get(targetNodeId);
-      if (!canAcceptFolderDrop(payload, targetNode)) return;
+      const zone = resolveFolderDropZone(e, el, payload, targetNode);
+      clearFolderDropVisual(el);
+      window.__eagleDragPayload = null;
+      if (!canAcceptFolderDrop(payload, targetNode, zone)) return;
 
       if (payload.kind === 'questions') {
         if (targetNode.type === 'userfolder') {
           addQuestionsToUserFolder(payload.ids, targetNode.folderId);
+          pulseFolderDropReceive(el);
         } else if (targetNode.type === 'paper' || targetNode.type === 'book') {
           addQuestionsToFolderTarget(payload.ids, targetNode.id);
+          pulseFolderDropReceive(el);
         } else if (targetNode.type === 'tag') {
           assignTagToQuestions(targetNode.tagId, payload.ids);
+          pulseFolderDropReceive(el);
         }
       } else if (payload.kind === 'folder') {
         if (payload.folderType === 'tag') {
           const addOnly = !!(e && e.altKey);
           reparentTagByDrop(payload.itemId, targetNode.tagId, addOnly);
         } else if (payload.folderType === 'userfolder') {
-          let newParentId = null;
-          if (targetNode.type === 'userfolder') newParentId = targetNode.folderId;
-          else if (isSystemFolderParentId(targetNode.id)) newParentId = targetNode.id;
-          moveUserFolder(payload.itemId, newParentId);
+          if (zone === 'before' || zone === 'after') {
+            reorderUserFolderAmongSiblings(payload.itemId, targetNode.folderId, zone);
+          } else {
+            let newParentId = null;
+            if (targetNode.type === 'userfolder') newParentId = targetNode.folderId;
+            else if (isSystemFolderParentId(targetNode.id)) newParentId = targetNode.id;
+            moveUserFolder(payload.itemId, newParentId);
+          }
         } else if (payload.folderType === 'custom') {
-          const newParentId = targetNode.type === 'custom' ? targetNode.customId : null;
-          moveCustomSmartFolder(payload.itemId, newParentId);
+          if (zone === 'before' || zone === 'after') {
+            reorderCustomSmartFolderAmongSiblings(payload.itemId, targetNode.customId, zone);
+          } else {
+            const newParentId = targetNode.type === 'custom' ? targetNode.customId : null;
+            moveCustomSmartFolder(payload.itemId, newParentId);
+          }
         }
       }
     }
@@ -16809,6 +18530,7 @@
       const list = readUserFolders();
       const rootItem = list.find(x => x.id === folderId);
       if (!rootItem) return;
+      const undoToken = beginFolderUndo('删除文件夹「' + rootItem.name + '」');
       const subtree = collectFolderSubtreeIds(list, folderId);
       const itemsToTrash = list.filter(x => subtree.has(x.id));
       const trash = readLocalTrash();
@@ -16822,6 +18544,7 @@
       });
       writeLocalTrash(trash);
       writeUserFolders(list.filter(x => !subtree.has(x.id)));
+      commitFolderUndo(undoToken, true);
 
       if (filterState.userFolderId && subtree.has(filterState.userFolderId)) {
         filterState.userFolderId = '';
@@ -16833,13 +18556,14 @@
       }
       renderInlineActiveChips();
       if (filterState.folderType === 'trash') renderRecycleBinPanel();
-      showToast(`已将文件夹「${rootItem.name}」移入回收站`, 'info');
+      showToast(`已将文件夹「${rootItem.name}」移入回收站（Ctrl+Z 撤销）`, 'info');
     }
 
     function moveCustomSmartFolderToTrash(customId) {
       const list = readCustomSmartFolders();
       const rootItem = list.find(x => x.id === customId);
       if (!rootItem) return;
+      const undoToken = beginFolderUndo('删除智能文件夹「' + rootItem.name + '」');
       const subtree = collectFolderSubtreeIds(list, customId);
       const itemsToTrash = list.filter(x => subtree.has(x.id));
       const trash = readLocalTrash();
@@ -16853,6 +18577,7 @@
       });
       writeLocalTrash(trash);
       writeCustomSmartFolders(list.filter(x => !subtree.has(x.id)));
+      commitFolderUndo(undoToken, true);
 
       const activeCustomId = folderTreeState.activeId && folderTreeState.activeId.startsWith('custom:')
         ? folderTreeState.activeId.slice('custom:'.length)
@@ -18882,6 +20607,19 @@
 
         if (isTyping) return;
 
+        // Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z：撤销 / 重做最近一次文件夹整理（拖题进夹、挪夹等）
+        if (e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'z' || e.key === 'Z')) {
+          e.preventDefault();
+          if (e.shiftKey) redoLastFolderOrganizeAction();
+          else undoLastFolderOrganizeAction();
+          return;
+        }
+        if (e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && (e.key === 'y' || e.key === 'Y')) {
+          e.preventDefault();
+          redoLastFolderOrganizeAction();
+          return;
+        }
+
         // Ctrl+Shift+C: 复制当前聚焦试题为图片 (原题库经典高价值快捷键)
         if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) {
           e.preventDefault();
@@ -19087,8 +20825,6 @@
 
     window.eagleVirtualList = eagleVirtualList;
     window.jumpToQuestionOrder = jumpToQuestionOrder;
-    window.handleJumpQuestionIndexKey = handleJumpQuestionIndexKey;
-    window.syncJumpQuestionIndexDisplay = syncJumpQuestionIndexDisplay;
 
     window.handleFolderTreeBlankContextMenu = handleFolderTreeBlankContextMenu;
     window.handleQuestionListBlankContextMenu = handleQuestionListBlankContextMenu;
@@ -19099,6 +20835,8 @@
     window.clearDateFilter = clearDateFilter;
     window.toggleFilterPanel = toggleFilterPanel;
     window.syncFilterPanelUI = syncFilterPanelUI;
+    window.toggleQuestionMetaCard = toggleQuestionMetaCard;
+    window.syncQuestionMetaCardUI = syncQuestionMetaCardUI;
     Object.defineProperty(window, 'questionsData', { configurable: true, get: () => questionsData });
     Object.defineProperty(window, 'filteredQuestions', { configurable: true, get: () => filteredQuestions });
     Object.defineProperty(window, 'currentActiveQuestionId', {

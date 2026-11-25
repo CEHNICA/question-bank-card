@@ -359,3 +359,52 @@ class LibraryFoldersAndTagGroupsTests(LiveServerTestCase):
         )
         self.assertEqual(removed["doc_overrides"][book_id]["removed"], [q1_id])
         self.assertNotIn("sections", removed["doc_overrides"][book_id])
+
+    def test_sync_preserves_sort_order_and_manual_mode(self):
+        synced = library_folders.mutate(
+            {
+                "action": "sync",
+                "revision": 0,
+                "user_folders": [
+                    {
+                        "id": "uf_a",
+                        "name": "甲",
+                        "parentId": None,
+                        "questionIds": [],
+                        "createdAt": 1,
+                        "sortOrder": 20,
+                    },
+                    {
+                        "id": "uf_b",
+                        "name": "乙",
+                        "parentId": None,
+                        "questionIds": [],
+                        "createdAt": 2,
+                        "sortOrder": 10,
+                    },
+                ],
+                "smart_folders": [
+                    {
+                        "id": "csf_a",
+                        "name": "视图",
+                        "parentId": None,
+                        "filter": {},
+                        "createdAt": 3,
+                        "sortOrder": 5,
+                    }
+                ],
+                "sort_modes": {"section:folders": "manual"},
+                "paper_sort_mode": "manual",
+            }
+        )
+        by_id = {f["id"]: f for f in synced["user_folders"]}
+        self.assertEqual(by_id["uf_a"]["sortOrder"], 20)
+        self.assertEqual(by_id["uf_b"]["sortOrder"], 10)
+        self.assertEqual(synced["smart_folders"][0]["sortOrder"], 5)
+        self.assertEqual(synced["sort_modes"]["section:folders"], "manual")
+        self.assertEqual(synced["paper_sort_mode"], "manual")
+
+        sorted_res = library_folders.mutate(
+            {"action": "set_sort", "target_id": "section:folders", "mode": "manual"}
+        )
+        self.assertEqual(sorted_res["sort_modes"]["section:folders"], "manual")

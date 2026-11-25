@@ -97,4 +97,22 @@ describe("Stage 3: 查重提示、一题多源证据与变式题组前端集成"
     assert.ok(eagleHtml.includes("batchBindVariantGroup"), "需提供批量互绑变式组入口");
     assert.ok(eagleHtml.includes("swapBasketVariant("), "试题篮列表需挂载 换变式 按钮");
   });
+
+  it("5. 查虫弹层必须有遮罩与 max-height，避免被右侧属性栏「挡住」", () => {
+    const tw = fs.readFileSync(path.join(__dirname, "eagle", "tailwind.css"), "utf8");
+    assert.ok(eagleHtml.includes("eagle-dedup-dialog"), "内层白卡片需有 eagle-dedup-dialog 钩子");
+    assert.match(
+      eagleHtml,
+      /#dedupCenterModal\s*\{[^}]*background-color:\s*rgba\(15,\s*23,\s*42,\s*0\.65\)/s,
+      "需内联兜底遮罩色，防止 tailwind 漏收 bg-slate-900/65"
+    );
+    assert.match(
+      eagleHtml,
+      /#dedupCenterModal\s*>\s*\.eagle-dedup-dialog\s*\{[^}]*max-height:\s*88vh/s,
+      "需内联兜底 max-height:88vh，防止白卡片被撑到数千像素"
+    );
+    assert.ok(tw.includes("max-h-\\[88vh\\]"), "tailwind.css 需包含 max-h-[88vh]");
+    assert.ok(tw.includes("bg-slate-900\\/65"), "tailwind.css 需包含 bg-slate-900/65");
+    assert.ok(tw.includes("backdrop-blur-xs"), "tailwind.css 需包含 backdrop-blur-xs");
+  });
 });

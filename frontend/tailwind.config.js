@@ -17,6 +17,11 @@ module.exports = {
     "./browser-interactions.js",
     "./eagle/eagle-print-preview.js",
   ],
-  theme: { extend: {} },
+  theme: {
+    extend: {
+      // HTML 里大量用了 backdrop-blur-xs；默认主题没有 xs，不补就会 silently 没模糊。
+      backdropBlur: { xs: "2px" },
+    },
+  },
   plugins: [],
 };

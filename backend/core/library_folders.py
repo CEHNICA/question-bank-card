@@ -31,7 +31,7 @@ MAX_SMART_FOLDERS = 200
 MAX_HISTORY = 50
 MAX_NAME_LEN = 120
 MAX_BATCH_QUESTIONS = 500
-VALID_SORT_MODES = ("time_desc", "time_asc", "name", "count_desc")
+VALID_SORT_MODES = ("time_desc", "time_asc", "name", "count_desc", "manual")
 DEFAULT_SORT_MODE = "time_desc"
 
 _LOCK = threading.RLock()
@@ -79,6 +79,20 @@ def _clean_sort_modes(raw) -> dict[str, str]:
         if k and val in VALID_SORT_MODES:
             out[k] = str(val)
     return out
+
+
+def _clean_sort_order(value) -> int | None:
+    """Preserve optional sibling order for Eagle-style manual folder arrange."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            return int(float(value.strip()))
+        except ValueError:
+            return None
+    return None
 
 
 def _clean_doc_overrides(raw) -> dict[str, dict]:
@@ -140,9 +154,17 @@ def _clean_user_folders(raw) -> list[dict]:
         if not isinstance(created_at, (int, float)) or created_at <= 0:
             match = re.match(r"^uf_(\d+)", fid)
             created_at = int(match.group(1)) if match else int(time.time() * 1000)
-        out.append(
-            {"id": fid, "name": name, "parentId": parent_id or None, "questionIds": qids, "createdAt": int(created_at)}
-        )
+        cleaned = {
+            "id": fid,
+            "name": name,
+            "parentId": parent_id or None,
+            "questionIds": qids,
+            "createdAt": int(created_at),
+        }
+        sort_order = _clean_sort_order(item.get("sortOrder"))
+        if sort_order is not None:
+            cleaned["sortOrder"] = sort_order
+        out.append(cleaned)
     return out
 
 
@@ -164,15 +186,17 @@ def _clean_smart_folders(raw) -> list[dict]:
         created_at = item.get("createdAt")
         if not isinstance(created_at, (int, float)) or created_at <= 0:
             created_at = int(time.time() * 1000)
-        out.append(
-            {
-                "id": fid,
-                "name": name,
-                "parentId": parent_id or None,
-                "filter": deepcopy(flt),
-                "createdAt": int(created_at),
-            }
-        )
+        cleaned = {
+            "id": fid,
+            "name": name,
+            "parentId": parent_id or None,
+            "filter": deepcopy(flt),
+            "createdAt": int(created_at),
+        }
+        sort_order = _clean_sort_order(item.get("sortOrder"))
+        if sort_order is not None:
+            cleaned["sortOrder"] = sort_order
+        out.append(cleaned)
     return out
 
 
@@ -801,7 +825,7 @@ def mutate(payload: dict) -> dict:
             target_id = str(payload.get("target_id") or "").strip()
             mode = str(payload.get("mode") or "").strip()
             if mode not in (*VALID_SORT_MODES, "default"):
-                raise FolderError("排序方式只能是 time_desc、time_asc、name、count_desc 或 default")
+                raise FolderError("排序方式只能是 time_desc、time_asc、name、count_desc、manual 或 default")
             if not target_id or target_id in {"global", "all"}:
                 state["paper_sort_mode"] = DEFAULT_SORT_MODE if mode == "default" else mode
                 label = "全局默认"
