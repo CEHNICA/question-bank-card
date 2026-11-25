@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" width="1200" height="360" role="img" aria-labelledby="hero-light-title hero-light-desc">
+  <title id="hero-light-title">题有据 TiYouJu v2.3.0</title>
+  <desc id="hero-light-desc">本地优先的数学题库与正规组卷工作台：每一道题，都能回到原卷。</desc>
+  <defs>
+    <linearGradient id="hl-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fcfdfb"/>
+      <stop offset="55%" stop-color="#f5f8f6"/>
+      <stop offset="100%" stop-color="#eef4f1"/>
+    </linearGradient>
+    <radialGradient id="hl-glow-teal" cx="0.82" cy="0.22" r="0.55">
+      <stop offset="0%" stop-color="#2f9668" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#2f9668" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="hl-glow-gold" cx="0.18" cy="0.88" r="0.48">
+      <stop offset="0%" stop-color="#d6a65d" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#d6a65d" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="hl-dots" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1" fill="#163f3a" fill-opacity="0.075"/>
+    </pattern>
+  </defs>
+
+  <!-- Outer card surface -->
+  <rect x="1" y="1" width="1198" height="358" rx="22" fill="url(#hl-bg)" stroke="#d9e4df" stroke-width="1.5"/>
+  <rect x="2" y="2" width="1196" height="356" rx="21" fill="url(#hl-dots)"/>
+  <rect x="2" y="2" width="1196" height="356" rx="21" fill="url(#hl-glow-teal)"/>
+  <rect x="2" y="2" width="1196" height="356" rx="21" fill="url(#hl-glow-gold)"/>
+
+  <!-- Top accent bar -->
+  <rect x="48" y="34" width="44" height="3.5" rx="1.75" fill="#2f9668"/>
+  <rect x="98" y="34" width="18" height="3.5" rx="1.75" fill="#d6a65d"/>
+
+  <!-- Brand Emblem (from logo-lockup.svg) -->
+  <g transform="translate(45.4 51.4) scale(0.082)">
+    <rect x="32" y="32" width="960" height="960" rx="224" fill="#163f3a"/>
+    <rect x="160" y="176" width="438" height="628" rx="78" fill="#fff4dc"/>
+    <path d="M238 330v-72h72M448 258h72v72M238 650v72h72M448 722h72v-72" fill="none" stroke="#d6a65d" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="430" y="314" width="430" height="522" rx="76" fill="#f9edcf"/>
+    <rect x="548" y="438" width="214" height="48" rx="24" fill="#245e55"/>
+    <rect x="548" y="532" width="246" height="48" rx="24" fill="#245e55"/>
+    <path d="M354 424h62c62 0 98 35 98 94v112c0 66 40 104 108 104h126" fill="none" stroke="#2f9668" stroke-width="78" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="354" cy="424" r="27" fill="#fff4dc"/>
+    <circle cx="354" cy="424" r="13" fill="#2f9668"/>
+    <circle cx="748" cy="734" r="42" fill="#d6a65d"/>
+    <circle cx="748" cy="734" r="17" fill="#fff4dc"/>
+  </g>
+
+  <!-- Brand title + version badge -->
+  <text x="148" y="100" fill="#163f3a" font-size="44" font-weight="700" letter-spacing="3" font-family="Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, Segoe UI, sans-serif">题有据</text>
+  <rect x="308" y="70" width="156" height="28" rx="14" fill="#163f3a"/>
+  <text x="386" y="89" text-anchor="middle" fill="#fff4dc" font-size="13" font-weight="700" letter-spacing="1" font-family="Consolas, SFMono-Regular, Segoe UI, sans-serif">TIYOUJU · v2.3.0</text>
+  <text x="148" y="128" fill="#54716c" font-size="12.5" font-weight="600" letter-spacing="1.6" font-family="Segoe UI, Microsoft YaHei UI, sans-serif">LOCAL-FIRST QUESTION BANK &amp; EXAM STUDIO</text>
+
+  <!-- Main tagline & subtitle -->
+  <text x="48" y="196" fill="#122e2a" font-size="36" font-weight="700" letter-spacing="0.8" font-family="Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, sans-serif">每一道题，都能回到原卷。</text>
+  <text x="48" y="238" fill="#46615c" font-size="17" font-weight="400" font-family="Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, sans-serif">把 Word / PDF / 拍照试卷整理成可检索的本地题库，</text>
+  <text x="48" y="266" fill="#46615c" font-size="17" font-weight="400" font-family="Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, sans-serif">完整保留原卷出处与学生手写证据，审校入库后一键组卷导出。</text>
+
+  <!-- Feature chips -->
+  <rect x="48" y="294" width="124" height="30" rx="15" fill="#ffffff" stroke="#cde0d8" stroke-width="1"/>
+  <text x="110" y="314" text-anchor="middle" fill="#1b4d46" font-size="12.5" font-weight="600" font-family="Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, sans-serif">Word 双轨直读</text>
+
+  <rect x="182" y="294" width="140" height="30" rx="15" fill="#ffffff" stroke="#cde0d8" stroke-width="1"/>
+  <text x="252" y="314" text-anchor="middle" fill="#1b4d46" font-size="12.5" font-weight="600" font-family="Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, sans-serif">多源手写证据归档</text>
+
+  <rect x="332" y="294" width="142" height="30" rx="15" fill="#ffffff" stroke="#cde0d8" stroke-width="1"/>
+  <text x="403" y="314" text-anchor="middle" fill="#1b4d46" font-size="12.5" font-weight="600" font-family="Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, sans-serif">A3 双栏镜像密封线</text>
+
+  <rect x="484" y="294" width="128" height="30" rx="15" fill="#ffffff" stroke="#cde0d8" stroke-width="1"/>
+  <text x="548" y="314" text-anchor="middle" fill="#1b4d46" font-size="12.5" font-weight="600" font-family="Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, sans-serif">FTS5 万题毫秒搜</text>
+
+  <!-- Right architectural schematic -->
+  <!-- Card 1: Source Paper + Handwriting Evidence -->
+  <rect x="654" y="42" width="212" height="148" rx="14" fill="#ffffff" stroke="#d5e2dc" stroke-width="1.2"/>
+  <rect x="668" y="54" width="108" height="20" rx="10" fill="#fff4dc" stroke="#e4c283" stroke-width="1"/>
+  <text x="722" y="68" text-anchor="middle" fill="#8b6220" font-size="11" font-weight="700" font-family="Microsoft YaHei UI, PingFang SC, sans-serif">原卷证据 · 多源留存</text>
+
+  <rect x="668" y="82" width="184" height="94" rx="8" fill="#fcf7ea" stroke="#e9dbb8" stroke-width="1"/>
+  <!-- Orange crop frame (text) -->
+  <path d="M684 102v-10h10M770 92h10v10M684 134v10h10M770 144h10v-10" fill="none" stroke="#d68b3e" stroke-width="2" stroke-linecap="round"/>
+  <rect x="692" y="100" width="76" height="6" rx="3" fill="#245e55" fill-opacity="0.72"/>
+  <rect x="692" y="112" width="60" height="5" rx="2.5" fill="#54716c" fill-opacity="0.45"/>
+  <!-- Handwritten ink stroke -->
+  <path d="M694 132c9-7 15 5 24-2 8-6 14 4 23-2 7-5 15 3 22-1" fill="none" stroke="#c0503e" stroke-width="2" stroke-linecap="round" opacity="0.85"/>
+  <!-- Green crop frame (figure) -->
+  <rect x="790" y="94" width="50" height="50" rx="5" fill="#eef7f2" stroke="#2f9668" stroke-width="1.6" stroke-dasharray="4 2"/>
+  <polygon points="802,134 816,104 832,134" fill="none" stroke="#245e55" stroke-width="1.8" stroke-linejoin="round"/>
+  <line x1="798" y1="134" x2="836" y2="134" stroke="#245e55" stroke-width="1.5"/>
+  <text x="678" y="167" fill="#7c6c4e" font-size="10.5" font-weight="600" font-family="Microsoft YaHei UI, sans-serif">原卷 #1 空白  |  手写错解 #2</text>
+
+  <!-- Connector Card 1 -> Card 2 -->
+  <path d="M866 116 H898" fill="none" stroke="#2f9668" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="866" cy="116" r="4" fill="#d6a65d"/>
+  <polygon points="895,111 904,116 895,121" fill="#2f9668"/>
+
+  <!-- Card 2: Verified Structured Question Card -->
+  <rect x="904" y="42" width="248" height="148" rx="14" fill="#ffffff" stroke="#cde0d8" stroke-width="1.4"/>
+  <circle cx="922" cy="64" r="5" fill="#2f9668"/>
+  <text x="934" y="68" fill="#163f3a" font-size="11.5" font-weight="700" font-family="Consolas, Segoe UI, sans-serif">Q-950683</text>
+  <rect x="1058" y="53" width="80" height="21" rx="10.5" fill="#e6f5ee"/>
+  <text x="1098" y="67.5" text-anchor="middle" fill="#1f754f" font-size="10.5" font-weight="700" font-family="Microsoft YaHei UI, sans-serif">已核验入库</text>
+
+  <!-- Formula block -->
+  <rect x="918" y="84" width="220" height="58" rx="8" fill="#f6faf8" stroke="#dfece6" stroke-width="1"/>
+  <text x="930" y="106" fill="#163f3a" font-size="14" font-style="italic" font-family="Georgia, Cambria Math, serif">f(x) = a ln x + (x − 1) / x</text>
+  <rect x="930" y="118" width="128" height="5.5" rx="2.75" fill="#245e55" fill-opacity="0.32"/>
+  <rect x="930" y="129" width="96" height="5.5" rx="2.75" fill="#245e55" fill-opacity="0.22"/>
+
+  <!-- Knowledge tags + Variant badge -->
+  <rect x="918" y="152" width="84" height="22" rx="11" fill="#edf4f1"/>
+  <text x="960" y="167" text-anchor="middle" fill="#245e55" font-size="10.5" font-weight="600" font-family="Microsoft YaHei UI, sans-serif">导数单调性</text>
+  <rect x="1010" y="152" width="78" height="22" rx="11" fill="#fff4dc"/>
+  <text x="1049" y="167" text-anchor="middle" fill="#8b6220" font-size="10.5" font-weight="600" font-family="Microsoft YaHei UI, sans-serif">变式组 (2)</text>
+  <rect x="1096" y="152" width="42" height="22" rx="11" fill="#edf4f1"/>
+  <text x="1117" y="167" text-anchor="middle" fill="#245e55" font-size="10.5" font-weight="600" font-family="Consolas, sans-serif">FTS5</text>
+
+  <!-- Connector Card 2 -> Card 3 -->
+  <path d="M1028 190 V214" fill="none" stroke="#2f9668" stroke-width="2.2" stroke-linecap="round"/>
+  <polygon points="1023,211 1028,220 1033,211" fill="#2f9668"/>
+  <!-- Provenance link Card 1 -> Card 3 -->
+  <path d="M760 190 V214" fill="none" stroke="#d6a65d" stroke-width="2" stroke-dasharray="4 3" stroke-linecap="round"/>
+  <polygon points="755,211 760,220 765,211" fill="#d6a65d"/>
+
+  <!-- Card 3: A3 2-Column Exam Paper with Mirrored Seal Line -->
+  <rect x="654" y="220" width="498" height="104" rx="14" fill="#ffffff" stroke="#cde0d8" stroke-width="1.4"/>
+  <!-- Seal band on left -->
+  <path d="M668 220.8 H693 V323.2 H668 A13.2 13.2 0 0 1 654.8 310 V234 A13.2 13.2 0 0 1 668 220.8 Z" fill="#f7f4ec"/>
+  <line x1="693" y1="228" x2="693" y2="316" stroke="#c7a05a" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <text x="674" y="254" text-anchor="middle" fill="#8b6220" font-size="11" font-weight="700" font-family="Microsoft YaHei UI, sans-serif">密</text>
+  <text x="674" y="276" text-anchor="middle" fill="#8b6220" font-size="11" font-weight="700" font-family="Microsoft YaHei UI, sans-serif">封</text>
+  <text x="674" y="298" text-anchor="middle" fill="#8b6220" font-size="11" font-weight="700" font-family="Microsoft YaHei UI, sans-serif">线</text>
+
+  <!-- Left column of A3 sheet -->
+  <text x="710" y="244" fill="#163f3a" font-size="12" font-weight="700" font-family="Microsoft YaHei UI, sans-serif">A3 横向双栏 · 高三阶段周测</text>
+  <rect x="868" y="231" width="46" height="18" rx="9" fill="#e6f5ee"/>
+  <text x="891" y="244" text-anchor="middle" fill="#1f754f" font-size="10" font-weight="700" font-family="Microsoft YaHei UI, sans-serif">150 分</text>
+  <rect x="710" y="256" width="188" height="5.5" rx="2.75" fill="#245e55" fill-opacity="0.62"/>
+  <rect x="710" y="268" width="150" height="5" rx="2.5" fill="#54716c" fill-opacity="0.38"/>
+  <rect x="710" y="284" width="38" height="16" rx="4" fill="#f0f5f3" stroke="#d5e2dc"/>
+  <text x="729" y="296" text-anchor="middle" fill="#245e55" font-size="10" font-weight="600" font-family="Consolas, sans-serif">A</text>
+  <rect x="754" y="284" width="38" height="16" rx="4" fill="#f0f5f3" stroke="#d5e2dc"/>
+  <text x="773" y="296" text-anchor="middle" fill="#245e55" font-size="10" font-weight="600" font-family="Consolas, sans-serif">B</text>
+  <rect x="798" y="284" width="38" height="16" rx="4" fill="#f0f5f3" stroke="#d5e2dc"/>
+  <text x="817" y="296" text-anchor="middle" fill="#245e55" font-size="10" font-weight="600" font-family="Consolas, sans-serif">C</text>
+  <rect x="842" y="284" width="38" height="16" rx="4" fill="#f0f5f3" stroke="#d5e2dc"/>
+  <text x="861" y="296" text-anchor="middle" fill="#245e55" font-size="10" font-weight="600" font-family="Consolas, sans-serif">D</text>
+
+  <!-- Center gutter divider -->
+  <line x1="924" y1="232" x2="924" y2="312" stroke="#dce7e2" stroke-width="1.2"/>
+
+  <!-- Right column of A3 sheet -->
+  <text x="940" y="244" fill="#245e55" font-size="11.5" font-weight="700" font-family="Microsoft YaHei UI, sans-serif">解答题（12 分）</text>
+  <rect x="940" y="256" width="120" height="5.5" rx="2.75" fill="#245e55" fill-opacity="0.55"/>
+  <rect x="940" y="268" width="96" height="5" rx="2.5" fill="#54716c" fill-opacity="0.36"/>
+  <rect x="940" y="286" width="124" height="22" rx="6" fill="#163f3a"/>
+  <text x="1002" y="301" text-anchor="middle" fill="#fff4dc" font-size="10.5" font-weight="600" font-family="Microsoft YaHei UI, sans-serif">预览 · PDF · Word 一致</text>
+
+  <!-- Mini coordinate diagram on bottom right -->
+  <rect x="1076" y="236" width="60" height="72" rx="8" fill="#f5faf7" stroke="#d5e6de"/>
+  <line x1="1086" y1="292" x2="1126" y2="292" stroke="#54716c" stroke-width="1.4"/>
+  <line x1="1092" y1="298" x2="1092" y2="248" stroke="#54716c" stroke-width="1.4"/>
+  <path d="M1094 288 Q1106 254 1122 252" fill="none" stroke="#2f9668" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="1108" cy="264" r="2.8" fill="#d6a65d"/>
+</svg>

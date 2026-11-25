@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 270" width="1200" height="270" role="img" aria-labelledby="wf-dark-title wf-dark-desc">
+  <title id="wf-dark-title">题有据端到端工作流</title>
+  <desc id="wf-dark-desc">从多源导卷、原卷核验与多源手写归档，到万题库检索与正规考卷导出的四步本地闭环。</desc>
+  <defs>
+    <linearGradient id="wd-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b1514"/>
+      <stop offset="100%" stop-color="#122420"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="1" y="1" width="1198" height="268" rx="18" fill="url(#wd-bg)" stroke="#23443e" stroke-width="1.4"/>
+
+  <text x="36" y="36" fill="#8cb0a8" font-size="12" font-weight="700" letter-spacing="1.8" font-family="Segoe UI, Microsoft YaHei UI, sans-serif">END-TO-END WORKFLOW · 四步本地优先闭环</text>
+  <text x="1164" y="36" text-anchor="end" fill="#8cb0a8" font-size="12" font-weight="600" font-family="Microsoft YaHei UI, sans-serif">未授权绝不上传原卷 · 人眼确认后才入库</text>
+
+  <!-- Step 01 -->
+  <rect x="36" y="56" width="256" height="184" rx="14" fill="#132522" stroke="#284c45" stroke-width="1.2"/>
+  <rect x="50" y="55.5" width="228" height="3" rx="1.5" fill="#3ecf8e"/>
+  <rect x="56" y="76" width="94" height="22" rx="11" fill="#173e30"/>
+  <text x="103" y="91" text-anchor="middle" fill="#70e3b0" font-size="11" font-weight="700" font-family="Consolas, Segoe UI, sans-serif">01 · INTAKE</text>
+  <text x="56" y="126" fill="#f0f7f4" font-size="20" font-weight="700" font-family="Microsoft YaHei UI, PingFang SC, sans-serif">多源导卷直读</text>
+  <text x="56" y="158" fill="#aac6bf" font-size="13.5" font-family="Microsoft YaHei UI, PingFang SC, sans-serif">· Word 免 OCR 直提图文公式</text>
+  <text x="56" y="184" fill="#aac6bf" font-size="13.5" font-family="Microsoft YaHei UI, PingFang SC, sans-serif">· 题后/卷尾答案解析自动归位</text>
+  <text x="56" y="210" fill="#aac6bf" font-size="13.5" font-family="Microsoft YaHei UI, PingFang SC, sans-serif">· PDF 与拍照原卷切框留底图</text>
+
+  <!-- Arrow 1 -> 2 -->
+  <line x1="298" y1="148" x2="315" y2="148" stroke="#3ecf8e" stroke-width="2.2" stroke-linecap="round"/>
+  <polygon points="313,142.5 322,148 313,153.5" fill="#3ecf8e"/>
+
+  <!-- Step 02 -->
+  <rect x="326" y="56" width="256" height="184" rx="14" fill="#132522" stroke="#284c45" stroke-width="1.2"/>
+  <rect x="340" y="55.5" width="228" height="3" rx="1.5" fill="#e5b96f"/>
+  <rect x="346" y="76" width="96" height="22" rx="11" fill="#2b2517"/>
+  <text x="394" y="91" text-anchor="middle" fill="#f0c87d" font-size="11" font-weight="700" font-family="Consolas, Segoe UI, sans-serif">02 · VERIFY</text>
+  <text x="346" y="126" fill="#f0f7f4" font-size="20" font-weight="700" font-family="Microsoft YaHei UI, PingFang SC, sans-serif">原卷核验与查重</text>
+  <text x="346" y="158" fill="#aac6bf" font-size="13.5" font-family="Microsoft YaHei UI, PingFang SC, sans-serif">· 左原卷右题面三区协同编辑</text>
+  <text x="346" y="184" fill="#aac6bf" font-size="13.5" font-family="Microsoft YaHei UI, PingFang SC, sans-serif">· Word/WPS 原貌图留核验证据</text>
+  <text x="346" y="210" fill="#aac6bf" font-size="13.5" font-family="Microsoft YaHei UI, PingFang SC, sans-serif">· 离线查重，一题归档多源手写</text>
+
+  <!-- Arrow 2 -> 3 -->
+  <line x1="588" y1="148" x2="605" y2="148" stroke="#3ecf8e" stroke-width="2.2" stroke-linecap="round"/>
+  <polygon points="603,142.5 612,148 603,153.5" fill="#3ecf8e"/>
+
+  <!-- Step 03 -->
+  <rect x="616" y="56" width="256" height="184" rx="14" fill="#132522" stroke="#284c45" stroke-width="1.2"/>
+  <rect x="630" y="55.5" width="228" height="3" rx="1.5" fill="#3ecf8e"/>
+  <rect x="636" y="76" width="102" height="22" rx="11" fill="#173e30"/>
+  <text x="687" y="91" text-anchor="middle" fill="#70e3b0" font-size="11" font-weight="700" font-family="Consolas, Segoe UI, sans-serif">03 · LIBRARY</text>
+  <text x="636" y="126" fill="#f0f7f4" font-size="20" font-weight="700" font-family="Microsoft YaHei UI, PingFang SC, sans-serif">万题库与变式组</text>
+  <text x="636" y="158" fill="#aac6bf" font-size="13.5" font-family="Microsoft YaHei UI, PingFang SC, sans-serif">· /eagle 虚拟滚动万题丝滑看</text>
+  <text x="636" y="184" fill="#aac6bf" font-size="13.5" font-family="Microsoft YaHei UI, PingFang SC, sans-serif">· SQLite FTS5 秒搜与变式互绑</text>
+  <text x="636" y="210" fill="#aac6bf" font-size="13.5" font-family="Microsoft YaHei UI, PingFang SC, sans-serif">· AI CLI/MCP 协同，改动须人审</text>
+
+  <!-- Arrow 3 -> 4 -->
+  <line x1="878" y1="148" x2="895" y2="148" stroke="#3ecf8e" stroke-width="2.2" stroke-linecap="round"/>
+  <polygon points="893,142.5 902,148 893,153.5" fill="#3ecf8e"/>
+
+  <!-- Step 04 -->
+  <rect x="906" y="56" width="258" height="184" rx="14" fill="#132522" stroke="#284c45" stroke-width="1.2"/>
+  <rect x="920" y="55.5" width="230" height="3" rx="1.5" fill="#e5b96f"/>
+  <rect x="926" y="76" width="90" height="22" rx="11" fill="#2b2517"/>
+  <text x="971" y="91" text-anchor="middle" fill="#f0c87d" font-size="11" font-weight="700" font-family="Consolas, Segoe UI, sans-serif">04 · EXAM</text>
+  <text x="926" y="126" fill="#f0f7f4" font-size="20" font-weight="700" font-family="Microsoft YaHei UI, PingFang SC, sans-serif">正规赋分与组卷</text>
+  <text x="926" y="158" fill="#aac6bf" font-size="13.5" font-family="Microsoft YaHei UI, PingFang SC, sans-serif">· 分节赋分，卷面总分自动汇总</text>
+  <text x="926" y="184" fill="#aac6bf" font-size="13.5" font-family="Microsoft YaHei UI, PingFang SC, sans-serif">· A4 单栏 / A3 双栏镜像密封线</text>
+  <text x="926" y="210" fill="#aac6bf" font-size="13.5" font-family="Microsoft YaHei UI, PingFang SC, sans-serif">· 按卷记用题，导出三端一致</text>
+</svg>
