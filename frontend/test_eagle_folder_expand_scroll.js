@@ -4,7 +4,6 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { describe, it } = require("node:test");
-const vm = require("node:vm");
 
 const html = fs.readFileSync(path.join(__dirname, "eagle", "index.html"), "utf8");
 
@@ -19,7 +18,7 @@ describe("左栏展开文件夹自动滚入视口", () => {
   });
 
   it("2. 内容溢出底部时只滚必要距离，超高时钉住标题", () => {
-    const match = html.match(/function ensureExpandedFolderInView\(nodeId\) \{[\s\S]*?\n    function toggleFolderNode/);
+    const match = html.match(/function ensureExpandedFolderInView\(nodeId\) \{[\s\S]*?\n {4}function toggleFolderNode/);
     assert.ok(match, "应能抽出 ensureExpandedFolderInView");
     const body = match[0];
     assert.match(body, /blockHeight > cRect\.height/);
@@ -28,7 +27,7 @@ describe("左栏展开文件夹自动滚入视口", () => {
   });
 
   it("3. 展开后才滚动，收起不抢滚动", () => {
-    const match = html.match(/function toggleFolderNode\(nodeId\) \{[\s\S]*?\n    function handleTreeSearch/);
+    const match = html.match(/function toggleFolderNode\(nodeId\) \{[\s\S]*?\n {4}function handleTreeSearch/);
     assert.ok(match);
     assert.match(match[0], /if \(willExpand\)/);
     assert.doesNotMatch(match[0], /ensureExpandedFolderInView\(nodeId\);\s*\n\s*writeExpanded/);

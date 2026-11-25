@@ -717,7 +717,30 @@
       font-size: 11px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       color: #64748b;
-      padding-right: 3.2rem;
+      padding-right: 1.7rem;
+    }
+    #inspectorUrlOpenBtn {
+      width: 1.25rem;
+      height: 1.25rem;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 0.3rem;
+      color: #059669;
+      background: #ecfdf5;
+      border: none;
+      cursor: pointer;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+    #inspectorUrlOpenBtn:hover {
+      background: #d1fae5;
+      color: #047857;
+    }
+    #inspectorUrlOpenBtn svg {
+      width: 0.75rem;
+      height: 0.75rem;
+      display: block;
     }
     .inspector-meta-row {
       display: flex;
@@ -2051,12 +2074,24 @@
               oninput="updateInspectorUrlActions()"
               onchange="saveInspectorNoteAndUrl()"
               onblur="saveInspectorNoteAndUrl()"
+              onfocus="handleInspectorUrlFocus(event)"
+              onmousedown="handleInspectorUrlMouseDown(event)"
               onkeydown="if(event.key==='Enter'){this.blur();}"
               class="inspector-meta-quiet inspector-meta-url"
             >
-            <div id="inspectorUrlActions" class="hidden absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
-              <button type="button" onclick="openInspectorUrl()" title="在浏览器中打开链接" class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-[10px] font-semibold cursor-pointer">开</button>
-              <button type="button" onclick="copyInspectorUrl()" title="复制链接" class="px-1 py-0.5 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 text-[10px] cursor-pointer">复制</button>
+            <div id="inspectorUrlActions" class="hidden absolute right-1 top-1/2 -translate-y-1/2 flex items-center">
+              <button
+                id="inspectorUrlOpenBtn"
+                type="button"
+                onclick="openInspectorUrl()"
+                title="打开链接"
+                aria-label="打开链接"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/>
+                  <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>
+                </svg>
+              </button>
             </div>
           </div>
 
@@ -6906,6 +6941,42 @@
       else actEl.classList.add('hidden');
     }
 
+    function isInspectorUrlFullySelected(el) {
+      if (!el) return false;
+      const len = String(el.value || '').length;
+      return len > 0 && el.selectionStart === 0 && el.selectionEnd === len;
+    }
+
+    // 第一次点进链接框：全选，方便 Ctrl+C；再点一次：取消全选，光标落到点击处。
+    function handleInspectorUrlMouseDown(event) {
+      const el = event && event.currentTarget;
+      if (!el) return;
+      if (document.activeElement === el && isInspectorUrlFullySelected(el)) {
+        el.dataset.skipSelectAll = '1';
+      } else {
+        delete el.dataset.skipSelectAll;
+      }
+    }
+
+    function handleInspectorUrlFocus(event) {
+      const el = event && event.target;
+      if (!el) return;
+      if (el.dataset.skipSelectAll === '1') {
+        delete el.dataset.skipSelectAll;
+        return;
+      }
+      const selectNow = () => {
+        try { el.select(); } catch (_) {}
+      };
+      requestAnimationFrame(selectNow);
+      // Chrome 会在 focus 后的 mouseup 里把全选冲掉，拦一次即可。
+      const onUp = (ev) => {
+        ev.preventDefault();
+        el.removeEventListener('mouseup', onUp);
+      };
+      el.addEventListener('mouseup', onUp);
+    }
+
     /**
      * 原地刷新题卡与试题篮中的题目名称展示，避免打断当前输入焦点的全量列表重绘
      * @param {string} qid 试题 ID
@@ -7018,19 +7089,6 @@
         saveInspectorNoteAndUrl();
       }
       window.open(target, '_blank', 'noopener');
-    }
-
-    async function copyInspectorUrl() {
-      const urlEl = document.getElementById('inspectorUrlInput');
-      const raw = urlEl ? urlEl.value : (currentActiveQuestionId ? getQuestionAnnotation(currentActiveQuestionId).url : '');
-      const target = String(raw || '').trim();
-      if (!target) return;
-      try {
-        await writeTextClipboard(target);
-        showToast('已复制链接到剪贴板', 'success');
-      } catch (e) {
-        showToast('复制链接失败', 'error');
-      }
     }
 
     function getLastUsedUserFolder() {

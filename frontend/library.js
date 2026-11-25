@@ -1954,7 +1954,7 @@
   let tagDialog = null, tagManagerDialog = null, tagCatalogueEditorDialog = null, tagTemplateDialog = null, tagCatalogue = { revision: 1, tags: [] };
   let inspectorRenderedKey = null;
   const inspectorScrolls = new Map(), inlineTagStates = new Map(), inlineTagLocks = new Set(), suggestionLocks = new Set(), suggestionAttempts = new Map();
-  let tagHover = null, tagHoverPanel = null, tagHoverOpenTimer = null, tagHoverCloseTimer = null, tagHoverSequence = 0, tagHoverSuppressFocus = false;
+  let tagHover = null, tagHoverPanel = null, tagHoverCloseTimer = null, tagHoverSequence = 0;
   const suggestionDraftKey = "qb-library-tag-suggestion-drafts";
   let suggestionDrafts = {};
   try { suggestionDrafts = JSON.parse(sessionStorage.getItem(suggestionDraftKey) || "{}"); } catch (_) {}
@@ -2026,7 +2026,7 @@
     }, 320);
   }
   function closeTagHover({ restoreFocus = false } = {}) {
-    window.clearTimeout(tagHoverOpenTimer); cancelTagHoverClose(); ++tagHoverSequence;
+    cancelTagHoverClose(); ++tagHoverSequence;
     const anchor = tagHover?.anchor; tagHover = null;
     if (tagHoverPanel) {
       try { if (tagHoverPanel.matches(":popover-open")) tagHoverPanel.hidePopover(); } catch (_) {}
@@ -2034,7 +2034,7 @@
     }
     document.querySelectorAll('[data-tag-hover][aria-expanded="true"]').forEach(chip => chip.setAttribute("aria-expanded", "false"));
     if (restoreFocus && anchor?.isConnected) {
-      tagHoverSuppressFocus = true; anchor.focus({ preventScroll: true }); queueMicrotask(() => { tagHoverSuppressFocus = false; });
+      anchor.focus({ preventScroll: true });
     }
   }
   function ensureTagHoverPanel() {
@@ -2074,9 +2074,9 @@
     chip.setAttribute("aria-haspopup", "dialog"); chip.setAttribute("aria-controls", "libraryTagHover"); chip.setAttribute("aria-expanded", "false");
     // 悬停不弹 tip、不自动打开层级浮层；点一下才打开。
     chip.removeAttribute("title");
-    chip.addEventListener("pointerleave", () => { window.clearTimeout(tagHoverOpenTimer); scheduleTagHoverClose(); });
+    chip.addEventListener("pointerleave", () => { scheduleTagHoverClose(); });
     chip.addEventListener("blur", scheduleTagHoverClose);
-    chip.addEventListener("click", event => { event.stopPropagation(); window.clearTimeout(tagHoverOpenTimer); void openTagHover(item.id, link, chip, true); });
+    chip.addEventListener("click", event => { event.stopPropagation(); void openTagHover(item.id, link, chip, true); });
     return chip;
   }
   async function openTagHover(publicationId, link, anchor, pinned = false) {

@@ -73,7 +73,7 @@ describe("Eagle 考题属性折叠（对齐基本信息）", () => {
     };
 
     const block = eagleHtml.match(
-      /\/\/ 考题属性折叠：[\s\S]*?function toggleQuestionMetaCard\(event\) \{[\s\S]*?\n    \}/
+      /\/\/ 考题属性折叠：[\s\S]*?function toggleQuestionMetaCard\(event\) \{[\s\S]*?\n {4}\}/
     );
     assert.ok(block, "应能抽出折叠逻辑");
     vm.runInNewContext(
