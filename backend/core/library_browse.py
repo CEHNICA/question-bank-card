@@ -92,7 +92,17 @@ def library_rows(params, *, omit: str = ""):
             rows = rows.none()
     kind = params.get("type", "").strip()
     if kind and omit != "type":
-        rows = rows.filter(question_type=kind)
+        kinds = [part.strip() for part in kind.split(",") if part.strip()]
+        if len(kinds) == 1:
+            rows = rows.filter(question_type=kinds[0])
+        elif len(kinds) > 1:
+            rows = rows.filter(question_type__in=kinds)
+    has_analysis = str(params.get("has_analysis", "")).strip()
+    if has_analysis == "yes":
+        no_analysis = (models.Q(content__analysis="") | models.Q(content__analysis__isnull=True)) & (
+            models.Q(extras__solution_id="") | models.Q(extras__solution_id__isnull=True)
+        )
+        rows = rows.exclude(no_analysis)
     review = params.get("review", "").strip()
     if review in library.APPROVAL_SOURCES and omit != "review":
         rows = rows.filter(review_source=review)
@@ -166,10 +176,36 @@ def library_rows(params, *, omit: str = ""):
             rows = rows.filter(
                 models.Q(tag_suggestions__status="pending") | models.Q(tag_assignments__needs_review=True)
             ).distinct()
-    for term in params.get("q", "").split()[:8]:
-        key = library.search_key(term)
-        if key:
-            rows = rows.filter(search_text__contains=key)
+    from . import library_fts
+
+    rows, _search_engine = library_fts.apply_fts_search(rows, params.get("q", ""))
+    if omit != "usage":
+        exclude_days = str(params.get("exclude_used_days", "")).strip()
+        exclude_batch = str(params.get("exclude_used_batch", "")).strip()
+        if exclude_days or exclude_batch:
+            from . import library_usage
+
+            used_excluded: set[str] = set()
+            if exclude_days == "all":
+                used_excluded |= library_usage.excluded_ids_within_days(0)
+            elif exclude_days:
+                try:
+                    days_val = int(exclude_days)
+                    if days_val > 0:
+                        used_excluded |= library_usage.excluded_ids_within_days(days_val)
+                except ValueError:
+                    pass
+            if exclude_batch:
+                used_excluded |= library_usage.excluded_ids_for_batch(exclude_batch)
+            if used_excluded:
+                excluded_uuids = []
+                for raw_id in used_excluded:
+                    try:
+                        excluded_uuids.append(uuid.UUID(raw_id))
+                    except ValueError:
+                        continue
+                if excluded_uuids:
+                    rows = rows.exclude(pk__in=excluded_uuids)
     return rows
 
 
@@ -638,7 +674,17 @@ def library_list(request):
     sort = request.GET.get("sort", "recent")
     if sort not in SORTS:
         return json_response({"error": "sort 只能是 recent、source 或 number"}, status=400)
-    rows = library_rows(request.GET).order_by(*SORTS[sort])
+    query_raw = str(request.GET.get("q", "") or "").strip()
+    search_engine = None
+    if query_raw:
+        from . import library_fts
+
+        base_rows = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
+        rows = library_rows(request.GET)
+        _, search_engine = library_fts.apply_fts_search(base_rows, query_raw)
+        rows = rows.order_by(*SORTS[sort])
+    else:
+        rows = library_rows(request.GET).order_by(*SORTS[sort])
     # 1.25.31：只取指定的几道题。后台刷新任务进度时用它，只读有任务的那几行，
     # 不再把屏上几百道题整屏重读一遍。编号先校验，非法值直接 400，不交给 ORM。
     wanted_param = request.GET.get("ids", "").strip()
@@ -680,17 +726,18 @@ def library_list(request):
     if bulk:
         # 批量模式只给题目本身。facets / presence / ai 这些是全库统计，
         # 跟分页无关 —— 批量请求再算一遍就是白算，题库工作台也不用它们。
-        return json_response(
-            {
-                "total": total,
-                "items": items,
-                "sort": sort,
-                "limit": limit,
-                "offset": offset,
-                "has_more": next_offset < total,
-                "next_offset": next_offset if next_offset < total else None,
-            }
-        )
+        payload = {
+            "total": total,
+            "items": items,
+            "sort": sort,
+            "limit": limit,
+            "offset": offset,
+            "has_more": next_offset < total,
+            "next_offset": next_offset if next_offset < total else None,
+        }
+        if search_engine is not None:
+            payload["search_engine"] = search_engine
+        return json_response(payload)
     ai_status = library_ai_settings.public_status()
     tag_work = tag_work_counts()
     return json_response(
@@ -725,6 +772,7 @@ def library_list(request):
             "offset": offset,
             "has_more": next_offset < total,
             "next_offset": next_offset if next_offset < total else None,
+            **({"search_engine": search_engine} if search_engine is not None else {}),
         }
     )
 
@@ -762,6 +810,9 @@ def library_batch(request):
             "tag_mode",
             "untagged_knowledge",
             "tag_review",
+            "has_analysis",
+            "exclude_used_days",
+            "exclude_used_batch",
         }
         if (
             not isinstance(filters, dict)

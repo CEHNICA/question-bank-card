@@ -62,6 +62,9 @@ def figure_parts(figure: dict) -> list[dict]:
 
 def figure_identity(figure: dict) -> str:
     """What the cropped image depends on.  A one-piece figure keeps its old key."""
+    word_asset = figure.get("word_asset") if isinstance(figure, dict) else None
+    if isinstance(word_asset, str) and word_asset:
+        return json.dumps(["word", word_asset])
     parts = figure_parts(figure)
     if not parts:
         return json.dumps([figure["page_idx"], figure["bbox"]])
@@ -78,6 +81,11 @@ def figure_file(question: Question, index: int) -> Path:
     from .pipeline import PageStore, paper_dir
 
     figure = question.figures[index]
+    word_asset = figure.get("word_asset") if isinstance(figure, dict) else None
+    if isinstance(word_asset, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", word_asset):
+        embedded = paper_dir(question.paper) / "word-figures" / word_asset
+        if embedded.is_file():
+            return embedded
     digest = hashlib.sha1(figure_identity(figure).encode()).hexdigest()[:12]
     target = paper_dir(question.paper) / "figures" / f"q{question.id}_{digest}.png"
     if not target.is_file():
@@ -529,6 +537,9 @@ def carried_extras(previous: PublishedQuestion | None, content: dict) -> dict:
         extras["ai_answer"] = deepcopy(answer)
     if "onenote" in previous.extras:
         extras["onenote"] = deepcopy(previous.extras["onenote"])
+    for key in ("evidence_sources", "variant_group_id", "dismissed_similarity_ids"):
+        if key in previous.extras:
+            extras[key] = deepcopy(previous.extras[key])
     if previous.extras.get("solution_id"):
         # The old immutable solution and its assets stay with the old version.
         # Never silently apply an edited solution to a replacement question.
@@ -578,7 +589,7 @@ def save_extras(publication: PublishedQuestion, extras: dict) -> PublishedQuesti
     current = PublishedQuestion.objects.filter(pk=publication.pk).values("extras").first()
     saved = current.get("extras") if current and isinstance(current.get("extras"), dict) else {}
     extras = deepcopy(extras) if isinstance(extras, dict) else {}
-    tag_keys = (
+    preserve_keys = (
         "tags",
         "tags_source",
         "tags_at",
@@ -588,8 +599,11 @@ def save_extras(publication: PublishedQuestion, extras: dict) -> PublishedQuesti
         "tags_executor",
         "tags_checked",
         "tags_legacy_original",
+        "evidence_sources",
+        "variant_group_id",
+        "dismissed_similarity_ids",
     )
-    for key in tag_keys:
+    for key in preserve_keys:
         if key in saved:
             extras[key] = deepcopy(saved[key])
         else:
@@ -677,6 +691,25 @@ def publish(question: Question, *, queue_enrichment: bool = True) -> tuple[Publi
                 figure["file"] = name
                 figure["url"] = f"/api/library/{publication_id}/figures/{name}"
             extras = carried_extras(latest, content)
+            if latest is not None and extras.get("evidence_sources"):
+                prev_dir = settings.DATA_ROOT / "library" / str(latest.pk)
+                carried_sources = []
+                for ev in extras["evidence_sources"]:
+                    if not isinstance(ev, dict):
+                        continue
+                    ev_copy = deepcopy(ev)
+                    crop_file = str(ev_copy.get("crop_file") or "").strip()
+                    ev_id = str(ev_copy.get("id") or "").strip()
+                    if crop_file:
+                        src_crop = prev_dir / crop_file
+                        if src_crop.is_file():
+                            shutil.copyfile(src_crop, folder / crop_file)
+                            ev_copy["crop_url"] = f"/api/library/{publication_id}/evidence/{ev_id}.png"
+                        else:
+                            ev_copy["crop_file"] = ""
+                            ev_copy["crop_url"] = ""
+                    carried_sources.append(ev_copy)
+                extras["evidence_sources"] = carried_sources
             publication = PublishedQuestion.objects.create(
                 id=publication_id,
                 question=question,
@@ -693,9 +726,33 @@ def publish(question: Question, *, queue_enrichment: bool = True) -> tuple[Publi
                 extras=extras,
                 tags_text=tags_text(tags_of(extras)),
             )
-            question.publications.filter(status=PublishedQuestion.Status.PUBLISHED).exclude(pk=publication.pk).update(
-                status=PublishedQuestion.Status.SUPERSEDED
+            from . import library_fts
+
+            superseded_ids = list(
+                question.publications.filter(status=PublishedQuestion.Status.PUBLISHED)
+                .exclude(pk=publication.pk)
+                .values_list("id", flat=True)
             )
+            if superseded_ids:
+                PublishedQuestion.objects.filter(id__in=superseded_ids).update(
+                    status=PublishedQuestion.Status.SUPERSEDED
+                )
+                library_fts.delete_publications(superseded_ids)
+            _materialize_word_solution_figures(question, publication)
+            from . import library_similarity
+
+            bind_peer = (
+                str((question.read_a or {}).get("bind_variant_pub_id") or "").strip()
+                if isinstance(question.read_a, dict)
+                else ""
+            )
+            if bind_peer:
+                try:
+                    library_similarity.bind_variant_group([str(publication.pk), bind_peer])
+                    publication.refresh_from_db()
+                except library_similarity.SimilarityError:
+                    pass
+            transaction.on_commit(library_similarity.bump_similarity_revision)
             # A queued or running enrichment job keeps its original snapshot.
             # The worker rejects replaced versions; a new version needs its own job.
             if queue_enrichment:
@@ -704,8 +761,67 @@ def publish(question: Question, *, queue_enrichment: bool = True) -> tuple[Publi
                 queue_on_intake(publication)
         except Exception:
             shutil.rmtree(folder, ignore_errors=True)
+            shutil.rmtree(settings.DATA_ROOT / "library-solutions" / str(publication_id), ignore_errors=True)
             raise
     return publication, True
+
+
+def _materialize_word_solution_figures(question: Question, publication: PublishedQuestion) -> None:
+    """将 Word 直读拆出的解析内嵌配图自动落入正式题库解析版本层（LibrarySolution）。"""
+    read_meta = question.read_a if isinstance(question.read_a, dict) else {}
+    raw_items = read_meta.get("solution_figures")
+    if not isinstance(raw_items, list) or not raw_items:
+        return
+    if (publication.extras or {}).get("solution_id"):
+        return
+    from .pipeline import paper_dir
+
+    src_dir = paper_dir(question.paper) / "word-solution-figures"
+    if not src_dir.is_dir():
+        return
+    dest_dir = Path(settings.DATA_ROOT) / "library-solutions" / str(publication.pk)
+    normalized_figs: list[dict] = []
+    for item in raw_items[:24]:
+        if not isinstance(item, dict):
+            continue
+        fname = item.get("file")
+        width = item.get("width")
+        height = item.get("height")
+        sha = item.get("sha256")
+        if (
+            not isinstance(fname, str)
+            or not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", fname)
+            or type(width) is not int
+            or type(height) is not int
+            or not isinstance(sha, str)
+            or len(sha) != 64
+        ):
+            continue
+        src_file = src_dir / fname
+        if not src_file.is_file():
+            continue
+        data = src_file.read_bytes()
+        if hashlib.sha256(data).hexdigest() != sha:
+            continue
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        asset_id = str(uuid.uuid4())
+        (dest_dir / f"{asset_id}.png").write_bytes(data)
+        spec = {"id": asset_id, "publication_id": str(publication.pk), "sha256": sha, "width": width, "height": height}
+        (dest_dir / f"{asset_id}.json").write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
+        disp_w = round(min(178.0, max(20.0, width * 25.4 / 150.0)), 1)
+        normalized_figs.append({"id": asset_id, "display_width": disp_w, "position": "after", "paragraph": 0})
+    if not normalized_figs:
+        return
+    content = publication.content or {}
+    row = LibrarySolution.objects.create(
+        publication=publication,
+        parent=None,
+        fingerprint=generation_fingerprint(content, publication.pk),
+        answer=str(content.get("answer") or ""),
+        analysis=str(content.get("analysis") or ""),
+        figures=normalized_figs,
+    )
+    save_extras(publication, {**deepcopy(publication.extras or {}), "solution_id": str(row.pk)})
 
 
 def rename_paper(paper: Paper, name: str) -> tuple[Paper, bool]:
@@ -768,9 +884,12 @@ def rename_paper(paper: Paper, name: str) -> tuple[Paper, bool]:
             publication.content_hash = new_hash
             publication.search_text = _search_text(content, publication.extras)
         if publications:
+            from . import library_fts
+
             PublishedQuestion.objects.bulk_update(
                 publications, ["source_filename", "content", "content_hash", "search_text"]
             )
+            library_fts.upsert_publications(publications)
     return paper, True
 
 
@@ -844,7 +963,10 @@ def update_published_sections(section_by_pub_id: dict[str, str]) -> tuple[int, d
         if updated_questions:
             Question.all_objects.bulk_update(updated_questions, ["section", "approved_content_hash"])
         if updated_publications:
+            from . import library_fts
+
             PublishedQuestion.objects.bulk_update(updated_publications, ["content", "content_hash", "search_text"])
+            library_fts.upsert_publications(updated_publications)
     return len(updated_publications), before_sections
 
 
@@ -884,6 +1006,9 @@ def withdraw(publication: PublishedQuestion) -> PublishedQuestion:
         publication.status = PublishedQuestion.Status.WITHDRAWN
         publication.withdrawn_at = timezone.now()
         publication.save(update_fields=["status", "withdrawn_at"])
+        from . import library_similarity
+
+        library_similarity.bump_similarity_revision()
     return publication
 
 
@@ -977,10 +1102,67 @@ def resolve_publication_ref(raw_ref: str) -> PublishedQuestion:
     return PublishedQuestion.objects.get(pk=matched[0].pk)
 
 
+def _normalized_evidence_sources(publication_id, extras: dict | None) -> list[dict]:
+    if not isinstance(extras, dict):
+        return []
+    out: list[dict] = []
+    for item in extras.get("evidence_sources") or []:
+        if not isinstance(item, dict):
+            continue
+        entry = deepcopy(item)
+        crop_file = str(entry.get("crop_file") or "").strip()
+        ev_id = str(entry.get("id") or "").strip()
+        entry["crop_url"] = f"/api/library/{publication_id}/evidence/{ev_id}.png" if (crop_file and ev_id) else ""
+        out.append(entry)
+    return out
+
+
+def _variant_peer_summary(publication: PublishedQuestion) -> dict:
+    content = publication.content if isinstance(publication.content, dict) else {}
+    stem = str(content.get("stem") or "").strip()
+    return {
+        "id": str(publication.pk),
+        "short_id": short_id_for(publication.pk),
+        "source_filename": str(publication.source_filename or ""),
+        "number": publication.number,
+        "question_type": publication.question_type,
+        "stem_preview": stem[:120],
+    }
+
+
+def _variant_peers_map(publications: list[PublishedQuestion]) -> dict[str, list[dict]]:
+    groups_by_pub: dict[str, str] = {}
+    group_ids: set[str] = set()
+    for pub in publications:
+        vg = str((pub.extras or {}).get("variant_group_id") or "").strip() if isinstance(pub.extras, dict) else ""
+        if vg:
+            groups_by_pub[str(pub.pk)] = vg
+            group_ids.add(vg)
+    if not group_ids:
+        return {}
+    buckets: dict[str, list[dict]] = {}
+    peers = PublishedQuestion.objects.filter(
+        status=PublishedQuestion.Status.PUBLISHED, extras__variant_group_id__in=list(group_ids)
+    ).only("id", "source_filename", "number", "question_type", "content", "extras")
+    for peer in peers:
+        vg = str((peer.extras or {}).get("variant_group_id") or "").strip() if isinstance(peer.extras, dict) else ""
+        if vg:
+            buckets.setdefault(vg, []).append(_variant_peer_summary(peer))
+    out: dict[str, list[dict]] = {}
+    for pub_id, vg in groups_by_pub.items():
+        out[pub_id] = [item for item in buckets.get(vg, []) if item["id"] != pub_id]
+    return out
+
+
 def publication_json(
-    publication: PublishedQuestion, *, include_tag_details: bool = True, prefetched_solutions: dict | None = None
+    publication: PublishedQuestion,
+    *,
+    include_tag_details: bool = True,
+    prefetched_solutions: dict | None = None,
+    prefetched_variant_peers: dict[str, list[dict]] | None = None,
+    prefetched_usage: dict[str, dict] | None = None,
 ) -> dict:
-    from . import library_solutions
+    from . import library_solutions, library_usage
 
     solution, solution_error = None, ""
     raw_solution_id = (publication.extras or {}).get("solution_id") if isinstance(publication.extras, dict) else None
@@ -1001,6 +1183,13 @@ def publication_json(
             solution_error = str(error)
     content = _content_with_figure_state(publication)
     locator = question_locator(publication)
+    extras_dict = publication.extras if isinstance(publication.extras, dict) else {}
+    variant_group_id = str(extras_dict.get("variant_group_id") or "").strip() or None
+    if prefetched_variant_peers is not None:
+        variant_peers = prefetched_variant_peers.get(str(publication.pk), [])
+    else:
+        variant_peers = _variant_peers_map([publication]).get(str(publication.pk), [])
+    usage_map = prefetched_usage if prefetched_usage is not None else library_usage.question_usage_map()
     data = {
         "id": str(publication.id),
         "short_id": locator["short_id"],
@@ -1021,11 +1210,15 @@ def publication_json(
         "has_answer": bool(str((publication.content or {}).get("answer") or "").strip()) or bool(solution),
         "subquestions": qtypes.subquestion_count((publication.content or {}).get("stem")),
         "tags": tags_of(publication.extras),
-        "ai_answer": (publication.extras or {}).get("ai_answer") if isinstance(publication.extras, dict) else None,
-        "onenote": (publication.extras or {}).get("onenote") if isinstance(publication.extras, dict) else None,
+        "ai_answer": extras_dict.get("ai_answer"),
+        "onenote": extras_dict.get("onenote"),
+        "evidence_sources": _normalized_evidence_sources(publication.pk, extras_dict),
+        "variant_group_id": variant_group_id,
+        "variant_peers": variant_peers,
+        "usage_summary": usage_map.get(str(publication.pk)),
         "solution": solution,
-        "solution_needs_review": bool(solution_error or (publication.extras or {}).get("solution_needs_review_id")),
-        "previous_solution_id": (publication.extras or {}).get("solution_needs_review_id"),
+        "solution_needs_review": bool(solution_error or extras_dict.get("solution_needs_review_id")),
+        "previous_solution_id": extras_dict.get("solution_needs_review_id"),
         "solution_error": solution_error,
     }
     if not include_tag_details:
@@ -1043,7 +1236,7 @@ def publications_json(publications) -> list[dict]:
     AI 建议、退役标签名和上下级关系 —— 一百多次查库，页面得多等半秒。
     出来的内容跟一道题一道题查完全一样。
     """
-    from . import library_tagging
+    from . import library_tagging, library_usage
 
     publications = list(publications)
     solution_ids = []
@@ -1057,8 +1250,16 @@ def publications_json(publications) -> list[dict]:
     prefetched_solutions = (
         {str(row.pk): row for row in LibrarySolution.objects.filter(pk__in=set(solution_ids))} if solution_ids else {}
     )
+    prefetched_variant_peers = _variant_peers_map(publications)
+    prefetched_usage = library_usage.question_usage_map()
     rows = [
-        publication_json(item, include_tag_details=False, prefetched_solutions=prefetched_solutions)
+        publication_json(
+            item,
+            include_tag_details=False,
+            prefetched_solutions=prefetched_solutions,
+            prefetched_variant_peers=prefetched_variant_peers,
+            prefetched_usage=prefetched_usage,
+        )
         for item in publications
     ]
     return library_tagging.attach_batch_to_publications(publications, rows)

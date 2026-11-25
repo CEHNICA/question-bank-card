@@ -45,6 +45,7 @@ from . import (
     library,
     library_ai_settings,
     library_jobs,
+    library_similarity,
     m3import,
     mineru,
     photos,
@@ -56,6 +57,7 @@ from . import (
     region_reads,
     source_images,
     tables,
+    word,
 )
 from .figure_policy import (
     BLOCKED_MISSING,
@@ -104,7 +106,15 @@ from .textnorm import fix_reading_symbols, fix_symbols, same_source_note, split_
 from .version import APP_VERSION
 
 FRONTEND = settings.FRONTEND_ROOT
-UPLOAD_KINDS = {".pdf": "pdf", ".jpg": "image", ".jpeg": "image", ".png": "image", ".webp": "image", ".docx": "docx"}
+UPLOAD_KINDS = {
+    ".pdf": "pdf",
+    ".jpg": "image",
+    ".jpeg": "image",
+    ".png": "image",
+    ".webp": "image",
+    ".docx": "docx",
+    ".doc": "docx",
+}
 # 自动判断「卷」还是「书」的分界。单份试卷极少超过 40 页；教材、讲义、合订资料都远超。
 # 40 页以上不自动切题（书每章重新编题号，硬切会把不同章节的题并成一条），
 # 原页完整保留，由老师框题；判错了可以在「试卷操作」里按教材重试或改回。
@@ -633,7 +643,12 @@ def _reading(value: dict) -> dict:
     }
 
 
-def question_json(question: Question, table_blocks: list[dict] | None = None, guard_reason: str | None = None) -> dict:
+def question_json(
+    question: Question,
+    table_blocks: list[dict] | None = None,
+    guard_reason: str | None = None,
+    similarity_matches: list[dict] | None = None,
+) -> dict:
     # Figure-policy upgrades deliberately adjust this instance for display
     # without persisting it. The mutation precondition must name saved evidence
     # before those derived state/flag/review changes occur.
@@ -742,6 +757,9 @@ def question_json(question: Question, table_blocks: list[dict] | None = None, gu
         "approved_at": question.approved_at.isoformat() if question.approved_at else None,
         "answer": question.answer,
         "analysis": question.analysis,
+        "solution_figure_count": len((question.read_a or {}).get("solution_figures") or [])
+        if isinstance(question.read_a, dict)
+        else 0,
         "origin": question.origin,
         "type_blocked": library.type_blocks_approval(question),
         "reads": {"a": _reading(question.read_a), "b": _reading(question.read_b), "c": _reading(question.read_c)},
@@ -753,6 +771,10 @@ def question_json(question: Question, table_blocks: list[dict] | None = None, gu
         # 1.26.47：这道题还能不能让 AI 识读。页面照着做，事前就把话说清楚，
         # 不用等点了之后弹一条红条说不行。
         "cut_reading_guard": cut_guard.guard_json(question, guard_reason),
+        "similarity_matches": similarity_matches if similarity_matches is not None else [],
+        "bind_variant_pub_id": (question.read_a or {}).get("bind_variant_pub_id")
+        if isinstance(question.read_a, dict)
+        else None,
     }
 
 
@@ -1165,7 +1187,7 @@ def papers(request):
     for item in uploads:
         kind = UPLOAD_KINDS.get(Path(item.name).suffix.lower())
         if kind is None:
-            return _error(f"{Path(item.name).name}：只支持 PDF、JPG、PNG、WEBP 或 DOCX")
+            return _error(f"{Path(item.name).name}：只支持 PDF、JPG、PNG、WEBP、DOCX 或 DOC")
         limit = settings.MAX_PDF_UPLOAD_BYTES if kind == "pdf" else settings.MAX_UPLOAD_BYTES
         if item.size > limit:
             shown_limit = 200 if kind == "pdf" else limit // (1024 * 1024)
@@ -1187,6 +1209,8 @@ def papers(request):
     # 再决定：40 页以上按书/讲义（本机不自动切题，避免各章重复题号被合并），其余按试卷。
     # 判断写在试卷上（材料的类型和未切题的原因都会显示），判错了还能在「试卷操作」改。
     plan = {"schema": 1, "mode": mode, "revision": 0}
+    if material_type == "auto" and kind == "docx":
+        plan["auto_material_type"] = True
     if cut_only:
         plan["cut_only"] = True
     if scan_only:
@@ -1273,6 +1297,9 @@ def papers(request):
                 )
             else:
                 intake.prepare(paper, mode)
+        except word.WordConversionError as exc:
+            paper.status, paper.error = Paper.Status.FAILED, str(exc)
+            paper.save(update_fields=["status", "error", "updated_at"])
         except Exception as exc:
             paper.status, paper.error = (
                 Paper.Status.FAILED,
@@ -1907,6 +1934,7 @@ def paper_detail(request, paper_id):
             str(paper.layout_revision),
             len(summary_tuples),
             summary_tuples,
+            library_similarity.library_revision_token(),
         )
         fingerprint = hashlib.sha1(repr(raw_sig).encode("utf-8")).hexdigest()
         etag = f'"{fingerprint}"'
@@ -1932,7 +1960,8 @@ def paper_detail(request, paper_id):
     # the card, its approval, its publication and the counts (1.10.3).
     with reusing_reviews():
         guards = cut_guard.reasons_for(rows)
-        questions = [question_json(q, paper_tables, guards.get(q.pk)) for q in rows]
+        sim_matches = library_similarity.find_matches_for_paper(paper, rows=rows)
+        questions = [question_json(q, paper_tables, guards.get(q.pk), sim_matches.get(q.pk, [])) for q in rows]
         data = paper_json(paper, rows=rows)
 
     payload = {"paper": data, "questions": questions}

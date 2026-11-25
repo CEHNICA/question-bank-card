@@ -899,6 +899,24 @@ body.library-basket-has-items:not(.library-basket-open):not(.library-basket-seen
 .exam-page-body { width: 178mm; height: 261mm; display: flex; flex-direction: column; align-items: stretch; }
 .exam-page-body > * { flex: 0 0 auto; }
 .exam-page-number { position: absolute; bottom: 8mm; left: 16mm; right: 16mm; text-align: center; color: #666; font: 10px/1.4 "Microsoft YaHei", sans-serif; }
+/* 阶段 4：A3 横向双栏 + 正反自动镜像装订密封线 + 分值标注 */
+.exam-page.is-a3-2col { width: 420mm; height: 297mm; padding: 18mm; }
+.exam-page.has-seal-left { padding-left: 28mm; padding-right: 14mm; }
+.exam-page.has-seal-right { padding-left: 14mm; padding-right: 28mm; }
+.exam-page.is-a3-2col.has-seal-left { padding: 18mm 16mm 18mm 30mm; }
+.exam-page.is-a3-2col.has-seal-right { padding: 18mm 30mm 18mm 16mm; }
+.exam-page.has-seal-left .exam-page-body,
+.exam-page.has-seal-right .exam-page-body { width: auto; }
+.exam-sheet-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16mm; height: 261mm; position: relative; }
+.exam-page.is-a3-2col.has-seal-left .exam-sheet-columns,
+.exam-page.is-a3-2col.has-seal-right .exam-sheet-columns { gap: 14mm; }
+.exam-sheet-columns::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; border-left: 1px solid #cbd5e1; }
+.exam-page.is-a3-2col .exam-page-body { width: auto; height: 261mm; min-width: 0; }
+.exam-seal-band { position: absolute; top: 18mm; bottom: 18mm; width: 17mm; display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 3mm; writing-mode: vertical-rl; text-orientation: mixed; color: #334155; font-family: "SimSun", "宋体", serif; font-size: 10.5px; letter-spacing: .12em; pointer-events: none; user-select: none; }
+.exam-page.has-seal-left .exam-seal-band { left: 6mm; border-right: 1.2px dashed #475569; padding-right: 2.5mm; transform: rotate(180deg); }
+.exam-page.has-seal-right .exam-seal-band { right: 6mm; border-left: 1.2px dashed #475569; padding-left: 2.5mm; }
+.exam-seal-cut { font-size: 9.5px; color: #64748b; font-family: "SimHei", "Microsoft YaHei", sans-serif; }
+.print-score { font-weight: 600; color: #111; margin-right: .25em; }
 .print-page-status { margin: 0 0 12px; font-size: 13px; color: #46554d; }
 .print-layout-warnings { margin: 0 0 12px; color: #795015; font-size: 12px; line-height: 1.6; }
 .print-flow .qb-question, .exam-page .qb-question { line-height: 1.35; letter-spacing: 0; }

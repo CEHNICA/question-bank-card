@@ -31,13 +31,14 @@ const mixed = [
   file("甲.pdf", "application/pdf"),
   file("第1页.jpg", "image/jpeg"),
   file("说明.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+  file("老卷.doc", "application/msword"),
   file("第2页.png", "image/png"),
   file("忽略.exe", "application/octet-stream")
 ];
 const routed = Upload.routeFiles(mixed);
-assert.deepEqual(routed.documents.map((item) => item.name), ["甲.pdf", "说明.docx"]);
+assert.deepEqual(routed.documents.map((item) => item.name), ["甲.pdf", "说明.docx", "老卷.doc"]);
 assert.deepEqual(routed.pictures.map((item) => item.name), ["第1页.jpg", "第2页.png"]);
-assert.deepEqual(routed.accepted.map((item) => item.name), ["甲.pdf", "第1页.jpg", "说明.docx", "第2页.png"]);
+assert.deepEqual(routed.accepted.map((item) => item.name), ["甲.pdf", "第1页.jpg", "说明.docx", "老卷.doc", "第2页.png"]);
 assert.deepEqual(routed.unsupported.map((item) => item.name), ["忽略.exe"]);
 
 // 浏览器给截图的通用 image.png 名称会换成清楚且不冲突的时间名称。

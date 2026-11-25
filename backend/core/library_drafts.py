@@ -62,7 +62,171 @@ PRINT_DEFAULTS = {
     "figure_overrides": {},
     # 大题组织方式："by_type" 按题型自动归组；"basket_order" 按当前选题顺序混排（不拆大题）。
     "group_mode": "by_type",
+    # 纸张规格："a4"（竖排单栏 210×297mm）| "a3_2col"（A3 横向双栏 420×297mm）
+    "paper_spec": "a4",
+    # 是否印正反自动镜像装订密封线
+    "seal_line": False,
+    # 考卷赋分与用题记账开关（按卷合并不重复记账）
+    "scoring_enabled": False,
+    "exam_duration_minutes": 0,
+    "type_scores": {},
+    "question_scores": {},
+    "record_usage": False,
+    "usage_batch_key": "",
 }
+PAPER_SPECS = ("a4", "a3_2col")
+SCORE_MIN = 0.5
+SCORE_MAX = 200.0
+SCORE_TYPES = ("single_choice", "multiple_choice", "fill_blank", "true_false", "free_response", "other")
+DEFAULT_TYPE_SCORES = {
+    "single_choice": 5.0,
+    "multiple_choice": 6.0,
+    "fill_blank": 5.0,
+    "true_false": 3.0,
+    "free_response": 12.0,
+    "other": 5.0,
+}
+
+
+def page_geometry(options: dict | None = None) -> dict:
+    """Preview/PDF/Word 共用的 A4/A3 纸张与双栏密封线几何尺寸（毫米）。"""
+    opts = options or {}
+    spec = "a3_2col" if opts.get("paper_spec") == "a3_2col" else "a4"
+    seal = bool(opts.get("seal_line"))
+    if spec == "a3_2col":
+        if seal:
+            return {
+                "paper_spec": "a3_2col",
+                "seal_line": True,
+                "page_width_mm": 420,
+                "page_height_mm": 297,
+                "col_width_mm": 180,
+                "body_height_mm": 261,
+                "columns": 2,
+                "col_gap_mm": 14,
+                "seal_margin_mm": 30,
+                "outer_margin_mm": 16,
+            }
+        return {
+            "paper_spec": "a3_2col",
+            "seal_line": False,
+            "page_width_mm": 420,
+            "page_height_mm": 297,
+            "col_width_mm": 184,
+            "body_height_mm": 261,
+            "columns": 2,
+            "col_gap_mm": 16,
+            "seal_margin_mm": 18,
+            "outer_margin_mm": 18,
+        }
+    if seal:
+        return {
+            "paper_spec": "a4",
+            "seal_line": True,
+            "page_width_mm": 210,
+            "page_height_mm": 297,
+            "col_width_mm": 168,
+            "body_height_mm": 261,
+            "columns": 1,
+            "col_gap_mm": 0,
+            "seal_margin_mm": 28,
+            "outer_margin_mm": 14,
+        }
+    return {
+        "paper_spec": "a4",
+        "seal_line": False,
+        "page_width_mm": 210,
+        "page_height_mm": 297,
+        "col_width_mm": 178,
+        "body_height_mm": 261,
+        "columns": 1,
+        "col_gap_mm": 0,
+        "seal_margin_mm": 16,
+        "outer_margin_mm": 16,
+    }
+
+
+def _clean_score(value) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    val = float(value)
+    if val != val or not SCORE_MIN <= val <= SCORE_MAX:
+        return None
+    rounded = round(val * 2) / 2.0
+    return rounded if rounded >= SCORE_MIN else None
+
+
+def format_score(value: float) -> str:
+    if abs(value - round(value)) < 1e-6:
+        return str(int(round(value)))
+    return f"{value:.1f}".rstrip("0").rstrip(".")
+
+
+def question_score(item_id: str, question_type: str, options: dict | None = None) -> float:
+    opts = options or {}
+    q_scores = opts.get("question_scores") or {}
+    if item_id in q_scores:
+        cleaned = _clean_score(q_scores[item_id])
+        if cleaned is not None:
+            return cleaned
+    t_scores = opts.get("type_scores") or {}
+    if question_type in t_scores:
+        cleaned = _clean_score(t_scores[question_type])
+        if cleaned is not None:
+            return cleaned
+    if question_type not in SCORE_TYPES and "other" in t_scores:
+        cleaned = _clean_score(t_scores["other"])
+        if cleaned is not None:
+            return cleaned
+    return DEFAULT_TYPE_SCORES.get(question_type, DEFAULT_TYPE_SCORES["other"])
+
+
+def student_header_line(items: list[dict], options: dict | None = None) -> str:
+    opts = options or {}
+    if not opts.get("scoring_enabled"):
+        return "姓名 ____________　班级 ____________　得分 ________"
+    total = sum(
+        question_score(str(item.get("id") or ""), str(item.get("question_type") or item.get("type") or "other"), opts)
+        for item in items
+    )
+    dur = int(opts.get("exam_duration_minutes") or 0)
+    parts = ["班级 ____________", "姓名 ____________", "考号 ____________"]
+    if dur > 0:
+        parts.append(f"考试时间：{dur} 分钟")
+    parts.append(f"满分：{format_score(total)} 分")
+    return "　".join(parts)
+
+
+def scored_section_heading(base_heading: str, group_items: list[dict], options: dict | None = None) -> str:
+    opts = options or {}
+    if not base_heading or not group_items or not opts.get("scoring_enabled"):
+        return base_heading
+    scores = [
+        question_score(str(item.get("id") or ""), str(item.get("question_type") or item.get("type") or "other"), opts)
+        for item in group_items
+    ]
+    subtotal = sum(scores)
+    if len(set(scores)) == 1:
+        return f"{base_heading}（共 {len(group_items)} 小题，每小题 {format_score(scores[0])} 分，共 {format_score(subtotal)} 分）"
+    return f"{base_heading}（共 {len(group_items)} 小题，共 {format_score(subtotal)} 分）"
+
+
+def question_score_prefix(
+    item_id: str, question_type: str, group_items: list[dict], options: dict | None = None
+) -> str:
+    opts = options or {}
+    if not opts.get("scoring_enabled"):
+        return ""
+    score = question_score(item_id, question_type, opts)
+    if opts.get("group_mode") == "basket_order" or question_type == "free_response":
+        return f"（{format_score(score)} 分）"
+    distinct = {
+        question_score(str(g.get("id") or ""), str(g.get("question_type") or g.get("type") or "other"), opts)
+        for g in (group_items or [])
+    }
+    return f"（{format_score(score)} 分）" if len(distinct) > 1 else ""
+
+
 # 留白（answer_space）有两种形态：
 #
 #   "auto"  按题型自动 —— 选择题不留白，解答题留 30 毫米。
@@ -222,8 +386,21 @@ def _figure_overrides(value):
 def _print_options(value, defaults=None, *, ids=None) -> dict:
     if not isinstance(value, dict) or set(value) - set(PRINT_DEFAULTS):
         raise DraftError("打印设置包含不支持的选项")
-    if any(type(value[key]) is not bool for key in (LEGACY_PRINT_KEYS | {"student_info"}) & set(value)):
+    if any(
+        type(value[key]) is not bool
+        for key in (LEGACY_PRINT_KEYS | {"student_info", "seal_line", "scoring_enabled", "record_usage"}) & set(value)
+    ):
         raise DraftError("打印开关只能是 true 或 false")
+    if "paper_spec" in value and value["paper_spec"] not in PAPER_SPECS:
+        raise DraftError("纸张版式只能选 A4 单栏 (a4) 或 A3 横向双栏 (a3_2col)")
+    if "exam_duration_minutes" in value and (
+        type(value["exam_duration_minutes"]) is not int or not 0 <= value["exam_duration_minutes"] <= 600
+    ):
+        raise DraftError("考试时长应为 0 到 600 之间的整数分钟")
+    if "usage_batch_key" in value and (
+        not isinstance(value["usage_batch_key"], str) or len(value["usage_batch_key"]) > 80
+    ):
+        raise DraftError("出卷批次标识格式不正确")
     if "font_size" in value and (type(value["font_size"]) is not int or value["font_size"] not in (12, 14, 16)):
         raise DraftError("字号只能选 12、14、16 磅")
     if "document" in value and value["document"] not in ("questions", "answers", "combined"):
@@ -245,6 +422,40 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
         result["figure_align"] = "right"
     if result.get("group_mode") not in ("by_type", "basket_order"):
         result["group_mode"] = "by_type"
+    if result.get("paper_spec") not in PAPER_SPECS:
+        result["paper_spec"] = "a4"
+    result["seal_line"] = bool(result.get("seal_line"))
+    result["scoring_enabled"] = bool(result.get("scoring_enabled"))
+    result["record_usage"] = bool(result.get("record_usage"))
+    result["usage_batch_key"] = str(result.get("usage_batch_key") or "").strip()[:80]
+    raw_dur = result.get("exam_duration_minutes", 0)
+    result["exam_duration_minutes"] = raw_dur if (type(raw_dur) is int and 0 <= raw_dur <= 600) else 0
+    raw_tscores = result.get("type_scores")
+    if not isinstance(raw_tscores, dict) or set(raw_tscores) - set(SCORE_TYPES):
+        raise DraftError("题型分值只能配置已知题型")
+    clean_tscores = {}
+    for k, v in raw_tscores.items():
+        cleaned = _clean_score(v)
+        if cleaned is None:
+            raise DraftError(f"题型分值应为 {SCORE_MIN}–{SCORE_MAX} 分")
+        clean_tscores[k] = cleaned
+    result["type_scores"] = clean_tscores
+    raw_qscores = result.get("question_scores")
+    if not isinstance(raw_qscores, dict) or len(raw_qscores) > 500:
+        raise DraftError("单题分值最多设置 500 题")
+    try:
+        qscore_keys = normalize_ids(list(raw_qscores))
+    except BrowseError as error:
+        raise DraftError("单题分值的题目编号不正确：" + str(error)) from None
+    if len(qscore_keys) != len(raw_qscores):
+        raise DraftError("单题分值的题目编号不能重复")
+    clean_qscore_vals = []
+    for v in raw_qscores.values():
+        cleaned = _clean_score(v)
+        if cleaned is None:
+            raise DraftError(f"单题分值应为 {SCORE_MIN}–{SCORE_MAX} 分")
+        clean_qscore_vals.append(cleaned)
+    q_scores_clean = dict(zip(qscore_keys, clean_qscore_vals))
     if "document" not in value and "answers" in value:
         result["document"] = "combined" if value["answers"] else "questions"
     result["answers"] = result["document"] != "questions"
@@ -385,10 +596,12 @@ def _print_options(value, defaults=None, *, ids=None) -> dict:
             | set(measured_keys)
             | set(table_keys)
             | set(split_keys)
+            | set(qscore_keys)
         )
         - selected
     ):
         raise DraftError("单题排版和另起页只能指定当前选中的题目")
+    result["question_scores"] = q_scores_clean
     result["option_overrides"] = dict(zip(keys, overrides.values()))
     result["answer_space_overrides"] = dict(zip(space_keys, normalized_spaces))
     result["figure_overrides"] = dict(zip(figure_keys, figures.values()))

@@ -413,6 +413,7 @@ class PublishedQuestion(models.Model):
             models.Index(fields=["status", "question_type"], name="pubq_status_qtype"),
             models.Index(fields=["status", "review_source"], name="pubq_status_review"),
             models.Index(fields=["question", "status"], name="pubq_question_status"),
+            models.Index(fields=["status", "number", "-published_at", "-id"], name="pubq_status_display"),
         ]
 
 

@@ -34,7 +34,17 @@ from django.views.decorators.csrf import csrf_exempt
 
 from . import features, library, tables
 from .library_browse import BrowseError, normalize_ids
-from .library_drafts import DraftError, _answer_space_millimetres, _print_options, _title
+from .library_drafts import (
+    DraftError,
+    _answer_space_millimetres,
+    _print_options,
+    _title,
+    page_geometry,
+    question_score,
+    question_score_prefix,
+    scored_section_heading,
+    student_header_line,
+)
 from .models import PublishedQuestion
 
 MAX_BODY = 2 * 1024 * 1024
@@ -2757,9 +2767,9 @@ def _answer_block_indent_mm(size):
     return (PREVIEW_ANSWER_NUMBER_COLUMN_EM * font_px + PREVIEW_ANSWER_COLUMN_GAP_PX) * PREVIEW_PX_TO_MM
 
 
-def _answer_block_text_width_mm(size):
+def _answer_block_text_width_mm(size, text_width_mm=PREVIEW_TEXT_WIDTH_MM):
     """答案正文列的净宽（毫米）：版心宽度减去题号列和列间隙。"""
-    return PREVIEW_TEXT_WIDTH_MM - _answer_block_indent_mm(size)
+    return text_width_mm - _answer_block_indent_mm(size)
 
 
 def _stem_column_left_mm(size, digits):
@@ -2900,7 +2910,7 @@ def _figure_row_lines(images, text_width_mm=PREVIEW_TEXT_WIDTH_MM, settings=None
     return _pack_lines(resolved, text_width_mm, (settings or {}).get("breaks"))
 
 
-def _figure_widths_for_slot(pictures, slot, settings=None, measured=None):
+def _figure_widths_for_slot(pictures, slot, settings=None, measured=None, text_width_mm=PREVIEW_TEXT_WIDTH_MM):
     """这个位置上的每张图，纸面上最终有多宽（毫米）。
 
     两层：先是老师自己在预览里改的宽度（只对题干配图有意义，``settings``
@@ -2908,7 +2918,7 @@ def _figure_widths_for_slot(pictures, slot, settings=None, measured=None):
     选项里的图在屏幕上被选项栏宽收口过，Word 自己量不到那个栏宽，
     不按实测值收口，纸上就比屏幕上大一圈。
     """
-    widths = _figure_widths(pictures, PREVIEW_TEXT_WIDTH_MM, settings if slot != "body" else None)
+    widths = _figure_widths(pictures, text_width_mm, settings if slot != "body" else None)
     measured = list(measured or [])
     if not measured or slot == "body":
         return widths
@@ -2991,6 +3001,7 @@ def _write_images(
     max_width_mm=None,
     indent_mm=None,
     align_override=None,
+    text_width_mm=PREVIEW_TEXT_WIDTH_MM,
 ):
     """写这个位置上的图。
 
@@ -3010,14 +3021,15 @@ def _write_images(
     align = align_override or (settings or {}).get("align") or "right"
     if align not in ("left", "center", "right"):
         align = "right"
-    widths = _figure_widths_for_slot(pictures, slot, settings, measured)
+    effective_width_mm = text_width_mm if max_width_mm is None else min(text_width_mm, max_width_mm)
+    widths = _figure_widths_for_slot(pictures, slot, settings, measured, text_width_mm=effective_width_mm)
     # 格子有上限：图比格子宽就压到隔壁列上（选项表就是这种情况）。
     if max_width_mm is not None:
         widths = [min(width, max_width_mm) for width in widths]
     if slot != "body" and lines is None:
         lines = _figure_row_lines(
             pictures,
-            text_width_mm=PREVIEW_TEXT_WIDTH_MM if max_width_mm is None else max_width_mm,
+            text_width_mm=text_width_mm if max_width_mm is None else max_width_mm,
             settings=settings,
             widths=widths,
         )
@@ -3031,7 +3043,7 @@ def _write_images(
             lines,
             align,
             widths,
-            text_width_mm=PREVIEW_TEXT_WIDTH_MM if max_width_mm is None else max_width_mm,
+            text_width_mm=text_width_mm if max_width_mm is None else max_width_mm,
         )
         return
     for index, image in enumerate(pictures):
@@ -3286,7 +3298,9 @@ def _write_solution_image(document, image, indent_mm=0.0, text_width_mm=None, sp
     return paragraph
 
 
-def _write_solution(document, item, size, label, lead_space_pt=0.0, table_lefts=None):
+def _write_solution(
+    document, item, size, label, lead_space_pt=0.0, table_lefts=None, text_width_mm=PREVIEW_TEXT_WIDTH_MM
+):
     """把一道题的答案块写进 Word。
 
     结构照抄预览（frontend/library-solutions.js 的 render()）：
@@ -3311,7 +3325,7 @@ def _write_solution(document, item, size, label, lead_space_pt=0.0, table_lefts=
     # 「1. 答案：……」整句顶格写 —— 纸上和屏幕上对不上。
     # 这里照抄那两栏：题号用悬挂缩进顶格，正文用制表符接到右边那一列。
     indent = _answer_block_indent_mm(size)
-    column = _answer_block_text_width_mm(size)
+    column = _answer_block_text_width_mm(size, text_width_mm=text_width_mm)
     number = label.strip()
     note = AI_REFERENCE_NOTE if item.get("ai") else ""
     # 题号只出现一次：要么顶格单独占一段，要么跟在正文前面（用制表符接到右列）。
@@ -4170,18 +4184,7 @@ def _footer_field(footer, instr):
     return field
 
 
-def _write_footer(document, count):
-    """页脚：第 <PAGE> 页 / 共 <NUMPAGES> 页 · 共 N 题。
-
-    文字照抄预览（frontend/exam-layout.js:463）。
-
-    页码必须是域（fldSimple PAGE），不能是写死的数字 —— 域的结果是 Word
-    打开时才算出来的，写死的话整份卷子都印「第 1 页」。
-    总页数同理用 NUMPAGES 域：预览分完页才知道有几页，写死的话分页一变就错。
-    单独抽出来，是为了能单独盯住它（见 test_library_export_footer.py）。
-    """
-    _footer_style(document)
-    footer = document.sections[0].footer.paragraphs[0]
+def _populate_footer_paragraph(footer, count):
     footer.alignment = 1  # 预览 .exam-page-number 是 text-align:center
     _line_spacing(footer, PREVIEW_FOOTER_LINE_HEIGHT_PT)
 
@@ -4199,6 +4202,22 @@ def _write_footer(document, count):
     text(" 页 / 共 ")
     _footer_field(footer, "NUMPAGES")
     text(f" 页 · 共 {count} 题")
+
+
+def _write_footer(document, count):
+    """页脚：第 <PAGE> 页 / 共 <NUMPAGES> 页 · 共 N 题。
+
+    文字照抄预览（frontend/exam-layout.js:463）。
+
+    页码必须是域（fldSimple PAGE），不能是写死的数字 —— 域的结果是 Word
+    打开时才算出来的，写死的话整份卷子都印「第 1 页」。
+    总页数同理用 NUMPAGES 域：预览分完页才知道有几页，写死的话分页一变就错。
+    单独抽出来，是为了能单独盯住它（见 test_library_export_footer.py）。
+    """
+    _footer_style(document)
+    _populate_footer_paragraph(document.sections[0].footer.paragraphs[0], count)
+    if document.settings.odd_and_even_pages_header_footer:
+        _populate_footer_paragraph(document.sections[0].even_page_footer.paragraphs[0], count)
 
 
 def _page_setup(document):
@@ -4222,6 +4241,163 @@ def _page_setup(document):
     return section
 
 
+def _write_seal_band_header(header, side, page_width_mm, page_height_mm):
+    from docx.enum.table import WD_ALIGN_VERTICAL, WD_ROW_HEIGHT_RULE
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Mm, Pt
+
+    lead_p = header.paragraphs[0]
+    lead_p.paragraph_format.space_before = Pt(0)
+    lead_p.paragraph_format.space_after = Pt(0)
+    lead_p.add_run().font.size = Pt(1)
+
+    band_w_mm = 18.0
+    top_mm = 18.0
+    band_h_mm = max(120.0, float(page_height_mm) - 36.0)
+    x_mm = 6.0 if side == "left" else max(6.0, float(page_width_mm) - 24.0)
+
+    table = header.add_table(rows=1, cols=1, width=Mm(band_w_mm))
+    table.autofit = False
+    table.columns[0].width = Mm(band_w_mm)
+    _set_table_widths(table, [band_w_mm])
+
+    tbl_pr = table._tbl.tblPr
+    tblp = OxmlElement("w:tblpPr")
+    tblp.set(qn("w:leftFromText"), "0")
+    tblp.set(qn("w:rightFromText"), "0")
+    tblp.set(qn("w:topFromText"), "0")
+    tblp.set(qn("w:bottomFromText"), "0")
+    tblp.set(qn("w:vertAnchor"), "page")
+    tblp.set(qn("w:horzAnchor"), "page")
+    tblp.set(qn("w:tblpX"), str(int(round(x_mm * 1440 / 25.4))))
+    tblp.set(qn("w:tblpY"), str(int(round(top_mm * 1440 / 25.4))))
+    tbl_pr.insert_element_before(
+        tblp,
+        "w:tblOverlap",
+        "w:bidiVisual",
+        "w:tblStyleRowBandSize",
+        "w:tblStyleColBandSize",
+        "w:tblW",
+        "w:jc",
+        "w:tblBorders",
+    )
+    borders = OxmlElement("w:tblBorders")
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        b = OxmlElement("w:" + edge)
+        b.set(qn("w:val"), "nil")
+        borders.append(b)
+    tbl_pr.insert_element_before(
+        borders, "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription"
+    )
+
+    row = table.rows[0]
+    row.height = Mm(band_h_mm)
+    row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+
+    cell = table.cell(0, 0)
+    cell.width = Mm(band_w_mm)
+    cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    tc_pr = cell._tc.get_or_add_tcPr()
+    tc_borders = OxmlElement("w:tcBorders")
+    dashed_edge = "right" if side == "left" else "left"
+    for edge in ("top", "left", "bottom", "right"):
+        b = OxmlElement("w:" + edge)
+        if edge == dashed_edge:
+            b.set(qn("w:val"), "dashed")
+            b.set(qn("w:sz"), "6")
+            b.set(qn("w:space"), "0")
+            b.set(qn("w:color"), "64748B")
+        else:
+            b.set(qn("w:val"), "nil")
+        tc_borders.append(b)
+    tc_pr.insert_element_before(
+        tc_borders, "w:shd", "w:noWrap", "w:tcMar", "w:textDirection", "w:tcFitText", "w:vAlign"
+    )
+    text_dir = OxmlElement("w:textDirection")
+    text_dir.set(qn("w:val"), "tbRl")
+    tc_pr.insert_element_before(
+        text_dir,
+        "w:tcFitText",
+        "w:vAlign",
+        "w:hideMark",
+        "w:headers",
+        "w:cellIns",
+        "w:cellDel",
+        "w:cellMerge",
+        "w:tcPrChange",
+    )
+
+    fields_p = cell.paragraphs[0]
+    fields_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    fields_p.paragraph_format.space_before = Pt(0)
+    fields_p.paragraph_format.space_after = Pt(3)
+    _font(
+        fields_p.add_run("学校：________  班级：________  姓名：________  考号：________"),
+        9,
+        east_asia="宋体",
+        latin=PREVIEW_LATIN_FONT,
+        color="334155",
+    )
+
+    line_p = cell.add_paragraph()
+    line_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    line_p.paragraph_format.space_before = Pt(0)
+    line_p.paragraph_format.space_after = Pt(0)
+    _font(
+        line_p.add_run("…………○…………密…………封…………线…………内…………不…………要…………答…………题…………○…………"),
+        8.5,
+        east_asia="宋体",
+        latin=PREVIEW_LATIN_FONT,
+        color="475569",
+    )
+
+
+def _apply_exam_paper_and_seal(document, options, mode):
+    from docx.enum.section import WD_ORIENT
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Mm
+
+    geom = page_geometry(options)
+    section = document.sections[0]
+    if geom["paper_spec"] == "a3_2col":
+        section.orientation = WD_ORIENT.LANDSCAPE
+        section.page_width = Mm(geom["page_width_mm"])
+        section.page_height = Mm(geom["page_height_mm"])
+        sect_pr = section._sectPr
+        cols = sect_pr.find(qn("w:cols"))
+        if cols is None:
+            cols = OxmlElement("w:cols")
+            sect_pr.insert_element_before(cols, "w:docGrid")
+        cols.set(qn("w:num"), "2")
+        cols.set(qn("w:equalWidth"), "1")
+        cols.set(qn("w:space"), str(int(round(geom["col_gap_mm"] * 1440 / 25.4))))
+        cols.set(qn("w:sep"), "1")
+    section.left_margin = Mm(geom["seal_margin_mm"])
+    section.right_margin = Mm(geom["outer_margin_mm"])
+    if geom["seal_line"] and mode != "answers":
+        settings_el = document.settings.element
+        if settings_el.find(qn("w:mirrorMargins")) is None:
+            settings_el.insert_element_before(
+                OxmlElement("w:mirrorMargins"),
+                "w:proofState",
+                "w:defaultTabStop",
+                "w:characterSpacingControl",
+                "w:compat",
+                "w:rsids",
+                "w:mathPr",
+                "w:themeFontLang",
+                "w:clrSchemeMapping",
+                "w:decimalSymbol",
+            )
+        document.settings.odd_and_even_pages_header_footer = True
+        _write_seal_band_header(section.header, "left", geom["page_width_mm"], geom["page_height_mm"])
+        _write_seal_band_header(section.even_page_header, "right", geom["page_width_mm"], geom["page_height_mm"])
+    return geom
+
+
 def _document(captured, title, options, mode):
     from docx import Document
     from docx.oxml.ns import qn
@@ -4231,6 +4407,8 @@ def _document(captured, title, options, mode):
     inline_answers = mode == "combined" and options.get("answer_layout", "appendix") == "inline"
     document = Document()
     _page_setup(document)
+    geom = _apply_exam_paper_and_seal(document, options, mode)
+    text_width_mm = geom["col_width_mm"]
     size = options["font_size"]
     normal = document.styles["Normal"]
     normal.font.name, normal.font.size = PREVIEW_LATIN_FONT, Pt(size)
@@ -4265,7 +4443,7 @@ def _document(captured, title, options, mode):
         info.paragraph_format.space_after = Pt(PREVIEW_INFO_SPACE_AFTER_PT)
         _line_spacing(info, PREVIEW_INFO_LINE_HEIGHT_PT)
         _font(
-            info.add_run(PREVIEW_STUDENT_INFO_TEXT),
+            info.add_run(student_header_line(captured, options)),
             PREVIEW_INFO_FONT_SIZE_PT,
             east_asia=PREVIEW_INFO_EAST_ASIA,
             latin=PREVIEW_INFO_LATIN,
@@ -4302,7 +4480,7 @@ def _document(captured, title, options, mode):
             section_title = document.add_paragraph()
             section_title.paragraph_format.keep_with_next = True
             _font(
-                section_title.add_run(_section_heading(group, index, name)),
+                section_title.add_run(scored_section_heading(_section_heading(group, index, name), group, options)),
                 PREVIEW_SECTION_FONT_SIZE_PT,
                 True,
                 east_asia=PREVIEW_SECTION_EAST_ASIA,
@@ -4350,6 +4528,7 @@ def _document(captured, title, options, mode):
                 number_paragraph.paragraph_format.space_before = Pt(PREVIEW_INFO_SPACE_AFTER_PT)
             _font(number_paragraph.add_run(f"{number}."), size, True)
             _line_spacing(number_paragraph, size * LINE_SPACING)
+            score_prefix = question_score_prefix(item["id"], item["type"], group, options)
             lead_segments = None
             if "origin" in item["fields"]:
                 origin_blocks = item["fields"]["origin"]
@@ -4359,12 +4538,14 @@ def _document(captured, title, options, mode):
                         *origin_blocks[0]["segments"],
                         {"type": "text", "raw": "）"},
                     ]
+                    if score_prefix:
+                        lead_segments.insert(0, {"type": "text", "raw": score_prefix})
                 else:
                     _write_field(
                         document,
                         origin_blocks,
                         size,
-                        prefix=[("（题源）", False)],
+                        prefix=([(score_prefix, False)] if score_prefix else []) + [("（题源）", False)],
                         where=item["where"],
                         first_paragraph=number_paragraph,
                         first_paragraph_tab_mm=stem_left,
@@ -4372,8 +4553,10 @@ def _document(captured, title, options, mode):
                     )
                     # 题号那一段已经被题源用掉了，题干接着从正文列起。
                     number_paragraph = None
+            elif score_prefix:
+                lead_segments = [{"type": "text", "raw": score_prefix}]
             image_body = item["content"].get("body_mode", "text") == "source_image"
-            stem_column = (stem_left, PREVIEW_TEXT_WIDTH_MM - stem_left)
+            stem_column = (stem_left, text_width_mm - stem_left)
             table_lefts = measured_tables.get(item["id"]) or {}
             _write_field(
                 document,
@@ -4388,6 +4571,7 @@ def _document(captured, title, options, mode):
                 # 题干正文列的左缘（版心左缘起算）——预览的正文列，
                 # 折行也折回这一列。
                 indent_mm=stem_left,
+                text_width_mm=text_width_mm,
                 # 首行顶上挂着题号：题号落在版心左缘，正文从正文列起。
                 first_paragraph=number_paragraph,
                 first_paragraph_tab_mm=stem_left,
@@ -4400,7 +4584,7 @@ def _document(captured, title, options, mode):
             # 原图题在预览里就是一张一张竖排（.qb-question-images 是 column 方向），
             # 只有排版文字的题干配图跟着 .qb-figures 的换行走。
             if image_body:
-                _write_images(document, item, "body")
+                _write_images(document, item, "body", text_width_mm=text_width_mm)
             else:
                 stem_figures = [image for image in item["images"] if image["slot"] == "stem"]
                 stem_measured = figures["measured"].get("stem")
@@ -4410,15 +4594,19 @@ def _document(captured, title, options, mode):
                     "stem",
                     _figure_row_lines(
                         stem_figures,
+                        text_width_mm=text_width_mm,
                         settings=figures,
-                        widths=_figure_widths_for_slot(stem_figures, "stem", figures, stem_measured),
+                        widths=_figure_widths_for_slot(
+                            stem_figures, "stem", figures, stem_measured, text_width_mm=text_width_mm
+                        ),
                     ),
                     settings=figures,
                     measured=stem_measured,
+                    text_width_mm=text_width_mm,
                 )
-            columns = _option_columns(item, options) if not image_body else 1
+            columns = _option_columns(item, options, text_width_mm=text_width_mm) if not image_body else 1
             if columns > 1:
-                _write_compact_options(document, item, size, columns, figures=figures)
+                _write_compact_options(document, item, size, columns, text_width_mm=text_width_mm, figures=figures)
             else:
                 # 单栏路径：预览里选项照样是「选项区缩进 2em + 标签列 + 正文列」
                 # 两列网格（.qb-options padding-left 2em，.qb-option 两列 grid），
@@ -4441,7 +4629,7 @@ def _document(captured, title, options, mode):
                     # 所以 A 那一行的正文列比 B 窄（Chrome 实测 13.853 / 13.618）。
                     label_offset_mm = _option_label_indent_mm(letter, size)
                     body_left_mm = OPTION_LIST_INDENT_MM + label_offset_mm
-                    body_width_mm = PREVIEW_TEXT_WIDTH_MM - body_left_mm
+                    body_width_mm = text_width_mm - body_left_mm
                     if has_field:
                         paragraph = document.add_paragraph()
                         _font(paragraph.add_run(f"{letter}."), size)
@@ -4508,7 +4696,7 @@ def _document(captured, title, options, mode):
             if inline_answers and _has_selected_answers([item]):
                 # A long solution may cross pages; never keep it with the entire
                 # question or add student writing space to a teacher copy.
-                _write_solution(document, item, size, "")
+                _write_solution(document, item, size, "", text_width_mm=text_width_mm)
                 _question_gap(document)
             if number > 1 and item["id"] in options["question_breaks"]:
                 if item is group[0] and section_title is not None:
@@ -4564,6 +4752,7 @@ def _document(captured, title, options, mode):
                     "answer": (measured_tables.get(item["id"]) or {}).get("answer"),
                     "analysis": (measured_tables.get(item["id"]) or {}).get("analysis"),
                 },
+                text_width_mm=text_width_mm,
             )
             _question_gap(document)
             # Even keep-whole-question mode must allow a long solution to flow.
@@ -4662,6 +4851,34 @@ def export(payload, *, warnings=None):
     return data, filename, mime, len(ids)
 
 
+def _record_docx_usage(payload, mime) -> None:
+    raw_options = payload.get("print_options", {})
+    if not isinstance(raw_options, dict) or not raw_options.get("record_usage"):
+        return
+    from . import library_usage
+    from .models import PublishedQuestion
+
+    ids = normalize_ids(payload.get("ids"))
+    options = _print_options(raw_options, ids=ids)
+    if not options.get("record_usage"):
+        return
+    title = _title(payload.get("title", "练习"))
+    total_score = None
+    if options.get("scoring_enabled"):
+        types = {
+            str(pk): qt for pk, qt in PublishedQuestion.objects.filter(id__in=ids).values_list("id", "question_type")
+        }
+        total_score = round(sum(question_score(pid, types.get(pid, ""), options) for pid in ids), 2)
+    library_usage.record_exam_export(
+        ids=ids,
+        title=title,
+        batch_key=options.get("usage_batch_key", ""),
+        paper_spec=options.get("paper_spec", "a4"),
+        total_score=total_score,
+        export_format="split" if mime == "application/zip" else "docx",
+    )
+
+
 @csrf_exempt
 def export_docx_view(request):
     if request.method != "POST":
@@ -4681,6 +4898,7 @@ def export_docx_view(request):
             )
         warnings = []
         data, filename, mime, count = export(payload, warnings=warnings)
+        _record_docx_usage(payload, mime)
     except RequestDataTooBig:
         return JsonResponse({"error": "导出内容超过 2 MiB，请减少选题、分批导出"}, status=413)
     except ExportError as error:

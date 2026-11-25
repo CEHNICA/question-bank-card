@@ -211,7 +211,7 @@
     <aside class="sidebar" aria-label="试卷">
       <div id="reviewTeachMount" class="teaching-dock"></div>
       <label id="dropZone" class="drop-zone" tabindex="-1">
-        <input id="fileInput" class="visually-hidden" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx" multiple>
+        <input id="fileInput" class="visually-hidden" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.doc" multiple>
         <span class="drop-icon" aria-hidden="true"><svg class="icon"><use href="#i-upload"/></svg></span>
         <span class="drop-text">
           <strong>上传资料</strong>
@@ -834,6 +834,23 @@
       <div class="key-row"><span>通过并继续，自动入库</span><span><kbd>Enter</kbd></span></div>
       <div class="key-row"><span>撤销通过</span><span><kbd>U</kbd></span></div>
       <p class="hint">完整说明按录入审核、切题配图、题库看题、答案编辑和组卷导出分别展示。</p>
+    </div>
+  </dialog>
+
+  <dialog id="similarityDialog" class="similarity-dialog" aria-labelledby="similarityDialogTitle">
+    <div class="dialog-head">
+      <div>
+        <h3 id="similarityDialogTitle">发现相似题目 · 核对处理</h3>
+        <p id="similarityDialogSub" class="hint">左侧为当前待审题卡，右侧为正式题库中已入库的原题。不会自动删题或跳过审核，请按需选择。</p>
+      </div>
+      <button class="button" type="button" data-close>关闭</button>
+    </div>
+    <div id="similarityDialogBody" class="similarity-dialog-body"></div>
+    <div class="dialog-actions similarity-dialog-actions">
+      <button id="similarityMergeBtn" class="button primary" type="button">合并证据（不重复入库，手写原图归档至核验证据）</button>
+      <button id="similarityBindVariantBtn" class="button" type="button">存为独立题并绑为变式组</button>
+      <button id="similarityKeepBtn" class="button quiet" type="button">仍存为独立题</button>
+      <button id="similaritySkipBtn" class="button quiet danger" type="button">纯跳过（移入回收站）</button>
     </div>
   </dialog>
 

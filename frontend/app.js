@@ -13,8 +13,8 @@ const QBUpload = (() => {
     { category: "photo", label: "照片", extension: /\.(jpe?g|png|webp)$/i, mime: /^image\/(jpeg|png|webp)$/i },
     { category: "pdf", label: "PDF", extension: /\.pdf$/i, mime: /^application\/pdf$/i },
     {
-      category: "docx", label: "Word", extension: /\.docx$/i,
-      mime: /^application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document$/i
+      category: "docx", label: "Word", extension: /\.(docx|doc)$/i,
+      mime: /^(application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document|application\/msword)$/i
     }
   ];
 
@@ -4471,6 +4471,184 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return panel;
   }
 
+  function similarityBanner(q) {
+    const matches = Array.isArray(q?.similarity_matches) ? q.similarity_matches : [];
+    if (!matches.length) return null;
+    const match = matches[0];
+    const isVariant = match.kind === "variant";
+    const banner = el("div", `similarity-banner${isVariant ? " is-variant" : ""}`);
+    const text = el("div", "similarity-banner-text");
+    const numText = match.number ? `第 ${match.number} 题` : match.short_id;
+    const msg = isVariant
+      ? `🔗 库内发现同源变式题：《${match.source_filename || "题库原题"}》${numText}（相似度 ${Math.round((match.score || 0) * 100)}%）`
+      : `💡 库内已有高度相似原题：《${match.source_filename || "题库原题"}》${numText}`;
+    text.append(el("span", "", msg));
+    if (q.bind_variant_pub_id && q.bind_variant_pub_id === match.publication_id) {
+      text.append(el("span", "similarity-variant-tag", "✓ 通过入库后自动绑为变式"));
+    }
+    const actions = el("div", "similarity-banner-actions");
+    const compareBtn = button(isVariant ? "对比 / 绑为变式" : "点开对比处理", "small", (event) => {
+      event.stopPropagation();
+      openSimilarityDialog(q, match);
+    });
+    actions.append(compareBtn);
+    banner.append(text, actions);
+    return banner;
+  }
+
+  function openSimilarityDialog(q, match) {
+    const dlg = $("similarityDialog");
+    const body = $("similarityDialogBody");
+    const sub = $("similarityDialogSub");
+    const mergeBtn = $("similarityMergeBtn");
+    const bindBtn = $("similarityBindVariantBtn");
+    const keepBtn = $("similarityKeepBtn");
+    const skipBtn = $("similaritySkipBtn");
+    if (!dlg || !body) return;
+
+    const isVariant = match.kind === "variant";
+    $("similarityDialogTitle").textContent = isVariant ? "发现同源变式题 · 核对处理" : "发现高度相似原题 · 核对处理";
+    if (sub) {
+      sub.textContent = isVariant
+        ? "两题题干结构高度相似且数值/局部条件不同。你可以按独立题入库并互绑为「变式题组」，之后组卷可一键换变式。"
+        : "若本题来自学生错题卷/批注卷，建议点「合并证据」：题库列表保持 1 题不重复，同时把本卷手写截图归档进原题核验证据栏。";
+    }
+
+    body.replaceChildren();
+    const grid = el("div", "similarity-compare-grid");
+
+    const leftPane = el("section", "similarity-pane");
+    const leftHead = el("div", "similarity-pane-head");
+    leftHead.append(el("span", "", `当前待审第 ${q.number} 题`), el("span", "hint", q.body_mode === "source_image" ? "原图" : "文字"));
+    leftPane.append(leftHead);
+    if (Array.isArray(q.regions) && q.regions.length) {
+      leftPane.append(cropView(q.regions, { figures: q.figures || [], capToNatural: true, questionId: q.id }));
+    }
+    const leftRendered = el("div", "rendered");
+    R.renderQuestion(leftRendered, content(q), { showNumber: false, showAnswer: "collapsed" });
+    leftPane.append(leftRendered);
+
+    const rightPane = el("section", "similarity-pane");
+    const rightHead = el("div", "similarity-pane-head");
+    rightHead.append(
+      el("span", "", `题库原题 ${match.short_id || ""}`),
+      el("span", "hint", match.has_answer ? "已有答案/解析" : "暂无解析")
+    );
+    rightPane.append(
+      rightHead,
+      el("div", "similarity-pane-meta", `来源：《${match.source_filename || "未命名"}》${match.number ? ` · 第 ${match.number} 题` : ""}`)
+    );
+    const rightRendered = el("div", "rendered");
+    R.renderQuestion(rightRendered, {
+      number: match.number || 1,
+      question_type: match.question_type || "unknown",
+      stem: match.stem || "",
+      options: match.options || {},
+      answer: match.answer || "",
+      figures: []
+    }, { showNumber: false, showAnswer: match.answer ? "collapsed" : false });
+    rightPane.append(rightRendered);
+    if (Array.isArray(match.tags) && match.tags.length) {
+      const tagsWrap = el("div", "similarity-pane-tags");
+      match.tags.forEach((tag) => tagsWrap.append(el("span", "", tag)));
+      rightPane.append(tagsWrap);
+    }
+
+    grid.append(leftPane, rightPane);
+    body.append(grid);
+
+    const setBusy = (busy) => {
+      [mergeBtn, bindBtn, keepBtn, skipBtn].forEach((btn) => { if (btn) btn.disabled = busy; });
+    };
+
+    if (mergeBtn) {
+      mergeBtn.hidden = Boolean(q.publication);
+      mergeBtn.onclick = async () => {
+        const paperId = state.paperId;
+        setBusy(true);
+        try {
+          const data = await api(`/api/questions/${q.id}/merge-duplicate`, {
+            method: "POST",
+            body: { target_publication_id: match.publication_id }
+          });
+          dlg.close();
+          if (state.paperId === paperId) {
+            state.questions = state.questions.filter((item) => item.id !== q.id);
+            state.rendered.delete(q.id);
+            state.expanded.delete(q.id);
+            state.editing.delete(q.id);
+            if (state.current === q.id) {
+              state.current = state.questions.find(visible)?.id ?? state.questions[0]?.id ?? null;
+            }
+            if (data.paper) updatePaperFromResponse(data.paper);
+            renderPaper();
+          }
+          toast(`已将本题手写原图归档至 ${data.target_short_id || match.short_id || "原题"} 核验证据（不重复入库）`, "success", data.undo_batch_id ? {
+            label: "撤销",
+            onClick: () => restoreDeletedBatch(paperId, data.undo_batch_id)
+          } : null);
+        } catch (error) {
+          toast(error.message || "合并证据失败", "error");
+        } finally {
+          setBusy(false);
+        }
+      };
+    }
+
+    if (bindBtn) {
+      bindBtn.onclick = async () => {
+        setBusy(true);
+        try {
+          await api(`/api/questions/${q.id}/similarity-preference`, {
+            method: "POST",
+            body: { target_publication_id: match.publication_id, mode: "bind_variant" }
+          });
+          q.bind_variant_pub_id = match.publication_id;
+          state.rendered.delete(q.id);
+          dlg.close();
+          renderCards();
+          toast(`已标记：本题核对入库后自动与 ${match.short_id || "原题"} 互绑为变式题组`, "success");
+        } catch (error) {
+          toast(error.message || "设置失败", "error");
+        } finally {
+          setBusy(false);
+        }
+      };
+    }
+
+    if (keepBtn) {
+      keepBtn.onclick = async () => {
+        setBusy(true);
+        try {
+          await api(`/api/questions/${q.id}/similarity-preference`, {
+            method: "POST",
+            body: { target_publication_id: match.publication_id, mode: "keep_independent" }
+          });
+          q.similarity_matches = (q.similarity_matches || []).filter((item) => item.publication_id !== match.publication_id);
+          if (q.bind_variant_pub_id === match.publication_id) q.bind_variant_pub_id = null;
+          state.rendered.delete(q.id);
+          dlg.close();
+          renderCards();
+          toast("已忽略本条提醒，将保留为独立题", "info");
+        } catch (error) {
+          toast(error.message || "操作失败", "error");
+        } finally {
+          setBusy(false);
+        }
+      };
+    }
+
+    if (skipBtn) {
+      skipBtn.onclick = async () => {
+        dlg.close();
+        await deleteQuestion(q);
+      };
+    }
+
+    setBusy(false);
+    dlg.showModal();
+  }
+
   function content(q) {
     return {
       number: q.number,
@@ -4608,6 +4786,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (flags) body.append(flags);
     const disagreement = disagreementPanel(q);
     if (disagreement) body.append(disagreement);
+    const simBanner = !approved ? similarityBanner(q) : null;
+    if (simBanner) body.append(simBanner);
 
     if (q.origin) {
       const origin = el("p", "card-origin");

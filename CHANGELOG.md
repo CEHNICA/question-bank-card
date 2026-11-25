@@ -3,6 +3,22 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.3.0
+
+**Word 双轨直读与答案同拆、Eagle 虚拟滚动、本地查重与一题多源证据归档、A3 双栏密封线考卷及 FTS5 万题按需检索**
+
+- **Word（`.docx` / `.doc`）双轨直读与答案同拆（`word.py`、`word_extract.py`、`word_omml.py`、`word_mtef.py`、`intake.py`、`printed_answers.py`、`tiyouju_cli.py`）**：
+  - 免 OCR 秒提 `.docx` 文字、OMML 原生公式、常见 MathType 公式与内嵌图片（本机装有 Word 或 WPS 时同步兼容老版 `.doc` 静默转换）；后台优先自动调用本机 Word / WPS 静默生成原貌 PDF 留作「📄 核验证据」（无办公软件时自动降级预览兜底）；支持题后及卷尾参考答案与解析（含配图）全自动剥离归位，疑难古董公式与矢量几何图诚实标黄提醒。
+- **`/eagle` 连续丝滑虚拟滚动与公式缓存（`frontend/eagle-virtual-list.js`、`frontend/eagle/index.html`、`backend/core/views.py`、`backend/qb_server/urls.py`）**：
+  - 保留连续一滚到底的手感，可视区外自动回收卡片、缓存排好的 KaTeX 公式 HTML；实时显示「当前第 X / 共 N 题」并支持输入题序秒跳；全选依然覆盖当前筛选出的全部题目。
+- **本地相似题查重、一题多源证据归档与变式题组（`library_similarity.py`、`models.py`、`library.py`、`views.py`、`urls.py`、`frontend/app.js`、`frontend/eagle/index.html`）**：
+  - 纯离线毫秒级识别重复原题与换皮变式，并在录题审核页入口挂提醒、在 `/eagle` 提供「全库查重整理」专区；合并重复题时保留唯一正式题卡并把新卷（含学生手写错解原图）追加到「📄 核验证据」多标签切换栏；支持同源变式题组互绑与组卷时一键切换变式。
+- **考卷赋分、A3 横向双栏镜像密封线与按卷用题历史（`library_usage.py`、`library_drafts.py`、`library_pdf.py`、`library_export.py`、`library_browse.py`、`library_transfer.py`、`frontend/exam-layout.js`、`frontend/exam-export.js`、`frontend/library.css`、`frontend/eagle/eagle-print-preview.html`、`frontend/eagle/eagle-print-preview.js`、`frontend/eagle/index.html`）**：
+  - 支持单题/大题分节赋分与总分自动汇总；新增标准 A3 横向双栏版式（奇偶页自动镜像密封线），并确保屏幕打印预览、PDF 与 Word 三端版式一致；按卷合并自动记录用题历史，支持筛选「排除近期已用题」防止周测撞车。
+- **SQLite FTS5 全文检索与万题级按需数据流（`library_fts.py`、`apps.py`、`migrations/0035_publishedquestion_fts_and_display_index.py`、`management/commands/refresh_search_index.py`、`library_browse.py`、`library_tagging.py`、`library_transfer.py`、`frontend/eagle/index.html`）**：
+  - 内置 `core_publishedquestion_fts`（FTS5 Unicode61 分词 + 中文逐字 / ASCII bigram 索引）实现万题库毫秒级检索，通过 Django 信号实时同步并支持迁移与命令重建；题量超 `2000` 时自动切换按需分批加载、服务端全文搜索与跨页全选；数据库快照备份自动安全跳过 FTS5 虚拟与影子表。
+
+
 ## 2.2.11
 
 **统一全屏三区「编辑」工作台、选项扩展至 A–H、AI 推荐答案与录题 0 题待切整理**

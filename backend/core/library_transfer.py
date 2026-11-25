@@ -81,8 +81,10 @@ SKIP_NAMES = {
     "mineru_engine.json",
     "knowledge-points.txt",
     "library-drafts.json",
+    "library-usage.json",
     "worker.lock",
     "library-drafts.lock",
+    "library-usage.lock",
 }
 
 
@@ -538,6 +540,9 @@ def _snapshot_database(
     with contextlib_closing(sqlite3.connect(target)) as writer:
         writer.execute("PRAGMA foreign_keys=OFF")
         for kind, name, sql in objects:
+            # Skip FTS5 virtual/shadow tables in snapshots; library_fts.ensure_populated() rebuilds them cleanly on first query.
+            if name == "core_publishedquestion_fts" or name.startswith("core_publishedquestion_fts_"):
+                continue
             if kind != "table":
                 writer.execute(sql)
                 continue

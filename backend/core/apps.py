@@ -179,9 +179,12 @@ class CoreConfig(AppConfig):
     name = "core"
 
     def ready(self):
+        from core import library_fts
+
         # 1.26.50：判定结果存到磁盘复用 —— 第二次打开软件不用再解析几千道题
         # 的 JSON 字段（冷启动那一遍要 3.9 秒）。接不上也不影响软件能用。
         verdict_cache.install()
+        library_fts.install_signals()
         for sweep in (discard_interrupted_uploads, discard_interrupted_deletes, discard_stale_system_temps):
             try:
                 sweep()

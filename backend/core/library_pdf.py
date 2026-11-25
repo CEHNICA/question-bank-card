@@ -33,7 +33,16 @@ from django.views.decorators.csrf import csrf_exempt
 
 from . import library_export as word
 from .library_browse import BrowseError, normalize_ids
-from .library_drafts import DraftError, _print_options, _title
+from .library_drafts import (
+    DraftError,
+    _print_options,
+    _title,
+    page_geometry,
+    question_score,
+    question_score_prefix,
+    scored_section_heading,
+    student_header_line,
+)
 
 DEADLINE_SECONDS = 60
 MAX_PDF_BYTES = 64 * 1024 * 1024
@@ -473,6 +482,7 @@ window.__qbPdfStatus = {ready:false};
   source.style.setProperty('--exam-font-size',o.font_size+'pt');
   source.dataset.answerSpace=o.answer_space;source.dataset.document=o.document;
   source.dataset.answerLayout=o.answer_layout;
+  source.dataset.paperSpec=o.paper_spec||'a4';source.dataset.sealLine=o.seal_line?'1':'0';
   const node=(tag,cls,text)=>{const n=document.createElement(tag);n.className=cls;if(text!==undefined)n.textContent=text;return n;};
   // 留白口径必须和 exam-layout.js 的 answerSpace() 一致（预览看到的 = 导出的）：
   // auto = 选择题不留白、解答题 30 毫米；数值 = 毫米数；解答题下限 8 毫米。
@@ -486,7 +496,7 @@ window.__qbPdfStatus = {ready:false};
     return 0;
   };
   source.append(node('h2','print-title',input.title));
-  if(o.student_info && o.document!=='answers')source.append(node('p','print-info','姓名 ____________　班级 ____________　得分 ________'));
+  if(o.student_info && o.document!=='answers')source.append(node('p','print-info',input.headerInfoText||'姓名 ____________　班级 ____________　得分 ________'));
   let number=0;const numbered=[];
   const inline=o.document==='combined' && o.answer_layout==='inline';
   const solutionRow=(n,item,isInline)=>{
@@ -499,7 +509,7 @@ window.__qbPdfStatus = {ready:false};
   };
   const types=[['single_choice','选择题'],['multiple_choice','多选题'],['fill_blank','填空题'],['true_false','判断题'],['free_response','解答题']];
   const known=new Set(types.map(x=>x[0]));types.push(['other','其他']);
-  const printed=input.sectionHeadings||{};
+  const printed=input.sectionHeadings||{},scorePrefixes=input.scorePrefixes||{};
   const basketOrder=o.group_mode==='basket_order';
   const grouped=basketOrder?[['basket_order',null,input.items]]:types.map(([key,name])=>[key,name,input.items.filter(x=>key==='other'?!known.has(x.type):x.type===key)]);
   let section=0;
@@ -511,7 +521,9 @@ window.__qbPdfStatus = {ready:false};
       const block=node('div','print-question');
       QBRender.renderQuestion(block,item.content,{number,showAnswer:'none',resolveUrl:x=>x.file,resolveQuestionImageUrl:x=>x.file});
       block.dataset.questionId=item.id;
-      if(o.origin && item.content.origin)(block.querySelector('.qb-stem-body')||block.querySelector('.qb-stem')).prepend(node('span','print-origin','（'+item.content.origin+'）'));
+      const stemHead=block.querySelector('.qb-stem-body')||block.querySelector('.qb-stem');
+      if(o.origin && item.content.origin && stemHead)stemHead.prepend(node('span','print-origin','（'+item.content.origin+'）'));
+      if(scorePrefixes[item.id] && stemHead)stemHead.prepend(node('span','print-score',scorePrefixes[item.id]));
       const overrides=o.answer_space_overrides||{};
       const raw=Object.prototype.hasOwnProperty.call(overrides,item.id)?overrides[item.id]:o.answer_space;
       let mm=spaceMm(raw,item.type);
@@ -545,7 +557,7 @@ window.__qbPdfStatus = {ready:false};
 """
 
 
-def _section_headings(captured, group_mode: str = "by_type") -> dict:
+def _section_headings(captured, group_mode: str = "by_type", options: dict | None = None) -> dict:
     """每组题印什么大题标题，在 Python 这边算好再交给页面。
 
     PDF 在浏览器里分组，Word 在这里分组；标题的取舍只有一条规则
@@ -560,12 +572,36 @@ def _section_headings(captured, group_mode: str = "by_type") -> dict:
     # 先去掉空组再编号：Word 那边的序号是在过滤之后的列表上数的，
     # 这里要是先编号，缺一个题型时 PDF 会印出「三、填空题」而 Word 印「二、」。
     present = [(key, name, group) for key, name, group in groups if group]
-    return {key: word._section_heading(group, index, name) for index, (key, name, group) in enumerate(present)}
+    return {
+        key: scored_section_heading(word._section_heading(group, index, name), group, options)
+        for index, (key, name, group) in enumerate(present)
+    }
+
+
+def _score_prefixes(captured, group_mode: str = "by_type", options: dict | None = None) -> dict[str, str]:
+    if not options or not options.get("scoring_enabled"):
+        return {}
+    if group_mode == "basket_order":
+        groups = [captured]
+    else:
+        known = {key for key, _ in word.GROUPS}
+        groups = [[item for item in captured if item["type"] == key] for key, _name in word.GROUPS]
+        groups.append([item for item in captured if item["type"] not in known])
+    prefixes: dict[str, str] = {}
+    for group in groups:
+        if not group:
+            continue
+        for item in group:
+            prefix = question_score_prefix(item["id"], item["type"], group, options)
+            if prefix:
+                prefixes[item["id"]] = prefix
+    return prefixes
 
 
 def _html_document(captured, title, options):
     mode = word._effective_document(captured, options["document"])
     options = {**options, "document": mode, "answers": mode != "questions"}
+    geom = page_geometry(options)
     css, scripts = _assets(Path(settings.FRONTEND_ROOT))
     nonce = secrets.token_urlsafe(24)
     items = []
@@ -614,7 +650,9 @@ def _html_document(captured, title, options):
             "items": items,
             "title": title,
             "options": options,
-            "sectionHeadings": _section_headings(captured, options.get("group_mode", "by_type")),
+            "headerInfoText": student_header_line(captured, options),
+            "sectionHeadings": _section_headings(captured, options.get("group_mode", "by_type"), options),
+            "scorePrefixes": _score_prefixes(captured, options.get("group_mode", "by_type"), options),
         },
         ensure_ascii=False,
     )
@@ -634,8 +672,10 @@ def _html_document(captured, title, options):
         raise word.ExportError("PDF 排版资源不完整，请修复安装。", 503)
     # Measurements use fixed print width, independent of the headless viewport.
     fixed = (
-        "html,body{margin:0;background:#fff}#printSource{position:absolute;left:-20000px;top:0;width:178mm;max-width:none}"
-        "#printPaper{width:210mm;max-width:none;padding:0;box-shadow:none}"
+        f"@page{{size:{geom['page_width_mm']}mm {geom['page_height_mm']}mm;margin:0}}"
+        f"html,body{{margin:0;background:#fff}}"
+        f"#printSource{{position:absolute;left:-20000px;top:0;width:{geom['col_width_mm']}mm;max-width:none}}"
+        f"#printPaper{{width:{geom['page_width_mm']}mm;max-width:none;padding:0;box-shadow:none}}"
         # 这份文档是卷子本身，不是题库页。题库页那句「没有可打印的内容」的指引
         # （library.css 的 @media print body:not(.printing)::after）是为「用户在题库页
         # 直接按 Ctrl+P」准备的，printToPDF 按 print 媒体类型渲染，会照单全收把它
@@ -663,9 +703,19 @@ def _html_document(captured, title, options):
     )
 
 
-def _validate_pdf(data, pages):
+def _document_page_size_mm(document: str) -> tuple[int, int]:
+    match = re.search(r"@page\{size:(\d+)mm\s+(\d+)mm", document or "")
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    return 210, 297
+
+
+def _validate_pdf(data, pages, page_size_mm: tuple[int, int] | None = None):
     import pymupdf
 
+    width_mm, height_mm = page_size_mm or (210, 297)
+    expected_w = width_mm / 25.4 * 72
+    expected_h = height_mm / 25.4 * 72
     if not data.startswith(b"%PDF-") or b"%%EOF" not in data[-1024:] or len(data) > MAX_PDF_BYTES:
         raise word.ExportError("PDF 文件未完整生成，请减少选题后重试。", 422)
     try:
@@ -673,13 +723,14 @@ def _validate_pdf(data, pages):
             if result.page_count != pages or not 1 <= pages <= MAX_PAGES or result.is_encrypted:
                 raise ValueError("page count")
             for page in result:
-                if abs(page.rect.width - 210 / 25.4 * 72) > 1 or abs(page.rect.height - 297 / 25.4 * 72) > 1:
+                if abs(page.rect.width - expected_w) > 1 or abs(page.rect.height - expected_h) > 1:
                     raise ValueError("page size")
     except (ValueError, RuntimeError, pymupdf.FileDataError):
-        raise word.ExportError("PDF 页数或 A4 页面不完整，请重新打开组卷后导出。", 422) from None
+        raise word.ExportError("PDF 页数或页面尺寸不完整，请重新打开组卷后导出。", 422) from None
 
 
 def _render(document):
+    page_w, page_h = _document_page_size_mm(document)
     if not _render_lock.acquire(blocking=False):
         raise word.ExportError("另一份 PDF 正在排版，请稍后重试。", 409)
     process = client = None
@@ -730,8 +781,8 @@ def _render(document):
                         "printBackground": True,
                         "displayHeaderFooter": False,
                         "preferCSSPageSize": True,
-                        "paperWidth": 210 / 25.4,
-                        "paperHeight": 297 / 25.4,
+                        "paperWidth": page_w / 25.4,
+                        "paperHeight": page_h / 25.4,
                         "marginTop": 0,
                         "marginBottom": 0,
                         "marginLeft": 0,
@@ -739,7 +790,10 @@ def _render(document):
                     },
                 )
                 data = base64.b64decode(result.get("data", ""), validate=True)
-                _validate_pdf(data, status["page_count"])
+                if (page_w, page_h) == (210, 297):
+                    _validate_pdf(data, status["page_count"])
+                else:
+                    _validate_pdf(data, status["page_count"], page_size_mm=(page_w, page_h))
                 if any(event.get("method") == "Runtime.exceptionThrown" for event in client.events):
                     raise word.ExportError("PDF 排版发生错误，未下载不完整的试卷。", 422)
                 return data, status["page_count"]
@@ -798,6 +852,34 @@ def export(payload):
     return data, word.safe_filename(title) + ".pdf", len(ids), pages
 
 
+def _record_pdf_usage(payload) -> None:
+    raw_options = payload.get("print_options", {})
+    if not isinstance(raw_options, dict) or not raw_options.get("record_usage"):
+        return
+    from . import library_usage
+    from .models import PublishedQuestion
+
+    ids = normalize_ids(payload.get("ids"))
+    options = _print_options(raw_options, {"answer_layout": "appendix"}, ids=ids)
+    if not options.get("record_usage"):
+        return
+    title = _title(payload.get("title", "练习"))
+    total_score = None
+    if options.get("scoring_enabled"):
+        types = {
+            str(pk): qt for pk, qt in PublishedQuestion.objects.filter(id__in=ids).values_list("id", "question_type")
+        }
+        total_score = round(sum(question_score(pid, types.get(pid, ""), options) for pid in ids), 2)
+    library_usage.record_exam_export(
+        ids=ids,
+        title=title,
+        batch_key=options.get("usage_batch_key", ""),
+        paper_spec=options.get("paper_spec", "a4"),
+        total_score=total_score,
+        export_format="pdf",
+    )
+
+
 @csrf_exempt
 def export_pdf_view(request):
     if request.method != "POST":
@@ -816,6 +898,7 @@ def export_pdf_view(request):
                 "PDF 导出内容格式不正确或超过 2 MiB，请减少选题", 413 if len(request.body) > word.MAX_BODY else 400
             )
         data, filename, count, pages = export(payload)
+        _record_pdf_usage(payload)
     except RequestDataTooBig:
         return JsonResponse({"error": "导出内容超过 2 MiB，请减少选题、分批导出"}, status=413)
     except word.ExportError as error:

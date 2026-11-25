@@ -295,13 +295,19 @@
 
     report(items.length ? "正在排版…" : "试题篮是空的。", items.length ? "" : "warn");
     paper.replaceChildren();
+    const spec = window.ExamLayout?.pageSpec ? window.ExamLayout.pageSpec(options) : { paperSpec: "a4", colWidthMm: 178 };
+    paper.dataset.paperSpec = spec.paperSpec;
+    paper.dataset.colWidthMm = String(spec.colWidthMm);
     paper.style.setProperty("--exam-font-size", `${options.font_size || 12}pt`);
     paper.dataset.answerSpace = options.answer_space || "none";
     paper.dataset.document = options.document || "questions";
 
     paper.append(node("h2", "print-title", state.title || "练习"));
     if (options.student_info !== false && options.document !== "answers") {
-      paper.append(node("p", "print-info", "姓名 ____________　班级 ____________　得分 ________"));
+      const infoText = window.ExamExport?.studentHeaderText
+        ? window.ExamExport.studentHeaderText(items, options)
+        : "姓名 ____________　班级 ____________　得分 ________";
+      paper.append(node("p", "print-info", infoText));
     }
     if (!items.length) {
       post({ type: CHANNEL_RESULT, page_count: 0, warnings: [], error: "" });
@@ -322,7 +328,7 @@
     grouped.forEach(([name, group], index) => {
       if (options.document !== "answers" && name) {
         const heading = window.ExamExport && typeof window.ExamExport.sectionHeading === "function"
-          ? window.ExamExport.sectionHeading(group, index, name)
+          ? window.ExamExport.sectionHeading(group, index, name, options)
           : name;
         if (heading) paper.append(node("h3", "print-section", heading));
       }
@@ -331,12 +337,16 @@
         if (options.document !== "answers") {
           const block = node("div", "print-question");
           QB.renderQuestion(block, item.content, { number, showAnswer: "none" });
+          const scorePrefix = window.ExamExport?.questionScorePrefix
+            ? window.ExamExport.questionScorePrefix(item, group, options)
+            : "";
           const origin = item.origin || (item.content && item.content.origin);
-          if (options.origin && origin) {
-            // 原图题只建 .qb-stem，没有 .qb-stem-body。插入点必须一样，
-            // 否则这类题在屏幕上没题源、导出的卷子上有。
+          if (scorePrefix || (options.origin && origin)) {
             const stem = block.querySelector(".qb-stem-body") || block.querySelector(".qb-stem");
-            if (stem) stem.prepend(node("span", "print-origin", `（${origin}）`));
+            if (stem) {
+              if (options.origin && origin) stem.prepend(node("span", "print-origin", `（${origin}）`));
+              if (scorePrefix) stem.prepend(node("span", "print-score", scorePrefix));
+            }
           }
           block.dataset.questionId = item.id;
           block.dataset.questionType = item.question_type;
@@ -405,7 +415,11 @@
       });
 
       const warnings = Array.isArray(result.warnings) ? result.warnings : [];
-      const summary = `A4 · 共 ${result.page_count} 页 · ${items.length} 题`;
+      const specLabel = spec.paperSpec === "a3_2col" ? "A3 横向双栏" : "A4";
+      const totalLabel = options.scoring_enabled && window.ExamExport?.totalExamScore
+        ? ` · 满分 ${window.ExamExport.formatScore(window.ExamExport.totalExamScore(items, options))} 分`
+        : "";
+      const summary = `${specLabel}${spec.sealLine ? " · 镜像密封线" : ""} · 共 ${result.page_count} 页 · ${items.length} 题${totalLabel}`;
       report(warnings.length ? `${summary} · ${warnings.join(" ")}` : summary, warnings.length ? "warn" : "ok");
       post({ type: CHANNEL_RESULT, page_count: result.page_count, warnings, error: "" });
     } catch (error) {

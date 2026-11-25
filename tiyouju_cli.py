@@ -706,6 +706,8 @@ def show_upload(result: dict) -> str:
         plan = paper.get("processing_plan") or {}
         if plan.get("scan_only"):
             text += f"\n已启用仅扫描模式（scan_only）；就绪后可用 `tiyouju blocks {short(paper['id'])} --json` 或 `tiyouju pages {short(paper['id'])} --grid` 探查并切题。"
+        elif plan.get("word_direct"):
+            text += f"\n已从 Word 原件直接提取题面与答案解析，可用 `tiyouju cards {short(paper['id'])}` 对照原卷核对。"
         elif plan.get("mode") == "manual":
             text += "\n原卷已在本机准备好，可在软件中手工框题或由助手 `tiyouju pages`/`cut`；没有发起识读。"
         else:

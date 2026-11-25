@@ -237,6 +237,9 @@ def _restore_one(publication: PublishedQuestion) -> str:
     publication.status = PublishedQuestion.Status.PUBLISHED
     publication.withdrawn_at = None
     publication.save(update_fields=["status", "withdrawn_at"])
+    from . import library_similarity
+
+    library_similarity.bump_similarity_revision()
     return ""
 
 

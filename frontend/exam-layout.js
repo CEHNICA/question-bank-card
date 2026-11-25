@@ -16,6 +16,18 @@
   // 「智能」档下解答题留多少。
   const AUTO_FREE_RESPONSE = 30;
   const positions = new Set(["left", "center", "right"]);
+  function pageSpec(options = {}) {
+    const spec = options && options.paper_spec === "a3_2col" ? "a3_2col" : "a4";
+    const seal = Boolean(options && options.seal_line);
+    if (spec === "a3_2col") {
+      return seal
+        ? { paperSpec: "a3_2col", sealLine: true, pageWidthMm: 420, pageHeightMm: 297, colWidthMm: 180, bodyHeightMm: 261, columns: 2, colGapMm: 14, sealMarginMm: 30, outerMarginMm: 16 }
+        : { paperSpec: "a3_2col", sealLine: false, pageWidthMm: 420, pageHeightMm: 297, colWidthMm: 184, bodyHeightMm: 261, columns: 2, colGapMm: 16, sealMarginMm: 18, outerMarginMm: 18 };
+    }
+    return seal
+      ? { paperSpec: "a4", sealLine: true, pageWidthMm: 210, pageHeightMm: 297, colWidthMm: 168, bodyHeightMm: 261, columns: 1, colGapMm: 0, sealMarginMm: 28, outerMarginMm: 14 }
+      : { paperSpec: "a4", sealLine: false, pageWidthMm: 210, pageHeightMm: 297, colWidthMm: 178, bodyHeightMm: 261, columns: 1, colGapMm: 0, sealMarginMm: 16, outerMarginMm: 16 };
+  }
   function figureSettings(value) {
     // 老师在预览里对配图做的调整：width 是「第几张图 → 纸面上几毫米」，align 管整行
     // 靠左还是靠右，breaks 里是从下一行开始的那几张。存储层已经查过一遍，这里再收
@@ -304,12 +316,17 @@
   async function paginate(source, supplied = {}) {
     if (!source?.ownerDocument || !supplied.host) throw new Error("缺少 A4 排版容器");
     const options = normalize(supplied), host = supplied.host, doc = source.ownerDocument;
+    const spec = pageSpec(supplied);
+    const colWidthPx = spec.colWidthMm * MM, bodyHeightPx = spec.bodyHeightMm * MM;
     const warnings = [], pages = [], bodies = [];
     const measure = element(doc, "div", "exam-layout-measure print-flow");
+    measure.style.width = `${spec.colWidthMm}mm`;
     measure.style.setProperty("--exam-font-size", source.style.getPropertyValue("--exam-font-size") || "12pt");
     measure.dataset.answerSpace = source.dataset.answerSpace || "none";
     doc.body.append(measure);
-    const work = clean(source.cloneNode(true)); work.removeAttribute("id"); work.classList.remove("exam-source"); work.classList.add("print-flow"); measure.append(work);
+    const work = clean(source.cloneNode(true)); work.removeAttribute("id"); work.classList.remove("exam-source"); work.classList.add("print-flow");
+    work.style.width = `${spec.colWidthMm}mm`;
+    measure.append(work);
     try {
       // Newly inserted maths can start its font requests only when the browser
       // lays it out. Reading fonts.ready before that first layout can resolve
@@ -328,57 +345,72 @@
           try { await image.decode(); } catch { throw new Error("试卷配图未能载入，请重试"); }
         }
         if (!image.naturalWidth) throw new Error("试卷配图未能载入，请重试");
-        // Match Word's natural 150 dpi size, capped to printable bounds. This is
-        // independent of remaining space and never changes library thumbnails.
-        // A width the teacher typed into the preview replaces the 150 dpi term
-        // rather than scaling it: the number they typed is millimetres on paper.
+        // Match Word's natural 150 dpi size, capped to printable bounds.
         const chosenWidth = Number(image.dataset.figureWidth) || Number(image.dataset.solutionWidth);
-        const imageScale = Math.min(chosenWidth > 0 ? Math.max(5, Math.min(178, chosenWidth)) * MM / image.naturalWidth : 96 / 150,
+        const imageScale = Math.min(chosenWidth > 0 ? Math.max(5, Math.min(chosenWidth, 178)) * MM / image.naturalWidth : 96 / 150,
           BODY_WIDTH / image.naturalWidth, 210 * MM / image.naturalHeight);
-        image.style.width = `${image.naturalWidth * imageScale}px`;
-        // 写死像素高度，不要交给 "auto"：图片是 atomic 块（不可切分），
-        // 只要布局那一刻它还没拿到内在尺寸，量出来就是 0 高，
-        // 整块图会被当成不占地方 → 卷面糊出页面、页数还少一页。
-        image.style.height = `${Math.max(1, Math.round(image.naturalHeight * imageScale))}px`;
+        const colScale = Math.min(imageScale, colWidthPx / image.naturalWidth);
+        image.style.width = `${image.naturalWidth * colScale}px`;
+        image.style.height = `${Math.max(1, Math.round(image.naturalHeight * colScale))}px`;
       }));
       work.querySelectorAll(".print-question").forEach(question => {
         alignQuestionNumber(question);
         fitOptions(question, options, warnings);
       });
       const formulaOverflow = fitFormulas(work);
-      if (formulaOverflow) warnings.push(`${formulaOverflow} 处公式超出 A4 正文，请调整字号或导出 Word 继续排版。`);
+      if (formulaOverflow) warnings.push(`${formulaOverflow} 处公式超出正文宽度，请调整字号或导出 Word 继续排版。`);
       work.querySelectorAll("table").forEach((table, index) => { table.dataset.examTable = String(index); });
-      // Strip tools from measurements; preview actions are overlaid afterwards.
-      const probe = element(doc, "div", "exam-layout-probe"); measure.append(probe);
-      let body, used = 0;
-      function newPage() {
+      const probe = element(doc, "div", "exam-layout-probe");
+      probe.style.width = `${spec.colWidthMm}mm`;
+      measure.append(probe);
+      let body, used = 0, sheetCols = [], colIndex = 0;
+      function newSheet() {
         const page = element(doc, "article", "exam-page");
+        if (spec.columns === 2) page.classList.add("is-a3-2col");
+        page.dataset.pageWidthMm = String(spec.pageWidthMm);
+        page.dataset.colWidthMm = String(spec.colWidthMm);
         page.style.setProperty("--exam-font-size", measure.style.getPropertyValue("--exam-font-size"));
         page.dataset.answerSpace = measure.dataset.answerSpace;
-        body = element(doc, "div", "exam-page-body"); page.append(body);
-        pages.push(page); bodies.push(body); used = 0;
+        if (spec.columns === 2) {
+          const colsWrap = element(doc, "div", "exam-sheet-columns");
+          const leftCol = element(doc, "div", "exam-page-body exam-col");
+          const rightCol = element(doc, "div", "exam-page-body exam-col");
+          colsWrap.append(leftCol, rightCol);
+          page.append(colsWrap);
+          sheetCols = [leftCol, rightCol];
+          colIndex = 0;
+          body = leftCol;
+          bodies.push(leftCol, rightCol);
+        } else {
+          body = element(doc, "div", "exam-page-body");
+          page.append(body);
+          sheetCols = [body];
+          colIndex = 0;
+          bodies.push(body);
+        }
+        pages.push(page);
+        used = 0;
+      }
+      function newPage() {
+        if (spec.columns === 2 && colIndex === 0 && sheetCols[1]) {
+          colIndex = 1;
+          body = sheetCols[1];
+          used = 0;
+          return;
+        }
+        newSheet();
       }
       function height(node) { probe.replaceChildren(node); return outerHeight(node); }
       function add(node, h) { body.append(node); used += h; }
       function atomic(node) {
         const h = height(node);
-        if (h > BODY_HEIGHT + 1) throw new Error(`${describe(node)}有图表或公式高于一页 A4，请调整字号或导出 Word 排版`);
-        if (used && used + h > BODY_HEIGHT + .5) newPage();
+        if (h > bodyHeightPx + 1) throw new Error(`${describe(node)}有图表或公式高于一页 A4，请调整字号或导出 Word 排版`);
+        if (used && used + h > bodyHeightPx + .5) newPage();
         add(node, h);
       }
-      newPage();
+      newSheet();
       let pending = [], hasQuestion = false;
       function writingSpace(blank, question) {
-        // Writing space is divisible; moving an entire 60 mm blank block left
-        // otherwise usable page bottoms empty and created blank continuation
-        // sheets. Keep the requested total, using the current page first.
-        // A remainder thinner than one text line is not writing space: the
-        // fragment is invisible on paper (the real sample is 胜利初四月考 第 22
-        // 题, 1 mm left at the foot of page 6) yet still forces a
-        // 「第 N 题答题区（续）」 heading on the next page, where the student then
-        // writes the whole thing. Below this, leave the sliver at the page foot
-        // and move the whole block down instead: 20 mm is about five text lines,
-        // so the abandoned strip costs less than the unusable fragment saves.
         const MIN_WRITABLE = 76;
         let remaining = height(blank.cloneNode(true));
         while (remaining > .01) {
@@ -391,7 +423,7 @@
             owner.append(element(doc, "div", "exam-continuation-label", `第 ${number} 题答题区（续）`));
           }
           const previousHeight = height(owner.cloneNode(true));
-          const available = BODY_HEIGHT - used - (existing ? 0 : previousHeight);
+          const available = bodyHeightPx - used - (existing ? 0 : previousHeight);
           if (available < MIN_WRITABLE) { newPage(); continue; }
           const allocated = Math.min(remaining, available);
           const piece = blank.cloneNode(false);
@@ -406,7 +438,7 @@
       }
       function compose(node, forceBreak = false) {
         const blank = node.matches(".print-question") && Array.from(node.children).find(child => child.matches(".print-answer-space"));
-        if (blank && (options.pagination === "compact" || height(node.cloneNode(true)) > BODY_HEIGHT + .5)) {
+        if (blank && (options.pagination === "compact" || height(node.cloneNode(true)) > bodyHeightPx + .5)) {
           blank.remove();
           compose(node, forceBreak);
           writingSpace(blank, node);
@@ -414,13 +446,13 @@
         }
         const h = height(node.cloneNode(true));
         const pendingHeight = pending.reduce((sum, heading) => sum + height(heading.cloneNode(true)), 0);
-        const full = !node.matches(".print-answer-row") && keepWhole(h, BODY_HEIGHT - pendingHeight, options.pagination);
+        const full = !node.matches(".print-answer-row") && keepWhole(h, bodyHeightPx - pendingHeight, options.pagination);
         const minimum = full ? h : Math.min(h, 62);
-        if (used && (forceBreak || used + pendingHeight + minimum > BODY_HEIGHT + .5)) newPage();
+        if (used && (forceBreak || used + pendingHeight + minimum > bodyHeightPx + .5)) newPage();
         pending.forEach(heading => atomic(heading)); pending = [];
-        if (h <= BODY_HEIGHT - used + .5) { add(node, h); return; }
+        if (h <= bodyHeightPx - used + .5) { add(node, h); return; }
         probe.replaceChildren(node);
-        const points = boundaries(node, BODY_HEIGHT);
+        const points = boundaries(node, bodyHeightPx);
         let start = 0, continued = false;
         while (start < points.length - 1) {
           let low = start + 1, high = points.length - 1, best = start, bestHeight = 0;
@@ -428,7 +460,7 @@
             const middle = Math.floor((low + high) / 2);
             const piece = fragment(node, points, start, middle, continued);
             const size = height(piece);
-            if (size <= BODY_HEIGHT - used + .5) { best = middle; bestHeight = size; low = middle + 1; }
+            if (size <= bodyHeightPx - used + .5) { best = middle; bestHeight = size; low = middle + 1; }
             else high = middle - 1;
           }
           if ((best === start || (!continued && bestHeight < 42)) && used) { newPage(); continue; }
@@ -455,38 +487,52 @@
         else atomic(node.cloneNode(true));
       });
       if (pending.length) warnings.push("分区标题后没有题目，已省略空分区。");
-      // Never emit an empty trailing sheet.
-      while (pages.length > 1 && !bodies.at(-1).children.length) { pages.pop(); bodies.pop(); }
+      while (pages.length > 1 && !Array.from(pages.at(-1).querySelectorAll(".exam-page-body")).some(col => col.children.length > 0)) {
+        pages.pop();
+      }
       pages.forEach((page, index) => {
         page.dataset.page = String(index + 1);
         page.setAttribute("aria-label", `第 ${index + 1} 页，共 ${pages.length} 页`);
+        if (spec.sealLine && supplied.document !== "answers") {
+          const isLeft = index % 2 === 0;
+          page.classList.add(isLeft ? "has-seal-left" : "has-seal-right");
+          const seal = element(doc, "aside", "exam-seal-band");
+          seal.setAttribute("aria-hidden", "true");
+          seal.append(
+            element(doc, "div", "exam-seal-fields", "学校 __________　班级 __________　姓名 __________　考号 __________"),
+            element(doc, "div", "exam-seal-cut", "密　　封　　线　　内　　不　　要　　答　　题")
+          );
+          page.prepend(seal);
+        }
         page.append(element(doc, "footer", "exam-page-number", `第 ${index + 1} 页 / 共 ${pages.length} 页${countText ? ` · ${countText}` : ""}`));
       });
       host.replaceChildren(...pages);
       host.dataset.pageCount = String(pages.length);
+      host.dataset.paperSpec = spec.paperSpec;
+      host.dataset.colWidthMm = String(spec.colWidthMm);
       scale(host);
-      return { page_count: pages.length, pages, warnings: [...new Set(warnings)], formula_overflow: formulaOverflow };
+      return { page_count: pages.length, pages, warnings: [...new Set(warnings)], formula_overflow: formulaOverflow, paper_spec: spec.paperSpec };
     } finally { measure.remove(); }
   }
   function scale(host) {
-    const available = host.clientWidth || PAGE_WIDTH;
-    const factor = Math.min(1, available / PAGE_WIDTH);
+    const firstPage = host.querySelector(".exam-page");
+    const defaultPageW = (Number(firstPage?.dataset.pageWidthMm) || 210) * MM;
+    const available = host.clientWidth || defaultPageW;
+    const factor = Math.min(1, available / defaultPageW);
     host.style.setProperty("--exam-scale", String(factor));
     host.querySelectorAll(".exam-page").forEach(page => {
-      // CSS zoom recalculates glyph advances and line boxes, so a scaled
-      // preview can wrap differently from the full-size PDF. Transform keeps
-      // the exact A4 layout; a frame reserves only its visible dimensions.
+      const pageWidthPx = (Number(page.dataset.pageWidthMm) || 210) * MM;
       let frame = page.parentElement;
       if (!frame?.classList.contains("exam-page-frame")) {
         frame = element(page.ownerDocument, "div", "exam-page-frame");
         page.before(frame); frame.append(page);
       }
-      frame.style.width = `${PAGE_WIDTH * factor}px`;
+      frame.style.width = `${pageWidthPx * factor}px`;
       frame.style.height = `${297 * MM * factor}px`;
       page.style.zoom = "1";
       page.style.transform = `scale(${factor})`;
     });
     return factor;
   }
-  return { paginate, scale, normalize, keepWhole, requestedColumns, answerSpace, answerSpaceMm, spaceMm, normalizeSpace, alignQuestionNumber, fitFormulas, applyFigureOverrides, figureSettings, PAGE_WIDTH, BODY_WIDTH, BODY_HEIGHT, SPACE_MAX, FREE_RESPONSE_MIN, AUTO_FREE_RESPONSE };
+  return { paginate, scale, normalize, pageSpec, keepWhole, requestedColumns, answerSpace, answerSpaceMm, spaceMm, normalizeSpace, alignQuestionNumber, fitFormulas, applyFigureOverrides, figureSettings, PAGE_WIDTH, BODY_WIDTH, BODY_HEIGHT, SPACE_MAX, FREE_RESPONSE_MIN, AUTO_FREE_RESPONSE };
 });

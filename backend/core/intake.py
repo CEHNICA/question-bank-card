@@ -10,7 +10,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from . import imaging, native_pdf, segment, source_images
+from . import figure_policy, imaging, native_pdf, qtypes, segment, source_images, tables, word
 from .models import Block, Paper, Question, QuestionGroup, RegionRead
 
 MODES = {"auto", "manual", "native", "mineru"}
@@ -107,9 +107,260 @@ def _native_segmentation_review(result: dict, blocks: list[dict]) -> tuple[list[
     return diagnostics, flags, list(dict.fromkeys(messages))
 
 
+def _prepare_word_direct(paper: Paper) -> Paper:
+    """Word (.docx / .doc) 双轨直读：直接提取题面/公式/表格/配图/答案，并准备原貌或 HTML 兜底核验证据。"""
+    folder = Path(settings.DATA_ROOT) / str(paper.pk)
+    prepared = word.prepare_word_sources(Path(paper.source_path), folder, pdf_target=folder / "converted.pdf")
+    paper.render_path = str(prepared["pdf_path"])
+    source, kind, digest = source_images.source_identity(paper)
+    paper.pages = imaging.page_sizes(source, kind)
+    if not paper.pages:
+        raise ValueError("原文件没有有效页面")
+
+    plan = deepcopy(paper.processing_plan or {})
+    revision = int(plan.get("revision", 0)) + 1
+    extracted = prepared["extracted"]
+    evidence_source = prepared["evidence_source"]
+    plan.update(
+        {
+            "schema": 1,
+            "revision": revision,
+            "mode": "native",
+            "word_direct": True,
+            "evidence_source": evidence_source,
+            "evidence_app": prepared["evidence_app"],
+            "render_sha256": digest,
+        }
+    )
+    if plan.get("auto_material_type") and len(paper.pages) >= 40:
+        paper.material_type = Paper.MaterialType.BOOK
+
+    mapped_pdf = word.map_word_questions_to_pdf(extracted["questions"], source, paper.pages)
+    plan["pages"] = mapped_pdf["pages"] or [
+        {"page_idx": p["page_idx"], "mode": "native", "warnings": []} for p in paper.pages
+    ]
+    warnings: list[str] = list(plan.get("warnings") or [])
+    if evidence_source == "html_fallback":
+        warnings.append(
+            "本机未检测到 Microsoft Word 或 WPS，已生成本地排版还原预览供核对；题面、公式与配图均由原件直接提取。"
+        )
+    warnings.extend(extracted.get("warnings") or [])
+
+    if paper.material_type == Paper.MaterialType.BOOK:
+        plan.update(mode="manual", word_direct=False, native_book_fallback=True, fallback_reason=BOOK_MANUAL_REASON)
+        plan["pages"] = [{**page, "mode": "manual"} for page in plan["pages"]]
+        plan["warnings"] = list(dict.fromkeys(warnings))
+        with transaction.atomic():
+            locked = Paper.objects.select_for_update().get(pk=paper.pk)
+            if locked.questions.exists() or locked.blocks.exists():
+                raise ValueError("已有题卡或解析结果，请选择转手工；现有成果不会重新覆盖。")
+            paper.processing_plan = plan
+            paper.status, paper.error = Paper.Status.READY, ""
+            paper.save(
+                update_fields=[
+                    "processing_plan",
+                    "render_path",
+                    "pages",
+                    "material_type",
+                    "status",
+                    "error",
+                    "updated_at",
+                ]
+            )
+            QuestionGroup.objects.create(
+                paper=paper,
+                title=paper.display_name,
+                kind=QuestionGroup.Kind.OTHER,
+                sequence=0,
+                page_start=1,
+                page_end=len(paper.pages),
+                metadata={"pages": list(range(len(paper.pages))), "source": "manual"},
+            )
+            if mapped_pdf["blocks"]:
+                Block.objects.bulk_create([Block(paper=paper, **b) for b in mapped_pdf["blocks"]], batch_size=300)
+        return paper
+
+    fig_dir = folder / "word-figures"
+    sol_fig_dir = folder / "word-solution-figures"
+    parsed_questions = extracted["questions"]
+    distinct_group_indices = sorted({int(q["group_idx"]) for q in parsed_questions}) or [0]
+
+    with transaction.atomic():
+        locked = Paper.objects.select_for_update().get(pk=paper.pk)
+        if locked.questions.exists() or locked.blocks.exists():
+            raise ValueError("已有题卡或解析结果，请选择转手工；现有成果不会重新覆盖。")
+        plan["warnings"] = list(dict.fromkeys(warnings))
+        paper.processing_plan = plan
+        paper.notes = list(dict.fromkeys([*(paper.notes or []), *warnings]))
+        paper.status, paper.error = Paper.Status.READY, ""
+        paper.save(
+            update_fields=[
+                "processing_plan",
+                "render_path",
+                "pages",
+                "material_type",
+                "notes",
+                "status",
+                "error",
+                "updated_at",
+            ]
+        )
+        if mapped_pdf["blocks"]:
+            Block.objects.bulk_create([Block(paper=paper, **b) for b in mapped_pdf["blocks"]], batch_size=300)
+
+        groups_by_idx: dict[int, QuestionGroup] = {}
+        for seq_no, g_idx in enumerate(distinct_group_indices):
+            sec_titles = [q["section"] for q in parsed_questions if q["group_idx"] == g_idx and q.get("section")]
+            g_title = (
+                sec_titles[0][:255] if (len(distinct_group_indices) > 1 and sec_titles) else paper.display_name[:255]
+            )
+            groups_by_idx[g_idx] = QuestionGroup.objects.create(
+                paper=paper,
+                title=g_title,
+                kind=QuestionGroup.Kind.EXAM,
+                sequence=seq_no,
+                page_start=1,
+                page_end=len(paper.pages),
+                metadata={"pages": list(range(len(paper.pages))), "source": "word"},
+            )
+
+        for idx, q_data in enumerate(parsed_questions):
+            m_info = mapped_pdf["mapped"][idx]
+            regions = m_info["regions"]
+            candidates = m_info["candidates"]
+            group = groups_by_idx[int(q_data["group_idx"])]
+
+            saved_figs: list[dict] = []
+            for f_idx, raw_fig in enumerate(q_data["figures"][:20]):
+                fig_bytes = raw_fig.get("bytes")
+                sha = raw_fig.get("sha256")
+                if not isinstance(fig_bytes, bytes) or not isinstance(sha, str):
+                    continue
+                fig_dir.mkdir(parents=True, exist_ok=True)
+                fname = f"fig_{sha[:24]}.png"
+                target_fig = fig_dir / fname
+                if not target_fig.is_file():
+                    target_fig.write_bytes(fig_bytes)
+                if f_idx < len(candidates):
+                    f_page = candidates[f_idx]["page_idx"]
+                    f_bbox = list(candidates[f_idx]["bbox"])
+                else:
+                    r0 = regions[0]
+                    f_page = r0["page_idx"]
+                    ry0, ry1 = float(r0["bbox"][1]), float(r0["bbox"][3])
+                    band = max(12.0, min(120.0, (ry1 - ry0) * 0.4))
+                    f_bbox = [
+                        round(float(r0["bbox"][0]) + 10.0, 1),
+                        round(max(ry0, ry1 - band), 1),
+                        round(min(960.0, float(r0["bbox"][2]) - 10.0), 1),
+                        round(ry1, 1),
+                    ]
+                saved_figs.append(
+                    {
+                        "slot": raw_fig.get("slot") or "stem",
+                        "page_idx": f_page,
+                        "bbox": f_bbox,
+                        "source": "manual",
+                        "word_asset": fname,
+                    }
+                )
+
+            sol_fig_specs: list[dict] = []
+            for raw_sol in q_data["solution_images"][:24]:
+                s_bytes = raw_sol.get("bytes")
+                s_sha = raw_sol.get("sha256")
+                if not isinstance(s_bytes, bytes) or not isinstance(s_sha, str):
+                    continue
+                sol_fig_dir.mkdir(parents=True, exist_ok=True)
+                sfname = f"sol_{s_sha[:24]}.png"
+                target_sol = sol_fig_dir / sfname
+                if not target_sol.is_file():
+                    target_sol.write_bytes(s_bytes)
+                sol_fig_specs.append(
+                    {"file": sfname, "sha256": s_sha, "width": int(raw_sol["width"]), "height": int(raw_sol["height"])}
+                )
+
+            qtype = q_data["question_type"]
+            stem = q_data["stem"]
+            options = q_data["options"]
+            flags = list(q_data["flags"])
+            flags = qtypes.with_flag(flags, qtype)
+            if qtypes.fill_blank_without_slot(qtype, stem) and qtypes.FLAG_FILL_NO_SLOT not in flags:
+                flags.append(qtypes.FLAG_FILL_NO_SLOT)
+
+            has_table = tables.has_table(stem)
+            cand_assignments = {str(c["label"]): ("table" if has_table else "decoration") for c in candidates}
+            read_record: dict = {
+                "engine": "word_direct",
+                "stem": stem,
+                "options": options,
+                "type": qtype,
+                "figures": cand_assignments,
+            }
+            if sol_fig_specs:
+                read_record["solution_figures"] = sol_fig_specs
+
+            question = Question(
+                paper=paper,
+                group=group,
+                number=int(q_data["number"]),
+                section=q_data["section"],
+                question_type=qtype,
+                regions=regions,
+                regions_auto=regions,
+                start_source="word",
+                body_mode="text",
+                processing_mode="auto",
+                stem=stem,
+                options=options,
+                origin=q_data["origin"],
+                answer=q_data["answer"],
+                analysis=q_data["analysis"],
+                figures=saved_figs,
+                figure_candidates=candidates,
+                read_a=read_record,
+                text_source="word",
+                state=Question.State.GREEN,
+                flags=flags,
+                source_anchor_seq=m_info["anchor_seq"],
+            )
+            if saved_figs:
+                question.figure_review = {
+                    "status": figure_policy.OK,
+                    "source": "human",
+                    "reason": "Word 原件内嵌配图直读绑定",
+                }
+            else:
+                fig_rev = figure_policy.stored_or_derived_review(question)
+                question.figure_review = fig_rev
+                if figure_policy.blocks_approval(fig_rev) and figure_policy.FLAG_NO_FIGURE not in question.flags:
+                    question.flags.append(figure_policy.FLAG_NO_FIGURE)
+
+            question.flags = list(dict.fromkeys(question.flags))
+            question.state = (
+                Question.State.YELLOW
+                if (question.flags or figure_policy.blocks_approval(question.figure_review))
+                else Question.State.GREEN
+            )
+            question.save()
+
+        paper.total = paper.questions.count()
+        paper.progress = paper.total
+        paper.save(update_fields=["total", "progress", "updated_at"])
+    return paper
+
+
 def prepare(paper: Paper, mode: str) -> Paper:
     if mode not in {"manual", "native"}:
         raise ValueError("请选择手工框题或本地文字 PDF")
+    plan_initial = paper.processing_plan or {}
+    if (
+        paper.kind == "docx"
+        and mode == "native"
+        and not plan_initial.get("cut_only")
+        and not plan_initial.get("scan_only")
+    ):
+        return _prepare_word_direct(paper)
     # Reuse only local rendering/conversion, never pipeline.parse.
     from .pipeline import convert_docx_to_pdf, prepare_photos
 
@@ -270,6 +521,8 @@ def prepare_auto(paper: Paper, *, allow_cloud: bool = False, cloud_ready: bool =
 
     try:
         prepare(paper, "native")
+    except word.WordConversionError:
+        raise
     except Exception:
         # A damaged text layer or failed segmentation must not make a valid
         # locally viewable original dependent on cloud service recovery.
@@ -283,7 +536,11 @@ def prepare_auto(paper: Paper, *, allow_cloud: bool = False, cloud_ready: bool =
         plan = deepcopy(paper.processing_plan or {})
         plan.update(requested_mode="auto", cloud_authorized=bool(allow_cloud), auto_fallback=True)
         if paper.questions.exists():
-            plan["fallback_reason"] = "已从本地文字层准备题卡，请对照原卷核对；未切出的页面可手工补充。"
+            plan["fallback_reason"] = (
+                "已从 Word 原件直接提取题面、公式、配图与答案解析，请对照原卷核对。"
+                if plan.get("word_direct")
+                else "已从本地文字层准备题卡，请对照原卷核对；未切出的页面可手工补充。"
+            )
         elif plan.get("scan_only") and paper.blocks.exists():
             # scan_only 模式提取完本地版面块后直接停留 READY，由外部助手自主探查并切题。
             plan["mode"] = "native"

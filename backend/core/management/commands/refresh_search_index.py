@@ -16,7 +16,7 @@ import sys
 
 from django.core.management.base import BaseCommand
 
-from core import library
+from core import library, library_fts
 from core.models import PublishedQuestion
 
 # 老卡片的快照里可能缺字段，补齐再算，免得算一半报错。
@@ -70,8 +70,13 @@ class Command(BaseCommand):
             return
 
         if options.get("apply"):
+            synced = []
             for publication, fresh in changed:
                 PublishedQuestion.objects.filter(pk=publication.pk).update(search_text=fresh)
+                publication.search_text = fresh
+                publication.status = PublishedQuestion.Status.PUBLISHED
+                synced.append(publication)
+            library_fts.upsert_publications(synced)
             self.stdout.write(f"已更新 {len(changed)} 张卡的搜索索引（题干、答案、图片未动）。")
             return
 

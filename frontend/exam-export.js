@@ -221,8 +221,8 @@
   // 自己判断不了，只能照这里量好的位置摆。
   function measureTableOffsets(paper) {
     const offsets = {};
-    // 正文栏（.print-flow / .exam-page-body）是 178 毫米宽的一条。
-    const columnWidthMm = 178;
+    // 正文栏（.print-flow / .exam-page-body）可能是 A4 (178/168mm) 或 A3 双栏 (184/180mm)。
+    const columnWidthMm = Number(paper?.dataset?.colWidthMm) || 178;
     const measure = (table) => {
       const column = table.closest(".exam-page-body, .print-flow");
       if (!column) return null;
@@ -358,16 +358,87 @@
     return locator.sectionLabel(section);
   }
 
-  function sectionHeading(group, index, name) {
+  const DEFAULT_TYPE_SCORES = Object.freeze({
+    single_choice: 5,
+    multiple_choice: 6,
+    fill_blank: 5,
+    true_false: 3,
+    free_response: 12,
+    other: 5
+  });
+
+  function cleanScore(value) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0.5 || value > 200) return null;
+    const rounded = Math.round(value * 2) / 2;
+    return rounded >= 0.5 ? rounded : null;
+  }
+
+  function formatScore(value) {
+    if (Math.abs(value - Math.round(value)) < 1e-6) return String(Math.round(value));
+    return Number(value).toFixed(1).replace(/\.0+$/, "");
+  }
+
+  function questionScore(item, options = {}) {
+    const id = String(item?.id || "");
+    const qType = String(item?.question_type || item?.type || "other");
+    const qScores = options?.question_scores || {};
+    if (Object.hasOwn(qScores, id)) {
+      const cleaned = cleanScore(Number(qScores[id]));
+      if (cleaned !== null) return cleaned;
+    }
+    const tScores = options?.type_scores || {};
+    if (Object.hasOwn(tScores, qType)) {
+      const cleaned = cleanScore(Number(tScores[qType]));
+      if (cleaned !== null) return cleaned;
+    }
+    if (!Object.hasOwn(DEFAULT_TYPE_SCORES, qType) && Object.hasOwn(tScores, "other")) {
+      const cleaned = cleanScore(Number(tScores.other));
+      if (cleaned !== null) return cleaned;
+    }
+    return Object.hasOwn(DEFAULT_TYPE_SCORES, qType) ? DEFAULT_TYPE_SCORES[qType] : DEFAULT_TYPE_SCORES.other;
+  }
+
+  function totalExamScore(items, options = {}) {
+    return (items || []).reduce((sum, item) => sum + questionScore(item, options), 0);
+  }
+
+  function studentHeaderText(items, options = {}) {
+    if (!options?.scoring_enabled) return "姓名 ____________　班级 ____________　得分 ________";
+    const total = totalExamScore(items, options);
+    const dur = Number.isInteger(options.exam_duration_minutes) && options.exam_duration_minutes > 0 ? options.exam_duration_minutes : 0;
+    const parts = ["班级 ____________", "姓名 ____________", "考号 ____________"];
+    if (dur > 0) parts.push(`考试时间：${dur} 分钟`);
+    parts.push(`满分：${formatScore(total)} 分`);
+    return parts.join("　");
+  }
+
+  function sectionHeading(group, index, name, options = {}) {
     if (!name) return "";
     const sections = new Set((group || [])
       .map((item) => String(item && item.content && item.content.section || "").trim())
       .filter(Boolean));
+    let base = "";
     if (sections.size === 1) {
       const label = shortSectionLabel([...sections][0]);
-      if (label) return label;
+      if (label) base = label;
     }
-    return `${PAPER_SECTION_NAMES[index] || index + 1}、${name}`;
+    if (!base) base = `${PAPER_SECTION_NAMES[index] || index + 1}、${name}`;
+    if (!options?.scoring_enabled || !Array.isArray(group) || !group.length) return base;
+    const scores = group.map(item => questionScore(item, options));
+    const subtotal = scores.reduce((a, b) => a + b, 0);
+    const uniform = new Set(scores).size === 1;
+    return uniform
+      ? `${base}（共 ${group.length} 小题，每小题 ${formatScore(scores[0])} 分，共 ${formatScore(subtotal)} 分）`
+      : `${base}（共 ${group.length} 小题，共 ${formatScore(subtotal)} 分）`;
+  }
+
+  function questionScorePrefix(item, group, options = {}) {
+    if (!options?.scoring_enabled) return "";
+    const score = questionScore(item, options);
+    const qType = String(item?.question_type || item?.type || "other");
+    if (options.group_mode === "basket_order" || qType === "free_response") return `（${formatScore(score)} 分）`;
+    const distinct = new Set((group || []).map(g => questionScore(g, options)));
+    return distinct.size > 1 ? `（${formatScore(score)} 分）` : "";
   }
 
   async function download(items, { title, print_options, solutions, format = "docx", preview_page_count } = {}) {
@@ -457,6 +528,9 @@
         .filter(([id, value]) => selectedIds.has(id)
           && (["none", "small", "medium", "large", "auto"].includes(value)
             || (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 200))));
+      if (options.question_scores) options.question_scores = Object.fromEntries(Object.entries(options.question_scores)
+        .filter(([id, value]) => selectedIds.has(id) && cleanScore(Number(value)) !== null)
+        .map(([id, value]) => [id, cleanScore(Number(value))]));
       const fixedSolutions = Object.fromEntries(Object.entries(solutions || {}).filter(([id, revision]) => selectedIds.has(id) && typeof revision === "string" && revision));
       // The PDF the teacher checked on screen is the PDF they get. Send the page
       // count the preview settled on so the server can refuse a file that would
@@ -507,5 +581,6 @@
   }
 
   return Object.freeze({ serializeField, serializeFields, selectedAnswer, fileName, paperGroups, paperOrder,
-    shortSectionLabel, sectionHeading, download, previewPaper, fillMeasured, measureOptionColumns, measureFigureWidths });
+    shortSectionLabel, sectionHeading, DEFAULT_TYPE_SCORES, formatScore, questionScore, totalExamScore,
+    studentHeaderText, questionScorePrefix, download, previewPaper, fillMeasured, measureOptionColumns, measureFigureWidths });
 });

@@ -533,6 +533,9 @@ def _sync_projection(publication_id):
     PublishedQuestion.objects.filter(pk=publication.pk).update(
         extras=extras, tags_text=publication.tags_text, search_text=publication.search_text
     )
+    from . import library_fts
+
+    library_fts.upsert_publication(publication.pk, publication.search_text, publication.status)
 
 
 def _reindex_tag_name(tag):
