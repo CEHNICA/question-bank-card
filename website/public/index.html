@@ -78,12 +78,20 @@
     <main>
       <section class="hero">
         <div class="container hero-grid">
-          <div>
-            <div class="eyebrow">Windows 10 / 11 · 本地优先 · 开源免费</div>
+          <div class="hero-copy">
+            <div class="hero-brand">
+              <img src="assets/app-icon.png?v=2" alt="题有据图标" />
+              <span class="hero-brand-name">题有据 TiYouJu</span>
+            </div>
+            <p class="hero-kicker">Windows 10 / 11 · 本地优先 · AGPL-3.0 开源免费</p>
             <h1>把零散试卷，<br />变成<span class="accent">你的私家题库。</span></h1>
             <p class="hero-sub">
               Word / PDF / 拍照题直收本机，每道题都留原卷出处，随时一键组卷导出。离线查重、万题秒搜到 A4 / A3 双栏试卷，<strong>题库与原卷始终留在自己电脑上</strong>。
             </p>
+            <ul class="hero-points">
+              <li>免 OCR 直读 · 毫秒级离线查重 · 8 层目录万题秒搜</li>
+              <li>分节赋分 · A4 / A3 双栏密封线 · 题库始终留在本机</li>
+            </ul>
             <div class="hero-cta">
               <a
                 class="btn btn-primary"
@@ -128,29 +136,30 @@
               <span class="trust-pill">AGPL-3.0 开源免费</span>
               <span class="trust-pill">不用 API 密钥也能先练</span>
             </div>
+            <p class="hero-domain">tiyouju.com</p>
           </div>
-
-          <figure class="shot-frame shot-frame--hero">
-            <div class="shot-toolbar">
-              <span class="shot-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-              <span class="shot-toolbar-title">逐题核对工作台 · 左侧原卷对照，右侧整理入库</span>
-              <span class="shot-toolbar-tip">点击图片放大</span>
-            </div>
-            <button
-              type="button"
-              class="shot-trigger"
-              data-zoom-src="assets/review-workspace.webp"
-              data-zoom-caption="逐题核对工作台：左侧保留真实原卷与手写痕迹，右侧核对题面、公式与配图，核验后一键入库。"
-              aria-label="放大查看逐题核对工作台截图"
-            >
-              <img src="assets/review-workspace.webp" alt="题有据逐题核对工作台界面" />
-            </button>
-            <figcaption class="shot-status">
-              <span>本地题库 · 1,284 题</span>
-              <span>离线可用</span>
-            </figcaption>
-          </figure>
         </div>
+
+        <figure class="shot-frame shot-frame--hero">
+          <div class="shot-toolbar">
+            <span class="shot-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="shot-toolbar-title">逐题核对工作台 · 左侧原卷对照，右侧整理入库</span>
+            <span class="shot-toolbar-tip">点击图片放大</span>
+          </div>
+          <button
+            type="button"
+            class="shot-trigger"
+            data-zoom-src="assets/review-workspace.webp"
+            data-zoom-caption="逐题核对工作台：左侧保留真实原卷与手写痕迹，右侧核对题面、公式与配图，核验后一键入库。"
+            aria-label="放大查看逐题核对工作台截图"
+          >
+            <img src="assets/review-workspace.webp" alt="题有据逐题核对工作台界面" />
+          </button>
+          <figcaption class="shot-status">
+            <span>本地题库 · 1,284 题</span>
+            <span>离线可用</span>
+          </figcaption>
+        </figure>
       </section>
 
       <section class="section" id="workflow">

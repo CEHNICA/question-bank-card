@@ -162,3 +162,37 @@ npx wrangler deploy
 
 推 GitHub 前同样需要清代理 —— 253KB 级 PNG 走代理会被掐断
 （`RPC failed; curl 56 Recv failure`）。
+
+---
+
+## 9. 首屏改版：OG 图构图（2026-11-26 第二轮）
+
+用户指认 `assets/og-cover.png`（分享卡片）为设计稿，要求「重新设计一个界面」。
+OG 图的构图特征与落地方式：
+
+| OG 图特征 | 官网落地 |
+| --- | --- |
+| 实拍截图满幅出血，不是缩在卡片里 | `.shot-frame--hero` 改成 `position:absolute; inset:0`，`img` 用 `object-fit:cover` 铺满首屏 |
+| 左侧实心深绿压板，向右渐隐 | `::after` 叠两层渐变：横向实心→透明，纵向压暗；`pointer-events:none` 保证右侧露出区仍可点开放大 |
+| 截图整体压暗融进深色 | `filter: brightness(0.7) saturate(0.82) contrast(1.04)`，白色纸面不再刺眼 |
+| 品牌行（图标 + 站名） | 新增 `.hero-brand` |
+| 小字副标 | `.hero-kicker`（「Windows 10 / 11 · 本地优先 · AGPL-3.0 开源免费」） |
+| 两行功能要点 | 新增 `.hero-points`（翠绿菱形标记） |
+| 底部金色域名 | 新增 `.hero-domain`（`tiyouju.com`） |
+| 首屏整版只有一块内容 | `.hero-grid` 由两栏 grid 改成单栏窄栏（640px），文案压在背景上 |
+
+### 保持不变的东西
+
+- `app.js` 一行不改。放大功能靠 `[data-zoom-src]` 通用绑定，首屏
+  `.shot-trigger` 保留该属性 → 露出区点击照常开灯箱。
+- 17 个关键 id、`.tab-btn` / `.thumb-btn` / `.shot-trigger` / `.is-active`
+  class、`data-*` 属性、SEO 标签全部不动。
+- 原文案零丢失：`tools/check_hero_copy.py` 以 `git HEAD` 为基线做短语级比对，
+  191 条旧短语 100% 保留；新增只有 hero-points 那两句（取自 OG 图）。
+
+### 新增的取舍
+
+- 移动端（≤680px）截图几乎全隐（`opacity:0.32` + 近乎实心压板），宁可牺牲
+  背景质感也要保证正文可读；标题降到 28px 让「变成你的私家题库。」不断行。
+- 平板（≤960px）导航栏砍掉后 3 项（与右上按钮/页脚重复），按钮加
+  `white-space:nowrap` 防止「进入社区」被拆成两行。
