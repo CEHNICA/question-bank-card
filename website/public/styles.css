@@ -181,6 +181,24 @@ img {
   background: var(--bg);
 }
 
+/* 顶部金线：与 OG 分享图同一道分割线 */
+.hero::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 4;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--gold) 0%,
+    var(--gold) 40%,
+    rgba(214, 166, 93, 0.4) 62%,
+    rgba(214, 166, 93, 0) 84%
+  );
+}
+
 .hero-grid {
   position: relative;
   z-index: 3;
