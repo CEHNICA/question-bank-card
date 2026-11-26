@@ -1,0 +1,36 @@
+{
+  "name": "tiyouju-community",
+  "version": "0.1.0",
+  "private": true,
+  "description": "题有据社区：Cloudflare Workers + D1 + R2 + Turnstile，独立部署，不进桌面安装包",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "dev:web": "vite --config web/vite.config.js",
+    "build": "vite build --config web/vite.config.js",
+    "dev": "npm run build && wrangler dev --config worker/wrangler.toml",
+    "db:local": "wrangler d1 execute tiyouju-community --local --config worker/wrangler.toml --file schema.sql",
+    "db:remote": "wrangler d1 execute tiyouju-community --remote --config worker/wrangler.toml --file schema.sql",
+    "deploy": "npm run build && wrangler deploy --config worker/wrangler.toml",
+    "test": "node --test \"test/*.test.ts\"",
+    "typecheck": "tsc -p worker/tsconfig.json"
+  },
+  "dependencies": {
+    "dompurify": "3.5.0",
+    "fflate": "0.8.3",
+    "hono": "4.13.22",
+    "katex": "0.19.1",
+    "marked": "18.3.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261125.1",
+    "@tailwindcss/vite": "4.3.5",
+    "tailwindcss": "4.3.5",
+    "typescript": "7.0.2",
+    "vite": "8.3.8",
+    "wrangler": "4.168.0"
+  }
+}

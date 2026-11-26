@@ -855,3 +855,142 @@ class SelectiveExportTests(TransferFixture):
             self.assertEqual(snap.execute("PRAGMA foreign_key_check").fetchall(), [])
         finally:
             snap.close()
+
+
+class CommunityPackTests(TransferFixture):
+    """发到题有据社区的题包：默认不带原卷、预览不含答案、照样能合并。"""
+
+    _publish = SelectiveExportTests._publish
+    _inspect_snapshot = SelectiveExportTests._inspect_snapshot
+
+    def _community_publish(self):
+        pub = self._publish(self.questions[0], answer="（虚构）答案甲")
+        pub.content = {
+            "stem": "（虚构）已知 $f(x)=x^2$，求 $f(2)$。",
+            "options": {"A": "$2$", "B": "$4$"},
+            "answer": "（虚构）答案甲",
+            "analysis": "（虚构）详细解析",
+        }
+        pub.save(update_fields=["content"])
+        figures = self.data / str(self.paper.pk) / "figures"
+        figures.mkdir(parents=True, exist_ok=True)
+        (figures / "f1.png").write_bytes(b"fig")
+        (self.data / str(self.paper.pk) / "source.docx").write_bytes(b"docx")
+        (self.data / "library" / str(pub.pk)).mkdir(parents=True, exist_ok=True)
+        (self.data / "library" / str(pub.pk) / "crop.png").write_bytes(b"\x89PNG crop")
+        tag = LibraryTag.objects.create(name="（虚构）函数求值", kind=LibraryTag.Kind.KNOWLEDGE)
+        LibraryTagAssignment.objects.create(publication=pub, tag=tag, source=LibraryTagAssignment.Source.HUMAN)
+        return pub
+
+    def _export(self, **kwargs):
+        out_dir = self.work / f"community-{uuid.uuid4().hex[:6]}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return library_transfer.export_community_pack(out_dir, paper_ids=[str(self.paper.pk)], **kwargs)
+
+    def test_default_pack_has_no_originals_or_local_paths(self):
+        pub = self._community_publish()
+        result = self._export()
+        bundle = Path(result["file"])
+        self.assertTrue(bundle.name.startswith("题有据社区题包-"))
+        self.assertFalse(result["community"]["include_originals"])
+        with zipfile.ZipFile(bundle) as archive:
+            names = set(archive.namelist())
+            manifest = json.loads(archive.read(library_transfer.MANIFEST_NAME).decode("utf-8"))
+        prefix = library_transfer.ORIGINALS
+        self.assertNotIn(f"{prefix}/{self.paper.pk}/source.pdf", names)
+        self.assertNotIn(f"{prefix}/{self.paper.pk}/source.docx", names)
+        self.assertIn(f"{prefix}/{self.paper.pk}/figures/f1.png", names)
+        self.assertIn(f"{prefix}/library/{pub.pk}/crop.png", names)
+        self.assertEqual(manifest["papers"][0]["files"], {})
+        self.assertEqual(manifest["community"], {"format": 1, "include_originals": False})
+        snap = self._inspect_snapshot(bundle)
+        try:
+            paths = snap.execute("SELECT source_path, render_path, zip_path FROM core_paper").fetchall()
+        finally:
+            snap.close()
+        self.assertEqual(paths, [("", "", "")], "本机路径里有用户名，不能发到网上")
+
+    def test_preview_shows_stem_and_options_but_never_answers(self):
+        self._community_publish()
+        result = self._export()
+        with zipfile.ZipFile(result["file"]) as archive:
+            names = set(archive.namelist())
+            preview = json.loads(archive.read(library_transfer.COMMUNITY_PREVIEW_NAME).decode("utf-8"))
+        self.assertEqual(preview["counts"]["questions"], 1)
+        self.assertEqual(preview["question_types"], {"single_choice": 1})
+        self.assertEqual([tag["name"] for tag in preview["tags"]], ["（虚构）函数求值"])
+        sample = preview["samples"][0]
+        self.assertIn("$f(x)=x^2$", sample["stem"])
+        self.assertEqual(sample["options"], [{"key": "A", "text": "$2$"}, {"key": "B", "text": "$4$"}])
+        text = json.dumps(preview, ensure_ascii=False)
+        self.assertNotIn("答案甲", text)
+        self.assertNotIn("详细解析", text)
+        self.assertNotIn("_publication", text)
+        self.assertEqual(preview["cover"], "community-cover.png")
+        self.assertIn("community-cover.png", names)
+
+    def test_pack_with_originals_keeps_source_and_merges_cleanly(self):
+        from django.db import connection
+
+        self._community_publish()
+        result = self._export(include_originals=True)
+        bundle = Path(result["file"])
+        with zipfile.ZipFile(bundle) as archive:
+            self.assertIn(f"{library_transfer.ORIGINALS}/{self.paper.pk}/source.pdf", archive.namelist())
+
+        LibraryTagAssignment.objects.all().delete()
+        LibraryTag.objects.all().delete()
+        PublishedQuestion.objects.all().delete()
+        Question.all_objects.all().delete()
+        Block.objects.all().delete()
+        Paper.objects.all().delete()
+        shutil.rmtree(self.data / str(self.paper.pk), ignore_errors=True)
+
+        merged = library_transfer.merge_bundle(bundle)
+        self.assertEqual(merged["report"]["新增卷子"], 1)
+        with connection.cursor() as cursor:
+            cursor.execute("PRAGMA foreign_key_check")
+            self.assertEqual(cursor.fetchall(), [])
+
+    def test_stripped_pack_merges_without_originals(self):
+        self._community_publish()
+        bundle = Path(self._export()["file"])
+        LibraryTagAssignment.objects.all().delete()
+        LibraryTag.objects.all().delete()
+        PublishedQuestion.objects.all().delete()
+        Question.all_objects.all().delete()
+        Block.objects.all().delete()
+        Paper.objects.all().delete()
+        shutil.rmtree(self.data / str(self.paper.pk), ignore_errors=True)
+
+        merged = library_transfer.merge_bundle(bundle)
+        self.assertEqual(merged["report"]["新增卷子"], 1)
+        self.assertEqual(PublishedQuestion.objects.count(), 1)
+        paper = Paper.objects.get()
+        self.assertTrue((self.data / str(paper.pk) / "figures" / "f1.png").is_file())
+
+    def test_whole_library_is_refused(self):
+        with self.assertRaises(library_transfer.TransferError):
+            library_transfer.export_community_pack(self.work)
+
+    def test_view_requires_a_selection_and_returns_counts(self):
+        self._community_publish()
+        client = Client()
+        headers = {"HTTP_X_QB_REQUEST": "1"}
+        refused = client.post(
+            "/api/backup/community-export",
+            data=json.dumps({"directory": str(self.work)}),
+            content_type="application/json",
+            **headers,
+        )
+        self.assertEqual(refused.status_code, 400)
+        ok = client.post(
+            "/api/backup/community-export",
+            data=json.dumps({"directory": str(self.work), "paper_ids": [str(self.paper.pk)]}),
+            content_type="application/json",
+            **headers,
+        )
+        self.assertEqual(ok.status_code, 200, ok.content.decode("utf-8"))
+        body = ok.json()
+        self.assertEqual(body["questions"], 1)
+        self.assertFalse(body["include_originals"])

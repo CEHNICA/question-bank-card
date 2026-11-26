@@ -2242,6 +2242,32 @@
 
   <!-- OneNote 解除关联改用 window.confirm 二次确认，不再保留独立弹窗 -->
 
+  <!-- 题有据社区：嵌入社区网站，关闭后保留页面状态（不重新加载）。 -->
+  <div id="communityModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-xs p-4">
+    <!-- 尺寸用内联样式：工作台的 tailwind.css 是预编译子集，任意值类名（h-[88vh]）不一定存在。 -->
+    <div class="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl" style="width:min(96vw,1152px);height:88vh;">
+      <div class="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
+        <div class="min-w-0">
+          <h3 class="text-sm font-bold text-slate-900">题有据社区</h3>
+          <p class="text-[11px] text-slate-400">浏览题包与心得；下载的题包仍用「设置 → 数据备份与迁移」合并进本机</p>
+        </div>
+        <div class="flex items-center gap-3 shrink-0 text-xs">
+          <a id="communityOpenExternal" href="#" target="_blank" rel="noopener" class="text-emerald-700 hover:underline">在浏览器打开</a>
+          <button type="button" onclick="reloadCommunityFrame()" class="text-slate-500 hover:text-slate-800">刷新</button>
+          <button type="button" onclick="closeCommunityModal()" class="text-slate-400 hover:text-slate-600 text-sm" aria-label="关闭社区">✕</button>
+        </div>
+      </div>
+      <iframe
+        id="communityFrame"
+        title="题有据社区"
+        class="w-full border-0 bg-slate-50"
+        style="flex:1 1 0;min-height:0;"
+        referrerpolicy="strict-origin-when-cross-origin"
+        allow="clipboard-write"
+      ></iframe>
+    </div>
+  </div>
+
   <div id="tagManagerModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-xs p-4">
     <div class="flex h-[520px] w-full max-w-2xl flex-col rounded-xl bg-white shadow-2xl overflow-hidden border border-slate-200">
       <div class="tm-head flex items-center justify-between border-b border-slate-100 px-5 py-3">
@@ -5927,6 +5953,36 @@
       sortAndRenderPapers(currentPaperSort);
     }
 
+    // 社区题包：先选文件夹，再问要不要附带原卷（默认不带），预览里不放答案。
+    async function exportCommunityPack(paperId) {
+      if (!paperId || typeof fetch !== 'function') return;
+      const headers = { 'Content-Type': 'application/json', 'X-QB-Request': '1', 'Referer': window.location.href };
+      try {
+        const picked = await fetch(`${API_BASE}/api/backup/choose-directory`, { method: 'POST', headers, body: '{}' });
+        const pickedBody = await picked.json().catch(() => ({}));
+        if (!picked.ok) throw new Error(pickedBody.error || '没能打开文件夹选择窗口。');
+        if (pickedBody.cancelled || !pickedBody.directory) return;
+        const includeOriginals = window.confirm(
+          '要把原卷 PDF / Word 一起放进社区题包吗？\n\n' +
+          '默认不带：只放题目、配图、解析和标签。\n' +
+          '只有原卷是你自己出的、或你确认有权分享时才点「确定」。'
+        );
+        showToast('正在打社区题包…', 'info');
+        const res = await fetch(`${API_BASE}/api/backup/community-export`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ directory: pickedBody.directory, paper_ids: [paperId], include_originals: includeOriginals })
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || '社区题包没打成，请重试。');
+        const sizeMb = (Number(body.size || 0) / 1024 / 1024).toFixed(1);
+        showToast(`社区题包已导出：${body.questions || 0} 道题，${sizeMb} MB（${body.include_originals ? '含原卷' : '不含原卷'}）。文件在 ${body.file}`, 'success');
+      } catch (error) {
+        showToast(error.message || '社区题包没打成，请重试。', 'error');
+      }
+    }
+    window.exportCommunityPack = exportCommunityPack;
+
     function openEagleContextMenu(e, source, paperId = null) {
       if (e) {
         e.preventDefault();
@@ -5955,7 +6011,8 @@
           treeMenuItem('🔍', `仅查看该项目的试题 (${targetPaper.total} 题)`, `filterByPaper('${targetPaper.id}'); hideEagleContextMenu();`),
           treeMenuItem('📦', '移动到...', `openFolderPickerForMove('doc', '${safeParentKey}')`),
           treeMenuItem('🔄', targetPaper.materialType === 'book' ? '转为「试卷」文件夹' : '转为「教材版本」文件夹', `togglePaperMaterialType('${targetPaper.id}'); hideEagleContextMenu();`),
-          treeMenuItem('➕', '在此文件夹下新建子文件夹', `createUserFolder('${safeParentKey}')`)
+          treeMenuItem('➕', '在此文件夹下新建子文件夹', `createUserFolder('${safeParentKey}')`),
+          treeMenuItem('🌐', '导出为社区题包…', `exportCommunityPack('${escapeInlineJsArg(targetPaper.id)}'); hideEagleContextMenu();`)
         ];
         if (targetPaper.materialType === 'book') {
           moreItems.push(treeMenuItem(
@@ -17740,6 +17797,16 @@
         count: readRecentQuestions().length,
         children: []
       });
+      // 资源社区：和 Eagle 一样放在左栏快捷视图里，点开是站内弹窗，不改变题库筛选。
+      roots.push({
+        id: 'action:community',
+        type: 'action',
+        actionKey: 'community',
+        label: '资源社区',
+        icon: '🌐',
+        count: '',
+        children: []
+      });
 
       // 标签紧挨「最近浏览」：常用入口靠上，别沉到文件夹后面。
       // 分区/分组/标签节点右侧数字一律 = 正式贴题的去重题数（与点选浏览一致）
@@ -18875,6 +18942,8 @@
           node = { id: nodeId, type: 'trash' };
         } else if (nodeId === 'action:tag_manager') {
           node = { id: nodeId, type: 'action', actionKey: 'tag_manager' };
+        } else if (nodeId === 'action:community') {
+          node = { id: nodeId, type: 'action', actionKey: 'community' };
         }
       }
       if (!node) return;
@@ -18895,6 +18964,7 @@
       }
       if (node.type === 'action') {
         if (node.actionKey === 'tag_manager') openTagManagerModal();
+        else if (node.actionKey === 'community') openCommunityModal();
         return;
       }
       folderTreeState.activeId = nodeId;
@@ -21181,6 +21251,32 @@
       }).then(ok => {
         if (ok) showToast(`已新建标签「${name.trim()}」`, 'success');
       });
+    }
+
+    // 题有据社区站点地址：本机预览用 wrangler dev；正式发布前改成社区的正式域名（https）。
+    const COMMUNITY_SITE_URL = 'http://127.0.0.1:8787/';
+
+    function openCommunityModal() {
+      const modal = document.getElementById('communityModal');
+      const frame = document.getElementById('communityFrame');
+      if (!modal || !frame) return;
+      const link = document.getElementById('communityOpenExternal');
+      if (link) link.href = COMMUNITY_SITE_URL;
+      // 第一次打开才加载；之后只显示/隐藏，保留浏览位置和登录状态。
+      if (!frame.dataset.loaded) {
+        frame.src = COMMUNITY_SITE_URL;
+        frame.dataset.loaded = '1';
+      }
+      modal.classList.remove('hidden');
+    }
+
+    function reloadCommunityFrame() {
+      const frame = document.getElementById('communityFrame');
+      if (frame && frame.dataset.loaded) frame.src = COMMUNITY_SITE_URL;
+    }
+
+    function closeCommunityModal() {
+      document.getElementById('communityModal')?.classList.add('hidden');
     }
 
     function openTagManagerModal() {

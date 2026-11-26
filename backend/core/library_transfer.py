@@ -48,6 +48,12 @@ from django.utils import timezone
 
 BUNDLE_FORMAT = 1
 MANIFEST_NAME = "题有据备份.json"
+COMMUNITY_PREVIEW_NAME = "community-preview.json"
+COMMUNITY_COVER_STEM = "community-cover"
+COMMUNITY_PREVIEW_FORMAT = 1
+COMMUNITY_PREVIEW_QUESTIONS = 3
+COMMUNITY_COVER_MAX_BYTES = 1024 * 1024
+COMMUNITY_ORIGINAL_SUFFIXES = {".pdf", ".zip", ".doc", ".docx"}
 DATABASE_NAME = "题库.sqlite3"
 ORIGINALS = "原卷"
 MAX_BUNDLE_BYTES = 2 * 1024 * 1024 * 1024
@@ -761,8 +767,141 @@ def _backup_lock():
             pass
 
 
+def export_community_pack(
+    directory: Path,
+    *,
+    paper_ids: list[str] | None = None,
+    tag_ids: list[str] | None = None,
+    include_originals: bool = False,
+) -> dict:
+    """打一份发到题有据社区的题包：只能按资料或目录文件夹选，不能整库。
+
+    和普通题包同一种格式（社区下载后走原来的「合并导入」），额外放一份
+    `community-preview.json` 给网站展示；默认不带原卷 PDF / Word，库里的本机路径一律抹掉。
+    预览里只放题干和选项，不放答案解析 —— 付费题包的答案不能在详情页白送。
+    """
+    if (paper_ids is None) == (tag_ids is None):
+        raise TransferError("社区题包要先选卷子或目录文件夹，不能把整个题库发出去。")
+    return export_bundle(
+        directory,
+        "题有据社区题包",
+        paper_ids=paper_ids,
+        tag_ids=tag_ids,
+        community={"include_originals": bool(include_originals)},
+    )
+
+
+def _is_original_document(relative: Path, original_names: set[str]) -> bool:
+    """卷子文件夹里的原卷本体（PDF / Word / 识读压缩包），配图之类不算。"""
+    parts = relative.parts
+    if not parts or not _looks_like_uuid(parts[0]):
+        return False
+    if relative.as_posix() in original_names:
+        return True
+    return relative.suffix.lower() in COMMUNITY_ORIGINAL_SUFFIXES
+
+
+def _options_preview(options) -> list[dict]:
+    if isinstance(options, dict):
+        return [{"key": str(key), "text": str(value or "")} for key, value in options.items()]
+    if isinstance(options, list):
+        rows = []
+        for index, item in enumerate(options):
+            if isinstance(item, dict):
+                key = str(item.get("key") or item.get("label") or chr(ord("A") + index))
+                rows.append({"key": key, "text": str(item.get("text") or item.get("content") or "")})
+            else:
+                rows.append({"key": chr(ord("A") + index), "text": str(item or "")})
+        return rows
+    return []
+
+
+def _community_preview(snapshot: Path, manifest: dict, *, include_originals: bool) -> dict:
+    """从打进包里的那份快照算预览：题数、题型分布、标签、前几道题的题干。"""
+    with contextlib_closing(sqlite3.connect(snapshot)) as reader:
+        rows = reader.execute(
+            f'SELECT id, number, question_type, content FROM "{PUBLICATION_TABLE}" '
+            "WHERE status = 'published' ORDER BY source_filename, number, id"
+        ).fetchall()
+        type_counts: dict[str, int] = {}
+        for _pid, _number, question_type, _content in rows:
+            key = str(question_type or "other")
+            type_counts[key] = type_counts.get(key, 0) + 1
+        tags: list[dict] = []
+        if _table_exists(reader, TAG_TABLE) and _table_exists(reader, ASSIGNMENT_TABLE):
+            tags = [
+                {"name": str(name), "kind": str(kind or ""), "questions": int(count)}
+                for name, kind, count in reader.execute(
+                    f'SELECT t.name, t.kind, COUNT(DISTINCT a.publication_id) FROM "{TAG_TABLE}" t '
+                    f'JOIN "{ASSIGNMENT_TABLE}" a ON a.tag_id = t.id '
+                    "GROUP BY t.id ORDER BY COUNT(DISTINCT a.publication_id) DESC, t.name LIMIT 30"
+                ).fetchall()
+            ]
+    samples = []
+    for pid, number, question_type, raw in rows[:COMMUNITY_PREVIEW_QUESTIONS]:
+        try:
+            content = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except json.JSONDecodeError:
+            content = {}
+        if not isinstance(content, dict):
+            content = {}
+        samples.append(
+            {
+                "number": number,
+                "question_type": str(question_type or ""),
+                "stem": str(content.get("stem") or ""),
+                "options": _options_preview(content.get("options")),
+                "figures": len(content.get("figures") or []),
+                "_publication": _uuid_text(pid),
+            }
+        )
+    return {
+        "format": COMMUNITY_PREVIEW_FORMAT,
+        "app_version": manifest.get("app_version", ""),
+        "created_at": manifest.get("created_at"),
+        "scope": manifest.get("scope", ""),
+        "include_originals": include_originals,
+        "papers": [
+            {
+                "title": str(item.get("title") or item.get("filename") or ""),
+                "questions": int(item.get("questions") or 0),
+            }
+            for item in manifest.get("papers") or []
+        ],
+        "folders": [str(item.get("name") or "") for item in manifest.get("folders") or []],
+        "counts": {
+            "papers": int((manifest.get("counts") or {}).get("papers", 0)),
+            "questions": len(rows),
+            "tags": len(tags),
+        },
+        "question_types": type_counts,
+        "tags": tags,
+        "samples": samples,
+        "cover": None,
+    }
+
+
+def _community_cover(preview: dict, root: Path) -> tuple[str, Path] | None:
+    """封面：用第一道示例题自己的裁片或配图，找不到就不放。"""
+    for sample in preview.get("samples") or []:
+        folder = root / "library" / str(sample.get("_publication") or "")
+        if not folder.is_dir():
+            continue
+        for path in sorted(folder.rglob("*")):
+            suffix = path.suffix.lower()
+            if path.is_file() and suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+                if path.stat().st_size <= COMMUNITY_COVER_MAX_BYTES:
+                    return f"{COMMUNITY_COVER_STEM}{suffix}", path
+    return None
+
+
 def export_bundle(
-    directory: Path, prefix: str = "题有据备份", *, paper_ids: list[str] | None = None, tag_ids: list[str] | None = None
+    directory: Path,
+    prefix: str = "题有据备份",
+    *,
+    paper_ids: list[str] | None = None,
+    tag_ids: list[str] | None = None,
+    community: dict | None = None,
 ) -> dict:
     """把整库、选定资料或目录文件夹打包成一个 zip 放进 `directory`。
 
@@ -788,20 +927,24 @@ def export_bundle(
         selected_folders = folder_selection["tags"]
         keep_question_ids = folder_selection["question_ids"]
         extra_keep_tag_hexes = folder_selection["subtree_tag_hexes"]
-        if prefix == "题有据备份":
+        stem_base = "题有据社区题包" if community is not None else "题有据题包"
+        if prefix in {"题有据备份", "题有据社区题包"}:
             first_stem = _safe_bundle_stem(selected_folders[0].name)
             if len(selected_folders) == 1:
-                actual_prefix = f"题有据题包-{first_stem}"
+                actual_prefix = f"{stem_base}-{first_stem}"
             else:
-                actual_prefix = f"题有据题包-{first_stem}等{len(selected_folders)}个文件夹"
+                actual_prefix = f"{stem_base}-{first_stem}等{len(selected_folders)}个文件夹"
     elif paper_ids is not None:
         selected_papers = _resolve_export_papers(paper_ids)
-        if selected_papers is not None and prefix == "题有据备份":
+        stem_base = "题有据社区题包" if community is not None else "题有据题包"
+        if selected_papers is not None and prefix in {"题有据备份", "题有据社区题包"}:
             first_stem = _safe_bundle_stem(selected_papers[0].display_name)
             if len(selected_papers) == 1:
-                actual_prefix = f"题有据题包-{first_stem}"
+                actual_prefix = f"{stem_base}-{first_stem}"
             else:
-                actual_prefix = f"题有据题包-{first_stem}等{len(selected_papers)}套"
+                actual_prefix = f"{stem_base}-{first_stem}等{len(selected_papers)}套"
+    if community is not None and selected_papers is None:
+        raise TransferError("社区题包要先选卷子或目录文件夹，不能把整个题库发出去。")
 
     with _backup_lock():
         return _export_bundle(
@@ -811,6 +954,7 @@ def export_bundle(
             selected_folders=selected_folders,
             keep_question_ids=keep_question_ids,
             extra_keep_tag_hexes=extra_keep_tag_hexes,
+            community=community,
         )
 
 
@@ -822,10 +966,13 @@ def _export_bundle(
     selected_folders: list | None = None,
     keep_question_ids: set[int] | None = None,
     extra_keep_tag_hexes: set[str] | None = None,
+    community: dict | None = None,
 ) -> dict:
     stamp = time.strftime("%Y%m%d-%H%M%S")
     target = directory / f"{prefix}-{stamp}.zip"
     temp = directory / f".{prefix}-{stamp}.part"
+    include_originals = True if community is None else bool(community.get("include_originals"))
+    preview: dict | None = None
     try:
         with tempfile.TemporaryDirectory() as work:
             snapshot = Path(work) / DATABASE_NAME
@@ -855,16 +1002,43 @@ def _export_bundle(
                 files_iter = _bundle_files(
                     data_root(), allowed_papers=allowed_papers, allowed_publications=allowed_publications
                 )
+            original_names: set[str] = set()
+            if community is not None:
+                for item in manifest.get("papers") or []:
+                    original_names.update(str(v) for v in (item.get("files") or {}).values() if isinstance(v, str))
+                    if not include_originals:
+                        item["files"] = {}
+                manifest["community"] = {"format": COMMUNITY_PREVIEW_FORMAT, "include_originals": include_originals}
+                # 本机路径里有 Windows 用户名，发到网上之前抹掉；合并时会按本机重新指过去。
+                with contextlib_closing(sqlite3.connect(snapshot)) as scrub:
+                    scrub.execute(f"UPDATE \"{PAPER_TABLE}\" SET source_path = '', render_path = '', zip_path = ''")
+                    scrub.commit()
+                preview = _community_preview(snapshot, manifest, include_originals=include_originals)
+            cover = _community_cover(preview, data_root()) if preview is not None else None
+            if preview is not None:
+                if cover is not None:
+                    preview["cover"] = cover[0]
+                for sample in preview["samples"]:
+                    sample.pop("_publication", None)
             with zipfile.ZipFile(temp, "w", zipfile.ZIP_DEFLATED) as archive:
                 archive.writestr(MANIFEST_NAME, json.dumps(manifest, ensure_ascii=False, indent=2))
                 archive.write(snapshot, DATABASE_NAME)
                 for path in files_iter:
-                    archive.write(path, f"{ORIGINALS}/{path.relative_to(data_root()).as_posix()}")
+                    relative = path.relative_to(data_root())
+                    if not include_originals and _is_original_document(relative, original_names):
+                        continue
+                    archive.write(path, f"{ORIGINALS}/{relative.as_posix()}")
+                if preview is not None:
+                    archive.writestr(COMMUNITY_PREVIEW_NAME, json.dumps(preview, ensure_ascii=False, indent=2))
+                if cover is not None:
+                    archive.write(cover[1], cover[0])
         # 写完了自己先验一遍：包能打开、清单和题库都在，才算是个备份。
         with zipfile.ZipFile(temp) as check:
             names = set(check.namelist())
         if MANIFEST_NAME not in names or DATABASE_NAME not in names:
             raise TransferError("备份包没写完整，已经把半成品删掉了，请再打一次。")
+        if community is not None and COMMUNITY_PREVIEW_NAME not in names:
+            raise TransferError("社区题包没写完整，已经把半成品删掉了，请再打一次。")
     except Exception:
         try:
             temp.unlink()
@@ -876,7 +1050,7 @@ def _export_bundle(
         str(item.get("title") or item.get("filename") or "").strip() for item in (manifest.get("papers") or [])
     ]
     folder_names = [str(item.get("name") or "").strip() for item in (manifest.get("folders") or [])]
-    return {
+    result = {
         "file": str(target),
         "name": target.name,
         "size": target.stat().st_size,
@@ -885,6 +1059,14 @@ def _export_bundle(
         "paper_names": [name for name in paper_names if name],
         "folder_names": [name for name in folder_names if name],
     }
+    if preview is not None:
+        result["community"] = {
+            "include_originals": include_originals,
+            "questions": preview["counts"]["questions"],
+            "samples": len(preview["samples"]),
+            "cover": preview["cover"],
+        }
+    return result
 
 
 # ---------------------------------------------------------------- 看一眼

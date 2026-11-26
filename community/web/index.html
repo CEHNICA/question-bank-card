@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="题有据社区：老师之间分享结构化数学题包和教学心得。" />
+    <title>题有据社区</title>
+  </head>
+  <body class="bg-slate-50 text-slate-800 antialiased">
+    <header class="sticky top-0 z-30 border-b border-slate-200/80 bg-white/80 backdrop-blur">
+      <div class="mx-auto flex h-14 max-w-6xl items-center gap-5 px-4">
+        <a href="#/" class="flex items-center gap-2 font-semibold text-slate-900">
+          <span class="grid h-7 w-7 place-items-center rounded-lg bg-emerald-600 text-sm text-white">据</span>
+          <span id="siteName">题有据社区</span>
+        </a>
+        <nav class="flex items-center gap-1 text-sm" id="mainNav">
+          <a href="#/" data-nav="packs" class="nav-link">题包</a>
+          <a href="#/posts" data-nav="posts" class="nav-link">心得</a>
+          <a href="#/upload" data-nav="upload" class="nav-link">发布题包</a>
+        </nav>
+        <div class="ml-auto flex items-center gap-2 text-sm" id="userBox"></div>
+      </div>
+    </header>
+    <main id="app" class="mx-auto max-w-6xl px-4 py-6"></main>
+    <footer class="mx-auto max-w-6xl px-4 pb-10 pt-4 text-xs text-slate-400">
+      <a href="#/rules" class="hover:text-slate-600">社区规则与版权说明</a>
+      <span class="mx-2">·</span>
+      <span>平台不代收任何款项；付费题包由作者站外自行收款并发放兑换码。</span>
+    </footer>
+    <div id="toast" class="pointer-events-none fixed bottom-5 right-5 z-50"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,33 @@
+name = "tiyouju-community"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# 一个 Worker 同时提供网页（Vite 打包结果）和 /api。
+# 同源才好用 HttpOnly 会话 cookie；/api/* 先进 Worker，其余路径交给静态资源。
+[assets]
+directory = "../web/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tiyouju-community"
+# 在自己的 Cloudflare 账号里 `npx wrangler d1 create tiyouju-community`，把返回的 id 填在这里。
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[r2_buckets]]
+binding = "PACKS"
+bucket_name = "tiyouju-community-packs"
+
+[vars]
+SITE_NAME = "题有据社区"
+# Turnstile 站点密钥是公开的；这里填的是 Cloudflare 官方测试用的「永远通过」密钥，上线前换成自己的。
+TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
+MAX_PACK_MB = "50"
+
+# 以下只用 `npx wrangler secret put <名字>` 设置，不写进仓库：
+#   TURNSTILE_SECRET   Turnstile 服务端密钥
+#   DOWNLOAD_SECRET    签发短时下载链接用的随机串（32 字节以上）
+# 本机 `wrangler dev` 用 worker/.dev.vars（参照 .dev.vars.example，已被 .gitignore 忽略）。

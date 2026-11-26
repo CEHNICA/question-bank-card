@@ -1,0 +1,4 @@
+# 复制成 worker/.dev.vars 给本机 `wrangler dev` 用。这里都是测试值，不能用于线上。
+# Cloudflare 官方测试密钥：服务端校验永远通过。
+TURNSTILE_SECRET=1x0000000000000000000000000000000AA
+DOWNLOAD_SECRET=local-dev-only-change-me-0123456789abcdef

@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+@layer components {
+  .nav-link {
+    @apply rounded-md px-2.5 py-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900;
+  }
+  .nav-link.is-active {
+    @apply bg-slate-100 text-slate-900;
+  }
+  .card {
+    @apply rounded-[14px] border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)];
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700;
+  }
+  .btn-danger {
+    @apply border-rose-200 text-rose-600 hover:bg-rose-50;
+  }
+  .input {
+    @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15;
+  }
+  .label {
+    @apply mb-1 block text-xs font-medium text-slate-500;
+  }
+  .chip {
+    @apply inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600;
+  }
+  .filter-item {
+    @apply flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm text-slate-600 hover:bg-slate-100;
+  }
+  .filter-item.is-active {
+    @apply bg-emerald-50 font-medium text-emerald-700;
+  }
+  .prose-lite {
+    @apply text-[15px] leading-7 text-slate-700;
+  }
+  .prose-lite h1,
+  .prose-lite h2,
+  .prose-lite h3 {
+    @apply mb-2 mt-5 font-semibold text-slate-900;
+  }
+  .prose-lite h1 {
+    @apply text-xl;
+  }
+  .prose-lite h2 {
+    @apply text-lg;
+  }
+  .prose-lite p,
+  .prose-lite ul,
+  .prose-lite ol,
+  .prose-lite blockquote,
+  .prose-lite pre {
+    @apply my-3;
+  }
+  .prose-lite ul {
+    @apply list-disc pl-6;
+  }
+  .prose-lite ol {
+    @apply list-decimal pl-6;
+  }
+  .prose-lite a {
+    @apply text-emerald-700 underline;
+  }
+  .prose-lite blockquote {
+    @apply border-l-4 border-slate-200 pl-3 text-slate-500;
+  }
+  .prose-lite code {
+    @apply rounded bg-slate-100 px-1 py-0.5 text-[13px];
+  }
+  .prose-lite pre {
+    @apply overflow-x-auto rounded-lg bg-slate-900 p-3 text-slate-100;
+  }
+  .prose-lite pre code {
+    @apply bg-transparent p-0;
+  }
+  .prose-lite img {
+    @apply max-w-full rounded-lg;
+  }
+}
+
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}

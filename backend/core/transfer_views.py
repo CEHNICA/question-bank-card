@@ -108,6 +108,60 @@ def export_view(request):
 
 
 @csrf_exempt
+def community_export_view(request):
+    """把选定的卷子或目录文件夹打成社区题包；默认不带原卷，不能整库。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request, limit=100_000)
+    if payload is None:
+        return _error("请求格式不正确。")
+    directory = str(payload.get("directory") or "").strip()
+    if not directory:
+        return _error("先选一个文件夹，社区题包会放在那里。")
+    raw_paper_ids = payload.get("paper_ids")
+    raw_tag_ids = payload.get("tag_ids")
+    if (raw_paper_ids is None) == (raw_tag_ids is None):
+        return _error("社区题包要先选卷子或目录文件夹其中一种，不能把整个题库发出去。")
+    selected = raw_paper_ids if raw_paper_ids is not None else raw_tag_ids
+    if not isinstance(selected, list) or not all(isinstance(item, str) for item in selected):
+        return _error("选中的卷子或目录文件夹格式不正确。")
+    include_originals = payload.get("include_originals", False)
+    if not isinstance(include_originals, bool):
+        return _error("是否附带原卷的选项格式不正确。")
+    try:
+        result = library_transfer.export_community_pack(
+            Path(directory),
+            paper_ids=selected if raw_paper_ids is not None else None,
+            tag_ids=selected if raw_tag_ids is not None else None,
+            include_originals=include_originals,
+        )
+    except TransferError as error:
+        return _error(str(error))
+    except OSError:
+        return _error("社区题包没写成，检查一下那个文件夹能不能写入。", status=500)
+    counts = result.get("counts") or {}
+    community = result.get("community") or {}
+    response = JsonResponse(
+        {
+            "file": result["file"],
+            "name": result["name"],
+            "size": result["size"],
+            "papers": counts.get("papers", 0),
+            "questions": community.get("questions", counts.get("publications", 0)),
+            "include_originals": bool(community.get("include_originals")),
+            "cover": community.get("cover"),
+            "paper_names": result.get("paper_names") or [],
+            "folder_names": result.get("folder_names") or [],
+        }
+    )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@csrf_exempt
 def choose_directory_view(request):
     """只在这台电脑上打开系统文件夹选择窗口；取消什么也不改。"""
     if request.method != "POST":

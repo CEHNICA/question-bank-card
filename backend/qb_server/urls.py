@@ -120,6 +120,7 @@ urlpatterns = [
     path("api/export-preferences/select", export_preferences.select_export_directory_view),
     path("api/backup/papers", transfer_views.papers_view),
     path("api/backup/export", transfer_views.export_view),
+    path("api/backup/community-export", transfer_views.community_export_view),
     path("api/backup/choose-directory", transfer_views.choose_directory_view),
     path("api/backup/inspect", transfer_views.inspect_view),
     path("api/backup/import", transfer_views.import_view),
