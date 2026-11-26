@@ -349,6 +349,13 @@ img {
   letter-spacing: 0.02em;
 }
 
+.shot-toolbar-tip {
+  margin-left: auto;
+  font-size: 12.5px;
+  color: rgba(214, 166, 93, 0.75);
+  letter-spacing: 0.02em;
+}
+
 .shot-status {
   display: flex;
   align-items: center;
@@ -435,6 +442,7 @@ img {
   font-size: 13px;
   font-weight: 700;
   margin-bottom: 8px;
+  box-shadow: 0 0 0 1px var(--emerald), 0 0 14px -6px var(--emerald);
 }
 
 .step-box h3 {
@@ -651,6 +659,7 @@ img {
   justify-content: space-between;
   gap: 24px;
   flex-wrap: wrap;
+  box-shadow: 0 0 70px -34px var(--glow);
 }
 
 .community-banner h2 {
@@ -669,6 +678,7 @@ img {
 .site-footer {
   margin-top: 32px;
   border-top: 1px solid var(--line);
+  background: linear-gradient(180deg, transparent, var(--bg-deep) 60%);
   padding: 28px 0 44px;
   font-size: 13.5px;
   color: var(--muted);
