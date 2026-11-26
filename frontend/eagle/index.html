@@ -4366,9 +4366,25 @@
           menuPill.textContent = `v${ver}`;
           menuPill.classList.remove('hidden');
         }
+        void noticeOfficialUpdate();
       } catch {
         // 离线或独立静态预览场景下静默略过，不影响工作台加载
       }
+    }
+
+    async function noticeOfficialUpdate() {
+      try {
+        const resp = await fetch('/api/update/check?auto=1', {
+          method: 'POST',
+          headers: { 'X-QB-Request': '1' }
+        });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data.update_available) return;
+        const pill = document.getElementById('eagleMenuVersionPill');
+        if (pill) pill.textContent = `v${data.current} · 可更新到 ${data.latest}`;
+        showToast(`官网有新版本 ${data.latest}。打开设置 → 关于，点「下载并安装」。`, 'success');
+      } catch (_) {}
     }
 
     let autoTagBackgroundEnabled = false;
@@ -18982,7 +18998,7 @@
       }
       if (node.type === 'action') {
         if (node.actionKey === 'tag_manager') openTagManagerModal();
-        else if (node.actionKey === 'community') openCommunityModal();
+        else if (node.actionKey === 'community') openCommunityInBrowser();
         return;
       }
       folderTreeState.activeId = nodeId;
@@ -21329,14 +21345,17 @@
     }
     window.saveCommunitySiteUrl = saveCommunitySiteUrl;
 
-    function openCommunityModal() {
-      const modal = document.getElementById('communityModal');
-      if (!modal) return;
+    async function openCommunityInBrowser() {
       const url = getCommunitySiteUrl();
-      syncCommunityModalView(false);
-      modal.classList.remove('hidden');
-      if (!isLocalLoopbackUrl(url)) {
-        window.open(url, '_blank', 'noopener');
+      try {
+        const resp = await fetch(`${API_BASE}/api/open-external`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
+          body: JSON.stringify({ url })
+        });
+        if (!resp.ok) throw new Error(String(resp.status));
+      } catch (_) {
+        showToast('没能用默认浏览器打开资源社区', 'error');
       }
     }
 

@@ -210,9 +210,11 @@ def find_forbidden_files(bundle: Path) -> list[str]:
         if relative_text.casefold() in ALLOWED_EXACT_PATHS:
             continue
         lowered_parts = tuple(part.casefold() for part in relative.parts)
+        # pythonnet 把运行库放在自己的 runtime 目录。这不是题库的 runtime 日志。
+        dependency_runtime = lowered_parts[:3] == ("_internal", "pythonnet", "runtime")
         if (
             _is_forbidden_name(path)
-            or any(part in FORBIDDEN_SEGMENTS for part in lowered_parts[:-1])
+            or (any(part in FORBIDDEN_SEGMENTS for part in lowered_parts[:-1]) and not dependency_runtime)
             or (_should_scan_text(relative, path) and _contains_sensitive_text(relative, path))
         ):
             findings.append(relative_text)

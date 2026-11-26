@@ -209,7 +209,11 @@ $env:PIP_DISABLE_PIP_VERSION_CHECK = '1'
 if (-not $SkipDependencyInstall) {
     Write-Host "[2/6] Installing pinned build and runtime dependencies..."
     Invoke-Native -FilePath $BuildPython -ArgumentList @('-m', 'pip', 'install', '--only-binary=:all:', '--requirement', $BuildRequirements)
-    Invoke-Native -FilePath $BuildPython -ArgumentList @('-m', 'pip', 'install', '--only-binary=:all:', '--requirement', $ApplicationRequirements)
+    # proxy_tools 在 PyPI 上只有源码包。先在本地打成 wheel，后面的 --only-binary 才能装上。
+    $Wheelhouse = Join-Path $BuildRoot 'wheels'
+    New-Item -ItemType Directory -Path $Wheelhouse -Force | Out-Null
+    Invoke-Native -FilePath $BuildPython -ArgumentList @('-m', 'pip', 'wheel', '--wheel-dir', $Wheelhouse, 'proxy_tools==0.1.0')
+    Invoke-Native -FilePath $BuildPython -ArgumentList @('-m', 'pip', 'install', '--only-binary=:all:', '--find-links', $Wheelhouse, '--requirement', $ApplicationRequirements)
 }
 else {
     Write-Host "[2/6] Skipping dependency installation."

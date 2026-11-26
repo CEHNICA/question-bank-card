@@ -33,6 +33,13 @@ packaging/requirements-build.lock.txt 锁定。
   https://github.com/pymupdf/PyMuPDF
 - pywin32 312 — PSF
   https://github.com/mhammond/pywin32
+- pywebview 5.4 — BSD-3-Clause
+  https://github.com/r0x0r/pywebview
+  只用来让题有据自己创建窗口。页面仍由系统自带的 WebView2 绘制，不另开 Edge。
+- pythonnet 3.2.1 — MIT
+  https://github.com/pythonnet/pythonnet
+  以及它带上的 clr_loader 0.3.1（MIT）、cffi 2.1.1（MIT）、pycparser 3.12（BSD-3-Clause）、
+  bottle 0.13.4（MIT）、proxy_tools 0.1.0（MIT）。
 - python-docx 1.2.0 — MIT
   https://github.com/python-openxml/python-docx
   仅随程序带其公开空白模板 docx/templates/default.docx，不含用户 Word 文件。

@@ -199,6 +199,10 @@
               <li><strong>个人信息</strong>不会被预先擦掉：姓名、手写、批改痕迹都还在图上。请先确认你有权处理这些资料。</li>
             </ul>
             <div class="about-row"><span>版本</span><strong id="aboutVersion">题有据</strong></div>
+            <label class="settings-switch"><span><strong>自动检查更新</strong><small>打开软件后向官网 tiyouju.com 询问有没有新版本。点「下载并安装」才会更新，安装前先备份题库。</small></span><input id="settingsAutoUpdate" type="checkbox" role="switch" checked></label>
+            <p id="updateStatusLine" class="side-note"></p>
+            <button type="button" class="button" id="updateCheckButton">检查更新</button>
+            <button type="button" class="button" id="updateInstallButton" hidden>下载并安装</button>
             <div class="about-row"><span>许可证</span><strong>AGPL-3.0</strong></div>
             <a class="button" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer">查看源代码</a>
           </section>

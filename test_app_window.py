@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -374,6 +375,7 @@ class WindowTests(unittest.TestCase):
                 self.assertTrue(app_window._disable_profile_password_saving(profile))
             self.assertEqual(reads, [preferences])
             expected = dict(original, credentials_enable_service=False, credentials_enable_autosignin=False)
+            expected["session"] = {"restore_on_startup": 5}
             self.assertEqual(json.loads(preferences.read_text(encoding="utf-8")), expected)
             self.assertEqual(ordinary.read_bytes(), ordinary_bytes)
             for target in unrelated:
@@ -460,25 +462,107 @@ class MainFlowTests(unittest.TestCase):
         opened.assert_not_called()
         prepare.assert_not_called()
 
-    def test_running_instance_opens_a_window_when_none_can_be_found(self):
-        # 服务还在、窗口已经关了（或没找到）：退回原来的「只打开窗口」。
+    def test_running_instance_does_not_open_a_second_window(self):
+        # 服务还在、一时没找到窗口：不再另开一扇。两扇窗口正是「关掉一个、另一个变空」的来源。
         prepare = Mock()
-        opened = Mock(return_value=Mock())
-        waited = Mock()
+        opened = Mock()
+        owned = Mock()
+        message = Mock()
         result = self.run_patched(
             self.patches(
-                open_window=opened, wait_for_reattached_window=waited, focus_existing_window=Mock(return_value=False)
+                open_window=opened,
+                run_own_window=owned,
+                _message=message,
+                focus_existing_window=Mock(return_value=False),
+                _FOCUS_RETRY_SECONDS=0,
             ),
             {"_running_instance": Mock(return_value="http://127.0.0.1:8768"), "_prepare": prepare},
         )
         self.assertEqual(result, 0)
-        opened.assert_called_once_with("http://127.0.0.1:8768/eagle")
+        opened.assert_not_called()
+        owned.assert_not_called()
         prepare.assert_not_called()
-        # This launch has to stay alive for as long as the window is open. The
-        # page draws its own minimise and close buttons, and the thread that acts
-        # on them dies with the process — returning straight out of here left the
-        # teacher with an open window whose two buttons did nothing.
-        waited.assert_called_once_with(opened.return_value)
+        message.assert_called_once()
+
+    def test_the_app_opens_its_own_window_instead_of_edge(self):
+        created = {}
+
+        class Shown:
+            def __iadd__(self, handler):
+                created["shown"] = handler
+                return self
+
+        class FakeWindow:
+            events = types.SimpleNamespace(shown=Shown())
+
+        def create_window(title, url, **kwargs):
+            created["title"] = title
+            created["url"] = url
+            created["window"] = kwargs
+            return FakeWindow()
+
+        def start(**kwargs):
+            created["start"] = kwargs
+
+        fake = types.ModuleType("webview")
+        fake.create_window = create_window
+        fake.start = start
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch.dict(sys.modules, {"webview": fake}),
+            patch.object(app_window, "_own_window_storage", return_value=Path(tmp)),
+        ):
+            app_window.run_own_window("http://127.0.0.1:9/eagle")
+        self.assertEqual(created["title"], "题有据")
+        self.assertEqual(created["url"], "http://127.0.0.1:9/eagle")
+        self.assertTrue(created["window"]["text_select"])
+        self.assertEqual(created["start"]["gui"], "edgechromium")
+        self.assertIs(created["start"]["private_mode"], False)
+        self.assertEqual(created["start"]["storage_path"], tmp)
+        self.assertTrue(callable(created["shown"]))
+
+    def test_own_window_ignores_an_edge_page_with_the_same_title(self):
+        windows = {
+            11: ("题有据 · 题库工作台", 100),
+            22: ("题有据 · 题库工作台", 200),
+        }
+        names = {100: "msedge.exe", 200: "questionbankcard.exe"}
+
+        class FakeUser32:
+            def IsWindowVisible(self, handle):
+                return handle in windows
+
+            def GetForegroundWindow(self):
+                return 11
+
+            def GetWindowThreadProcessId(self, handle, byref):
+                byref._obj.value = windows[handle][1]
+                return 1
+
+            def GetWindowTextLengthW(self, handle):
+                return len(windows[handle][0])
+
+            def GetWindowTextW(self, handle, buffer, _limit):
+                buffer.value = windows[handle][0]
+
+            def EnumWindows(self, callback, _):
+                for handle in windows:
+                    callback(handle, 0)
+
+        with patch.object(app_window, "_process_image_name", side_effect=lambda pid: names[pid]):
+            hwnd = app_window._own_window_hwnd(FakeUser32())
+        self.assertEqual(hwnd, 22)
+
+    def test_raising_the_own_window_restores_and_foregrounds_it(self):
+        user32 = Mock()
+        user32.GetForegroundWindow.return_value = 11
+        user32.GetWindowThreadProcessId.side_effect = [7, 9]
+        user32.AttachThreadInput.return_value = True
+        app_window._raise_own_window(user32, 22)
+        user32.ShowWindow.assert_called_once_with(22, app_window._SW_RESTORE)
+        user32.SetForegroundWindow.assert_called_once_with(22)
+        user32.AttachThreadInput.assert_any_call(7, 9, True)
+        user32.AttachThreadInput.assert_any_call(7, 9, False)
 
     def test_a_reattached_window_is_waited_for_without_a_server_handle(self):
         # 判据是窗口句柄本身：窗口还开着就一直陪着，窗口一关立刻收工。
@@ -624,8 +708,7 @@ class MainFlowTests(unittest.TestCase):
                     _needs_install=Mock(return_value=False),
                     Splash=DirectSplash,
                     load_credentials=Mock(return_value=saved),
-                    open_window=Mock(return_value=Mock()),
-                    wait_for_window=waited,
+                    run_own_window=waited,
                 ),
                 {
                     "_running_instance": Mock(return_value=None),
@@ -698,8 +781,7 @@ class MainFlowTests(unittest.TestCase):
                     _needs_install=Mock(return_value=False),
                     Splash=DirectSplash,
                     load_credentials=Mock(return_value=saved),
-                    open_window=Mock(return_value=Mock()),
-                    wait_for_window=waited,
+                    run_own_window=waited,
                 ),
                 {
                     "_running_instance": Mock(return_value=None),
@@ -764,8 +846,7 @@ class MainFlowTests(unittest.TestCase):
                     Splash=DirectSplash,
                     load_credentials=Mock(return_value={}),
                     _configure_credentials=configure,
-                    open_window=Mock(return_value=Mock()),
-                    wait_for_window=waited,
+                    run_own_window=waited,
                 ),
                 {
                     "_running_instance": Mock(return_value=None),

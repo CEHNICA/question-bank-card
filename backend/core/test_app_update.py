@@ -1,0 +1,139 @@
+"""官网更新：只认 tiyouju.com，安装包必须对上 SHA-256。"""
+
+import hashlib
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+from urllib.parse import urlparse
+
+from django.test import SimpleTestCase, override_settings
+
+from core import app_update
+from core.version import APP_VERSION
+
+
+class _Body:
+    def __init__(self, payload: bytes, url: str):
+        self.payload = payload
+        self.url = url
+        self.offset = 0
+
+    def geturl(self):
+        return self.url
+
+    def read(self, size=-1):
+        if size is None or size < 0:
+            size = len(self.payload) - self.offset
+        chunk = self.payload[self.offset : self.offset + size]
+        self.offset += len(chunk)
+        return chunk
+
+    def close(self):
+        return None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+
+def _response_for(url: str, latest: str, installer: bytes, checksum: str, final_url: str | None = None):
+    path = urlparse(url).path
+    final = final_url or url
+    if path == "/api/latest-release":
+        body = json.dumps({"version": latest, "published_at": "2026-11-26"}).encode()
+    elif path == "/download/SHA256SUMS.txt":
+        body = f"{checksum} *TiYouJu-Setup-{latest}.exe\n".encode()
+    elif path == "/download/installer":
+        body = installer
+    else:
+        raise AssertionError(path)
+    return _Body(body, final)
+
+
+class OfficialUpdateTests(SimpleTestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.database = self.root / "db.sqlite3"
+        self.database.write_bytes(b"sqlite-placeholder")
+        self.settings = override_settings(
+            DATA_ROOT=self.root / "data",
+            DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": str(self.database)}},
+        )
+        self.settings.enable()
+
+    def tearDown(self):
+        self.settings.disable()
+        self.tmp.cleanup()
+
+    def test_a_newer_official_version_is_offered(self):
+        installer = b"installer-bytes"
+        digest = hashlib.sha256(installer).hexdigest()
+
+        def urlopen(request, timeout):
+            return _response_for(request.full_url, "9.9.9", installer, digest)
+
+        with patch.object(app_update.urllib.request, "urlopen", side_effect=urlopen):
+            info = app_update.describe_latest()
+        self.assertEqual(info["current"], APP_VERSION)
+        self.assertTrue(info["update_available"])
+        self.assertEqual(info["latest"], "9.9.9")
+        self.assertTrue(info["auto_check"])
+
+    def test_auto_check_can_be_turned_off_and_skips_the_network(self):
+        app_update.set_auto_check(False)
+        self.assertFalse(app_update.auto_check_enabled())
+        request = self.client.post("/api/update/check?auto=1", HTTP_X_QB_REQUEST="1")
+        self.assertEqual(request.status_code, 200)
+        self.assertTrue(request.json()["skipped"])
+
+    def test_install_rejects_a_bad_checksum_and_accepts_the_official_file(self):
+        installer = b"official-installer"
+        digest = hashlib.sha256(installer).hexdigest()
+        calls = []
+
+        def urlopen(request, timeout):
+            calls.append(request.full_url)
+            return _response_for(request.full_url, "9.9.9", installer, "0" * 64)
+
+        with (
+            patch.dict(app_update.os.environ, {"TEMP": str(self.root), "TMP": str(self.root)}),
+            patch.object(app_update.urllib.request, "urlopen", side_effect=urlopen),
+            patch.object(app_update.subprocess, "Popen") as launched,
+        ):
+            with self.assertRaises(app_update.UpdateError):
+                app_update.install_latest()
+        launched.assert_not_called()
+
+        def good_open(request, timeout):
+            return _response_for(request.full_url, "9.9.9", installer, digest)
+
+        with (
+            patch.dict(app_update.os.environ, {"TEMP": str(self.root), "TMP": str(self.root)}),
+            patch.object(app_update.urllib.request, "urlopen", side_effect=good_open),
+            patch.object(app_update.subprocess, "Popen") as launched,
+            patch.object(app_update.os, "name", "nt"),
+        ):
+            result = app_update.install_latest()
+        self.assertEqual(result["version"], "9.9.9")
+        launched.assert_called_once()
+        self.assertTrue(any(self.root.joinpath("backups").glob("before-update-*.sqlite3")))
+
+    def test_a_redirect_away_from_the_official_site_is_refused(self):
+        def urlopen(request, timeout):
+            return _response_for(
+                request.full_url, "9.9.9", b"x", "ab" * 32, final_url="https://example.invalid/setup.exe"
+            )
+
+        with patch.object(app_update.urllib.request, "urlopen", side_effect=urlopen):
+            with self.assertRaises(app_update.UpdateError) as caught:
+                app_update.describe_latest()
+        self.assertIn("tiyouju.com", str(caught.exception))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,12 +1,19 @@
 asgiref==3.12.1
+bottle==0.13.4; platform_system == "Windows"
 certifi==2026.7.22
+cffi==2.1.1; platform_system == "Windows"
 charset-normalizer==3.5.1
+clr_loader==0.3.1; platform_system == "Windows"
 Django==5.2.17
 idna==3.20
 lxml==6.1.1
 mathml2omml==0.0.2
 Pillow==12.3.0
+proxy_tools==0.1.0; platform_system == "Windows"
+pycparser==3.12; platform_system == "Windows"
 PyMuPDF==1.28.2
+pythonnet==3.2.1; platform_system == "Windows"
+pywebview==5.4; platform_system == "Windows"
 pywin32==312; platform_system == "Windows"
 python-docx==1.2.0
 requests==2.34.2

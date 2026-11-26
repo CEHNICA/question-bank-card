@@ -95,6 +95,18 @@ class BundleAuditTests(unittest.TestCase):
             for relative in forbidden:
                 self.assertIn(Path(relative).name, str(caught.exception))
 
+    def test_pythonnet_runtime_library_is_not_the_app_runtime_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self.make_bundle(Path(tmp))
+            library = bundle / "_internal" / "pythonnet" / "runtime" / "Python.Runtime.dll"
+            library.parent.mkdir(parents=True)
+            library.write_bytes(b"public-runtime")
+            self.assertEqual(find_forbidden_files(bundle), [])
+            leaked = bundle / "backend" / "runtime" / "worker.log"
+            leaked.parent.mkdir(parents=True)
+            leaked.write_bytes(b"private")
+            self.assertEqual(find_forbidden_files(bundle), ["backend/runtime/worker.log"])
+
     def test_sensitive_text_is_rejected_without_echoing_secret_content(self):
         sensitive = {
             "config.json": '{"Authorization": "Bearer supersecret0123456789"}',

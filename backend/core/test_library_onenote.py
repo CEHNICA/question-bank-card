@@ -193,6 +193,28 @@ class OneNoteLinkTests(TestCase):
         self.assertEqual(pending["q"], qid)
         self.assertIsNone(tiyouju_protocol.consume_deep_link())
 
+    def test_open_external_uses_the_default_browser(self):
+        with patch("core.library_onenote.os.startfile", create=True) as opened:
+            response = self.client.post(
+                "/api/open-external",
+                data=json.dumps({"url": "https://community.tiyouju.com/"}),
+                content_type="application/json",
+                HTTP_X_QB_REQUEST="1",
+            )
+        self.assertEqual(response.status_code, 200)
+        opened.assert_called_once_with("https://community.tiyouju.com/")
+
+    def test_open_external_rejects_non_web_addresses(self):
+        with patch("core.library_onenote.os.startfile", create=True) as opened:
+            response = self.client.post(
+                "/api/open-external",
+                data=json.dumps({"url": "onenote:https://d.docs.live.net/fake"}),
+                content_type="application/json",
+                HTTP_X_QB_REQUEST="1",
+            )
+        self.assertEqual(response.status_code, 400)
+        opened.assert_not_called()
+
     @patch("core.library_onenote.shell_open_onenote", return_value=False)
     @patch("core.library_onenote.call_bridge")
     def test_open_page_calls_navigate(self, mock_call, _mock_shell):

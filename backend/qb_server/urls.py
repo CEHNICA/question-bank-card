@@ -2,6 +2,7 @@ from django.urls import path
 
 from core import (
     api_key_reveal,
+    app_update,
     export_preferences,
     library_browse,
     library_clipboard,
@@ -247,4 +248,9 @@ urlpatterns = [
     path("api/library/<uuid:publication_id>/onenote/open", library_onenote.onenote_open_view),
     path("api/library/<uuid:publication_id>/onenote/unbind", library_onenote.onenote_unbind_view),
     path("api/deep-link", library_onenote.deep_link_view),
+    path("api/open-external", library_onenote.open_external_view),
+    path("api/update", app_update.update_status_view),
+    path("api/update/settings", app_update.update_settings_view),
+    path("api/update/check", app_update.update_check_view),
+    path("api/update/install", app_update.update_install_view),
 ]

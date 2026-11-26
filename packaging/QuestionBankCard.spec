@@ -130,6 +130,13 @@ hiddenimports = [
     "win32crypt",
     "win32event",
     "win32process",
+    "webview",
+    "webview.platforms.winforms",
+    "webview.platforms.edgechromium",
+    "bottle",
+    "proxy_tools",
+    "clr",
+    "clr_loader",
 ]
 
 # Django discovers contenttypes and its migrations at runtime.

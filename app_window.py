@@ -3,9 +3,8 @@
 双击桌面上的“题有据”图标（或 app_launcher.pyw）后：
 1. 不弹黑色命令行窗口，先显示一个小的启动画面；
 2. 在后台启动网页服务和工作者（沿用 start_question_bank.py 的全部逻辑与安全约束）；
-3. 用 Edge（没有 Edge 时用 Chrome）的“应用窗口”模式打开题库：没有地址栏和标签页，
-   有自己的任务栏图标；
-4. 关掉这个窗口，后台服务随之停止。
+3. 由本程序自己创建一扇窗口（WebView2 只负责在窗口里画页面），不再另开 Edge；
+4. 关掉这扇窗口，后台服务随之停止。程序已经在运行时，再点图标只把这一扇拉到前面。
 
 第一次安装组件时会交给原来的命令行启动器；API 凭据则在软件
 的“设置 → 服务与密钥”中录入。独立配置窗口仅作为凭据文件损坏时的故障恢复入口。
@@ -42,6 +41,8 @@ LOG_FILE = launcher.RUNTIME / "launcher.log"
 APP_TITLE = "题有据"
 APP_SUBTITLE = "原卷可追溯的题库整理工具"
 APP_USER_MODEL_ID = "QuestionBank.CardReview"
+# 自己的窗口只认这些进程。Edge 里碰巧标题带「题有据」的页面不算。
+_OWN_WINDOW_PROCESSES = frozenset({"questionbankcard.exe", "python.exe", "pythonw.exe"})
 
 
 def _resolve_app_version() -> str:
@@ -285,9 +286,17 @@ def _disable_profile_password_saving(profile: Path) -> bool:
         if not isinstance(data, dict):
             raise ValueError("invalid preferences")
         settings = {"credentials_enable_service": False, "credentials_enable_autosignin": False}
-        if all(data.get(key) is value for key, value in settings.items()):
+        session = data.get("session")
+        # 5 = 打开指定页面，不恢复上次的窗口。恢复上次会话时，--app 会再开一扇，
+        # 桌面上就并排两扇题有据；关掉先被盯上的那扇，服务跟着停，另一扇就空了。
+        restore_off = isinstance(session, dict) and session.get("restore_on_startup") == 5
+        if restore_off and all(data.get(key) is value for key, value in settings.items()):
             return True
         data.update(settings)
+        if not isinstance(session, dict):
+            session = {}
+            data["session"] = session
+        session["restore_on_startup"] = 5
         preferences.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -351,6 +360,13 @@ _WINDOW_LOOKUP_INTERVAL = 0.5
 # 兜底：拿不到窗口句柄、只能按配置目录判断时，最多再等这么久就强行收尾。
 # 以前这里没有上限，浏览器残留一个崩溃收集器就能让退出永远停在这一行。
 _CLOSE_BACKSTOP = 20.0
+# 一扇窗刚关掉时，另一扇可能还在画标题。这段时间里再找一次，找到就接着守。
+_REPLACEMENT_GRACE = 1.0
+# 服务已经起来、窗口还没画出来时，再点图标不要立刻另开一扇。
+_FOCUS_RETRY_SECONDS = 8.0
+_FOCUS_RETRY_INTERVAL = 0.4
+# Chromium 用来恢复上次窗口的文件。只在这个配置目录还没有浏览器进程时删。
+_SESSION_LEFTOVERS = ("Current Session", "Current Tabs", "Last Session", "Last Tabs")
 
 
 def _window_alive(user32, hwnd: int) -> bool:
@@ -921,33 +937,229 @@ def apply_window_icon(user32, hwnd: int) -> None:
         pass
 
 
+def _forget_restored_session(profile: Path) -> None:
+    """删掉上次没关干净的会话文件，避免这次启动把旧窗口和新窗口一起摆出来。
+
+    只在这个配置目录还没有浏览器进程时调用。进程还在的时候删，会把正在用的窗口弄坏。
+    """
+    default = profile / "Default"
+    if not default.is_dir():
+        return
+    for name in _SESSION_LEFTOVERS:
+        path = default / name
+        if path.is_file():
+            with contextlib.suppress(OSError):
+                path.unlink()
+    sessions = default / "Sessions"
+    if sessions.is_dir():
+        shutil.rmtree(sessions, ignore_errors=True)
+
+
+class _AlreadyOpen:
+    """屏幕上已经有一扇题有据窗口，这次没有再启动浏览器。"""
+
+    def poll(self) -> None:
+        return None
+
+
 def open_window(url: str) -> subprocess.Popen | None:
     browsers = browser_candidates()
     if not browsers:
         webbrowser.open_new_tab(url)
         return None
     profile = window_profile()
+    user32 = _user32()
+    if user32 is not None:
+        existing = _app_window(user32, profile, require_title=True)
+        if existing:
+            apply_window_icon(user32, existing)
+            with contextlib.suppress(Exception):
+                user32.ShowWindow(existing, _SW_RESTORE)
+                user32.SetForegroundWindow(existing)
+            threading.Thread(target=watch_window, args=(profile,), daemon=True).start()
+            return _AlreadyOpen()  # type: ignore[return-value]
+    if not _browser_pids(profile):
+        _forget_restored_session(profile)
     web = subprocess.Popen(window_command(browsers[0], url, profile), creationflags=CREATE_NO_WINDOW)
     threading.Thread(target=watch_window, args=(profile,), daemon=True).start()
     return web
 
 
-def focus_existing_window() -> bool:
-    """应用已经在运行时，把现有窗口切到前面，而不是再开一个。
+def _process_image_name(pid: int) -> str:
+    """进程的可执行文件名，小写。查不到就返回空字符串。"""
+    if not pid or os.name != "nt":
+        return ""
+    import ctypes
+    from ctypes import wintypes
 
-    1.25.42：再点一次桌面图标，原来会「只打开窗口」—— 于是桌面上叠出好几个
-    题有据窗口，每个都连同一个服务。现在先找现有窗口，找到就还原并置前。
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return ""
+    try:
+        size = wintypes.DWORD(1024)
+        buffer = ctypes.create_unicode_buffer(size.value)
+        if not kernel.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+            return ""
+        return Path(buffer.value).name.lower()
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def _own_window_hwnd(user32) -> int:
+    """题有据自己创建的那扇窗口。Edge 里打开的同名页面不算。"""
+    import ctypes
+
+    found: list[int] = []
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_size_t)
+    def collect(handle, _):
+        if not user32.IsWindowVisible(handle):
+            return True
+        if APP_TITLE not in _window_title(user32, handle):
+            return True
+        pid = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(handle, ctypes.byref(pid))
+        if _process_image_name(int(pid.value)) in _OWN_WINDOW_PROCESSES:
+            found.append(int(handle))
+        return True
+
+    user32.EnumWindows(collect, 0)
+    if not found:
+        return 0
+    try:
+        foreground = int(user32.GetForegroundWindow())
+    except Exception:  # noqa: BLE001
+        foreground = 0
+    if foreground in found:
+        return foreground
+    return found[0]
+
+
+def _own_window_storage() -> Path:
+    folder = launcher.USER_ROOT / "own-window"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def run_own_window(url: str) -> None:
+    """打开题有据自己的窗口，直到用户关掉它才返回。
+
+    窗口属于本进程。WebView2 只在这扇窗口里面画页面，不再另开一个 Edge。
+    """
+    import webview
+
+    icon = ASSETS / "app.ico"
+    window = webview.create_window(
+        APP_TITLE,
+        url,
+        width=1440,
+        height=900,
+        min_size=(1100, 720),
+        text_select=True,
+        background_color="#F4F7FB",
+    )
+
+    def _brand() -> None:
+        user32 = _user32()
+        if user32 is None:
+            return
+        hwnd = _own_window_hwnd(user32)
+        if hwnd:
+            apply_window_icon(user32, hwnd)
+
+    window.events.shown += _brand
+    webview.start(
+        gui="edgechromium",
+        private_mode=False,
+        storage_path=str(_own_window_storage()),
+        icon=str(icon) if icon.is_file() else None,
+    )
+
+
+def _raise_own_window(user32, hwnd: int) -> None:
+    """把题有据自己的窗口从 OneNote 后面拉回来。
+
+    从 OneNote 点「回到题有据」时，新进程往往没有前台权，直接 SetForegroundWindow
+    会被系统丢掉。先把当前前台线程和这扇窗口的线程接到一起，再置前。
+    """
+    import ctypes
+
+    user32.ShowWindow(hwnd, _SW_RESTORE)
+    foreground = 0
+    try:
+        foreground = int(user32.GetForegroundWindow() or 0)
+    except Exception:  # noqa: BLE001
+        foreground = 0
+    attached = False
+    fg_thread = 0
+    target_thread = 0
+    if foreground and foreground != hwnd:
+        fg_pid = ctypes.c_ulong()
+        target_pid = ctypes.c_ulong()
+        fg_thread = int(user32.GetWindowThreadProcessId(foreground, ctypes.byref(fg_pid)) or 0)
+        target_thread = int(user32.GetWindowThreadProcessId(hwnd, ctypes.byref(target_pid)) or 0)
+        if fg_thread and target_thread and fg_thread != target_thread:
+            attached = bool(user32.AttachThreadInput(fg_thread, target_thread, True))
+    if getattr(user32, "BringWindowToTop", None):
+        user32.BringWindowToTop(hwnd)
+    user32.SetForegroundWindow(hwnd)
+    if attached:
+        user32.AttachThreadInput(fg_thread, target_thread, False)
+
+
+def focus_existing_window() -> bool:
+    """应用已经在运行时，把题有据自己的那扇窗口切到前面，而不是再开一个。
+
+    OneNote 里点「在题有据中打开」走的也是这里：深链写好之后，把这扇窗口拉回前台，
+    页面再按题目定位。不会另开浏览器。
     """
     user32 = _user32()
     if user32 is None:
         return False
-    hwnd = _app_window(user32, window_profile())
+    hwnd = _own_window_hwnd(user32)
     if not hwnd:
         return False
     apply_window_icon(user32, hwnd)
-    user32.ShowWindow(hwnd, _SW_RESTORE)
-    user32.SetForegroundWindow(hwnd)
+    _raise_own_window(user32, hwnd)
     return True
+
+
+def _focus_running_window() -> bool:
+    """服务已经在跑时，先等现有窗口出现并切到前面。
+
+    窗口还在画的那几秒里再点一次图标，原来会立刻再开一扇。两扇连着同一个后端，
+    关掉被盯上的那扇，服务就停了，剩下的一扇页面变空。
+    """
+    deadline = time.monotonic() + _FOCUS_RETRY_SECONDS
+    while True:
+        if focus_existing_window():
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(_FOCUS_RETRY_INTERVAL)
+
+
+def _replacement_window(user32, profile: Path, closed_hwnd: int) -> int:
+    """刚关掉的那扇之外，还有没有别的题有据窗口。没有就返回 0。"""
+    deadline = time.monotonic() + _REPLACEMENT_GRACE
+    while True:
+        candidate = _app_window(user32, profile, require_title=True)
+        if candidate and candidate != closed_hwnd and _window_alive(user32, candidate):
+            return candidate
+        if time.monotonic() >= deadline:
+            return 0
+        time.sleep(0.2)
 
 
 def _profile_still_open(profile: Path) -> bool:
@@ -1332,7 +1544,7 @@ def _handle_protocol_uri(uri: str) -> int:
 
     existing = launcher._running_instance()
     if existing:
-        focused = focus_existing_window()
+        focused = _focus_running_window()
         print(f"协议回跳：已通知运行中的窗口 q={question_id} focused={focused}", flush=True)
         return 0
 
@@ -1387,19 +1599,12 @@ def _main(arguments: list[str] | None = None) -> int:
         return _hand_off_to_console(f"需要 Python 3.12（当前是 {sys.version_info.major}.{sys.version_info.minor}）")
     existing = launcher._running_instance()
     if existing:
-        # 1.25.42：已经在运行时先切到现有窗口。原来这里直接「只打开窗口」，
-        # 点几次图标就叠出几个题有据窗口 —— 老师说的「打开好几个题目界面」。
-        if focus_existing_window():
+        # 已经在运行：只把自己的那扇窗口拉到前面。不再另开 Edge，也不再开第二扇。
+        if _focus_running_window():
             print(f"已在运行：{existing}，已切到现有窗口", flush=True)
             return 0
-        home = f"{existing.rstrip('/')}/eagle"
-        print(f"已在运行：{home}，只打开窗口", flush=True)
-        window = open_window(home)
-        # 窗口上的「最小化 / 关闭」是网页自己画的按钮，由 watch_window 这条守护
-        # 线程照着控制文件去做。就在这里 return 的话，进程一退出，线程跟着被杀，
-        # 两个按钮就再也点不动了 —— 窗口还开着，按钮却是死的。
-        # 这个进程没有自己启动服务，不需要收尾，陪着窗口开下去就行。
-        wait_for_reattached_window(window)
+        _message("题有据已经在运行。请从任务栏点开现有窗口，这次不会再开一扇。")
+        print(f"已在运行：{existing}，没有找到自己的窗口，不再另开", flush=True)
         return 0
     if _needs_install():
         return _hand_off_to_console("第一次使用（或组件有更新），需要联网安装已验证版本的组件")
@@ -1492,10 +1697,7 @@ def _main(arguments: list[str] | None = None) -> int:
             return 0
         url = value
         print(f"服务就绪：{url}", flush=True)
-        window = open_window(url)
-        how = wait_for_window(window, processes[-1])
-        if how == "service-died":
-            print("窗口还开着但服务没了，下面这次退出会把整个软件一起关掉。", flush=True)
+        run_own_window(url)
         print("窗口已关闭，停止服务", flush=True)
         return 0
     finally:

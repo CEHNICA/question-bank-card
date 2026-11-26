@@ -848,3 +848,41 @@ def deep_link_view(request: HttpRequest) -> JsonResponse:
     if not pending:
         return JsonResponse({"ok": True, "q": None})
     return JsonResponse({"ok": True, "q": pending.get("q"), "ts": pending.get("ts")})
+
+
+@csrf_exempt
+def open_external_view(request: HttpRequest) -> JsonResponse:
+    """POST /api/open-external：用系统默认浏览器打开一个 http(s) 地址。
+
+    资源社区走这里。WebView2 里的 window.open 会留在题有据窗口里，不是用户的默认浏览器。
+    """
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return JsonResponse({"error": "只能在本机打开"}, status=403)
+    if request.headers.get("X-QB-Request") != "1":
+        return JsonResponse({"error": "请求需从题库页面发起"}, status=403)
+    try:
+        payload = json.loads(request.body or b"{}")
+    except (ValueError, TypeError):
+        return JsonResponse({"error": "请求格式不正确"}, status=400)
+    if not isinstance(payload, dict):
+        return JsonResponse({"error": "请求格式不正确"}, status=400)
+    url = str(payload.get("url") or "").strip()
+    if len(url) > 2000:
+        return JsonResponse({"error": "地址太长"}, status=400)
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return JsonResponse({"error": "只能打开网页地址"}, status=400)
+    try:
+        if os.name == "nt":
+            os.startfile(url)  # noqa: S606 - 只接受上面校验过的 http(s)
+        else:
+            import webbrowser
+
+            webbrowser.open(url)
+    except OSError:
+        return JsonResponse({"error": "系统没有打开这个地址"}, status=500)
+    return JsonResponse({"ok": True})

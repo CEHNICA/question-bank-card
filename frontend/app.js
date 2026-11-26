@@ -6076,10 +6076,69 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   document.addEventListener("api-config-saved", () => { void loadFeatureSwitches(); void loadStatus(); });
   document.addEventListener("library-ai-settings-saved", () => { void loadFeatureSwitches(); });
   $("settingsLens").addEventListener("change", (event) => setLens(event.target.checked));
+  function bindOfficialUpdate() {
+    const toggle = $("settingsAutoUpdate");
+    const line = $("updateStatusLine");
+    const install = $("updateInstallButton");
+    if (!toggle || !line || !install) return;
+    const paint = (data) => {
+      toggle.checked = data.auto_check !== false;
+      if (data.error) {
+        line.textContent = data.error;
+        install.hidden = true;
+        return;
+      }
+      if (data.skipped) {
+        line.textContent = "已关闭自动检查。需要时再点「检查更新」。";
+        install.hidden = true;
+        return;
+      }
+      if (data.update_available) {
+        line.textContent = `官网 tiyouju.com 有新版本 ${data.latest}，当前是 ${data.current}。`;
+        install.hidden = false;
+        return;
+      }
+      line.textContent = data.latest
+        ? `已经是官网最新版本 ${data.current}。`
+        : "打开软件后会向 tiyouju.com 询问新版本。";
+      install.hidden = true;
+    };
+    const check = async (auto) => {
+      line.textContent = "正在询问 tiyouju.com…";
+      try {
+        const response = await api(`/api/update/check${auto ? "?auto=1" : ""}`, { method: "POST" });
+        paint(response);
+      } catch (error) {
+        paint({ error: error.message || "连不上 tiyouju.com。", auto_check: toggle.checked });
+      }
+    };
+    toggle.addEventListener("change", async () => {
+      try {
+        paint(await api("/api/update/settings", { method: "POST", body: { auto_check: toggle.checked } }));
+      } catch (error) {
+        line.textContent = error.message || "没能保存这个开关。";
+      }
+    });
+    $("updateCheckButton").addEventListener("click", () => check(false));
+    install.addEventListener("click", async () => {
+      install.disabled = true;
+      line.textContent = "正在从 tiyouju.com 下载并核对安装包…";
+      try {
+        const result = await api("/api/update/install", { method: "POST" });
+        line.textContent = `正在安装 ${result.version}。软件会先关掉，题库已备份，装完后重新打开。`;
+      } catch (error) {
+        line.textContent = error.message || "没有安装。";
+        install.disabled = false;
+      }
+    });
+    void check(true);
+  }
+
   $("settingsAutoExpand").addEventListener("change", (event) => {
     state.autoExpand = event.target.checked;
     writePref("qb-auto-expand", state.autoExpand ? "1" : "0");
   });
+  bindOfficialUpdate();
   $("settingsRename").addEventListener("click", () => closeSettingsThen(openRenameDialog));
   $("settingsReparse").addEventListener("click", () => closeSettingsThen(reparsePaper));
   $("settingsStop").addEventListener("click", () => closeSettingsThen(stopPaper));
