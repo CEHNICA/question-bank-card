@@ -101,8 +101,13 @@ test('Eagle 7大核心Bug修复综合验证套件', async (t) => {
     );
     assert.match(
       content,
-      /placeholder="搜索题干、名称、标签、文件夹…/,
-      '占位符要写明能搜详情字段'
+      /aria-label="搜索题目、名称、标签、文件夹"/,
+      '搜索框无障碍标签要写明能搜详情字段'
+    );
+    assert.match(
+      content,
+      /placeholder="搜索题干、名称、标签…"/,
+      '精简占位符保留常用字段提示'
     );
   });
 
