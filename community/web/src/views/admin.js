@@ -6,7 +6,9 @@ import { statusChip } from "./account.js";
 const TABS = [
   ["pending", "待审题包"],
   ["approved", "已上架"],
+  ["rejected", "已驳回"],
   ["taken_down", "已下架"],
+  ["withdrawn", "已撤回"],
   ["reports", "举报"],
   ["users", "用户"],
 ];
@@ -20,11 +22,19 @@ export async function adminView() {
   const nav = TABS.map(
     ([key, label]) => `<a href="#/admin?tab=${key}" class="nav-link ${tab === key ? "is-active" : ""}">${label}</a>`,
   ).join("");
-  let body = "";
-  if (tab === "reports") body = await reportsHtml();
-  else if (tab === "users") body = await usersHtml();
-  else body = await packsHtml(tab);
+  const [storage, body] = await Promise.all([
+    api("/api/admin/storage").catch(() => null),
+    tab === "reports" ? reportsHtml() : tab === "users" ? usersHtml() : packsHtml(tab),
+  ]);
+  const storageBar = storage
+    ? `<div class="card mt-3 flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-xs text-slate-600">
+        <span>R2 免费存储占用：<strong>${megabytes(storage.used_bytes)}</strong> / ${megabytes(storage.max_total_bytes)}
+          （在存 ${storage.active_packs} 份）</span>
+        ${storage.recoverable_packs ? `<span class="text-amber-700">有 ${storage.recoverable_packs} 份未售出的已驳回/撤回/下架题包可清理（可释放 ${megabytes(storage.recoverable_bytes)}）</span>` : ""}
+      </div>`
+    : "";
   setView(`<h1 class="text-xl font-semibold">管理</h1>
+    ${storageBar}
     <nav class="mt-3 flex flex-wrap gap-1 text-sm">${nav}</nav>
     <div class="mt-4">${body}</div>`);
   bindActions();
@@ -51,7 +61,9 @@ async function packsHtml(status) {
         ${status === "pending" ? `<button class="btn btn-primary" data-review="${p.id}" data-action="approve">通过</button>
           <button class="btn btn-danger" data-review="${p.id}" data-action="reject">驳回</button>` : ""}
         ${status === "approved" ? `<button class="btn btn-danger" data-review="${p.id}" data-action="takedown">下架</button>` : ""}
-        ${status === "taken_down" ? `<button class="btn" data-review="${p.id}" data-action="restore">恢复上架</button>` : ""}
+        ${status === "taken_down" && !p.r2_purged_at ? `<button class="btn" data-review="${p.id}" data-action="restore">恢复上架</button>` : ""}
+        ${(status === "rejected" || status === "taken_down" || status === "withdrawn") && !p.r2_purged_at ? `<button class="btn btn-danger" data-purge="${p.id}" data-buyers="${p.buyers || 0}">清理存储</button>` : ""}
+        ${p.r2_purged_at ? '<span class="chip">存储已清理</span>' : ""}
       </div></div>`,
     )
     .join("")}</div>`;
@@ -144,6 +156,23 @@ function bindActions() {
       busy(button, async () => {
         await api(`/api/admin/users/${button.dataset.clearPay}/clear-payment`, { method: "POST", body: {} });
         toast("已清除。");
+        adminView();
+      });
+    }),
+  );
+  document.querySelectorAll("[data-purge]").forEach((button) =>
+    button.addEventListener("click", () => {
+      const buyers = Number(button.dataset.buyers || 0);
+      const msg = buyers > 0
+        ? `已有 ${buyers} 位买家拥有该题包！强制清理存储文件后他们将无法再下载，仅用于严重违规。确定？`
+        : "从 R2 删除该题包与封面文件以释放免费空间，确定？";
+      if (!window.confirm(msg)) return;
+      busy(button, async () => {
+        await api(`/api/admin/packs/${button.dataset.purge}/purge`, {
+          method: "POST",
+          body: buyers > 0 ? { force: true } : {},
+        });
+        toast("已清理 R2 文件。", "success");
         adminView();
       });
     }),

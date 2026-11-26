@@ -68,9 +68,36 @@ export class FakeD1 {
 
 export class FakeR2 {
   objects = new Map<string, { bytes: Uint8Array; contentType?: string }>();
-  async put(key: string, value: Uint8Array | ArrayBuffer, options?: { httpMetadata?: { contentType?: string } }) {
-    const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
-    this.objects.set(key, { bytes: bytes.slice(), contentType: options?.httpMetadata?.contentType });
+  async put(
+    key: string,
+    value: Uint8Array | ArrayBuffer | ReadableStream<Uint8Array>,
+    options?: { httpMetadata?: { contentType?: string } },
+  ) {
+    let bytes: Uint8Array;
+    if (value instanceof Uint8Array) {
+      bytes = value.slice();
+    } else if (value instanceof ArrayBuffer) {
+      bytes = new Uint8Array(value);
+    } else {
+      const reader = value.getReader();
+      const chunks: Uint8Array[] = [];
+      let total = 0;
+      while (true) {
+        const { done, value: chunk } = await reader.read();
+        if (done) break;
+        if (chunk) {
+          chunks.push(chunk);
+          total += chunk.byteLength;
+        }
+      }
+      bytes = new Uint8Array(total);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+    }
+    this.objects.set(key, { bytes, contentType: options?.httpMetadata?.contentType });
   }
   async get(key: string) {
     const object = this.objects.get(key);
@@ -86,7 +113,7 @@ export class FakeR2 {
   }
 }
 
-export function makeEnv() {
+export function makeEnv(overrides: Partial<{ MAX_PACK_MB: string; MAX_TOTAL_R2_MB: string; MAX_DAILY_UPLOADS_PER_USER: string }> = {}) {
   return {
     DB: new FakeD1(),
     PACKS: new FakeR2(),
@@ -94,6 +121,9 @@ export function makeEnv() {
     TURNSTILE_SECRET: "test-secret",
     DOWNLOAD_SECRET: "test-download-secret-0123456789",
     MAX_PACK_MB: "5",
+    MAX_TOTAL_R2_MB: "8500",
+    MAX_DAILY_UPLOADS_PER_USER: "10",
+    ...overrides,
   };
 }
 
@@ -127,7 +157,10 @@ export class Client {
     if (this.cookie) headers.Cookie = this.cookie;
     let payload: BodyInit | undefined;
     if (body instanceof FormData) payload = body;
-    else if (body !== undefined) {
+    else if (body instanceof Uint8Array || body instanceof Blob) {
+      headers["Content-Type"] = extraHeaders["Content-Type"] || "application/zip";
+      payload = body as BodyInit;
+    } else if (body !== undefined) {
       headers["Content-Type"] = "application/json";
       payload = JSON.stringify(body);
     }
@@ -202,7 +235,7 @@ export function makePackZip(options: PackOptions = {}) {
     "原卷/library/x/crop.png": new Uint8Array([137, 80, 78, 71]),
   };
   if (options.community !== false) files["community-preview.json"] = strToU8(JSON.stringify(preview));
-  if (options.cover) files["community-cover.png"] = new Uint8Array([137, 80, 78, 71, 1, 2, 3]);
+  if (options.cover) files["community-cover.png"] = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
   return zipSync(files);
 }
 

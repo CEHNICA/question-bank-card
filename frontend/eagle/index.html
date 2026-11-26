@@ -2242,20 +2242,38 @@
 
   <!-- OneNote 解除关联改用 window.confirm 二次确认，不再保留独立弹窗 -->
 
-  <!-- 题有据社区：嵌入社区网站，关闭后保留页面状态（不重新加载）。 -->
+  <!-- 题有据社区：本地预览用弹窗内嵌，正式 https 域名自动改为系统浏览器打开（避免跨站 Cookie 被拦截）。 -->
   <div id="communityModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-xs p-4">
     <!-- 尺寸用内联样式：工作台的 tailwind.css 是预编译子集，任意值类名（h-[88vh]）不一定存在。 -->
     <div class="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl" style="width:min(96vw,1152px);height:88vh;">
-      <div class="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
         <div class="min-w-0">
           <h3 class="text-sm font-bold text-slate-900">题有据社区</h3>
-          <p class="text-[11px] text-slate-400">浏览题包与心得；下载的题包仍用「设置 → 数据备份与迁移」合并进本机</p>
+          <p class="text-[11px] text-slate-400">浏览、分享题包与心得；下载后的社区题包请在本机导入合并，只增不减且可撤销</p>
         </div>
-        <div class="flex items-center gap-3 shrink-0 text-xs">
-          <a id="communityOpenExternal" href="#" target="_blank" rel="noopener" class="text-emerald-700 hover:underline">在浏览器打开</a>
+        <div class="flex flex-wrap items-center gap-2 shrink-0 text-xs">
+          <label for="communityUrlInput" class="text-[11px] text-slate-500">站点地址</label>
+          <input
+            id="communityUrlInput"
+            type="url"
+            aria-label="社区站点地址"
+            placeholder="https://community.你的域名/"
+            class="h-7 w-56 rounded-md border border-slate-200 px-2 text-xs text-slate-700 outline-hidden focus:border-emerald-500"
+          >
+          <button type="button" onclick="saveCommunitySiteUrl()" class="rounded-md border border-slate-200 px-2.5 py-1 text-slate-600 hover:bg-slate-50">保存地址</button>
+          <a id="communityOpenExternal" href="#" target="_blank" rel="noopener" class="rounded-md bg-emerald-600 px-2.5 py-1 font-medium text-white hover:bg-emerald-700">在浏览器打开</a>
+          <a href="/settings#backup" class="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-emerald-700 hover:bg-emerald-100">去导入已下载题包</a>
           <button type="button" onclick="reloadCommunityFrame()" class="text-slate-500 hover:text-slate-800">刷新</button>
           <button type="button" onclick="closeCommunityModal()" class="text-slate-400 hover:text-slate-600 text-sm" aria-label="关闭社区">✕</button>
         </div>
+      </div>
+      <div id="communityExternalNotice" class="hidden flex-1 flex-col items-center justify-center gap-3 bg-slate-50 p-8 text-center">
+        <div class="text-3xl">🌐</div>
+        <div class="text-sm font-semibold text-slate-800">已为正式社区站点切换到系统浏览器打开</div>
+        <p class="max-w-md text-xs leading-5 text-slate-500">
+          正式域名（HTTPS）如果嵌在桌面内嵌框里，浏览器的跨站 Cookie 策略会拦截登录和人机验证。<br>
+          请点击上方「在浏览器打开」登录、预览与下载题包，下载完成后点「去导入已下载题包」合并进本机题库。
+        </p>
       </div>
       <iframe
         id="communityFrame"
@@ -21253,26 +21271,82 @@
       });
     }
 
-    // 题有据社区站点地址：本机预览用 wrangler dev；正式发布前改成社区的正式域名（https）。
-    const COMMUNITY_SITE_URL = 'http://127.0.0.1:8787/';
+    // 题有据社区站点地址：可在界面中配置并持久化到本地；默认指向本机 wrangler dev。
+    const DEFAULT_COMMUNITY_SITE_URL = 'http://127.0.0.1:8787/';
+    const COMMUNITY_URL_STORAGE_KEY = 'tyj_community_site_url';
+
+    function getCommunitySiteUrl() {
+      try {
+        const saved = localStorage.getItem(COMMUNITY_URL_STORAGE_KEY);
+        if (saved && /^https?:\/\//i.test(saved.trim())) return saved.trim();
+      } catch (_) {}
+      return DEFAULT_COMMUNITY_SITE_URL;
+    }
+
+    function isLocalLoopbackUrl(url) {
+      return /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/i.test(url);
+    }
+
+    function syncCommunityModalView(forceReload = false) {
+      const url = getCommunitySiteUrl();
+      const input = document.getElementById('communityUrlInput');
+      if (input && input.value !== url) input.value = url;
+      const link = document.getElementById('communityOpenExternal');
+      if (link) link.href = url;
+      const frame = document.getElementById('communityFrame');
+      const notice = document.getElementById('communityExternalNotice');
+      if (!frame || !notice) return;
+      if (isLocalLoopbackUrl(url)) {
+        notice.classList.add('hidden');
+        notice.classList.remove('flex');
+        frame.classList.remove('hidden');
+        if (!frame.dataset.loaded || forceReload || frame.dataset.loadedUrl !== url) {
+          frame.src = url;
+          frame.dataset.loaded = '1';
+          frame.dataset.loadedUrl = url;
+        }
+      } else {
+        frame.classList.add('hidden');
+        frame.removeAttribute('src');
+        delete frame.dataset.loaded;
+        notice.classList.remove('hidden');
+        notice.classList.add('flex');
+      }
+    }
+
+    function saveCommunitySiteUrl() {
+      const input = document.getElementById('communityUrlInput');
+      const raw = (input?.value || '').trim();
+      if (!/^https?:\/\//i.test(raw)) {
+        showToast('请填写以 http:// 或 https:// 开头的社区地址', 'error');
+        return;
+      }
+      try {
+        localStorage.setItem(COMMUNITY_URL_STORAGE_KEY, raw);
+      } catch (_) {}
+      syncCommunityModalView(true);
+      showToast('已保存社区站点地址', 'success');
+    }
+    window.saveCommunitySiteUrl = saveCommunitySiteUrl;
 
     function openCommunityModal() {
       const modal = document.getElementById('communityModal');
-      const frame = document.getElementById('communityFrame');
-      if (!modal || !frame) return;
-      const link = document.getElementById('communityOpenExternal');
-      if (link) link.href = COMMUNITY_SITE_URL;
-      // 第一次打开才加载；之后只显示/隐藏，保留浏览位置和登录状态。
-      if (!frame.dataset.loaded) {
-        frame.src = COMMUNITY_SITE_URL;
-        frame.dataset.loaded = '1';
-      }
+      if (!modal) return;
+      const url = getCommunitySiteUrl();
+      syncCommunityModalView(false);
       modal.classList.remove('hidden');
+      if (!isLocalLoopbackUrl(url)) {
+        window.open(url, '_blank', 'noopener');
+      }
     }
 
     function reloadCommunityFrame() {
-      const frame = document.getElementById('communityFrame');
-      if (frame && frame.dataset.loaded) frame.src = COMMUNITY_SITE_URL;
+      const url = getCommunitySiteUrl();
+      if (isLocalLoopbackUrl(url)) {
+        syncCommunityModalView(true);
+      } else {
+        window.open(url, '_blank', 'noopener');
+      }
     }
 
     function closeCommunityModal() {

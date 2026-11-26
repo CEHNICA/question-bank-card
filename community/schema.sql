@@ -37,10 +37,11 @@ CREATE TABLE IF NOT EXISTS packs (
   price_cents INTEGER NOT NULL DEFAULT 0 CHECK (price_cents >= 0),
   originality TEXT NOT NULL DEFAULT 'compiled' CHECK (originality IN ('original', 'compiled')),
   status TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending', 'approved', 'rejected', 'taken_down', 'withdrawn')),
+    CHECK (status IN ('uploading', 'pending', 'approved', 'rejected', 'taken_down', 'withdrawn')),
   review_note TEXT NOT NULL DEFAULT '',
   r2_key TEXT NOT NULL,
   cover_key TEXT,
+  r2_purged_at TEXT,
   size INTEGER NOT NULL DEFAULT 0,
   question_count INTEGER NOT NULL DEFAULT 0,
   paper_count INTEGER NOT NULL DEFAULT 0,
@@ -55,6 +56,7 @@ CREATE TABLE IF NOT EXISTS packs (
 );
 CREATE INDEX IF NOT EXISTS packs_status_created ON packs(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS packs_author ON packs(author_id);
+CREATE INDEX IF NOT EXISTS packs_r2_active ON packs(r2_purged_at, status, created_at);
 
 -- 预览由桌面版导出时生成（community-preview.json），网站只存清洗后的副本，不解析 sqlite。
 CREATE TABLE IF NOT EXISTS pack_previews (

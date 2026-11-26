@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AppBindings } from "./env.ts";
+import { loadPack, maxTotalR2Bytes, activeR2Bytes, packBuyerCount, purgePackStorage } from "./packs.ts";
 import { fail, intParam, nowIso, readJson, requireAdmin, text } from "./util.ts";
 
 export const adminRoutes = new Hono<AppBindings>();
@@ -9,19 +10,61 @@ adminRoutes.use("*", async (c, next) => {
   await next();
 });
 
+adminRoutes.get("/storage", async (c) => {
+  const usedBytes = await activeR2Bytes(c.env);
+  const maxBytes = maxTotalR2Bytes(c.env);
+  const counts = await c.env.DB.prepare(
+    `SELECT
+       SUM(CASE WHEN r2_purged_at IS NULL THEN 1 ELSE 0 END) AS active_packs,
+       SUM(CASE WHEN status = 'uploading' THEN 1 ELSE 0 END) AS uploading_packs,
+       SUM(CASE WHEN r2_purged_at IS NULL AND status IN ('rejected', 'withdrawn', 'taken_down')
+                 AND NOT EXISTS (SELECT 1 FROM entitlements e WHERE e.pack_id = packs.id)
+                THEN 1 ELSE 0 END) AS recoverable_packs,
+       COALESCE(SUM(CASE WHEN r2_purged_at IS NULL AND status IN ('rejected', 'withdrawn', 'taken_down')
+                          AND NOT EXISTS (SELECT 1 FROM entitlements e WHERE e.pack_id = packs.id)
+                         THEN size ELSE 0 END), 0) AS recoverable_bytes
+     FROM packs`,
+  ).first<Record<string, number | null>>();
+  return c.json({
+    used_bytes: usedBytes,
+    max_total_bytes: maxBytes,
+    active_packs: Number(counts?.active_packs ?? 0),
+    uploading_packs: Number(counts?.uploading_packs ?? 0),
+    recoverable_packs: Number(counts?.recoverable_packs ?? 0),
+    recoverable_bytes: Number(counts?.recoverable_bytes ?? 0),
+  });
+});
+
 adminRoutes.get("/packs", async (c) => {
   const status = text(c.req.query("status"), 20) || "pending";
   const rows = await c.env.DB.prepare(
     `SELECT p.id, p.title, p.status, p.stage, p.subject, p.year, p.price_cents, p.originality, p.question_count,
             p.paper_count,
-            p.include_originals, p.size, p.created_at, p.review_note, u.username AS author_username,
-            u.display_name AS author_name
+            p.include_originals, p.size, p.r2_purged_at, p.created_at, p.review_note, u.username AS author_username,
+            u.display_name AS author_name,
+            (SELECT COUNT(*) FROM entitlements e WHERE e.pack_id = p.id) AS buyers
        FROM packs p JOIN users u ON u.id = p.author_id
       WHERE p.status = ? ORDER BY p.created_at ASC LIMIT 200`,
   )
     .bind(status)
     .all();
   return c.json({ packs: rows.results ?? [] });
+});
+
+adminRoutes.post("/packs/:id/purge", async (c) => {
+  const pack = await loadPack(c.env, c.req.param("id"));
+  if (!pack) fail(404, "没有这份题包。");
+  if (pack.r2_purged_at) return c.json({ ok: true, purged: false });
+  if (pack.status === "pending" || pack.status === "approved") {
+    fail(400, "请先驳回或下架后再清理存储文件。");
+  }
+  const buyers = await packBuyerCount(c.env, pack.id);
+  const body: Record<string, unknown> = await readJson(c).catch(() => ({}));
+  if (buyers > 0 && !(pack.status === "taken_down" && body.force === true)) {
+    fail(409, "已有买家拥有这份题包，不能直接删除文件。");
+  }
+  await purgePackStorage(c.env, pack);
+  return c.json({ ok: true, purged: true });
 });
 
 const REVIEW_ACTIONS: Record<string, string> = {

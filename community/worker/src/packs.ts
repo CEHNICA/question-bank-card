@@ -3,12 +3,15 @@ import { unzipSync } from "fflate";
 import type { AppBindings, Env, SessionUser } from "./env.ts";
 import {
   type AppContext,
+  HttpError,
   base64UrlToBytes,
   bytesToBase64Url,
   fail,
+  hit,
   hmacSign,
   intParam,
   nowIso,
+  rateLimited,
   readJson,
   requireUser,
   text,
@@ -22,6 +25,9 @@ export const PREVIEW_NAME = "community-preview.json";
 const COVER_PATTERN = /^community-cover\.(png|jpe?g|webp)$/;
 const COVER_MAX_BYTES = 1024 * 1024;
 const DOWNLOAD_TTL_MS = 5 * 60 * 1000;
+const DIRECT_MULTIPART_MAX_BYTES = 20 * 1024 * 1024;
+const DEFAULT_MAX_TOTAL_R2_MB = 8500;
+const DEFAULT_DAILY_UPLOADS_PER_USER = 10;
 export const STAGES = ["小学", "初中", "高中", "大学", "其他"];
 
 type PackRow = {
@@ -34,6 +40,8 @@ type PackRow = {
   include_originals: number;
   r2_key: string;
   cover_key: string | null;
+  r2_purged_at: string | null;
+  size: number;
 };
 
 export type CleanPreview = {
@@ -148,10 +156,212 @@ export function parsePackZip(bytes: Uint8Array): ParsedPack {
   return { preview, cover };
 }
 
+export function maxPackBytes(env: Env): number {
+  return Number(env.MAX_PACK_MB || 50) * 1024 * 1024;
+}
+
+export function maxTotalR2Bytes(env: Env): number {
+  const mb = Number(env.MAX_TOTAL_R2_MB || DEFAULT_MAX_TOTAL_R2_MB);
+  return (Number.isFinite(mb) && mb > 0 ? mb : DEFAULT_MAX_TOTAL_R2_MB) * 1024 * 1024;
+}
+
+function maxDailyUploads(env: Env): number {
+  const n = Number(env.MAX_DAILY_UPLOADS_PER_USER || DEFAULT_DAILY_UPLOADS_PER_USER);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_DAILY_UPLOADS_PER_USER;
+}
+
+export async function activeR2Bytes(env: Env): Promise<number> {
+  const row = await env.DB.prepare(
+    "SELECT COALESCE(SUM(size), 0) AS total FROM packs WHERE r2_purged_at IS NULL",
+  ).first<{ total: number }>();
+  return Number(row?.total ?? 0);
+}
+
+export async function packBuyerCount(env: Env, packId: string): Promise<number> {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM entitlements WHERE pack_id = ?")
+    .bind(packId)
+    .first<{ n: number }>();
+  return Number(row?.n ?? 0);
+}
+
+export async function purgePackStorage(
+  env: Env,
+  pack: Pick<PackRow, "id" | "r2_key" | "cover_key" | "r2_purged_at">,
+  options: { nextStatus?: string; note?: string } = {},
+): Promise<void> {
+  const keys = [pack.r2_key, pack.cover_key].filter((k): k is string => Boolean(k));
+  if (keys.length) await env.PACKS.delete(keys);
+  const now = nowIso();
+  if (options.nextStatus) {
+    await env.DB.prepare(
+      "UPDATE packs SET status = ?, review_note = COALESCE(?, review_note), cover_key = NULL, r2_purged_at = ?, size = 0, updated_at = ? WHERE id = ?",
+    )
+      .bind(options.nextStatus, options.note ?? null, now, now, pack.id)
+      .run();
+  } else {
+    await env.DB.prepare(
+      "UPDATE packs SET cover_key = NULL, r2_purged_at = ?, size = 0, updated_at = ? WHERE id = ?",
+    )
+      .bind(now, now, pack.id)
+      .run();
+  }
+}
+
+export async function runPackMaintenance(env: Env, nowMs = Date.now()): Promise<{
+  abandoned_uploading: number;
+  purged_rejected: number;
+}> {
+  const uploadingCutoff = new Date(nowMs - 2 * 3600 * 1000).toISOString();
+  const abandoned = await env.DB.prepare(
+    "SELECT id, r2_key, cover_key FROM packs WHERE status = 'uploading' AND created_at < ? LIMIT 100",
+  )
+    .bind(uploadingCutoff)
+    .all<{ id: string; r2_key: string; cover_key: string | null }>();
+  let abandonedCount = 0;
+  for (const row of abandoned.results ?? []) {
+    const keys = [row.r2_key, row.cover_key].filter((k): k is string => Boolean(k));
+    if (keys.length) await env.PACKS.delete(keys).catch(() => null);
+    await env.DB.prepare("DELETE FROM packs WHERE id = ? AND status = 'uploading'").bind(row.id).run();
+    abandonedCount += 1;
+  }
+
+  const rejectedCutoff = new Date(nowMs - 7 * 86400 * 1000).toISOString();
+  const staleRejected = await env.DB.prepare(
+    `SELECT p.id, p.r2_key, p.cover_key, p.r2_purged_at
+       FROM packs p
+      WHERE p.status = 'rejected' AND p.r2_purged_at IS NULL AND p.updated_at < ?
+        AND NOT EXISTS (SELECT 1 FROM entitlements e WHERE e.pack_id = p.id)
+      LIMIT 100`,
+  )
+    .bind(rejectedCutoff)
+    .all<Pick<PackRow, "id" | "r2_key" | "cover_key" | "r2_purged_at">>();
+  let purgedCount = 0;
+  for (const row of staleRejected.results ?? []) {
+    await purgePackStorage(env, row);
+    purgedCount += 1;
+  }
+  return { abandoned_uploading: abandonedCount, purged_rejected: purgedCount };
+}
+
+function uploadRateKey(userId: number): string {
+  return `pack-upload:${userId}`;
+}
+
+async function assertUploadAllowed(env: Env, userId: number, incomingBytes: number): Promise<void> {
+  if (await rateLimited(env, uploadRateKey(userId), maxDailyUploads(env), 24 * 3600 * 1000)) {
+    fail(429, `每人每天最多上传 ${maxDailyUploads(env)} 个题包，明天再试。`);
+  }
+  const used = await activeR2Bytes(env);
+  const limit = maxTotalR2Bytes(env);
+  if (used + incomingBytes > limit) {
+    fail(507, "社区免费存储空间已接近上限，请稍后再试或联系管理员清理无效文件。");
+  }
+}
+
+type PackMetaInput = {
+  title: unknown;
+  stage: unknown;
+  subject: unknown;
+  year: unknown;
+  tags: unknown;
+  price_yuan: unknown;
+  originality: unknown;
+  description: unknown;
+  rights_confirmed: unknown;
+  originals_confirmed: unknown;
+};
+
+type ParsedPackMeta = {
+  title: string;
+  stage: string;
+  subject: string;
+  year: number | null;
+  tags: string[];
+  price: number;
+  originality: "original" | "compiled";
+  description: string;
+  originalsConfirmed: boolean;
+};
+
+function validatePackMetaInput(input: PackMetaInput): ParsedPackMeta {
+  const confirmed = input.rights_confirmed === "1" || input.rights_confirmed === true;
+  if (!confirmed) fail(400, "请先确认你有权分发这份题包。");
+  const title = text(input.title, 80);
+  if (title.length < 2) fail(400, "请填一个标题。");
+  const stage = text(input.stage, 10);
+  if (stage && !STAGES.includes(stage)) fail(400, "学段只能选小学、初中、高中、大学或其他。");
+  const subject = text(input.subject, 20) || "数学";
+  const year = intParam(input.year, 0, 0, 3000) || null;
+  const tags = text(input.tags, 300)
+    .split(/[,，、\s]+/)
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+  const price = parsePriceYuan(input.price_yuan);
+  const originality = input.originality === "original" ? "original" : "compiled";
+  const description = text(input.description, 5000);
+  const originalsConfirmed = input.originals_confirmed === "1" || input.originals_confirmed === true;
+  return { title, stage, subject, year, tags, price, originality, description, originalsConfirmed };
+}
+
+function validateManifestAndPreview(
+  rawManifest: unknown,
+  rawPreview: unknown,
+  originalsConfirmed: boolean,
+): CleanPreview {
+  const manifest = (rawManifest && typeof rawManifest === "object" ? rawManifest : null) as Record<
+    string,
+    unknown
+  > | null;
+  if (!manifest) fail(400, "题包清单读不出来。");
+  if (manifest.format !== 1) fail(400, "题包格式版本不认识，请升级题有据后重新导出。");
+  if (!manifest.community || !rawPreview || typeof rawPreview !== "object") {
+    fail(400, "请用题有据桌面版的「导出为社区题包」重新导出，普通备份包不能直接发到社区。");
+  }
+  const preview = cleanPreview(rawPreview);
+  const community = manifest.community as Record<string, unknown>;
+  preview.include_originals = Boolean(community.include_originals);
+  if (preview.include_originals && !originalsConfirmed) {
+    fail(400, "这份题包带了原卷文件，请再确认原卷版权归你或已获授权。");
+  }
+  return preview;
+}
+
+function sniffCoverBytes(bytes: Uint8Array): { ext: string; contentType: string } | null {
+  if (bytes.length > 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+    return { ext: "png", contentType: "image/png" };
+  }
+  if (bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return { ext: "jpg", contentType: "image/jpeg" };
+  }
+  const ascii = (start: number, end: number) => String.fromCharCode(...bytes.slice(start, end));
+  if (bytes.length > 12 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP") {
+    return { ext: "webp", contentType: "image/webp" };
+  }
+  return null;
+}
+
+function decodeCoverBase64(raw: unknown): ParsedPack["cover"] {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const cleaned = raw.trim().replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, "");
+  let binary: string;
+  try {
+    binary = atob(cleaned);
+  } catch {
+    fail(400, "封面图片格式不正确。");
+  }
+  if (binary.length > COVER_MAX_BYTES) fail(413, "封面图片不能超过 1 MB。");
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const sniffed = sniffCoverBytes(bytes);
+  if (!sniffed) fail(400, "封面图片只支持 PNG、JPG 或 WebP。");
+  return { bytes, contentType: sniffed.contentType, ext: sniffed.ext };
+}
+
 export async function loadPack(env: Env, id: string): Promise<PackRow | null> {
   return (
     (await env.DB.prepare(
-      `SELECT id, author_id, title, status, price_cents, originality, include_originals, r2_key, cover_key
+      `SELECT id, author_id, title, status, price_cents, originality, include_originals, r2_key, cover_key, r2_purged_at, size
          FROM packs WHERE id = ?`,
     )
       .bind(id)
@@ -252,43 +462,226 @@ packRoutes.get("/packs", async (c) => {
   });
 });
 
+async function insertPackRecord(
+  env: Env,
+  params: {
+    id: string;
+    userId: number;
+    meta: ParsedPackMeta;
+    preview: CleanPreview;
+    r2Key: string;
+    coverKey: string | null;
+    size: number;
+    status: "uploading" | "pending";
+  },
+) {
+  const { id, userId, meta, preview, r2Key, coverKey, size, status } = params;
+  const tagNames = meta.tags.length ? meta.tags : preview.tags.slice(0, 8).map((tag) => tag.name);
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO packs (id, author_id, title, description, stage, subject, year, tags_text, price_cents,
+                          originality, status, r2_key, cover_key, size, question_count, paper_count,
+                          include_originals, rights_confirmed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      id,
+      userId,
+      meta.title,
+      meta.description,
+      meta.stage,
+      meta.subject,
+      meta.year,
+      tagNames.join(","),
+      meta.price,
+      meta.originality,
+      status,
+      r2Key,
+      coverKey,
+      size,
+      preview.counts.questions,
+      preview.counts.papers,
+      preview.include_originals ? 1 : 0,
+      nowIso(),
+    ),
+    env.DB.prepare("INSERT INTO pack_previews (pack_id, preview_json) VALUES (?, ?)").bind(
+      id,
+      JSON.stringify(preview),
+    ),
+  ]);
+}
+
+packRoutes.post("/packs/init", async (c) => {
+  const user = requireUser(c);
+  const body = await readJson(c);
+  const maxBytes = maxPackBytes(c.env);
+  const fileSize = intParam(body.file_size, 0, 0, Number.MAX_SAFE_INTEGER);
+  if (fileSize < 22) fail(400, "请选择有效的社区题包 zip 文件。");
+  if (fileSize > maxBytes) fail(413, `题包太大了，单个不能超过 ${c.env.MAX_PACK_MB || 50} MB。`);
+
+  const meta = validatePackMetaInput({
+    title: body.title,
+    stage: body.stage,
+    subject: body.subject,
+    year: body.year,
+    tags: body.tags,
+    price_yuan: body.price_yuan,
+    originality: body.originality,
+    description: body.description,
+    rights_confirmed: body.rights_confirmed,
+    originals_confirmed: body.originals_confirmed,
+  });
+  const preview = validateManifestAndPreview(body.manifest, body.preview, meta.originalsConfirmed);
+  if (meta.price > 0) {
+    await assertCanSell(c.env, {
+      author_id: user.id,
+      originality: meta.originality,
+      include_originals: preview.include_originals,
+    });
+  }
+  await assertUploadAllowed(c.env, user.id, fileSize);
+  const cover = decodeCoverBase64(body.cover_base64);
+
+  const id = crypto.randomUUID();
+  const r2Key = `packs/${id}.zip`;
+  let coverKey: string | null = null;
+  if (cover) {
+    coverKey = `covers/${id}.${cover.ext}`;
+    await c.env.PACKS.put(coverKey, cover.bytes, { httpMetadata: { contentType: cover.contentType } });
+  }
+  try {
+    await insertPackRecord(c.env, {
+      id,
+      userId: user.id,
+      meta,
+      preview,
+      r2Key,
+      coverKey,
+      size: fileSize,
+      status: "uploading",
+    });
+  } catch (error) {
+    if (coverKey) await c.env.PACKS.delete(coverKey).catch(() => null);
+    throw error;
+  }
+  return c.json({ id, status: "uploading", upload_url: `/api/packs/${id}/bundle` }, 201);
+});
+
+packRoutes.put("/packs/:id/bundle", async (c) => {
+  const user = requireUser(c);
+  const pack = await loadPack(c.env, c.req.param("id"));
+  if (!pack || pack.author_id !== user.id) fail(404, "没有这份题包。");
+  if (pack.status !== "uploading") fail(409, "这份题包已经完成上传，不能重复覆盖。");
+  const maxBytes = maxPackBytes(c.env);
+  if (pack.size <= 0 || pack.size > maxBytes) fail(413, `题包太大了，单个不能超过 ${c.env.MAX_PACK_MB || 50} MB。`);
+
+  const declaredHeader = c.req.header("Content-Length");
+  if (declaredHeader !== undefined) {
+    const declared = Number(declaredHeader);
+    if (!Number.isFinite(declared) || declared !== pack.size) {
+      fail(400, "上传的文件大小和初始化记录不一致，请重试。");
+    }
+  }
+  const sourceBody = c.req.raw.body;
+  if (!sourceBody) fail(400, "没有收到题包文件内容。");
+
+  let total = 0;
+  let checkedHeader = false;
+  let firstByte: number | null = null;
+  const verifier = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      if (!checkedHeader && chunk.byteLength > 0) {
+        if (firstByte === null && chunk.byteLength === 1) {
+          firstByte = chunk[0];
+        } else {
+          const b0 = firstByte !== null ? firstByte : chunk[0];
+          const b1 = firstByte !== null ? chunk[0] : chunk[1];
+          if (b0 !== 0x50 || b1 !== 0x4b) {
+            throw new HttpError(400, "这个文件不是有效的 zip 题包。");
+          }
+          checkedHeader = true;
+        }
+      }
+      total += chunk.byteLength;
+      if (total > pack.size) {
+        throw new HttpError(413, "实际上传的文件超过了登记大小。");
+      }
+      controller.enqueue(chunk);
+    },
+    flush() {
+      if (!checkedHeader || total !== pack.size) {
+        throw new HttpError(400, "题包上传不完整，请重试。");
+      }
+    },
+  });
+
+  const verifiedStream = sourceBody.pipeThrough(verifier);
+  const FixedStream = (globalThis as { FixedLengthStream?: new (len: number) => TransformStream<Uint8Array, Uint8Array> })
+    .FixedLengthStream;
+  const uploadStream =
+    typeof FixedStream === "function" ? verifiedStream.pipeThrough(new FixedStream(pack.size)) : verifiedStream;
+
+  try {
+    await c.env.PACKS.put(pack.r2_key, uploadStream as unknown as ReadableStream, {
+      httpMetadata: { contentType: "application/zip" },
+      customMetadata: { author: String(user.id) },
+    });
+  } catch (error) {
+    await c.env.PACKS.delete(pack.r2_key).catch(() => null);
+    if (error instanceof HttpError) throw error;
+    fail(400, "题包流式写入失败，请重新上传。");
+  }
+
+  await c.env.DB.prepare("UPDATE packs SET status = 'pending', updated_at = ? WHERE id = ? AND status = 'uploading'")
+    .bind(nowIso(), pack.id)
+    .run();
+  await hit(c.env, uploadRateKey(user.id));
+  return c.json({ id: pack.id, status: "pending" });
+});
+
 packRoutes.post("/packs", async (c) => {
   const user = requireUser(c);
-  const maxBytes = Number(c.env.MAX_PACK_MB || 50) * 1024 * 1024;
+  const maxBytes = maxPackBytes(c.env);
+  const directLimit = Math.min(maxBytes, DIRECT_MULTIPART_MAX_BYTES);
   const declared = Number(c.req.header("Content-Length") || 0);
   if (declared > maxBytes + 64 * 1024) fail(413, `题包太大了，单个不能超过 ${c.env.MAX_PACK_MB || 50} MB。`);
+  if (declared > directLimit + 64 * 1024) {
+    fail(413, "题包超过 20 MB，请使用网页端分段流式上传以免超出服务内存。");
+  }
   const form = await c.req.parseBody();
   const file = form.file;
   if (!(file instanceof File)) fail(400, "请选择一个题包 zip 文件。");
   if (file.size > maxBytes) fail(413, `题包太大了，单个不能超过 ${c.env.MAX_PACK_MB || 50} MB。`);
-  if (form.rights_confirmed !== "1") fail(400, "请先确认你有权分发这份题包。");
-  const title = text(form.title, 80);
-  if (title.length < 2) fail(400, "请填一个标题。");
-  const stage = text(form.stage, 10);
-  if (stage && !STAGES.includes(stage)) fail(400, "学段只能选小学、初中、高中、大学或其他。");
-  const subject = text(form.subject, 20) || "数学";
-  const year = intParam(form.year, 0, 0, 3000) || null;
-  const tags = text(form.tags, 300)
-    .split(/[,，、\s]+/)
-    .map((tag) => tag.trim())
-    .filter(Boolean)
-    .slice(0, 12);
-  const price = parsePriceYuan(form.price_yuan);
-  const originality = form.originality === "original" ? "original" : "compiled";
-  const description = text(form.description, 5000);
+  if (file.size > directLimit) {
+    fail(413, "题包超过 20 MB，请使用网页端分段流式上传以免超出服务内存。");
+  }
+
+  const meta = validatePackMetaInput({
+    title: form.title,
+    stage: form.stage,
+    subject: form.subject,
+    year: form.year,
+    tags: form.tags,
+    price_yuan: form.price_yuan,
+    originality: form.originality,
+    description: form.description,
+    rights_confirmed: form.rights_confirmed,
+    originals_confirmed: form.originals_confirmed,
+  });
 
   const bytes = new Uint8Array(await file.arrayBuffer());
   const parsed = parsePackZip(bytes);
-  if (parsed.preview.include_originals && form.originals_confirmed !== "1") {
+  if (parsed.preview.include_originals && !meta.originalsConfirmed) {
     fail(400, "这份题包带了原卷文件，请再确认原卷版权归你或已获授权。");
   }
-  if (price > 0) {
+  if (meta.price > 0) {
     await assertCanSell(c.env, {
       author_id: user.id,
-      originality,
+      originality: meta.originality,
       include_originals: parsed.preview.include_originals,
     });
   }
+  await assertUploadAllowed(c.env, user.id, bytes.byteLength);
+
   const id = crypto.randomUUID();
   const r2Key = `packs/${id}.zip`;
   await c.env.PACKS.put(r2Key, bytes, {
@@ -300,42 +693,22 @@ packRoutes.post("/packs", async (c) => {
     coverKey = `covers/${id}.${parsed.cover.ext}`;
     await c.env.PACKS.put(coverKey, parsed.cover.bytes, { httpMetadata: { contentType: parsed.cover.contentType } });
   }
-  const tagNames = tags.length ? tags : parsed.preview.tags.slice(0, 8).map((tag) => tag.name);
   try {
-    await c.env.DB.batch([
-      c.env.DB.prepare(
-        `INSERT INTO packs (id, author_id, title, description, stage, subject, year, tags_text, price_cents,
-                            originality, r2_key, cover_key, size, question_count, paper_count, include_originals,
-                            rights_confirmed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(
-        id,
-        user.id,
-        title,
-        description,
-        stage,
-        subject,
-        year,
-        tagNames.join(","),
-        price,
-        originality,
-        r2Key,
-        coverKey,
-        bytes.byteLength,
-        parsed.preview.counts.questions,
-        parsed.preview.counts.papers,
-        parsed.preview.include_originals ? 1 : 0,
-        nowIso(),
-      ),
-      c.env.DB.prepare("INSERT INTO pack_previews (pack_id, preview_json) VALUES (?, ?)").bind(
-        id,
-        JSON.stringify(parsed.preview),
-      ),
-    ]);
+    await insertPackRecord(c.env, {
+      id,
+      userId: user.id,
+      meta,
+      preview: parsed.preview,
+      r2Key,
+      coverKey,
+      size: bytes.byteLength,
+      status: "pending",
+    });
   } catch (error) {
     await c.env.PACKS.delete([r2Key, ...(coverKey ? [coverKey] : [])]);
     throw error;
   }
+  await hit(c.env, uploadRateKey(user.id));
   return c.json({ id, status: "pending" }, 201);
 });
 
@@ -353,6 +726,7 @@ packRoutes.get("/packs/:id", async (c) => {
   const manage = canManage(user, row);
   if (row.status !== "approved" && !manage) fail(404, "没有这份题包。");
   const owned = user ? manage || (await hasEntitlement(c.env, user.id, row.id)) : false;
+  const buyers = manage ? await packBuyerCount(c.env, row.id) : undefined;
   const posts = await c.env.DB.prepare(
     `SELECT p.id, p.title, p.like_count, p.comment_count, p.created_at, u.username AS author_username,
             u.display_name AS author_name
@@ -381,11 +755,17 @@ packRoutes.get("/packs/:id", async (c) => {
       ...rest,
       cover_key: undefined,
       has_cover: Boolean(row.cover_key),
+      r2_purged_at: row.r2_purged_at ?? null,
+      buyers,
       review_note: manage ? row.review_note : undefined,
       reviewed_by: undefined,
     },
     preview: previewJson ? JSON.parse(String(previewJson)) : null,
-    viewer: { can_manage: manage, owned, can_download: row.status === "approved" && (!paid || owned) },
+    viewer: {
+      can_manage: manage,
+      owned,
+      can_download: !row.r2_purged_at && row.status === "approved" && (!paid || owned),
+    },
     payment,
     my_request: myRequest,
     posts: posts.results ?? [],
@@ -414,6 +794,7 @@ packRoutes.post("/packs/:id/download", async (c) => {
   if (!pack) fail(404, "没有这份题包。");
   const manage = canManage(user, pack);
   if (pack.status !== "approved" && !manage) fail(404, "没有这份题包。");
+  if (pack.r2_purged_at) fail(410, "这份题包文件已被清理。");
   if (pack.price_cents > 0 && !manage && !(await hasEntitlement(c.env, user.id, pack.id))) {
     fail(402, "这是付费题包，请先向作者付款，等作者开通或用兑换码兑换后再下载。");
   }
@@ -425,6 +806,7 @@ packRoutes.get("/dl/:token", async (c) => {
   const { packId } = await verifyDownload(c.env, c.req.param("token"));
   const pack = await loadPack(c.env, packId);
   if (!pack || pack.status === "taken_down") fail(404, "这份题包已经下架了。");
+  if (pack.r2_purged_at) fail(410, "这份题包文件已被清理。");
   const object = await c.env.PACKS.get(pack.r2_key);
   if (!object) fail(404, "题包文件找不到了，请联系作者。");
   await c.env.DB.prepare("UPDATE packs SET downloads = downloads + 1 WHERE id = ?").bind(pack.id).run();
@@ -467,20 +849,35 @@ packRoutes.post("/packs/:id/withdraw", async (c) => {
   return c.json({ ok: true });
 });
 
+packRoutes.delete("/packs/:id", async (c) => {
+  const user = requireUser(c);
+  const pack = await loadPack(c.env, c.req.param("id"));
+  if (!pack || !canManage(user, pack)) fail(404, "没有这份题包。");
+  if (pack.status === "taken_down" && user.role !== "admin") {
+    fail(403, "这份题包已被管理员下架，不能自行删除。");
+  }
+  const buyers = await packBuyerCount(c.env, pack.id);
+  if (buyers > 0) {
+    fail(409, "已有买家拥有这份题包，不能删除存储文件；如需停售请点「撤回题包」。");
+  }
+  await purgePackStorage(c.env, pack, { nextStatus: "withdrawn" });
+  return c.json({ ok: true, purged: true });
+});
+
 packRoutes.get("/me/packs", async (c) => {
   const user = requireUser(c);
   const mine = await c.env.DB.prepare(
     `SELECT p.id, p.title, p.status, p.review_note, p.price_cents, p.originality, p.question_count, p.downloads,
-            p.created_at,
+            p.size, p.r2_purged_at, p.created_at,
             (SELECT COUNT(*) FROM entitlements e WHERE e.pack_id = p.id) AS buyers,
             (SELECT COALESCE(SUM(e.price_cents), 0) FROM entitlements e WHERE e.pack_id = p.id) AS estimated_cents,
             (SELECT COUNT(*) FROM purchase_requests r WHERE r.pack_id = p.id AND r.status = 'pending') AS pending_requests
-       FROM packs p WHERE p.author_id = ? ORDER BY p.created_at DESC`,
+       FROM packs p WHERE p.author_id = ? AND p.status != 'uploading' ORDER BY p.created_at DESC`,
   )
     .bind(user.id)
     .all();
   const owned = await c.env.DB.prepare(
-    `SELECT p.id, p.title, p.status, p.price_cents, p.question_count, e.created_at AS redeemed_at, e.source,
+    `SELECT p.id, p.title, p.status, p.price_cents, p.question_count, p.r2_purged_at, e.created_at AS redeemed_at, e.source,
             u.display_name AS author_name
        FROM entitlements e JOIN packs p ON p.id = e.pack_id JOIN users u ON u.id = p.author_id
       WHERE e.user_id = ? ORDER BY e.created_at DESC`,

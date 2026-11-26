@@ -1,9 +1,10 @@
 // 所有接口同源；写操作带 X-TYJ 头，Worker 据此拒绝跨站请求。
-export async function api(path, { method = "GET", body, form } = {}) {
-  const headers = {};
+export async function api(path, { method = "GET", body, form, rawBody, headers: extraHeaders } = {}) {
+  const headers = { ...extraHeaders };
   let payload;
   if (method !== "GET") headers["X-TYJ"] = "1";
-  if (form) payload = form;
+  if (rawBody !== undefined) payload = rawBody;
+  else if (form) payload = form;
   else if (body !== undefined) {
     headers["Content-Type"] = "application/json";
     payload = JSON.stringify(body);

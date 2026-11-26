@@ -26,6 +26,13 @@ SITE_NAME = "题有据社区"
 # Turnstile 站点密钥是公开的；这里填的是 Cloudflare 官方测试用的「永远通过」密钥，上线前换成自己的。
 TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
 MAX_PACK_MB = "50"
+# 死守 Cloudflare R2 免费 10 GB 配额：留出 1.5 GB 缓冲给收款码、封面和在途上传。
+MAX_TOTAL_R2_MB = "8500"
+MAX_DAILY_UPLOADS_PER_USER = "10"
+
+[triggers]
+# 每天 UTC 03:15 清理过期会话、限流记录、失败的半截上传及 7 天前无人购买的已驳回文件。
+crons = ["15 3 * * *"]
 
 # 以下只用 `npx wrangler secret put <名字>` 设置，不写进仓库：
 #   TURNSTILE_SECRET   Turnstile 服务端密钥

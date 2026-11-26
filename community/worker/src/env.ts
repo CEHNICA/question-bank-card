@@ -9,6 +9,8 @@ export type Env = {
   TURNSTILE_SECRET?: string;
   DOWNLOAD_SECRET?: string;
   MAX_PACK_MB?: string;
+  MAX_TOTAL_R2_MB?: string;
+  MAX_DAILY_UPLOADS_PER_USER?: string;
 };
 
 export type SessionUser = {

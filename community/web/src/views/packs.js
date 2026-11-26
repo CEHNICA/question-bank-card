@@ -1,7 +1,65 @@
+import { unzipSync } from "fflate";
 import { api, state } from "../api.js";
 import { escapeHtml, megabytes, priceLabel, renderMarkdown, renderMathText, timeAgo, typeName, yuan } from "../render.js";
 import { avatar, busy, needLogin, queryParams, setView, toast } from "../ui.js";
 import { bindRedeemForm, statusChip } from "./account.js";
+
+const COVER_PATTERN = /^community-cover\.(png|jpe?g|webp)$/;
+
+function uint8ToBase64(bytes) {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 8192) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  }
+  return btoa(binary);
+}
+
+async function inspectCommunityZip(file) {
+  const seen = new Set();
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let files;
+  try {
+    files = unzipSync(bytes, {
+      filter(entry) {
+        seen.add(entry.name);
+        if (entry.name === "题有据备份.json" || entry.name === "community-preview.json") {
+          return entry.originalSize < 4 * 1024 * 1024;
+        }
+        return COVER_PATTERN.test(entry.name) && entry.originalSize <= 1024 * 1024;
+      },
+    });
+  } catch {
+    throw new Error("这个文件打不开，不是完整的 zip 题包。");
+  }
+  if (!seen.has("题库.sqlite3") || !files["题有据备份.json"]) {
+    throw new Error("这不是题有据导出的题包：缺少清单或题库。");
+  }
+  const decoder = new TextDecoder();
+  let manifest;
+  let preview;
+  try {
+    manifest = JSON.parse(decoder.decode(files["题有据备份.json"]));
+  } catch {
+    throw new Error("题包清单读不出来。");
+  }
+  if (manifest.format !== 1) throw new Error("题包格式版本不认识，请升级题有据后重新导出。");
+  if (!manifest.community || !files["community-preview.json"]) {
+    throw new Error("请用题有据桌面版的「导出为社区题包」重新导出，普通备份包不能直接发到社区。");
+  }
+  try {
+    preview = JSON.parse(decoder.decode(files["community-preview.json"]));
+  } catch {
+    throw new Error("题包预览读不出来，请重新导出。");
+  }
+  let coverBase64 = "";
+  for (const [name, data] of Object.entries(files)) {
+    if (COVER_PATTERN.test(name)) {
+      coverBase64 = uint8ToBase64(data);
+      break;
+    }
+  }
+  return { manifest, preview, coverBase64 };
+}
 
 const STAGES = ["小学", "初中", "高中", "大学", "其他"];
 
@@ -140,7 +198,9 @@ export async function packDetailView(id) {
     .join("");
 
   let action;
-  if (pack.status !== "approved") {
+  if (pack.r2_purged_at) {
+    action = `<div class="rounded-lg bg-slate-100 p-3 text-sm text-slate-600">这份题包文件已被清理释放空间。</div>`;
+  } else if (pack.status !== "approved") {
     action = `<div class="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">${statusChip(pack.status)}
       <span class="ml-1">${pack.status === "pending" ? "管理员审核通过后才会公开。" : escapeHtml(pack.review_note || "")}</span></div>`;
   } else if (viewer.can_download) {
@@ -319,6 +379,7 @@ function manageHtml(pack) {
         : ""
     }
     ${isAuthor && pack.status !== "withdrawn" && pack.status !== "taken_down" ? '<button class="btn btn-danger mt-4 w-full" id="withdrawBtn">撤回题包</button>' : ""}
+    ${isAuthor && !pack.r2_purged_at && Number(pack.buyers || 0) === 0 && pack.status !== "taken_down" ? '<button class="btn mt-2 w-full" id="purgeOwnBtn">彻底删除并释放存储</button>' : ""}
   </section>`;
 }
 
@@ -337,6 +398,14 @@ function bindManage(pack, id) {
     busy(event.currentTarget, async () => {
       await api(`/api/packs/${pack.id}/withdraw`, { method: "POST", body: {} });
       toast("已撤回。");
+      packDetailView(id);
+    });
+  });
+  document.getElementById("purgeOwnBtn")?.addEventListener("click", (event) => {
+    if (!window.confirm("目前还没有人兑换或购买这份题包。彻底删除后文件会从服务器清除、释放免费存储配额且不可恢复，确定？")) return;
+    busy(event.currentTarget, async () => {
+      await api(`/api/packs/${pack.id}`, { method: "DELETE", body: {} });
+      toast("已清除文件并释放空间。", "success");
       packDetailView(id);
     });
   });
@@ -435,11 +504,12 @@ export async function uploadView() {
         <label class="flex items-start gap-2 text-sm text-slate-600"><input type="checkbox" name="originals_confirmed" value="1" class="mt-1">
           <span>如果题包里附带了原卷文件：我确认原卷版权归我或已获授权。（不带原卷可不勾）</span></label>
         <div class="flex items-center gap-3"><button class="btn btn-primary" type="submit">提交审核</button>
-          <span class="text-xs text-slate-400">新题包先审后发，审核通过后公开。</span></div>
+          <span class="text-xs text-slate-400" id="uploadProgress">新题包先审后发，审核通过后公开。</span></div>
       </form>
     </div>`);
   const form = document.getElementById("uploadForm");
   const priceHint = document.getElementById("priceHint");
+  const progress = document.getElementById("uploadProgress");
   form.querySelectorAll("input[name=originality]").forEach((radio) =>
     radio.addEventListener("change", () => {
       const original = form.originality.value === "original";
@@ -455,14 +525,51 @@ export async function uploadView() {
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const file = form.file.files[0];
-    if (file && file.size > maxMb * 1024 * 1024) {
+    if (!file) {
+      toast("请选择一个题包 zip 文件。", "error");
+      return;
+    }
+    if (file.size > maxMb * 1024 * 1024) {
       toast(`题包太大了，单个不能超过 ${maxMb} MB。`, "error");
       return;
     }
     busy(form.querySelector("button[type=submit]"), async () => {
-      const result = await api("/api/packs", { method: "POST", form: new FormData(form) });
-      toast("已提交，等待管理员审核。", "success");
-      location.hash = `#/pack/${result.id}`;
+      try {
+        if (progress) progress.textContent = "正在本机校验题包结构与封面…";
+        const inspected = await inspectCommunityZip(file);
+        const fd = new FormData(form);
+        if (progress) progress.textContent = "正在登记元数据与免费存储配额…";
+        const init = await api("/api/packs/init", {
+          method: "POST",
+          body: {
+            title: fd.get("title"),
+            stage: fd.get("stage"),
+            subject: fd.get("subject"),
+            year: fd.get("year"),
+            tags: fd.get("tags"),
+            price_yuan: fd.get("price_yuan"),
+            originality: fd.get("originality"),
+            description: fd.get("description"),
+            rights_confirmed: fd.get("rights_confirmed") === "1",
+            originals_confirmed: fd.get("originals_confirmed") === "1",
+            file_size: file.size,
+            manifest: inspected.manifest,
+            preview: inspected.preview,
+            cover_base64: inspected.coverBase64 || undefined,
+          },
+        });
+        if (progress) progress.textContent = `正在流式上传题包（${megabytes(file.size)}）…`;
+        await api(init.upload_url, {
+          method: "PUT",
+          rawBody: file,
+          headers: { "Content-Type": "application/zip" },
+        });
+        toast("已提交，等待管理员审核。", "success");
+        location.hash = `#/pack/${init.id}`;
+      } catch (error) {
+        if (progress) progress.textContent = "新题包先审后发，审核通过后公开。";
+        throw error;
+      }
     });
   });
 }

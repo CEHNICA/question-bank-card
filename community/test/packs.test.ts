@@ -1,5 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { strToU8, unzipSync } from "fflate";
+import { runMaintenance } from "../worker/src/index.ts";
 import { Client, makeEnv, makePackZip, packForm, promoteAdmin, setPayment, stubTurnstile } from "./helpers.ts";
 
 let restore: () => void;
@@ -147,4 +149,126 @@ test("reports reach the admin and takedown hides the pack", async () => {
   const mine = await author.json("GET", "/api/me/packs");
   assert.equal(mine.data.packs[0].status, "taken_down");
   assert.equal(mine.data.packs[0].review_note, "（虚构）版权投诉");
+});
+
+test("streaming two-step upload stores zip in R2 without server unzip", async () => {
+  const { env, author, admin, visitor } = await setup();
+  const zip = makePackZip({ cover: true });
+  const extracted = unzipSync(zip);
+  const manifest = JSON.parse(new TextDecoder().decode(extracted["题有据备份.json"]));
+  const preview = JSON.parse(new TextDecoder().decode(extracted["community-preview.json"]));
+  const coverBytes = extracted["community-cover.png"];
+  let binary = "";
+  for (const b of coverBytes) binary += String.fromCharCode(b);
+
+  const init = await author.json("POST", "/api/packs/init", {
+    title: "（虚构）流式上传题包",
+    stage: "高中",
+    subject: "数学",
+    year: 2026,
+    tags: "导数,流式",
+    price_yuan: "0",
+    originality: "original",
+    description: "（虚构）流式上传测试",
+    rights_confirmed: true,
+    file_size: zip.byteLength,
+    manifest,
+    preview,
+    cover_base64: btoa(binary),
+  });
+  assert.equal(init.status, 201, JSON.stringify(init.data));
+  assert.equal(init.data.status, "uploading");
+  assert.equal((await admin.json("GET", "/api/admin/packs")).data.packs.length, 0, "uploading 阶段不进入待审队列");
+
+  const putRes = await author.json("PUT", init.data.upload_url, zip);
+  assert.equal(putRes.status, 200, JSON.stringify(putRes.data));
+  assert.equal(putRes.data.status, "pending");
+  assert.equal((await admin.json("GET", "/api/admin/packs")).data.packs.length, 1);
+
+  await admin.json("POST", `/api/admin/packs/${init.data.id}/review`, { action: "approve" });
+  const link = await visitor.json("POST", `/api/packs/${init.data.id}/download`, {});
+  const file = await visitor.request("GET", link.data.url);
+  assert.equal(file.status, 200);
+  assert.deepEqual(new Uint8Array(await file.arrayBuffer()), zip);
+});
+
+test("streaming upload rejects non-zip stream and enforces storage quota & daily upload limit", async () => {
+  const zip = makePackZip();
+  const extracted = unzipSync(zip);
+  const manifest = JSON.parse(new TextDecoder().decode(extracted["题有据备份.json"]));
+  const preview = JSON.parse(new TextDecoder().decode(extracted["community-preview.json"]));
+
+  const env = makeEnv({ MAX_TOTAL_R2_MB: String((zip.byteLength * 1.5) / 1024 / 1024), MAX_DAILY_UPLOADS_PER_USER: "2" });
+  const author = new Client(env);
+  await author.register("author_quota");
+
+  const badInit = await author.json("POST", "/api/packs/init", {
+    title: "（虚构）坏文件流",
+    rights_confirmed: true,
+    file_size: zip.byteLength,
+    manifest,
+    preview,
+  });
+  assert.equal(badInit.status, 201);
+  const badBytes = new Uint8Array(zip.byteLength);
+  badBytes.set(strToU8("NOT_A_ZIP"));
+  const badPut = await author.json("PUT", badInit.data.upload_url, badBytes);
+  assert.equal(badPut.status, 400);
+  assert.equal(env.PACKS.objects.has(`packs/${badInit.data.id}.zip`), false);
+
+  // Clean up uploading placeholder so storage sum reflects only real packs
+  env.DB.db.prepare("DELETE FROM packs WHERE id = ?").run(badInit.data.id);
+
+  const ok1 = await author.json("POST", "/api/packs", packForm(zip, { title: "（虚构）配额包1" }));
+  assert.equal(ok1.status, 201);
+  const overQuota = await author.json("POST", "/api/packs", packForm(zip, { title: "（虚构）超配额包" }));
+  assert.equal(overQuota.status, 507);
+
+  // Raise quota and verify per-user daily upload limit (1 already uploaded, 1 more succeeds, 3rd hits 429)
+  env.MAX_TOTAL_R2_MB = "100";
+  const ok2 = await author.json("POST", "/api/packs", packForm(zip, { title: "（虚构）配额包2" }));
+  assert.equal(ok2.status, 201);
+  const limited = await author.json("POST", "/api/packs", packForm(zip, { title: "（虚构）超次数包" }));
+  assert.equal(limited.status, 429);
+});
+
+test("pack purge frees R2 storage when unpurchased and cron cleans stale records", async () => {
+  const { env, author, admin, visitor } = await setup();
+  const up1 = await author.json("POST", "/api/packs", packForm(makePackZip({ cover: true }), { title: "（虚构）可清理" }));
+  assert.equal(up1.status, 201);
+  const id1 = up1.data.id;
+
+  const del1 = await author.json("DELETE", `/api/packs/${id1}`, {});
+  assert.equal(del1.status, 200);
+  assert.equal(env.PACKS.objects.has(`packs/${id1}.zip`), false);
+  assert.equal(env.PACKS.objects.has(`covers/${id1}.png`), false);
+
+  // Pack with entitlement cannot be deleted by author
+  await setPayment(author);
+  const up2 = await author.json(
+    "POST",
+    "/api/packs",
+    packForm(makePackZip(), { title: "（虚构）已售不可删", originality: "original", price_yuan: "10" }),
+  );
+  const id2 = up2.data.id;
+  await admin.json("POST", `/api/admin/packs/${id2}/review`, { action: "approve" });
+  const { data: codeRes } = await author.json("POST", `/api/packs/${id2}/codes`, { count: 1 });
+  await visitor.json("POST", "/api/redeem", { code: codeRes.codes[0] });
+  const blockedDel = await author.json("DELETE", `/api/packs/${id2}`, {});
+  assert.equal(blockedDel.status, 409);
+
+  // Rejected pack + abandoned uploading + expired session cleanup via maintenance cron
+  const up3 = await author.json("POST", "/api/packs", packForm(makePackZip(), { title: "（虚构）待审驳回" }));
+  const id3 = up3.data.id;
+  await admin.json("POST", `/api/admin/packs/${id3}/review`, { action: "reject", note: "内容不完整" });
+  const oldIso = new Date(Date.now() - 8 * 86400 * 1000).toISOString();
+  env.DB.db.prepare("UPDATE packs SET updated_at = ? WHERE id = ?").run(oldIso, id3);
+
+  const storageBefore = await admin.json("GET", "/api/admin/storage");
+  assert.equal(storageBefore.status, 200);
+  assert.equal(storageBefore.data.recoverable_packs, 1);
+
+  const summary = await runMaintenance(env, Date.now());
+  assert.equal(summary.purged_rejected, 1);
+  assert.equal(env.PACKS.objects.has(`packs/${id3}.zip`), false);
 });

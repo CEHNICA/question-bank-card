@@ -1,8 +1,8 @@
 import { Hono } from "hono";
-import type { AppBindings } from "./env.ts";
+import type { AppBindings, Env } from "./env.ts";
 import { HttpError } from "./util.ts";
 import { authRoutes, loadSessionUser } from "./auth.ts";
-import { packRoutes } from "./packs.ts";
+import { packRoutes, runPackMaintenance } from "./packs.ts";
 import { postRoutes } from "./posts.ts";
 import { redeemRoutes } from "./redeem.ts";
 import { salesRoutes } from "./sales.ts";
@@ -57,4 +57,25 @@ export function createApp() {
   return app;
 }
 
-export default createApp();
+export async function runMaintenance(env: Env, nowMs = Date.now()) {
+  const packResult = await runPackMaintenance(env, nowMs);
+  const rateCutoff = nowMs - 24 * 3600 * 1000;
+  const [expiredSessions, expiredRates] = await env.DB.batch([
+    env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(nowMs),
+    env.DB.prepare("DELETE FROM rate_events WHERE at < ?").bind(rateCutoff),
+  ]);
+  return {
+    ...packResult,
+    cleaned_sessions: Number(expiredSessions.meta?.changes ?? 0),
+    cleaned_rate_events: Number(expiredRates.meta?.changes ?? 0),
+  };
+}
+
+const app = createApp();
+
+export default {
+  fetch: app.fetch,
+  scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(runMaintenance(env));
+  },
+};
