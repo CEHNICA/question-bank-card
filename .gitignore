@@ -59,3 +59,6 @@ secrets.json
 tools/dsh-portable/
 .acl-recovery/
 
+# website visual-check screenshots (local artifacts only)
+website/tools/_shots/
+
