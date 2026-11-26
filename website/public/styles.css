@@ -22,10 +22,14 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: clip;
+  max-width: 100%;
 }
 
 body {
   margin: 0;
+  overflow-x: clip;
+  max-width: 100%;
   font-family: "PingFang SC", "Microsoft YaHei UI", "Noto Sans SC", system-ui, -apple-system, sans-serif;
   color: var(--ink);
   background: radial-gradient(circle at 12% 0%, #f3efe2 0%, var(--paper) 42%, #f7f4ec 100%);
@@ -168,6 +172,13 @@ img {
   align-items: center;
 }
 
+.hero-grid > *,
+.download-grid > *,
+.features-grid > *,
+.steps-grid > * {
+  min-width: 0;
+}
+
 .eyebrow {
   display: inline-flex;
   align-items: center;
@@ -239,6 +250,7 @@ img {
 
 .shot-frame {
   margin: 0;
+  min-width: 0;
   background: var(--surface-strong);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -267,8 +279,9 @@ img {
   font-size: 13px;
   color: var(--muted);
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px 12px;
 }
 
 .section {
@@ -292,11 +305,17 @@ img {
 }
 
 .workflow-card {
+  min-width: 0;
   background: var(--surface-strong);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 24px;
   box-shadow: 0 12px 30px -24px rgba(22, 63, 58, 0.25);
+}
+
+.workflow-card img {
+  width: 100%;
+  height: auto;
 }
 
 .steps-grid {
@@ -447,6 +466,7 @@ img {
 }
 
 .download-card {
+  min-width: 0;
   background: var(--surface-strong);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -486,6 +506,8 @@ img {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
   padding: 12px 14px;
   border-radius: 12px;
   background: #132c28;
@@ -498,6 +520,8 @@ img {
 
 .code-box code {
   flex: 1;
+  min-width: 0;
+  overflow-x: auto;
   white-space: nowrap;
 }
 
@@ -561,13 +585,15 @@ img {
 .footer-brand {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
-.footer-brand img {
-  height: 44px;
-  width: auto;
+.footer-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  flex-shrink: 0;
 }
 
 .footer-links {
@@ -596,7 +622,7 @@ img {
 
 .lightbox-inner {
   position: relative;
-  max-width: min(1160px, 100%);
+  width: min(1160px, calc(100vw - 24px));
   max-height: 92vh;
   background: #ffffff;
   border-radius: 16px;
@@ -604,8 +630,11 @@ img {
 }
 
 .lightbox-inner img {
+  max-width: 100%;
   max-height: calc(92vh - 76px);
   width: auto;
+  height: auto;
+  margin: 0 auto;
   border-radius: 10px;
 }
 
@@ -657,6 +686,25 @@ img {
 }
 
 @media (max-width: 680px) {
+  .header-inner {
+    gap: 10px;
+    min-height: 60px;
+  }
+
+  .version-badge {
+    display: none;
+  }
+
+  .header-actions {
+    gap: 6px;
+  }
+
+  .btn-sm {
+    padding: 7px 11px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
   .nav {
     display: none;
   }
@@ -668,6 +716,32 @@ img {
 
   .thumb-strip {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .workflow-card {
+    padding: 16px;
+  }
+
+  .download-card {
+    padding: 20px 16px;
+  }
+
+  .community-banner {
+    padding: 24px 18px;
+  }
+
+  .code-box {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .code-box code {
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .copy-btn {
+    align-self: flex-end;
   }
 
   .hero {

@@ -1,8 +1,14 @@
 @import "tailwindcss";
 
+html,
+body {
+  overflow-x: clip;
+  max-width: 100%;
+}
+
 @layer components {
   .nav-link {
-    @apply rounded-md px-2.5 py-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900;
+    @apply shrink-0 whitespace-nowrap rounded-md px-2.5 py-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900;
   }
   .nav-link.is-active {
     @apply bg-slate-100 text-slate-900;

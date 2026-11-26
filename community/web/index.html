@@ -5,21 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="题有据社区：老师之间分享结构化数学题包和教学心得。" />
     <title>题有据社区</title>
+    <link rel="icon" type="image/png" href="/app-icon.png?v=2" />
   </head>
   <body class="bg-slate-50 text-slate-800 antialiased">
     <header class="sticky top-0 z-30 border-b border-slate-200/80 bg-white/80 backdrop-blur">
-      <div class="mx-auto flex h-14 max-w-6xl items-center gap-5 px-4">
-        <a href="#/" class="flex items-center gap-2 font-semibold text-slate-900">
-          <span class="grid h-7 w-7 place-items-center rounded-lg bg-emerald-600 text-sm text-white">据</span>
+      <div class="mx-auto flex min-h-14 max-w-6xl flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2 sm:h-14 sm:flex-nowrap sm:py-0">
+        <a href="#/" class="flex shrink-0 items-center gap-2 font-semibold text-slate-900">
+          <img src="/app-icon.png?v=2" alt="题有据" class="h-7 w-7 shrink-0 rounded-lg" />
           <span id="siteName">题有据社区</span>
         </a>
-        <nav class="flex items-center gap-1 text-sm" id="mainNav">
+        <nav class="order-3 flex w-full items-center gap-1 overflow-x-auto pb-0.5 text-sm sm:order-none sm:w-auto sm:pb-0" id="mainNav">
           <a href="#/" data-nav="packs" class="nav-link">题包</a>
           <a href="#/posts" data-nav="posts" class="nav-link">心得</a>
           <a href="#/upload" data-nav="upload" class="nav-link">发布题包</a>
           <a href="https://tiyouju.com/" class="nav-link" target="_blank" rel="noopener">官网下载</a>
         </nav>
-        <div class="ml-auto flex items-center gap-2 text-sm" id="userBox"></div>
+        <div class="ml-auto flex shrink-0 items-center gap-2 text-sm" id="userBox"></div>
       </div>
     </header>
     <main id="app" class="mx-auto max-w-6xl px-4 py-6"></main>
