@@ -48,11 +48,12 @@ export async function verifyPassword(password: string, stored: string): Promise<
 }
 
 export async function verifyTurnstile(env: Env, token: unknown, ip: string): Promise<void> {
-  if (!env.TURNSTILE_SECRET) fail(503, "网站还没配置人机验证，暂时不能注册或登录。");
-  const response = String(token ?? "");
+  const secret = env.TURNSTILE_SECRET?.trim() || "";
+  if (!secret) fail(503, "网站还没配置人机验证，暂时不能注册或登录。");
+  const response = String(token ?? "").trim();
   if (!response) fail(400, "请先完成人机验证。");
   const form = new FormData();
-  form.append("secret", env.TURNSTILE_SECRET);
+  form.append("secret", secret);
   form.append("response", response);
   if (ip && ip !== "local") form.append("remoteip", ip);
   let ok = false;
@@ -61,8 +62,11 @@ export async function verifyTurnstile(env: Env, token: unknown, ip: string): Pro
       method: "POST",
       body: form,
     });
-    const body = (await result.json()) as { success?: boolean };
+    const body = (await result.json()) as { success?: boolean; "error-codes"?: string[] };
     ok = Boolean(body.success);
+    if (!ok) {
+      console.error("turnstile verify failed", body["error-codes"] ?? []);
+    }
   } catch {
     fail(503, "人机验证服务暂时连不上，请稍后再试。");
   }
