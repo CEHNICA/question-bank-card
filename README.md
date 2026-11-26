@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/readme-hero-dark.svg" />
     <source media="(prefers-color-scheme: light)" srcset="docs/assets/brand/readme-hero-light.svg" />
-    <img src="docs/assets/brand/readme-hero-light.svg" width="100%" alt="题有据 TiYouJu v2.3.0 — 每一道题，都能回到原卷。" />
+    <img src="docs/assets/brand/readme-hero-light.svg" width="100%" alt="题有据 TiYouJu — 把零散试卷，变成你的私家题库。" />
   </picture>
 </p>
 
@@ -36,9 +36,9 @@
   <a href="CHANGELOG.md">完整更新记录</a>
 </p>
 
-> **面向数学教师与教研场景的本地优先题库与正规组卷工作台（Windows 10 / 11）**
+> **把零散试卷，变成你的私家题库（Windows 10 / 11 · 本地优先 · 开源免费）**
 >
-> 把 Word 试卷、PDF 扫描件或手写错题照片整理成可检索的结构化题库——**每一道题都保留原卷出处与学生手写证据，人工核验后才入库，组卷预览、PDF 与 Word 三端一致。**
+> Word / PDF / 拍照题直收本机，每道题都留原卷出处与学生手写证据，人工核验后才入库，随时一键组卷导出，预览、PDF 与 Word 三端一致。
 
 ---
 
