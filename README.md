@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://github.com/CEHNICA/question-bank-card/releases/latest">
-    <img src="https://img.shields.io/badge/release-v2.3.0-2f9668?style=flat-square" alt="Release v2.3.0" />
+    <img src="https://img.shields.io/badge/release-v2.3.6-2f9668?style=flat-square" alt="Release v2.3.6" />
   </a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-163f3a?style=flat-square" alt="Windows 10/11" />
   <a href="LICENSE">
@@ -21,7 +21,11 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/CEHNICA/question-bank-card/releases/latest"><strong>下载 Windows 安装版</strong></a>
+  <a href="https://tiyouju.com/"><strong>官网介绍与下载</strong></a>
+  &nbsp;·&nbsp;
+  <a href="https://community.tiyouju.com/"><strong>题包社区</strong></a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/CEHNICA/question-bank-card/releases/latest"><strong>GitHub 下载安装版</strong></a>
   &nbsp;·&nbsp;
   <a href="#try-demo"><strong>不用密钥先练一遍</strong></a>
   &nbsp;·&nbsp;
@@ -131,7 +135,7 @@
 
 ### 1. Windows 安装与启动
 
-- **图形安装版 / 便携版**：前往 [GitHub Releases](https://github.com/CEHNICA/question-bank-card/releases/latest) 下载 `TiYouJu-Setup-2.3.0.exe`（推荐）或免安装便携压缩包 `QuestionBankCard-2.3.0-portable.zip`。
+- **图形安装版 / 便携版**：前往 [题有据官网](https://tiyouju.com/#download) 或 [GitHub Releases](https://github.com/CEHNICA/question-bank-card/releases/latest) 下载 `TiYouJu-Setup-2.3.6.exe`（推荐）或免安装便携压缩包 `QuestionBankCard-2.3.6-portable.zip`。
 - **PowerShell 一行安装**：
 
 ```powershell

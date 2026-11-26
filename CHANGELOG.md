@@ -3,6 +3,20 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.3.6
+
+**题有据社区正式上线、桌面端直达社区入口、流式直传 R2 与 `tiyouju.com` 官网发布**
+
+- **题包导出与社区分享闭环（`backend/core/library_transfer.py`、`frontend/eagle/index.html`）**：
+  - 桌面端新增「题包导出」与社区直达入口（默认指向 `https://community.tiyouju.com/`），支持在桌面浏览器或系统默认浏览器安全打开外部 HTTPS 社区站点并导入结构化题包。
+  - 社区支持分享者发布免费题包或原创题包站外收款与兑换码验证，平台不代收任何款项。
+- **Cloudflare Workers 社区后端加固（`community/`）**：
+  - 改为两步流式直传 R2，避免 128 MB 内存限制溢出；增加 8500 MB R2 免费额度硬顶、每用户每日 10 次上传限流与过期孤立文件清理。
+  - 修复 Turnstile 服务端校验时对密钥与令牌做首尾空白裁剪并记录详细错误码。
+- **题有据官网介绍与下载页上线（`website/`）**：
+  - 上线 `https://tiyouju.com/`（与 `https://www.tiyouju.com/`）官方产品介绍、四步工作流、实跑界面轮播预览、Windows 安装包 / 便携版 / PowerShell 一行安装说明，并与 `https://community.tiyouju.com/` 双向互通。
+
+
 ## 2.3.5
 
 **CI / 类型检查修复与测试 / Lint 全量收口**
