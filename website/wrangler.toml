@@ -1,0 +1,7 @@
+name = "tiyouju-site"
+compatibility_date = "2026-04-01"
+assets = { directory = "./public", not_found_handling = "404-page" }
+routes = [
+  { pattern = "tiyouju.com/*", zone_name = "tiyouju.com" },
+  { pattern = "www.tiyouju.com", custom_domain = true }
+]

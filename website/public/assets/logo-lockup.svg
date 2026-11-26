@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-labelledby="title desc">
+  <title id="title">题有据</title>
+  <desc id="desc">每一道题，都能回到原卷。</desc>
+  <g transform="translate(32 28) scale(.23828125)">
+    <rect x="32" y="32" width="960" height="960" rx="224" fill="#163f3a"/>
+    <rect x="160" y="176" width="438" height="628" rx="78" fill="#fff4dc"/>
+    <path d="M238 330v-72h72M448 258h72v72M238 650v72h72M448 722h72v-72" fill="none" stroke="#d6a65d" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="430" y="314" width="430" height="522" rx="76" fill="#f9edcf"/>
+    <rect x="548" y="438" width="214" height="48" rx="24" fill="#245e55"/>
+    <rect x="548" y="532" width="246" height="48" rx="24" fill="#245e55"/>
+    <path d="M354 424h62c62 0 98 35 98 94v112c0 66 40 104 108 104h126" fill="none" stroke="#2f9668" stroke-width="78" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="354" cy="424" r="27" fill="#fff4dc"/>
+    <circle cx="354" cy="424" r="13" fill="#2f9668"/>
+    <circle cx="748" cy="734" r="42" fill="#d6a65d"/>
+    <circle cx="748" cy="734" r="17" fill="#fff4dc"/>
+  </g>
+  <text x="322" y="137" fill="#163f3a" font-size="92" font-weight="750" letter-spacing="8" font-family="Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, sans-serif">题有据</text>
+  <text x="326" y="211" fill="#54716c" font-size="34" font-weight="500" letter-spacing="2" font-family="Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, sans-serif">每一道题，都能回到原卷。</text>
+</svg>
