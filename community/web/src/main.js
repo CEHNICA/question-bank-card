@@ -33,8 +33,8 @@ export function renderUserBox() {
   }
   box.innerHTML = `
     ${user.role === "admin" ? '<a href="#/admin" class="nav-link">管理</a>' : ""}
-    <a href="#/me" class="nav-link">${escapeHtml(user.display_name || user.username)}${
-      user.pending_sales ? ` <span class="chip bg-amber-500 text-white" title="待核对的付款通知">${user.pending_sales}</span>` : ""
+    <a href="#/me" class="nav-link"><span class="max-w-[96px] truncate sm:max-w-none">${escapeHtml(user.display_name || user.username)}</span>${
+      user.pending_sales ? ` <span class="chip ml-1 bg-amber-500 text-white" title="待核对的付款通知">${user.pending_sales}</span>` : ""
     }</a>
     <button type="button" class="btn" id="logoutBtn">退出</button>`;
   document.getElementById("logoutBtn").addEventListener("click", async () => {

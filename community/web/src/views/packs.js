@@ -123,11 +123,13 @@ export async function browseView() {
     `<a href="${link(changes)}" class="filter-item ${active ? "is-active" : ""}"><span>${escapeHtml(label)}</span>${
       count !== undefined ? `<span class="text-xs text-slate-400">${count}</span>` : ""
     }</a>`;
+  const pillItem = (label, changes, active) =>
+    `<a href="${link(changes)}" class="pill-filter ${active ? "is-active" : ""}">${escapeHtml(label)}</a>`;
   const years = Object.keys(yearCounts).sort((a, b) => b - a);
 
   setView(`
     <div class="grid gap-6 md:grid-cols-[200px_1fr]">
-      <aside class="space-y-5 text-sm">
+      <aside class="hidden space-y-5 text-sm md:block">
         <div><div class="label px-2">学段</div>
           ${filterItem("全部", undefined, { stage: "" }, !filters.stage)}
           ${STAGES.map((s) => filterItem(s, stageCounts[s] || 0, { stage: s }, filters.stage === s)).join("")}</div>
@@ -139,19 +141,33 @@ export async function browseView() {
           ${filterItem("全部", undefined, { year: "" }, !filters.year)}
           ${years.map((y) => filterItem(y, yearCounts[y], { year: y }, filters.year === y)).join("")}</div>` : ""}
       </aside>
-      <section>
-        <form id="searchForm" class="mb-4 flex items-center gap-2">
-          <input class="input max-w-xs" name="q" value="${escapeHtml(filters.q)}" placeholder="搜索标题、介绍、标签">
-          <button class="btn" type="submit">搜索</button>
+      <section class="min-w-0">
+        <form id="searchForm" class="mb-3 flex flex-wrap items-center gap-2">
+          <div class="flex min-w-0 flex-1 items-center gap-2 sm:flex-initial">
+            <input class="input min-w-0 flex-1 sm:w-64" name="q" value="${escapeHtml(filters.q)}" placeholder="搜索标题、介绍、标签">
+            <button class="btn shrink-0" type="submit">搜索</button>
+          </div>
           ${filters.tag ? `<a href="${link({ tag: "" })}" class="chip bg-emerald-50 text-emerald-700">标签：${escapeHtml(filters.tag)} ✕</a>` : ""}
-          <div class="ml-auto flex gap-1 text-sm">
+          <div class="ml-auto flex shrink-0 gap-1 text-sm">
             <a href="${link({ sort: "" })}" class="nav-link ${filters.sort !== "popular" ? "is-active" : ""}">最新</a>
             <a href="${link({ sort: "popular" })}" class="nav-link ${filters.sort === "popular" ? "is-active" : ""}">最多下载</a>
           </div>
         </form>
+        <div class="mb-4 space-y-2 md:hidden">
+          <div class="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+            ${pillItem("全部学段", { stage: "" }, !filters.stage)}
+            ${STAGES.map((s) => pillItem(s, { stage: s }, filters.stage === s)).join("")}
+          </div>
+          <div class="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+            ${pillItem("全部价格", { price: "" }, !filters.price)}
+            ${pillItem("免费", { price: "free" }, filters.price === "free")}
+            ${pillItem("付费", { price: "paid" }, filters.price === "paid")}
+            ${years.map((y) => pillItem(`${y} 年`, { year: filters.year === y ? "" : y }, filters.year === y)).join("")}
+          </div>
+        </div>
         ${
           data.packs.length
-            ? `<div class="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-4">${data.packs.map(packCard).join("")}</div>`
+            ? `<div class="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">${data.packs.map(packCard).join("")}</div>`
             : `<div class="card p-10 text-center text-sm text-slate-400">还没有符合条件的题包。${
                 state.user ? '<a href="#/upload" class="ml-1 text-emerald-700">发布第一份</a>' : ""
               }</div>`
@@ -214,8 +230,8 @@ export async function packDetailView(id) {
 
   setView(`
     <div class="grid gap-6 lg:grid-cols-[1fr_320px]">
-      <div class="space-y-5">
-        <section class="card p-6">
+      <div class="min-w-0 space-y-5">
+        <section class="card p-4 sm:p-6">
           <div class="flex flex-wrap items-center gap-2 text-xs text-slate-400">
             ${pack.stage ? `<span class="chip">${escapeHtml(pack.stage)}</span>` : ""}
             ${pack.subject ? `<span class="chip">${escapeHtml(pack.subject)}</span>` : ""}
@@ -223,33 +239,40 @@ export async function packDetailView(id) {
             ${pack.originality === "original" ? '<span class="chip bg-emerald-50 text-emerald-700">作者声明原创</span>' : '<span class="chip">整理汇编</span>'}
             ${pack.include_originals ? '<span class="chip bg-sky-50 text-sky-700">含原卷</span>' : '<span class="chip">不含原卷</span>'}
           </div>
-          <h1 class="mt-2 text-2xl font-semibold text-slate-900">${escapeHtml(pack.title)}</h1>
-          <div class="mt-2 flex items-center gap-2 text-sm text-slate-500">${avatar(pack.author_name)}
+          <h1 class="mt-2 text-xl font-semibold text-slate-900 sm:text-2xl">${escapeHtml(pack.title)}</h1>
+          <div class="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-500">${avatar(pack.author_name)}
             <a href="#/u/${encodeURIComponent(pack.author_username)}" class="hover:text-emerald-700">${escapeHtml(pack.author_name)}</a>
             <span>· ${timeAgo(pack.created_at)}</span></div>
+          <div class="mt-4 flex items-center justify-between gap-3 rounded-xl border border-slate-200/80 bg-slate-50 px-3.5 py-2.5 lg:hidden">
+            <div>
+              <div class="text-lg font-semibold ${paid ? "text-amber-600" : "text-emerald-600"}">${priceLabel(pack.price_cents)}</div>
+              <div class="text-xs text-slate-500">${pack.question_count} 题 · ${megabytes(pack.size)}</div>
+            </div>
+            <button type="button" class="btn btn-primary shrink-0" id="jumpActionBtn">${paid ? "去购买 / 下载 ↓" : "去下载 ↓"}</button>
+          </div>
           ${pack.description ? `<div class="prose-lite mt-4">${renderMarkdown(pack.description)}</div>` : ""}
           ${tags ? `<div class="mt-4 flex flex-wrap gap-1.5">${tags}</div>` : ""}
         </section>
         ${
           preview
-            ? `<section class="card p-6">
-          <div class="flex items-baseline justify-between"><h2 class="font-semibold">题目预览</h2>
+            ? `<section class="card p-4 sm:p-6">
+          <div class="flex flex-wrap items-baseline justify-between gap-2"><h2 class="font-semibold">题目预览</h2>
             <span class="text-xs text-slate-400">只展示前 ${preview.samples.length} 道题的题干，预览不含答案与解析</span></div>
           <div class="mt-3 flex flex-wrap gap-1.5">${types}</div>
           <div class="mt-2">${preview.samples.map(sampleHtml).join("") || '<p class="py-4 text-sm text-slate-400">没有可预览的题目。</p>'}</div>
         </section>`
             : ""
         }
-        <section class="card p-6">
-          <div class="flex items-center justify-between"><h2 class="font-semibold">相关心得</h2>
+        <section class="card p-4 sm:p-6">
+          <div class="flex flex-wrap items-center justify-between gap-2"><h2 class="font-semibold">相关心得</h2>
             ${state.user && pack.status === "approved" ? `<a class="btn" href="#/posts/new?pack=${pack.id}">写心得</a>` : ""}</div>
-          <ul class="mt-2 text-sm">${data.posts.map((p) => `<li class="flex justify-between border-t border-slate-100 py-2">
+          <ul class="mt-2 text-sm">${data.posts.map((p) => `<li class="flex flex-wrap justify-between gap-2 border-t border-slate-100 py-2">
             <a href="#/post/${p.id}" class="hover:text-emerald-700">${escapeHtml(p.title)}</a>
             <span class="text-xs text-slate-400">${escapeHtml(p.author_name)} · ${p.like_count} 赞</span></li>`).join("") || '<li class="py-2 text-slate-400">还没有人写心得。</li>'}</ul>
         </section>
       </div>
-      <aside class="space-y-5">
-        <section class="card p-5">
+      <aside class="min-w-0 space-y-5">
+        <section class="card p-4 sm:p-5" id="packActionCard">
           ${pack.has_cover ? `<img src="/api/packs/${pack.id}/cover" alt="" class="mb-4 w-full rounded-lg border border-slate-100">` : ""}
           <div class="text-2xl font-semibold ${paid ? "text-amber-600" : "text-emerald-600"}">${priceLabel(pack.price_cents)}</div>
           <dl class="mt-3 grid grid-cols-2 gap-y-1 text-sm text-slate-500">
@@ -266,6 +289,9 @@ export async function packDetailView(id) {
       </aside>
     </div>`);
 
+  document.getElementById("jumpActionBtn")?.addEventListener("click", () => {
+    document.getElementById("packActionCard")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
   document.getElementById("downloadBtn")?.addEventListener("click", (event) =>
     busy(event.currentTarget, async () => {
       const result = await api(`/api/packs/${pack.id}/download`, { method: "POST", body: {} });
@@ -370,9 +396,9 @@ function manageHtml(pack) {
         ? `<div class="mt-5 border-t border-slate-100 pt-4">
       <h3 class="text-sm font-semibold">兑换码（团购、线下发放用）</h3>
       <p class="mt-1 text-xs text-slate-500">买家点「我已付款」的，到「<a href="#/me" class="text-emerald-700">我的 → 付款通知</a>」一键开通即可，不用发码。兑换码适合一次卖给一个班或线下发放；码只在生成时显示一次，请立刻保存。</p>
-      <form id="codesForm" class="mt-2 flex gap-2">
-        <input class="input w-20" type="number" name="count" min="1" max="200" value="10">
-        <input class="input" name="note" maxlength="60" placeholder="备注（如：某班团购）">
+      <form id="codesForm" class="mt-2 flex flex-wrap gap-2 sm:flex-nowrap">
+        <input class="input w-20 shrink-0" type="number" name="count" min="1" max="200" value="10">
+        <input class="input min-w-0 flex-1" name="note" maxlength="60" placeholder="备注（如：某班团购）">
         <button class="btn btn-primary shrink-0" type="submit">生成</button></form>
       <div id="newCodes"></div>
       <div id="codeList" class="mt-3 text-xs text-slate-500">正在读取兑换码…</div></div>`
@@ -472,7 +498,7 @@ export async function uploadView() {
   setView(`
     <div class="mx-auto max-w-2xl">
       <h1 class="text-xl font-semibold">发布题包</h1>
-      <div class="card mt-4 p-5 text-sm text-slate-600">
+      <div class="card mt-4 p-4 text-sm text-slate-600 sm:p-5">
         <p class="font-medium text-slate-800">先在题有据桌面版导出</p>
         <ol class="mt-2 list-decimal space-y-1 pl-5">
           <li>在左侧文件夹树里右键一份试卷或书 →「更多」→「导出为社区题包…」。</li>
@@ -480,7 +506,7 @@ export async function uploadView() {
           <li>把导出的 <code>题有据社区题包-*.zip</code> 传到下面。单个不超过 ${maxMb} MB。</li>
         </ol>
       </div>
-      <form id="uploadForm" class="card mt-4 space-y-4 p-5">
+      <form id="uploadForm" class="card mt-4 space-y-4 p-4 sm:p-5">
         <div><label class="label">题包文件</label><input class="input" type="file" name="file" accept=".zip,application/zip" required></div>
         <div><label class="label">标题</label><input class="input" name="title" maxlength="80" required placeholder="如：2026 届高一上期中数学（含解析）"></div>
         <div class="grid gap-4 sm:grid-cols-3">
@@ -503,7 +529,7 @@ export async function uploadView() {
           <span>我确认对这份题包有分发权利（自己编写、整理，或已获得授权），不含盗版教辅、未公开考试题等侵权内容。</span></label>
         <label class="flex items-start gap-2 text-sm text-slate-600"><input type="checkbox" name="originals_confirmed" value="1" class="mt-1">
           <span>如果题包里附带了原卷文件：我确认原卷版权归我或已获授权。（不带原卷可不勾）</span></label>
-        <div class="flex items-center gap-3"><button class="btn btn-primary" type="submit">提交审核</button>
+        <div class="flex flex-wrap items-center gap-3"><button class="btn btn-primary" type="submit">提交审核</button>
           <span class="text-xs text-slate-400" id="uploadProgress">新题包先审后发，审核通过后公开。</span></div>
       </form>
     </div>`);

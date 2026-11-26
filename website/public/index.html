@@ -9,7 +9,7 @@
     />
     <title>题有据 TiYouJu — 每一道题，都能回到原卷</title>
     <link rel="icon" type="image/png" href="assets/app-icon.png?v=2" />
-    <link rel="stylesheet" href="styles.css?v=2" />
+    <link rel="stylesheet" href="styles.css?v=3" />
   </head>
   <body>
     <header class="site-header">
@@ -49,9 +49,7 @@
               <a
                 class="btn btn-primary"
                 id="downloadInstallerBtn"
-                href="https://github.com/CEHNICA/question-bank-card/releases/latest"
-                target="_blank"
-                rel="noopener"
+                href="/download/installer"
               >
                 下载 Windows 安装版
               </a>
@@ -59,22 +57,30 @@
                 逛逛题包社区
               </a>
             </div>
+            <p class="release-meta" id="releaseMeta">
+              当前最新：<strong>v2.3.6</strong> · 点击即可直接下载安装包，自动同步 GitHub 最新正式版
+            </p>
             <div class="hero-quick-links">
               <a
                 id="downloadPortableBtn"
-                href="https://github.com/CEHNICA/question-bank-card/releases/latest"
-                target="_blank"
-                rel="noopener"
+                href="/download/portable"
               >
                 免安装便携版 (.zip)
               </a>
               <a href="#install-cli">PowerShell 一行安装</a>
               <a
-                href="https://github.com/CEHNICA/question-bank-card/releases/latest"
+                href="/download/SHA256SUMS.txt"
                 target="_blank"
                 rel="noopener"
               >
-                查看发布版本与更新说明
+                SHA-256 校验值
+              </a>
+              <a
+                href="https://github.com/CEHNICA/question-bank-card/releases"
+                target="_blank"
+                rel="noopener"
+              >
+                GitHub 历史版本
               </a>
             </div>
             <div class="trust-row">
@@ -312,22 +318,21 @@
                 <a
                   class="btn btn-primary"
                   id="downloadInstallerCardBtn"
-                  href="https://github.com/CEHNICA/question-bank-card/releases/latest"
-                  target="_blank"
-                  rel="noopener"
+                  href="/download/installer"
                 >
                   下载安装版 (TiYouJu-Setup.exe)
                 </a>
                 <a
                   class="btn btn-secondary"
                   id="downloadPortableCardBtn"
-                  href="https://github.com/CEHNICA/question-bank-card/releases/latest"
-                  target="_blank"
-                  rel="noopener"
+                  href="/download/portable"
                 >
                   下载便携版 (.zip)
                 </a>
               </div>
+              <p class="release-meta" id="downloadCardMeta" style="margin-bottom: 14px">
+                点按钮直接在当前网页开始下载最新正式版，与 GitHub Releases 自动同步。
+              </p>
               <div class="hint-box">
                 <strong>不用配任何 API 密钥就能先试用：</strong>安装打开后点击「手工切题练习」，即可用内置示例走通切题、编辑公式、审核入库与导出 PDF 全流程。
               </div>
@@ -341,7 +346,16 @@
                 <button type="button" class="copy-btn" id="copyPsBtn">复制命令</button>
               </div>
               <p style="margin-bottom: 0; font-size: 13.5px">
-                所有历史版本、校验文件（<code>SHA256SUMS.txt</code>）与完整源码归档均可在
+                支持查看最新校验文件
+                <a
+                  href="/download/SHA256SUMS.txt"
+                  target="_blank"
+                  rel="noopener"
+                  style="color: var(--emerald-hover); text-decoration: underline"
+                >
+                  <code>SHA256SUMS.txt</code>
+                </a>
+                ；历史版本与完整源码归档也可在
                 <a
                   href="https://github.com/CEHNICA/question-bank-card/releases"
                   target="_blank"
@@ -406,6 +420,6 @@
       </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=3"></script>
   </body>
 </html>

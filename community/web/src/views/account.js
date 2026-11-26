@@ -173,34 +173,61 @@ export async function meView() {
         }</td></tr>`,
     )
     .join("");
+  const packCards = data.packs
+    .map(
+      (pack) => `<div class="border-t border-slate-100 py-3 text-sm">
+        <div class="flex items-start justify-between gap-2">
+          <a href="#/pack/${pack.id}" class="font-medium text-slate-800 hover:text-emerald-700">${escapeHtml(pack.title)}</a>
+          ${statusChip(pack.status)}
+        </div>
+        <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+          <span>${priceLabel(pack.price_cents)}</span>
+          <span>${pack.question_count} 题 · ${pack.downloads} 次下载</span>
+          ${
+            pack.price_cents > 0
+              ? `<span>${pack.buyers} 人购买 · 约 ${priceLabel(pack.estimated_cents)}${
+                  pack.pending_requests ? ` <span class="chip bg-amber-50 text-amber-700">${pack.pending_requests} 条待核对</span>` : ""
+                }</span>`
+              : ""
+          }
+        </div>
+        ${pack.review_note ? `<div class="mt-1 text-xs text-slate-400">审核意见：${escapeHtml(pack.review_note)}</div>` : ""}
+      </div>`,
+    )
+    .join("");
   const owned = data.owned
     .map(
-      (pack) => `<li class="flex items-center justify-between border-t border-slate-100 py-2">
+      (pack) => `<li class="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 py-2">
         <a href="#/pack/${pack.id}" class="hover:text-emerald-700">${escapeHtml(pack.title)}</a>
         <span class="text-xs text-slate-400">${escapeHtml(pack.author_name)} · ${timeAgo(pack.redeemed_at)}${pack.source === "redeem" ? "兑换" : "开通"}</span></li>`,
     )
     .join("");
   setView(`
     <div class="grid gap-5 md:grid-cols-[1fr_320px]">
-      <div class="space-y-5">
-        <section class="card p-5">
-          <div class="flex items-center justify-between"><h2 class="font-semibold">我发布的题包</h2>
+      <div class="min-w-0 space-y-5">
+        <section class="card p-4 sm:p-5">
+          <div class="flex flex-wrap items-center justify-between gap-2"><h2 class="font-semibold">我发布的题包</h2>
             <a href="#/upload" class="btn btn-primary">发布题包</a></div>
-          ${packs ? `<table class="mt-3 w-full text-sm"><tbody>${packs}</tbody></table>` : '<p class="mt-3 text-sm text-slate-400">还没有发布过题包。</p>'}
+          ${
+            packs
+              ? `<div class="mt-3 sm:hidden">${packCards}</div>
+                 <div class="mt-3 hidden overflow-x-auto sm:block"><table class="w-full text-sm"><tbody>${packs}</tbody></table></div>`
+              : '<p class="mt-3 text-sm text-slate-400">还没有发布过题包。</p>'
+          }
           ${totalBuyers ? `<p class="mt-3 text-xs text-slate-400">合计 ${totalBuyers} 人购买，按开通时标价估算约 ${priceLabel(totalCents)}。兑换码可能是团购价，实际收入以你自己的收款记录为准。</p>` : ""}
         </section>
-        <section class="card p-5" id="sales">
+        <section class="card p-4 sm:p-5" id="sales">
           <h2 class="font-semibold">付款通知 ${pendingCount ? `<span class="chip bg-amber-50 text-amber-700">${pendingCount} 条待核对</span>` : ""}</h2>
           <p class="mt-1 text-xs text-slate-500">买家付款后点了「我已付款」。先在你的微信 / 支付宝里核对到账，再点开通；没收到就点「没收到」并写原因。</p>
           ${incomingHtml(requests.incoming)}
         </section>
-        <section class="card p-5">
+        <section class="card p-4 sm:p-5">
           <h2 class="font-semibold">我购买的题包</h2>
           ${owned ? `<ul class="mt-2 text-sm">${owned}</ul>` : '<p class="mt-3 text-sm text-slate-400">还没有购买过付费题包。</p>'}
         </section>
         ${outgoingHtml(requests.outgoing)}
       </div>
-      <aside class="space-y-5">
+      <aside class="min-w-0 space-y-5">
         ${paymentHtml(payment)}
         <section class="card p-5">
           <h2 class="font-semibold">输入兑换码</h2>
@@ -331,19 +358,19 @@ export async function userView(username) {
   const data = await api(`/api/users/${encodeURIComponent(username)}`);
   const user = data.user;
   setView(`
-    <div class="card p-6">
+    <div class="card p-4 sm:p-6">
       <h1 class="text-xl font-semibold">${escapeHtml(user.display_name || user.username)}</h1>
       <p class="text-sm text-slate-400">@${escapeHtml(user.username)} · ${timeAgo(user.created_at)}加入</p>
       ${user.bio ? `<p class="mt-3 text-sm text-slate-600">${escapeHtml(user.bio)}</p>` : ""}
     </div>
     <div class="mt-5 grid gap-5 md:grid-cols-2">
-      <section class="card p-5"><h2 class="font-semibold">题包</h2>
-        <ul class="mt-2 text-sm">${data.packs.map((p) => `<li class="flex justify-between border-t border-slate-100 py-2">
+      <section class="card p-4 sm:p-5"><h2 class="font-semibold">题包</h2>
+        <ul class="mt-2 text-sm">${data.packs.map((p) => `<li class="flex flex-wrap justify-between gap-2 border-t border-slate-100 py-2">
           <a href="#/pack/${p.id}" class="hover:text-emerald-700">${escapeHtml(p.title)}</a>
           <span class="text-xs text-slate-400">${p.originality === "original" ? "原创 · " : ""}${priceLabel(p.price_cents)} · ${p.question_count} 题</span></li>`).join("") || '<li class="py-2 text-slate-400">暂无</li>'}</ul>
       </section>
-      <section class="card p-5"><h2 class="font-semibold">心得</h2>
-        <ul class="mt-2 text-sm">${data.posts.map((p) => `<li class="flex justify-between border-t border-slate-100 py-2">
+      <section class="card p-4 sm:p-5"><h2 class="font-semibold">心得</h2>
+        <ul class="mt-2 text-sm">${data.posts.map((p) => `<li class="flex flex-wrap justify-between gap-2 border-t border-slate-100 py-2">
           <a href="#/post/${p.id}" class="hover:text-emerald-700">${escapeHtml(p.title)}</a>
           <span class="text-xs text-slate-400">${p.like_count} 赞 · ${timeAgo(p.created_at)}</span></li>`).join("") || '<li class="py-2 text-slate-400">暂无</li>'}</ul>
       </section>

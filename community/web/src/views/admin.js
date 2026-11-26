@@ -35,7 +35,7 @@ export async function adminView() {
     : "";
   setView(`<h1 class="text-xl font-semibold">管理</h1>
     ${storageBar}
-    <nav class="mt-3 flex flex-wrap gap-1 text-sm">${nav}</nav>
+    <nav class="mt-3 flex gap-1 overflow-x-auto pb-1 text-sm sm:flex-wrap">${nav}</nav>
     <div class="mt-4">${body}</div>`);
   bindActions();
 }
@@ -57,7 +57,7 @@ async function packsHtml(status) {
           <span>${timeAgo(p.created_at)}提交</span></div>
         ${p.review_note ? `<div class="mt-1 text-xs text-slate-500">意见：${escapeHtml(p.review_note)}</div>` : ""}
       </div>
-      <div class="flex gap-2">
+      <div class="flex flex-wrap gap-2">
         ${status === "pending" ? `<button class="btn btn-primary" data-review="${p.id}" data-action="approve">通过</button>
           <button class="btn btn-danger" data-review="${p.id}" data-action="reject">驳回</button>` : ""}
         ${status === "approved" ? `<button class="btn btn-danger" data-review="${p.id}" data-action="takedown">下架</button>` : ""}
@@ -97,15 +97,15 @@ async function usersHtml() {
   return `<form id="userSearch" class="mb-3"><input class="input max-w-xs" name="q" value="${escapeHtml(q)}" placeholder="搜索用户名"></form>
     <div class="card divide-y divide-slate-100">${users
       .map(
-        (u) => `<div class="flex items-center gap-3 p-3 text-sm">
+        (u) => `<div class="flex flex-wrap items-center gap-2 p-3 text-sm sm:gap-3">
         <a href="#/u/${encodeURIComponent(u.username)}" class="font-medium">${escapeHtml(u.display_name || u.username)}</a>
         <span class="text-xs text-slate-400">@${escapeHtml(u.username)} · ${timeAgo(u.created_at)}注册</span>
         ${u.role === "admin" ? '<span class="chip">管理员</span>' : ""}
         ${u.banned_at ? '<span class="chip bg-rose-50 text-rose-600">已停用</span>' : ""}
-        <span class="ml-auto"></span>
+        <div class="ml-auto flex flex-wrap gap-2">
         ${u.has_payment ? `<button class="btn" data-clear-pay="${u.id}">清除收款信息</button>` : ""}
         ${u.role !== "admin" ? `<button class="btn ${u.banned_at ? "" : "btn-danger"}" data-ban="${u.id}" data-banned="${u.banned_at ? "0" : "1"}">${u.banned_at ? "恢复" : "停用"}</button>` : ""}
-      </div>`,
+        </div></div>`,
       )
       .join("")}</div>`;
 }

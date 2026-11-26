@@ -89,30 +89,68 @@
     }, 1800);
   });
 
-  // 在能访问 GitHub API 的网络下自动解析最新安装包和便携版直链；不可达时静默回退到 Releases 页。
-  fetch("https://api.github.com/repos/CEHNICA/question-bank-card/releases/latest", {
-    headers: { Accept: "application/vnd.github+json" },
-  })
+  function formatMb(bytes) {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "";
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function formatDate(iso) {
+    if (typeof iso !== "string" || !iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+
+  // 从同源 /api/latest-release 拉取 GitHub 最新正式版信息（国内免代理可用）；按钮链接始终直指 /download/* 在当前页下载。
+  fetch("/api/latest-release")
     .then((res) => (res.ok ? res.json() : null))
     .then((release) => {
-      if (!release || !Array.isArray(release.assets)) return;
-      if (typeof release.tag_name === "string" && release.tag_name) {
-        const badge = document.getElementById("versionBadge");
-        if (badge) badge.textContent = release.tag_name;
+      if (!release || !release.tag) return;
+      const badge = document.getElementById("versionBadge");
+      if (badge) badge.textContent = release.tag;
+
+      const installerMb = formatMb(release.installer?.size);
+      const portableMb = formatMb(release.portable?.size);
+      const dateText = formatDate(release.published_at);
+
+      const heroInstallerBtn = document.getElementById("downloadInstallerBtn");
+      if (heroInstallerBtn) {
+        heroInstallerBtn.textContent = installerMb
+          ? `下载 Windows 安装版 (${release.tag} · ${installerMb})`
+          : `下载 Windows 安装版 (${release.tag})`;
       }
-      const installer = release.assets.find((a) => /^TiYouJu-Setup-.*\.exe$/i.test(a.name));
-      const portable = release.assets.find((a) => /^QuestionBankCard-.*-portable\.zip$/i.test(a.name));
-      if (installer?.browser_download_url) {
-        ["downloadInstallerBtn", "downloadInstallerCardBtn"].forEach((id) => {
-          const el = document.getElementById(id);
-          if (el) el.href = installer.browser_download_url;
-        });
+
+      const cardInstallerBtn = document.getElementById("downloadInstallerCardBtn");
+      if (cardInstallerBtn && release.installer?.name) {
+        cardInstallerBtn.textContent = installerMb
+          ? `下载 ${release.installer.name} (${installerMb})`
+          : `下载 ${release.installer.name}`;
       }
-      if (portable?.browser_download_url) {
-        ["downloadPortableBtn", "downloadPortableCardBtn"].forEach((id) => {
-          const el = document.getElementById(id);
-          if (el) el.href = portable.browser_download_url;
-        });
+
+      const heroPortableBtn = document.getElementById("downloadPortableBtn");
+      if (heroPortableBtn && portableMb) {
+        heroPortableBtn.textContent = `免安装便携版 (${portableMb})`;
+      }
+
+      const cardPortableBtn = document.getElementById("downloadPortableCardBtn");
+      if (cardPortableBtn && release.portable?.name) {
+        cardPortableBtn.textContent = portableMb
+          ? `下载便携版 (${portableMb})`
+          : `下载 ${release.portable.name}`;
+      }
+
+      const meta = document.getElementById("releaseMeta");
+      if (meta) {
+        const parts = [`当前最新：<strong>${release.tag}</strong>`];
+        if (dateText) parts.push(`更新于 ${dateText}`);
+        parts.push("点按钮直接下载，自动同步 GitHub 最新正式版");
+        meta.innerHTML = parts.join(" · ");
+      }
+
+      const cardMeta = document.getElementById("downloadCardMeta");
+      if (cardMeta) {
+        const sizeNote = installerMb ? `安装包 ${installerMb}，` : "";
+        cardMeta.textContent = `当前已同步 ${release.tag}（${sizeNote}与 GitHub Releases 同步），点击即在当前网页直接下载。`;
       }
     })
     .catch(() => {});

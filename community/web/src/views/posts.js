@@ -24,9 +24,9 @@ export async function postsView() {
   };
   setView(`
     <div class="mx-auto max-w-3xl">
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <h1 class="text-xl font-semibold">教学心得</h1>
-        <div class="ml-3 flex gap-1 text-sm">
+        <div class="flex gap-1 text-sm sm:ml-3">
           <a href="${link({ sort: "" })}" class="nav-link ${sort !== "hot" ? "is-active" : ""}">最新</a>
           <a href="${link({ sort: "hot" })}" class="nav-link ${sort === "hot" ? "is-active" : ""}">最多赞</a>
         </div>
@@ -62,14 +62,14 @@ export async function postsView() {
 
 function editorHtml({ title = "", body = "", packId = "", packTitle = "", submit = "发布" }) {
   return `
-    <form id="postForm" class="card mt-4 space-y-4 p-5">
+    <form id="postForm" class="card mt-4 space-y-4 p-4 sm:p-5">
       <div><label class="label">标题</label><input class="input" name="title" maxlength="100" required value="${escapeHtml(title)}"></div>
       ${packId ? `<input type="hidden" name="pack_id" value="${escapeHtml(packId)}">
         <p class="text-sm text-slate-500">关联题包：<span class="chip bg-emerald-50 text-emerald-700">📦 ${escapeHtml(packTitle)}</span></p>` : ""}
       <div class="grid gap-4 md:grid-cols-2">
         <div><label class="label">正文（Markdown，公式用 $…$ 或 $$…$$）</label>
-          <textarea class="input min-h-[320px] font-mono text-[13px]" name="body" required maxlength="20000">${escapeHtml(body)}</textarea></div>
-        <div><div class="label">预览</div><div id="postPreview" class="prose-lite min-h-[320px] rounded-lg border border-dashed border-slate-200 p-3"></div></div>
+          <textarea class="input min-h-[200px] font-mono text-[13px] sm:min-h-[320px]" name="body" required maxlength="20000">${escapeHtml(body)}</textarea></div>
+        <div><div class="label">预览</div><div id="postPreview" class="prose-lite min-h-[200px] rounded-lg border border-dashed border-slate-200 p-3 sm:min-h-[320px]"></div></div>
       </div>
       <button class="btn btn-primary" type="submit">${submit}</button>
     </form>`;
@@ -117,7 +117,7 @@ export async function postDetailView(id) {
     .map(
       (c) => `<li class="flex gap-3 border-t border-slate-100 py-3">${avatar(c.author_name)}
         <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-2 text-xs text-slate-400">
+          <div class="flex flex-wrap items-center gap-2 text-xs text-slate-400">
             <a href="#/u/${encodeURIComponent(c.author_username)}" class="font-medium text-slate-600">${escapeHtml(c.author_name || c.author_username)}</a>
             <span>${timeAgo(c.created_at)}</span>
             ${state.user && (state.user.id === c.author_id || state.user.role === "admin") ? `<button class="ml-auto hover:text-rose-600" data-del-comment="${c.id}">删除</button>` : ""}
@@ -128,8 +128,8 @@ export async function postDetailView(id) {
     .join("");
   setView(`
     <article class="mx-auto max-w-3xl">
-      <div class="card p-6">
-        <h1 class="text-2xl font-semibold text-slate-900">${escapeHtml(post.title)}</h1>
+      <div class="card p-4 sm:p-6">
+        <h1 class="text-xl font-semibold text-slate-900 sm:text-2xl">${escapeHtml(post.title)}</h1>
         <div class="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-500">${avatar(post.author_name)}
           <a href="#/u/${encodeURIComponent(post.author_username)}" class="hover:text-emerald-700">${escapeHtml(post.author_name || post.author_username)}</a>
           <span>· ${timeAgo(post.created_at)}</span>
@@ -143,7 +143,7 @@ export async function postDetailView(id) {
           ${state.user && !viewer.can_manage ? '<button class="btn btn-danger ml-auto" id="reportPostBtn">举报</button>' : ""}
         </div>
       </div>
-      <section class="card mt-5 p-6" id="commentsBox">
+      <section class="card mt-5 p-4 sm:p-6" id="commentsBox">
         <h2 class="font-semibold">评论 ${data.comments.length}</h2>
         <ul class="mt-2">${comments || '<li class="py-3 text-sm text-slate-400">还没有评论。</li>'}</ul>
         ${
