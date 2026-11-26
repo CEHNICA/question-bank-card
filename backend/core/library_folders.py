@@ -1203,7 +1203,7 @@ def _mutate_reorder(state: dict, payload: dict, doc_types: dict[str, str], befor
 
     for idx, key in enumerate(ordered_keys):
         _, kind_tag, obj, _, _ = entry_map[key]
-        if kind_tag == "uf":
+        if kind_tag == "uf" and isinstance(obj, dict):
             obj["sortOrder"] = idx * 10
         else:
             doc_id = str(obj)
@@ -1683,7 +1683,7 @@ def mutate(payload: dict) -> dict:
                 }
                 added_set = set(ov["added"])
                 removed_set = set(ov["removed"])
-                changed = 0
+                doc_added_count = 0
                 for qid in qids:
                     was_in = qid in added_set or (qid in pubs_in_doc and qid not in removed_set)
                     if qid in removed_set:
@@ -1691,7 +1691,7 @@ def mutate(payload: dict) -> dict:
                     if qid not in pubs_in_doc:
                         added_set.add(qid)
                     if not was_in:
-                        changed += 1
+                        doc_added_count += 1
                 sections_map = dict(ov.get("sections") or {})
                 if not added_set and not removed_set and not sections_map:
                     state["doc_overrides"].pop(doc_uuid, None)
@@ -1701,7 +1701,7 @@ def mutate(payload: dict) -> dict:
                         add_entry["sections"] = sections_map
                     state["doc_overrides"][doc_uuid] = add_entry
                 op_record = _record_history(state, "add_questions", f"将 {len(qids)} 道题归入资料文件夹", before)
-                message = f"已将 {len(qids)} 道题放入资料文件夹（新增 {changed} 题）"
+                message = f"已将 {len(qids)} 道题放入资料文件夹（新增 {doc_added_count} 题）"
             else:
                 folder = _find_user_folder(state["user_folders"], raw_target)
                 existing = set(folder.get("questionIds") or [])

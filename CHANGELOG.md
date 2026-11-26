@@ -3,6 +3,15 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.3.5
+
+**CI / 类型检查修复与测试 / Lint 全量收口**
+
+- **类型检查修复（`backend/core/library_folders.py`）**：修正 `_mutate_reorder` 节点字典类型收窄与 `add_questions` 分支局部变量 `doc_added_count` 命名冲突，消除 `mypy` 全部报错。
+- **前端测试与导出脚本清理（`frontend/test_eagle_bug_fixes.js` 等）**：保留 Eagle 顶栏精简搜索占位符（`"搜索题干、名称、标签…"`）与完整 `aria-label` 无障碍提示，同步对应测试断言并清理导出脚本 ESLint 报错。
+- **完整包含 `2.3.4` 全部功能**：大一统数据驱动文件夹树（8 层上限）、书本自定义自由目录接管、资料节点归组拖排与整树 JSON 原子提交。
+
+
 ## 2.3.4
 
 **大一统数据驱动文件夹树、书本自由目录接管、资料节点归组与整树原子提交（含 2.3.3 界面收口）**
