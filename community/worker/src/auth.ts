@@ -18,6 +18,7 @@ import {
   timingSafeEqual,
 } from "./util.ts";
 import { pendingSalesCount } from "./sales.ts";
+import { adminMaxPackMb } from "./packs.ts";
 
 export const SESSION_COOKIE = "tyj_session";
 const SESSION_DAYS = 30;
@@ -132,7 +133,17 @@ export const authRoutes = new Hono<AppBindings>();
 authRoutes.get("/me", async (c) => {
   const user = c.get("user");
   if (!user || user.banned_at) return c.json({ user: null });
-  return c.json({ user: { ...publicUser(user), pending_sales: await pendingSalesCount(c.env, user.id) } });
+  const isAdmin = user.role === "admin";
+  const maxPackMb = isAdmin ? adminMaxPackMb(c.env) : Number(c.env.MAX_PACK_MB || 50);
+  return c.json({
+    user: {
+      ...publicUser(user),
+      is_admin: isAdmin,
+      unlimited_uploads: isAdmin,
+      max_pack_mb: maxPackMb,
+      pending_sales: await pendingSalesCount(c.env, user.id),
+    },
+  });
 });
 
 authRoutes.post("/register", async (c) => {

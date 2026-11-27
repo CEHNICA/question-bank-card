@@ -52,10 +52,21 @@ def expire_api_jobs():
         status=LibraryJob.Status.RUNNING,
         updated_at__lte=now - timedelta(seconds=API_RUNNING_SECONDS),
     )
-    return sum(
+    expired_tag_ids = list(queued.filter(kind=LibraryJob.Kind.TAGS).values_list("pk", flat=True)) + list(
+        running.filter(kind=LibraryJob.Kind.TAGS).values_list("pk", flat=True)
+    )
+    count = sum(
         rows.update(status=LibraryJob.Status.FAILED, error=TIMEOUT_MESSAGE, updated_at=now)
         for rows in (queued, running)
     )
+    if expired_tag_ids:
+        LibraryTagSuggestion.objects.filter(
+            job_id__in=expired_tag_ids,
+            status__in=[LibraryTagSuggestion.Status.QUEUED, LibraryTagSuggestion.Status.RUNNING],
+        ).update(
+            status=LibraryTagSuggestion.Status.FAILED, message=TIMEOUT_MESSAGE, catalogue_snapshot={}, updated_at=now
+        )
+    return count
 
 
 def touch_worker_heartbeat() -> None:
@@ -208,7 +219,10 @@ def cancel_jobs(payload):
                     LibraryTagSuggestion.objects.filter(
                         job=job, status__in=[LibraryTagSuggestion.Status.QUEUED, LibraryTagSuggestion.Status.RUNNING]
                     ).update(
-                        status=LibraryTagSuggestion.Status.FAILED, message=CANCEL_MESSAGE, updated_at=timezone.now()
+                        status=LibraryTagSuggestion.Status.FAILED,
+                        message=CANCEL_MESSAGE,
+                        catalogue_snapshot={},
+                        updated_at=timezone.now(),
                     )
                 count += 1
     return {"cancelled": count, "jobs": [job_json(job) for job in rows], "assistant_handoff": assistant_handoff(rows)}

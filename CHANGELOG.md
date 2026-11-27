@@ -3,6 +3,26 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.3.12
+
+**大文件夹流畅切换、社区大包进度与上传记录、OneNote 静默读取、磁盘空间止血及启动弹窗修复**
+
+- **题库工作台大文件夹性能优化与定位码反馈（`frontend/eagle/index.html`）**：
+  - 将 `readUserFolders`、`readDocFolderOverrides`、`readDocPlacements` 解析逻辑内聚缓存并暴露零拷贝只读路径，目录树重绘开头统一执行一次 `assignTextbookChapters()` 并向各级子树传递 `chaptersAssigned: true` / `skipAssign: true`（避免单轮渲染重算百余次章节归属）；
+  - 使用单遍索引 `buildCategorizedQuestionIdSet()` 与 `buildQuestionTagIndexMap()` 替代逐题循环重扫；点击已展开节点原地刷新高亮且按卷拉取改走 `bulk=1&limit=500`；
+  - 复制题目定位码（`#btnCopyInspectorLocator`）增加按压凹陷与深色「✓ 已复制」视觉状态反馈。
+- **社区大包上传、关闭二选一提示、实时进度与上传记录（`community/`、`credential_store.py`、`backend/core/tiyouju_protocol.py`、`backend/core/library_transfer.py`、`backend/core/transfer_views.py`、`frontend/eagle/index.html`）**：
+  - 社区 Worker（`packs.ts`、`auth.ts`、`index.ts`、`env.ts`）与桌面端同步识别社区账号 `role`，管理员/作者账号导出社区题包时放开 100 题、250 图、8 MB 原卷与 15 MB 打包上限（线上支持至 Cloudflare 单包 `ADMIN_MAX_PACK_MB = 95 MB`）；
+  - 新增后台流式上传任务接口（`/api/backup/community-upload/start`、`tasks`、`cancel`、`history`）；上传过程中关闭弹窗提供「取消上传 / 后台继续」二选一确认，收起后顶栏与右下角浮动条持续显示上传进度与历史记录。
+- **OneNote 静默读取步骤、彻底清理自动备份与主库防膨胀（`backend/core/library_onenote.py`、`backend/core/onenote_bridge.ps1`、`backend/core/library_transfer.py`、`backend/core/library_jobs.py`、`backend/core/library_job_control.py`、`backend/core/app_update.py`、`start_question_bank.py`、`app_window.py`）**：
+  - AI Agent 调用 `read_onenote_note` / `export_page_step_images` 时默认 `silent=True`，直接通过 COM 静默导出不把 OneNote 窗口顶到前台；
+  - 彻底下线并从工作台设置移除残留「每天自动打一份备份」开关，启动时自动清理历史 `题有据自动备份-*.zip`；升级前库快照（`before-*`、`pre-migrate-*`）滚动保留最新 3 份；修复 `_clear_stale_cache` 同步清扫 `Default` / `EBWebView\Default` 下的浏览器缓存；
+  - 后台自动补标签（`enqueue_untagged_background`）排除 `FAILED` / `STALE` 建议并跳过 >6 配图题目，排队与失败行不再重复存入整份目录快照，启动恢复时自动精简既有失败行大快照。
+- **桌面窗口启动置前与官网 R2 同步加速（`app_window.py`、`website/worker.js`、`website/wrangler.toml`、`.github/workflows/release.yml`）**：
+  - 启动关闭启动画面并创建 WebView2 窗口后主动执行恢复与置前（必要时短脉冲置顶拉回前台），避免界面缩在任务栏后面；
+  - 官网 `tiyouju.com` 接入 Cloudflare R2 存储桶 `tiyouju-releases`、5 分钟 Cron 预同步与 GitHub 发布完成预热步骤，安装包与版本清单直接从边缘节点高速分发。
+
+
 ## 2.3.11
 
 **录题界面视觉重塑、设置与原卷窗统一，以及国内 AI 助手（豆包 / WorkBuddy / MiniMax）一键接入**

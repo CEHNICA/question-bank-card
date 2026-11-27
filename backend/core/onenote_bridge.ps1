@@ -167,7 +167,10 @@ function Clear-StaleHeadlessOneNote {
 }
 
 function Ensure-OneNoteWindow {
-  param([int]$TimeoutSeconds = 9)
+  param(
+    [int]$TimeoutSeconds = 9,
+    [switch]$Silent
+  )
   Reset-OneNoteCrashFlags
   if (Has-VisibleOneNoteFrame) { return $true }
   Clear-StaleHeadlessOneNote
@@ -176,16 +179,37 @@ function Ensure-OneNoteWindow {
   $exe = Get-OneNoteExecutable
   if (-not $exe) { return $false }
   Reset-OneNoteCrashFlags
+  $prevFg = [IntPtr]::Zero
+  if ($Silent) {
+    try { $prevFg = [TiYouJuOneNote.Native]::GetForegroundWindow() } catch { $prevFg = [IntPtr]::Zero }
+  }
   try {
-    Start-Process -FilePath $exe | Out-Null
+    if ($Silent) {
+      Start-Process -FilePath $exe -WindowStyle Minimized | Out-Null
+    } else {
+      Start-Process -FilePath $exe | Out-Null
+    }
   } catch {
     return $false
   }
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  $ready = $false
   while ((Get-Date) -lt $deadline) {
     Start-Sleep -Milliseconds 200
-    if (Has-VisibleOneNoteFrame) { return $true }
+    if (Has-VisibleOneNoteFrame) {
+      $ready = $true
+      break
+    }
   }
+  if ($Silent -and $prevFg -ne [IntPtr]::Zero) {
+    try {
+      $curFg = [TiYouJuOneNote.Native]::GetForegroundWindow()
+      if ($curFg -ne $prevFg) {
+        [void][TiYouJuOneNote.Native]::SetForegroundWindow($prevFg)
+      }
+    } catch {}
+  }
+  if ($ready) { return $true }
   return (Has-VisibleOneNoteFrame)
 }
 
@@ -693,7 +717,13 @@ try {
       $pf = 3
       if ($params.format) { $pf = [int]$params.format }
       $clsid = [string]$params.clsid
-      if ($params.ensureWindow -or -not (Has-VisibleOneNoteFrame)) {
+      $silent = [bool]($params.silent)
+      $ensureWin = [bool]($params.ensureWindow)
+      $prevFg = [IntPtr]::Zero
+      if ($silent) {
+        try { $prevFg = [TiYouJuOneNote.Native]::GetForegroundWindow() } catch { $prevFg = [IntPtr]::Zero }
+      }
+      if (-not $silent -and ($ensureWin -or -not (Has-VisibleOneNoteFrame))) {
         [void](Ensure-OneNoteWindow -TimeoutSeconds 12)
         $one = Get-OneNote
       }
@@ -706,7 +736,7 @@ try {
           $publishedOk = $true
           break
         } catch {
-          if ($attempt -eq 0 -and (Ensure-OneNoteWindow -TimeoutSeconds 12)) {
+          if ($attempt -eq 0 -and (Ensure-OneNoteWindow -TimeoutSeconds 12 -Silent:$silent)) {
             $one = Get-OneNote
             continue
           }
@@ -720,6 +750,14 @@ try {
           $sz = (Get-Item -LiteralPath $dest).Length
           if ($sz -gt 0) { break }
         }
+      }
+      if ($silent -and $prevFg -ne [IntPtr]::Zero) {
+        try {
+          $curFg = [TiYouJuOneNote.Native]::GetForegroundWindow()
+          if ($curFg -ne $prevFg) {
+            [void][TiYouJuOneNote.Native]::SetForegroundWindow($prevFg)
+          }
+        } catch {}
       }
       $bytes = 0
       $exists = $false

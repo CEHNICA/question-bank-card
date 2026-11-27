@@ -69,6 +69,7 @@ def parse_protocol_action(uri: str) -> dict | None:
             "token": token,
             "username": str((params.get("username") or [""])[0]).strip(),
             "display_name": str((params.get("display_name") or [""])[0]).strip(),
+            "role": str((params.get("role") or [""])[0]).strip(),
             "site": str((params.get("site") or [""])[0]).strip(),
         }
 
@@ -210,6 +211,7 @@ def handle_community_auth(action: dict) -> bool:
             token,
             username=str(action.get("username") or ""),
             display_name=str(action.get("display_name") or ""),
+            role=str(action.get("role") or ""),
             site=str(action.get("site") or ""),
         )
     except Exception as exc:
@@ -221,6 +223,7 @@ def handle_community_auth(action: dict) -> bool:
             "action": "community_auth",
             "username": saved.get("username", ""),
             "display_name": saved.get("display_name", ""),
+            "role": saved.get("role", ""),
             "site": saved.get("site", ""),
         }
     )

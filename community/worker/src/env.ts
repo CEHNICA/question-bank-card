@@ -11,6 +11,7 @@ export type Env = {
   TURNSTILE_SECRET?: string;
   DOWNLOAD_SECRET?: string;
   MAX_PACK_MB?: string;
+  ADMIN_MAX_PACK_MB?: string;
   MAX_TOTAL_R2_MB?: string;
   MAX_TOTAL_WEBDAV_MB?: string;
   R2_HOT_TARGET_MB?: string;

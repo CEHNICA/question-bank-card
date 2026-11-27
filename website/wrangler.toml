@@ -6,3 +6,10 @@ routes = [
   { pattern = "tiyouju.com/*", zone_name = "tiyouju.com" },
   { pattern = "www.tiyouju.com", custom_domain = true }
 ]
+
+[[r2_buckets]]
+bucket_name = "tiyouju-releases"
+binding = "RELEASES"
+
+[triggers]
+crons = ["*/5 * * * *"]

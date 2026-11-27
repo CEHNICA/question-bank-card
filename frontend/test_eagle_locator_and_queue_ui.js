@@ -16,6 +16,9 @@ test("Eagle 工作台提供题目身份证一键复制与定位搜索支持，�
   assert.match(html, /id="inspectorPositionText"/);
   assert.match(html, /id="btnInspectorEvidence"/);
   assert.match(html, /function copyQuestionLocator\(/);
+  assert.match(html, /function markInspectorLocatorCopied\(/);
+  assert.match(html, /#btnCopyInspectorLocator\.is-copied/);
+  assert.doesNotMatch(html, /每天自动打一份备份|auto_backup/, "工作台设置开关已彻底移除自动备份");
   assert.match(html, /function getQuestionShortId\(/);
   assert.match(html, /if \(sid && \(sid\.includes\(kw\) \|\| kw\.includes\(sid\)\)\) return true;/);
   const metaIdx = html.indexOf('id="questionMetaCard"');

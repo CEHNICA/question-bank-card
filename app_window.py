@@ -263,10 +263,26 @@ def _clear_stale_cache(profile: Path) -> None:
     if _CACHE_CLEARED:
         return
     _CACHE_CLEARED = True
-    for name in ("Cache", "Code Cache", "GPUCache", "DawnGraphiteCache", "DawnWebGPUCache"):
-        target = profile / name
-        if target.is_dir():
-            shutil.rmtree(target, ignore_errors=True)
+    cache_dirs = (
+        "Cache",
+        "Code Cache",
+        "GPUCache",
+        "DawnGraphiteCache",
+        "DawnWebGPUCache",
+        "GrShaderCache",
+        "ShaderCache",
+        "component_crx_cache",
+        "extensions_crx_cache",
+        "ProvenanceData",
+        "Service Worker",
+    )
+    for base in (profile, profile / "Default", profile / "EBWebView" / "Default"):
+        if not base.is_dir():
+            continue
+        for name in cache_dirs:
+            target = base / name
+            if target.is_dir():
+                shutil.rmtree(target, ignore_errors=True)
 
 
 def _disable_profile_password_saving(profile: Path) -> bool:
@@ -349,7 +365,12 @@ def window_command(browser: Path, url: str, profile: Path) -> list[str]:
 # 于是"页面 → 启动器"的控制通道（控制文件 + /api/window/…）也一并撤掉了。
 #
 # 只用 ctypes：本文件已经在用它弹系统对话框，不为同一件事再引入一个打包依赖。
+_SW_SHOW = 5
 _SW_RESTORE = 9
+_HWND_TOPMOST = -1
+_HWND_NOTOPMOST = -2
+_SWP_NOSIZE = 0x0001
+_SWP_NOMOVE = 0x0002
 # 窗口迟迟不出现就放弃守候，不拖住退出。
 _WINDOW_GRACE = 60.0
 # 窗口还没出现时，别每轮都去重新定位：定位要起一个 PowerShell 查进程号，冷启动
@@ -1070,15 +1091,40 @@ def run_own_window(url: str) -> None:
         background_color="#F4F7FB",
     )
 
-    def _brand() -> None:
+    def _ensure_front_after_start() -> None:
+        # Splash 销毁后 Windows 可能把焦点还给桌面/上一扇窗口，等 WebView2 首帧就绪后再复核一次。
+        time.sleep(0.25)
         user32 = _user32()
         if user32 is None:
             return
         hwnd = _own_window_hwnd(user32)
+        if not hwnd:
+            return
+        fg = 0
+        with contextlib.suppress(Exception):
+            fg = int(user32.GetForegroundWindow() or 0)
+        if fg != hwnd or user32.IsIconic(hwnd):
+            _raise_own_window(user32, hwnd, pulse_topmost=True)
+
+    def _activate_own_window() -> None:
+        user32 = _user32()
+        if user32 is None:
+            return
+        hwnd = _own_window_hwnd(user32)
+        if not hwnd:
+            for _ in range(10):
+                time.sleep(0.05)
+                hwnd = _own_window_hwnd(user32)
+                if hwnd:
+                    break
         if hwnd:
             apply_window_icon(user32, hwnd)
+            with contextlib.suppress(Exception):
+                window.restore()
+            _raise_own_window(user32, hwnd, pulse_topmost=True)
+        threading.Thread(target=_ensure_front_after_start, daemon=True).start()
 
-    window.events.shown += _brand
+    window.events.shown += _activate_own_window
     webview.start(
         gui="edgechromium",
         private_mode=False,
@@ -1087,15 +1133,19 @@ def run_own_window(url: str) -> None:
     )
 
 
-def _raise_own_window(user32, hwnd: int) -> None:
-    """把题有据自己的窗口从 OneNote 后面拉回来。
+def _raise_own_window(user32, hwnd: int, *, pulse_topmost: bool = False) -> None:
+    """把题有据自己的窗口切到最前（兼容首次启动与从 OneNote 回跳）。
 
-    从 OneNote 点「回到题有据」时，新进程往往没有前台权，直接 SetForegroundWindow
-    会被系统丢掉。先把当前前台线程和这扇窗口的线程接到一起，再置前。
+    启动画面刚关闭或从 OneNote 点「回到题有据」时，新窗口可能没有前台权，
+    直接 SetForegroundWindow 会被系统丢在任务栏后面。先把当前前台线程和这扇
+    窗口线程接到一起再置前，首次启动还可短脉冲一次置顶确保窗口弹出显示。
     """
     import ctypes
 
-    user32.ShowWindow(hwnd, _SW_RESTORE)
+    if getattr(user32, "IsIconic", None) and user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, _SW_RESTORE)
+    else:
+        user32.ShowWindow(hwnd, _SW_SHOW)
     foreground = 0
     try:
         foreground = int(user32.GetForegroundWindow() or 0)
@@ -1116,6 +1166,15 @@ def _raise_own_window(user32, hwnd: int) -> None:
     user32.SetForegroundWindow(hwnd)
     if attached:
         user32.AttachThreadInput(fg_thread, target_thread, False)
+    if pulse_topmost:
+        after_fg = 0
+        with contextlib.suppress(Exception):
+            after_fg = int(user32.GetForegroundWindow() or 0)
+        if after_fg != hwnd and getattr(user32, "SetWindowPos", None):
+            with contextlib.suppress(Exception):
+                user32.SetWindowPos(hwnd, _HWND_TOPMOST, 0, 0, 0, 0, _SWP_NOMOVE | _SWP_NOSIZE)
+                user32.SetWindowPos(hwnd, _HWND_NOTOPMOST, 0, 0, 0, 0, _SWP_NOMOVE | _SWP_NOSIZE)
+                user32.SetForegroundWindow(hwnd)
 
 
 def focus_existing_window() -> bool:

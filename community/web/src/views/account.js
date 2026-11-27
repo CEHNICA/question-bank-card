@@ -342,6 +342,7 @@ export async function desktopAuthView() {
           token: result.token,
           username: u.username || "",
           display_name: u.display_name || u.username || "",
+          role: u.role || "user",
           site: location.origin + "/",
         }).toString();
       const box = document.getElementById("desktopAuthFallback");

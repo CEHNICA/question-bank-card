@@ -147,6 +147,9 @@ def _backup_database() -> None:
     folder.mkdir(parents=True, exist_ok=True)
     destination = folder / f"before-update-{datetime.now():%Y%m%d-%H%M%S}.sqlite3"
     shutil.copy2(database, destination)
+    old_snapshots = sorted(folder.glob("before-*.sqlite3"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for stale in old_snapshots[3:]:
+        stale.unlink(missing_ok=True)
 
 
 def install_latest() -> dict:

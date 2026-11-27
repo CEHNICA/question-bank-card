@@ -107,3 +107,24 @@ class BackupSafetyAndRetiredAutoBackupTests(TestCase):
         with library_transfer._backup_lock():
             with self.assertRaises(library_transfer.TransferError):
                 library_transfer.export_bundle(out)
+
+    def test_purge_legacy_auto_backups_frees_space_and_keeps_manual_backups(self):
+        """彻底清理历史 10 份自动备份文件，但绝不删除手动备份或上传记录。"""
+        root = library_transfer.backups_root()
+        root.mkdir(parents=True, exist_ok=True)
+        auto_zip = root / "题有据自动备份-20261020-050000.zip"
+        auto_part = root / "题有据自动备份-20261021-050000.zip.part"
+        manual_zip = root / "题有据备份-20261127-200000.zip"
+        uploads_json = root / "community-uploads.json"
+        auto_zip.write_bytes(b"a" * 100)
+        auto_part.write_bytes(b"b" * 50)
+        manual_zip.write_bytes(b"m" * 40)
+        uploads_json.write_text("[]", encoding="utf-8")
+
+        res = library_transfer.purge_legacy_auto_backups()
+        self.assertEqual(res["removed"], 2)
+        self.assertEqual(res["freed_bytes"], 150)
+        self.assertFalse(auto_zip.exists())
+        self.assertFalse(auto_part.exists())
+        self.assertTrue(manual_zip.is_file())
+        self.assertTrue(uploads_json.is_file())

@@ -237,6 +237,22 @@
     @media (hover: none) {
       .qc-evidence-btn { opacity: 1 !important; }
     }
+    #btnCopyInspectorLocator {
+      transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease, transform 0.1s ease, box-shadow 0.14s ease;
+    }
+    #btnCopyInspectorLocator:active {
+      transform: translateY(1px) scale(0.94);
+      background-color: #cbd5e1;
+      border-color: #94a3b8;
+    }
+    #btnCopyInspectorLocator.is-copied,
+    #btnCopyInspectorLocator.is-copied:hover {
+      background-color: #065f46;
+      border-color: #064e3b;
+      color: #ffffff;
+      box-shadow: inset 0 1.5px 3px rgba(0, 0, 0, 0.28);
+      transform: translateY(1px) scale(0.96);
+    }
     /* 窄屏弹窗：头部按钮别挤出屏幕。
        390px 实测三处硬伤：
        ① 快速审题头部右组（上一题/下一题 + 试题篮 + 收藏 + 关闭）372px，
@@ -2247,6 +2263,42 @@
     @media (max-width: 540px) {
       .eagle-update-popup { right: 12px; bottom: 12px; padding: 14px; }
     }
+    .comm-progress-track {
+      width: 100%;
+      height: 6px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      overflow: hidden;
+    }
+    .comm-progress-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      background: #047857;
+      transition: width 0.22s ease;
+    }
+    .eagle-upload-float {
+      position: fixed;
+      left: 20px;
+      bottom: 20px;
+      z-index: 9505;
+      width: min(336px, calc(100vw - 24px));
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid #cbd5e1;
+      background: #ffffff;
+      color: #0f172a;
+      box-shadow: 0 16px 36px -10px rgba(15, 23, 42, 0.18), 0 4px 10px rgba(4, 120, 87, 0.12);
+      display: grid;
+      gap: 8px;
+    }
+    .eagle-upload-float.hidden {
+      display: none;
+    }
+    #communityUploadCenterModal > div {
+      width: min(94vw, 680px);
+      max-height: 85vh;
+    }
   </style>
   <script>
     // 尽早套上上次的界面缩放，避免先出小字再猛跳一下。
@@ -2424,6 +2476,20 @@
           </div>
 
           <div class="flex items-center gap-2 text-[11px] text-slate-500 shrink-0 whitespace-nowrap eagle-toolbar-right">
+            <button
+              id="btnCommunityUploadCenter"
+              type="button"
+              onclick="openCommunityUploadCenter()"
+              class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 hover:text-emerald-700 hover:bg-slate-100 rounded-md border border-transparent hover:border-slate-200 transition-colors cursor-pointer"
+              title="社区上传进度与记录"
+              aria-label="社区上传进度与记录"
+            >
+              <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5-5m0 0l5 5m-5-5v12"/>
+              </svg>
+              <span id="commUploadToolbarLabel" class="hidden font-mono font-semibold text-emerald-700"></span>
+            </button>
+            <span class="text-slate-300">|</span>
             <button
               id="btnOpenBasket"
               onclick="openBasketExportModal()"
@@ -2871,7 +2937,7 @@
                 <button
                   id="btnCopyInspectorLocator"
                   type="button"
-                  onclick="copyQuestionLocator(currentActiveQuestionId)"
+                  onclick="copyQuestionLocator(currentActiveQuestionId, this)"
                   class="shrink-0 inline-flex items-center justify-center p-1 rounded bg-white border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-700 text-slate-600 cursor-pointer transition-colors"
                   aria-label="复制题目定位码"
                   title="复制题目定位码"
@@ -3175,6 +3241,10 @@
         </button>
         <button type="button" onclick="hideEagleAppMainMenu(); openSolutionEditorFromMenu();" class="eagle-menu-item" title="编辑当前题目 (Ctrl+E)">
           <span class="eagle-menu-item-left"><span class="eagle-menu-icon">✏️</span><span class="truncate">编辑当前题目</span></span>
+        </button>
+        <button type="button" onclick="openCommunityUploadCenter(); hideEagleAppMainMenu();" class="eagle-menu-item">
+          <span class="eagle-menu-item-left"><span class="eagle-menu-icon">☁️</span><span class="truncate">社区上传进度与记录</span></span>
+          <span id="menuBadgeUploadCount" class="eagle-menu-pill hidden">0</span>
         </button>
         <button type="button" onclick="loadInitialLibraryData(); refreshPapersData(); hideEagleAppMainMenu();" class="eagle-menu-item">
           <span class="eagle-menu-item-left"><span class="eagle-menu-icon">🔄</span><span class="truncate">刷新题库数据</span></span>
@@ -3726,13 +3796,16 @@
     class="hidden fixed inset-0 z-[10014] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4"
     onclick="closeCommunityPublishModal()"
   >
-    <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden" onclick="event.stopPropagation()">
+    <div class="relative bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden" onclick="event.stopPropagation()">
       <div class="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-slate-50/90 shrink-0">
-        <div>
+        <div class="min-w-0 pr-2">
           <h3 class="text-sm font-bold text-slate-900">上传到题有据资源社区</h3>
           <p id="commPubSourceLabel" class="text-[11px] text-slate-500 mt-0.5 truncate">自动打包并提交审核，无需手动选文件夹</p>
         </div>
-        <button type="button" onclick="closeCommunityPublishModal()" class="text-slate-400 hover:text-slate-700 p-1 cursor-pointer" aria-label="关闭上传窗口">✕</button>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button type="button" onclick="openCommunityUploadCenter()" class="px-2 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-100 text-[11px] font-medium text-slate-600 cursor-pointer">上传记录</button>
+          <button type="button" onclick="closeCommunityPublishModal()" class="text-slate-400 hover:text-slate-700 p-1 cursor-pointer" aria-label="关闭上传窗口">✕</button>
+        </div>
       </div>
       <div class="p-5 overflow-y-auto space-y-3.5 text-xs text-slate-700">
         <div id="commPubAuthBox" class="rounded-xl border border-slate-200 bg-slate-50 p-3 flex items-center justify-between gap-3">
@@ -3796,20 +3869,93 @@
         </label>
         <label id="commPubIncludeOriginalsRow" class="flex items-start gap-2 cursor-pointer">
           <input id="commPubIncludeOriginals" type="checkbox" class="mt-0.5">
-          <span>附带原卷 PDF / Word 文件（默认不带，限 8 MB 内；若含原卷则不可设价）</span>
+          <span id="commPubIncludeOriginalsLabel">附带原卷 PDF / Word 文件（默认不带；若含原卷则不可设价）</span>
         </label>
         <label class="flex items-start gap-2 cursor-pointer">
           <input id="commPubRights" type="checkbox" class="mt-0.5">
           <span>我确认对这份题包拥有分发权利，不含盗版教辅或未公开考试题等侵权内容。</span>
         </label>
+        <div id="commPubProgressCard" class="hidden rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 space-y-2">
+          <div class="flex items-center justify-between gap-2 text-xs">
+            <span id="commPubProgressStage" class="font-semibold text-emerald-900 truncate">正在准备上传…</span>
+            <span id="commPubProgressPercent" class="font-mono font-bold text-emerald-700 shrink-0">0%</span>
+          </div>
+          <div class="comm-progress-track">
+            <div id="commPubProgressBar" class="comm-progress-fill" style="width: 0%;"></div>
+          </div>
+          <div id="commPubProgressMeta" class="text-[11px] text-slate-600">请稍候，可在右上角点击 ✕ 选择取消或转入后台</div>
+        </div>
         <p id="commPubStatusLine" class="hidden rounded-lg px-3 py-2 text-xs"></p>
       </div>
       <div class="flex items-center justify-end gap-2 px-5 py-3 border-t border-slate-100 bg-slate-50/70 shrink-0">
-        <button type="button" onclick="closeCommunityPublishModal()" class="px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-xs font-medium text-slate-700 cursor-pointer">取消</button>
+        <button id="commPubCancelBtn" type="button" onclick="handleCommPublishFooterCancel()" class="px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-xs font-medium text-slate-700 cursor-pointer">取消</button>
+        <button id="commPubBgBtn" type="button" onclick="continueCommunityUploadInBackground()" class="hidden px-3.5 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold cursor-pointer">后台继续</button>
         <button id="commPubSubmitBtn" type="button" onclick="submitCommunityPublish()" class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer">打包并上传</button>
+      </div>
+      <div id="commUploadClosePrompt" class="hidden absolute inset-0 z-20 flex items-center justify-center bg-slate-900/45 backdrop-blur-xs p-5" onclick="event.stopPropagation()">
+        <div class="bg-white rounded-xl border border-slate-200 shadow-2xl w-full max-w-sm p-4 space-y-3">
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <h4 class="text-sm font-bold text-slate-900">正在上传社区题包</h4>
+              <p id="commUploadClosePromptDesc" class="text-xs text-slate-500 mt-1 leading-relaxed">题包正在处理与上传中，请选择要如何操作：</p>
+            </div>
+            <button type="button" onclick="dismissCommunityUploadClosePrompt()" class="text-slate-400 hover:text-slate-700 p-0.5 cursor-pointer" aria-label="留在此窗口">✕</button>
+          </div>
+          <div class="flex items-center justify-end gap-2 pt-1">
+            <button id="commPromptCancelBtn" type="button" onclick="confirmCancelCommunityUploadFromPrompt()" class="px-3.5 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold cursor-pointer">取消上传</button>
+            <button id="commPromptBackgroundBtn" type="button" onclick="continueCommunityUploadInBackground()" class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold cursor-pointer">后台继续</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
+
+  <!-- ================= 社区上传进度与上传记录弹窗 ================= -->
+  <div
+    id="communityUploadCenterModal"
+    class="hidden fixed inset-0 z-[10016] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4"
+    onclick="closeCommunityUploadCenter()"
+  >
+    <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden" onclick="event.stopPropagation()">
+      <div class="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-slate-50/90 shrink-0">
+        <div>
+          <h3 class="text-sm font-bold text-slate-900">社区上传进度与记录</h3>
+          <p class="text-[11px] text-slate-500 mt-0.5">查看后台正在打包上传的题包进度，以及历史上传提交记录</p>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <button type="button" onclick="clearCommunityUploadHistory()" class="px-2.5 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-100 text-[11px] text-slate-600 cursor-pointer">清空记录</button>
+          <button type="button" onclick="closeCommunityUploadCenter()" class="text-slate-400 hover:text-slate-700 p-1 cursor-pointer" aria-label="关闭上传记录窗口">✕</button>
+        </div>
+      </div>
+      <div id="communityUploadCenterBody" class="p-5 overflow-y-auto space-y-4 text-xs text-slate-700">
+        <div class="py-10 text-center text-slate-400">正在加载上传记录…</div>
+      </div>
+      <div class="flex items-center justify-end gap-2 px-5 py-3 border-t border-slate-100 bg-slate-50/70 shrink-0">
+        <button type="button" onclick="closeCommunityUploadCenter()" class="px-4 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold cursor-pointer">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 左下角后台上传浮动进度条 ================= -->
+  <aside id="eagleUploadFloatingBar" class="eagle-upload-float hidden" role="status" aria-live="polite">
+    <div class="flex items-center justify-between gap-2">
+      <div class="flex items-center gap-1.5 min-w-0">
+        <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+        <span id="eagleUploadFloatTitle" class="text-xs font-bold text-slate-900 truncate">正在上传题包…</span>
+      </div>
+      <span id="eagleUploadFloatPct" class="font-mono text-xs font-bold text-emerald-700 shrink-0">0%</span>
+    </div>
+    <div class="comm-progress-track">
+      <div id="eagleUploadFloatBarFill" class="comm-progress-fill" style="width: 0%;"></div>
+    </div>
+    <div class="flex items-center justify-between gap-2 text-[11px]">
+      <span id="eagleUploadFloatStage" class="text-slate-500 truncate">后台打包上传中…</span>
+      <div class="flex items-center gap-1.5 shrink-0">
+        <button type="button" onclick="openCommunityUploadCenter()" class="px-2 py-0.5 rounded border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium cursor-pointer">详情</button>
+        <button type="button" onclick="cancelActiveFloatCommunityUpload()" class="px-2 py-0.5 rounded border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-medium cursor-pointer">取消</button>
+      </div>
+    </div>
+  </aside>
 
   <!-- ================= 社区题包自动下载导入确认弹窗 ================= -->
   <div
@@ -6416,7 +6562,7 @@
       const label = (targetPaper && (targetPaper.name || targetPaper.filename)) || '资料';
       const job = (async () => {
         if (sentinel) sentinel.innerText = `正在载入《${label}》的已入库试题...`;
-        const pageSize = 100;
+        const pageSize = 500;
         let offset = 0;
         let total = Math.max(0, Number(wantTotal) || 0);
         const incoming = [];
@@ -6424,7 +6570,7 @@
         let loadError = '';
         while (offset < total || (total === 0 && offset === 0)) {
           const res = await fetch(
-            `${API_BASE}/api/library?document=${encodeURIComponent(key)}&limit=${pageSize}&offset=${offset}&sort=source&slim=1`,
+            `${API_BASE}/api/library?document=${encodeURIComponent(key)}&bulk=1&limit=${pageSize}&offset=${offset}&sort=source&slim=1`,
             { headers: { 'X-QB-Request': '1', 'Referer': window.location.href } }
           );
           // 失败不是「到头了」。以前这里直接 break：翻页中途 500 会静默停下，
@@ -6634,6 +6780,7 @@
           if (totalCount > firstRawItems.length) {
             loadRemainingLibraryItems(libraryLoadGeneration, totalCount, firstRawItems.length);
           }
+          void pollCommunityUploadTasks(true);
         }
       } catch (e) {
         console.warn('Real data loading fallback:', e);
@@ -7523,22 +7670,66 @@
 
     // ================= 社区一键上传与自动下载导入 =================
     let communityPublishTarget = null;
-    let communitySessionInfo = { connected: false, username: '', display_name: '', site: 'https://community.tiyouju.com/' };
+    let communitySessionInfo = { connected: false, username: '', display_name: '', role: '', is_admin: false, site: 'https://community.tiyouju.com/' };
     let activeCommunityStagingId = '';
+    let activeCommUploadTaskId = '';
+    let commUploadTasksList = [];
+    let commUploadHistoryList = [];
+    let commUploadPollTimer = null;
+    const _commUploadNotifiedDone = new Set();
 
-    async function refreshCommunityAuthStatus() {
+    function formatUploadBytes(bytes) {
+      const n = Number(bytes || 0);
+      if (!n || n <= 0) return '0 B';
+      if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+      return `${Math.max(1, Math.round(n / 1024))} KB`;
+    }
+
+    function formatUploadTime(iso) {
+      if (!iso) return '';
+      try {
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return '';
+        const pad = n => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      } catch (_) {
+        return '';
+      }
+    }
+
+    function activeRunningCommTask() {
+      if (activeCommUploadTaskId) {
+        const bound = commUploadTasksList.find(t => t && t.task_id === activeCommUploadTaskId);
+        if (bound && bound.status === 'running') return bound;
+      }
+      return commUploadTasksList.find(t => t && t.status === 'running') || null;
+    }
+
+    async function refreshCommunityAuthStatus(forceRefresh = true) {
       const titleEl = document.getElementById('commPubAuthTitle');
       const subEl = document.getElementById('commPubAuthSub');
       const connBtn = document.getElementById('commPubConnectBtn');
       const discBtn = document.getElementById('commPubDisconnectBtn');
+      const origLabelEl = document.getElementById('commPubIncludeOriginalsLabel');
       try {
-        const resp = await fetch(`${API_BASE}/api/community/session`, { headers: { 'X-QB-Request': '1' } });
+        const qs = forceRefresh ? '?refresh=1' : '';
+        const resp = await fetch(`${API_BASE}/api/community/session${qs}`, { headers: { 'X-QB-Request': '1' } });
         const data = await resp.json().catch(() => ({}));
         communitySessionInfo = { ...communitySessionInfo, ...data };
+        const isAdmin = Boolean(data.is_admin || data.role === 'admin');
         if (data.connected) {
           const who = data.display_name || data.username || '已授权账号';
-          if (titleEl) titleEl.textContent = `已连接资源社区：${who}`;
-          if (subEl) subEl.textContent = `${data.site || getCommunitySiteUrl()} · 可直接打包并上传题包`;
+          if (titleEl) titleEl.textContent = `已连接资源社区：${who}${isAdmin ? '（作者 / 管理员）' : ''}`;
+          if (subEl) {
+            subEl.textContent = isAdmin
+              ? `${data.site || getCommunitySiteUrl()} · 管理员不限单包题数与每日上传次数`
+              : `${data.site || getCommunitySiteUrl()} · 普通账号单包限 100 题 / 15 MB（作者可在社区设为 admin 解除限制）`;
+          }
+          if (origLabelEl) {
+            origLabelEl.textContent = isAdmin
+              ? '附带原卷 PDF / Word 文件（默认不带；若含原卷则不可设价）'
+              : '附带原卷 PDF / Word 文件（默认不带，限 8 MB 内；若含原卷则不可设价）';
+          }
           if (connBtn) connBtn.textContent = '重新授权';
           if (discBtn) discBtn.classList.remove('hidden');
         } else {
@@ -7759,29 +7950,416 @@
         statusEl.className = 'hidden rounded-lg px-3 py-2 text-xs';
         statusEl.textContent = '';
       }
+      const progCard = document.getElementById('commPubProgressCard');
+      if (progCard) progCard.classList.add('hidden');
+      const promptEl = document.getElementById('commUploadClosePrompt');
+      if (promptEl) promptEl.classList.add('hidden');
+      activeCommUploadTaskId = '';
+      syncCommPublishButtons();
       syncCommPubPriceState();
       modal.classList.remove('hidden');
-      void refreshCommunityAuthStatus();
+      void refreshCommunityAuthStatus(true);
     }
 
-    function closeCommunityPublishModal() {
+    function setCommPublishStatus(msg, kind = 'info') {
+      const statusEl = document.getElementById('commPubStatusLine');
+      if (!statusEl) return;
+      if (!msg) {
+        statusEl.className = 'hidden rounded-lg px-3 py-2 text-xs';
+        statusEl.textContent = '';
+        return;
+      }
+      statusEl.textContent = msg;
+      statusEl.className = kind === 'error'
+        ? 'rounded-lg px-3 py-2 text-xs bg-rose-50 text-rose-700 border border-rose-200'
+        : (kind === 'success'
+          ? 'rounded-lg px-3 py-2 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200'
+          : 'rounded-lg px-3 py-2 text-xs bg-slate-100 text-slate-700 border border-slate-200');
+    }
+
+    function syncCommPublishButtons() {
+      const task = activeCommUploadTaskId
+        ? commUploadTasksList.find(t => t && t.task_id === activeCommUploadTaskId)
+        : null;
+      const isRunning = Boolean(task && task.status === 'running');
+      const btnEl = document.getElementById('commPubSubmitBtn');
+      const cancelBtn = document.getElementById('commPubCancelBtn');
+      const bgBtn = document.getElementById('commPubBgBtn');
+      if (btnEl) {
+        btnEl.disabled = isRunning;
+        btnEl.classList.toggle('hidden', isRunning);
+        btnEl.textContent = '打包并上传';
+      }
+      if (bgBtn) bgBtn.classList.toggle('hidden', !isRunning);
+      if (cancelBtn) {
+        cancelBtn.textContent = isRunning ? '取消上传' : '取消';
+        cancelBtn.className = isRunning
+          ? 'px-3.5 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-xs font-semibold text-rose-700 cursor-pointer'
+          : 'px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-xs font-medium text-slate-700 cursor-pointer';
+      }
+    }
+
+    function dismissCommunityUploadClosePrompt() {
+      document.getElementById('commUploadClosePrompt')?.classList.add('hidden');
+    }
+
+    function closeCommunityPublishModal(force = false) {
       const modal = document.getElementById('communityPublishModal');
-      if (modal) modal.classList.add('hidden');
+      if (!modal || modal.classList.contains('hidden')) return;
+      const task = activeCommUploadTaskId
+        ? commUploadTasksList.find(t => t && t.task_id === activeCommUploadTaskId)
+        : null;
+      if (!force && task && task.status === 'running') {
+        const promptEl = document.getElementById('commUploadClosePrompt');
+        const descEl = document.getElementById('commUploadClosePromptDesc');
+        if (descEl) {
+          descEl.textContent = `「${task.title || '题包'}」正在上传（${task.percent || 0}%），点击下方选择处理方式：`;
+        }
+        if (promptEl) {
+          promptEl.classList.remove('hidden');
+          return;
+        }
+      }
+      dismissCommunityUploadClosePrompt();
+      modal.classList.add('hidden');
+    }
+
+    function continueCommunityUploadInBackground() {
+      dismissCommunityUploadClosePrompt();
+      closeCommunityPublishModal(true);
+      renderCommunityUploadIndicators();
+      showToast('已转入后台继续打包上传，可在顶部或左下角查看进度', 'info');
+    }
+
+    async function cancelCommunityUploadTask(taskId) {
+      if (!taskId) return false;
+      try {
+        const resp = await fetch(`${API_BASE}/api/backup/community-upload/${encodeURIComponent(taskId)}/cancel`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
+          body: '{}'
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok && data.task) {
+          const idx = commUploadTasksList.findIndex(t => t && t.task_id === taskId);
+          if (idx >= 0) commUploadTasksList[idx] = data.task;
+          else commUploadTasksList.unshift(data.task);
+        }
+        await pollCommunityUploadTasks(true);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    async function confirmCancelCommunityUploadFromPrompt() {
+      const taskId = activeCommUploadTaskId;
+      dismissCommunityUploadClosePrompt();
+      if (taskId) {
+        await cancelCommunityUploadTask(taskId);
+      }
+      setCommPublishStatus('已取消本次上传。', 'info');
+      syncCommPublishButtons();
+      closeCommunityPublishModal(true);
+      showToast('已取消社区上传', 'info');
+    }
+
+    async function handleCommPublishFooterCancel() {
+      const task = activeCommUploadTaskId
+        ? commUploadTasksList.find(t => t && t.task_id === activeCommUploadTaskId)
+        : null;
+      if (task && task.status === 'running') {
+        await cancelCommunityUploadTask(task.task_id);
+        setCommPublishStatus('已取消本次上传。', 'info');
+        syncCommPublishButtons();
+        showToast('已取消社区上传', 'info');
+        return;
+      }
+      closeCommunityPublishModal(true);
+    }
+
+    async function cancelActiveFloatCommunityUpload() {
+      const running = activeRunningCommTask();
+      if (!running) return;
+      await cancelCommunityUploadTask(running.task_id);
+      showToast(`已取消上传「${running.title || '题包'}」`, 'info');
+    }
+
+    function renderCommPublishTaskState(task) {
+      const progCard = document.getElementById('commPubProgressCard');
+      const stageEl = document.getElementById('commPubProgressStage');
+      const pctEl = document.getElementById('commPubProgressPercent');
+      const barEl = document.getElementById('commPubProgressBar');
+      const metaEl = document.getElementById('commPubProgressMeta');
+      if (!task) {
+        if (progCard) progCard.classList.add('hidden');
+        syncCommPublishButtons();
+        return;
+      }
+      if (progCard) progCard.classList.remove('hidden');
+      const pct = Math.max(0, Math.min(100, Number(task.percent || 0)));
+      if (stageEl) stageEl.textContent = task.message || '正在上传…';
+      if (pctEl) pctEl.textContent = `${pct}%`;
+      if (barEl) barEl.style.width = `${pct}%`;
+      if (metaEl) {
+        if (task.bytes_total > 0) {
+          metaEl.textContent = `${formatUploadBytes(task.bytes_sent)} / ${formatUploadBytes(task.bytes_total)} · 点击右上角 ✕ 可取消或转入后台`;
+        } else if (task.status === 'running') {
+          metaEl.textContent = '正在准备与压缩题包，点击右上角 ✕ 可取消或转入后台';
+        } else if (task.status === 'succeeded') {
+          metaEl.textContent = `${task.questions || 0} 题 · ${formatUploadBytes(task.size)}`;
+        } else if (task.status === 'cancelled') {
+          metaEl.textContent = '已取消上传';
+        } else if (task.status === 'failed') {
+          metaEl.textContent = task.error || '上传失败';
+        }
+      }
+      if (task.status === 'succeeded') {
+        const noteExtra = task.onenote_count > 0 ? `，已附带 ${task.onenote_count} 题 OneNote 步骤图` : '';
+        const skipExtra = task.onenote_skipped > 0 ? `（已跳过 ${task.onenote_skipped} 题无效 OneNote 页）` : '';
+        const msg = task.pack_status === 'published'
+          ? `已发布到资源社区（${task.questions || 0} 题${noteExtra}）${skipExtra}！`
+          : `已上传提交审核（${task.questions || 0} 题${noteExtra}）${skipExtra}，审核通过后自动上架。`;
+        setCommPublishStatus(msg, 'success');
+      } else if (task.status === 'failed') {
+        setCommPublishStatus(task.error || '上传社区失败。', 'error');
+        if (task.needs_auth) void refreshCommunityAuthStatus(false);
+      } else if (task.status === 'cancelled') {
+        setCommPublishStatus('已取消本次上传。', 'info');
+      }
+      syncCommPublishButtons();
+    }
+
+    function renderCommunityUploadIndicators() {
+      const running = commUploadTasksList.find(t => t && t.status === 'running') || null;
+      const modal = document.getElementById('communityPublishModal');
+      const modalOpen = Boolean(modal && !modal.classList.contains('hidden'));
+
+      const labelEl = document.getElementById('commUploadToolbarLabel');
+      const tbBtn = document.getElementById('btnCommunityUploadCenter');
+      if (labelEl && tbBtn) {
+        if (running) {
+          labelEl.textContent = `${running.percent || 0}%`;
+          labelEl.classList.remove('hidden');
+          tbBtn.classList.add('bg-emerald-50', 'border-emerald-200', 'text-emerald-700');
+          tbBtn.title = `正在上传「${running.title || '题包'}」(${running.percent || 0}%) · 点击查看详情与记录`;
+        } else {
+          labelEl.classList.add('hidden');
+          labelEl.textContent = '';
+          tbBtn.classList.remove('bg-emerald-50', 'border-emerald-200', 'text-emerald-700');
+          tbBtn.title = `社区上传进度与记录（共 ${commUploadHistoryList.length} 条）`;
+        }
+      }
+
+      const menuBadge = document.getElementById('menuBadgeUploadCount');
+      if (menuBadge) {
+        if (running) {
+          menuBadge.textContent = `${running.percent || 0}%`;
+          menuBadge.classList.remove('hidden');
+          menuBadge.classList.add('is-accent');
+        } else if (commUploadHistoryList.length > 0) {
+          menuBadge.textContent = String(commUploadHistoryList.length);
+          menuBadge.classList.remove('hidden', 'is-accent');
+        } else {
+          menuBadge.classList.add('hidden');
+        }
+      }
+
+      const floatEl = document.getElementById('eagleUploadFloatingBar');
+      if (floatEl) {
+        if (running && !modalOpen) {
+          floatEl.classList.remove('hidden');
+          const tEl = document.getElementById('eagleUploadFloatTitle');
+          const pEl = document.getElementById('eagleUploadFloatPct');
+          const fEl = document.getElementById('eagleUploadFloatBarFill');
+          const sEl = document.getElementById('eagleUploadFloatStage');
+          if (tEl) tEl.textContent = running.title || '正在上传题包…';
+          if (pEl) pEl.textContent = `${running.percent || 0}%`;
+          if (fEl) fEl.style.width = `${Math.max(0, Math.min(100, Number(running.percent || 0)))}%`;
+          if (sEl) sEl.textContent = running.message || '后台打包上传中…';
+        } else {
+          floatEl.classList.add('hidden');
+        }
+      }
+
+      if (activeCommUploadTaskId) {
+        const bound = commUploadTasksList.find(t => t && t.task_id === activeCommUploadTaskId);
+        if (bound) renderCommPublishTaskState(bound);
+      }
+
+      const centerModal = document.getElementById('communityUploadCenterModal');
+      if (centerModal && !centerModal.classList.contains('hidden')) {
+        renderCommunityUploadCenterBody();
+      }
+    }
+
+    function renderCommunityUploadCenterBody() {
+      const bodyEl = document.getElementById('communityUploadCenterBody');
+      if (!bodyEl) return;
+      const runningTasks = commUploadTasksList.filter(t => t && t.status === 'running');
+      const parts = [];
+
+      if (runningTasks.length) {
+        parts.push(`
+          <div class="space-y-2">
+            <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">正在进行 (${runningTasks.length})</div>
+            ${runningTasks.map(t => {
+              const pct = Math.max(0, Math.min(100, Number(t.percent || 0)));
+              const bytesText = t.bytes_total > 0 ? `${formatUploadBytes(t.bytes_sent)} / ${formatUploadBytes(t.bytes_total)}` : '';
+              return `
+                <div class="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 space-y-2">
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="min-w-0">
+                      <div class="font-bold text-slate-900 truncate">${escapeHtml(t.title || '未命名题包')}</div>
+                      ${t.source_label ? `<div class="text-[11px] text-slate-500 truncate">${escapeHtml(t.source_label)}</div>` : ''}
+                    </div>
+                    <span class="font-mono font-bold text-emerald-700 shrink-0">${pct}%</span>
+                  </div>
+                  <div class="comm-progress-track"><div class="comm-progress-fill" style="width: ${pct}%;"></div></div>
+                  <div class="flex items-center justify-between gap-2 text-[11px]">
+                    <span class="text-slate-600 truncate">${escapeHtml(t.message || '上传中…')}${bytesText ? ` · ${escapeHtml(bytesText)}` : ''}</span>
+                    <button type="button" onclick="cancelCommunityUploadTask('${escapeInlineJsArg(t.task_id)}')" class="px-2.5 py-1 rounded-md border border-rose-200 bg-white hover:bg-rose-50 text-rose-700 font-semibold cursor-pointer shrink-0">取消上传</button>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `);
+      }
+
+      const statusMeta = (st) => {
+        if (st === 'published' || st === 'approved' || st === 'succeeded') return { cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', label: '已上架' };
+        if (st === 'pending') return { cls: 'bg-amber-50 text-amber-800 border-amber-200', label: '已提交审核' };
+        if (st === 'cancelled') return { cls: 'bg-slate-100 text-slate-600 border-slate-200', label: '已取消' };
+        return { cls: 'bg-rose-50 text-rose-700 border-rose-200', label: '上传失败' };
+      };
+
+      parts.push(`
+        <div class="space-y-2">
+          <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">上传记录 (${commUploadHistoryList.length})</div>
+          ${commUploadHistoryList.length ? commUploadHistoryList.map(rec => {
+            const sm = statusMeta(rec.status);
+            const metaBits = [];
+            if (rec.questions) metaBits.push(`${rec.questions} 题`);
+            if (rec.size) metaBits.push(formatUploadBytes(rec.size));
+            if (rec.onenote_count) metaBits.push(`含 ${rec.onenote_count} 题 OneNote 笔记`);
+            const timeText = formatUploadTime(rec.finished_at || rec.created_at);
+            if (timeText) metaBits.push(timeText);
+            return `
+              <div class="rounded-xl border border-slate-200 bg-white p-3 flex items-start justify-between gap-3">
+                <div class="min-w-0 space-y-1 flex-1">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="font-semibold text-slate-900 truncate">${escapeHtml(rec.title || '未命名题包')}</span>
+                    <span class="px-1.5 py-0.5 rounded border text-[10px] font-semibold ${sm.cls}">${sm.label}</span>
+                  </div>
+                  ${rec.source_label ? `<div class="text-[11px] text-slate-500 truncate">${escapeHtml(rec.source_label)}</div>` : ''}
+                  <div class="text-[11px] text-slate-400">${escapeHtml(metaBits.join(' · ') || '—')}</div>
+                  ${rec.error ? `<div class="text-[11px] text-rose-600 break-words">${escapeHtml(rec.error)}</div>` : ''}
+                </div>
+                <div class="flex items-center gap-1.5 shrink-0">
+                  ${rec.url ? `<button type="button" onclick="openExternalCommunityUrl('${escapeInlineJsArg(rec.url)}')" class="px-2.5 py-1 rounded-md border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-medium cursor-pointer">查看</button>` : ''}
+                  <button type="button" onclick="deleteCommunityUploadRecord('${escapeInlineJsArg(rec.id || '')}')" class="px-2 py-1 rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-500 cursor-pointer">删除</button>
+                </div>
+              </div>
+            `;
+          }).join('') : `
+            <div class="rounded-xl border border-dashed border-slate-200 bg-slate-50/70 py-10 text-center text-slate-400">
+              <div class="text-2xl mb-1.5">☁️</div>
+              <div>还没有社区上传记录</div>
+              <div class="text-[11px] mt-1">在左侧文件夹树或题卡上右键，选择「上传到社区」即可开始分享。</div>
+            </div>
+          `}
+        </div>
+      `);
+
+      bodyEl.innerHTML = parts.join('');
+    }
+
+    function openCommunityUploadCenter() {
+      const modal = document.getElementById('communityUploadCenterModal');
+      if (!modal) return;
+      modal.classList.remove('hidden');
+      renderCommunityUploadCenterBody();
+      void pollCommunityUploadTasks(true);
+    }
+
+    function closeCommunityUploadCenter() {
+      document.getElementById('communityUploadCenterModal')?.classList.add('hidden');
+    }
+
+    async function deleteCommunityUploadRecord(recordId) {
+      if (!recordId) return;
+      try {
+        await fetch(`${API_BASE}/api/backup/community-upload/history`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
+          body: JSON.stringify({ id: recordId })
+        });
+        await pollCommunityUploadTasks(true);
+      } catch (_) {}
+    }
+
+    async function clearCommunityUploadHistory() {
+      if (!commUploadHistoryList.length) return;
+      if (!window.confirm('确认清空社区上传历史记录？（不会删除已上传到社区的题包）')) return;
+      try {
+        await fetch(`${API_BASE}/api/backup/community-upload/history`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
+          body: JSON.stringify({ action: 'clear' })
+        });
+        await pollCommunityUploadTasks(true);
+      } catch (_) {}
+    }
+
+    async function pollCommunityUploadTasks(once = false) {
+      if (typeof fetch !== 'function') return;
+      try {
+        const resp = await fetch(`${API_BASE}/api/backup/community-upload/tasks`, {
+          headers: { 'X-QB-Request': '1' },
+          cache: 'no-store'
+        });
+        if (!resp.ok) return;
+        const data = await resp.json().catch(() => ({}));
+        commUploadTasksList = Array.isArray(data.tasks) ? data.tasks : [];
+        commUploadHistoryList = Array.isArray(data.history) ? data.history : [];
+
+        for (const t of commUploadTasksList) {
+          if (!t || !t.task_id) continue;
+          if (t.status === 'succeeded' && !_commUploadNotifiedDone.has(t.task_id)) {
+            _commUploadNotifiedDone.add(t.task_id);
+            const modal = document.getElementById('communityPublishModal');
+            const modalClosedOrOther = !modal || modal.classList.contains('hidden') || activeCommUploadTaskId !== t.task_id;
+            if (modalClosedOrOther) {
+              showToast(`「${t.title || '题包'}」已上传到资源社区（${t.questions || 0} 题）`, 'success');
+            } else {
+              showToast(`已上传提交（${t.questions || 0} 题）！`, 'success');
+            }
+          } else if (t.status === 'failed' && !_commUploadNotifiedDone.has(t.task_id)) {
+            _commUploadNotifiedDone.add(t.task_id);
+            const modal = document.getElementById('communityPublishModal');
+            const modalClosedOrOther = !modal || modal.classList.contains('hidden') || activeCommUploadTaskId !== t.task_id;
+            if (modalClosedOrOther) {
+              showToast(`「${t.title || '题包'}」上传失败：${t.error || '请查看上传记录'}`, 'error');
+            }
+          }
+        }
+
+        renderCommunityUploadIndicators();
+      } catch (_) {
+      } finally {
+        const hasRunning = commUploadTasksList.some(t => t && t.status === 'running');
+        clearTimeout(commUploadPollTimer);
+        if (hasRunning && !once) {
+          commUploadPollTimer = setTimeout(() => { void pollCommunityUploadTasks(false); }, 600);
+        } else if (hasRunning && once) {
+          commUploadPollTimer = setTimeout(() => { void pollCommunityUploadTasks(false); }, 600);
+        }
+      }
     }
 
     async function submitCommunityPublish() {
       if (!communityPublishTarget) return;
-      const statusEl = document.getElementById('commPubStatusLine');
-      const btnEl = document.getElementById('commPubSubmitBtn');
-      const setStatus = (msg, kind = 'info') => {
-        if (!statusEl) return;
-        statusEl.textContent = msg;
-        statusEl.className = kind === 'error'
-          ? 'rounded-lg px-3 py-2 text-xs bg-rose-50 text-rose-700 border border-rose-200'
-          : (kind === 'success'
-            ? 'rounded-lg px-3 py-2 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200'
-            : 'rounded-lg px-3 py-2 text-xs bg-slate-100 text-slate-700 border border-slate-200');
-      };
       const title = (document.getElementById('commPubTitle')?.value || '').trim();
       const stage = (document.getElementById('commPubStage')?.value || '高中').trim();
       const subject = (document.getElementById('commPubSubject')?.value || '数学').trim();
@@ -7796,10 +8374,9 @@
       const includeOneNote = Boolean(includeOneNoteRow && !includeOneNoteRow.classList.contains('hidden') && document.getElementById('commPubIncludeOneNote')?.checked);
       const rightsConfirmed = Boolean(document.getElementById('commPubRights')?.checked);
 
-      if (!title) { setStatus('请填写题包标题。', 'error'); return; }
-      if (!rightsConfirmed) { setStatus('请先勾选版权声明确认。', 'error'); return; }
-      if (btnEl) { btnEl.disabled = true; btnEl.textContent = '正在压缩打包上传…'; }
-      setStatus(includeOneNote ? '正在导出 OneNote 思考步骤并压缩打包上传，请稍候…' : '正在后台压缩打社区题包并上传，请稍候…', 'info');
+      if (!title) { setCommPublishStatus('请填写题包标题。', 'error'); return; }
+      if (!rightsConfirmed) { setCommPublishStatus('请先勾选版权声明确认。', 'error'); return; }
+      setCommPublishStatus('', 'info');
 
       try {
         const reqPayload = {
@@ -7815,6 +8392,7 @@
           include_onenote: includeOneNote,
           rights_confirmed: rightsConfirmed,
           originals_confirmed: includeOriginals,
+          source_label: communityPublishTarget.sourceLabel || '',
           site_url: getCommunitySiteUrl()
         };
         if (communityPublishTarget.mode === 'paper') {
@@ -7822,35 +8400,30 @@
         } else {
           reqPayload.publication_ids = communityPublishTarget.publicationIds;
         }
-        const resp = await fetch(`${API_BASE}/api/backup/community-upload`, {
+        const resp = await fetch(`${API_BASE}/api/backup/community-upload/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
           body: JSON.stringify(reqPayload)
         });
         const body = await resp.json().catch(() => ({}));
         if (resp.status === 401 && body.needs_auth) {
-          setStatus(body.error || '请先在浏览器完成资源社区授权登录后再点击上传。', 'error');
-          void refreshCommunityAuthStatus();
+          setCommPublishStatus(body.error || '请先在浏览器完成资源社区授权登录后再点击上传。', 'error');
+          void refreshCommunityAuthStatus(false);
           return;
         }
         if (!resp.ok || !body.ok) {
-          throw new Error(body.error || '上传社区失败，请稍后重试。');
+          throw new Error(body.error || '启动上传任务失败，请稍后重试。');
         }
-        const noteExtra = body.onenote_count > 0
-          ? `，已附带 ${body.onenote_count} 题 OneNote 步骤图`
-          : '';
-        const skipExtra = body.onenote_skipped > 0
-          ? `（已跳过 ${body.onenote_skipped} 题无效 OneNote 页）`
-          : '';
-        const statusMsg = body.status === 'published'
-          ? `已发布到资源社区（${body.questions || 0} 题${noteExtra}）${skipExtra}！`
-          : `已上传提交审核（${body.questions || 0} 题${noteExtra}）${skipExtra}，审核通过后自动上架。`;
-        setStatus(statusMsg, 'success');
-        showToast(statusMsg, 'success');
+        activeCommUploadTaskId = body.task_id || '';
+        if (body.task) {
+          commUploadTasksList.unshift(body.task);
+          renderCommPublishTaskState(body.task);
+          renderCommunityUploadIndicators();
+        }
+        clearTimeout(commUploadPollTimer);
+        commUploadPollTimer = setTimeout(() => { void pollCommunityUploadTasks(false); }, 400);
       } catch (err) {
-        setStatus(err.message || '上传社区失败。', 'error');
-      } finally {
-        if (btnEl) { btnEl.disabled = false; btnEl.textContent = '打包并上传'; }
+        setCommPublishStatus(err.message || '上传社区失败。', 'error');
       }
     }
 
@@ -8058,7 +8631,6 @@
         const resp = await fetch(`${API_BASE}/api/settings/features`, { cache: 'no-store' });
         const data = await resp.json().catch(() => ({}));
         const items = [
-          { key: 'auto_backup', title: '每天自动打一份备份', desc: '自动把题库打包一份到软件自己的 backups 目录（只留最近 10 份）；它救不了误删、原卷或整块硬盘坏掉。', checked: data.auto_backup !== false },
           { key: 'normalize_stem_display', title: '整理题干显示格式', desc: '自动去掉扫描带来的多余空行和生硬换行，不修改原卷和数据库原文。', checked: Boolean(data.normalize_stem_display) },
           { key: 'knowledge_tags_visible', title: '在题卡展示知识点路径', desc: '允许开启/隐藏题库内知识点路径及 AI 核对视图。', checked: Boolean(data.knowledge_tags_visible) },
           { key: 'ai_answer_drafts', title: '允许生成 AI 参考答案初稿', desc: '控制是否在答案解析窗口允许发送模型答题请求（仍需人工核对并保存）。', checked: Boolean(data.ai_answer_drafts) }
@@ -8902,7 +9474,7 @@
     }
 
     /**
-     * 同步更新左上角 ≡ 主菜单中收纳的专项视图与管理工具计数徽标
+     * 同步更新左上角 ≡ 主菜单中收纳的专项视图与管理工具计数徽标（单遍扫描，O(N)）
      */
     function updateEagleAppMainMenuCounts() {
       const setTxt = (id, val) => {
@@ -8910,11 +9482,26 @@
         if (el) el.innerText = String(val);
       };
       setTxt('menuBadgeTagCount', Array.isArray(tagCatalogue) ? tagCatalogue.length : 0);
-      setTxt('menuBadgeOneNote', countQuestionsForFilterSpec({ smartFilter: 'onenote' }));
-      setTxt('menuBadgeUncategorized', countQuestionsForFilterSpec({ smartFilter: 'uncategorized' }));
-      setTxt('menuBadgeNeedTags', countQuestionsForFilterSpec({ smartFilter: 'need_tags' }));
+      const catSet = typeof buildCategorizedQuestionIdSet === 'function' ? buildCategorizedQuestionIdSet() : null;
+      let oneNoteCount = 0;
+      let uncategorizedCount = 0;
+      let needTagsCount = 0;
+      let aiUnverifiedCount = 0;
+      for (const q of questionsData) {
+        if (!q) continue;
+        if (hasQuestionOneNote(q)) oneNoteCount += 1;
+        if (catSet) {
+          if (!catSet.has(String(q.id))) uncategorizedCount += 1;
+        } else if (typeof isQuestionUncategorized === 'function' && isQuestionUncategorized(q.id)) {
+          uncategorizedCount += 1;
+        }
+        if (!q.tags || q.tags.length <= 1 || q.tags.every(t => t.color === 'slate')) needTagsCount += 1;
+        if (q.aiAnswer && !q.rawAnalysis) aiUnverifiedCount += 1;
+      }
+      setTxt('menuBadgeOneNote', oneNoteCount);
+      setTxt('menuBadgeUncategorized', uncategorizedCount);
+      setTxt('menuBadgeNeedTags', needTagsCount);
       setTxt('menuBadgeRecent', readRecentQuestions().length);
-      const aiUnverifiedCount = countQuestionsForFilterSpec({ smartFilter: 'ai_unverified' });
       setTxt('menuBadgeAiUnverified', aiUnverifiedCount);
       const aiBtn = document.getElementById('menuBtnAiUnverified');
       if (aiBtn) {
@@ -9314,17 +9901,53 @@
       return updatedQuestions;
     }
 
-    function isQuestionUncategorized(qid) {
-      const idStr = String(qid);
-      const folders = readUserFolders();
+    function buildCategorizedQuestionIdSet(preloadedFolders, preloadedOverrides) {
+      const folders = preloadedFolders || (typeof readUserFoldersCached === 'function' ? readUserFoldersCached() : readUserFolders());
+      const overrides = preloadedOverrides || (typeof readDocFolderOverridesCached === 'function' ? readDocFolderOverridesCached() : readDocFolderOverrides());
+      const catSet = new Set();
       for (const f of folders) {
-        if (Array.isArray(f.questionIds) && f.questionIds.some(x => String(x) === idStr)) {
+        if (f._qidSet) {
+          f._qidSet.forEach(id => catSet.add(id));
+        } else if (Array.isArray(f.questionIds)) {
+          for (const x of f.questionIds) catSet.add(String(x));
+        }
+      }
+      const publishedDocIds = new Set();
+      for (const p of papersData) {
+        if (p && (p.published || 0) > 0) publishedDocIds.add(String(p.id));
+      }
+      for (const docId of Object.keys(overrides)) {
+        if (!publishedDocIds.has(docId)) continue;
+        const ov = overrides[docId];
+        if (ov && Array.isArray(ov.added)) {
+          for (const id of ov.added) catSet.add(String(id));
+        }
+      }
+      for (const q of questionsData) {
+        if (!q || !q.documentId) continue;
+        const idStr = String(q.id);
+        if (catSet.has(idStr)) continue;
+        const ov = overrides[String(q.documentId)];
+        const isRemoved = ov && (ov._removedSet ? ov._removedSet.has(idStr) : (Array.isArray(ov.removed) && ov.removed.includes(idStr)));
+        if (!isRemoved) catSet.add(idStr);
+      }
+      return catSet;
+    }
+
+    function isQuestionUncategorized(qid, prebuiltCatSet) {
+      const idStr = String(qid);
+      if (prebuiltCatSet) return !prebuiltCatSet.has(idStr);
+      const folders = typeof readUserFoldersCached === 'function' ? readUserFoldersCached() : readUserFolders();
+      for (const f of folders) {
+        if (f._qidSet ? f._qidSet.has(idStr) : (Array.isArray(f.questionIds) && f.questionIds.some(x => String(x) === idStr))) {
           return false;
         }
       }
       const q = questionsData.find(x => String(x.id) === idStr);
       if (q) {
-        const overrides = typeof readDocFolderOverrides === 'function' ? readDocFolderOverrides() : {};
+        const overrides = typeof readDocFolderOverridesCached === 'function'
+          ? readDocFolderOverridesCached()
+          : (typeof readDocFolderOverrides === 'function' ? readDocFolderOverrides() : {});
         for (const p of papersData) {
           if ((p.published || 0) > 0 && isQuestionInDocFolder(q, p.id, overrides)) {
             return false;
@@ -9333,7 +9956,7 @@
         // 兜底：若题目带 documentId 但对应试卷信息尚未载入且未被手动移出，则不视为未分类
         if (q.documentId) {
           const ov = overrides[String(q.documentId)];
-          const isRemoved = ov && Array.isArray(ov.removed) && ov.removed.includes(idStr);
+          const isRemoved = ov && (ov._removedSet ? ov._removedSet.has(idStr) : (Array.isArray(ov.removed) && ov.removed.includes(idStr)));
           if (!isRemoved) return false;
         }
       }
@@ -10132,7 +10755,44 @@
       return `[题有据题目 ${sid}] 《${title}》${numPart} (id: ${q.id})`;
     }
 
-    async function copyQuestionLocator(qid) {
+    function resetInspectorLocatorCopyButton(btnEl) {
+      const btn = (btnEl && typeof btnEl.classList === 'object')
+        ? btnEl
+        : (typeof document !== 'undefined' ? document.getElementById('btnCopyInspectorLocator') : null);
+      if (!btn) return;
+      if (btn._copiedTimer) {
+        clearTimeout(btn._copiedTimer);
+        btn._copiedTimer = null;
+      }
+      if (btn.dataset && btn.dataset.defaultHtml) {
+        btn.innerHTML = btn.dataset.defaultHtml;
+      }
+      btn.classList.remove('is-copied');
+      btn.setAttribute('aria-label', '复制题目定位码');
+      btn.setAttribute('title', '复制题目定位码');
+    }
+
+    function markInspectorLocatorCopied(btnEl) {
+      const btn = (btnEl && typeof btnEl.classList === 'object')
+        ? btnEl
+        : (typeof document !== 'undefined' ? document.getElementById('btnCopyInspectorLocator') : null);
+      if (!btn) return;
+      if (btn.dataset && !btn.dataset.defaultHtml) {
+        btn.dataset.defaultHtml = btn.innerHTML;
+      }
+      if (btn._copiedTimer) {
+        clearTimeout(btn._copiedTimer);
+      }
+      btn.classList.add('is-copied');
+      btn.innerHTML = '<svg class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.2 8.4l3 3 6.6-6.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="text-[10px] font-medium leading-none ml-0.5">已复制</span>';
+      btn.setAttribute('aria-label', '已复制题目定位码');
+      btn.setAttribute('title', '已复制定位码');
+      btn._copiedTimer = setTimeout(() => {
+        resetInspectorLocatorCopyButton(btn);
+      }, 1800);
+    }
+
+    async function copyQuestionLocator(qid, btnEl) {
       const q = questionsData.find(item => item.id === qid);
       if (!q) return;
       const text = buildQuestionLocatorText(q);
@@ -10149,6 +10809,7 @@
           document.execCommand('copy');
           ta.remove();
         }
+        markInspectorLocatorCopied(btnEl);
         showToast(`已复制定位 ${getQuestionShortId(q)}，可直接发给 AI Agent`, 'success');
       } catch {
         showToast(`复制失败，定位码为 ${getQuestionShortId(q)}`, 'error');
@@ -10198,18 +10859,20 @@
         }
       }
 
-      if (typeof readUserFolders === 'function') {
-        const folders = readUserFolders();
+      if (typeof readUserFoldersCached === 'function' || typeof readUserFolders === 'function') {
+        const folders = typeof readUserFoldersCached === 'function' ? readUserFoldersCached() : readUserFolders();
         const qid = String(q.id);
         for (const f of folders) {
-          if (!Array.isArray(f.questionIds)) continue;
-          if (!f.questionIds.some(x => String(x) === qid)) continue;
-          if (String(f.name || '').toLowerCase().includes(kw)) return true;
+          if (f._qidSet ? f._qidSet.has(qid) : (Array.isArray(f.questionIds) && f.questionIds.some(x => String(x) === qid))) {
+            if (String(f.name || '').toLowerCase().includes(kw)) return true;
+          }
         }
       }
 
       if (Array.isArray(papersData) && typeof isQuestionInDocFolder === 'function') {
-        const overrides = typeof readDocFolderOverrides === 'function' ? readDocFolderOverrides() : {};
+        const overrides = typeof readDocFolderOverridesCached === 'function'
+          ? readDocFolderOverridesCached()
+          : (typeof readDocFolderOverrides === 'function' ? readDocFolderOverrides() : {});
         for (const p of papersData) {
           if (!p || !p.id) continue;
           if (!isQuestionInDocFolder(q, p.id, overrides)) continue;
@@ -10221,11 +10884,12 @@
       return false;
     }
 
-    function folderSectionMatchesForSpec(q, spec) {
+    function folderSectionMatchesForSpec(q, spec, membershipCache) {
       const list = (spec && (spec.folderSections || spec.sections)) || [];
       if (!list.length) return false;
       const sec = String(q.section || '').trim();
-      const overrides = typeof readDocFolderOverrides === 'function' ? readDocFolderOverrides() : {};
+      const overrides = (membershipCache && membershipCache.overrides)
+        || (typeof readDocFolderOverridesCached === 'function' ? readDocFolderOverridesCached() : (typeof readDocFolderOverrides === 'function' ? readDocFolderOverrides() : {}));
       for (const item of list) {
         if (item.paperId) {
           if (typeof isQuestionInDocFolder === 'function') {
@@ -10316,7 +10980,7 @@
         const qIds = (q.tags || []).filter(t => t && !t.needsReview).map(t => String(t.id));
         if (ft.some(id => qIds.includes(String(id)))) return true;
       }
-      if (fs.length && folderSectionMatchesForSpec(q, spec)) return true;
+      if (fs.length && folderSectionMatchesForSpec(q, spec, membershipCache)) return true;
       return false;
     }
 
@@ -10587,7 +11251,11 @@
         const isSimple = !q.tags || q.tags.length <= 1 || q.tags.every(t => t.color === 'slate');
         if (!isSimple) return false;
       } else if (s.smartFilter === 'uncategorized') {
-        if (typeof isQuestionUncategorized === 'function' && !isQuestionUncategorized(q.id)) return false;
+        if (membershipCache && membershipCache.categorizedSet) {
+          if (membershipCache.categorizedSet.has(String(q.id))) return false;
+        } else if (typeof isQuestionUncategorized === 'function' && !isQuestionUncategorized(q.id)) {
+          return false;
+        }
       } else if (s.smartFilter === 'random') {
         // 随机模式保留全部符合其他筛选条件的试题并打乱顺序
       } else if (s.smartFilter === 'recent') {
@@ -10715,8 +11383,8 @@
      */
     function buildFilterMembershipCache(spec) {
       const s = spec || {};
-      const overrides = readDocFolderOverrides();
-      const folders = readUserFolders();
+      const overrides = typeof readDocFolderOverridesCached === 'function' ? readDocFolderOverridesCached() : readDocFolderOverrides();
+      const folders = typeof readUserFoldersCached === 'function' ? readUserFoldersCached() : readUserFolders();
       const docSets = new Map();
       const pids = new Set([
         ...((s.folderPaperIds || s.paperIds) || []),
@@ -10737,7 +11405,11 @@
           excludedBatchIds = new Set(batch.ids.map(String));
         }
       }
-      return { docSets, userFolderSet, excludedBatchIds, overrides, folders };
+      let categorizedSet = null;
+      if (s.smartFilter === 'uncategorized' && typeof buildCategorizedQuestionIdSet === 'function') {
+        categorizedSet = buildCategorizedQuestionIdSet(folders, overrides);
+      }
+      return { docSets, userFolderSet, excludedBatchIds, overrides, folders, categorizedSet };
     }
 
     /**
@@ -16315,6 +16987,7 @@
           metaCard?.classList.remove('hidden');
           const locatorCodeEl = document.getElementById('inspectorLocatorCode');
           if (locatorCodeEl) locatorCodeEl.innerText = getQuestionShortId(curr);
+          if (typeof resetInspectorLocatorCopyButton === 'function') resetInspectorLocatorCopyButton();
           const sourceTextEl = document.getElementById('inspectorSourceText');
           if (sourceTextEl) {
             const srcLabel = String(curr.source || '未命名资料').trim();
@@ -17346,9 +18019,42 @@
       return false;
     }
 
+    function buildQuestionTagIndexMap() {
+      const idxMap = new Map();
+      for (let i = 0; i < questionsData.length; i++) {
+        const q = questionsData[i];
+        const tags = q && Array.isArray(q.tags) ? q.tags : [];
+        for (const t of tags) {
+          if (!t || t.needsReview || !t.id) continue;
+          const tid = String(t.id);
+          let arr = idxMap.get(tid);
+          if (!arr) {
+            arr = [];
+            idxMap.set(tid, arr);
+          }
+          arr.push(i);
+        }
+      }
+      return idxMap;
+    }
+
     /** 统计某组标签下「去重后的正式题数」（不含 needsReview；对齐目录 subtree_count）。 */
-    function countQuestionsForTagIdSet(tagIds) {
-      const set = new Set((tagIds || []).map(String).filter(Boolean));
+    function countQuestionsForTagIdSet(tagIds, prebuiltTagIndexMap = null) {
+      if (!Array.isArray(tagIds) || !tagIds.length) return 0;
+      if (prebuiltTagIndexMap) {
+        if (tagIds.length === 1) {
+          const hit = prebuiltTagIndexMap.get(String(tagIds[0]));
+          return hit ? hit.length : 0;
+        }
+        const seenIdx = new Set();
+        for (const id of tagIds) {
+          const list = prebuiltTagIndexMap.get(String(id));
+          if (!list) continue;
+          for (const idx of list) seenIdx.add(idx);
+        }
+        return seenIdx.size;
+      }
+      const set = new Set(tagIds.map(String).filter(Boolean));
       if (!set.size) return 0;
       let n = 0;
       for (const q of questionsData) {
@@ -17358,9 +18064,11 @@
       return n;
     }
 
-    /** @param {{ includeEmpty?: boolean }} [opts] includeEmpty：主树标签区要显示零题标签，便于建层级 */
+    /** @param {{ includeEmpty?: boolean, tagIndexMap?: Map }} [opts] includeEmpty：主树标签区要显示零题标签，便于建层级 */
     function buildTagTreeNodes(kind, opts) {
       const includeEmpty = !!(opts && opts.includeEmpty);
+      const tagIndexMap = (opts && opts.tagIndexMap)
+        || (typeof buildQuestionTagIndexMap === 'function' ? buildQuestionTagIndexMap() : null);
       const pool = tagCatalogue.filter(t => t.kind === kind && t.active !== false);
       if (!pool.length) return [];
       const byId = new Map(pool.map(t => [String(t.id), t]));
@@ -17406,7 +18114,7 @@
         const descIds = collectDesc(tid);
         // 目录投影 subtree_count = 点选浏览能刷出的题数；题库已加载时再与本机列表对齐取大，避免投影滞后
         const apiCount = Math.max(t.subtree_count || 0, t.count || 0, t.direct_count || 0);
-        const liveCount = questionsReady ? countQuestionsForTagIdSet(descIds) : 0;
+        const liveCount = questionsReady ? countQuestionsForTagIdSet(descIds, tagIndexMap) : 0;
         const count = Math.max(apiCount, liveCount);
         if (!count && !includeEmpty) return null;
         return {
@@ -17985,29 +18693,43 @@
     // ================= 通用嵌套树辅助（循环检测 / 子树收集） =================
     var MAX_FOLDER_DEPTH = 8;
 
-    function readDocPlacements() {
+    function readDocPlacements(opts) {
       try {
         const key = (typeof EAGLE_DOC_PLACEMENTS_KEY === 'string') ? EAGLE_DOC_PLACEMENTS_KEY : 'eagle_doc_placements_v1';
-        const raw = localStorage.getItem(key);
-        const obj = raw ? JSON.parse(raw) : {};
-        if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {};
-        const out = {};
-        Object.keys(obj).forEach(k => {
-          const entry = obj[k];
-          if (!entry || typeof entry !== 'object') return;
-          let pid = entry.parentId ? String(entry.parentId).trim() : null;
-          if (pid && pid.startsWith('userfolder:')) pid = pid.slice('userfolder:'.length) || null;
-          if (pid === '__root__' || pid === 'root') pid = 'section:folders';
-          if (pid === 'default' || pid === '') pid = null;
-          const sortRaw = Number(entry.sortOrder);
-          const cleaned = { parentId: pid };
-          if (Number.isFinite(sortRaw)) cleaned.sortOrder = sortRaw;
-          if (cleaned.parentId !== null || Number.isFinite(cleaned.sortOrder)) {
-            out[String(k)] = cleaned;
+        const raw = localStorage.getItem(key) || '';
+        const cache = readDocPlacements._cache || (readDocPlacements._cache = { raw: null, value: null });
+        let out = (cache.raw === raw && cache.value) ? cache.value : null;
+        if (!out) {
+          const obj = raw ? JSON.parse(raw) : {};
+          out = {};
+          if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+            Object.keys(obj).forEach(k => {
+              const entry = obj[k];
+              if (!entry || typeof entry !== 'object') return;
+              let pid = entry.parentId ? String(entry.parentId).trim() : null;
+              if (pid && pid.startsWith('userfolder:')) pid = pid.slice('userfolder:'.length) || null;
+              if (pid === '__root__' || pid === 'root') pid = 'section:folders';
+              if (pid === 'default' || pid === '') pid = null;
+              const sortRaw = Number(entry.sortOrder);
+              const cleaned = { parentId: pid };
+              if (Number.isFinite(sortRaw)) cleaned.sortOrder = sortRaw;
+              if (cleaned.parentId !== null || Number.isFinite(cleaned.sortOrder)) {
+                out[String(k)] = cleaned;
+              }
+            });
           }
-        });
-        return out;
+          cache.raw = raw;
+          cache.value = out;
+        }
+        if (opts && opts._cached === true) return out;
+        const copy = {};
+        Object.keys(out).forEach(k => { copy[k] = { ...out[k] }; });
+        return copy;
       } catch (e) { return {}; }
+    }
+
+    function readDocPlacementsCached() {
+      return typeof readDocPlacements === 'function' ? readDocPlacements({ _cached: true }) : {};
     }
 
     function writeDocPlacements(mapObj) {
@@ -18015,6 +18737,7 @@
         const key = (typeof EAGLE_DOC_PLACEMENTS_KEY === 'string') ? EAGLE_DOC_PLACEMENTS_KEY : 'eagle_doc_placements_v1';
         localStorage.setItem(key, JSON.stringify(mapObj || {}));
       } catch (e) {}
+      if (typeof readDocPlacements === 'function') readDocPlacements._cache = null;
       if (typeof scheduleFoldersSync === 'function') scheduleFoldersSync();
     }
 
@@ -18342,40 +19065,70 @@
     }
 
     // ================= 试卷 / 教材文件夹增删映射与我的文件夹统一操作 =================
-    function readDocFolderOverrides() {
+    function readDocFolderOverrides(opts) {
       try {
-        const raw = localStorage.getItem(EAGLE_DOC_FOLDER_OVERRIDES_KEY);
-        const obj = raw ? JSON.parse(raw) : {};
-        if (!obj || typeof obj !== 'object') return {};
-        const out = {};
-        Object.keys(obj).forEach(k => {
-          const entry = obj[k];
-          if (entry && typeof entry === 'object') {
-            const cleanedSections = {};
-            if (entry.sections && typeof entry.sections === 'object') {
-              Object.keys(entry.sections).forEach(qid => {
-                const meta = entry.sections[qid];
-                if (meta && typeof meta === 'object') {
-                  cleanedSections[String(qid)] = { ...meta };
+        const key = (typeof EAGLE_DOC_FOLDER_OVERRIDES_KEY === 'string')
+          ? EAGLE_DOC_FOLDER_OVERRIDES_KEY
+          : 'eagle_doc_folder_overrides_v1';
+        const raw = localStorage.getItem(key) || '';
+        const cache = readDocFolderOverrides._cache || (readDocFolderOverrides._cache = { raw: null, value: null });
+        let out = (cache.raw === raw && cache.value) ? cache.value : null;
+        if (!out) {
+          const obj = raw ? JSON.parse(raw) : {};
+          out = {};
+          if (obj && typeof obj === 'object') {
+            Object.keys(obj).forEach(k => {
+              const entry = obj[k];
+              if (entry && typeof entry === 'object') {
+                const cleanedSections = {};
+                if (entry.sections && typeof entry.sections === 'object') {
+                  Object.keys(entry.sections).forEach(qid => {
+                    const meta = entry.sections[qid];
+                    if (meta && typeof meta === 'object') {
+                      cleanedSections[String(qid)] = { ...meta };
+                    }
+                  });
                 }
-              });
-            }
-            const item = {
-              added: Array.isArray(entry.added) ? Array.from(new Set(entry.added.map(String))) : [],
-              removed: Array.isArray(entry.removed) ? Array.from(new Set(entry.removed.map(String))) : []
-            };
-            if (Object.keys(cleanedSections).length) {
-              item.sections = cleanedSections;
-            }
-            out[String(k)] = item;
+                const added = Array.isArray(entry.added) ? Array.from(new Set(entry.added.map(String))) : [];
+                const removed = Array.isArray(entry.removed) ? Array.from(new Set(entry.removed.map(String))) : [];
+                const item = {
+                  added,
+                  removed,
+                  _addedSet: new Set(added),
+                  _removedSet: new Set(removed)
+                };
+                if (Object.keys(cleanedSections).length) {
+                  item.sections = cleanedSections;
+                }
+                out[String(k)] = item;
+              }
+            });
           }
+          cache.raw = raw;
+          cache.value = out;
+        }
+        if (opts && opts._cached === true) return out;
+        const copyMap = {};
+        Object.keys(out).forEach(k => {
+          const e = out[k];
+          const copy = { added: e.added.slice(), removed: e.removed.slice() };
+          if (e.sections) {
+            copy.sections = {};
+            Object.keys(e.sections).forEach(qid => { copy.sections[qid] = { ...e.sections[qid] }; });
+          }
+          copyMap[k] = copy;
         });
-        return out;
+        return copyMap;
       } catch (e) { return {}; }
+    }
+
+    function readDocFolderOverridesCached() {
+      return typeof readDocFolderOverrides === 'function' ? readDocFolderOverrides({ _cached: true }) : {};
     }
 
     function writeDocFolderOverrides(mapObj) {
       try { localStorage.setItem(EAGLE_DOC_FOLDER_OVERRIDES_KEY, JSON.stringify(mapObj || {})); } catch (e) {}
+      if (typeof readDocFolderOverrides === 'function') readDocFolderOverrides._cache = null;
       if (typeof scheduleFoldersSync === 'function') scheduleFoldersSync();
     }
 
@@ -18486,11 +19239,14 @@
      */
     function isQuestionInDocFolder(q, docId, preloadedOverrides) {
       if (!q || !docId) return false;
-      const overrides = preloadedOverrides || readDocFolderOverrides();
+      const overrides = preloadedOverrides
+        || (typeof readDocFolderOverridesCached === 'function' ? readDocFolderOverridesCached() : readDocFolderOverrides());
       const ov = overrides[String(docId)];
       const qidStr = String(q.id);
-      if (ov && Array.isArray(ov.added) && ov.added.includes(qidStr)) return true;
-      if (ov && Array.isArray(ov.removed) && ov.removed.includes(qidStr)) return false;
+      if (ov) {
+        if (ov._addedSet ? ov._addedSet.has(qidStr) : (Array.isArray(ov.added) && ov.added.includes(qidStr))) return true;
+        if (ov._removedSet ? ov._removedSet.has(qidStr) : (Array.isArray(ov.removed) && ov.removed.includes(qidStr))) return false;
+      }
       return String(q.documentId || '') === String(docId);
     }
 
@@ -18736,37 +19492,66 @@
     }
 
     // ================= 我的文件夹（用户手动建夹 + 嵌套子文件夹 + 题库归档） =================
-    function readUserFolders() {
+    function readUserFolders(opts) {
       try {
-        const raw = localStorage.getItem(USER_FOLDERS_STORAGE_KEY);
-        const arr = raw ? JSON.parse(raw) : [];
-        if (!Array.isArray(arr)) return [];
-        const rows = arr
-          .filter(x => x && x.id && x.name)
-          .map(x => {
-            const id = String(x.id);
-            let createdAt = Number(x.createdAt) || 0;
-            if (!createdAt) {
-              const m = id.match(/^uf_(\d+)/);
-              createdAt = m ? Number(m[1]) || 0 : 0;
+        const storageKey = (typeof USER_FOLDERS_STORAGE_KEY === 'string') ? USER_FOLDERS_STORAGE_KEY : 'eagle_user_folders_v1';
+        const mirrorKey = (typeof FOLDER_SORT_ORDERS_MIRROR_KEY === 'string') ? FOLDER_SORT_ORDERS_MIRROR_KEY : 'eagle_folder_sort_orders_v1';
+        const raw = localStorage.getItem(storageKey) || '';
+        const mirrorRaw = localStorage.getItem(mirrorKey) || '';
+        const cacheKey = raw + '\0' + mirrorRaw;
+        const cache = readUserFolders._cache || (readUserFolders._cache = { key: null, value: null });
+        let rows = (cache.key === cacheKey && cache.value) ? cache.value : null;
+        if (!rows) {
+          const arr = raw ? JSON.parse(raw) : [];
+          rows = [];
+          if (Array.isArray(arr)) {
+            rows = arr
+              .filter(x => x && x.id && x.name)
+              .map(x => {
+                const id = String(x.id);
+                let createdAt = Number(x.createdAt) || 0;
+                if (!createdAt) {
+                  const m = id.match(/^uf_(\d+)/);
+                  createdAt = m ? Number(m[1]) || 0 : 0;
+                }
+                let pid = x.parentId ? String(x.parentId).trim() : null;
+                if (pid && pid.startsWith('userfolder:')) {
+                  pid = pid.slice('userfolder:'.length) || null;
+                }
+                const sortRaw = Number(x.sortOrder);
+                const qids = Array.isArray(x.questionIds) ? Array.from(new Set(x.questionIds.map(String))) : [];
+                const out = {
+                  id,
+                  name: String(x.name),
+                  parentId: pid,
+                  questionIds: qids,
+                  _qidSet: new Set(qids),
+                  createdAt
+                };
+                if (Number.isFinite(sortRaw)) out.sortOrder = sortRaw;
+                return out;
+              });
+            if (typeof applyFolderSortOrdersMirror === 'function') {
+              rows = applyFolderSortOrdersMirror(rows, 'user');
             }
-            let pid = x.parentId ? String(x.parentId).trim() : null;
-            if (pid && pid.startsWith('userfolder:')) {
-              pid = pid.slice('userfolder:'.length) || null;
-            }
-            const sortRaw = Number(x.sortOrder);
-            const out = {
-              id,
-              name: String(x.name),
-              parentId: pid,
-              questionIds: Array.isArray(x.questionIds) ? Array.from(new Set(x.questionIds.map(String))) : [],
-              createdAt
-            };
-            if (Number.isFinite(sortRaw)) out.sortOrder = sortRaw;
-            return out;
-          });
-        return typeof applyFolderSortOrdersMirror === 'function' ? applyFolderSortOrdersMirror(rows, 'user') : rows;
+          }
+          cache.key = cacheKey;
+          cache.value = rows;
+        }
+        if (opts && opts._cached === true) return rows;
+        return rows.map(x => ({
+          id: x.id,
+          name: x.name,
+          parentId: x.parentId,
+          questionIds: x.questionIds.slice(),
+          createdAt: x.createdAt,
+          ...(Number.isFinite(Number(x.sortOrder)) ? { sortOrder: Number(x.sortOrder) } : {})
+        }));
       } catch (e) { return []; }
+    }
+
+    function readUserFoldersCached() {
+      return typeof readUserFolders === 'function' ? readUserFolders({ _cached: true }) : [];
     }
 
     const FOLDER_SORT_ORDERS_MIRROR_KEY = 'eagle_folder_sort_orders_v1';
@@ -18790,6 +19575,7 @@
       try {
         localStorage.setItem(FOLDER_SORT_ORDERS_MIRROR_KEY, JSON.stringify(mirror || { user: {}, smart: {} }));
       } catch (e) {}
+      if (typeof readUserFolders === 'function') readUserFolders._cache = null;
     }
 
     function updateFolderSortOrdersMirrorFromList(list, kind) {
@@ -18838,6 +19624,7 @@
         }
         localStorage.setItem(USER_FOLDERS_STORAGE_KEY, JSON.stringify(normalized));
       } catch (e) {}
+      if (typeof readUserFolders === 'function') readUserFolders._cache = null;
       if (typeof scheduleFoldersSync === 'function') scheduleFoldersSync();
     }
 
@@ -19413,7 +20200,7 @@
       const parentMode = inheritedMode || getExplicitFolderSortMode(effectiveParentKey) || resolveFolderSortMode('section:folders');
       const placements = typeof readDocPlacements === 'function' ? readDocPlacements() : {};
       const overrides = typeof readDocFolderOverrides === 'function' ? readDocFolderOverrides() : {};
-      const preloaded = { overrides, foldersList: list, placements };
+      const preloaded = { overrides, foldersList: list, placements, chaptersAssigned: true };
       const build = (item, curParentMode = parentMode) => {
         const nodeId = 'userfolder:' + item.id;
         const folderMode = getExplicitFolderSortMode(nodeId) || curParentMode;
@@ -20203,6 +20990,7 @@
     }
 
     function getFolderTreeRoots() {
+      if (typeof assignTextbookChapters === 'function') assignTextbookChapters();
       const roots = [];
       roots.push({ id: 'all', type: 'all', label: '全部题库', icon: '\u{1F4DA}', count: questionsData.length, children: [] });
 
@@ -20238,12 +21026,13 @@
 
       // 标签紧挨「最近浏览」：常用入口靠上，别沉到文件夹后面。
       // 分区/分组/标签节点右侧数字一律 = 正式贴题的去重题数（与点选浏览一致）
-      const knowTags = buildTagTreeNodes('knowledge', { includeEmpty: true });
-      const methTags = buildTagTreeNodes('method', { includeEmpty: true });
+      const tagIndexMap = typeof buildQuestionTagIndexMap === 'function' ? buildQuestionTagIndexMap() : null;
+      const knowTags = buildTagTreeNodes('knowledge', { includeEmpty: true, tagIndexMap });
+      const methTags = buildTagTreeNodes('method', { includeEmpty: true, tagIndexMap });
       const knowTagIds = tagCatalogue.filter(t => t.kind === 'knowledge' && t.active !== false).map(t => t.id);
       const methTagIds = tagCatalogue.filter(t => t.kind === 'method' && t.active !== false).map(t => t.id);
-      const knowQuestionCount = countQuestionsForTagIdSet(knowTagIds);
-      const methQuestionCount = countQuestionsForTagIdSet(methTagIds);
+      const knowQuestionCount = countQuestionsForTagIdSet(knowTagIds, tagIndexMap);
+      const methQuestionCount = countQuestionsForTagIdSet(methTagIds, tagIndexMap);
       const tagsSectionMode = resolveFolderSortMode('section:tags');
       const tagSectionChildren = sortFolderTreeNodes([
         {
@@ -20275,7 +21064,7 @@
         sectionKind: 'tags',
         label: '标签',
         icon: '\u{1F4D3}',
-        count: countQuestionsForTagIdSet(knowTagIds.concat(methTagIds)),
+        count: countQuestionsForTagIdSet(knowTagIds.concat(methTagIds), tagIndexMap),
         actionLabel: '+',
         actionTitle: '新建顶级标签（考点 ' + knowTagIds.length + ' · 方法 ' + methTagIds.length + '）',
         actionCall: 'event.stopPropagation(); promptCreateTreeTag(null, null)',
@@ -20308,7 +21097,7 @@
       const papersGroupMode = getExplicitFolderSortMode('group:papers') || folderSectionMode;
       const booksGroupMode = getExplicitFolderSortMode('group:books') || folderSectionMode;
       const rootPlacedDocs = typeof buildPlacedDocTreeNodesForParent === 'function'
-        ? buildPlacedDocTreeNodesForParent('section:folders', folderSectionMode)
+        ? buildPlacedDocTreeNodesForParent('section:folders', folderSectionMode, { chaptersAssigned: true })
         : [];
       const folderChildren = sortFolderTreeNodes(
         buildUserFolderTreeNodes(folderSectionMode).concat(rootPlacedDocs),
@@ -20329,7 +21118,7 @@
         });
       }
 
-      const books = buildTextbookTreeNodes(booksGroupMode);
+      const books = buildTextbookTreeNodes(booksGroupMode, { skipAssign: true });
       const bookGroupSubfolders = buildUserFolderTreeNodesForParent('group:books', booksGroupMode);
       if (books.length || bookGroupSubfolders.length) {
         const bookKids = sortFolderTreeNodes(books.concat(bookGroupSubfolders), booksGroupMode);
@@ -21571,6 +22360,36 @@
     }
     // --- /folder-keyboard-nav ---
 
+    function syncFolderTreeActiveHighlight(nodeId) {
+      const container = document.getElementById('folderTreeContainer');
+      if (!container) return false;
+      const targetEl = document.getElementById('ftree-' + nodeId);
+      if (!targetEl) return false;
+      container.querySelectorAll('[data-folder-enterable="1"]').forEach(el => {
+        const n = folderNodeRegistry.get(el.id.slice('ftree-'.length));
+        const isMethod = Boolean(n && n.type === 'tag' && n.tagKind === 'method');
+        el.classList.remove(
+          'bg-emerald-50', 'text-emerald-900', 'bg-violet-50', 'text-violet-900', 'font-semibold'
+        );
+        el.classList.add('text-slate-600', 'hover:bg-slate-100');
+        const cntEl = el.lastElementChild;
+        if (cntEl) {
+          cntEl.classList.remove('text-emerald-700', 'text-violet-700');
+          cntEl.classList.add('text-slate-400');
+        }
+        if (el === targetEl) {
+          el.classList.remove('text-slate-600', 'hover:bg-slate-100');
+          el.classList.add(isMethod ? 'bg-violet-50' : 'bg-emerald-50', isMethod ? 'text-violet-900' : 'text-emerald-900', 'font-semibold');
+          if (cntEl) {
+            cntEl.classList.remove('text-slate-400');
+            cntEl.classList.add(isMethod ? 'text-violet-700' : 'text-emerald-700');
+          }
+        }
+      });
+      if (typeof paintFolderKeyboardCursor === 'function') paintFolderKeyboardCursor();
+      return true;
+    }
+
     function applyFolderNode(nodeId) {
       let node = folderNodeRegistry.get(nodeId);
       // NOTE: 专项视图与回收站已收纳进左上角 ≡ 主菜单，可能不在左侧树注册表中，按前缀兜底构造节点
@@ -21608,6 +22427,7 @@
       }
       if (typeof armFolderKeyboardIfTreeEvent === 'function') armFolderKeyboardIfTreeEvent(typeof window !== 'undefined' ? window.event : null);
       folderTreeState.activeId = nodeId;
+      const expandedSizeBefore = folderTreeState.expanded.size;
 
       filterState.smartFilter = '';
       filterState.paperId = '';
@@ -21631,7 +22451,10 @@
         // 缺题时只拉「已入库」清单（/api/library?document=），不拉整卷 paper_detail：
         // 《思想方法导引》五百多题的原卷裁片会把主线程卡死，也会把未入库题混进题库。
         const targetPaper = papersData.find(p => p.id === node.paperId);
-        const existingCount = questionsData.filter(q => String(q.documentId) === String(node.paperId)).length;
+        let existingCount = 0;
+        for (let i = 0; i < questionsData.length; i++) {
+          if (String(questionsData[i].documentId) === String(node.paperId)) existingCount += 1;
+        }
         const wantTotal = (targetPaper && targetPaper.published) || 0;
         if (existingCount < wantTotal && targetPaper && wantTotal > 0 && typeof fetch === 'function') {
           ensureDocumentQuestionsLoaded(node.paperId, targetPaper, wantTotal);
@@ -21680,7 +22503,10 @@
         return;
       }
 
-      renderFolderTree();
+      const expandedChanged = folderTreeState.expanded.size !== expandedSizeBefore;
+      if (expandedChanged || typeof syncFolderTreeActiveHighlight !== 'function' || !syncFolderTreeActiveHighlight(nodeId)) {
+        renderFolderTree();
+      }
       renderInlineActiveChips();
       updateFavoritesBadge();
       applyFilters();
@@ -24164,6 +24990,11 @@
             clearOpRecropSelection();
             return;
           }
+          const closePrompt = document.getElementById('commUploadClosePrompt');
+          if (closePrompt && !closePrompt.classList.contains('hidden')) {
+            dismissCommunityUploadClosePrompt();
+            return;
+          }
           hideEagleContextMenu();
           hideEagleAppMainMenu();
           closeDeleteConfirmModal();
@@ -24177,6 +25008,7 @@
           closeEagleHelpModal();
           closeDedupCenterModal();
           closeEaglePreferencesModal();
+          closeCommunityUploadCenter();
           closeCommunityPublishModal();
           closeCommunityImportModal();
           clearBatchSelection();
@@ -24548,6 +25380,16 @@
     window.batchPublishToCommunity = batchPublishToCommunity;
     window.closeCommunityPublishModal = closeCommunityPublishModal;
     window.submitCommunityPublish = submitCommunityPublish;
+    window.openCommunityUploadCenter = openCommunityUploadCenter;
+    window.closeCommunityUploadCenter = closeCommunityUploadCenter;
+    window.continueCommunityUploadInBackground = continueCommunityUploadInBackground;
+    window.confirmCancelCommunityUploadFromPrompt = confirmCancelCommunityUploadFromPrompt;
+    window.dismissCommunityUploadClosePrompt = dismissCommunityUploadClosePrompt;
+    window.handleCommPublishFooterCancel = handleCommPublishFooterCancel;
+    window.cancelActiveFloatCommunityUpload = cancelActiveFloatCommunityUpload;
+    window.cancelCommunityUploadTask = cancelCommunityUploadTask;
+    window.deleteCommunityUploadRecord = deleteCommunityUploadRecord;
+    window.clearCommunityUploadHistory = clearCommunityUploadHistory;
     window.connectCommunityAccount = connectCommunityAccount;
     window.disconnectCommunityAccount = disconnectCommunityAccount;
     window.syncCommPubPriceState = syncCommPubPriceState;

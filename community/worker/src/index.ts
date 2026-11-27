@@ -42,6 +42,7 @@ export function createApp() {
       site_name: c.env.SITE_NAME || "题有据社区",
       turnstile_site_key: c.env.TURNSTILE_SITE_KEY || "",
       max_pack_mb: Number(c.env.MAX_PACK_MB || 50),
+      admin_max_pack_mb: Number(c.env.ADMIN_MAX_PACK_MB || 95),
       user_storage_quota_mb: Number(c.env.USER_STORAGE_QUOTA_MB || 500),
       storage_mode: c.env.PACK_STORAGE_MODE || "r2",
     }),

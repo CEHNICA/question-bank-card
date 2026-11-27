@@ -161,6 +161,33 @@ class PriorityQueueAndLocatorTests(TestCase):
         self.assertEqual(queued, 2)
         self.assertEqual(LibraryJob.objects.filter(kind="tags", status=LibraryJob.Status.QUEUED, priority=0).count(), 2)
 
+    def test_failed_background_tag_suggestion_is_not_requeued_and_holds_no_large_snapshot(self):
+        features.save({"auto_tag_background": True})
+        queued = library_jobs.enqueue_untagged_background(batch_size=1, max_queued_floor=4)
+        self.assertEqual(queued, 1)
+        job = LibraryJob.objects.get(kind="tags", status=LibraryJob.Status.QUEUED)
+        suggestion = LibraryTagSuggestion.objects.get(job=job)
+        self.assertEqual(suggestion.catalogue_snapshot, {})
+
+        with mock.patch.object(library_jobs, "run_tag_proposal", side_effect=RuntimeError("上游限流")):
+            claimed = library_jobs.claim_next_job()
+            self.assertIsNotNone(claimed)
+            library_jobs._execute_claimed_job(claimed)
+
+        suggestion.refresh_from_db()
+        self.assertEqual(suggestion.status, LibraryTagSuggestion.Status.FAILED)
+        self.assertEqual(suggestion.catalogue_snapshot, {})
+
+        # Next 1.5s worker ticks must NOT infinitely re-enqueue the failed question.
+        still_available = len(self.pubs) - 1
+        second = library_jobs.enqueue_untagged_background(batch_size=10, max_queued_floor=10)
+        self.assertEqual(second, still_available)
+        self.assertEqual(
+            LibraryJob.objects.filter(publication=job.publication, kind="tags").count(),
+            1,
+            "失败的后台补标题目不得被无限重新入队",
+        )
+
 
 class ParallelJobWorkerTests(TransactionTestCase):
     setUp = PriorityQueueAndLocatorTests.setUp

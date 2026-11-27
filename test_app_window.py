@@ -1190,6 +1190,16 @@ class BrowserCacheTests(unittest.TestCase):
             # 首次捕获（1 次）+ 2 秒后复核（1 次）+ 检测到浏览器重置图标后补刷（1 次）= 3 次
             self.assertEqual(applied, [6161, 6161, 6161])
 
+    def test_raise_own_window_restores_minimized_and_pulses_topmost_when_fg_locked(self):
+        fake_user32 = Mock()
+        fake_user32.IsIconic.return_value = True
+        fake_user32.GetForegroundWindow.side_effect = [100, 100]
+        fake_user32.GetWindowThreadProcessId.return_value = 42
+        app_window._raise_own_window(fake_user32, 999, pulse_topmost=True)
+        fake_user32.ShowWindow.assert_called_once_with(999, app_window._SW_RESTORE)
+        self.assertEqual(fake_user32.SetWindowPos.call_count, 2)
+        self.assertGreaterEqual(fake_user32.SetForegroundWindow.call_count, 2)
+
     def test_apply_window_icon_caches_handles_and_writes_property_store_on_windows(self):
         app_window._ICON_HANDLE_CACHE.clear()
         self.addCleanup(app_window._ICON_HANDLE_CACHE.clear)

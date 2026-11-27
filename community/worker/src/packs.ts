@@ -45,6 +45,7 @@ const DEFAULT_R2_HOT_TARGET_MB = 5500;
 const DEFAULT_COLD_ARCHIVE_AGE_DAYS = 7;
 const DEFAULT_ARCHIVE_BATCH_SIZE = 3;
 const DEFAULT_USER_STORAGE_QUOTA_MB = 500;
+const DEFAULT_ADMIN_MAX_PACK_MB = 95;
 const DEFAULT_DAILY_UPLOADS_PER_USER = 5;
 const DEFAULT_MAX_PENDING_PER_USER = 5;
 export const STAGES = ["小学", "初中", "高中", "大学", "其他"];
@@ -195,6 +196,18 @@ export function parsePackZip(bytes: Uint8Array): ParsedPack {
 
 export function maxPackBytes(env: Env): number {
   return Number(env.MAX_PACK_MB || 50) * 1024 * 1024;
+}
+
+export function adminMaxPackMb(env: Env): number {
+  const mb = Number(env.ADMIN_MAX_PACK_MB ?? DEFAULT_ADMIN_MAX_PACK_MB);
+  return Number.isFinite(mb) && mb > 0 ? mb : DEFAULT_ADMIN_MAX_PACK_MB;
+}
+
+export function maxPackBytesForUser(env: Env, user: Pick<SessionUser, "role">): number {
+  if (user.role === "admin") {
+    return Math.max(maxPackBytes(env), adminMaxPackMb(env) * 1024 * 1024);
+  }
+  return maxPackBytes(env);
 }
 
 export function maxTotalR2Bytes(env: Env): number {
@@ -720,10 +733,11 @@ async function insertPackRecord(
 packRoutes.post("/packs/init", async (c) => {
   const user = requireUser(c);
   const body = await readJson(c);
-  const maxBytes = maxPackBytes(c.env);
+  const maxBytes = maxPackBytesForUser(c.env, user);
+  const maxMbLabel = Math.round(maxBytes / 1024 / 1024);
   const fileSize = intParam(body.file_size, 0, 0, Number.MAX_SAFE_INTEGER);
   if (fileSize < 22) fail(400, "请选择有效的社区题包 zip 文件。");
-  if (fileSize > maxBytes) fail(413, `题包太大了，单个不能超过 ${c.env.MAX_PACK_MB || 50} MB。`);
+  if (fileSize > maxBytes) fail(413, `题包太大了，单个不能超过 ${maxMbLabel} MB。`);
 
   const meta = validatePackMetaInput({
     title: body.title,
@@ -778,8 +792,9 @@ packRoutes.put("/packs/:id/bundle", async (c) => {
   const pack = await loadPack(c.env, c.req.param("id"));
   if (!pack || pack.author_id !== user.id) fail(404, "没有这份题包。");
   if (pack.status !== "uploading") fail(409, "这份题包已经完成上传，不能重复覆盖。");
-  const maxBytes = maxPackBytes(c.env);
-  if (pack.size <= 0 || pack.size > maxBytes) fail(413, `题包太大了，单个不能超过 ${c.env.MAX_PACK_MB || 50} MB。`);
+  const maxBytes = maxPackBytesForUser(c.env, user);
+  const maxMbLabel = Math.round(maxBytes / 1024 / 1024);
+  if (pack.size <= 0 || pack.size > maxBytes) fail(413, `题包太大了，单个不能超过 ${maxMbLabel} MB。`);
 
   const declaredHeader = c.req.header("Content-Length");
   if (declaredHeader !== undefined) {

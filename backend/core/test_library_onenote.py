@@ -521,14 +521,15 @@ class OneNoteLinkTests(TestCase):
 
     @patch("core.library_onenote._ensure_desktop_window", return_value=True)
     @patch("core.library_onenote.call_bridge")
-    def test_export_page_step_images_crops_whitespace_and_compresses(self, mock_call, _mock_win):
-        """验证 OneNote 导出 PDF 时传 ensureWindow=True 并在渲染后自动裁掉多余白边。"""
+    def test_export_page_step_images_crops_whitespace_and_compresses(self, mock_call, mock_win):
+        """验证 OneNote 默认静默导出 PDF（不唤起/置前窗口），并在渲染后自动裁掉多余白边。"""
         import pymupdf
         from PIL import Image
 
         def fake_publish(op, **params):
             self.assertEqual(op, "publish")
-            self.assertTrue(params.get("ensureWindow"))
+            self.assertFalse(params.get("ensureWindow"))
+            self.assertTrue(params.get("silent"))
             self.assertEqual(params.get("format"), 3)
             dest = Path(params["dest"])
             doc = pymupdf.open()
@@ -542,6 +543,7 @@ class OneNoteLinkTests(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp) / "steps"
             paths = library_onenote.export_page_step_images("{page-crop}", out_dir, max_pages=3)
+            mock_win.assert_not_called()
             self.assertEqual(len(paths), 1)
             self.assertTrue(paths[0].is_file())
             with Image.open(paths[0]) as cropped:

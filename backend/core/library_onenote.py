@@ -1004,9 +1004,9 @@ def _crop_and_compress_onenote_page(img, *, max_long_side: int = 1280, pad_px: i
 
 
 def export_page_step_images(
-    page_id: str, dest_dir: Path, *, max_pages: int = 3, max_long_side: int = 1280
+    page_id: str, dest_dir: Path, *, max_pages: int = 3, max_long_side: int = 1280, silent: bool = True
 ) -> list[Path]:
-    """将关联的 OneNote 页面导出为裁边压缩后的步骤 PNG 列表（必要时自动打开 OneNote）。"""
+    """将关联的 OneNote 页面导出为裁边压缩后的步骤 PNG 列表（默认静默导出，不抢占前台窗口）。"""
     clean_page_id = str(page_id or "").strip()
     if not clean_page_id:
         raise OneNoteError("题目未关联有效的 OneNote 页面。")
@@ -1017,9 +1017,16 @@ def export_page_step_images(
     dest_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="tyj-onenote-pdf-") as tmp_dir:
         pdf_path = Path(tmp_dir) / "onenote-page.pdf"
-        _ensure_desktop_window()
+        if not silent:
+            _ensure_desktop_window()
         result = call_bridge(
-            "publish", timeout_seconds=45, id=clean_page_id, dest=str(pdf_path), format=3, ensureWindow=True
+            "publish",
+            timeout_seconds=45,
+            id=clean_page_id,
+            dest=str(pdf_path),
+            format=3,
+            ensureWindow=not silent,
+            silent=bool(silent),
         )
         if (
             not isinstance(result, dict)

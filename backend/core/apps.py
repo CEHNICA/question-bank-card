@@ -180,12 +180,18 @@ class CoreConfig(AppConfig):
 
     def ready(self):
         from core import library_fts
+        from core.library_transfer import purge_legacy_auto_backups
 
         # 1.26.50：判定结果存到磁盘复用 —— 第二次打开软件不用再解析几千道题
         # 的 JSON 字段（冷启动那一遍要 3.9 秒）。接不上也不影响软件能用。
         verdict_cache.install()
         library_fts.install_signals()
-        for sweep in (discard_interrupted_uploads, discard_interrupted_deletes, discard_stale_system_temps):
+        for sweep in (
+            discard_interrupted_uploads,
+            discard_interrupted_deletes,
+            discard_stale_system_temps,
+            purge_legacy_auto_backups,
+        ):
             try:
                 sweep()
             except Exception as exc:  # 清理失败绝不能挡住软件启动。

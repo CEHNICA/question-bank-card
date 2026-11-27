@@ -101,3 +101,22 @@ jobs:
           Get-ChildItem $assets -File | ForEach-Object {
             gh release upload "v$version" $_.FullName --repo $env:GITHUB_REPOSITORY --clobber
           }
+
+      - name: Warm website release mirror
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          try {
+            $meta = Invoke-RestMethod -Uri "https://tiyouju.com/api/latest-release?refresh=1" -TimeoutSec 20
+            Write-Host "官网同步已触发: $($meta.tag)"
+            foreach ($path in @('/download/SHA256SUMS.txt', '/download/install.ps1', '/download/skill', '/download/installer', '/download/portable')) {
+              try {
+                Invoke-WebRequest -Uri "https://tiyouju.com$path" -OutFile $null -TimeoutSec 60 -UseBasicParsing | Out-Null
+                Write-Host "已预热 $path"
+              } catch {
+                Write-Host "预热 $path 跳过: $($_.Exception.Message)"
+              }
+            }
+          } catch {
+            Write-Host "官网同步触发跳过: $($_.Exception.Message)"
+          }

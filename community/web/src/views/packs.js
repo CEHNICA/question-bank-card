@@ -523,7 +523,10 @@ function bindManage(pack, id) {
 
 export async function uploadView() {
   if (!state.user) return needLogin("登录后才能发布题包。");
-  const maxMb = state.config.max_pack_mb || 50;
+  const isAdmin = state.user.role === "admin";
+  const maxMb = isAdmin
+    ? Math.max(Number(state.config.admin_max_pack_mb || 95), Number(state.config.max_pack_mb || 50))
+    : (state.config.max_pack_mb || 50);
   const payment = await api("/api/me/payment").catch(() => ({ note: "", has_qr: false }));
   const hasPayment = Boolean(payment.note || payment.has_qr);
   setView(`

@@ -17,12 +17,14 @@ import os
 import shutil
 import sqlite3
 import tempfile
+import threading
+import time
 import unittest
 import uuid
 import zipfile
 from pathlib import Path
 
-from django.test import Client, TestCase, override_settings
+from django.test import Client, TestCase, TransactionTestCase, override_settings
 
 from core import library_transfer
 from core.models import (
@@ -1286,3 +1288,189 @@ class CommunityDirectTransferTests(TransferFixture):
             self.assertGreaterEqual(sol_count, 1)
         finally:
             snap.close()
+
+    def test_unlimited_community_export_for_admin(self):
+        pub1 = self._publish_sample()
+        pub2 = PublishedQuestion.objects.create(
+            question=self.questions[1],
+            paper=self.paper,
+            source_filename=self.paper.filename,
+            number=self.questions[1].number,
+            question_type=self.questions[1].question_type,
+            version=1,
+            content={"stem": self.questions[1].stem, "options": {}, "answer": "", "analysis": ""},
+            content_hash="c" * 64,
+        )
+
+        # Simulate tight regular cap (1 question) -> regular blocked, unlimited=True succeeds
+        with unittest.mock.patch.object(library_transfer, "COMMUNITY_MAX_QUESTIONS", 1):
+            with self.assertRaises(library_transfer.TransferError):
+                library_transfer.export_community_pack(
+                    self.work / "limited", publication_ids=[str(pub1.pk), str(pub2.pk)], unlimited=False
+                )
+            (self.work / "unlimited").mkdir(parents=True, exist_ok=True)
+            unlim_res = library_transfer.export_community_pack(
+                self.work / "unlimited",
+                publication_ids=[str(pub1.pk), str(pub2.pk)],
+                unlimited=True,
+                custom_title="作者超大题包",
+            )
+            self.assertEqual(unlim_res["community"]["questions"], 2)
+
+
+class CommunityAsyncUploadTaskTests(TransactionTestCase):
+    """后台异步社区上传任务、取消、历史记录（需要真实提交事务以便工作线程读取 SQLite）。"""
+
+    def setUp(self):
+        self.work = Path(tempfile.mkdtemp(prefix="qb-async-up-"))
+        self.addCleanup(shutil.rmtree, self.work, ignore_errors=True)
+        self.data = self.work / "data"
+        self.data.mkdir(parents=True, exist_ok=True)
+        override = override_settings(DATA_ROOT=self.data)
+        override.enable()
+        self.addCleanup(override.disable)
+        env_patch = unittest.mock.patch.dict(
+            os.environ,
+            {
+                "QB_DATA_ROOT": str(self.data),
+                "QB_CREDENTIAL_FILE": str(self.work / "credentials.dat"),
+                "QB_COMMUNITY_SESSION_FILE": str(self.work / "community.dat"),
+            },
+        )
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+
+        self.paper = Paper.objects.create(
+            filename="（虚构）异步卷.pdf",
+            kind="pdf",
+            sha256="f" * 64,
+            status=Paper.Status.READY,
+            pages=[{"page_idx": 0, "width": 1684, "height": 1190}],
+        )
+        q1 = Question.objects.create(
+            paper=self.paper,
+            number=1,
+            question_type="single_choice",
+            stem="（虚构）异步测试第一题",
+            options={"A": "甲"},
+            answer="甲",
+            analysis="",
+            state=Question.State.YELLOW,
+            text_source="agree",
+            regions=[{"page_idx": 0, "bbox": [10, 10, 200, 200]}],
+        )
+        PublishedQuestion.objects.create(
+            question=q1,
+            paper=self.paper,
+            source_filename=self.paper.filename,
+            number=q1.number,
+            question_type=q1.question_type,
+            version=1,
+            content={"stem": q1.stem, "options": q1.options, "answer": q1.answer, "analysis": ""},
+            content_hash="d" * 64,
+        )
+
+    def test_async_upload_tasks_progress_cancel_and_history(self):
+        from core import credential_settings
+
+        store = credential_settings._load_store()
+        store.save_community_session(
+            "tyj_dt_admin_tok",
+            username="author",
+            display_name="作者",
+            role="admin",
+            site="https://community.tiyouju.com/",
+        )
+        client = Client()
+        headers = {"HTTP_X_QB_REQUEST": "1"}
+        with (
+            unittest.mock.patch(
+                "core.transfer_views._sync_community_session_role", return_value=("admin", 95 * 1024 * 1024)
+            ),
+            unittest.mock.patch(
+                "core.transfer_views._community_http_json",
+                return_value=(201, {"id": "pack-async-1", "upload_url": "/api/packs/pack-async-1/bundle"}),
+            ),
+            unittest.mock.patch(
+                "core.transfer_views._community_http_put_file",
+                return_value=(200, {"id": "pack-async-1", "status": "pending"}),
+            ),
+        ):
+            started = client.post(
+                "/api/backup/community-upload/start",
+                data=json.dumps(
+                    {
+                        "paper_ids": [str(self.paper.pk)],
+                        "title": "（虚构）异步进度上传",
+                        "source_label": "试卷：测试（1 题）",
+                        "rights_confirmed": True,
+                    }
+                ),
+                content_type="application/json",
+                **headers,
+            )
+            self.assertEqual(started.status_code, 202, started.content.decode("utf-8"))
+            task_id = started.json()["task_id"]
+            deadline = time.monotonic() + 5.0
+            final_task = None
+            tasks_body = {}
+            while time.monotonic() < deadline:
+                poll = client.get("/api/backup/community-upload/tasks")
+                self.assertEqual(poll.status_code, 200)
+                tasks_body = poll.json()
+                hit = next((t for t in tasks_body.get("tasks", []) if t["task_id"] == task_id), None)
+                if hit and hit["status"] != "running":
+                    final_task = hit
+                    break
+                time.sleep(0.05)
+            self.assertIsNotNone(final_task)
+            self.assertEqual(final_task["status"], "succeeded", final_task)
+            self.assertEqual(final_task["percent"], 100)
+            self.assertEqual(final_task["pack_id"], "pack-async-1")
+            history = tasks_body.get("history", [])
+            self.assertTrue(any(h.get("id") == task_id for h in history))
+
+        # Cancel path
+        ev = threading.Event()
+        with (
+            unittest.mock.patch(
+                "core.transfer_views._sync_community_session_role", return_value=("admin", 95 * 1024 * 1024)
+            ),
+            unittest.mock.patch(
+                "core.transfer_views._community_http_json",
+                side_effect=lambda *a, **kw: (ev.wait(2.0), (201, {"id": "p2", "upload_url": "/api/packs/p2/bundle"}))[
+                    1
+                ],
+            ),
+        ):
+            started2 = client.post(
+                "/api/backup/community-upload/start",
+                data=json.dumps(
+                    {"paper_ids": [str(self.paper.pk)], "title": "（虚构）待取消上传", "rights_confirmed": True}
+                ),
+                content_type="application/json",
+                **headers,
+            )
+            tid2 = started2.json()["task_id"]
+            cancel_res = client.post(
+                f"/api/backup/community-upload/{tid2}/cancel", data="{}", content_type="application/json", **headers
+            )
+            self.assertEqual(cancel_res.status_code, 200)
+            ev.set()
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                poll = client.get("/api/backup/community-upload/tasks").json()
+                hit2 = next((t for t in poll.get("tasks", []) if t["task_id"] == tid2), None)
+                if hit2 and hit2["status"] != "running":
+                    self.assertEqual(hit2["status"], "cancelled")
+                    break
+                time.sleep(0.05)
+
+        clear_res = client.post(
+            "/api/backup/community-upload/history",
+            data=json.dumps({"action": "clear"}),
+            content_type="application/json",
+            **headers,
+        )
+        self.assertEqual(clear_res.status_code, 200)
+        self.assertEqual(client.get("/api/backup/community-upload/tasks").json()["history"], [])

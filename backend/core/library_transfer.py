@@ -40,6 +40,7 @@ import re
 import shutil
 import sqlite3
 import tempfile
+import threading
 import time
 import uuid
 import zipfile
@@ -99,6 +100,10 @@ SKIP_NAMES = {
 
 class TransferError(ValueError):
     """A problem the teacher can act on; the message says what to do next."""
+
+
+class UploadCancelledError(TransferError):
+    """Raised when the user cancels a community upload task mid-flight."""
 
 
 def _uuid_text(value) -> str:
@@ -170,6 +175,37 @@ def records_root() -> Path:
 def backups_root() -> Path:
     """软件本机备份锁与历史备份所在目录（打包导出时已由 SKIP_DIRECTORIES 排除）。"""
     return data_root() / "backups"
+
+
+LEGACY_AUTO_BACKUP_PREFIX = "题有据自动备份-"
+
+
+def purge_legacy_auto_backups(root: Path | None = None) -> dict[str, int]:
+    """清理历史“每天自动备份（保留最近 10 份）”留下的压缩包，释放磁盘空间。
+
+    只删 ``题有据自动备份-*.zip`` 及中断残留的 ``*.zip.part``；
+    绝不触碰用户手动导出的 ``题有据备份-*.zip``、升级前快照或上传记录。
+    """
+    folder = Path(root) if root is not None else backups_root()
+    if not folder.is_dir():
+        return {"removed": 0, "freed_bytes": 0}
+    removed = 0
+    freed_bytes = 0
+    for pattern in (f"{LEGACY_AUTO_BACKUP_PREFIX}*.zip", f"{LEGACY_AUTO_BACKUP_PREFIX}*.zip.part"):
+        for candidate in folder.glob(pattern):
+            if not candidate.is_file():
+                continue
+            try:
+                size = candidate.stat().st_size
+            except OSError:
+                size = 0
+            try:
+                candidate.unlink()
+                removed += 1
+                freed_bytes += max(0, int(size))
+            except OSError:
+                continue
+    return {"removed": removed, "freed_bytes": freed_bytes}
 
 
 # ---------------------------------------------------------------- 导出
@@ -371,18 +407,21 @@ def _resolve_export_publications(publication_ids: list[str] | None) -> dict:
     if not ordered_ids:
         raise TransferError("先选择至少一道要打包的题目。")
 
-    rows = (
-        PublishedQuestion.objects.filter(
-            pk__in=ordered_ids,
-            status=PublishedQuestion.Status.PUBLISHED,
-            question__isnull=False,
-            question__deleted_at__isnull=True,
-            paper__isnull=False,
+    matched_pubs = []
+    for start in range(0, len(ordered_ids), 500):
+        chunk_ids = ordered_ids[start : start + 500]
+        rows = (
+            PublishedQuestion.objects.filter(
+                pk__in=chunk_ids,
+                status=PublishedQuestion.Status.PUBLISHED,
+                question__isnull=False,
+                question__deleted_at__isnull=True,
+                paper__isnull=False,
+            )
+            .select_related("paper", "question")
+            .order_by("source_filename", "number", "id")
         )
-        .select_related("paper", "question")
-        .order_by("source_filename", "number", "id")
-    )
-    matched_pubs = [pub for pub in rows if not is_demo(pub.paper)]
+        matched_pubs.extend(pub for pub in rows if not is_demo(pub.paper))
     if not matched_pubs:
         raise TransferError("所选范围内没有可分享的已入库正式题目（示例题不参与上传）。")
 
@@ -1046,6 +1085,10 @@ def export_community_pack(
     include_originals: bool = False,
     include_onenote: bool = False,
     custom_title: str | None = None,
+    unlimited: bool = False,
+    max_pack_bytes: int | None = None,
+    progress_cb=None,
+    cancel_check=None,
 ) -> dict:
     """打一份发到题有据社区的题包：支持按试卷/教材、目录文件夹或选定题目导出，不能整库导出。"""
     mode_count = sum(1 for val in (paper_ids, tag_ids, publication_ids) if val is not None)
@@ -1061,7 +1104,11 @@ def export_community_pack(
             "include_originals": bool(include_originals) if paper_ids is not None else False,
             "include_onenote": bool(include_onenote),
             "title": str(custom_title or "").strip(),
+            "unlimited": bool(unlimited),
+            "max_pack_bytes": max_pack_bytes,
         },
+        progress_cb=progress_cb,
+        cancel_check=cancel_check,
     )
 
 
@@ -1186,6 +1233,8 @@ def export_bundle(
     tag_ids: list[str] | None = None,
     publication_ids: list[str] | None = None,
     community: dict | None = None,
+    progress_cb=None,
+    cancel_check=None,
 ) -> dict:
     """把整库、选定资料、目录文件夹或精选题目打包成一个 zip 放进 `directory`。"""
     directory = Path(directory)
@@ -1251,6 +1300,8 @@ def export_bundle(
             keep_publication_hexes=keep_publication_hexes,
             extra_keep_tag_hexes=extra_keep_tag_hexes,
             community=community,
+            progress_cb=progress_cb,
+            cancel_check=cancel_check,
         )
 
 
@@ -1264,15 +1315,32 @@ def _export_bundle(
     keep_publication_hexes: set[str] | None = None,
     extra_keep_tag_hexes: set[str] | None = None,
     community: dict | None = None,
+    progress_cb=None,
+    cancel_check=None,
 ) -> dict:
+    def _check_cancelled():
+        if callable(cancel_check) and cancel_check():
+            raise UploadCancelledError("已取消上传。")
+
+    def _emit(phase: str, done: int = 0, total: int = 0, detail: str = ""):
+        if callable(progress_cb):
+            try:
+                progress_cb(phase=phase, done=done, total=total, detail=detail)
+            except Exception:
+                pass
+
     stamp = time.strftime("%Y%m%d-%H%M%S")
     target = directory / f"{prefix}-{stamp}.zip"
     temp = directory / f".{prefix}-{stamp}.part"
     include_originals = True if community is None else bool(community.get("include_originals"))
     include_onenote = False if community is None else bool(community.get("include_onenote"))
+    unlimited_community = bool(community and community.get("unlimited"))
+    explicit_max_pack_bytes = community.get("max_pack_bytes") if community else None
     preview: dict | None = None
     onenote_meta = {"attached": 0, "skipped": 0, "preview_data_uri": None, "files": []}
     try:
+        _check_cancelled()
+        _emit("snapshot", 0, 1, "正在生成题库快照…")
         with tempfile.TemporaryDirectory() as work:
             snapshot = Path(work) / DATABASE_NAME
             if selected_papers is None:
@@ -1302,6 +1370,7 @@ def _export_bundle(
                 files_iter = _bundle_files(
                     data_root(), allowed_papers=allowed_papers, allowed_publications=allowed_publications
                 )
+            _check_cancelled()
             original_names: set[str] = set()
             if community is not None:
                 q_total = int(
@@ -1309,7 +1378,7 @@ def _export_bundle(
                     or (manifest.get("counts") or {}).get("questions")
                     or 0
                 )
-                if q_total > COMMUNITY_MAX_QUESTIONS:
+                if not unlimited_community and q_total > COMMUNITY_MAX_QUESTIONS:
                     raise TransferError(
                         f"单次最多上传 {COMMUNITY_MAX_QUESTIONS} 道题目（当前 {q_total} 道），请拆分后再试。"
                     )
@@ -1324,7 +1393,9 @@ def _export_bundle(
                         manifest["folders"] = [{"id": "", "name": custom_title, "kind": "custom"}]
                 manifest["community"] = {"format": COMMUNITY_PREVIEW_FORMAT, "include_originals": include_originals}
                 if include_onenote:
+                    _emit("onenote", 0, 1, "正在导出 OneNote 思考步骤…")
                     onenote_meta = _attach_onenote_steps_to_snapshot(snapshot, Path(work))
+                    _check_cancelled()
                 # 本机路径里有 Windows 用户名，发到网上之前抹掉；合并时会按本机重新指过去。
                 with contextlib_closing(sqlite3.connect(snapshot)) as scrub:
                     scrub.execute(f"UPDATE \"{PAPER_TABLE}\" SET source_path = '', render_path = '', zip_path = ''")
@@ -1342,27 +1413,34 @@ def _export_bundle(
                 for sample in preview["samples"]:
                     sample.pop("_publication", None)
 
+            files_list = list(files_iter)
+            total_files = len(files_list) + len(onenote_meta["files"])
+            _emit("packing", 0, max(1, total_files), "正在压缩打包题包…")
+
             originals_total_bytes = 0
             image_count = 0
+            packed_done = 0
             with zipfile.ZipFile(temp, "w", zipfile.ZIP_DEFLATED) as archive:
                 archive.writestr(MANIFEST_NAME, json.dumps(manifest, ensure_ascii=False, indent=2))
                 archive.write(snapshot, DATABASE_NAME)
-                for path in files_iter:
+                for path in files_list:
+                    _check_cancelled()
                     relative = path.relative_to(data_root())
                     is_orig = _is_original_document(relative, original_names)
                     if not include_originals and is_orig:
+                        packed_done += 1
                         continue
                     arc_name = f"{ORIGINALS}/{relative.as_posix()}"
                     if community is not None and is_orig:
                         originals_total_bytes += path.stat().st_size
-                        if originals_total_bytes > COMMUNITY_MAX_ORIGINALS_BYTES:
+                        if not unlimited_community and originals_total_bytes > COMMUNITY_MAX_ORIGINALS_BYTES:
                             raise TransferError(
                                 "附带的原卷 PDF / Word 总体积超过 8 MB 上限，请取消「附带原卷」后再上传。"
                             )
                         archive.write(path, arc_name)
                     elif community is not None and path.suffix.lower() in COMMUNITY_IMAGE_SUFFIXES:
                         image_count += 1
-                        if image_count > COMMUNITY_MAX_IMAGES:
+                        if not unlimited_community and image_count > COMMUNITY_MAX_IMAGES:
                             raise TransferError(
                                 f"单个题包最多包含 {COMMUNITY_MAX_IMAGES} 张图片，请拆分成多个小包后再上传。"
                             )
@@ -1370,18 +1448,36 @@ def _export_bundle(
                         archive.writestr(arc_name, compressed)
                     else:
                         archive.write(path, arc_name)
+                    packed_done += 1
+                    if packed_done == total_files or packed_done % 10 == 0:
+                        _emit(
+                            "packing",
+                            packed_done,
+                            max(1, total_files),
+                            f"正在压缩文件 ({packed_done}/{max(1, total_files)})…",
+                        )
                 for extra_src, extra_arc in onenote_meta["files"]:
+                    _check_cancelled()
                     if extra_src.suffix.lower() in COMMUNITY_IMAGE_SUFFIXES:
                         image_count += 1
-                        if image_count > COMMUNITY_MAX_IMAGES:
+                        if not unlimited_community and image_count > COMMUNITY_MAX_IMAGES:
                             raise TransferError(
                                 f"包含 OneNote 笔记后的总图片数超过 {COMMUNITY_MAX_IMAGES} 张上限，请分批上传。"
                             )
                     archive.write(extra_src, extra_arc)
+                    packed_done += 1
+                    if packed_done == total_files or packed_done % 10 == 0:
+                        _emit(
+                            "packing",
+                            packed_done,
+                            max(1, total_files),
+                            f"正在压缩文件 ({packed_done}/{max(1, total_files)})…",
+                        )
                 if preview is not None:
                     archive.writestr(COMMUNITY_PREVIEW_NAME, json.dumps(preview, ensure_ascii=False, indent=2))
                 if cover is not None:
                     archive.write(cover[1], cover[0])
+        _check_cancelled()
         # 写完了自己先验一遍：包能打开、清单和题库都在，才算是个备份。
         with zipfile.ZipFile(temp) as check:
             names = set(check.namelist())
@@ -1389,10 +1485,16 @@ def _export_bundle(
             raise TransferError("备份包没写完整，已经把半成品删掉了，请再打一次。")
         if community is not None and COMMUNITY_PREVIEW_NAME not in names:
             raise TransferError("社区题包没写完整，已经把半成品删掉了，请再打一次。")
-        if community is not None and temp.stat().st_size > COMMUNITY_MAX_PACK_BYTES:
+        pack_cap = (
+            int(explicit_max_pack_bytes)
+            if isinstance(explicit_max_pack_bytes, (int, float)) and explicit_max_pack_bytes > 0
+            else (None if unlimited_community else COMMUNITY_MAX_PACK_BYTES)
+        )
+        if community is not None and pack_cap is not None and temp.stat().st_size > pack_cap:
             mb = temp.stat().st_size / 1024 / 1024
+            cap_mb = round(pack_cap / 1024 / 1024)
             raise TransferError(
-                f"压缩打包后体积为 {mb:.1f} MB，超出社区单包 15 MB 上限，请减少题目数量或取消附带原卷。"
+                f"压缩打包后体积为 {mb:.1f} MB，超出单包 {cap_mb} MB 上限，请减少题目数量或取消附带原卷。"
             )
     except Exception:
         try:
@@ -2527,3 +2629,70 @@ def _delete(table: str, row_id: str) -> int:
     with connection.cursor() as cursor:
         cursor.execute(f'DELETE FROM "{table}" WHERE id=?', (row_id,))
         return cursor.rowcount
+
+
+COMMUNITY_UPLOADS_LOCK = threading.Lock()
+COMMUNITY_UPLOADS_MAX = 100
+
+
+def community_uploads_path() -> Path:
+    return backups_root() / "community-uploads.json"
+
+
+def _read_community_uploads_locked() -> list[dict]:
+    path = community_uploads_path()
+    if not path.is_file():
+        return []
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(raw, list):
+            return [row for row in raw if isinstance(row, dict)]
+    except (OSError, ValueError, TypeError):
+        pass
+    return []
+
+
+def _write_community_uploads_locked(items: list[dict]) -> None:
+    path = community_uploads_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(items[:COMMUNITY_UPLOADS_MAX], ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def list_community_uploads() -> list[dict]:
+    with COMMUNITY_UPLOADS_LOCK:
+        return _read_community_uploads_locked()
+
+
+def record_community_upload(entry: dict) -> dict:
+    item = dict(entry)
+    item.setdefault("id", uuid.uuid4().hex)
+    item.setdefault("created_at", timezone.now().isoformat())
+    with COMMUNITY_UPLOADS_LOCK:
+        items = _read_community_uploads_locked()
+        items = [row for row in items if row.get("id") != item.get("id")]
+        items.insert(0, item)
+        _write_community_uploads_locked(items[:COMMUNITY_UPLOADS_MAX])
+    return item
+
+
+def delete_community_upload(record_id: str) -> bool:
+    clean = str(record_id or "").strip()
+    if not clean:
+        return False
+    with COMMUNITY_UPLOADS_LOCK:
+        items = _read_community_uploads_locked()
+        kept = [row for row in items if str(row.get("id") or "") != clean]
+        if len(kept) == len(items):
+            return False
+        _write_community_uploads_locked(kept)
+    return True
+
+
+def clear_community_uploads() -> int:
+    with COMMUNITY_UPLOADS_LOCK:
+        items = _read_community_uploads_locked()
+        count = len(items)
+        _write_community_uploads_locked([])
+    return count

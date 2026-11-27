@@ -486,6 +486,7 @@ def load_community_session(path: Path | None = None) -> dict[str, str] | None:
         "token": token,
         "username": str(payload.get("username") or "").strip(),
         "display_name": str(payload.get("display_name") or "").strip(),
+        "role": str(payload.get("role") or "").strip(),
         "site": str(payload.get("site") or "").strip(),
     }
 
@@ -495,6 +496,7 @@ def save_community_session(
     *,
     username: str = "",
     display_name: str = "",
+    role: str = "",
     site: str = "",
     path: Path | None = None,
 ) -> dict[str, str]:
@@ -506,6 +508,7 @@ def save_community_session(
         "token": clean_token,
         "username": str(username or "").strip()[:40],
         "display_name": str(display_name or "").strip()[:60],
+        "role": str(role or "").strip()[:20],
         "site": str(site or "").strip()[:300],
     }
     target = path or community_session_path()
@@ -527,6 +530,7 @@ def save_community_session(
     return {
         "username": record["username"],
         "display_name": record["display_name"],
+        "role": record["role"],
         "site": record["site"],
     }
 
@@ -542,11 +546,14 @@ def community_session_public(path: Path | None = None) -> dict[str, object]:
     """返回脱敏后的社区连接状态（绝不包含 token 明文）。"""
     session = load_community_session(path)
     if not session:
-        return {"connected": False, "username": "", "display_name": "", "site": ""}
+        return {"connected": False, "username": "", "display_name": "", "role": "", "is_admin": False, "site": ""}
+    role = str(session.get("role") or "").strip()
     return {
         "connected": True,
         "username": session["username"],
         "display_name": session["display_name"] or session["username"],
+        "role": role,
+        "is_admin": role == "admin",
         "site": session["site"],
     }
 

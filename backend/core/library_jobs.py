@@ -11,6 +11,7 @@ import io
 import json
 import logging
 import os
+import random
 import re
 import threading
 import time
@@ -223,7 +224,7 @@ def enqueue(
                 taxonomy_revision=catalogue.revision,
                 assignment_revision=publication.tag_revision,
                 method_source=method_snapshot,
-                catalogue_snapshot=tag_catalogue_snapshot(),
+                catalogue_snapshot={},
                 prompt_version="tags-v3-hierarchy",
                 status=LibraryTagSuggestion.Status.QUEUED,
                 message="已加入任务队列，完成后请核对建议。",
@@ -700,7 +701,12 @@ def _finish(job: LibraryJob, status: str, error: str = "") -> None:
                     LibraryTagSuggestion.Status.RUNNING,
                     LibraryTagSuggestion.Status.PENDING,
                 ],
-            ).update(status=LibraryTagSuggestion.Status.FAILED, message=error[:500], updated_at=timezone.now())
+            ).update(
+                status=LibraryTagSuggestion.Status.FAILED,
+                message=error[:500],
+                catalogue_snapshot={},
+                updated_at=timezone.now(),
+            )
 
 
 def default_concurrency() -> int:
@@ -729,15 +735,20 @@ def default_concurrency() -> int:
     return DEFAULT_JOB_CONCURRENCY
 
 
-def _with_sqlite_retry(fn, *, attempts: int = 5):
-    """在多并发写 SQLite WAL 遇到瞬时锁冲突时做短暂退避重试。"""
-    for attempt in range(attempts):
-        try:
-            return fn()
-        except OperationalError as error:
-            if "locked" not in str(error).lower() or attempt == attempts - 1:
-                raise
-            time.sleep(0.05 * (attempt + 1))
+_SQLITE_TX_LOCK = threading.RLock()
+
+
+def _with_sqlite_retry(fn, *, attempts: int = 10):
+    """在多并发写 SQLite WAL 遇到瞬时锁冲突时串行化本进程事务并做退避重试。"""
+    with _SQLITE_TX_LOCK:
+        for attempt in range(attempts):
+            try:
+                return fn()
+            except OperationalError as error:
+                msg = str(error).lower()
+                if ("locked" not in msg and "busy" not in msg) or attempt == attempts - 1:
+                    raise
+                time.sleep(0.03 * (attempt + 1) + random.uniform(0.01, 0.05))
 
 
 def claim_next_job() -> LibraryJob | None:
@@ -799,7 +810,7 @@ def _execute_claimed_job(job: LibraryJob) -> None:
                         "taxonomy_revision": catalogue.revision,
                         "assignment_revision": publication.tag_revision,
                         "method_source": method_snapshot,
-                        "catalogue_snapshot": tag_catalogue_snapshot(),
+                        "catalogue_snapshot": {},
                         "prompt_version": "tags-v3-hierarchy",
                         "status": LibraryTagSuggestion.Status.RUNNING,
                         "message": "旧版任务转为待核对建议。",
@@ -837,15 +848,14 @@ def _execute_claimed_job(job: LibraryJob) -> None:
             suggestion = _with_sqlite_retry(lambda: LibraryTagSuggestion.objects.get(job=job))
             from . import library_tagging
 
-            if (
-                suggestion.status == LibraryTagSuggestion.Status.STALE
-                or suggestion.taxonomy_revision != library_tagging.catalogue_state().revision
-            ):
+            current_rev = _with_sqlite_retry(lambda: library_tagging.catalogue_state().revision)
+            if suggestion.status == LibraryTagSuggestion.Status.STALE or suggestion.taxonomy_revision != current_rev:
                 raise JobError("标签目录在排队后发生变化；旧任务已停止，请重新建议。")
             suggestion.status = LibraryTagSuggestion.Status.RUNNING
             suggestion.message = "正在根据题面、配图和当前采用的解析整理建议。"
             _with_sqlite_retry(lambda: suggestion.save(update_fields=["status", "message", "updated_at"]))
             result, engine = run_tag_proposal(publication, suggestion)
+            snapshot_payload = suggestion.catalogue_snapshot or _with_sqlite_retry(tag_catalogue_snapshot)
 
             def _save_suggestion():
                 with transaction.atomic():
@@ -854,13 +864,22 @@ def _execute_claimed_job(job: LibraryJob) -> None:
                     current_suggestion.suggestions = result.get("suggestions", [])
                     current_suggestion.message = result.get("message", "")
                     current_suggestion.generation_source = engine
+                    if not current_suggestion.catalogue_snapshot:
+                        current_suggestion.catalogue_snapshot = snapshot_payload
                     current_suggestion.status = {
                         "ok": LibraryTagSuggestion.Status.PENDING,
                         "no_match": LibraryTagSuggestion.Status.NO_MATCH,
                         "review_required": LibraryTagSuggestion.Status.REVIEW,
                     }[result["status"]]
                     current_suggestion.save(
-                        update_fields=["suggestions", "message", "generation_source", "status", "updated_at"]
+                        update_fields=[
+                            "suggestions",
+                            "message",
+                            "generation_source",
+                            "catalogue_snapshot",
+                            "status",
+                            "updated_at",
+                        ]
                     )
                     job.result = {
                         "tag_suggestion_id": str(current_suggestion.pk),
@@ -979,19 +998,28 @@ def enqueue_untagged_background(batch_size: int = 6, max_queued_floor: int = 4) 
             LibraryTagSuggestion.Status.REVIEW,
             LibraryTagSuggestion.Status.ACCEPTED,
             LibraryTagSuggestion.Status.REJECTED,
+            LibraryTagSuggestion.Status.FAILED,
+            LibraryTagSuggestion.Status.STALE,
         ],
     ).values("publication_id")
+    failed_job_ids = LibraryJob.objects.filter(kind=LibraryJob.Kind.TAGS, status=LibraryJob.Status.FAILED).values(
+        "publication_id"
+    )
     candidates = (
         PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED)
         .exclude(pk__in=tagged_ids)
         .exclude(pk__in=queued_or_running_ids)
         .exclude(pk__in=handled_suggestion_ids)
+        .exclude(pk__in=failed_job_ids)
         .order_by("-published_at")[: max(1, batch_size * 2)]
     )
     queued = 0
     for publication in candidates:
         if queued >= batch_size:
             break
+        content = publication.content or {}
+        if len(content.get("figures") or []) > 6:
+            continue
         try:
             enqueue(
                 publication,
@@ -1008,11 +1036,23 @@ def enqueue_untagged_background(batch_size: int = 6, max_queued_floor: int = 4) 
     return queued
 
 
+def purge_failed_tag_suggestion_snapshots() -> int:
+    """清理历史失败/失效标签建议行中残留的冗余目录大快照，避免 SQLite 体积持续膨胀。"""
+    return (
+        LibraryTagSuggestion.objects.filter(
+            status__in=[LibraryTagSuggestion.Status.FAILED, LibraryTagSuggestion.Status.STALE]
+        )
+        .exclude(catalogue_snapshot={})
+        .update(catalogue_snapshot={})
+    )
+
+
 def recover_interrupted() -> int:
     """Jobs left running by a worker that stopped go back to the queue."""
     from .library_job_control import expire_api_jobs
 
     expire_api_jobs()
+    purge_failed_tag_suggestion_snapshots()
     return LibraryJob.objects.filter(executor=LibraryJob.Executor.API, status=LibraryJob.Status.RUNNING).update(
         status=LibraryJob.Status.QUEUED
     )

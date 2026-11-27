@@ -436,6 +436,9 @@ def _backup_database_before_migrate(migration_hash: str) -> Path | None:
         if check.execute("PRAGMA quick_check").fetchone() != ("ok",):
             target.unlink(missing_ok=True)
             raise RuntimeError("升级前数据库备份校验失败，已停止迁移")
+    old_snapshots = sorted(BACKUPS.glob("pre-migrate-*.sqlite3"), key=lambda p: p.stat().st_mtime, reverse=True)
+    for stale in old_snapshots[3:]:
+        stale.unlink(missing_ok=True)
     print(f"升级前数据库备份：{target}", flush=True)
     return target
 

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import base64
+import http.client
 import ipaddress
 import json
 import shutil
@@ -21,17 +22,23 @@ from pathlib import Path
 from typing import Any
 
 from django.http import HttpResponseNotAllowed, JsonResponse
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from . import credential_settings, library_transfer
-from .library_transfer import TransferError
+from .library_transfer import TransferError, UploadCancelledError
 
 MAX_UPLOAD_BYTES = library_transfer.MAX_BUNDLE_BYTES
 DEFAULT_COMMUNITY_SITE = "https://community.tiyouju.com"
+_COMMUNITY_ADMIN_STREAM_MAX_BYTES = 95 * 1024 * 1024
 _STAGED_LOCK = threading.Lock()
 _STAGED_PACKS: dict[str, dict[str, Any]] = {}
 _STAGED_TTL_SECONDS = 1800.0
 _MAX_STAGED_ITEMS = 8
+
+_UPLOAD_LOCK = threading.Lock()
+_UPLOAD_TASKS: dict[str, dict[str, Any]] = {}
+_MAX_MEMORY_UPLOAD_TASKS = 20
 
 
 def _guard(request, *, json_body=True):
@@ -387,6 +394,11 @@ def community_session_view(request):
     if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
         return _error("只能在本机查看社区授权状态", 403)
     store = credential_settings._load_store()
+    if request.GET.get("refresh") == "1":
+        session = store.load_community_session()
+        if session and session.get("token"):
+            site_url = _normalize_site_url(session.get("site") or "")
+            _sync_community_session_role(site_url, session, store)
     info = store.community_session_public()
     response = JsonResponse(info)
     response["Cache-Control"] = "no-store"
@@ -448,27 +460,351 @@ def _community_http_json(
         return int(err.code), body if isinstance(body, dict) else {"error": f"HTTP {err.code}"}
 
 
-def _community_http_put_file(url: str, *, token: str, file_path: Path) -> tuple[int, dict]:
-    raw_bytes = file_path.read_bytes()
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "X-TYJ": "1",
-        "Content-Type": "application/zip",
-        "Content-Length": str(len(raw_bytes)),
-        "Accept": "application/json",
-    }
-    req = urllib.request.Request(url, data=raw_bytes, headers=headers, method="PUT")
+def _sync_community_session_role(site_url: str, session: dict[str, str], store) -> tuple[str, int | None]:
+    """向社区 /api/me 同步当前用户角色与包体上限（失败时退回本机缓存角色）。"""
+    role = str(session.get("role") or "").strip()
+    max_pack_bytes: int | None = _COMMUNITY_ADMIN_STREAM_MAX_BYTES if role == "admin" else None
+    token = str(session.get("token") or "").strip()
+    if not token or not site_url:
+        return role, max_pack_bytes
+    req = urllib.request.Request(
+        f"{site_url}/api/me",
+        headers={"Authorization": f"Bearer {token}", "X-TYJ": "1", "Accept": "application/json"},
+        method="GET",
+    )
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with urllib.request.urlopen(req, timeout=8) as resp:
             body = json.loads(resp.read().decode("utf-8") or "{}")
-            return int(getattr(resp, "status", 200)), body if isinstance(body, dict) else {}
-    except urllib.error.HTTPError as err:
-        raw = err.read().decode("utf-8", errors="replace")
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return role, max_pack_bytes
+    user = body.get("user") if isinstance(body, dict) else None
+    if isinstance(user, dict):
+        live_role = str(user.get("role") or "").strip()
+        if live_role:
+            role = live_role
+            if live_role != str(session.get("role") or "").strip():
+                try:
+                    store.save_community_session(
+                        token,
+                        username=str(user.get("username") or session.get("username") or ""),
+                        display_name=str(user.get("display_name") or session.get("display_name") or ""),
+                        role=live_role,
+                        site=site_url + "/",
+                    )
+                except Exception:
+                    pass
+        raw_mb = user.get("max_pack_mb")
+        if isinstance(raw_mb, (int, float)) and raw_mb > 0:
+            max_pack_bytes = int(raw_mb * 1024 * 1024)
+        elif role == "admin":
+            max_pack_bytes = _COMMUNITY_ADMIN_STREAM_MAX_BYTES
+    return role, max_pack_bytes
+
+
+def _community_http_put_file(
+    url: str, *, token: str, file_path: Path, progress_cb=None, cancel_event: threading.Event | None = None
+) -> tuple[int, dict]:
+    if progress_cb is None and cancel_event is None:
+        raw_bytes = file_path.read_bytes()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "X-TYJ": "1",
+            "Content-Type": "application/zip",
+            "Content-Length": str(len(raw_bytes)),
+            "Accept": "application/json",
+        }
+        req = urllib.request.Request(url, data=raw_bytes, headers=headers, method="PUT")
+        try:
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                body = json.loads(resp.read().decode("utf-8") or "{}")
+                return int(getattr(resp, "status", 200)), body if isinstance(body, dict) else {}
+        except urllib.error.HTTPError as err:
+            raw = err.read().decode("utf-8", errors="replace")
+            try:
+                body = json.loads(raw) if raw else {}
+            except ValueError:
+                body = {"error": raw or f"HTTP {err.code}"}
+            return int(err.code), body if isinstance(body, dict) else {"error": f"HTTP {err.code}"}
+
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.hostname or ""
+    port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+    target_path = parsed.path or "/"
+    if parsed.query:
+        target_path = f"{target_path}?{parsed.query}"
+    total_size = int(file_path.stat().st_size)
+    conn_cls = http.client.HTTPSConnection if parsed.scheme.lower() == "https" else http.client.HTTPConnection
+    conn = conn_cls(host, port, timeout=180)
+    try:
+        conn.putrequest("PUT", target_path)
+        conn.putheader("Authorization", f"Bearer {token}")
+        conn.putheader("X-TYJ", "1")
+        conn.putheader("Content-Type", "application/zip")
+        conn.putheader("Content-Length", str(total_size))
+        conn.putheader("Accept", "application/json")
+        conn.endheaders()
+
+        sent = 0
+        chunk_size = 65536
+        with file_path.open("rb") as stream:
+            while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise UploadCancelledError("已取消上传。")
+                chunk = stream.read(chunk_size)
+                if not chunk:
+                    break
+                conn.send(chunk)
+                sent += len(chunk)
+                if callable(progress_cb):
+                    progress_cb(sent, total_size)
+
+        if cancel_event is not None and cancel_event.is_set():
+            raise UploadCancelledError("已取消上传。")
+        resp = conn.getresponse()
+        raw = resp.read().decode("utf-8", errors="replace")
         try:
             body = json.loads(raw) if raw else {}
         except ValueError:
-            body = {"error": raw or f"HTTP {err.code}"}
-        return int(err.code), body if isinstance(body, dict) else {"error": f"HTTP {err.code}"}
+            body = {"error": raw or f"HTTP {resp.status}"}
+        return int(resp.status), body if isinstance(body, dict) else {"error": f"HTTP {resp.status}"}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _parse_community_upload_payload(payload: dict) -> tuple[dict | None, JsonResponse | None]:
+    raw_paper_ids = payload.get("paper_ids")
+    raw_publication_ids = payload.get("publication_ids")
+    paper_ids = (
+        [x.strip() for x in raw_paper_ids]
+        if isinstance(raw_paper_ids, list)
+        and raw_paper_ids
+        and all(isinstance(x, str) and x.strip() for x in raw_paper_ids)
+        else None
+    )
+    publication_ids = (
+        [x.strip() for x in raw_publication_ids]
+        if isinstance(raw_publication_ids, list)
+        and raw_publication_ids
+        and all(isinstance(x, str) and x.strip() for x in raw_publication_ids)
+        else None
+    )
+    if bool(paper_ids) == bool(publication_ids):
+        return None, _error("请指定要上传的试卷/教材，或选定要上传的题目与文件夹。")
+
+    include_originals = bool(payload.get("include_originals", False)) if paper_ids else False
+    include_onenote = bool(payload.get("include_onenote", False))
+    rights_confirmed = payload.get("rights_confirmed") is True
+    originals_confirmed = payload.get("originals_confirmed") is True
+    if not rights_confirmed:
+        return None, _error("请先确认你有权分发这份题包。")
+    if include_originals and not originals_confirmed:
+        return None, _error("附带原卷文件时，请同时确认原卷版权归属。")
+
+    title = str(payload.get("title") or "").strip()
+    if len(title) < 2:
+        return None, _error("请填写题包标题（至少 2 个字）。")
+
+    raw_tags = payload.get("tags")
+    if isinstance(raw_tags, list):
+        tags_text = ",".join(str(x or "").strip() for x in raw_tags if str(x or "").strip())
+    else:
+        tags_text = str(raw_tags or "").strip()
+
+    return {
+        "paper_ids": paper_ids,
+        "publication_ids": publication_ids,
+        "include_originals": include_originals,
+        "include_onenote": include_onenote,
+        "rights_confirmed": rights_confirmed,
+        "originals_confirmed": originals_confirmed,
+        "title": title,
+        "stage": str(payload.get("stage") or "高中").strip(),
+        "subject": str(payload.get("subject") or "数学").strip(),
+        "year": payload.get("year") or "",
+        "tags": tags_text,
+        "price_yuan": str(payload.get("price_yuan") if payload.get("price_yuan") is not None else "0"),
+        "originality": "original" if payload.get("originality") == "original" else "compiled",
+        "description": str(payload.get("description") or "").strip(),
+        "source_label": str(payload.get("source_label") or "").strip(),
+        "site_url": str(payload.get("site_url") or "").strip(),
+    }, None
+
+
+def _execute_community_upload(
+    params: dict, *, session: dict[str, str], store, update_task=None, cancel_event: threading.Event | None = None
+) -> tuple[int, dict]:
+    site_url = _normalize_site_url(params.get("site_url") or session.get("site") or "")
+    token = session["token"]
+    role, max_pack_bytes = _sync_community_session_role(site_url, session, store)
+    unlimited = role == "admin"
+
+    def _emit(stage: str, percent: int, message: str, *, bytes_sent: int = 0, bytes_total: int = 0):
+        if callable(update_task):
+            update_task(
+                stage=stage,
+                percent=max(0, min(100, int(percent))),
+                message=message,
+                bytes_sent=bytes_sent,
+                bytes_total=bytes_total,
+            )
+
+    def _is_cancelled() -> bool:
+        return bool(cancel_event is not None and cancel_event.is_set())
+
+    def _pack_progress(*, phase: str, done: int = 0, total: int = 1, detail: str = ""):
+        if phase == "snapshot":
+            _emit("packing", 5, detail or "正在生成题库快照…")
+        elif phase == "onenote":
+            _emit("onenote", 12, detail or "正在导出 OneNote 思考步骤…")
+        elif phase == "packing":
+            ratio = (done / max(1, total)) if total > 0 else 1.0
+            pct = 15 + int(ratio * 25)
+            _emit("packing", pct, detail or "正在压缩打包题包…")
+
+    _emit("preparing", 2, "正在检查社区账号权限与题目范围…")
+    with tempfile.TemporaryDirectory(prefix="tyj-comm-up-") as work:
+        exported = library_transfer.export_community_pack(
+            Path(work),
+            paper_ids=params["paper_ids"],
+            publication_ids=params["publication_ids"],
+            include_originals=params["include_originals"],
+            include_onenote=params["include_onenote"],
+            custom_title=params["title"],
+            unlimited=unlimited,
+            max_pack_bytes=max_pack_bytes,
+            progress_cb=_pack_progress if callable(update_task) else None,
+            cancel_check=_is_cancelled if cancel_event is not None else None,
+        )
+        zip_path = Path(exported["file"])
+        zip_size = int(exported.get("size") or zip_path.stat().st_size)
+        manifest, preview, cover_b64 = _read_community_zip_metadata(zip_path)
+
+        if _is_cancelled():
+            raise UploadCancelledError("已取消上传。")
+
+        _emit("init", 42, "正在登记社区题包元数据…", bytes_sent=0, bytes_total=zip_size)
+        init_body = {
+            "title": params["title"],
+            "stage": params["stage"],
+            "subject": params["subject"],
+            "year": params["year"],
+            "tags": params["tags"],
+            "price_yuan": params["price_yuan"],
+            "originality": params["originality"],
+            "description": params["description"],
+            "rights_confirmed": True,
+            "originals_confirmed": params["originals_confirmed"],
+            "file_size": zip_size,
+            "manifest": manifest,
+            "preview": preview,
+            "cover_base64": cover_b64 or None,
+        }
+        try:
+            init_status, init_data = _community_http_json(
+                f"{site_url}/api/packs/init", token=token, method="POST", payload=init_body
+            )
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            return 502, {"error": f"连不上社区服务器：{exc}"}
+
+        if init_status == 401:
+            store.clear_community_session()
+            return 401, {"error": "社区授权已过期或被吊销，请重新授权连接。", "needs_auth": True}
+        if init_status >= 400:
+            return init_status, {"error": str(init_data.get("error") or "社区登记题包失败。")}
+
+        pack_id = str(init_data.get("id") or "")
+        upload_path = str(init_data.get("upload_url") or "")
+        if not pack_id or not upload_path:
+            return 502, {"error": "社区没有返回上传地址。"}
+
+        if _is_cancelled():
+            raise UploadCancelledError("已取消上传。")
+
+        put_url = urllib.parse.urljoin(site_url + "/", upload_path.lstrip("/"))
+        _emit("uploading", 45, "正在上传题包文件到资源社区…", bytes_sent=0, bytes_total=zip_size)
+
+        def _put_progress(sent: int, total: int):
+            ratio = (sent / max(1, total)) if total > 0 else 1.0
+            pct = 45 + int(ratio * 53)
+            sent_mb = sent / 1024 / 1024
+            total_mb = total / 1024 / 1024
+            _emit(
+                "uploading",
+                pct,
+                f"正在上传到社区（{sent_mb:.1f} MB / {total_mb:.1f} MB）…",
+                bytes_sent=sent,
+                bytes_total=total,
+            )
+
+        try:
+            if callable(update_task) or cancel_event is not None:
+                try:
+                    put_status, put_data = _community_http_put_file(
+                        put_url, token=token, file_path=zip_path, progress_cb=_put_progress, cancel_event=cancel_event
+                    )
+                except TypeError:
+                    put_status, put_data = _community_http_put_file(put_url, token=token, file_path=zip_path)
+            else:
+                put_status, put_data = _community_http_put_file(put_url, token=token, file_path=zip_path)
+        except UploadCancelledError:
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException) as exc:
+            return 502, {"error": f"上传题包文件时网络中断：{exc}"}
+        if put_status >= 400:
+            return put_status, {"error": str(put_data.get("error") or "题包文件上传失败。")}
+
+    community_meta = exported.get("community") or {}
+    return 201, {
+        "ok": True,
+        "id": pack_id,
+        "status": str(put_data.get("status") or "pending"),
+        "url": f"{site_url}/#/pack/{pack_id}",
+        "site": site_url,
+        "questions": int(community_meta.get("questions") or 0),
+        "size": zip_size,
+        "onenote_count": int(community_meta.get("onenote_count") or 0),
+        "onenote_skipped": int(community_meta.get("onenote_skipped") or 0),
+    }
+
+
+def _trim_upload_tasks_locked() -> None:
+    if len(_UPLOAD_TASKS) <= _MAX_MEMORY_UPLOAD_TASKS:
+        return
+    finished = [
+        (tid, float(t.get("_sort_ts") or 0)) for tid, t in _UPLOAD_TASKS.items() if t.get("status") != "running"
+    ]
+    finished.sort(key=lambda pair: pair[1])
+    while len(_UPLOAD_TASKS) > _MAX_MEMORY_UPLOAD_TASKS and finished:
+        tid, _ = finished.pop(0)
+        _UPLOAD_TASKS.pop(tid, None)
+
+
+def _public_upload_task(task: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "task_id": task.get("task_id"),
+        "title": task.get("title"),
+        "source_label": task.get("source_label") or "",
+        "status": task.get("status"),
+        "stage": task.get("stage"),
+        "percent": int(task.get("percent") or 0),
+        "message": task.get("message") or "",
+        "bytes_sent": int(task.get("bytes_sent") or 0),
+        "bytes_total": int(task.get("bytes_total") or 0),
+        "questions": int(task.get("questions") or 0),
+        "size": int(task.get("size") or 0),
+        "pack_id": task.get("pack_id") or "",
+        "pack_status": task.get("pack_status") or "",
+        "url": task.get("url") or "",
+        "onenote_count": int(task.get("onenote_count") or 0),
+        "onenote_skipped": int(task.get("onenote_skipped") or 0),
+        "error": task.get("error") or "",
+        "needs_auth": bool(task.get("needs_auth")),
+        "created_at": task.get("created_at") or "",
+        "finished_at": task.get("finished_at") or "",
+    }
 
 
 @csrf_exempt
@@ -490,119 +826,322 @@ def community_upload_view(request):
         resp["Cache-Control"] = "no-store"
         return resp
 
-    raw_paper_ids = payload.get("paper_ids")
-    raw_publication_ids = payload.get("publication_ids")
-    paper_ids = (
-        [x.strip() for x in raw_paper_ids]
-        if isinstance(raw_paper_ids, list)
-        and raw_paper_ids
-        and all(isinstance(x, str) and x.strip() for x in raw_paper_ids)
-        else None
-    )
-    publication_ids = (
-        [x.strip() for x in raw_publication_ids]
-        if isinstance(raw_publication_ids, list)
-        and raw_publication_ids
-        and all(isinstance(x, str) and x.strip() for x in raw_publication_ids)
-        else None
-    )
-    if bool(paper_ids) == bool(publication_ids):
-        return _error("请指定要上传的试卷/教材，或选定要上传的题目与文件夹。")
+    params, err_resp = _parse_community_upload_payload(payload)
+    if err_resp is not None or params is None:
+        return err_resp or _error("请求格式不正确。")
 
-    include_originals = bool(payload.get("include_originals", False)) if paper_ids else False
-    include_onenote = bool(payload.get("include_onenote", False))
-    rights_confirmed = payload.get("rights_confirmed") is True
-    originals_confirmed = payload.get("originals_confirmed") is True
-    if not rights_confirmed:
-        return _error("请先确认你有权分发这份题包。")
-    if include_originals and not originals_confirmed:
-        return _error("附带原卷文件时，请同时确认原卷版权归属。")
+    try:
+        status_code, body = _execute_community_upload(params, session=session, store=store)
+    except TransferError as error:
+        library_transfer.record_community_upload(
+            {"title": params["title"], "source_label": params["source_label"], "status": "failed", "error": str(error)}
+        )
+        return _error(str(error))
+    except (OSError, ValueError, zipfile.BadZipFile):
+        library_transfer.record_community_upload(
+            {
+                "title": params["title"],
+                "source_label": params["source_label"],
+                "status": "failed",
+                "error": "题包打包失败，请稍后重试。",
+            }
+        )
+        return _error("题包打包失败，请稍后重试。", status=500)
 
-    title = str(payload.get("title") or "").strip()
-    if len(title) < 2:
-        return _error("请填写题包标题（至少 2 个字）。")
+    if status_code >= 400:
+        library_transfer.record_community_upload(
+            {
+                "title": params["title"],
+                "source_label": params["source_label"],
+                "status": "failed",
+                "error": str(body.get("error") or "上传社区失败。"),
+            }
+        )
+        resp = JsonResponse(body, status=status_code)
+        resp["Cache-Control"] = "no-store"
+        return resp
 
-    site_url = _normalize_site_url(str(payload.get("site_url") or session.get("site") or ""))
-    token = session["token"]
-
-    with tempfile.TemporaryDirectory(prefix="tyj-comm-up-") as work:
-        try:
-            exported = library_transfer.export_community_pack(
-                Path(work),
-                paper_ids=paper_ids,
-                publication_ids=publication_ids,
-                include_originals=include_originals,
-                include_onenote=include_onenote,
-                custom_title=title,
-            )
-            zip_path = Path(exported["file"])
-            zip_size = int(exported.get("size") or zip_path.stat().st_size)
-            manifest, preview, cover_b64 = _read_community_zip_metadata(zip_path)
-        except TransferError as error:
-            return _error(str(error))
-        except (OSError, ValueError, zipfile.BadZipFile):
-            return _error("题包打包失败，请稍后重试。", status=500)
-
-        init_body = {
-            "title": title,
-            "stage": str(payload.get("stage") or "高中").strip(),
-            "subject": str(payload.get("subject") or "数学").strip(),
-            "year": payload.get("year") or "",
-            "tags": str(payload.get("tags") or "").strip(),
-            "price_yuan": str(payload.get("price_yuan") if payload.get("price_yuan") is not None else "0"),
-            "originality": "original" if payload.get("originality") == "original" else "compiled",
-            "description": str(payload.get("description") or "").strip(),
-            "rights_confirmed": True,
-            "originals_confirmed": originals_confirmed,
-            "file_size": zip_size,
-            "manifest": manifest,
-            "preview": preview,
-            "cover_base64": cover_b64 or None,
-        }
-        try:
-            init_status, init_data = _community_http_json(
-                f"{site_url}/api/packs/init", token=token, method="POST", payload=init_body
-            )
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            return _error(f"连不上社区服务器：{exc}", status=502)
-
-        if init_status == 401:
-            store.clear_community_session()
-            resp = JsonResponse({"error": "社区授权已过期或被吊销，请重新授权连接。", "needs_auth": True}, status=401)
-            resp["Cache-Control"] = "no-store"
-            return resp
-        if init_status >= 400:
-            return _error(str(init_data.get("error") or "社区登记题包失败。"), status=init_status)
-
-        pack_id = str(init_data.get("id") or "")
-        upload_path = str(init_data.get("upload_url") or "")
-        if not pack_id or not upload_path:
-            return _error("社区没有返回上传地址。", status=502)
-
-        put_url = urllib.parse.urljoin(site_url + "/", upload_path.lstrip("/"))
-        try:
-            put_status, put_data = _community_http_put_file(put_url, token=token, file_path=zip_path)
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            return _error(f"上传题包文件时网络中断：{exc}", status=502)
-        if put_status >= 400:
-            return _error(str(put_data.get("error") or "题包文件上传失败。"), status=put_status)
-
-    community_meta = exported.get("community") or {}
-    response = JsonResponse(
+    library_transfer.record_community_upload(
         {
-            "ok": True,
-            "id": pack_id,
-            "status": str(put_data.get("status") or "pending"),
-            "url": f"{site_url}/#/pack/{pack_id}",
-            "questions": int(community_meta.get("questions") or 0),
-            "size": zip_size,
-            "onenote_count": int(community_meta.get("onenote_count") or 0),
-            "onenote_skipped": int(community_meta.get("onenote_skipped") or 0),
-        },
-        status=201,
+            "title": params["title"],
+            "source_label": params["source_label"],
+            "status": str(body.get("status") or "pending"),
+            "pack_id": str(body.get("id") or ""),
+            "url": str(body.get("url") or ""),
+            "site": str(body.get("site") or ""),
+            "questions": int(body.get("questions") or 0),
+            "size": int(body.get("size") or 0),
+            "onenote_count": int(body.get("onenote_count") or 0),
+            "finished_at": timezone.now().isoformat(),
+        }
     )
+    response = JsonResponse(body, status=201)
     response["Cache-Control"] = "no-store"
     return response
+
+
+@csrf_exempt
+def community_upload_start_view(request):
+    """POST /api/backup/community-upload/start: 后台启动社区打包与上传任务，立即返回 task_id 供轮询进度与取消。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request, limit=200_000)
+    if payload is None:
+        return _error("请求格式不正确。")
+
+    store = credential_settings._load_store()
+    session = store.load_community_session()
+    if not session or not session.get("token"):
+        resp = JsonResponse({"error": "请先在浏览器登录并授权连接题有据社区账号。", "needs_auth": True}, status=401)
+        resp["Cache-Control"] = "no-store"
+        return resp
+
+    params, err_resp = _parse_community_upload_payload(payload)
+    if err_resp is not None or params is None:
+        return err_resp or _error("请求格式不正确。")
+
+    task_id = uuid.uuid4().hex
+    cancel_event = threading.Event()
+    now_iso = timezone.now().isoformat()
+    task_entry: dict[str, Any] = {
+        "task_id": task_id,
+        "title": params["title"],
+        "source_label": params["source_label"],
+        "status": "running",
+        "stage": "preparing",
+        "percent": 2,
+        "message": "正在准备上传任务…",
+        "bytes_sent": 0,
+        "bytes_total": 0,
+        "questions": 0,
+        "size": 0,
+        "pack_id": "",
+        "pack_status": "",
+        "url": "",
+        "onenote_count": 0,
+        "onenote_skipped": 0,
+        "error": "",
+        "needs_auth": False,
+        "created_at": now_iso,
+        "finished_at": "",
+        "_sort_ts": time.monotonic(),
+        "_cancel_event": cancel_event,
+    }
+    with _UPLOAD_LOCK:
+        _UPLOAD_TASKS[task_id] = task_entry
+        _trim_upload_tasks_locked()
+        snapshot = _public_upload_task(task_entry)
+
+    def _update_task(**fields):
+        with _UPLOAD_LOCK:
+            target = _UPLOAD_TASKS.get(task_id)
+            if not target or target.get("status") != "running":
+                return
+            target.update(fields)
+
+    def _worker():
+        from django.db import close_old_connections
+
+        close_old_connections()
+        try:
+            status_code, body = _execute_community_upload(
+                params, session=session, store=store, update_task=_update_task, cancel_event=cancel_event
+            )
+            finished_iso = timezone.now().isoformat()
+            if cancel_event.is_set():
+                raise UploadCancelledError("已取消上传。")
+            if status_code >= 400:
+                err_msg = str(body.get("error") or "上传社区失败。")
+                with _UPLOAD_LOCK:
+                    t = _UPLOAD_TASKS.get(task_id)
+                    if t:
+                        t.update(
+                            status="failed",
+                            stage="failed",
+                            message=err_msg,
+                            error=err_msg,
+                            needs_auth=bool(body.get("needs_auth")),
+                            finished_at=finished_iso,
+                        )
+                library_transfer.record_community_upload(
+                    {
+                        "id": task_id,
+                        "title": params["title"],
+                        "source_label": params["source_label"],
+                        "status": "failed",
+                        "error": err_msg,
+                        "created_at": now_iso,
+                        "finished_at": finished_iso,
+                    }
+                )
+            else:
+                pack_status = str(body.get("status") or "pending")
+                with _UPLOAD_LOCK:
+                    t = _UPLOAD_TASKS.get(task_id)
+                    if t:
+                        t.update(
+                            status="succeeded",
+                            stage="done",
+                            percent=100,
+                            message="上传完成",
+                            questions=int(body.get("questions") or 0),
+                            size=int(body.get("size") or 0),
+                            bytes_sent=int(body.get("size") or 0),
+                            bytes_total=int(body.get("size") or 0),
+                            pack_id=str(body.get("id") or ""),
+                            pack_status=pack_status,
+                            url=str(body.get("url") or ""),
+                            onenote_count=int(body.get("onenote_count") or 0),
+                            onenote_skipped=int(body.get("onenote_skipped") or 0),
+                            finished_at=finished_iso,
+                        )
+                library_transfer.record_community_upload(
+                    {
+                        "id": task_id,
+                        "title": params["title"],
+                        "source_label": params["source_label"],
+                        "status": pack_status,
+                        "pack_id": str(body.get("id") or ""),
+                        "url": str(body.get("url") or ""),
+                        "site": str(body.get("site") or ""),
+                        "questions": int(body.get("questions") or 0),
+                        "size": int(body.get("size") or 0),
+                        "onenote_count": int(body.get("onenote_count") or 0),
+                        "created_at": now_iso,
+                        "finished_at": finished_iso,
+                    }
+                )
+        except UploadCancelledError:
+            finished_iso = timezone.now().isoformat()
+            with _UPLOAD_LOCK:
+                t = _UPLOAD_TASKS.get(task_id)
+                if t:
+                    t.update(
+                        status="cancelled", stage="cancelled", message="已取消上传", error="", finished_at=finished_iso
+                    )
+            library_transfer.record_community_upload(
+                {
+                    "id": task_id,
+                    "title": params["title"],
+                    "source_label": params["source_label"],
+                    "status": "cancelled",
+                    "created_at": now_iso,
+                    "finished_at": finished_iso,
+                }
+            )
+        except TransferError as exc:
+            finished_iso = timezone.now().isoformat()
+            err_msg = str(exc)
+            with _UPLOAD_LOCK:
+                t = _UPLOAD_TASKS.get(task_id)
+                if t:
+                    t.update(status="failed", stage="failed", message=err_msg, error=err_msg, finished_at=finished_iso)
+            library_transfer.record_community_upload(
+                {
+                    "id": task_id,
+                    "title": params["title"],
+                    "source_label": params["source_label"],
+                    "status": "failed",
+                    "error": err_msg,
+                    "created_at": now_iso,
+                    "finished_at": finished_iso,
+                }
+            )
+        except Exception:
+            finished_iso = timezone.now().isoformat()
+            err_msg = "打包或上传过程中出现意外错误，请稍后重试。"
+            with _UPLOAD_LOCK:
+                t = _UPLOAD_TASKS.get(task_id)
+                if t:
+                    t.update(status="failed", stage="failed", message=err_msg, error=err_msg, finished_at=finished_iso)
+            library_transfer.record_community_upload(
+                {
+                    "id": task_id,
+                    "title": params["title"],
+                    "source_label": params["source_label"],
+                    "status": "failed",
+                    "error": err_msg,
+                    "created_at": now_iso,
+                    "finished_at": finished_iso,
+                }
+            )
+        finally:
+            close_old_connections()
+
+    threading.Thread(target=_worker, name=f"comm-upload-{task_id[:8]}", daemon=True).start()
+    resp = JsonResponse({"ok": True, "task_id": task_id, "task": snapshot}, status=202)
+    resp["Cache-Control"] = "no-store"
+    return resp
+
+
+@csrf_exempt
+def community_upload_tasks_view(request):
+    """GET /api/backup/community-upload/tasks: 查询进行中与近期上传任务以及历史上传记录。"""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return _error("上传任务只能在本地查看", 403)
+    with _UPLOAD_LOCK:
+        tasks = sorted(_UPLOAD_TASKS.values(), key=lambda t: float(t.get("_sort_ts") or 0), reverse=True)
+        public_tasks = [_public_upload_task(t) for t in tasks]
+    history = library_transfer.list_community_uploads()
+    resp = JsonResponse({"tasks": public_tasks, "history": history})
+    resp["Cache-Control"] = "no-store"
+    return resp
+
+
+@csrf_exempt
+def community_upload_cancel_view(request, task_id: str):
+    """POST /api/backup/community-upload/<task_id>/cancel: 取消正在进行的上传任务。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    clean_id = str(task_id or "").strip()
+    with _UPLOAD_LOCK:
+        task = _UPLOAD_TASKS.get(clean_id)
+        if not task:
+            return _error("没有找到对应的上传任务。", status=404)
+        if task.get("status") != "running":
+            resp = JsonResponse({"ok": True, "task": _public_upload_task(task)})
+            resp["Cache-Control"] = "no-store"
+            return resp
+        ev = task.get("_cancel_event")
+        if isinstance(ev, threading.Event):
+            ev.set()
+        task["message"] = "正在取消上传…"
+        snapshot = _public_upload_task(task)
+    resp = JsonResponse({"ok": True, "task": snapshot})
+    resp["Cache-Control"] = "no-store"
+    return resp
+
+
+@csrf_exempt
+def community_upload_history_view(request):
+    """DELETE / POST /api/backup/community-upload/history: 删除单条或清空历史上传记录。"""
+    if request.method not in {"POST", "DELETE"}:
+        return HttpResponseNotAllowed(["POST", "DELETE"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request, limit=10_000) or {}
+    action = str(payload.get("action") or "").strip()
+    record_id = str(payload.get("id") or request.GET.get("id") or "").strip()
+    if action == "clear" or (request.method == "DELETE" and not record_id):
+        removed = library_transfer.clear_community_uploads()
+        resp = JsonResponse({"ok": True, "removed": removed})
+        resp["Cache-Control"] = "no-store"
+        return resp
+    if not record_id:
+        return _error("请指定要删除的上传记录编号。")
+    deleted = library_transfer.delete_community_upload(record_id)
+    resp = JsonResponse({"ok": deleted})
+    resp["Cache-Control"] = "no-store"
+    return resp
 
 
 @csrf_exempt

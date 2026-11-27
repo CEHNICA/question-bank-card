@@ -604,3 +604,41 @@ test("ordinary users hit MAX_PENDING_PER_USER cap while admins bypass it", async
     assert.equal((await admin.json("POST", "/api/packs", packForm(zip, { title: `（虚构）管理员待审${i}` }))).status, 201);
   }
 });
+
+test("admin streaming upload bypasses MAX_PACK_MB up to ADMIN_MAX_PACK_MB", async () => {
+  const env = makeEnv({ MAX_PACK_MB: "0.0001", ADMIN_MAX_PACK_MB: "95" });
+  const regular = new Client(env);
+  await regular.register("size_reg");
+  const admin = new Client(env);
+  await admin.register("size_adm");
+  promoteAdmin(env, "size_adm");
+
+  const zip = makePackZip();
+  const extracted = unzipSync(zip);
+  const manifest = JSON.parse(new TextDecoder().decode(extracted["题有据备份.json"]));
+  const preview = JSON.parse(new TextDecoder().decode(extracted["community-preview.json"]));
+
+  const regInit = await regular.json("POST", "/api/packs/init", {
+    title: "（虚构）普通超限",
+    rights_confirmed: true,
+    file_size: zip.byteLength,
+    manifest,
+    preview,
+  });
+  assert.equal(regInit.status, 413);
+
+  const admInit = await admin.json("POST", "/api/packs/init", {
+    title: "（虚构）作者不限包大小",
+    rights_confirmed: true,
+    file_size: zip.byteLength,
+    manifest,
+    preview,
+  });
+  assert.equal(admInit.status, 201, JSON.stringify(admInit.data));
+  const admPut = await admin.json("PUT", admInit.data.upload_url, zip);
+  assert.equal(admPut.status, 200, JSON.stringify(admPut.data));
+  const me = await admin.json("GET", "/api/me");
+  assert.equal(me.status, 200);
+  assert.equal(me.data.user.is_admin, true);
+  assert.equal(me.data.user.unlimited_uploads, true);
+});
