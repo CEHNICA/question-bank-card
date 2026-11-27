@@ -9,7 +9,7 @@
     />
     <title>题有据 TiYouJu — 把零散试卷，变成你的私家题库</title>
     <link rel="icon" type="image/png" href="assets/app-icon.png?v=2" />
-    <link rel="stylesheet" href="styles.css?v=3" />
+    <link rel="stylesheet" href="styles.css?v=4" />
 
     <!-- 规范链接：主域为准，www 视为同一页的镜像 -->
     <link rel="canonical" href="https://tiyouju.com/" />
@@ -41,7 +41,7 @@
     <meta name="twitter:image:alt" content="题有据逐题核对工作台：左侧原卷对照，右侧整理入库" />
 
     <!-- 浏览器与搜索引擎的基础信号 -->
-    <meta name="theme-color" content="#163f3a" />
+    <meta name="theme-color" content="#070a0d" />
     <meta name="robots" content="index, follow" />
     <meta name="author" content="题有据 TiYouJu" />
     <meta
@@ -55,8 +55,8 @@
       <div class="container header-inner">
         <a href="#" class="brand">
           <img src="assets/app-icon.png?v=2" alt="题有据图标" />
-          <span>题有据</span>
-          <span class="version-badge" id="versionBadge">v2.3.6</span>
+          <span class="brand-name">题有据</span>
+          <span class="version-badge" id="versionBadge">v2.3.8</span>
         </a>
         <nav class="nav" aria-label="主导航">
           <a href="#workflow">工作流程</a>
@@ -67,99 +67,123 @@
           <a href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener">GitHub</a>
         </nav>
         <div class="header-actions">
-          <a class="btn btn-secondary btn-sm" href="https://community.tiyouju.com/" target="_blank" rel="noopener">
+          <a class="btn btn-secondary btn-sm header-community-btn" href="https://community.tiyouju.com/" target="_blank" rel="noopener">
             进入社区
           </a>
           <a class="btn btn-primary btn-sm" href="#download">免费下载</a>
+          <button
+            type="button"
+            class="menu-toggle"
+            id="mobileMenuBtn"
+            aria-label="打开导航菜单"
+            aria-expanded="false"
+            aria-controls="mobileNav"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <line x1="4" y1="7" x2="20" y2="7" />
+              <line x1="4" y1="12" x2="20" y2="12" />
+              <line x1="4" y1="17" x2="20" y2="17" />
+            </svg>
+          </button>
         </div>
       </div>
+      <nav class="mobile-nav" id="mobileNav" aria-label="移动端导航" hidden>
+        <div class="container mobile-nav-inner">
+          <a href="#workflow">01 · 工作流程</a>
+          <a href="#showcase">02 · 界面预览</a>
+          <a href="#features">03 · 核心能力</a>
+          <a href="#download">04 · 下载安装</a>
+          <a href="https://community.tiyouju.com/" target="_blank" rel="noopener">题包社区</a>
+          <a href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener">GitHub 源码</a>
+        </div>
+      </nav>
     </header>
 
     <main>
       <section class="hero">
-        <div class="container hero-grid">
+        <div class="hero-glow" aria-hidden="true"></div>
+        <div class="container hero-shell">
           <div class="hero-copy">
-            <div class="hero-brand">
-              <img src="assets/app-icon.png?v=2" alt="题有据图标" />
-              <span class="hero-brand-name">题有据 TiYouJu</span>
-            </div>
-            <p class="hero-kicker">Windows 10 / 11 · 本地优先 · AGPL-3.0 开源免费</p>
+            <p class="hero-kicker">
+              <span class="kicker-dot" aria-hidden="true"></span>
+              Windows 10 / 11 · 本地优先 · AGPL-3.0 开源免费
+            </p>
             <h1>把零散试卷，<br />变成<span class="accent">你的私家题库。</span></h1>
             <p class="hero-sub">
               Word / PDF / 拍照题直收本机，每道题都留原卷出处，随时一键组卷导出。离线查重、万题秒搜到 A4 / A3 双栏试卷，<strong>题库与原卷始终留在自己电脑上</strong>。
             </p>
-            <ul class="hero-points">
-              <li>免 OCR 直读 · 毫秒级离线查重 · 8 层目录万题秒搜</li>
-              <li>分节赋分 · A4 / A3 双栏密封线 · 题库始终留在本机</li>
-            </ul>
             <div class="hero-cta">
-              <a
-                class="btn btn-primary"
-                id="downloadInstallerBtn"
-                href="/download/installer"
-              >
-                下载 Windows 安装版
+              <a class="btn btn-primary btn-lg" id="downloadInstallerBtn" href="/download/installer">
+                <svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M10 3v10m0 0-3.75-3.75M10 13l3.75-3.75" />
+                  <path d="M4 15.5h12" />
+                </svg>
+                <span>下载 Windows 安装版</span>
               </a>
-              <a class="btn btn-secondary" href="https://community.tiyouju.com/" target="_blank" rel="noopener">
+              <a class="btn btn-secondary btn-lg" href="https://community.tiyouju.com/" target="_blank" rel="noopener">
                 逛逛题包社区
               </a>
             </div>
             <p class="release-meta" id="releaseMeta">
-              当前最新：<strong>v2.3.6</strong> · 点击即可直接下载安装包，自动同步 GitHub 最新正式版
+              当前最新：<strong>v2.3.8</strong> · 点击即可直接下载安装包，自动同步 GitHub 最新正式版
             </p>
             <div class="hero-quick-links">
-              <a
-                id="downloadPortableBtn"
-                href="/download/portable"
-              >
-                免安装便携版 (.zip)
-              </a>
+              <a id="downloadPortableBtn" href="/download/portable">免安装便携版 (.zip)</a>
+              <span class="sep" aria-hidden="true">·</span>
               <a href="#install-cli">PowerShell 一行安装</a>
-              <a
-                href="/download/SHA256SUMS.txt"
-                target="_blank"
-                rel="noopener"
-              >
-                SHA-256 校验值
-              </a>
-              <a
-                href="https://github.com/CEHNICA/question-bank-card/releases"
-                target="_blank"
-                rel="noopener"
-              >
-                GitHub 历史版本
-              </a>
+              <span class="sep" aria-hidden="true">·</span>
+              <a href="/download/SHA256SUMS.txt" target="_blank" rel="noopener">SHA-256 校验值</a>
+              <span class="sep" aria-hidden="true">·</span>
+              <a href="https://github.com/CEHNICA/question-bank-card/releases" target="_blank" rel="noopener">GitHub 历史版本</a>
             </div>
-            <div class="trust-row">
-              <span class="trust-pill">Windows 10 / 11</span>
-              <span class="trust-pill">本地题库 · 每天自动备份</span>
-              <span class="trust-pill">AGPL-3.0 开源免费</span>
-              <span class="trust-pill">不用 API 密钥也能先练</span>
-            </div>
-            <p class="hero-domain">tiyouju.com</p>
+          </div>
+
+          <div class="hero-stage reveal">
+            <figure class="shot-frame shot-frame--hero">
+              <div class="shot-toolbar">
+                <span class="shot-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span class="shot-toolbar-title">逐题核对工作台 · 左侧原卷对照，右侧整理入库</span>
+                <span class="shot-toolbar-tip">点击图片放大</span>
+              </div>
+              <button
+                type="button"
+                class="shot-trigger"
+                data-zoom-src="assets/review-workspace.webp"
+                data-zoom-caption="逐题核对工作台：左侧保留真实原卷与手写痕迹，右侧核对题面、公式与配图，核验后一键入库。"
+                aria-label="放大查看逐题核对工作台截图"
+              >
+                <img src="assets/review-workspace.webp" alt="题有据逐题核对工作台界面" />
+              </button>
+              <figcaption class="shot-status">
+                <span>本地题库 · 1,284 题</span>
+                <span>离线可用 · 免 OCR 直读 · 每天自动备份</span>
+              </figcaption>
+            </figure>
           </div>
         </div>
+      </section>
 
-        <figure class="shot-frame shot-frame--hero">
-          <div class="shot-toolbar">
-            <span class="shot-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-            <span class="shot-toolbar-title">逐题核对工作台 · 左侧原卷对照，右侧整理入库</span>
-            <span class="shot-toolbar-tip">点击图片放大</span>
+      <section class="metrics-band" aria-label="架构保障">
+        <div class="container">
+          <div class="metrics-strip reveal">
+            <div class="metric-item">
+              <div class="metric-value">100% 本机</div>
+              <div class="metric-label">原卷、公式与题库留在本地硬盘</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-value">&lt; 10ms</div>
+              <div class="metric-label">SQLite FTS5 万题检索与离线查重</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-value">8 层目录</div>
+              <div class="metric-label">自由树状整理与多源手写归档</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-value">每天备份</div>
+              <div class="metric-label">本地保留最近 10 份，合并还原不抹库</div>
+            </div>
           </div>
-          <button
-            type="button"
-            class="shot-trigger"
-            data-zoom-src="assets/review-workspace.webp"
-            data-zoom-caption="逐题核对工作台：左侧保留真实原卷与手写痕迹，右侧核对题面、公式与配图，核验后一键入库。"
-            aria-label="放大查看逐题核对工作台截图"
-          >
-            <img src="assets/review-workspace.webp" alt="题有据逐题核对工作台界面" />
-          </button>
-          <figcaption class="shot-status">
-            <span>本地题库 · 1,284 题</span>
-            <span>离线可用</span>
-          </figcaption>
-        </figure>
+        </div>
       </section>
 
       <section class="section" id="workflow">
@@ -169,26 +193,37 @@
             <h2>四步本地闭环：从整卷散题到可印刷试卷</h2>
             <p>不上传你的私人试卷，不未经确认改动题面，每一步都保留原卷依据。</p>
           </div>
-          <div class="workflow-card">
-            <img src="assets/workflow.svg" alt="题有据四步本地闭环流程图" />
+          <div class="workflow-card reveal">
             <div class="steps-grid">
               <div class="step-box">
-                <div class="step-num">1</div>
+                <div class="step-top">
+                  <div class="step-num">1</div>
+                  <span class="step-code">01 · INTAKE</span>
+                </div>
                 <h3>多源导卷直读</h3>
                 <p>支持 Word（.docx/.doc）免 OCR 直读公式与配图、文字 PDF 自动切题、扫描件与照片框选切题。</p>
               </div>
               <div class="step-box">
-                <div class="step-num">2</div>
+                <div class="step-top">
+                  <div class="step-num">2</div>
+                  <span class="step-code">02 · VERIFY</span>
+                </div>
                 <h3>原卷核验与查重</h3>
                 <p>左右对照原卷与学生手写错解，毫秒级离线查重并合并多份出处，人工点「通过」才入正式库。</p>
               </div>
               <div class="step-box">
-                <div class="step-num">3</div>
+                <div class="step-top">
+                  <div class="step-num">3</div>
+                  <span class="step-code">03 · LIBRARY</span>
+                </div>
                 <h3>万题库与自由目录</h3>
                 <p>SQLite FTS5 秒搜中英文与公式，支持 8 层自由文件夹树、变式题组与社区题包分享导入。</p>
               </div>
               <div class="step-box">
-                <div class="step-num">4</div>
+                <div class="step-top">
+                  <div class="step-num">4</div>
+                  <span class="step-code">04 · EXAM</span>
+                </div>
                 <h3>正规赋分与组卷</h3>
                 <p>支持分节赋分、用题防撞车、A4 单栏与 A3 双栏密封线，屏幕预览、PDF 与 Word 三端一致。</p>
               </div>
@@ -248,7 +283,7 @@
             </button>
           </div>
 
-          <figure class="shot-frame">
+          <figure class="shot-frame shot-frame--gallery reveal">
             <button
               type="button"
               class="shot-trigger"
@@ -263,7 +298,7 @@
               <span id="galleryCaption">
                 逐题核对工作台：左侧保留真实手写演算与原卷对照，右侧完成题面、选项与配图整理，核对后一键入库。
               </span>
-              <span>点击图片放大</span>
+              <span class="zoom-cue">点击图片放大</span>
             </figcaption>
           </figure>
 
@@ -325,33 +360,99 @@
             <p>不花哨，但把老师日常录题、找题、组卷、备份最怕踩的坑一条一条补齐。</p>
           </div>
           <div class="features-grid">
-            <article class="feature-card">
-              <span class="feature-tag">免 OCR 直读</span>
+            <article class="feature-card bento-wide reveal">
+              <div class="feature-head">
+                <span class="feature-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <path d="M14 2v6h6" />
+                    <path d="M8 13h8M8 17h5" />
+                  </svg>
+                </span>
+                <span class="feature-tag">免 OCR 直读</span>
+              </div>
               <h3>Word（.docx / .doc）双轨拆题与答案剥离</h3>
               <p>直接读取 OMML / MathType 公式和内嵌配图，自动分离紧跟题后或卷尾的【答案】【解析】，同时留存原貌 PDF 作核对依据。</p>
+              <div class="spec-chips" aria-hidden="true">
+                <span>.docx / .doc</span>
+                <span>OMML / MathType</span>
+                <span>内嵌配图</span>
+                <span>原貌 PDF</span>
+              </div>
             </article>
-            <article class="feature-card">
-              <span class="feature-tag">防重护库</span>
+
+            <article class="feature-card bento-narrow reveal">
+              <div class="feature-head">
+                <span class="feature-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                    <path d="m9 12 2 2 4-4" />
+                  </svg>
+                </span>
+                <span class="feature-tag">防重护库</span>
+              </div>
               <h3>毫秒级离线查重与一题多源证据归档</h3>
               <p>题库里只保留唯一干净题卡，历次空白原卷、不同学生的手写错解挂入多标签证据栏；变式题支持互绑与一键替换。</p>
             </article>
-            <article class="feature-card">
-              <span class="feature-tag">正规排版</span>
+
+            <article class="feature-card bento-narrow reveal">
+              <div class="feature-head">
+                <span class="feature-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="4" width="18" height="16" rx="2" />
+                    <path d="M12 4v16M7 8h1M7 12h2M16 8h1M16 12h1" />
+                  </svg>
+                </span>
+                <span class="feature-tag">正规排版</span>
+              </div>
               <h3>分节赋分、A3 双栏密封线与用题防撞车</h3>
               <p>支持 A4 单栏和标准 A3 横向双栏（奇偶页自动镜像密封线），自动记录历史用题并支持排除近期已用题，防止周测撞车。</p>
             </article>
-            <article class="feature-card">
-              <span class="feature-tag">万题流畅</span>
+
+            <article class="feature-card bento-wide reveal">
+              <div class="feature-head">
+                <span class="feature-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="7" />
+                    <path d="m20 20-3.5-3.5" />
+                  </svg>
+                </span>
+                <span class="feature-tag">万题流畅</span>
+              </div>
               <h3>/eagle 虚拟滚动、FTS5 秒搜与 8 层目录</h3>
               <p>公式缓存配合分段加载，上万道题快速拖动不卡顿；支持自由目录树与书本自定义章节接管，随时支持撤销。</p>
+              <div class="spec-chips" aria-hidden="true">
+                <span>SQLite FTS5</span>
+                <span>虚拟滚动</span>
+                <span>8 层目录树</span>
+                <span>可撤销</span>
+              </div>
             </article>
-            <article class="feature-card">
-              <span class="feature-tag">社区互通</span>
+
+            <article class="feature-card bento-half reveal">
+              <div class="feature-head">
+                <span class="feature-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                    <path d="m3.3 7 8.7 5 8.7-5M12 22V12" />
+                  </svg>
+                </span>
+                <span class="feature-tag">社区互通</span>
+              </div>
               <h3>结构化题包一键导出分享与导入</h3>
               <p>支持将整理好的题包导出到题有据社区共享，也能从社区直接下载题包一键导回桌面题库，保留公式、配图与标签结构。</p>
             </article>
-            <article class="feature-card">
-              <span class="feature-tag">人审防线</span>
+
+            <article class="feature-card bento-half reveal">
+              <div class="feature-head">
+                <span class="feature-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="4" y="4" width="16" height="16" rx="3" />
+                    <path d="M9 12h6M12 9v6" />
+                  </svg>
+                </span>
+                <span class="feature-tag">人审防线</span>
+              </div>
               <h3>本机每天自动备份 + AI 助手安全协同</h3>
               <p>本机自动留存最近 10 份备份，只合并补缺不抹库；AI 助手可通过 CLI / MCP 协助整理，但绝不跳过人工核对私自改题。</p>
             </article>
@@ -368,26 +469,18 @@
           </div>
 
           <div class="download-grid">
-            <div class="download-card">
+            <div class="download-card reveal">
               <h3>图形安装版 &amp; 便携版</h3>
               <p>推荐日常教研电脑下载安装版（带桌面快捷方式和卸载器）；受限电脑可选免安装便携压缩包，解压即用。</p>
               <div class="download-actions">
-                <a
-                  class="btn btn-primary"
-                  id="downloadInstallerCardBtn"
-                  href="/download/installer"
-                >
+                <a class="btn btn-primary" id="downloadInstallerCardBtn" href="/download/installer">
                   下载安装版 (TiYouJu-Setup.exe)
                 </a>
-                <a
-                  class="btn btn-secondary"
-                  id="downloadPortableCardBtn"
-                  href="/download/portable"
-                >
+                <a class="btn btn-secondary" id="downloadPortableCardBtn" href="/download/portable">
                   下载便携版 (.zip)
                 </a>
               </div>
-              <p class="release-meta" id="downloadCardMeta" style="margin-bottom: 14px">
+              <p class="release-meta" id="downloadCardMeta">
                 点按钮直接在当前网页开始下载最新正式版，与 GitHub Releases 自动同步。
               </p>
               <div class="hint-box">
@@ -395,29 +488,30 @@
               </div>
             </div>
 
-            <div class="download-card" id="install-cli">
+            <div class="download-card reveal" id="install-cli">
               <h3>PowerShell 一行命令安装 / 升级</h3>
               <p>自动获取最新正式版、校验 SHA-256 哈希，并在覆盖升级前自动备份你本机的原有题库。</p>
               <div class="code-box">
-                <code id="psInstallCmd">irm https://github.com/CEHNICA/question-bank-card/releases/latest/download/install.ps1 | iex</code>
-                <button type="button" class="copy-btn" id="copyPsBtn">复制命令</button>
+                <div class="code-box-head">
+                  <span class="shot-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <span class="code-box-label">Windows PowerShell</span>
+                </div>
+                <div class="code-box-body">
+                  <code id="psInstallCmd">irm https://github.com/CEHNICA/question-bank-card/releases/latest/download/install.ps1 | iex</code>
+                  <button type="button" class="copy-btn" id="copyPsBtn">复制命令</button>
+                </div>
               </div>
-              <p style="margin-bottom: 0; font-size: 13.5px">
+              <p class="checksum-note">
                 支持查看最新校验文件
-                <a
-                  href="/download/SHA256SUMS.txt"
-                  target="_blank"
-                  rel="noopener"
-                  style="color: var(--emerald-hover); text-decoration: underline"
-                >
+                <a class="inline-link" href="/download/SHA256SUMS.txt" target="_blank" rel="noopener">
                   <code>SHA256SUMS.txt</code>
                 </a>
                 ；历史版本与完整源码归档也可在
                 <a
+                  class="inline-link"
                   href="https://github.com/CEHNICA/question-bank-card/releases"
                   target="_blank"
                   rel="noopener"
-                  style="color: var(--emerald-hover); text-decoration: underline"
                 >
                   GitHub Releases
                 </a>
@@ -428,9 +522,9 @@
         </div>
       </section>
 
-      <section class="section">
+      <section class="section section--community">
         <div class="container">
-          <div class="community-banner">
+          <div class="community-banner reveal">
             <div>
               <h2>逛逛「题有据社区」，交流题包与教研心得</h2>
               <p>
@@ -448,8 +542,8 @@
     <footer class="site-footer">
       <div class="container footer-inner">
         <div class="footer-brand">
-          <img src="assets/app-icon.png?v=2" alt="题有据" class="footer-icon" />
-          <strong>题有据</strong>
+          <strong>题有据 TiYouJu</strong>
+          <span class="footer-sep" aria-hidden="true">·</span>
           <span>把零散试卷，变成你的私家题库 · 开源协议：AGPL-3.0-only</span>
         </div>
         <div class="footer-links">
@@ -477,6 +571,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=3"></script>
+    <script src="app.js?v=4"></script>
   </body>
 </html>

@@ -1,14 +1,14 @@
-"""官网深色改版的视觉与回归检查。
+"""官网深色旗舰改版的视觉与回归检查。
 
 在仓库根目录执行：
 
-    python website/tools/check_dark_theme.py
+    .venv/Scripts/python.exe website/tools/check_dark_theme.py
 
-做四件事：
-1. 三档宽度（320 / 768 / 1440）整页截图，输出到 website/tools/_shots/
-2. 断言页面上没有残留的浅色底（米白纸质感），即浅色背景不应再出现
-3. 回归：图集 tab 切换后主图与 caption 是否同步、复制命令按钮是否可用
-4. 断言关键 id 与 class 仍在（app.js 依赖它们）
+检查项：
+1. 四档宽度（320 / 390 / 768 / 1440）整页与首屏截图，输出到 website/tools/_shots/
+2. 断言页面全篇仅保留 1 处 app-icon.png 图标，不再出现手机端或首屏重复图标
+3. 断言移动端首屏窗口工具栏/状态栏与主标题零重叠、四档宽度零横向溢出
+4. 断言没有浅色纸质感背景残留、所有关键 ID 与 SEO 标签完整、图集切换与复制命令可用
 """
 
 import sys
@@ -20,10 +20,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_DIR = REPO_ROOT / "website" / "public"
 SHOTS_DIR = Path(__file__).resolve().parent / "_shots"
 
-# 改版前的米白纸质感主色，出现即视为「没改干净」
 FORBIDDEN_BG = ["rgb(251, 248, 241)", "rgb(255, 252, 246)"]
 
-WIDTHS = [(320, "mobile"), (768, "tablet"), (1440, "desktop")]
+WIDTHS = [(320, "mobile"), (390, "mobile390"), (768, "tablet"), (1440, "desktop")]
 
 failures: list[str] = []
 
@@ -47,8 +46,6 @@ def main() -> int:
             page = browser_context.new_page()
             page.set_viewport_size({"width": width, "height": 900})
             errors: list[str] = []
-            # file:// 下 fetch("/api/latest-release") 必然失败，那是本地预览的固有现象，
-            # 不算页面缺陷；线上有真接口。这里过滤掉它，只看真正的脚本错误。
             page.on(
                 "console",
                 lambda m: errors.append(m.text)
@@ -58,24 +55,45 @@ def main() -> int:
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.goto(url)
             page.wait_for_load_state("networkidle")
+            page.wait_for_timeout(450)
 
-            # 整页截图
             shot = SHOTS_DIR / f"{name}-{width}.png"
             page.screenshot(path=str(shot), full_page=True)
             print(f"[{name} {width}] 截图 -> {shot.name}")
 
-            # 横向溢出
             overflow = page.evaluate(
                 "() => document.documentElement.scrollWidth - document.documentElement.clientWidth"
             )
             check(overflow <= 1, f"{name} 无横向溢出 (scrollWidth-clientWidth={overflow})")
 
-            # 首屏截图单独出，便于看大图效果
+            icon_count = page.locator('img[src*="app-icon.png"]').count()
+            check(icon_count == 1, f"{name} 仅保留 1 个题有据图标 (实际 {icon_count})")
+
+            if width <= 420:
+                overlap = page.evaluate(
+                    """() => {
+                        const h1 = document.querySelector('h1')?.getBoundingClientRect();
+                        const tb = document.querySelector('.shot-toolbar')?.getBoundingClientRect();
+                        const st = document.querySelector('.shot-status')?.getBoundingClientRect();
+                        if (!h1 || !tb || !st) return 'missing';
+                        const hit = (a, b) => !(a.bottom <= b.top || a.top >= b.bottom || a.right <= b.left || a.left >= b.right);
+                        return hit(h1, tb) || hit(h1, st);
+                    }"""
+                )
+                check(overlap is False, f"{name} 首屏窗口条与主标题无重叠 (overlap={overlap})")
+
+                # 手机端菜单按钮可展开
+                menu_btn = page.locator("#mobileMenuBtn")
+                check(menu_btn.is_visible(), f"{name} 移动端菜单按钮可见")
+                menu_btn.click()
+                page.wait_for_timeout(150)
+                check(page.locator("#mobileNav").is_visible(), f"{name} 点击菜单按钮可展开导航")
+                menu_btn.click()
+                page.wait_for_timeout(100)
+
             page.screenshot(path=str(SHOTS_DIR / f"{name}-hero.png"))
 
-            # 浅色残留：body 与主要卡片区
             if width == 1440:
-                # body 背景是渐变，backgroundColor 会是透明，要看 backgroundImage
                 body_style = page.evaluate(
                     """() => {
                         const s = getComputedStyle(document.body);
@@ -85,7 +103,7 @@ def main() -> int:
                 check(
                     "rgb(251, 248, 241)" not in body_style["image"]
                     and "rgb(251, 248, 241)" not in body_style["color"],
-                    f"body 背景已深色化 (image={body_style['image'][:60]})",
+                    f"body 背景已深色化 (bg={body_style['color']})",
                 )
                 light = page.evaluate(
                     """() => {
@@ -103,25 +121,28 @@ def main() -> int:
                 )
                 check(not light, f"卡片无浅色纸质感残留 {light if light else ''}")
 
-                # 首屏面板：工具栏条 + 状态栏
-                check(
-                    page.locator(".shot-toolbar").count() == 1,
-                    "首屏工具栏条存在",
+                hidden_cards = page.evaluate(
+                    """() => {
+                        const bad = [];
+                        for (const sel of ['.metrics-strip', '.workflow-card', '.feature-card', '.download-card', '.community-banner']) {
+                            for (const el of document.querySelectorAll(sel)) {
+                                if (Number(getComputedStyle(el).opacity) < 0.99) {
+                                    bad.push(sel);
+                                }
+                            }
+                        }
+                        return bad;
+                    }"""
                 )
-                check(
-                    page.locator(".shot-status").count() == 1,
-                    "首屏状态栏存在",
-                )
-                check(
-                    page.locator(".shot-dots i").count() == 3,
-                    "工具栏三个窗口圆点",
-                )
+                check(not hidden_cards, f"全页卡片直接可见无 opacity:0 空白 {hidden_cards if hidden_cards else ''}")
 
-                # 区块编号
+                check(page.locator(".shot-toolbar").count() == 1, "首屏工具栏条存在")
+                check(page.locator(".shot-status").count() == 1, "首屏状态栏存在")
+                check(page.locator(".shot-dots i").count() >= 3, "工具栏窗口圆点存在")
+
                 indexes = page.locator(".section-index").count()
                 check(indexes == 4, f"四个区块编号齐全 (实际 {indexes})")
 
-                # 不变量：app.js 依赖的 id
                 ids = [
                     "versionBadge",
                     "downloadInstallerBtn",
@@ -144,37 +165,25 @@ def main() -> int:
                 missing = [i for i in ids if page.locator(f"#{i}").count() == 0]
                 check(not missing, f"app.js 依赖的 id 全部保留 {missing if missing else ''}")
 
-                # 回归：图集切换
                 page.locator(".tab-btn").nth(4).click()
-                page.wait_for_timeout(400)
+                page.wait_for_timeout(300)
                 src = page.locator("#galleryMainImg").get_attribute("src")
                 check(src == "assets/paper-preview.webp", f"图集切换主图同步 (src={src})")
                 caption = page.locator("#galleryCaption").inner_text()
-                check(
-                    "组卷" in caption and "A3" in caption,
-                    f"图集切换 caption 同步 (含'组卷'与'A3')",
-                )
+                check("组卷" in caption and "A3" in caption, "图集切换 caption 同步 (含'组卷'与'A3')")
                 zoom_src = page.locator("#galleryZoomBtn").get_attribute("data-zoom-src")
-                check(
-                    zoom_src == "assets/paper-preview.webp",
-                    f"灯箱 data-zoom-src 同步 (={zoom_src})",
-                )
+                check(zoom_src == "assets/paper-preview.webp", f"灯箱 data-zoom-src 同步 (={zoom_src})")
 
-                # 回归：复制命令（剪贴板写权限已在 context 上授予）
                 page.locator("#copyPsBtn").click()
-                page.wait_for_timeout(400)
+                page.wait_for_timeout(300)
                 btn_text = page.locator("#copyPsBtn").inner_text()
                 check("复制" in btn_text or "已" in btn_text, f"复制按钮有反馈 (文本={btn_text})")
                 try:
                     clip = page.evaluate("() => navigator.clipboard.readText()")
-                    check(
-                        "install.ps1" in clip,
-                        f"剪贴板内容正确 (含 install.ps1)",
-                    )
+                    check("install.ps1" in clip, "剪贴板内容正确 (含 install.ps1)")
                 except Exception as exc:  # noqa: BLE001
                     check(False, f"读取剪贴板失败: {exc}")
 
-                # 回归：SEO 标签仍在
                 for meta in [
                     'meta[property="og:image"]',
                     'meta[property="og:title"]',
