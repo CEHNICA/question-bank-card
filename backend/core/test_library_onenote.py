@@ -403,3 +403,148 @@ class OneNoteLinkTests(TestCase):
         ok = library_onenote._refine_open("{page-none}", "onenote:https://d.docs.live.net/fake/page-none")
         self.assertFalse(ok)
         mock_shell.assert_called_once_with("onenote:https://d.docs.live.net/fake/page-none")
+
+    def test_compute_page_right_edge_scans_outline_and_ink_drawing(self):
+        """XML 边界扫描应同时考虑 Outline、InkDrawing（含缺失 Size 兜底）与 Image 的最右侧坐标。"""
+        sample_xml = (
+            '<?xml version="1.0"?>'
+            '<one:Page xmlns:one="http://schemas.microsoft.com/office/onenote/2013/onenote" ID="{p1}">'
+            '<one:Outline objectID="{o1}"><one:Position x="36.0" y="86.0" z="0"/>'
+            '<one:Size width="520.0" height="200.0" isSetByUser="true"/></one:Outline>'
+            '<one:InkDrawing objectID="{ink1}"><one:Position x="620.5" y="140.0" z="1"/>'
+            '<one:Size width="180.0" height="90.0"/></one:InkDrawing>'
+            "</one:Page>"
+        )
+        self.assertEqual(library_onenote.compute_page_right_edge(sample_xml), 800.5)
+
+        ink_no_size = (
+            '<?xml version="1.0"?>'
+            '<one:Page xmlns:one="http://schemas.microsoft.com/office/onenote/2013/onenote" ID="{p2}">'
+            '<one:InkDrawing objectID="{ink2}"><one:Position x="700.0" y="120.0" z="1"/></one:InkDrawing>'
+            "</one:Page>"
+        )
+        self.assertEqual(
+            library_onenote.compute_page_right_edge(ink_no_size), 700.0 + library_onenote.FALLBACK_INK_WIDTH_PT
+        )
+
+    @patch("core.library_onenote.cached_question_image")
+    @patch("core.library_onenote.call_bridge")
+    def test_start_attempt_appends_to_right_safe_zone_and_updates_timeline(self, mock_call, mock_cache):
+        """发起二刷应扫描现有 XML 最大横坐标，在右侧安全区追加 Outline 并写回对象级深链与时间轴。"""
+        mock_cache.return_value = _sample_png_bytes(1000, 300)
+        self.item.extras = {
+            "onenote": {
+                "page_id": "{page-multi}",
+                "url": "onenote:https://d.docs.live.net/fake/page-multi",
+                "title": "2026-11-20 09:00:00",
+                "attempts": [
+                    {
+                        "attempt": 1,
+                        "created_at": "2026-11-20T09:00:00+08:00",
+                        "date": "2026-11-20",
+                        "label": "第 1 刷 · 2026-11-20 09:00",
+                        "outline_id": "{ol-1}",
+                        "focus_object_id": "{oe-1}",
+                        "object_url": "onenote:https://d.docs.live.net/fake/page-multi&object-id={ol-1}",
+                        "x": 36.0,
+                        "y": 86.0,
+                    }
+                ],
+            }
+        }
+        self.item.save(update_fields=["extras"])
+
+        captured = {}
+
+        def fake_bridge(op, **params):
+            if op == "page":
+                return {
+                    "id": "{page-multi}",
+                    "xml": (
+                        '<?xml version="1.0"?>'
+                        '<one:Page xmlns:one="http://schemas.microsoft.com/office/onenote/2013/onenote" ID="{page-multi}">'
+                        '<one:Outline objectID="{ol-1}"><one:Position x="36.0" y="86.0" z="0"/>'
+                        '<one:Size width="540.0" height="240.0" isSetByUser="true"/></one:Outline>'
+                        '<one:InkDrawing objectID="{ink-1}"><one:Position x="580.0" y="210.0" z="1"/>'
+                        '<one:Size width="140.0" height="80.0"/></one:InkDrawing>'
+                        "</one:Page>"
+                    ),
+                }
+            if op == "append_outline":
+                captured.update(params)
+                return {
+                    "id": "{page-multi}",
+                    "outlineId": "{ol-2}",
+                    "focusObjectId": "{oe-2}",
+                    "objectUrl": "onenote:https://d.docs.live.net/fake/page-multi&object-id={ol-2}",
+                    "navigated": True,
+                    "focused": True,
+                }
+            if op == "navigate":
+                captured["nav"] = params
+                return {"id": params.get("id"), "objectId": params.get("objectId"), "navigated": True, "focused": True}
+            return {}
+
+        mock_call.side_effect = fake_bridge
+
+        resp = self.client.post(f"/api/library/{self.item.id}/onenote/attempt")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertTrue(body["ok"])
+        attempts = body["onenote"]["attempts"]
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(attempts[1]["attempt"], 2)
+        expected_x = 580.0 + 140.0 + library_onenote.SAFE_HORIZONTAL_GAP_PT
+        self.assertEqual(attempts[1]["x"], expected_x)
+        self.assertEqual(attempts[1]["outline_id"], "{ol-2}")
+        self.assertEqual(attempts[1]["focus_object_id"], "{oe-2}")
+        self.assertIn(f'x="{expected_x:.1f}"', captured["outlineXml"])
+        self.assertIn("重做", captured["outlineXml"])
+
+        # 点击第 1 条记录历史节点应精确传 object_id 跳转到 {oe-1}
+        resp_open = self.client.post(
+            f"/api/library/{self.item.id}/onenote/open?wait=1",
+            data=json.dumps({"object_id": "{oe-1}"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp_open.status_code, 200)
+        self.assertEqual(captured["nav"]["objectId"], "{oe-1}")
+
+        # 时间轴接口仍向后兼容
+        tl_resp = self.client.get("/api/library/onenote/timeline")
+        self.assertEqual(tl_resp.status_code, 200)
+        tl = tl_resp.json()
+        self.assertTrue(tl["ok"])
+        self.assertEqual(tl["total_attempts"], 2)
+        self.assertEqual(tl["total_questions"], 1)
+        self.assertEqual(tl["days"][-1]["date"], "2026-11-20")
+
+    @patch("core.library_onenote._ensure_desktop_window", return_value=True)
+    @patch("core.library_onenote.call_bridge")
+    def test_export_page_step_images_crops_whitespace_and_compresses(self, mock_call, _mock_win):
+        """验证 OneNote 导出 PDF 时传 ensureWindow=True 并在渲染后自动裁掉多余白边。"""
+        import pymupdf
+        from PIL import Image
+
+        def fake_publish(op, **params):
+            self.assertEqual(op, "publish")
+            self.assertTrue(params.get("ensureWindow"))
+            self.assertEqual(params.get("format"), 3)
+            dest = Path(params["dest"])
+            doc = pymupdf.open()
+            page = doc.new_page(width=600, height=800)
+            page.draw_rect(pymupdf.Rect(80, 120, 260, 220), color=(0, 0, 0), fill=(0, 0, 0))
+            doc.save(str(dest))
+            doc.close()
+            return {"dest": str(dest), "exists": True, "bytes": dest.stat().st_size, "publishFormat": 3}
+
+        mock_call.side_effect = fake_publish
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "steps"
+            paths = library_onenote.export_page_step_images("{page-crop}", out_dir, max_pages=3)
+            self.assertEqual(len(paths), 1)
+            self.assertTrue(paths[0].is_file())
+            with Image.open(paths[0]) as cropped:
+                # 原本 ~1250x1667 的白纸页应被自动裁剪到只比黑框略大（远小于整页高 1667）
+                self.assertLess(cropped.width, 600)
+                self.assertLess(cropped.height, 450)

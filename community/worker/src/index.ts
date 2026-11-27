@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { AppBindings, Env } from "./env.ts";
 import { HttpError } from "./util.ts";
-import { authRoutes, loadSessionUser } from "./auth.ts";
+import { authRoutes, loadBearerUser, loadSessionUser } from "./auth.ts";
 import { packRoutes, runPackMaintenance } from "./packs.ts";
 import { postRoutes } from "./posts.ts";
 import { redeemRoutes } from "./redeem.ts";
@@ -22,6 +22,7 @@ export function createApp() {
   // 写操作只接受同源请求：带自定义头会触发跨域预检，而我们不放行任何跨域来源。
   app.use("/api/*", async (c, next) => {
     const method = c.req.method;
+    const bearerUser = await loadBearerUser(c);
     if (method !== "GET" && method !== "HEAD") {
       if (c.req.header("X-TYJ") !== "1") {
         return c.json({ error: "请求来源不对。" }, 403);
@@ -31,7 +32,7 @@ export function createApp() {
         return c.json({ error: "请求来源不对。" }, 403);
       }
     }
-    c.set("user", await loadSessionUser(c));
+    c.set("user", bearerUser ?? (await loadSessionUser(c)));
     await next();
     c.header("Cache-Control", "no-store");
   });
@@ -41,6 +42,8 @@ export function createApp() {
       site_name: c.env.SITE_NAME || "题有据社区",
       turnstile_site_key: c.env.TURNSTILE_SITE_KEY || "",
       max_pack_mb: Number(c.env.MAX_PACK_MB || 50),
+      user_storage_quota_mb: Number(c.env.USER_STORAGE_QUOTA_MB || 500),
+      storage_mode: c.env.PACK_STORAGE_MODE || "r2",
     }),
   );
 

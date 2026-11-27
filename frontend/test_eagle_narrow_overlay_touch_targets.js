@@ -133,7 +133,6 @@ const TOUCH_RULES = [
   ["#filterPillsPanel\\s+button\\[id\\^=\"pillBtn\"\\]", "min-height:\\s*32px", "筛选胶囊"],
   ["#basketExportModal\\s+\\.bkm-clear", "min-height:\\s*32px", "试题篮清空按钮"],
   ["#btnCollapsedAppMenu", "min-width:\\s*32px", "折叠态应用菜单按钮"],
-  ["#btnToggleInspector", "min-width:\\s*32px", "属性栏开关按钮"],
   ["#questionListContainer\\s+button\\[id\\^=\"star_btn_\"\\]", "min-width:\\s*32px", "题卡收藏星"],
   ["#questionListContainer\\s+button\\[id\\^=\"btn_analysis_\"\\]", "min-height:\\s*32px", "题卡查看解析"],
   ["#questionListContainer\\s+button\\[id\\^=\"btn_basket_\"\\]", "min-height:\\s*32px", "题卡试题篮"],
@@ -181,11 +180,6 @@ assertInMedia(
   "max-width: 640px",
   /#btnEagleAppMenu[^{]*\{[^}]*min-height:\s*32px/,
   "顶栏应用菜单按钮抬到 32px"
-);
-assertInMedia(
-  "max-width: 640px",
-  /#treeSearchInput[^{]*\{[^}]*min-height:\s*32px/,
-  "左栏树搜索框抬到 32px"
 );
 assertInMedia(
   "max-width: 640px",

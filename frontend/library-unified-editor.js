@@ -732,7 +732,23 @@
 
       const sourcePane = node("div", "card-source");
       const sourceSticky = node("div", "source-sticky");
+      const sourceHead = node("div", "source-head");
+      sourceHead.style.display = "flex";
+      sourceHead.style.alignItems = "center";
+      sourceHead.style.justifyContent = "space-between";
+      sourceHead.style.gap = "8px";
       const sourceLabel = node("p", "source-label", "🔍 原卷截图 · 点击放大对照");
+      const sourceRecropBtn = node("button", "button quiet small", "✂️ 重框/重识");
+      sourceRecropBtn.type = "button";
+      sourceRecropBtn.title = "如果原图少裁了一部分，直接打开原卷画新框并重新识读";
+      sourceRecropBtn.addEventListener("click", () => {
+        if (!record?.id || typeof root.openOriginalRecropModal !== "function") return;
+        const targetId = String(record.id);
+        void close().then(() => {
+          root.openOriginalRecropModal(targetId);
+        });
+      });
+      sourceHead.append(sourceLabel, sourceRecropBtn);
       const sourceCropFrame = node("div", "source-crop-frame");
       const sourceImg = node("img");
       sourceImg.alt = "题目原卷截图";
@@ -747,7 +763,7 @@
       });
       sourceImg.addEventListener("click", openSourceViewer);
       sourceCropFrame.append(sourceImg);
-      sourceSticky.append(sourceLabel, sourceCropFrame);
+      sourceSticky.append(sourceHead, sourceCropFrame);
       sourcePane.append(sourceSticky);
 
       const cardBody = node("div", "card-body");

@@ -3,6 +3,19 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.3.8
+
+**原卷重框重识、社区多范围压缩上传、OneNote 思路随包分享与「来自云端」自动归类**
+
+- **原卷重框裁剪与重新 AI 识读（`backend/core/library_recrop.py`、`frontend/eagle/index.html`、`frontend/library-unified-editor.js`）**：题库原卷证据弹窗、统一编辑左栏与快速审题支持两点画框重裁配图/原图题干，并可一键提交 AI 重新识别更新题卡。
+- **工作台界面精简与防误触快捷键（`frontend/eagle/index.html`、`frontend/index.html`）**：录入按钮收进 `≡` 主菜单、题库字母快捷键统一改为 `Ctrl + 键` 防误触、去除多余刷数计数与刷题时间轴，并将定位码复制、原卷核验、`✨ 建议`与 OneNote 操作栏精简为直观图标与短标签；文件夹悬停展示完整祖先路径。
+- **社区上传扩展、压缩与 OneNote 步骤分享（`backend/core/library_transfer.py`、`backend/core/library_onenote.py`、`backend/core/library_folders.py`）**：
+  - 除整套试卷/教材外，新增**普通自定义文件夹**右键、**单题卡片**右键及**多选批量操作栏**打包上传社区；
+  - 导出社区题包时在临时包内等比缩放并压缩图片，卡控单包 `15 MB` / `100 题` / `250 图` 上限；支持可选导出作者 OneNote 页面（未启动自动打开 OneNote，裁边压缩后入临时解析层随包展示在题目下方）；
+  - 云端下载并合并社区题包后，自动创建并放入顶级 **`来自云端`** 文件夹。
+- **社区后端存储适配与空间配额（`community/`）**：新增 `storage.ts` 存储适配层支持 **R2 封面 + 123 云盘 WebDAV 题包**混合存储；增加普通用户个人 **500 MB** 累计配额与每日上传限制（管理员不限），详情页展示 `含作者 OneNote 思路` 徽章与首图试看。
+
+
 ## 2.3.7
 
 **题有据自己的窗口**

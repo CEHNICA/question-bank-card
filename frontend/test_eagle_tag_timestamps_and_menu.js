@@ -83,8 +83,8 @@ test("Eagle UI places exclude-used controls inside #filterPillsPanel and keeps t
   assert.ok(scriptSrc.includes("function initSidebarResize"), "sidebar resize must be initialized");
   assert.ok(scriptSrc.includes("eagle_inspector_width_px"), "inspector width must persist");
   assert.ok(scriptSrc.includes("eagle_sidebar_width_px"), "sidebar width must persist");
-  assert.match(scriptSrc, /INSPECTOR_WIDTH_DEFAULT = 320/, "right default matches Eagle ~20%");
-  assert.match(scriptSrc, /SIDEBAR_WIDTH_DEFAULT = 260/, "left default matches Eagle ~16%");
+  assert.match(scriptSrc, /INSPECTOR_WIDTH_DEFAULT = 240/, "right default is the narrow property column");
+  assert.match(scriptSrc, /SIDEBAR_WIDTH_DEFAULT = 180/, "left default is the narrow folder column");
   assert.match(eagleHtml, /--inspector-width/, "inspector width uses CSS variable");
   assert.match(eagleHtml, /--sidebar-width/, "sidebar width uses CSS variable");
 

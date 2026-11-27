@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
@@ -994,3 +995,294 @@ class CommunityPackTests(TransferFixture):
         body = ok.json()
         self.assertEqual(body["questions"], 1)
         self.assertFalse(body["include_originals"])
+
+
+class CommunityDirectTransferTests(TransferFixture):
+    def setUp(self):
+        super().setUp()
+        self.session_file = self.work / "community-session.dat"
+        self.env_patch = unittest.mock.patch.dict(
+            os.environ, {"QB_COMMUNITY_SESSION_FILE": str(self.session_file)}, clear=False
+        )
+        self.env_patch.start()
+        self.addCleanup(self.env_patch.stop)
+
+    def _publish_sample(self):
+        q = self.questions[0]
+        return PublishedQuestion.objects.create(
+            question=q,
+            paper=self.paper,
+            source_filename=self.paper.filename,
+            number=q.number,
+            question_type=q.question_type,
+            version=1,
+            content={
+                "stem": q.stem,
+                "options": q.options,
+                "answer": "甲",
+                "analysis": "",
+                "source_filename": self.paper.filename,
+            },
+            content_hash="b" * 64,
+        )
+
+    def test_protocol_parses_community_auth_and_import_pack(self):
+        from core import tiyouju_protocol
+
+        auth = tiyouju_protocol.parse_protocol_action(
+            "tiyouju://community-auth?token=tyj_dt_abc&username=alice&display_name=%E7%8E%8B%E8%80%81%E5%B8%88&site=https%3A%2F%2Fcommunity.tiyouju.com%2F"
+        )
+        self.assertEqual(auth["action"], "community_auth")
+        self.assertEqual(auth["username"], "alice")
+        self.assertEqual(auth["display_name"], "王老师")
+
+        imp = tiyouju_protocol.parse_protocol_action(
+            "tiyouju://import-pack?url=https%3A%2F%2Fcommunity.tiyouju.com%2Fapi%2Fdl%2Ftok&title=%E6%B5%8B%E8%AF%95%E9%A2%98%E5%8C%85&pack_id=p1"
+        )
+        self.assertEqual(imp["action"], "import_pack")
+        self.assertEqual(imp["pack_id"], "p1")
+        # Reject insecure http on non-loopback host
+        self.assertIsNone(
+            tiyouju_protocol.parse_protocol_action("tiyouju://import-pack?url=http%3A%2F%2Fevil.com%2Fapi%2Fdl%2F1")
+        )
+
+    def test_community_upload_requires_auth_and_uploads_paper_only(self):
+        from core import credential_settings
+
+        self._publish_sample()
+        client = Client()
+        headers = {"HTTP_X_QB_REQUEST": "1"}
+
+        # 1. Without community session -> 401 needs_auth
+        no_auth = client.post(
+            "/api/backup/community-upload",
+            data=json.dumps({"paper_ids": [str(self.paper.pk)], "title": "（虚构）模拟卷", "rights_confirmed": True}),
+            content_type="application/json",
+            **headers,
+        )
+        self.assertEqual(no_auth.status_code, 401)
+        self.assertTrue(no_auth.json()["needs_auth"])
+
+        # 2. Save DPAPI-protected session -> public endpoint never leaks token
+        store = credential_settings._load_store()
+        store.save_community_session(
+            "tyj_dt_secret_token", username="teacher1", display_name="张老师", site="https://community.tiyouju.com/"
+        )
+        pub_sess = client.get("/api/community/session").json()
+        self.assertTrue(pub_sess["connected"])
+        self.assertEqual(pub_sess["username"], "teacher1")
+        self.assertNotIn("token", pub_sess)
+
+        # 3. Upload succeeds with mocked community HTTP endpoints
+        with (
+            unittest.mock.patch(
+                "core.transfer_views._community_http_json",
+                return_value=(201, {"id": "pack-123", "upload_url": "/api/packs/pack-123/bundle"}),
+            ) as mock_init,
+            unittest.mock.patch(
+                "core.transfer_views._community_http_put_file",
+                return_value=(200, {"id": "pack-123", "status": "pending"}),
+            ) as mock_put,
+        ):
+            ok = client.post(
+                "/api/backup/community-upload",
+                data=json.dumps(
+                    {
+                        "paper_ids": [str(self.paper.pk)],
+                        "title": "（虚构）高一模拟卷",
+                        "stage": "高中",
+                        "rights_confirmed": True,
+                    }
+                ),
+                content_type="application/json",
+                **headers,
+            )
+        self.assertEqual(ok.status_code, 201, ok.content.decode("utf-8"))
+        self.assertEqual(ok.json()["id"], "pack-123")
+        mock_init.assert_called_once()
+        mock_put.assert_called_once()
+
+    def test_fetch_and_inspect_ssrf_guard_and_staged_import(self):
+        self._publish_sample()
+        bundle_info = library_transfer.export_community_pack(self.work, paper_ids=[str(self.paper.pk)])
+        zip_bytes = Path(bundle_info["file"]).read_bytes()
+
+        # Remove local data so merge proves import works
+        PublishedQuestion.objects.all().delete()
+        Question.all_objects.all().delete()
+        Block.objects.all().delete()
+        Paper.objects.all().delete()
+        shutil.rmtree(self.data / str(self.paper.pk), ignore_errors=True)
+
+        client = Client()
+        headers = {"HTTP_X_QB_REQUEST": "1"}
+
+        # Reject private IP / non-dl path
+        bad = client.post(
+            "/api/backup/fetch-and-inspect",
+            data=json.dumps({"url": "https://192.168.1.10/api/dl/abc"}),
+            content_type="application/json",
+            **headers,
+        )
+        self.assertEqual(bad.status_code, 400)
+
+        class _FakeResp:
+            def __init__(self, data: bytes):
+                self._buf = data
+                self._pos = 0
+
+            def read(self, n=-1):
+                if self._pos >= len(self._buf):
+                    return b""
+                chunk = self._buf[self._pos : self._pos + (len(self._buf) if n < 0 else n)]
+                self._pos += len(chunk)
+                return chunk
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        with unittest.mock.patch("core.transfer_views.urllib.request.urlopen", return_value=_FakeResp(zip_bytes)):
+            inspected = client.post(
+                "/api/backup/fetch-and-inspect",
+                data=json.dumps(
+                    {"url": "https://community.tiyouju.com/api/dl/tok123", "title": "（虚构）导入卷", "pack_id": "p1"}
+                ),
+                content_type="application/json",
+                **headers,
+            )
+        self.assertEqual(inspected.status_code, 200, inspected.content.decode("utf-8"))
+        staging_id = inspected.json()["staging_id"]
+        self.assertEqual(inspected.json()["publications"], 1)
+
+        imported = client.post(
+            "/api/backup/import-staged",
+            data=json.dumps({"staging_id": staging_id}),
+            content_type="application/json",
+            **headers,
+        )
+        self.assertEqual(imported.status_code, 200, imported.content.decode("utf-8"))
+        self.assertEqual(PublishedQuestion.objects.count(), 1)
+        imported_data = imported.json()
+        self.assertIsNotNone(imported_data.get("cloud_folder"))
+        self.assertEqual(imported_data["cloud_folder"]["folder_name"], "来自云端")
+        self.assertEqual(imported_data["cloud_folder"]["added_count"], 1)
+
+        from core import library_folders
+
+        overview = library_folders.overview(include_tree=False)
+        cloud_folders = [f for f in overview["user_folders"] if f.get("name") == "来自云端"]
+        self.assertEqual(len(cloud_folders), 1)
+        self.assertEqual(len(cloud_folders[0]["questionIds"]), 1)
+
+    def test_community_pack_scoped_publications_compresses_images_and_embeds_onenote(self):
+        """验证单题/精选题目导出精确裁剪、自动压缩大图不改原图、以及附带 OneNote 步骤入解析。"""
+        from PIL import Image, ImageDraw
+
+        from core import library_onenote
+        from core.models import Question
+
+        paper = Paper.objects.create(filename="（虚构）精选卷.pdf", sha256="e" * 64)
+        q1 = Question.objects.create(
+            paper=paper, number=1, question_type="single_choice", stem="（虚构）精选分享题", options=["甲", "乙"]
+        )
+        q2 = Question.objects.create(
+            paper=paper, number=2, question_type="single_choice", stem="（虚构）未选陪跑题", options=["甲", "乙"]
+        )
+        pub1 = PublishedQuestion.objects.create(
+            question=q1,
+            paper=paper,
+            source_filename=paper.filename,
+            number=q1.number,
+            question_type=q1.question_type,
+            version=1,
+            content={
+                "stem": q1.stem,
+                "options": q1.options,
+                "answer": "甲",
+                "analysis": "",
+                "source_filename": paper.filename,
+            },
+            content_hash="e" * 64,
+            extras={"onenote": {"page_id": "{page-share-1}", "title": "手写笔记"}},
+        )
+        PublishedQuestion.objects.create(
+            question=q2,
+            paper=paper,
+            source_filename=paper.filename,
+            number=q2.number,
+            question_type=q2.question_type,
+            version=1,
+            content={
+                "stem": q2.stem,
+                "options": q2.options,
+                "answer": "乙",
+                "analysis": "",
+                "source_filename": paper.filename,
+            },
+            content_hash="f" * 64,
+        )
+
+        # 给 pub1 放一张 2400x1800 的大图，验证社区打包时会缩放到 <= 1280px 且不动本机原图
+        fig_dir = self.data / "library" / str(pub1.pk) / "figures"
+        fig_dir.mkdir(parents=True, exist_ok=True)
+        big_path = fig_dir / "figure-1.png"
+        big_img = Image.new("RGB", (2400, 1800), (255, 255, 255))
+        draw = ImageDraw.Draw(big_img)
+        draw.line([(100, 100), (2300, 1700)], fill=(0, 0, 0), width=8)
+        big_img.save(big_path, format="PNG")
+        orig_size = big_path.stat().st_size
+
+        def fake_step_export(page_id, dest_dir, **_kwargs):
+            self.assertEqual(page_id, "{page-share-1}")
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            step = dest_dir / "onenote-step-1.png"
+            step_im = Image.new("RGB", (320, 200), (255, 255, 255))
+            ImageDraw.Draw(step_im).text((20, 20), "Step 1", fill=(0, 0, 0))
+            step_im.save(step, format="PNG")
+            return [step]
+
+        out_dir = self.work / "comm_selection"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        with unittest.mock.patch.object(library_onenote, "export_page_step_images", side_effect=fake_step_export):
+            res = library_transfer.export_community_pack(
+                out_dir, publication_ids=[str(pub1.pk)], include_onenote=True, custom_title="高一函数精选单题"
+            )
+
+        self.assertEqual(res["community"]["questions"], 1)
+        self.assertEqual(res["community"]["onenote_count"], 1)
+        # 原图绝不被改动
+        self.assertEqual(big_path.stat().st_size, orig_size)
+        with Image.open(big_path) as orig_im:
+            self.assertEqual(orig_im.size, (2400, 1800))
+
+        bundle = Path(res["file"])
+        with zipfile.ZipFile(bundle) as zf:
+            names = set(zf.namelist())
+            preview = json.loads(zf.read(library_transfer.COMMUNITY_PREVIEW_NAME).decode("utf-8"))
+            self.assertTrue(preview["has_onenote_notes"])
+            self.assertEqual(preview["onenote_count"], 1)
+            self.assertTrue(str(preview.get("onenote_preview") or "").startswith("data:image/png;base64,"))
+            packed_fig = zf.read(f"{library_transfer.ORIGINALS}/library/{pub1.pk}/figures/figure-1.png")
+            with Image.open(io.BytesIO(packed_fig)) as packed_im:
+                self.assertLessEqual(max(packed_im.size), 1280)
+            self.assertTrue(
+                any(
+                    n.startswith(f"{library_transfer.ORIGINALS}/library-solutions/{pub1.pk}/") and n.endswith(".png")
+                    for n in names
+                )
+            )
+
+        snap_path = self.work / "snap-check.sqlite3"
+        with zipfile.ZipFile(bundle) as zf:
+            snap_path.write_bytes(zf.read(library_transfer.DATABASE_NAME))
+        snap = sqlite3.connect(snap_path)
+        try:
+            stems = {row[0] for row in snap.execute("SELECT stem FROM core_question").fetchall()}
+            self.assertEqual(stems, {"（虚构）精选分享题"})
+            sol_count = snap.execute("SELECT COUNT(*) FROM core_librarysolution").fetchone()[0]
+            self.assertGreaterEqual(sol_count, 1)
+        finally:
+            snap.close()

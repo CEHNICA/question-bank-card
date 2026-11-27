@@ -280,15 +280,13 @@ it("D7：标签目录读失败必须自己告诉用户，不能静默咽下去",
   );
 });
 
-it("D7：右栏置顶标签区在目录读失败时必须说明「读不到」", () => {
+it("D7：看题右栏不再放置顶标签", () => {
   const inspector = bodyOf(eagle, "function renderRightInspector");
   assert.ok(inspector, "找不到 renderRightInspector");
-  assert.ok(
-    /tagCatalogueReadError/.test(inspector),
-    "右栏置顶标签区必须处理目录读取失败：空着会被当成「没有置顶标签」"
+  assert.equal(
+    inspector.includes("pinnedTagsContainer"),
+    false,
+    "右栏不应再渲染置顶标签"
   );
-  assert.ok(
-    inspector.includes("没有置顶标签"),
-    "必须写明「不是没有置顶标签」：老师看到空区会以为置顶丢了"
-  );
+  assert.equal(eagle.includes('id="pinnedTagsSection"'), false);
 });

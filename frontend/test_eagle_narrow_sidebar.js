@@ -41,7 +41,7 @@ test("窄屏下左栏别再把正文挤成一条缝", async (t) => {
   });
 
   await t.test("2. 用户手动开合过就听用户的", () => {
-    const fn = html.match(/function toggleLeftSidebar\([\s\S]{0,1200}?\n {4}\}/);
+    const fn = html.match(/function toggleLeftSidebar\([\s\S]{0,1800}?\n {4}\}/);
     assert.ok(fn, "应能找到 toggleLeftSidebar");
     assert.ok(
       /leftSidebarUserPref = collapsed;/.test(fn[0]),

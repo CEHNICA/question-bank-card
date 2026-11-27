@@ -18,16 +18,19 @@ import {
   timingSafeEqual,
 } from "./util.ts";
 import { assertCanSell, authorPayment, parsePriceYuan } from "./sales.ts";
+import { WEBDAV_PREFIX, deleteStoredObjects, getPackStream, isWebDavMode, packStorageKey, putPackObject } from "./storage.ts";
 
 export const MANIFEST_NAME = "题有据备份.json";
 export const DATABASE_NAME = "题库.sqlite3";
 export const PREVIEW_NAME = "community-preview.json";
 const COVER_PATTERN = /^community-cover\.(png|jpe?g|webp)$/;
 const COVER_MAX_BYTES = 1024 * 1024;
+const ONENOTE_PREVIEW_MAX_CHARS = 180_000;
 const DOWNLOAD_TTL_MS = 5 * 60 * 1000;
 const DIRECT_MULTIPART_MAX_BYTES = 20 * 1024 * 1024;
 const DEFAULT_MAX_TOTAL_R2_MB = 8500;
-const DEFAULT_DAILY_UPLOADS_PER_USER = 10;
+const DEFAULT_USER_STORAGE_QUOTA_MB = 500;
+const DEFAULT_DAILY_UPLOADS_PER_USER = 5;
 export const STAGES = ["小学", "初中", "高中", "大学", "其他"];
 
 type PackRow = {
@@ -51,6 +54,9 @@ export type CleanPreview = {
   samples: { number: unknown; question_type: string; stem: string; options: { key: string; text: string }[]; figures: number }[];
   papers: { title: string; questions: number }[];
   include_originals: boolean;
+  has_onenote_notes?: boolean;
+  onenote_count?: number;
+  onenote_preview?: string;
 };
 
 type ParsedPack = {
@@ -95,7 +101,7 @@ export function cleanPreview(raw: unknown): CleanPreview {
     const item = (paper && typeof paper === "object" ? paper : {}) as Record<string, unknown>;
     return { title: text(item.title, 120), questions: num(item.questions) };
   });
-  return {
+  const cleaned: CleanPreview = {
     counts: { papers: num(counts.papers), questions: num(counts.questions), tags: num(counts.tags) },
     question_types: types,
     tags,
@@ -103,6 +109,16 @@ export function cleanPreview(raw: unknown): CleanPreview {
     papers,
     include_originals: Boolean(source.include_originals),
   };
+  if (Boolean(source.has_onenote_notes)) {
+    cleaned.has_onenote_notes = true;
+    const noteCount = num(source.onenote_count);
+    if (noteCount > 0) cleaned.onenote_count = noteCount;
+    const rawOneNotePreview = typeof source.onenote_preview === "string" ? source.onenote_preview.trim() : "";
+    if (/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(rawOneNotePreview) && rawOneNotePreview.length <= ONENOTE_PREVIEW_MAX_CHARS) {
+      cleaned.onenote_preview = rawOneNotePreview;
+    }
+  }
+  return cleaned;
 }
 
 /** 认出这是题有据桌面版「导出社区题包」打出来的 zip，并取出预览和封面。 */
@@ -165,6 +181,11 @@ export function maxTotalR2Bytes(env: Env): number {
   return (Number.isFinite(mb) && mb > 0 ? mb : DEFAULT_MAX_TOTAL_R2_MB) * 1024 * 1024;
 }
 
+export function maxUserQuotaBytes(env: Env): number {
+  const mb = Number(env.USER_STORAGE_QUOTA_MB || DEFAULT_USER_STORAGE_QUOTA_MB);
+  return (Number.isFinite(mb) && mb > 0 ? mb : DEFAULT_USER_STORAGE_QUOTA_MB) * 1024 * 1024;
+}
+
 function maxDailyUploads(env: Env): number {
   const n = Number(env.MAX_DAILY_UPLOADS_PER_USER || DEFAULT_DAILY_UPLOADS_PER_USER);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_DAILY_UPLOADS_PER_USER;
@@ -172,9 +193,37 @@ function maxDailyUploads(env: Env): number {
 
 export async function activeR2Bytes(env: Env): Promise<number> {
   const row = await env.DB.prepare(
-    "SELECT COALESCE(SUM(size), 0) AS total FROM packs WHERE r2_purged_at IS NULL",
-  ).first<{ total: number }>();
+    "SELECT COALESCE(SUM(size), 0) AS total FROM packs WHERE r2_purged_at IS NULL AND r2_key NOT LIKE ?",
+  )
+    .bind(`${WEBDAV_PREFIX}%`)
+    .first<{ total: number }>();
   return Number(row?.total ?? 0);
+}
+
+export async function activeWebDavBytes(env: Env): Promise<number> {
+  const row = await env.DB.prepare(
+    "SELECT COALESCE(SUM(size), 0) AS total FROM packs WHERE r2_purged_at IS NULL AND r2_key LIKE ?",
+  )
+    .bind(`${WEBDAV_PREFIX}%`)
+    .first<{ total: number }>();
+  return Number(row?.total ?? 0);
+}
+
+export async function activeUserBytes(env: Env, userId: number): Promise<number> {
+  const row = await env.DB.prepare("SELECT COALESCE(SUM(size), 0) AS total FROM packs WHERE author_id = ? AND r2_purged_at IS NULL")
+    .bind(userId)
+    .first<{ total: number }>();
+  return Number(row?.total ?? 0);
+}
+
+export async function activeStorageSummary(env: Env) {
+  const [r2Bytes, webdavBytes] = await Promise.all([activeR2Bytes(env), activeWebDavBytes(env)]);
+  return {
+    storage_mode: isWebDavMode(env) ? "webdav" : "r2",
+    used_bytes: isWebDavMode(env) ? webdavBytes : r2Bytes,
+    r2_used_bytes: r2Bytes,
+    webdav_used_bytes: webdavBytes,
+  };
 }
 
 export async function packBuyerCount(env: Env, packId: string): Promise<number> {
@@ -189,8 +238,7 @@ export async function purgePackStorage(
   pack: Pick<PackRow, "id" | "r2_key" | "cover_key" | "r2_purged_at">,
   options: { nextStatus?: string; note?: string } = {},
 ): Promise<void> {
-  const keys = [pack.r2_key, pack.cover_key].filter((k): k is string => Boolean(k));
-  if (keys.length) await env.PACKS.delete(keys);
+  await deleteStoredObjects(env, [pack.r2_key, pack.cover_key]);
   const now = nowIso();
   if (options.nextStatus) {
     await env.DB.prepare(
@@ -219,8 +267,7 @@ export async function runPackMaintenance(env: Env, nowMs = Date.now()): Promise<
     .all<{ id: string; r2_key: string; cover_key: string | null }>();
   let abandonedCount = 0;
   for (const row of abandoned.results ?? []) {
-    const keys = [row.r2_key, row.cover_key].filter((k): k is string => Boolean(k));
-    if (keys.length) await env.PACKS.delete(keys).catch(() => null);
+    await deleteStoredObjects(env, [row.r2_key, row.cover_key]).catch(() => null);
     await env.DB.prepare("DELETE FROM packs WHERE id = ? AND status = 'uploading'").bind(row.id).run();
     abandonedCount += 1;
   }
@@ -247,14 +294,34 @@ function uploadRateKey(userId: number): string {
   return `pack-upload:${userId}`;
 }
 
-async function assertUploadAllowed(env: Env, userId: number, incomingBytes: number): Promise<void> {
-  if (await rateLimited(env, uploadRateKey(userId), maxDailyUploads(env), 24 * 3600 * 1000)) {
-    fail(429, `每人每天最多上传 ${maxDailyUploads(env)} 个题包，明天再试。`);
+async function assertUploadAllowed(env: Env, user: SessionUser, incomingBytes: number): Promise<void> {
+  const isAdmin = user.role === "admin";
+  if (!isAdmin) {
+    if (await rateLimited(env, uploadRateKey(user.id), maxDailyUploads(env), 24 * 3600 * 1000)) {
+      fail(429, `普通用户每天最多上传 ${maxDailyUploads(env)} 个题包，明天再试。`);
+    }
+    const userUsed = await activeUserBytes(env, user.id);
+    const userQuota = maxUserQuotaBytes(env);
+    if (userUsed + incomingBytes > userQuota) {
+      const quotaMb = Math.round(userQuota / 1024 / 1024);
+      const quotaText = quotaMb >= 1024 ? `${(quotaMb / 1024).toFixed(1)} GB` : `${quotaMb} MB`;
+      fail(413, `你的个人云端累计空间已达上限（${quotaText}），请先在「我的上传」清理未售旧题包释放空间。`);
+    }
   }
-  const used = await activeR2Bytes(env);
-  const limit = maxTotalR2Bytes(env);
-  if (used + incomingBytes > limit) {
-    fail(507, "社区免费存储空间已接近上限，请稍后再试或联系管理员清理无效文件。");
+  if (!isWebDavMode(env)) {
+    const used = await activeR2Bytes(env);
+    const limit = maxTotalR2Bytes(env);
+    if (used + incomingBytes > limit) {
+      fail(507, "社区免费存储空间已接近上限，请稍后再试或联系管理员清理无效文件。");
+    }
+  } else if (env.MAX_TOTAL_WEBDAV_MB) {
+    const webdavMb = Number(env.MAX_TOTAL_WEBDAV_MB);
+    if (Number.isFinite(webdavMb) && webdavMb > 0) {
+      const used = await activeWebDavBytes(env);
+      if (used + incomingBytes > webdavMb * 1024 * 1024) {
+        fail(507, "社区网盘总空间已接近上限，请联系管理员清理或扩容。");
+      }
+    }
   }
 }
 
@@ -442,8 +509,11 @@ packRoutes.get("/packs", async (c) => {
   const rows = await c.env.DB.prepare(
     `SELECT p.id, p.title, p.stage, p.subject, p.year, p.tags_text, p.price_cents, p.originality, p.question_count,
             p.paper_count, p.downloads, p.created_at, p.cover_key IS NOT NULL AS has_cover,
+            CASE WHEN v.preview_json LIKE '%"has_onenote_notes":true%' THEN 1 ELSE 0 END AS has_onenote_notes,
             u.username AS author_username, u.display_name AS author_name
-       FROM packs p JOIN users u ON u.id = p.author_id
+       FROM packs p
+       JOIN users u ON u.id = p.author_id
+       LEFT JOIN pack_previews v ON v.pack_id = p.id
       WHERE ${clause}
       ORDER BY ${sort} LIMIT ? OFFSET ?`,
   )
@@ -538,11 +608,11 @@ packRoutes.post("/packs/init", async (c) => {
       include_originals: preview.include_originals,
     });
   }
-  await assertUploadAllowed(c.env, user.id, fileSize);
+  await assertUploadAllowed(c.env, user, fileSize);
   const cover = decodeCoverBase64(body.cover_base64);
 
   const id = crypto.randomUUID();
-  const r2Key = `packs/${id}.zip`;
+  const r2Key = packStorageKey(c.env, id);
   let coverKey: string | null = null;
   if (cover) {
     coverKey = `covers/${id}.${cover.ext}`;
@@ -621,12 +691,9 @@ packRoutes.put("/packs/:id/bundle", async (c) => {
     typeof FixedStream === "function" ? verifiedStream.pipeThrough(new FixedStream(pack.size)) : verifiedStream;
 
   try {
-    await c.env.PACKS.put(pack.r2_key, uploadStream as unknown as ReadableStream, {
-      httpMetadata: { contentType: "application/zip" },
-      customMetadata: { author: String(user.id) },
-    });
+    await putPackObject(c.env, pack.r2_key, uploadStream as unknown as ReadableStream<Uint8Array>, pack.size, user.id);
   } catch (error) {
-    await c.env.PACKS.delete(pack.r2_key).catch(() => null);
+    await deleteStoredObjects(c.env, [pack.r2_key]).catch(() => null);
     if (error instanceof HttpError) throw error;
     fail(400, "题包流式写入失败，请重新上传。");
   }
@@ -634,7 +701,7 @@ packRoutes.put("/packs/:id/bundle", async (c) => {
   await c.env.DB.prepare("UPDATE packs SET status = 'pending', updated_at = ? WHERE id = ? AND status = 'uploading'")
     .bind(nowIso(), pack.id)
     .run();
-  await hit(c.env, uploadRateKey(user.id));
+  if (user.role !== "admin") await hit(c.env, uploadRateKey(user.id));
   return c.json({ id: pack.id, status: "pending" });
 });
 
@@ -680,14 +747,11 @@ packRoutes.post("/packs", async (c) => {
       include_originals: parsed.preview.include_originals,
     });
   }
-  await assertUploadAllowed(c.env, user.id, bytes.byteLength);
+  await assertUploadAllowed(c.env, user, bytes.byteLength);
 
   const id = crypto.randomUUID();
-  const r2Key = `packs/${id}.zip`;
-  await c.env.PACKS.put(r2Key, bytes, {
-    httpMetadata: { contentType: "application/zip" },
-    customMetadata: { author: String(user.id) },
-  });
+  const r2Key = packStorageKey(c.env, id);
+  await putPackObject(c.env, r2Key, bytes, bytes.byteLength, user.id);
   let coverKey: string | null = null;
   if (parsed.cover) {
     coverKey = `covers/${id}.${parsed.cover.ext}`;
@@ -705,10 +769,10 @@ packRoutes.post("/packs", async (c) => {
       status: "pending",
     });
   } catch (error) {
-    await c.env.PACKS.delete([r2Key, ...(coverKey ? [coverKey] : [])]);
+    await deleteStoredObjects(c.env, [r2Key, coverKey]).catch(() => null);
     throw error;
   }
-  await hit(c.env, uploadRateKey(user.id));
+  if (user.role !== "admin") await hit(c.env, uploadRateKey(user.id));
   return c.json({ id, status: "pending" }, 201);
 });
 
@@ -807,11 +871,11 @@ packRoutes.get("/dl/:token", async (c) => {
   const pack = await loadPack(c.env, packId);
   if (!pack || pack.status === "taken_down") fail(404, "这份题包已经下架了。");
   if (pack.r2_purged_at) fail(410, "这份题包文件已被清理。");
-  const object = await c.env.PACKS.get(pack.r2_key);
-  if (!object) fail(404, "题包文件找不到了，请联系作者。");
+  const stream = await getPackStream(c.env, pack.r2_key);
+  if (!stream) fail(404, "题包文件找不到了，请联系作者。");
   await c.env.DB.prepare("UPDATE packs SET downloads = downloads + 1 WHERE id = ?").bind(pack.id).run();
   const safeName = `${pack.title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "_").slice(0, 60) || "题包"}.zip`;
-  return new Response(object.body as unknown as ReadableStream, {
+  return new Response(stream as unknown as ReadableStream, {
     headers: {
       "Content-Type": "application/zip",
       "Content-Disposition": `attachment; filename="tiyouju-pack.zip"; filename*=UTF-8''${encodeURIComponent(safeName)}`,
@@ -884,7 +948,17 @@ packRoutes.get("/me/packs", async (c) => {
   )
     .bind(user.id)
     .all();
-  return c.json({ packs: mine.results ?? [], owned: owned.results ?? [] });
+  const usedBytes = await activeUserBytes(c.env, user.id);
+  const quotaBytes = maxUserQuotaBytes(c.env);
+  return c.json({
+    packs: mine.results ?? [],
+    owned: owned.results ?? [],
+    storage: {
+      used_bytes: usedBytes,
+      quota_bytes: user.role === "admin" ? null : quotaBytes,
+      is_unlimited: user.role === "admin",
+    },
+  });
 });
 
 export async function fileReport(c: AppContext, targetType: "pack" | "post" | "comment", targetId: string) {

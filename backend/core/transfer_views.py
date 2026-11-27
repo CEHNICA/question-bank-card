@@ -5,17 +5,32 @@
 
 from __future__ import annotations
 
+import base64
+import ipaddress
+import json
 import shutil
 import tempfile
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+import zipfile
 from pathlib import Path
 
 from django.http import HttpResponseNotAllowed, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
-from . import library_transfer
+from . import credential_settings, library_transfer
 from .library_transfer import TransferError
 
 MAX_UPLOAD_BYTES = library_transfer.MAX_BUNDLE_BYTES
+DEFAULT_COMMUNITY_SITE = "https://community.tiyouju.com"
+_STAGED_LOCK = threading.Lock()
+_STAGED_PACKS: dict[str, dict[str, object]] = {}
+_STAGED_TTL_SECONDS = 1800.0
+_MAX_STAGED_ITEMS = 8
 
 
 def _guard(request, *, json_body=True):
@@ -304,5 +319,421 @@ def records_view(request):
     except TransferError as error:
         return _error(str(error))
     response = JsonResponse({"removed": removed})
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+def _cleanup_expired_staged_locked(now: float | None = None) -> None:
+    current = time.monotonic() if now is None else now
+    expired = [k for k, v in _STAGED_PACKS.items() if (current - float(v.get("created_at") or 0)) > _STAGED_TTL_SECONDS]
+    for key in expired:
+        entry = _STAGED_PACKS.pop(key, None)
+        if entry and isinstance(entry.get("dir"), Path):
+            shutil.rmtree(entry["dir"], ignore_errors=True)
+    while len(_STAGED_PACKS) >= _MAX_STAGED_ITEMS:
+        oldest_key = min(_STAGED_PACKS, key=lambda k: float(_STAGED_PACKS[k].get("created_at") or 0))
+        entry = _STAGED_PACKS.pop(oldest_key, None)
+        if entry and isinstance(entry.get("dir"), Path):
+            shutil.rmtree(entry["dir"], ignore_errors=True)
+
+
+def _validate_pack_download_url(raw_url: str) -> str:
+    url = str(raw_url or "").strip()
+    if not url or len(url) > 2048:
+        raise TransferError("下载链接无效。")
+    parsed = urllib.parse.urlparse(url)
+    host = (parsed.hostname or "").strip().lower()
+    if not host or parsed.username or parsed.password:
+        raise TransferError("下载链接格式不受支持。")
+    scheme = parsed.scheme.lower()
+    is_local_dev = host in {"127.0.0.1", "localhost"}
+    if scheme == "http" and is_local_dev:
+        pass
+    elif scheme == "https":
+        try:
+            addr = ipaddress.ip_address(host)
+        except ValueError:
+            addr = None
+        if addr is not None and (
+            addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_multicast or addr.is_reserved
+        ):
+            raise TransferError("不允许从内网或保留地址下载题包。")
+    else:
+        raise TransferError("只允许从安全的 HTTPS 社区地址下载题包。")
+    if "/api/dl/" not in (parsed.path or ""):
+        raise TransferError("只支持题有据社区签发的题包下载链接。")
+    return url
+
+
+def _normalize_site_url(raw_site: str | None) -> str:
+    candidate = str(raw_site or "").strip().rstrip("/") or DEFAULT_COMMUNITY_SITE
+    parsed = urllib.parse.urlparse(candidate)
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        return DEFAULT_COMMUNITY_SITE
+    if parsed.scheme.lower() == "https" or (parsed.scheme.lower() == "http" and host in {"127.0.0.1", "localhost"}):
+        return f"{parsed.scheme.lower()}://{parsed.netloc}"
+    return DEFAULT_COMMUNITY_SITE
+
+
+@csrf_exempt
+def community_session_view(request):
+    """GET /api/community/session: 返回本机是否已授权连接社区账号（绝不返回 token）。"""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    if request.META.get("REMOTE_ADDR", "") not in {"127.0.0.1", "::1"}:
+        return _error("只能在本机查看社区授权状态", 403)
+    store = credential_settings._load_store()
+    info = store.community_session_public()
+    response = JsonResponse(info)
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@csrf_exempt
+def community_disconnect_view(request):
+    """POST /api/community/disconnect: 清除本机保存的社区桌面授权令牌。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    store = credential_settings._load_store()
+    store.clear_community_session()
+    response = JsonResponse({"ok": True})
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+def _read_community_zip_metadata(zip_path: Path) -> tuple[dict, dict, str]:
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        manifest = json.loads(zf.read(library_transfer.MANIFEST_NAME).decode("utf-8"))
+        preview = json.loads(zf.read(library_transfer.COMMUNITY_PREVIEW_NAME).decode("utf-8"))
+        cover_b64 = ""
+        for name in zf.namelist():
+            if name.startswith("community-cover.") and name.rsplit(".", 1)[-1].lower() in {
+                "png",
+                "jpg",
+                "jpeg",
+                "webp",
+            }:
+                raw_cover = zf.read(name)
+                if len(raw_cover) <= library_transfer.COMMUNITY_COVER_MAX_BYTES:
+                    cover_b64 = base64.b64encode(raw_cover).decode("ascii")
+                break
+    return manifest, preview, cover_b64
+
+
+def _community_http_json(
+    url: str, *, token: str, method: str = "POST", payload: dict | None = None
+) -> tuple[int, dict]:
+    data = json.dumps(payload or {}, ensure_ascii=False).encode("utf-8") if payload is not None else None
+    headers = {"Authorization": f"Bearer {token}", "X-TYJ": "1", "Accept": "application/json"}
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = json.loads(resp.read().decode("utf-8") or "{}")
+            return int(getattr(resp, "status", 200)), body if isinstance(body, dict) else {}
+    except urllib.error.HTTPError as err:
+        raw = err.read().decode("utf-8", errors="replace")
+        try:
+            body = json.loads(raw) if raw else {}
+        except ValueError:
+            body = {"error": raw or f"HTTP {err.code}"}
+        return int(err.code), body if isinstance(body, dict) else {"error": f"HTTP {err.code}"}
+
+
+def _community_http_put_file(url: str, *, token: str, file_path: Path) -> tuple[int, dict]:
+    raw_bytes = file_path.read_bytes()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "X-TYJ": "1",
+        "Content-Type": "application/zip",
+        "Content-Length": str(len(raw_bytes)),
+        "Accept": "application/json",
+    }
+    req = urllib.request.Request(url, data=raw_bytes, headers=headers, method="PUT")
+    try:
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            body = json.loads(resp.read().decode("utf-8") or "{}")
+            return int(getattr(resp, "status", 200)), body if isinstance(body, dict) else {}
+    except urllib.error.HTTPError as err:
+        raw = err.read().decode("utf-8", errors="replace")
+        try:
+            body = json.loads(raw) if raw else {}
+        except ValueError:
+            body = {"error": raw or f"HTTP {err.code}"}
+        return int(err.code), body if isinstance(body, dict) else {"error": f"HTTP {err.code}"}
+
+
+@csrf_exempt
+def community_upload_view(request):
+    """POST /api/backup/community-upload: 支持选定试卷/教材、普通文件夹或单/多道题目，在临时目录压缩打包并上传到社区。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request, limit=200_000)
+    if payload is None:
+        return _error("请求格式不正确。")
+
+    store = credential_settings._load_store()
+    session = store.load_community_session()
+    if not session or not session.get("token"):
+        resp = JsonResponse({"error": "请先在浏览器登录并授权连接题有据社区账号。", "needs_auth": True}, status=401)
+        resp["Cache-Control"] = "no-store"
+        return resp
+
+    raw_paper_ids = payload.get("paper_ids")
+    raw_publication_ids = payload.get("publication_ids")
+    paper_ids = (
+        [x.strip() for x in raw_paper_ids]
+        if isinstance(raw_paper_ids, list)
+        and raw_paper_ids
+        and all(isinstance(x, str) and x.strip() for x in raw_paper_ids)
+        else None
+    )
+    publication_ids = (
+        [x.strip() for x in raw_publication_ids]
+        if isinstance(raw_publication_ids, list)
+        and raw_publication_ids
+        and all(isinstance(x, str) and x.strip() for x in raw_publication_ids)
+        else None
+    )
+    if bool(paper_ids) == bool(publication_ids):
+        return _error("请指定要上传的试卷/教材，或选定要上传的题目与文件夹。")
+
+    include_originals = bool(payload.get("include_originals", False)) if paper_ids else False
+    include_onenote = bool(payload.get("include_onenote", False))
+    rights_confirmed = payload.get("rights_confirmed") is True
+    originals_confirmed = payload.get("originals_confirmed") is True
+    if not rights_confirmed:
+        return _error("请先确认你有权分发这份题包。")
+    if include_originals and not originals_confirmed:
+        return _error("附带原卷文件时，请同时确认原卷版权归属。")
+
+    title = str(payload.get("title") or "").strip()
+    if len(title) < 2:
+        return _error("请填写题包标题（至少 2 个字）。")
+
+    site_url = _normalize_site_url(str(payload.get("site_url") or session.get("site") or ""))
+    token = session["token"]
+
+    with tempfile.TemporaryDirectory(prefix="tyj-comm-up-") as work:
+        try:
+            exported = library_transfer.export_community_pack(
+                Path(work),
+                paper_ids=paper_ids,
+                publication_ids=publication_ids,
+                include_originals=include_originals,
+                include_onenote=include_onenote,
+                custom_title=title,
+            )
+            zip_path = Path(exported["file"])
+            zip_size = int(exported.get("size") or zip_path.stat().st_size)
+            manifest, preview, cover_b64 = _read_community_zip_metadata(zip_path)
+        except TransferError as error:
+            return _error(str(error))
+        except (OSError, ValueError, zipfile.BadZipFile):
+            return _error("题包打包失败，请稍后重试。", status=500)
+
+        init_body = {
+            "title": title,
+            "stage": str(payload.get("stage") or "高中").strip(),
+            "subject": str(payload.get("subject") or "数学").strip(),
+            "year": payload.get("year") or "",
+            "tags": str(payload.get("tags") or "").strip(),
+            "price_yuan": str(payload.get("price_yuan") if payload.get("price_yuan") is not None else "0"),
+            "originality": "original" if payload.get("originality") == "original" else "compiled",
+            "description": str(payload.get("description") or "").strip(),
+            "rights_confirmed": True,
+            "originals_confirmed": originals_confirmed,
+            "file_size": zip_size,
+            "manifest": manifest,
+            "preview": preview,
+            "cover_base64": cover_b64 or None,
+        }
+        try:
+            init_status, init_data = _community_http_json(
+                f"{site_url}/api/packs/init", token=token, method="POST", payload=init_body
+            )
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            return _error(f"连不上社区服务器：{exc}", status=502)
+
+        if init_status == 401:
+            store.clear_community_session()
+            resp = JsonResponse({"error": "社区授权已过期或被吊销，请重新授权连接。", "needs_auth": True}, status=401)
+            resp["Cache-Control"] = "no-store"
+            return resp
+        if init_status >= 400:
+            return _error(str(init_data.get("error") or "社区登记题包失败。"), status=init_status)
+
+        pack_id = str(init_data.get("id") or "")
+        upload_path = str(init_data.get("upload_url") or "")
+        if not pack_id or not upload_path:
+            return _error("社区没有返回上传地址。", status=502)
+
+        put_url = urllib.parse.urljoin(site_url + "/", upload_path.lstrip("/"))
+        try:
+            put_status, put_data = _community_http_put_file(put_url, token=token, file_path=zip_path)
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            return _error(f"上传题包文件时网络中断：{exc}", status=502)
+        if put_status >= 400:
+            return _error(str(put_data.get("error") or "题包文件上传失败。"), status=put_status)
+
+    community_meta = exported.get("community") or {}
+    response = JsonResponse(
+        {
+            "ok": True,
+            "id": pack_id,
+            "status": str(put_data.get("status") or "pending"),
+            "url": f"{site_url}/#/pack/{pack_id}",
+            "questions": int(community_meta.get("questions") or 0),
+            "size": zip_size,
+            "onenote_count": int(community_meta.get("onenote_count") or 0),
+            "onenote_skipped": int(community_meta.get("onenote_skipped") or 0),
+        },
+        status=201,
+    )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@csrf_exempt
+def fetch_and_inspect_view(request):
+    """POST /api/backup/fetch-and-inspect: 拉取社区签名下载链接到暂存区并返回合并预览。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request, limit=20_000)
+    if payload is None:
+        return _error("请求格式不正确。")
+    try:
+        dl_url = _validate_pack_download_url(str(payload.get("url") or ""))
+    except TransferError as error:
+        return _error(str(error))
+
+    stage_dir = Path(tempfile.mkdtemp(prefix="tyj-stage-"))
+    target = stage_dir / "community-pack.zip"
+    try:
+        req = urllib.request.Request(dl_url, headers={"Accept": "application/zip, */*"}, method="GET")
+        total = 0
+        checked_magic = False
+        with urllib.request.urlopen(req, timeout=90) as resp, open(target, "wb") as writer:
+            while True:
+                chunk = resp.read(65536)
+                if not chunk:
+                    break
+                if not checked_magic:
+                    if len(chunk) < 2 or chunk[:2] != b"PK":
+                        raise TransferError("下载到的文件不是有效的 zip 题包。")
+                    checked_magic = True
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    raise TransferError("题包太大了，超过本地导入上限。")
+                writer.write(chunk)
+        if not checked_magic or total == 0:
+            raise TransferError("下载到的题包是空的，请重试。")
+        result = library_transfer.plan_merge(target)
+    except TransferError as error:
+        shutil.rmtree(stage_dir, ignore_errors=True)
+        return _error(str(error))
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        shutil.rmtree(stage_dir, ignore_errors=True)
+        return _error(f"下载题包失败（链接可能已过期，请在网页重新点击下载）：{exc}", status=502)
+
+    staging_id = uuid.uuid4().hex
+    with _STAGED_LOCK:
+        _cleanup_expired_staged_locked()
+        _STAGED_PACKS[staging_id] = {
+            "dir": stage_dir,
+            "path": target,
+            "created_at": time.monotonic(),
+            "title": str(payload.get("title") or "").strip(),
+            "pack_id": str(payload.get("pack_id") or "").strip(),
+        }
+
+    resp = _inspect_response(result)
+    data = json.loads(resp.content.decode("utf-8"))
+    data["staging_id"] = staging_id
+    data["title"] = str(payload.get("title") or "").strip()
+    data["pack_id"] = str(payload.get("pack_id") or "").strip()
+    out = JsonResponse(data)
+    out["Cache-Control"] = "no-store"
+    return out
+
+
+@csrf_exempt
+def import_staged_view(request):
+    """POST /api/backup/import-staged: 确认并合并暂存区的社区题包进本机题库。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request, limit=10_000)
+    if payload is None:
+        return _error("请求格式不正确。")
+    staging_id = str(payload.get("staging_id") or "").strip()
+    if not staging_id:
+        return _error("缺少暂存题包编号。")
+    with _STAGED_LOCK:
+        entry = _STAGED_PACKS.pop(staging_id, None)
+    if not entry:
+        return _error("暂存题包已过期或不存在，请在社区页面重新点一次下载。", status=404)
+    stage_dir = entry["dir"]
+    path = entry["path"]
+    cloud_folder = None
+    try:
+        result = library_transfer.merge_bundle(path)
+        manifest = result.get("manifest") or {}
+        pub_ids = list(result.get("publication_ids") or [])
+        if manifest.get("community") and pub_ids:
+            from . import library_folders
+
+            try:
+                cloud_folder = library_folders.assign_publications_to_cloud_folder(pub_ids)
+            except Exception:
+                cloud_folder = None
+    except TransferError as error:
+        return _error(str(error))
+    except (OSError, ValueError):
+        return _error("合并没能完成，本机题库还是原样。可以再试一次。", status=500)
+    finally:
+        if isinstance(stage_dir, Path):
+            shutil.rmtree(stage_dir, ignore_errors=True)
+    response = JsonResponse(
+        {
+            "report": result["report"],
+            "record": result["record"],
+            "publication_ids": result.get("publication_ids") or [],
+            "cloud_folder": cloud_folder,
+        }
+    )
+    response["Cache-Control"] = "no-store"
+    return response
+
+
+@csrf_exempt
+def discard_staged_view(request):
+    """POST /api/backup/discard-staged: 取消导入并清理暂存题包。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    rejected = _guard(request)
+    if rejected:
+        return rejected
+    payload = _body(request, limit=10_000) or {}
+    staging_id = str(payload.get("staging_id") or "").strip()
+    if staging_id:
+        with _STAGED_LOCK:
+            entry = _STAGED_PACKS.pop(staging_id, None)
+        if entry and isinstance(entry.get("dir"), Path):
+            shutil.rmtree(entry["dir"], ignore_errors=True)
+    response = JsonResponse({"ok": True})
     response["Cache-Control"] = "no-store"
     return response

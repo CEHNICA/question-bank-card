@@ -1538,18 +1538,18 @@ def _handle_protocol_uri(uri: str) -> int:
     except Exception as exc:  # noqa: BLE001 - 注册失败不能挡住回跳
         print(f"协议注册失败：{exc!r}", flush=True)
 
-    question_id = tiyouju_protocol.parse_question_id(uri)
-    if question_id:
-        tiyouju_protocol.queue_deep_link(question_id)
+    action = tiyouju_protocol.dispatch_protocol_action(uri)
+    question_id = str(action.get("q") or "").strip() if action and action.get("action") == "question" else None
+    action_name = str(action.get("action") or "") if action else ""
 
     existing = launcher._running_instance()
     if existing:
         focused = _focus_running_window()
-        print(f"协议回跳：已通知运行中的窗口 q={question_id} focused={focused}", flush=True)
+        print(f"协议回跳：已通知运行中的窗口 action={action_name} q={question_id} focused={focused}", flush=True)
         return 0
 
     # 尚未运行：本进程就是冷启动，不要再拉一份 exe。深链留给 Eagle 首屏消费。
-    print(f"协议回跳：将冷启动并定位 q={question_id}", flush=True)
+    print(f"协议回跳：将冷启动 action={action_name} q={question_id}", flush=True)
     return -1
 
 
@@ -1683,10 +1683,13 @@ def _main(arguments: list[str] | None = None) -> int:
                 from core import tiyouju_protocol as protocol
 
                 pending = protocol.consume_deep_link()
-                if pending and pending.get("q"):
-                    # 冷启动时把 q 直接带进首屏；同时再写回一份，供轮询兜底。
-                    protocol.queue_deep_link(pending["q"])
-                    home = protocol.build_target_url(port, pending["q"])
+                if pending:
+                    if pending.get("q"):
+                        # 冷启动时把 q 直接带进首屏；同时再写回一份，供轮询兜底。
+                        protocol.queue_deep_link(pending["q"])
+                        home = protocol.build_target_url(port, pending["q"])
+                    elif pending.get("action"):
+                        protocol.queue_deep_link(pending)
             except Exception as exc:  # noqa: BLE001
                 print(f"读取回跳深链失败：{exc!r}", flush=True)
             return ("ready", home)

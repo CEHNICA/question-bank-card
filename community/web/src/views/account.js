@@ -142,11 +142,12 @@ function paymentHtml(payment) {
 
 export async function meView() {
   if (!state.user) return needLogin("登录后才能看「我的」。");
-  const [data, profileData, payment, requests] = await Promise.all([
+  const [data, profileData, payment, requests, tokensData] = await Promise.all([
     api("/api/me/packs"),
     api(`/api/users/${encodeURIComponent(state.user.username)}`).catch(() => ({ user: {} })),
     api("/api/me/payment"),
     api("/api/me/purchase-requests"),
+    api("/api/desktop-tokens").catch(() => ({ tokens: [] })),
   ]);
   const bio = profileData.user?.bio || "";
   const pendingCount = requests.incoming.filter((r) => r.status === "pending").length;
@@ -247,6 +248,22 @@ export async function meView() {
           </form>
         </section>
         <section class="card p-5">
+          <h2 class="font-semibold">已授权的桌面端</h2>
+          <p class="mt-1 text-xs text-slate-500">用于从题有据桌面端一键打包上传题包，可随时吊销。</p>
+          <ul class="mt-2 space-y-2 text-xs" id="desktopTokensList">${
+            (tokensData.tokens || []).length
+              ? tokensData.tokens
+                  .map(
+                    (t) => `<li class="flex items-center justify-between gap-2 border-t border-slate-100 pt-2">
+                <div class="min-w-0"><div class="truncate font-medium text-slate-700">${escapeHtml(t.label)}</div>
+                  <div class="text-slate-400">${timeAgo(t.created_at)}授权${t.last_used_at ? ` · 最近使用 ${timeAgo(t.last_used_at)}` : ""}</div></div>
+                <button type="button" class="btn btn-danger shrink-0 px-2 py-1 text-xs" data-revoke-token="${t.id}">吊销</button></li>`,
+                  )
+                  .join("")
+              : '<li class="text-slate-400">暂无已授权设备。</li>'
+          }</ul>
+        </section>
+        <section class="card p-5">
           <h2 class="font-semibold">修改密码</h2>
           <form id="passwordForm" class="mt-3 space-y-3">
             <input class="input" type="password" name="current_password" placeholder="原密码" autocomplete="current-password" required>
@@ -279,6 +296,62 @@ export async function meView() {
       toast("密码已修改，其他设备上的登录已失效。", "success");
     });
   });
+  document.querySelectorAll("[data-revoke-token]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      busy(btn, async () => {
+        await api(`/api/desktop-tokens/${btn.dataset.revokeToken}`, { method: "DELETE", body: {} });
+        toast("已吊销该桌面端授权。", "success");
+        meView();
+      });
+    }),
+  );
+}
+
+export async function desktopAuthView() {
+  if (!state.user) {
+    return needLogin("请先登录社区账号，再授权题有据桌面端一键上传题包。");
+  }
+  const params = queryParams();
+  const label = (params.get("label") || "题有据桌面端").slice(0, 40);
+  setView(`
+    <div class="card mx-auto mt-6 max-w-md p-6">
+      <h1 class="text-lg font-semibold text-slate-900">授权题有据桌面端上传</h1>
+      <p class="mt-2 text-sm leading-6 text-slate-600">
+        当前已登录账号：<strong class="text-slate-900">${escapeHtml(state.user.display_name || state.user.username)}</strong>
+        <span class="text-xs text-slate-400">(@${escapeHtml(state.user.username)})</span>
+      </p>
+      <p class="mt-2 text-xs leading-5 text-slate-500">
+        授权后，题有据桌面端将只获取上传题包所需的专用令牌（本机加密存储），可在「我的 → 已授权的桌面端」随时吊销。
+      </p>
+      <div class="mt-5 flex flex-wrap gap-2">
+        <button id="grantDesktopBtn" type="button" class="btn btn-primary flex-1">确认授权并回到题有据</button>
+        <a href="#/" class="btn">取消</a>
+      </div>
+      <div id="desktopAuthFallback" class="mt-4 hidden rounded-lg bg-emerald-50 p-3 text-xs text-emerald-900">
+        <p class="font-medium">正在唤起题有据桌面端…</p>
+        <p class="mt-1">如果浏览器没有自动弹出打开提示，请点击：<a id="desktopAuthUriLink" href="#" class="font-semibold underline">立即回到题有据</a></p>
+      </div>
+    </div>`);
+  document.getElementById("grantDesktopBtn").addEventListener("click", (event) =>
+    busy(event.currentTarget, async () => {
+      const result = await api("/api/desktop-tokens", { method: "POST", body: { label } });
+      const u = result.user || state.user;
+      const uri =
+        "tiyouju://community-auth?" +
+        new URLSearchParams({
+          token: result.token,
+          username: u.username || "",
+          display_name: u.display_name || u.username || "",
+          site: location.origin + "/",
+        }).toString();
+      const box = document.getElementById("desktopAuthFallback");
+      const link = document.getElementById("desktopAuthUriLink");
+      if (link) link.href = uri;
+      if (box) box.classList.remove("hidden");
+      toast("授权成功，正在返回题有据桌面端…", "success");
+      location.href = uri;
+    }),
+  );
 }
 
 function bindSales() {

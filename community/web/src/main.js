@@ -5,7 +5,7 @@ import { escapeHtml } from "./render.js";
 import { errorView, loading, toast } from "./ui.js";
 import { browseView, packDetailView, uploadView } from "./views/packs.js";
 import { newPostView, postDetailView, postsView } from "./views/posts.js";
-import { loginView, meView, registerView, userView } from "./views/account.js";
+import { desktopAuthView, loginView, meView, registerView, userView } from "./views/account.js";
 import { adminView } from "./views/admin.js";
 import { rulesView } from "./views/rules.js";
 
@@ -18,6 +18,7 @@ const routes = [
   [/^\/post\/(\d+)$/, postDetailView, "posts"],
   [/^\/login$/, loginView, ""],
   [/^\/register$/, registerView, ""],
+  [/^\/desktop-auth$/, desktopAuthView, ""],
   [/^\/me$/, meView, ""],
   [/^\/u\/([^/]+)$/, userView, ""],
   [/^\/admin$/, adminView, ""],

@@ -204,7 +204,6 @@ it("Eagle：题卡勾选框必须有可访问名（不能只有一截方框）",
 it("Eagle：表单控件不能只靠 placeholder 当名字", () => {
   // 这些控件的 placeholder 是输入提示，不是名字
   const mustHave = [
-    "treeSearchInput",
     "globalSearchInput",
     "dropTagSearchInput",
     "inspectorNameInput",

@@ -45,7 +45,7 @@ test("窄屏展开的题目属性栏不许把正文挤成一条缝", async (t) =
     assert.ok(fixedRule > mediaStart, "浮层规则要写在媒体查询里面");
     // 宽屏折叠走 .collapsed（width: 3rem），逻辑没被改
     assert.ok(
-      /#rightInspectorPane\.collapsed \{ width: 3rem; \}/.test(html),
+      /#rightInspectorPane\.collapsed \{ width: (?:0|3rem);/.test(html),
       "宽屏的收起规则还在"
     );
   });

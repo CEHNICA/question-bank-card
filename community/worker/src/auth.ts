@@ -8,6 +8,7 @@ import {
   clientIp,
   fail,
   hit,
+  nowIso,
   randomBytes,
   rateLimited,
   readJson,
@@ -101,6 +102,27 @@ export async function loadSessionUser(c: AppContext): Promise<SessionUser | null
   return row ?? null;
 }
 
+export async function loadBearerUser(c: AppContext): Promise<SessionUser | null> {
+  const auth = c.req.header("Authorization") || "";
+  const match = /^Bearer\s+(.+)$/i.exec(auth.trim());
+  if (!match) return null;
+  const token = match[1].trim();
+  if (!token) return null;
+  const row = await c.env.DB.prepare(
+    `SELECT u.id, u.username, u.display_name, u.role, u.banned_at, d.id AS token_id
+       FROM desktop_tokens d JOIN users u ON u.id = d.user_id
+      WHERE d.token_hash = ? AND d.revoked_at IS NULL`,
+  )
+    .bind(await sha256Hex(token))
+    .first<SessionUser & { token_id: number }>();
+  if (!row || row.banned_at) return null;
+  await c.env.DB.prepare("UPDATE desktop_tokens SET last_used_at = ? WHERE id = ?")
+    .bind(nowIso(), row.token_id)
+    .run()
+    .catch(() => null);
+  return { id: row.id, username: row.username, display_name: row.display_name, role: row.role, banned_at: row.banned_at };
+}
+
 function publicUser(user: SessionUser) {
   return { id: user.id, username: user.username, display_name: user.display_name || user.username, role: user.role };
 }
@@ -174,7 +196,7 @@ authRoutes.post("/me/profile", async (c) => {
   const body = await readJson(c);
   const displayName = text(body.display_name, 30) || user.username;
   const bio = text(body.bio, 300);
-  await c.env.DB.prepare("UPDATE users SET display_name = ?, bio = ? WHERE id = ?").bind(displayName, bio, user.id).run();
+  await c.env.DB.prepare("UPDATE users SET bio = ?, display_name = ? WHERE id = ?").bind(bio, displayName, user.id).run();
   return c.json({ ok: true });
 });
 
@@ -216,4 +238,50 @@ authRoutes.get("/users/:username", async (c) => {
     .bind(row.id)
     .all();
   return c.json({ user: row, packs: packs.results, posts: posts.results });
+});
+
+authRoutes.get("/desktop-tokens", async (c) => {
+  const user = requireUser(c);
+  const rows = await c.env.DB.prepare(
+    `SELECT id, label, created_at, last_used_at
+       FROM desktop_tokens
+      WHERE user_id = ? AND revoked_at IS NULL
+      ORDER BY created_at DESC LIMIT 20`,
+  )
+    .bind(user.id)
+    .all();
+  return c.json({ tokens: rows.results ?? [] });
+});
+
+authRoutes.post("/desktop-tokens", async (c) => {
+  const user = requireUser(c);
+  const body = await readJson(c).catch(() => ({}));
+  const label = text((body as Record<string, unknown>).label, 40) || "题有据桌面端";
+  const token = `tyj_dt_${bytesToBase64Url(randomBytes(32))}`;
+  const inserted = await c.env.DB.prepare(
+    "INSERT INTO desktop_tokens (token_hash, user_id, label) VALUES (?, ?, ?) RETURNING id, created_at",
+  )
+    .bind(await sha256Hex(token), user.id, label)
+    .first<{ id: number; created_at: string }>();
+  return c.json(
+    {
+      id: inserted?.id,
+      token,
+      label,
+      created_at: inserted?.created_at,
+      user: publicUser(user),
+    },
+    201,
+  );
+});
+
+authRoutes.delete("/desktop-tokens/:id", async (c) => {
+  const user = requireUser(c);
+  const id = Number(c.req.param("id"));
+  if (!Number.isInteger(id) || id <= 0) fail(400, "令牌编号不对。");
+  const res = await c.env.DB.prepare("UPDATE desktop_tokens SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL")
+    .bind(nowIso(), id, user.id)
+    .run();
+  if (!res.meta?.changes) fail(404, "没有找到这个授权。");
+  return c.json({ ok: true });
 });

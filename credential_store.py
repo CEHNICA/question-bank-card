@@ -462,6 +462,95 @@ def clear_credentials(path: Path | None = None) -> None:
         raise CredentialStoreError("无法清除当前用户保存的凭据。") from exc
 
 
+def community_session_path() -> Path:
+    explicit = os.environ.get("QB_COMMUNITY_SESSION_FILE", "").strip()
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    return credential_path().with_name("community-session.dat")
+
+
+def load_community_session(path: Path | None = None) -> dict[str, str] | None:
+    target = path or community_session_path()
+    if not target.is_file():
+        return None
+    try:
+        payload = json.loads(_transform(target.read_bytes(), protect=False).decode("utf-8"))
+    except (OSError, UnicodeError, ValueError, TypeError, CredentialStoreError):
+        return None
+    if not isinstance(payload, dict) or payload.get("version") != 1:
+        return None
+    token = str(payload.get("token") or "").strip()
+    if not token:
+        return None
+    return {
+        "token": token,
+        "username": str(payload.get("username") or "").strip(),
+        "display_name": str(payload.get("display_name") or "").strip(),
+        "site": str(payload.get("site") or "").strip(),
+    }
+
+
+def save_community_session(
+    token: str,
+    *,
+    username: str = "",
+    display_name: str = "",
+    site: str = "",
+    path: Path | None = None,
+) -> dict[str, str]:
+    clean_token = str(token or "").strip()
+    if not clean_token or any(ch.isspace() for ch in clean_token) or len(clean_token) > 4096:
+        raise CredentialValidationError("社区桌面授权令牌格式不正确。")
+    record = {
+        "version": 1,
+        "token": clean_token,
+        "username": str(username or "").strip()[:40],
+        "display_name": str(display_name or "").strip()[:60],
+        "site": str(site or "").strip()[:300],
+    }
+    target = path or community_session_path()
+    protected = _transform(json.dumps(record, ensure_ascii=False).encode("utf-8"), protect=True)
+    temporary: Path | None = None
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="wb", prefix="community-session-", suffix=".tmp", dir=target.parent, delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(protected)
+        temporary.replace(target)
+    except OSError as exc:
+        raise CredentialStoreError("无法保存社区授权信息。") from exc
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return {
+        "username": record["username"],
+        "display_name": record["display_name"],
+        "site": record["site"],
+    }
+
+
+def clear_community_session(path: Path | None = None) -> None:
+    try:
+        (path or community_session_path()).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def community_session_public(path: Path | None = None) -> dict[str, object]:
+    """返回脱敏后的社区连接状态（绝不包含 token 明文）。"""
+    session = load_community_session(path)
+    if not session:
+        return {"connected": False, "username": "", "display_name": "", "site": ""}
+    return {
+        "connected": True,
+        "username": session["username"],
+        "display_name": session["display_name"] or session["username"],
+        "site": session["site"],
+    }
+
+
 def _read_saved() -> dict[str, object]:
     try:
         return load_credentials()

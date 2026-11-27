@@ -3516,31 +3516,8 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     void openPaperContextMenu({ clientX: rect.left, clientY: rect.bottom + 6 }, state.paperId);
   });
 
-  /**
-   * 切换左侧试卷与章节侧边栏收起状态，并在本地持久化
-   * @param {boolean} collapsed 是否收起侧栏
-   */
-  function setEntrySidebarCollapsed(collapsed) {
-    const next = Boolean(collapsed);
-    document.documentElement.classList.toggle("entry-sidebar-collapsed", next);
-    const toggle = $("entrySidebarToggle");
-    if (toggle) {
-      toggle.setAttribute("aria-pressed", String(next));
-      const label = next ? "展开待录列表" : "收起待录列表";
-      toggle.setAttribute("aria-label", label);
-      toggle.title = `${label}（快捷键 [）`;
-    }
-    writePref("qb-entry-sidebar-collapsed", next ? "1" : "0");
-  }
-
-  if (typeof readPref === "function" && readPref("qb-entry-sidebar-collapsed") === "1") {
-    setEntrySidebarCollapsed(true);
-  }
-  $("entrySidebarToggle")?.addEventListener("click", (event) => {
-    const collapsed = !document.documentElement.classList.contains("entry-sidebar-collapsed");
-    setEntrySidebarCollapsed(collapsed);
-    releaseToggleFocus(event);
-  });
+  // 录入页左侧待录列表不再收起（需要大画面审核直接使用「全屏」模式）。
+  document.documentElement.classList.remove("entry-sidebar-collapsed");
 
   $("entryChapterToggle")?.addEventListener("click", () => {
     const nav = $("entryChapterNav");
@@ -3569,14 +3546,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       event.preventDefault();
       closePaperContextMenu();
       return;
-    }
-    if (event.key === "[" && !event.ctrlKey && !event.metaKey && !event.altKey) {
-      const active = document.activeElement;
-      if (active && (/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName) || active.isContentEditable)) return;
-      if (window.location.pathname === "/settings") return;
-      if (document.querySelector("dialog[open]") || document.documentElement.classList.contains("review-fullscreen")) return;
-      event.preventDefault();
-      setEntrySidebarCollapsed(!document.documentElement.classList.contains("entry-sidebar-collapsed"));
     }
   }, true);
   $("paperMenu")?.querySelector(".paper-menu-panel")?.addEventListener("click", (event) => {
@@ -10233,8 +10202,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       document.title = "题有据 · 共用设置";
       document.querySelector(".layout").hidden = true;
       $("settingsHome").hidden = false;
-      // 设置页没有待录侧栏；共用录入页顶栏时把收起按钮藏掉，避免空壳开关。
-      if ($("entrySidebarToggle")) $("entrySidebarToggle").hidden = true;
       document.querySelectorAll(".topnav a").forEach((link) => {
         const active = new URL(link.href, window.location.href).pathname === "/settings";
         link.classList.toggle("active", active);

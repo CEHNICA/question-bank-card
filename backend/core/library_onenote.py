@@ -14,6 +14,7 @@ import sys
 import tempfile
 import threading
 import time
+import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -378,6 +379,13 @@ PAGE_ID_PLACEHOLDER = "__QB_PAGE_ID__"
 BACKLINK_SCHEME = "tiyouju"
 # OneNote 页面里题面图的最大显示宽度（磅）。再宽在常规窗口里就要横向滚动了。
 MAX_IMAGE_WIDTH_PT = 520.0
+DEFAULT_OUTLINE_X_PT = 36.0
+DEFAULT_OUTLINE_Y_PT = 86.0
+DEFAULT_OUTLINE_WIDTH_PT = 540.0
+FALLBACK_OUTLINE_WIDTH_PT = 420.0
+FALLBACK_INK_WIDTH_PT = 240.0
+# 新一刷插在当前整页最右侧内容再往右留白 240pt 处，聚焦时左侧旧解法落在视野外，天然防剧透。
+SAFE_HORIZONTAL_GAP_PT = 240.0
 
 # NOTE: 只在题面图渲染失败时才走文字兜底，所以这里只覆盖中学数学最常见的命令，
 # 目标是「读得懂」，不是完整的 LaTeX 排版。
@@ -623,14 +631,21 @@ def _span(text: str, *, size: str = "11.0pt", color: str = "#1E293B", bold: bool
     return f'<span style="font-family:微软雅黑;font-size:{size};color:{color};{weight}">{html.escape(text)}</span>'
 
 
-def build_page_xml(publication: PublishedQuestion, title: str, png: bytes | None) -> str:
-    """生成 OneNote 答题页的完整页面 XML（页面 ID 用占位符，由桥接脚本建页后替换）。
-
-    题号和出处放在 OneNote 自己的大标题里。正文只留回跳链接和题面，手写写在下面的空白处。
-    """
+def _question_rows(publication: PublishedQuestion, png: bytes | None, *, header_label: str = "") -> list[str]:
+    """构造一组 OneNote Outline 内部的行（回跳链接、可选刷次标头与题面图/文字兜底）。"""
     content = publication.content or {}
     link = html.escape(backlink_url(publication), quote=True)
-    rows = [_text_oe(f'<a href="{link}">{_span("在题有据中打开此题", size="10.0pt", color="#4B5563")}</a>')]
+    rows: list[str] = []
+    if header_label:
+        rows.append(
+            _text_oe(
+                f"{_span(header_label, size='11.0pt', color='#047857', bold=True)}"
+                f'&nbsp;&nbsp;<a href="{link}">{_span("在题有据中打开此题", size="10.0pt", color="#4B5563")}</a>'
+            )
+        )
+    else:
+        rows.append(_text_oe(f'<a href="{link}">{_span("在题有据中打开此题", size="10.0pt", color="#4B5563")}</a>'))
+
     if png:
         rows.append(_image_oe(png))
     else:
@@ -646,14 +661,109 @@ def build_page_xml(publication: PublishedQuestion, title: str, png: bytes | None
                 rows.append(
                     _text_oe(_span(f"{key}. {latex_to_plain(str(options[key]))}", size="12.0pt", color="#1E293B"))
                 )
+    return rows
 
+
+def build_page_xml(publication: PublishedQuestion, title: str, png: bytes | None, *, header_label: str = "") -> str:
+    """生成 OneNote 答题页的完整页面 XML（页面 ID 用占位符，由桥接脚本建页后替换）。
+
+    题号和出处放在 OneNote 自己的大标题里。正文只留回跳链接和题面，手写写在下面的空白处。
+    """
+    rows = _question_rows(publication, png, header_label=header_label)
     return (
         '<?xml version="1.0"?>'
         f'<one:Page xmlns:one="{ONE_NS}" ID="{PAGE_ID_PLACEHOLDER}">'
         f"<one:Title><one:OE><one:T>{_cdata(html.escape(title))}</one:T></one:OE></one:Title>"
-        f"<one:Outline><one:OEChildren>{''.join(rows)}</one:OEChildren></one:Outline>"
+        f'<one:Outline><one:Position x="{DEFAULT_OUTLINE_X_PT:.1f}" y="{DEFAULT_OUTLINE_Y_PT:.1f}" z="0"/>'
+        f'<one:Size width="{DEFAULT_OUTLINE_WIDTH_PT:.1f}" height="240.0" isSetByUser="true"/>'
+        f"<one:OEChildren>{''.join(rows)}</one:OEChildren></one:Outline>"
         "</one:Page>"
     )
+
+
+def build_attempt_outline_xml(
+    publication: PublishedQuestion, png: bytes | None, *, x: float, y: float, header_label: str
+) -> str:
+    """构造可追加到现有 OneNote 页面的独立 <one:Outline> 片段（带定位坐标与刷次标头）。"""
+    rows = _question_rows(publication, png, header_label=header_label)
+    return (
+        f'<one:Outline xmlns:one="{ONE_NS}">'
+        f'<one:Position x="{x:.1f}" y="{y:.1f}" z="0"/>'
+        f'<one:Size width="{DEFAULT_OUTLINE_WIDTH_PT:.1f}" height="240.0" isSetByUser="true"/>'
+        f"<one:OEChildren>{''.join(rows)}</one:OEChildren>"
+        "</one:Outline>"
+    )
+
+
+def compute_page_right_edge(page_xml: str) -> float:
+    """扫描 OneNote 页面 XML 中所有 Outline / InkDrawing / Image 等对象，计算最右侧横坐标 max_x。"""
+    raw = str(page_xml or "").strip()
+    if not raw:
+        return 0.0
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        return 0.0
+
+    container_tags = {
+        f"{{{ONE_NS}}}Outline",
+        f"{{{ONE_NS}}}InkDrawing",
+        f"{{{ONE_NS}}}Image",
+        f"{{{ONE_NS}}}InsertedFile",
+        f"{{{ONE_NS}}}MediaFile",
+    }
+    pos_tag = f"{{{ONE_NS}}}Position"
+    size_tag = f"{{{ONE_NS}}}Size"
+    ink_tag = f"{{{ONE_NS}}}InkDrawing"
+
+    max_x = 0.0
+    for elem in root.iter():
+        if elem.tag not in container_tags:
+            continue
+        pos = elem.find(pos_tag)
+        if pos is None:
+            continue
+        try:
+            x = float(pos.attrib.get("x", "0"))
+        except (TypeError, ValueError):
+            continue
+        if x < 0:
+            x = 0.0
+        size = elem.find(size_tag)
+        width = 0.0
+        if size is not None:
+            try:
+                width = float(size.attrib.get("width", "0"))
+            except (TypeError, ValueError):
+                width = 0.0
+        if width <= 0:
+            width = FALLBACK_INK_WIDTH_PT if elem.tag == ink_tag else FALLBACK_OUTLINE_WIDTH_PT
+        right = x + width
+        if right > max_x:
+            max_x = right
+    return round(max_x, 1)
+
+
+def _format_attempt_stamp(dt: datetime | None = None) -> tuple[str, str, str]:
+    local_dt = (dt or datetime.now()).astimezone()
+    return local_dt.isoformat(), local_dt.strftime("%Y-%m-%d"), local_dt.strftime("%Y-%m-%d %H:%M")
+
+
+def _save_onenote_record(publication: PublishedQuestion, onenote_record: dict[str, Any]) -> None:
+    content = dict(publication.content or {})
+    if not str(content.get("source_filename") or "").strip():
+        content["source_filename"] = publication.source_filename or ""
+        publication.content = content
+        publication.save(update_fields=["content"])
+
+    extras = dict(publication.extras or {})
+    extras["onenote"] = onenote_record
+    try:
+        library.save_extras(publication, extras)
+    except Exception:
+        logger.exception("OneNote 页面已建好，但写入题库关联失败 publication=%s", publication.pk)
+        publication.extras = extras
+        publication.save(update_fields=["extras"])
 
 
 def create_or_sync_page(publication: PublishedQuestion) -> dict[str, Any]:
@@ -675,6 +785,7 @@ def create_or_sync_page(publication: PublishedQuestion) -> dict[str, Any]:
 
     _nb_id, sec_id, nb_name, sec_name = resolve_target_section()
     title = _page_title(publication)
+    created_iso, created_date, created_hm = _format_attempt_stamp()
 
     threading.Thread(target=_ensure_protocol_background, name="onenote-protocol-register", daemon=True).start()
 
@@ -695,6 +806,22 @@ def create_or_sync_page(publication: PublishedQuestion) -> dict[str, Any]:
         link_data = call_bridge("hyperlink", id=page_id)
         link = link_data.get("link", "")
 
+    outline_id = str(data.get("outlineId") or "").strip()
+    focus_object_id = str(data.get("focusObjectId") or outline_id).strip()
+    object_url = str(data.get("objectUrl") or link or "").strip()
+
+    first_attempt = {
+        "attempt": 1,
+        "created_at": created_iso,
+        "date": created_date,
+        "label": f"{created_date} 笔记",
+        "outline_id": outline_id,
+        "focus_object_id": focus_object_id,
+        "object_url": object_url,
+        "x": DEFAULT_OUTLINE_X_PT,
+        "y": DEFAULT_OUTLINE_Y_PT,
+    }
+
     onenote_record = {
         "url": link,
         "page_id": page_id,
@@ -702,22 +829,10 @@ def create_or_sync_page(publication: PublishedQuestion) -> dict[str, Any]:
         "notebook": nb_name,
         "section": sec_name,
         "updated_at": datetime.now(UTC).isoformat(),
+        "attempts": [first_attempt],
     }
 
-    content = dict(publication.content or {})
-    if not str(content.get("source_filename") or "").strip():
-        content["source_filename"] = publication.source_filename or ""
-        publication.content = content
-        publication.save(update_fields=["content"])
-
-    extras = dict(publication.extras or {})
-    extras["onenote"] = onenote_record
-    try:
-        library.save_extras(publication, extras)
-    except Exception:
-        logger.exception("OneNote 页面已建好，但写入题库关联失败 publication=%s", publication.pk)
-        publication.extras = extras
-        publication.save(update_fields=["extras"])
+    _save_onenote_record(publication, onenote_record)
 
     if link:
         shell_open_onenote(link)
@@ -735,14 +850,71 @@ def create_or_sync_page(publication: PublishedQuestion) -> dict[str, Any]:
     return onenote_record
 
 
-def _refine_open(page_id: str | None, url: str | None) -> bool:
+def start_attempt(publication: PublishedQuestion) -> dict[str, Any]:
+    """发起新的一刷（首次则建页记第 1 刷；已有页则在当前最右侧安全区插入并对象级聚焦）。"""
+    existing = (publication.extras or {}).get("onenote") or {}
+    if not isinstance(existing, dict) or not str(existing.get("page_id") or "").strip():
+        return create_or_sync_page(publication)
+
+    page_id = str(existing["page_id"]).strip()
+    page_data = call_bridge("page", id=page_id, timeout_seconds=20)
+    page_xml = str((page_data or {}).get("xml") or "")
+    if not page_xml:
+        raise OneNoteError("未在 OneNote 中找到该题原页面；如需新建，请先取消当前关联后重试。")
+
+    max_x = compute_page_right_edge(page_xml)
+    insert_x = round(max_x + SAFE_HORIZONTAL_GAP_PT, 1) if max_x > 0 else DEFAULT_OUTLINE_X_PT
+    insert_y = DEFAULT_OUTLINE_Y_PT
+
+    prev_attempts = existing.get("attempts") if isinstance(existing.get("attempts"), list) else []
+    max_num = max((int(a.get("attempt") or 0) for a in prev_attempts if isinstance(a, dict)), default=1)
+    next_num = max(2, max_num + 1) if prev_attempts or existing.get("page_id") else 1
+
+    created_iso, created_date, created_hm = _format_attempt_stamp()
+    attempt_label = f"{created_date} 重做"
+
+    png = cached_question_image(publication) or _source_image_png(publication) or render_question_image(publication)
+    outline_xml = build_attempt_outline_xml(publication, png, x=insert_x, y=insert_y, header_label=attempt_label)
+
+    append_res = call_bridge(
+        "append_outline", timeout_seconds=40, pageId=page_id, outlineXml=outline_xml, marker=created_hm
+    )
+
+    outline_id = str((append_res or {}).get("outlineId") or "").strip()
+    focus_object_id = str((append_res or {}).get("focusObjectId") or outline_id).strip()
+    object_url = str((append_res or {}).get("objectUrl") or existing.get("url") or "").strip()
+
+    attempt_entry = {
+        "attempt": next_num,
+        "created_at": created_iso,
+        "date": created_date,
+        "label": attempt_label,
+        "outline_id": outline_id,
+        "focus_object_id": focus_object_id,
+        "object_url": object_url,
+        "x": insert_x,
+        "y": insert_y,
+    }
+
+    updated_attempts = [a for a in prev_attempts if isinstance(a, dict)] + [attempt_entry]
+    updated_record = dict(existing)
+    updated_record["updated_at"] = datetime.now(UTC).isoformat()
+    updated_record["attempts"] = updated_attempts
+    _save_onenote_record(publication, updated_record)
+    return updated_record
+
+
+def _refine_open(page_id: str | None, url: str | None, *, object_id: str | None = None) -> bool:
     """COM 切页并置前；若 COM 失败或未置前，再通过系统协议补开一次，返回是否至少有一种方式生效。"""
     navigated = False
     focused = False
     has_window = False
     if page_id:
         try:
-            data = call_bridge("navigate", id=str(page_id), timeout_seconds=12)
+            nav_kwargs: dict[str, Any] = {"id": str(page_id), "timeout_seconds": 12}
+            if object_id:
+                nav_kwargs["objectId"] = str(object_id)
+            data = call_bridge("navigate", **nav_kwargs)
             navigated = bool(data.get("navigated", True)) if isinstance(data, dict) else True
             if isinstance(data, dict):
                 focused = bool(data.get("focused"))
@@ -750,15 +922,15 @@ def _refine_open(page_id: str | None, url: str | None) -> bool:
             else:
                 has_window = focused
         except Exception as exc:
-            logger.warning("Failed to navigate by page_id=%s: %s", page_id, exc)
+            logger.warning("Failed to navigate by page_id=%s object_id=%s: %s", page_id, object_id, exc)
     opened_by_shell = False
     if url and (not navigated or not focused):
         opened_by_shell = bool(shell_open_onenote(str(url)))
     return (navigated and (focused or has_window)) or opened_by_shell
 
 
-def open_page(publication: PublishedQuestion, *, wait: bool = False) -> dict[str, Any]:
-    """打开已关联解答页。
+def open_page(publication: PublishedQuestion, *, wait: bool = False, object_id: str | None = None) -> dict[str, Any]:
+    """打开已关联解答页（支持传入 object_id 精确跳转到某一次刷题区域）。
 
     默认兼容立刻返回的异步路径；前端传入 wait=True 时同步完成 COM/协议唤起，
     让打开过程中的等待条持续显示到实际唤起结束。
@@ -770,18 +942,182 @@ def open_page(publication: PublishedQuestion, *, wait: bool = False) -> dict[str
 
     page_id = record.get("page_id")
     url = record.get("url")
+    target_object_id = str(object_id or "").strip() or None
+    if target_object_id:
+        for attempt in record.get("attempts") or []:
+            if isinstance(attempt, dict) and (
+                attempt.get("focus_object_id") == target_object_id or attempt.get("outline_id") == target_object_id
+            ):
+                if attempt.get("object_url"):
+                    url = attempt.get("object_url")
+                break
     if not page_id and not url:
         raise OneNoteError("无法定位到该页面，链接或页面标识已丢失。")
 
     if wait:
-        if not _refine_open(page_id, url):
+        ok = _refine_open(page_id, url, object_id=target_object_id) if target_object_id else _refine_open(page_id, url)
+        if not ok:
             raise OneNoteError("未能唤起 OneNote，请确认桌面版 OneNote 已启动并打开对应笔记本。")
         return {"ok": True, "opened": True, "focused": True, "onenote": record, "deferred": False}
 
+    refine_kwargs = {"object_id": target_object_id} if target_object_id else {}
     threading.Thread(
-        target=_refine_open, args=(page_id, url), name=f"onenote-open-{publication.pk}", daemon=True
+        target=_refine_open,
+        args=(page_id, url),
+        kwargs=refine_kwargs,
+        name=f"onenote-open-{publication.pk}",
+        daemon=True,
     ).start()
     return {"ok": True, "opened": True, "focused": False, "onenote": record, "deferred": True}
+
+
+def _crop_and_compress_onenote_page(img, *, max_long_side: int = 1280, pad_px: int = 24) -> bytes:
+    """裁掉 OneNote 无限画布四周多余空白，保留舒适边距并压成紧凑 PNG。"""
+    from PIL import Image, ImageOps
+
+    rgb = ImageOps.exif_transpose(img).convert("RGB")
+    gray = rgb.convert("L")
+    # Treat near-white (>= 248) pixels as background so infinite-canvas margins crop cleanly.
+    mask = gray.point(lambda p: 255 if p < 248 else 0, mode="1")
+    bbox = mask.getbbox()
+    if bbox:
+        left = max(0, bbox[0] - pad_px)
+        top = max(0, bbox[1] - pad_px)
+        right = min(rgb.width, bbox[2] + pad_px)
+        bottom = min(rgb.height, bbox[3] + pad_px)
+        rgb = rgb.crop((left, top, right, bottom))
+
+    long_side = max(rgb.width, rgb.height)
+    if long_side > max_long_side > 0:
+        scale = max_long_side / float(long_side)
+        rgb = rgb.resize(
+            (max(1, int(round(rgb.width * scale))), max(1, int(round(rgb.height * scale)))), Image.Resampling.LANCZOS
+        )
+
+    quantized = rgb.quantize(colors=64, method=Image.Quantize.FASTOCTREE)
+    buf = io.BytesIO()
+    quantized.save(buf, format="PNG", optimize=True, compress_level=9)
+    return buf.getvalue()
+
+
+def export_page_step_images(
+    page_id: str, dest_dir: Path, *, max_pages: int = 3, max_long_side: int = 1280
+) -> list[Path]:
+    """将关联的 OneNote 页面导出为裁边压缩后的步骤 PNG 列表（必要时自动打开 OneNote）。"""
+    clean_page_id = str(page_id or "").strip()
+    if not clean_page_id:
+        raise OneNoteError("题目未关联有效的 OneNote 页面。")
+
+    import pymupdf
+    from PIL import Image
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="tyj-onenote-pdf-") as tmp_dir:
+        pdf_path = Path(tmp_dir) / "onenote-page.pdf"
+        _ensure_desktop_window()
+        result = call_bridge(
+            "publish", timeout_seconds=45, id=clean_page_id, dest=str(pdf_path), format=3, ensureWindow=True
+        )
+        if (
+            not isinstance(result, dict)
+            or not result.get("exists")
+            or not pdf_path.is_file()
+            or pdf_path.stat().st_size <= 0
+        ):
+            raise OneNoteError("未能从 OneNote 导出该笔记页 PDF。")
+
+        out_paths: list[Path] = []
+        with pymupdf.open(str(pdf_path)) as doc:
+            total = min(len(doc), max(1, int(max_pages)))
+            matrix = pymupdf.Matrix(150 / 72.0, 150 / 72.0)
+            for idx in range(total):
+                pix = doc[idx].get_pixmap(matrix=matrix, alpha=False)
+                pil_img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                png_bytes = _crop_and_compress_onenote_page(pil_img, max_long_side=max_long_side)
+                target = dest_dir / f"onenote-step-{idx + 1}.png"
+                target.write_bytes(png_bytes)
+                out_paths.append(target)
+        return out_paths
+
+
+def build_onenote_timeline() -> dict[str, Any]:
+    """聚合全库所有刷题记录，按日期倒序生成每日刷题时间轴。"""
+    rows = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED).only(
+        "id", "source_filename", "number", "question_type", "content", "extras", "published_at"
+    )
+    events: list[dict[str, Any]] = []
+    questions_seen: set[str] = set()
+
+    for pub in rows:
+        extras = pub.extras if isinstance(pub.extras, dict) else {}
+        onenote = extras.get("onenote")
+        if not isinstance(onenote, dict) or (not onenote.get("page_id") and not onenote.get("url")):
+            continue
+        pid = str(pub.pk)
+        questions_seen.add(pid)
+        content = pub.content if isinstance(pub.content, dict) else {}
+        stem = str(content.get("stem") or "").strip()
+        stem_preview = re.sub(r"\s+", " ", stem)[:120]
+        source_name = _display_source_name(pub.source_filename or content.get("source_filename") or "")
+        section = str(content.get("section") or "").strip()
+        attempts = onenote.get("attempts") if isinstance(onenote.get("attempts"), list) else []
+
+        if attempts:
+            for item in attempts:
+                if not isinstance(item, dict):
+                    continue
+                created_at = str(item.get("created_at") or onenote.get("updated_at") or "")
+                date_str = str(item.get("date") or created_at[:10] or "").strip()
+                if not date_str:
+                    date_str = (onenote.get("title") or "")[:10] or "未记录日期"
+                events.append(
+                    {
+                        "publication_id": pid,
+                        "number": pub.number,
+                        "question_type": pub.question_type,
+                        "source_filename": source_name,
+                        "section": section,
+                        "stem_preview": stem_preview,
+                        "attempt": int(item.get("attempt") or 1),
+                        "label": str(item.get("label") or f"第 {item.get('attempt') or 1} 刷"),
+                        "created_at": created_at,
+                        "date": date_str,
+                        "object_id": str(item.get("focus_object_id") or item.get("outline_id") or ""),
+                        "object_url": str(item.get("object_url") or onenote.get("url") or ""),
+                        "page_id": str(onenote.get("page_id") or ""),
+                    }
+                )
+        else:
+            raw_date = str(onenote.get("updated_at") or onenote.get("title") or "")
+            date_str = raw_date[:10] if len(raw_date) >= 10 and raw_date[4] == "-" else "早期记录"
+            events.append(
+                {
+                    "publication_id": pid,
+                    "number": pub.number,
+                    "question_type": pub.question_type,
+                    "source_filename": source_name,
+                    "section": section,
+                    "stem_preview": stem_preview,
+                    "attempt": 1,
+                    "label": str(onenote.get("title") or "第 1 刷"),
+                    "created_at": raw_date,
+                    "date": date_str,
+                    "object_id": "",
+                    "object_url": str(onenote.get("url") or ""),
+                    "page_id": str(onenote.get("page_id") or ""),
+                }
+            )
+
+    events.sort(key=lambda item: (item["date"], item["created_at"], item["attempt"]), reverse=True)
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for ev in events:
+        grouped.setdefault(ev["date"], []).append(ev)
+
+    days = [
+        {"date": day, "count": len(items), "items": items}
+        for day, items in sorted(grouped.items(), key=lambda pair: pair[0], reverse=True)
+    ]
+    return {"ok": True, "days": days, "total_attempts": len(events), "total_questions": len(questions_seen)}
 
 
 # ---------------- API Views ----------------
@@ -805,21 +1141,57 @@ def onenote_create_view(request: HttpRequest, publication_id: str) -> JsonRespon
 
 
 @csrf_exempt
+def onenote_attempt_view(request: HttpRequest, publication_id: str) -> JsonResponse:
+    """POST /api/library/<publication_id>/onenote/attempt: 在同页右侧安全区发起新的一刷。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+
+    publication = get_object_or_404(PublishedQuestion, pk=publication_id)
+    try:
+        record = start_attempt(publication)
+        return JsonResponse({"ok": True, "onenote": record})
+    except OneNoteError as err:
+        return JsonResponse({"ok": False, "error": str(err)}, status=400)
+    except Exception as exc:
+        logger.exception("Unexpected error starting OneNote attempt for %s", publication_id)
+        return JsonResponse({"ok": False, "error": f"创建 OneNote 刷题区域异常: {exc}"}, status=500)
+
+
+@csrf_exempt
 def onenote_open_view(request: HttpRequest, publication_id: str) -> JsonResponse:
-    """POST /api/library/<publication_id>/onenote/open: 在 OneNote 中调起并定位到本题解答页。"""
+    """POST /api/library/<publication_id>/onenote/open: 在 OneNote 中调起并定位到本题解答页或指定刷次对象。"""
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
 
     publication = get_object_or_404(PublishedQuestion, pk=publication_id)
     try:
         wait = request.GET.get("wait") in {"1", "true", "yes"}
-        result = open_page(publication, wait=wait)
+        object_id = str(request.GET.get("object_id") or "").strip() or None
+        if not object_id and request.body:
+            try:
+                body = json.loads(request.body)
+                if isinstance(body, dict):
+                    object_id = str(body.get("object_id") or "").strip() or None
+            except (ValueError, TypeError):
+                object_id = None
+        if object_id:
+            result = open_page(publication, wait=wait, object_id=object_id)
+        else:
+            result = open_page(publication, wait=wait)
         return JsonResponse(result)
     except OneNoteError as err:
         return JsonResponse({"ok": False, "error": str(err)}, status=400)
     except Exception as exc:
         logger.exception("Unexpected error opening OneNote page for %s", publication_id)
         return JsonResponse({"ok": False, "error": f"打开 OneNote 页面异常: {exc}"}, status=500)
+
+
+@csrf_exempt
+def onenote_timeline_view(request: HttpRequest) -> JsonResponse:
+    """GET /api/library/onenote/timeline: 返回按天分组的个人刷题时间轴。"""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    return JsonResponse(build_onenote_timeline())
 
 
 @csrf_exempt
@@ -839,15 +1211,23 @@ def onenote_unbind_view(request: HttpRequest, publication_id: str) -> JsonRespon
 
 @csrf_exempt
 def deep_link_view(request: HttpRequest) -> JsonResponse:
-    """GET /api/deep-link: 消费一次 tiyouju:// 回跳留下的定位请求。"""
+    """GET /api/deep-link: 消费一次 tiyouju:// 回跳留下的定位或社区动作请求。"""
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
     from . import tiyouju_protocol
 
     pending = tiyouju_protocol.consume_deep_link()
     if not pending:
-        return JsonResponse({"ok": True, "q": None})
-    return JsonResponse({"ok": True, "q": pending.get("q"), "ts": pending.get("ts")})
+        return JsonResponse({"ok": True, "q": None, "action": None})
+    return JsonResponse(
+        {
+            "ok": True,
+            "q": pending.get("q"),
+            "action": pending.get("action"),
+            "payload": pending,
+            "ts": pending.get("ts"),
+        }
+    )
 
 
 @csrf_exempt

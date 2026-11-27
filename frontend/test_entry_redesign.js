@@ -8,9 +8,8 @@ const css = fs.readFileSync(path.join(__dirname, "styles.css"), "utf8");
 const appJs = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
 
 describe("录入题目页（/）重设计契约检查", () => {
-  it("index.html 包含纯图标侧栏折叠、章节目录、右上角题库工作台+设置与显式试卷操作按钮，并已移除聚光灯模式按钮", () => {
-    assert.match(html, /id="entrySidebarToggle"[^>]*aria-label="收起待录列表"/);
-    assert.doesNotMatch(html, /id="entrySidebarToggle"[\s\S]*?>试卷栏</);
+  it("index.html 移除冗余的左侧收起按钮（已有全屏放大审题），并包含章节目录、右上角题库工作台+设置与显式试卷操作按钮", () => {
+    assert.doesNotMatch(html, /id="entrySidebarToggle"/);
     assert.doesNotMatch(html, /id="focusToggle"/);
     assert.doesNotMatch(html, /id="settingsFocus"/);
     assert.match(html, /class="review-top-actions review-top-actions-end[\s\S]*?id="reviewReturnLibrary"[\s\S]*?id="settingsButton"/);
@@ -39,16 +38,14 @@ describe("录入题目页（/）重设计契约检查", () => {
     assert.match(css, /\.card-tick\s*\{[\s\S]*?color:\s*#[0-9a-fA-F]{3,6};/);
   });
 
-  it("app.js 挂载试卷操作按钮、侧栏折叠及对应试卷下挂载多章节导航", () => {
+  it("app.js 挂载试卷操作按钮及对应试卷下挂载多章节导航，并保留全屏审题", () => {
     assert.match(appJs, /function\s+renderEntryChapterNav\s*\(/);
     assert.match(appJs, /function\s+jumpToChapterQuestion\s*\(/);
     assert.match(appJs, /pendingChapterJumpId/);
     assert.match(appJs, /function\s+syncActiveChapterNav\s*\(/);
-    assert.match(appJs, /function\s+setEntrySidebarCollapsed\s*\(/);
     assert.match(appJs, /if\s*\(isActive\s*&&\s*chapterNav\)\s*\{[\s\S]*?item\.append\(chapterNav\)/);
     assert.match(appJs, /\$\("entryChapterToggle"\)\?\.addEventListener\("click"/);
     assert.match(appJs, /\$\("paperMenuTrigger"\)\?\.addEventListener\("click"/);
-    assert.match(appJs, /\$\("entrySidebarToggle"\)\?\.addEventListener\("click"/);
     assert.match(appJs, /renderEntryChapterNav\(\);/);
     assert.match(appJs, /syncActiveChapterNav\(id\)/);
   });

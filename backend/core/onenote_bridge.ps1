@@ -690,14 +690,31 @@ try {
       # PublishFormat: pfOneNote=0 pfOneNotePackage=1 pfMHTML=2 pfPDF=3 pfXPS=4 pfWord=5 pfEMF=6 pfHTML=7 pfOneNote2007=8
       $id = [string]$params.id
       $dest = [string]$params.dest
-      $pf = 1
+      $pf = 3
       if ($params.format) { $pf = [int]$params.format }
       $clsid = [string]$params.clsid
+      if ($params.ensureWindow -or -not (Has-VisibleOneNoteFrame)) {
+        [void](Ensure-OneNoteWindow -TimeoutSeconds 12)
+        $one = Get-OneNote
+      }
       if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Force }
-      if ($clsid) { [void]$one.Publish($id, $dest, $pf, $clsid) }
-      else { [void]$one.Publish($id, $dest, $pf) }
-      # OneNote can finish writing the package after the call returns
-      for ($i = 0; $i -lt 20; $i++) {
+      $publishedOk = $false
+      for ($attempt = 0; $attempt -lt 2; $attempt++) {
+        try {
+          if ($clsid) { [void]$one.Publish($id, $dest, $pf, $clsid) }
+          else { [void]$one.Publish($id, $dest, $pf) }
+          $publishedOk = $true
+          break
+        } catch {
+          if ($attempt -eq 0 -and (Ensure-OneNoteWindow -TimeoutSeconds 12)) {
+            $one = Get-OneNote
+            continue
+          }
+          throw
+        }
+      }
+      # OneNote can finish writing the file after Publish returns
+      for ($i = 0; $i -lt 24; $i++) {
         Start-Sleep -Milliseconds 250
         if (Test-Path -LiteralPath $dest) {
           $sz = (Get-Item -LiteralPath $dest).Length
@@ -707,7 +724,7 @@ try {
       $bytes = 0
       $exists = $false
       if (Test-Path -LiteralPath $dest) { $exists = $true; $bytes = (Get-Item -LiteralPath $dest).Length }
-      $data = [ordered]@{ dest = $dest; bytes = $bytes; exists = $exists; publishFormat = $pf }
+      $data = [ordered]@{ dest = $dest; bytes = $bytes; exists = $exists; publishFormat = $pf; published = $publishedOk }
     }
 
     'create' {
@@ -790,7 +807,43 @@ try {
       [void]$one.UpdatePageContent($doc.OuterXml)
       $link = $null
       try { [void]$one.GetHyperlinkToObject([string]$targetId, '', [ref]$link) } catch {}
-      $data = [ordered]@{ id = [string]$targetId; link = [string]$link }
+
+      $outlineId = ''
+      $focusObjectId = ''
+      $objectUrl = ''
+      try {
+        $afterXml = Get-PageContent $one $targetId
+        if ($afterXml) {
+          $afterDoc = New-Object System.Xml.XmlDocument
+          $afterDoc.PreserveWhitespace = $true
+          $afterDoc.LoadXml($afterXml)
+          $afterNs = New-Object System.Xml.XmlNamespaceManager($afterDoc.NameTable)
+          $afterNs.AddNamespace('one', $ONE_NS)
+          $firstOutline = $afterDoc.DocumentElement.SelectSingleNode('./one:Outline[@objectID]', $afterNs)
+          if ($firstOutline) {
+            $outlineId = [string]$firstOutline.GetAttribute('objectID')
+            $focusObjectId = $outlineId
+            $firstOe = $firstOutline.SelectSingleNode('.//one:OE[@objectID]', $afterNs)
+            if ($firstOe) {
+              $oeId = [string]$firstOe.GetAttribute('objectID')
+              if ($oeId) { $focusObjectId = $oeId }
+            }
+            if ($outlineId) {
+              $objLinkOut = $null
+              try { [void]$one.GetHyperlinkToObject([string]$targetId, $outlineId, [ref]$objLinkOut) } catch {}
+              if ($objLinkOut) { $objectUrl = [string]$objLinkOut }
+            }
+          }
+        }
+      } catch {}
+
+      $data = [ordered]@{
+        id = [string]$targetId
+        link = [string]$link
+        outlineId = $outlineId
+        focusObjectId = $focusObjectId
+        objectUrl = $objectUrl
+      }
     }
 
     'update' {
@@ -875,7 +928,17 @@ try {
       if (-not (Has-VisibleOneNoteFrame)) {
         [void](Ensure-OneNoteWindow -TimeoutSeconds 9)
       }
-      [void]$one.NavigateTo([string]$params.id)
+      $targetId = [string]$params.id
+      $objectId = if ($params.objectId) { [string]$params.objectId } else { '' }
+      if ($objectId) {
+        try {
+          [void]$one.NavigateTo($targetId, $objectId)
+        } catch {
+          [void]$one.NavigateTo($targetId)
+        }
+      } else {
+        [void]$one.NavigateTo($targetId)
+      }
       $focused = $false
       try { $focused = [bool](Show-OneNoteForeground) } catch { $focused = $false }
       if (-not $focused -and (Has-VisibleOneNoteFrame)) {
@@ -883,13 +946,112 @@ try {
         try { $focused = [bool](Show-OneNoteForeground) } catch { $focused = $false }
       }
       $hasWindow = Has-VisibleOneNoteFrame
-      $data = [ordered]@{ id = [string]$params.id; navigated = $true; focused = $focused; has_window = $hasWindow }
+      $data = [ordered]@{ id = $targetId; objectId = $objectId; navigated = $true; focused = $focused; has_window = $hasWindow }
     }
 
     'hyperlink' {
       $link = $null
-      [void]$one.GetHyperlinkToObject([string]$params.id, '', [ref]$link)
-      $data = [ordered]@{ id = [string]$params.id; link = [string]$link }
+      $objectId = if ($params.objectId) { [string]$params.objectId } else { '' }
+      [void]$one.GetHyperlinkToObject([string]$params.id, $objectId, [ref]$link)
+      $data = [ordered]@{ id = [string]$params.id; objectId = $objectId; link = [string]$link }
+    }
+
+    'append_outline' {
+      if (-not (Has-VisibleOneNoteFrame)) {
+        [void](Ensure-OneNoteWindow -TimeoutSeconds 9)
+      }
+      $targetPageId = [string]$params.pageId
+      $rawOutlineXml = [string]$params.outlineXml
+      $marker = if ($params.marker) { [string]$params.marker } else { '' }
+      if (-not $targetPageId) { throw 'pageId is required' }
+      if (-not $rawOutlineXml) { throw 'outlineXml is required' }
+
+      $beforeXml = Get-PageContent $one $targetPageId
+      if (-not $beforeXml) { throw ('page not found: ' + $targetPageId) }
+
+      $doc = New-Object System.Xml.XmlDocument
+      $doc.PreserveWhitespace = $true
+      $doc.LoadXml($beforeXml)
+      $ns = New-Object System.Xml.XmlNamespaceManager($doc.NameTable)
+      $ns.AddNamespace('one', $ONE_NS)
+      $page = $doc.DocumentElement
+
+      $beforeIds = New-Object 'System.Collections.Generic.HashSet[string]'
+      foreach ($ol in $page.SelectNodes('./one:Outline', $ns)) {
+        $oid = $ol.GetAttribute('objectID')
+        if ($oid) { [void]$beforeIds.Add($oid) }
+      }
+
+      $fragDoc = New-Object System.Xml.XmlDocument
+      $fragDoc.PreserveWhitespace = $true
+      $fragDoc.LoadXml($rawOutlineXml)
+      $importedOutline = $doc.ImportNode($fragDoc.DocumentElement, $true)
+      [void]$page.AppendChild($importedOutline)
+
+      [void]$one.UpdatePageContent($doc.OuterXml)
+
+      $afterXml = Get-PageContent $one $targetPageId
+      $afterDoc = New-Object System.Xml.XmlDocument
+      $afterDoc.PreserveWhitespace = $true
+      $afterDoc.LoadXml($afterXml)
+      $afterNs = New-Object System.Xml.XmlNamespaceManager($afterDoc.NameTable)
+      $afterNs.AddNamespace('one', $ONE_NS)
+
+      $newOutline = $null
+      $lastCandidate = $null
+      foreach ($ol in $afterDoc.DocumentElement.SelectNodes('./one:Outline', $afterNs)) {
+        $oid = $ol.GetAttribute('objectID')
+        if ($oid -and -not $beforeIds.Contains($oid)) {
+          $lastCandidate = $ol
+          if ($marker -and $ol.OuterXml.Contains($marker)) {
+            $newOutline = $ol
+            break
+          }
+        }
+      }
+      if (-not $newOutline) { $newOutline = $lastCandidate }
+
+      $newOutlineId = if ($newOutline) { [string]$newOutline.GetAttribute('objectID') } else { '' }
+      $focusObjectId = $newOutlineId
+      if ($newOutline) {
+        $firstOe = $newOutline.SelectSingleNode('.//one:OE[@objectID]', $afterNs)
+        if ($firstOe) {
+          $oeId = [string]$firstOe.GetAttribute('objectID')
+          if ($oeId) { $focusObjectId = $oeId }
+        }
+      }
+
+      $objLink = $null
+      try {
+        [void]$one.GetHyperlinkToObject($targetPageId, $newOutlineId, [ref]$objLink)
+      } catch {
+        $objLink = ''
+      }
+
+      $navTarget = if ($focusObjectId) { $focusObjectId } else { $newOutlineId }
+      if ($navTarget) {
+        try {
+          [void]$one.NavigateTo($targetPageId, $navTarget)
+        } catch {
+          try { [void]$one.NavigateTo($targetPageId) } catch {}
+        }
+      } else {
+        try { [void]$one.NavigateTo($targetPageId) } catch {}
+      }
+
+      $focused = $false
+      try { $focused = [bool](Show-OneNoteForeground) } catch { $focused = $false }
+      $hasWindow = Has-VisibleOneNoteFrame
+
+      $data = [ordered]@{
+        id = $targetPageId
+        outlineId = $newOutlineId
+        focusObjectId = $focusObjectId
+        objectUrl = [string]$objLink
+        navigated = $true
+        focused = $focused
+        has_window = $hasWindow
+      }
     }
 
     'scan_backups' {

@@ -124,8 +124,8 @@ test("窄屏下工具栏与题卡头部别再挤成一团", async (t) => {
       "窄屏收起的属性栏要 0 宽，别白占 48px"
     );
     assert.ok(
-      /#rightInspectorPane:not\(\.force-open\) #btnToggleInspector \{[\s\S]{0,400}?position: fixed;/.test(narrow),
-      "切换按钮要变成贴右边的小标签，不然就点不到了"
+      !/#btnToggleInspector/.test(narrow),
+      "右栏不再单独放收起按钮，两侧一起由左上角那个按钮开关"
     );
     assert.ok(
       /#rightInspectorPane\.force-open/.test(html),

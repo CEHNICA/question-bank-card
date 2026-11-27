@@ -30,7 +30,10 @@
 
 from __future__ import annotations
 
+import base64
 import contextlib
+import hashlib
+import io
 import json
 import os
 import re
@@ -343,6 +346,59 @@ def _resolve_export_folders(tag_ids: list[str] | None) -> dict:
     }
 
 
+def _resolve_export_publications(publication_ids: list[str] | None) -> dict:
+    """校验并展开指定题目（单题、多选题或自定义文件夹汇总的 PublishedQuestion ID）。"""
+    if not isinstance(publication_ids, (list, tuple)) or not publication_ids:
+        raise TransferError("先选择至少一道要打包的题目。")
+
+    from .demo import is_demo
+    from .models import PublishedQuestion
+
+    ordered_ids: list[str] = []
+    seen: set[str] = set()
+    for raw in publication_ids:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        try:
+            norm = _uuid_text(text)
+        except (ValueError, AttributeError, TypeError):
+            raise TransferError(f"题目编号「{text}」格式无效。") from None
+        if norm not in seen:
+            seen.add(norm)
+            ordered_ids.append(norm)
+
+    if not ordered_ids:
+        raise TransferError("先选择至少一道要打包的题目。")
+
+    rows = (
+        PublishedQuestion.objects.filter(
+            pk__in=ordered_ids,
+            status=PublishedQuestion.Status.PUBLISHED,
+            question__isnull=False,
+            question__deleted_at__isnull=True,
+            paper__isnull=False,
+        )
+        .select_related("paper", "question")
+        .order_by("source_filename", "number", "id")
+    )
+    matched_pubs = [pub for pub in rows if not is_demo(pub.paper)]
+    if not matched_pubs:
+        raise TransferError("所选范围内没有可分享的已入库正式题目（示例题不参与上传）。")
+
+    question_ids = {int(pub.question_id) for pub in matched_pubs if pub.question_id is not None}
+    publication_hexes = {_uuid_hex(pub.pk) for pub in matched_pubs}
+    papers_by_id = {pub.paper_id: pub.paper for pub in matched_pubs if pub.paper is not None}
+    papers = sorted(papers_by_id.values(), key=lambda paper: (paper.created_at, str(paper.pk)))
+    return {
+        "publications": matched_pubs,
+        "publication_hexes": publication_hexes,
+        "question_ids": question_ids,
+        "papers": papers,
+        "paper_hexes": {_uuid_hex(paper.pk) for paper in papers},
+    }
+
+
 def _resolve_export_papers(paper_ids: list[str] | None) -> list | None:
     """校验并按顺序取出要单独打包的资料；传入 None 表示整库导出。"""
     if paper_ids is None:
@@ -390,6 +446,7 @@ def _prune_snapshot_database(
     keep_paper_hexes: set[str],
     *,
     keep_question_ids: set[int] | None = None,
+    keep_publication_hexes: set[str] | None = None,
     extra_keep_tag_hexes: set[str] | None = None,
 ) -> None:
     """按选定资料或目录文件夹裁剪临时快照库：只留目标题目、解析、配图归属与相关标签。"""
@@ -434,6 +491,13 @@ def _prune_snapshot_database(
         f'OR question_id NOT IN (SELECT id FROM "{QUESTION_TABLE}")',
         (*paper_params, "published"),
     )
+    if keep_publication_hexes is not None:
+        writer.execute("CREATE TEMP TABLE IF NOT EXISTS _keep_publications (id TEXT PRIMARY KEY)")
+        writer.execute("DELETE FROM _keep_publications")
+        writer.executemany(
+            "INSERT OR IGNORE INTO _keep_publications (id) VALUES (?)", [(str(pid),) for pid in keep_publication_hexes]
+        )
+        writer.execute(f'DELETE FROM "{PUBLICATION_TABLE}" WHERE id NOT IN (SELECT id FROM _keep_publications)')
     if _table_exists(writer, SOLUTION_TABLE):
         writer.execute(
             f'DELETE FROM "{SOLUTION_TABLE}" WHERE publication_id NOT IN (SELECT id FROM "{PUBLICATION_TABLE}")'
@@ -525,6 +589,7 @@ def _snapshot_database(
     keep_paper_hexes: set[str] | None = None,
     *,
     keep_question_ids: set[int] | None = None,
+    keep_publication_hexes: set[str] | None = None,
     extra_keep_tag_hexes: set[str] | None = None,
 ) -> dict | None:
     """拍一份一致的题库快照。
@@ -571,7 +636,11 @@ def _snapshot_database(
             writer.execute("INSERT OR REPLACE INTO sqlite_sequence (name, seq) VALUES (?, ?)", (name, value))
         if keep_paper_hexes is not None:
             _prune_snapshot_database(
-                writer, keep_paper_hexes, keep_question_ids=keep_question_ids, extra_keep_tag_hexes=extra_keep_tag_hexes
+                writer,
+                keep_paper_hexes,
+                keep_question_ids=keep_question_ids,
+                keep_publication_hexes=keep_publication_hexes,
+                extra_keep_tag_hexes=extra_keep_tag_hexes,
             )
         writer.commit()
         if keep_paper_hexes is not None:
@@ -767,27 +836,232 @@ def _backup_lock():
             pass
 
 
+COMMUNITY_MAX_PACK_BYTES = 15 * 1024 * 1024
+COMMUNITY_MAX_QUESTIONS = 100
+COMMUNITY_MAX_IMAGES = 250
+COMMUNITY_MAX_ORIGINALS_BYTES = 8 * 1024 * 1024
+COMMUNITY_IMAGE_MAX_LONG_SIDE = 1280
+COMMUNITY_COVER_MAX_LONG_SIDE = 800
+COMMUNITY_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
+
+
+def _compress_community_image_bytes(
+    raw_bytes: bytes, suffix: str, *, max_long_side: int = COMMUNITY_IMAGE_MAX_LONG_SIDE, colors: int = 128
+) -> bytes:
+    """仅在打社区分享包时压缩图片体积（不改原文件后缀，不触碰本机题库原图）。"""
+    try:
+        from PIL import Image, ImageOps
+
+        with Image.open(io.BytesIO(raw_bytes)) as opened:
+            im = ImageOps.exif_transpose(opened)
+            if im.mode in {"RGBA", "LA"} or (im.mode == "P" and "transparency" in im.info):
+                rgba = im.convert("RGBA")
+                bg = Image.new("RGB", rgba.size, (255, 255, 255))
+                bg.paste(rgba, mask=rgba.getchannel("A"))
+                rgb = bg
+            else:
+                rgb = im.convert("RGB")
+
+            long_side = max(rgb.width, rgb.height)
+            if long_side > max_long_side > 0:
+                scale = max_long_side / float(long_side)
+                rgb = rgb.resize(
+                    (max(1, int(round(rgb.width * scale))), max(1, int(round(rgb.height * scale)))),
+                    Image.Resampling.LANCZOS,
+                )
+
+            ext = suffix.lower()
+            out = io.BytesIO()
+            if ext in {".jpg", ".jpeg"}:
+                rgb.save(out, format="JPEG", quality=82, optimize=True)
+            elif ext == ".webp":
+                rgb.save(out, format="WEBP", quality=80, method=6)
+            else:
+                quantized = rgb.quantize(colors=max(16, min(256, colors)), method=Image.Quantize.FASTOCTREE)
+                quantized.save(out, format="PNG", optimize=True, compress_level=9)
+            candidate = out.getvalue()
+            if candidate and len(candidate) < len(raw_bytes):
+                return candidate
+    except Exception:
+        pass
+    return raw_bytes
+
+
+def _attach_onenote_steps_to_snapshot(snapshot: Path, work_dir: Path, *, max_pages_per_question: int = 3) -> dict:
+    """在社区打包临时库中，导出并注入作者已关联的 OneNote 思考与做题步骤。"""
+    from . import library, library_onenote
+
+    extra_files: list[tuple[Path, str]] = []
+    attached = 0
+    skipped = 0
+    preview_data_uri: str | None = None
+    staging_root = Path(work_dir) / "onenote-solutions"
+    staging_root.mkdir(parents=True, exist_ok=True)
+
+    with contextlib_closing(sqlite3.connect(snapshot)) as conn:
+        if not _table_exists(conn, PUBLICATION_TABLE) or not _table_exists(conn, SOLUTION_TABLE):
+            return {"attached": 0, "skipped": 0, "preview_data_uri": None, "files": []}
+        rows = conn.execute(
+            f"SELECT id, content, extras FROM \"{PUBLICATION_TABLE}\" WHERE status = 'published' ORDER BY source_filename, number, id"
+        ).fetchall()
+
+        now_iso = timezone.now().isoformat()
+        for pub_hex, raw_content, raw_extras in rows:
+            try:
+                extras = json.loads(raw_extras) if isinstance(raw_extras, str) and raw_extras.strip() else {}
+            except json.JSONDecodeError:
+                extras = {}
+            if not isinstance(extras, dict):
+                continue
+            onenote = extras.get("onenote")
+            if not isinstance(onenote, dict):
+                continue
+            page_id = str(onenote.get("page_id") or "").strip()
+            if not page_id:
+                continue
+
+            pub_text = _uuid_text(pub_hex)
+            pub_dir = staging_root / pub_text
+            try:
+                step_paths = library_onenote.export_page_step_images(
+                    page_id, pub_dir, max_pages=max_pages_per_question, max_long_side=COMMUNITY_IMAGE_MAX_LONG_SIDE
+                )
+            except Exception:
+                skipped += 1
+                continue
+            if not step_paths:
+                skipped += 1
+                continue
+
+            try:
+                content = json.loads(raw_content) if isinstance(raw_content, str) and raw_content.strip() else {}
+            except json.JSONDecodeError:
+                content = {}
+            if not isinstance(content, dict):
+                content = {}
+
+            normalized_figs: list[dict] = []
+            for img_path in step_paths:
+                img_bytes = img_path.read_bytes()
+                if preview_data_uri is None:
+                    thumb = _compress_community_image_bytes(img_bytes, ".png", max_long_side=640, colors=64)
+                    b64 = base64.b64encode(thumb).decode("ascii")
+                    if len(b64) <= 120_000:
+                        preview_data_uri = f"data:image/png;base64,{b64}"
+                asset_id = str(uuid.uuid4())
+                png_name = f"{asset_id}.png"
+                meta_name = f"{asset_id}.json"
+                png_out = pub_dir / png_name
+                meta_out = pub_dir / meta_name
+                img_path.replace(png_out)
+                sha = hashlib.sha256(img_bytes).hexdigest()
+                try:
+                    from PIL import Image
+
+                    with Image.open(io.BytesIO(img_bytes)) as opened:
+                        w, h = opened.size
+                except Exception:
+                    w, h = 800, 600
+                spec = {"id": asset_id, "publication_id": pub_text, "sha256": sha, "width": int(w), "height": int(h)}
+                meta_out.write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
+                disp_w = round(min(178.0, max(20.0, int(w) * 25.4 / 150.0)), 1)
+                normalized_figs.append({"id": asset_id, "display_width": disp_w, "position": "after", "paragraph": 0})
+                extra_files.append((png_out, f"{ORIGINALS}/library-solutions/{pub_text}/{png_name}"))
+                extra_files.append((meta_out, f"{ORIGINALS}/library-solutions/{pub_text}/{meta_name}"))
+
+            if not normalized_figs:
+                continue
+
+            existing_sol_hex = str(extras.get("solution_id") or "").strip().replace("-", "")
+            parent_row = None
+            if existing_sol_hex:
+                parent_row = conn.execute(
+                    f'SELECT id, answer, analysis, figures, fingerprint FROM "{SOLUTION_TABLE}" WHERE id = ?',
+                    (existing_sol_hex,),
+                ).fetchone()
+            if parent_row is None:
+                parent_row = conn.execute(
+                    f'SELECT id, answer, analysis, figures, fingerprint FROM "{SOLUTION_TABLE}" '
+                    f"WHERE publication_id = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+                    (pub_hex,),
+                ).fetchone()
+
+            if parent_row is not None:
+                parent_hex, prev_answer, prev_analysis, raw_prev_figs, prev_fp = parent_row
+                try:
+                    prev_figs = json.loads(raw_prev_figs) if isinstance(raw_prev_figs, str) else (raw_prev_figs or [])
+                except json.JSONDecodeError:
+                    prev_figs = []
+                if not isinstance(prev_figs, list):
+                    prev_figs = []
+                base_answer = str(prev_answer or "")
+                base_analysis = str(prev_analysis or "")
+                merged_figs = prev_figs + normalized_figs
+                fp = str(prev_fp or library.generation_fingerprint(content, pub_text))
+            else:
+                parent_hex = None
+                base_answer = str(content.get("answer") or "")
+                base_analysis = str(content.get("analysis") or "")
+                merged_figs = normalized_figs
+                fp = library.generation_fingerprint(content, pub_text)
+
+            heading = "【作者 OneNote 思考与做题步骤】"
+            if heading not in base_analysis:
+                base_analysis = f"{base_analysis.rstrip()}\n\n{heading}".strip()
+
+            new_sol_hex = _uuid_hex(uuid.uuid4())
+            conn.execute(
+                f'INSERT INTO "{SOLUTION_TABLE}" (id, publication_id, parent_id, fingerprint, answer, analysis, figures, created_at) '
+                f"VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    new_sol_hex,
+                    pub_hex,
+                    parent_hex,
+                    fp,
+                    base_answer,
+                    base_analysis,
+                    json.dumps(merged_figs, ensure_ascii=False),
+                    now_iso,
+                ),
+            )
+            next_extras = dict(extras)
+            next_extras["solution_id"] = _uuid_text(new_sol_hex)
+            next_extras.pop("onenote", None)
+            conn.execute(
+                f'UPDATE "{PUBLICATION_TABLE}" SET extras = ? WHERE id = ?',
+                (json.dumps(next_extras, ensure_ascii=False), pub_hex),
+            )
+            attached += 1
+        conn.commit()
+
+    return {"attached": attached, "skipped": skipped, "preview_data_uri": preview_data_uri, "files": extra_files}
+
+
 def export_community_pack(
     directory: Path,
     *,
     paper_ids: list[str] | None = None,
     tag_ids: list[str] | None = None,
+    publication_ids: list[str] | None = None,
     include_originals: bool = False,
+    include_onenote: bool = False,
+    custom_title: str | None = None,
 ) -> dict:
-    """打一份发到题有据社区的题包：只能按资料或目录文件夹选，不能整库。
-
-    和普通题包同一种格式（社区下载后走原来的「合并导入」），额外放一份
-    `community-preview.json` 给网站展示；默认不带原卷 PDF / Word，库里的本机路径一律抹掉。
-    预览里只放题干和选项，不放答案解析 —— 付费题包的答案不能在详情页白送。
-    """
-    if (paper_ids is None) == (tag_ids is None):
-        raise TransferError("社区题包要先选卷子或目录文件夹，不能把整个题库发出去。")
+    """打一份发到题有据社区的题包：支持按试卷/教材、目录文件夹或选定题目导出，不能整库导出。"""
+    mode_count = sum(1 for val in (paper_ids, tag_ids, publication_ids) if val is not None)
+    if mode_count != 1:
+        raise TransferError("社区题包要先选卷子、文件夹或具体题目（一次选一种范围），不能把整个题库发出去。")
     return export_bundle(
         directory,
         "题有据社区题包",
         paper_ids=paper_ids,
         tag_ids=tag_ids,
-        community={"include_originals": bool(include_originals)},
+        publication_ids=publication_ids,
+        community={
+            "include_originals": bool(include_originals) if paper_ids is not None else False,
+            "include_onenote": bool(include_onenote),
+            "title": str(custom_title or "").strip(),
+        },
     )
 
 
@@ -881,16 +1155,25 @@ def _community_preview(snapshot: Path, manifest: dict, *, include_originals: boo
     }
 
 
-def _community_cover(preview: dict, root: Path) -> tuple[str, Path] | None:
-    """封面：用第一道示例题自己的裁片或配图，找不到就不放。"""
+def _community_cover(preview: dict, root: Path, staging_dir: Path | None = None) -> tuple[str, Path] | None:
+    """封面：优先用第一道示例题的配图并缩放到 800px 宽，找不到就不放。"""
     for sample in preview.get("samples") or []:
         folder = root / "library" / str(sample.get("_publication") or "")
         if not folder.is_dir():
             continue
         for path in sorted(folder.rglob("*")):
             suffix = path.suffix.lower()
-            if path.is_file() and suffix in {".png", ".jpg", ".jpeg", ".webp"}:
-                if path.stat().st_size <= COMMUNITY_COVER_MAX_BYTES:
+            if path.is_file() and suffix in COMMUNITY_IMAGE_SUFFIXES:
+                if staging_dir is not None:
+                    raw = path.read_bytes()
+                    compressed = _compress_community_image_bytes(
+                        raw, suffix, max_long_side=COMMUNITY_COVER_MAX_LONG_SIDE, colors=128
+                    )
+                    if len(compressed) <= COMMUNITY_COVER_MAX_BYTES:
+                        cover_out = Path(staging_dir) / f"{COMMUNITY_COVER_STEM}{suffix}"
+                        cover_out.write_bytes(compressed)
+                        return f"{COMMUNITY_COVER_STEM}{suffix}", cover_out
+                elif path.stat().st_size <= COMMUNITY_COVER_MAX_BYTES:
                     return f"{COMMUNITY_COVER_STEM}{suffix}", path
     return None
 
@@ -901,23 +1184,21 @@ def export_bundle(
     *,
     paper_ids: list[str] | None = None,
     tag_ids: list[str] | None = None,
+    publication_ids: list[str] | None = None,
     community: dict | None = None,
 ) -> dict:
-    """把整库、选定资料或目录文件夹打包成一个 zip 放进 `directory`。
-
-    1.26.20：**先写临时文件，写成了再改名**。以前直接往最终文件名上写，
-    中途出错（比如软件被关掉）就留下一个半个的包 —— 那不是备份，是垃圾：
-    程序打不开，还白占磁盘。写坏了的临时文件当场删掉，不留残骸。
-    """
+    """把整库、选定资料、目录文件夹或精选题目打包成一个 zip 放进 `directory`。"""
     directory = Path(directory)
     if not directory.is_dir():
         raise TransferError("选的文件夹不在了，重新选一个。")
-    if paper_ids is not None and tag_ids is not None:
-        raise TransferError("一次只能按卷子或按目录文件夹其中一种方式导出。")
+    scope_count = sum(1 for val in (paper_ids, tag_ids, publication_ids) if val is not None)
+    if scope_count > 1:
+        raise TransferError("一次只能按卷子、目录文件夹或选定题目其中一种方式导出。")
 
     selected_papers: list | None = None
     selected_folders: list | None = None
     keep_question_ids: set[int] | None = None
+    keep_publication_hexes: set[str] | None = None
     extra_keep_tag_hexes: set[str] | None = None
     actual_prefix = prefix
 
@@ -934,6 +1215,20 @@ def export_bundle(
                 actual_prefix = f"{stem_base}-{first_stem}"
             else:
                 actual_prefix = f"{stem_base}-{first_stem}等{len(selected_folders)}个文件夹"
+    elif publication_ids is not None:
+        pub_selection = _resolve_export_publications(publication_ids)
+        selected_papers = pub_selection["papers"]
+        keep_question_ids = pub_selection["question_ids"]
+        keep_publication_hexes = pub_selection["publication_hexes"]
+        stem_base = "题有据社区题包" if community is not None else "题有据题包"
+        if prefix in {"题有据备份", "题有据社区题包"}:
+            custom = str((community or {}).get("title") or "").strip()
+            if custom:
+                actual_prefix = f"{stem_base}-{_safe_bundle_stem(custom)}"
+            elif len(keep_publication_hexes) == 1:
+                actual_prefix = f"{stem_base}-精选单题"
+            else:
+                actual_prefix = f"{stem_base}-精选{len(keep_publication_hexes)}题"
     elif paper_ids is not None:
         selected_papers = _resolve_export_papers(paper_ids)
         stem_base = "题有据社区题包" if community is not None else "题有据题包"
@@ -944,7 +1239,7 @@ def export_bundle(
             else:
                 actual_prefix = f"{stem_base}-{first_stem}等{len(selected_papers)}套"
     if community is not None and selected_papers is None:
-        raise TransferError("社区题包要先选卷子或目录文件夹，不能把整个题库发出去。")
+        raise TransferError("社区题包要先选卷子、文件夹或题目，不能把整个题库发出去。")
 
     with _backup_lock():
         return _export_bundle(
@@ -953,6 +1248,7 @@ def export_bundle(
             selected_papers=selected_papers,
             selected_folders=selected_folders,
             keep_question_ids=keep_question_ids,
+            keep_publication_hexes=keep_publication_hexes,
             extra_keep_tag_hexes=extra_keep_tag_hexes,
             community=community,
         )
@@ -965,6 +1261,7 @@ def _export_bundle(
     *,
     selected_folders: list | None = None,
     keep_question_ids: set[int] | None = None,
+    keep_publication_hexes: set[str] | None = None,
     extra_keep_tag_hexes: set[str] | None = None,
     community: dict | None = None,
 ) -> dict:
@@ -972,7 +1269,9 @@ def _export_bundle(
     target = directory / f"{prefix}-{stamp}.zip"
     temp = directory / f".{prefix}-{stamp}.part"
     include_originals = True if community is None else bool(community.get("include_originals"))
+    include_onenote = False if community is None else bool(community.get("include_onenote"))
     preview: dict | None = None
+    onenote_meta = {"attached": 0, "skipped": 0, "preview_data_uri": None, "files": []}
     try:
         with tempfile.TemporaryDirectory() as work:
             snapshot = Path(work) / DATABASE_NAME
@@ -986,6 +1285,7 @@ def _export_bundle(
                     snapshot,
                     keep_paper_hexes=keep_paper_hexes,
                     keep_question_ids=keep_question_ids,
+                    keep_publication_hexes=keep_publication_hexes,
                     extra_keep_tag_hexes=extra_keep_tag_hexes,
                 )
                 counts_override = snapshot_info["counts"] if snapshot_info else None
@@ -1004,30 +1304,80 @@ def _export_bundle(
                 )
             original_names: set[str] = set()
             if community is not None:
+                q_total = int(
+                    (manifest.get("counts") or {}).get("publications")
+                    or (manifest.get("counts") or {}).get("questions")
+                    or 0
+                )
+                if q_total > COMMUNITY_MAX_QUESTIONS:
+                    raise TransferError(
+                        f"单次最多上传 {COMMUNITY_MAX_QUESTIONS} 道题目（当前 {q_total} 道），请拆分后再试。"
+                    )
                 for item in manifest.get("papers") or []:
                     original_names.update(str(v) for v in (item.get("files") or {}).values() if isinstance(v, str))
                     if not include_originals:
                         item["files"] = {}
+                if keep_publication_hexes is not None:
+                    manifest["scope"] = "selection"
+                    custom_title = str(community.get("title") or "").strip()
+                    if custom_title and not manifest.get("folders"):
+                        manifest["folders"] = [{"id": "", "name": custom_title, "kind": "custom"}]
                 manifest["community"] = {"format": COMMUNITY_PREVIEW_FORMAT, "include_originals": include_originals}
+                if include_onenote:
+                    onenote_meta = _attach_onenote_steps_to_snapshot(snapshot, Path(work))
                 # 本机路径里有 Windows 用户名，发到网上之前抹掉；合并时会按本机重新指过去。
                 with contextlib_closing(sqlite3.connect(snapshot)) as scrub:
                     scrub.execute(f"UPDATE \"{PAPER_TABLE}\" SET source_path = '', render_path = '', zip_path = ''")
                     scrub.commit()
                 preview = _community_preview(snapshot, manifest, include_originals=include_originals)
-            cover = _community_cover(preview, data_root()) if preview is not None else None
+                if onenote_meta["attached"] > 0:
+                    preview["has_onenote_notes"] = True
+                    preview["onenote_count"] = onenote_meta["attached"]
+                    if onenote_meta["preview_data_uri"]:
+                        preview["onenote_preview"] = onenote_meta["preview_data_uri"]
+            cover = _community_cover(preview, data_root(), Path(work)) if preview is not None else None
             if preview is not None:
                 if cover is not None:
                     preview["cover"] = cover[0]
                 for sample in preview["samples"]:
                     sample.pop("_publication", None)
+
+            originals_total_bytes = 0
+            image_count = 0
             with zipfile.ZipFile(temp, "w", zipfile.ZIP_DEFLATED) as archive:
                 archive.writestr(MANIFEST_NAME, json.dumps(manifest, ensure_ascii=False, indent=2))
                 archive.write(snapshot, DATABASE_NAME)
                 for path in files_iter:
                     relative = path.relative_to(data_root())
-                    if not include_originals and _is_original_document(relative, original_names):
+                    is_orig = _is_original_document(relative, original_names)
+                    if not include_originals and is_orig:
                         continue
-                    archive.write(path, f"{ORIGINALS}/{relative.as_posix()}")
+                    arc_name = f"{ORIGINALS}/{relative.as_posix()}"
+                    if community is not None and is_orig:
+                        originals_total_bytes += path.stat().st_size
+                        if originals_total_bytes > COMMUNITY_MAX_ORIGINALS_BYTES:
+                            raise TransferError(
+                                "附带的原卷 PDF / Word 总体积超过 8 MB 上限，请取消「附带原卷」后再上传。"
+                            )
+                        archive.write(path, arc_name)
+                    elif community is not None and path.suffix.lower() in COMMUNITY_IMAGE_SUFFIXES:
+                        image_count += 1
+                        if image_count > COMMUNITY_MAX_IMAGES:
+                            raise TransferError(
+                                f"单个题包最多包含 {COMMUNITY_MAX_IMAGES} 张图片，请拆分成多个小包后再上传。"
+                            )
+                        compressed = _compress_community_image_bytes(path.read_bytes(), path.suffix)
+                        archive.writestr(arc_name, compressed)
+                    else:
+                        archive.write(path, arc_name)
+                for extra_src, extra_arc in onenote_meta["files"]:
+                    if extra_src.suffix.lower() in COMMUNITY_IMAGE_SUFFIXES:
+                        image_count += 1
+                        if image_count > COMMUNITY_MAX_IMAGES:
+                            raise TransferError(
+                                f"包含 OneNote 笔记后的总图片数超过 {COMMUNITY_MAX_IMAGES} 张上限，请分批上传。"
+                            )
+                    archive.write(extra_src, extra_arc)
                 if preview is not None:
                     archive.writestr(COMMUNITY_PREVIEW_NAME, json.dumps(preview, ensure_ascii=False, indent=2))
                 if cover is not None:
@@ -1039,6 +1389,11 @@ def _export_bundle(
             raise TransferError("备份包没写完整，已经把半成品删掉了，请再打一次。")
         if community is not None and COMMUNITY_PREVIEW_NAME not in names:
             raise TransferError("社区题包没写完整，已经把半成品删掉了，请再打一次。")
+        if community is not None and temp.stat().st_size > COMMUNITY_MAX_PACK_BYTES:
+            mb = temp.stat().st_size / 1024 / 1024
+            raise TransferError(
+                f"压缩打包后体积为 {mb:.1f} MB，超出社区单包 15 MB 上限，请减少题目数量或取消附带原卷。"
+            )
     except Exception:
         try:
             temp.unlink()
@@ -1062,6 +1417,9 @@ def _export_bundle(
     if preview is not None:
         result["community"] = {
             "include_originals": include_originals,
+            "include_onenote": include_onenote,
+            "onenote_count": int(onenote_meta["attached"]),
+            "onenote_skipped": int(onenote_meta["skipped"]),
             "questions": preview["counts"]["questions"],
             "samples": len(preview["samples"]),
             "cover": preview["cover"],
@@ -2021,9 +2379,25 @@ def merge_bundle(path: Path) -> dict:
             merge = _Merge(archive, manifest, dry_run=False)
             report = merge.run()
             record = _write_record(merge)
+            added_pub_ids = [_uuid_text(pid) for pid in merge.added["publications"] if pid]
+            pub_ids = list(
+                dict.fromkeys(
+                    [
+                        _uuid_text(pid)
+                        for pid in list(merge.added["publications"]) + list(merge.publication_map.values())
+                        if pid
+                    ]
+                )
+            )
     finally:
         archive.close()
-    return {"report": report, "record": record, "manifest": manifest}
+    return {
+        "report": report,
+        "record": record,
+        "manifest": manifest,
+        "publication_ids": pub_ids,
+        "added_publication_ids": added_pub_ids,
+    }
 
 
 def _write_record(merge: _Merge) -> dict:

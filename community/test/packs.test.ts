@@ -272,3 +272,209 @@ test("pack purge frees R2 storage when unpurchased and cron cleans stale records
   assert.equal(summary.purged_rejected, 1);
   assert.equal(env.PACKS.objects.has(`packs/${id3}.zip`), false);
 });
+
+test("desktop bearer token supports streaming pack upload and revocation", async () => {
+  const { env, author } = await setup();
+  const issued = await author.json("POST", "/api/desktop-tokens", { label: "测试桌面端" });
+  assert.equal(issued.status, 201, JSON.stringify(issued.data));
+  const token = issued.data.token as string;
+  assert.ok(token.startsWith("tyj_dt_"));
+
+  const listed = await author.json("GET", "/api/desktop-tokens");
+  assert.equal(listed.status, 200);
+  assert.equal(listed.data.tokens.length, 1);
+
+  const zip = makePackZip({ cover: true });
+  const previewRaw = unzipSync(zip)["community-preview.json"];
+  const manifestRaw = unzipSync(zip)["题有据备份.json"];
+  const desktopClient = new Client(env);
+  const authHeaders = { Authorization: `Bearer ${token}` };
+
+  const initRes = await desktopClient.request(
+    "POST",
+    "/api/packs/init",
+    {
+      title: "（虚构）桌面端直传题包",
+      stage: "高中",
+      subject: "数学",
+      year: 2026,
+      tags: "函数",
+      price_yuan: "0",
+      originality: "compiled",
+      rights_confirmed: true,
+      originals_confirmed: false,
+      file_size: zip.byteLength,
+      manifest: JSON.parse(new TextDecoder().decode(manifestRaw)),
+      preview: JSON.parse(new TextDecoder().decode(previewRaw)),
+    },
+    authHeaders,
+  );
+  const initData = (await initRes.json()) as Record<string, any>;
+  assert.equal(initRes.status, 201, JSON.stringify(initData));
+
+  const putRes = await desktopClient.request("PUT", initData.upload_url, zip, {
+    ...authHeaders,
+    "Content-Type": "application/zip",
+  });
+  assert.equal(putRes.status, 200);
+  assert.ok(env.PACKS.objects.has(`packs/${initData.id}.zip`));
+
+  const revoked = await author.json("DELETE", `/api/desktop-tokens/${issued.data.id}`, {});
+  assert.equal(revoked.status, 200);
+
+  const rejected = await desktopClient.request(
+    "POST",
+    "/api/packs/init",
+    {
+      title: "（虚构）吊销后应拒绝",
+      stage: "高中",
+      rights_confirmed: true,
+      file_size: zip.byteLength,
+      manifest: JSON.parse(new TextDecoder().decode(manifestRaw)),
+      preview: JSON.parse(new TextDecoder().decode(previewRaw)),
+    },
+    authHeaders,
+  );
+  assert.equal(rejected.status, 401);
+});
+
+test("webdav hybrid mode routes zip blobs to webdav while keeping covers in R2", async () => {
+  const davStore = new Map<string, Uint8Array>();
+  const methodsSeen: string[] = [];
+  const fakeDavFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method || "GET").toUpperCase();
+    methodsSeen.push(`${method} ${url}`);
+    assert.ok(String((init?.headers as Record<string, string> | undefined)?.Authorization || "").startsWith("Basic "));
+    if (method === "MKCOL") {
+      return new Response("", { status: 201 });
+    }
+    if (method === "PUT") {
+      assert.ok(Number((init?.headers as Record<string, string> | undefined)?.["Content-Length"] || 0) > 0);
+      const buf = new Uint8Array(await new Response(init?.body as BodyInit).arrayBuffer());
+      davStore.set(url, buf);
+      return new Response("", { status: 201 });
+    }
+    if (method === "GET") {
+      const hit = davStore.get(url);
+      return hit ? new Response(hit.slice(), { status: 200 }) : new Response("not found", { status: 404 });
+    }
+    if (method === "DELETE") {
+      davStore.delete(url);
+      return new Response("", { status: 204 });
+    }
+    return new Response("", { status: 405 });
+  }) as typeof fetch;
+
+  const env = makeEnv({
+    PACK_STORAGE_MODE: "webdav",
+    WEBDAV_BASE_URL: "https://webdav.123pan.cn/webdav",
+    WEBDAV_DIR: "tiyouju-packs",
+    WEBDAV_USERNAME: "demo-user",
+    WEBDAV_PASSWORD: "demo-password",
+    WEBDAV_FETCH: fakeDavFetch,
+  });
+  const author = new Client(env);
+  await author.register("dav_author");
+  const admin = new Client(env);
+  await admin.register("dav_admin");
+  promoteAdmin(env, "dav_admin");
+
+  const zip = makePackZip({ cover: true });
+  const up = await author.json("POST", "/api/packs", packForm(zip, { title: "（虚构）网盘混合包" }));
+  assert.equal(up.status, 201, JSON.stringify(up.data));
+  const id = up.data.id;
+
+  // 封面留 R2，题包主体走 WebDAV
+  assert.ok(env.PACKS.objects.has(`covers/${id}.png`));
+  assert.equal(env.PACKS.objects.has(`packs/${id}.zip`), false);
+  const expectedDavUrl = `https://webdav.123pan.cn/webdav/tiyouju-packs/packs/${id}.zip`;
+  assert.ok(davStore.has(expectedDavUrl));
+
+  await admin.json("POST", `/api/admin/packs/${id}/review`, { action: "approve" });
+  const dlLink = await author.json("POST", `/api/packs/${id}/download`, {});
+  assert.equal(dlLink.status, 200);
+  const dlResp = await new Client(env).request("GET", dlLink.data.url);
+  assert.equal(dlResp.status, 200);
+  const dlBytes = new Uint8Array(await dlResp.arrayBuffer());
+  assert.deepEqual(dlBytes, zip);
+
+  const storage = await admin.json("GET", "/api/admin/storage");
+  assert.equal(storage.data.storage_mode, "webdav");
+  assert.equal(storage.data.r2_used_bytes, 0);
+  assert.equal(storage.data.webdav_used_bytes, zip.byteLength);
+
+  const del = await author.json("DELETE", `/api/packs/${id}`, {});
+  assert.equal(del.status, 200);
+  assert.equal(davStore.has(expectedDavUrl), false);
+  assert.equal(env.PACKS.objects.has(`covers/${id}.png`), false);
+});
+
+test("ordinary users hit USER_STORAGE_QUOTA_MB while admins bypass per-user and daily limits", async () => {
+  const zip = makePackZip();
+  const quotaMb = (zip.byteLength * 1.5) / 1024 / 1024;
+  const env = makeEnv({
+    USER_STORAGE_QUOTA_MB: String(quotaMb),
+    MAX_DAILY_UPLOADS_PER_USER: "1",
+    MAX_TOTAL_R2_MB: "100",
+  });
+  const regular = new Client(env);
+  await regular.register("regular1");
+  const admin = new Client(env);
+  await admin.register("owner1");
+  promoteAdmin(env, "owner1");
+
+  const first = await regular.json("POST", "/api/packs", packForm(zip, { title: "（虚构）普通首包" }));
+  assert.equal(first.status, 201);
+  // 绕开每日次数限制，验证个人累计空间上限
+  const envQuotaOnly = makeEnv({
+    USER_STORAGE_QUOTA_MB: String(quotaMb),
+    MAX_DAILY_UPLOADS_PER_USER: "10",
+    MAX_TOTAL_R2_MB: "100",
+  });
+  const reg2 = new Client(envQuotaOnly);
+  await reg2.register("reg2");
+  const adm2 = new Client(envQuotaOnly);
+  await adm2.register("adm2");
+  promoteAdmin(envQuotaOnly, "adm2");
+
+  assert.equal((await reg2.json("POST", "/api/packs", packForm(zip, { title: "（虚构）配额内" }))).status, 201);
+  const blocked = await reg2.json("POST", "/api/packs", packForm(zip, { title: "（虚构）超个人空间" }));
+  assert.equal(blocked.status, 413);
+  assert.match(blocked.data.error, /个人云端累计空间已达上限/);
+
+  // 管理员账号不受个人上限与日次数限制
+  envQuotaOnly.MAX_DAILY_UPLOADS_PER_USER = "1";
+  assert.equal((await adm2.json("POST", "/api/packs", packForm(zip, { title: "（虚构）管理员包1" }))).status, 201);
+  assert.equal((await adm2.json("POST", "/api/packs", packForm(zip, { title: "（虚构）管理员包2" }))).status, 201);
+});
+
+test("preview retains OneNote badge fields when has_onenote_notes is enabled", async () => {
+  const { author, admin } = await setup();
+  const baseZip = makePackZip();
+  const unpacked = unzipSync(baseZip);
+  const preview = JSON.parse(new TextDecoder().decode(unpacked["community-preview.json"]));
+  preview.has_onenote_notes = true;
+  preview.onenote_count = 3;
+  preview.onenote_preview = "data:image/png;base64,iVBORw0KGgo=";
+  const manifest = JSON.parse(new TextDecoder().decode(unpacked["题有据备份.json"]));
+
+  const init = await author.json("POST", "/api/packs/init", {
+    title: "（虚构）含OneNote笔记包",
+    stage: "高中",
+    rights_confirmed: true,
+    file_size: baseZip.byteLength,
+    manifest,
+    preview,
+  });
+  assert.equal(init.status, 201);
+  await author.request("PUT", init.data.upload_url, baseZip, { "Content-Type": "application/zip" });
+  await admin.json("POST", `/api/admin/packs/${init.data.id}/review`, { action: "approve" });
+
+  const list = await new Client(author.env).json("GET", "/api/packs");
+  assert.equal(list.data.packs[0].has_onenote_notes, 1);
+  const detail = await new Client(author.env).json("GET", `/api/packs/${init.data.id}`);
+  assert.equal(detail.data.preview.has_onenote_notes, true);
+  assert.equal(detail.data.preview.onenote_count, 3);
+  assert.equal(detail.data.preview.onenote_preview, "data:image/png;base64,iVBORw0KGgo=");
+});

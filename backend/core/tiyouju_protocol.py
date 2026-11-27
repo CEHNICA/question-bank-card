@@ -34,12 +34,13 @@ PROJECT_ROOT = BACKEND_DIR.parent
 FROZEN = bool(getattr(sys, "frozen", False))
 
 
-def parse_question_id(uri: str) -> str | None:
-    """从 tiyouju:// URI 中解析题目 ID。
+def parse_protocol_action(uri: str) -> dict | None:
+    """解析 tiyouju:// 协议动作。
 
-    支持格式：
+    支持：
     - tiyouju://question/<uuid>
-    - tiyouju://question/<uuid>/
+    - tiyouju://community-auth?token=...&username=...&display_name=...&site=...
+    - tiyouju://import-pack?url=...&title=...&pack_id=...
     """
     raw = (uri or "").strip()
     if not raw:
@@ -49,10 +50,52 @@ def parse_question_id(uri: str) -> str | None:
         return None
     host = (parsed.netloc or "").strip().lower()
     path_parts = [part for part in (parsed.path or "").split("/") if part]
+    if not host and path_parts:
+        host = path_parts[0].lower()
+        path_parts = path_parts[1:]
+
     if host == "question" and path_parts:
-        return urllib.parse.unquote(path_parts[0]).strip() or None
-    if not host and len(path_parts) >= 2 and path_parts[0].lower() == "question":
-        return urllib.parse.unquote(path_parts[1]).strip() or None
+        qid = urllib.parse.unquote(path_parts[0]).strip()
+        return {"action": "question", "q": qid} if qid else None
+
+    params = urllib.parse.parse_qs(parsed.query or "", keep_blank_values=False)
+
+    if host == "community-auth":
+        token = str((params.get("token") or [""])[0]).strip()
+        if not token:
+            return None
+        return {
+            "action": "community_auth",
+            "token": token,
+            "username": str((params.get("username") or [""])[0]).strip(),
+            "display_name": str((params.get("display_name") or [""])[0]).strip(),
+            "site": str((params.get("site") or [""])[0]).strip(),
+        }
+
+    if host == "import-pack":
+        pack_url = str((params.get("url") or [""])[0]).strip()
+        dl = urllib.parse.urlparse(pack_url)
+        dl_host = (dl.hostname or "").lower()
+        allowed_scheme = dl.scheme.lower() == "https" or (
+            dl.scheme.lower() == "http" and dl_host in {"127.0.0.1", "localhost"}
+        )
+        if not allowed_scheme or not dl_host:
+            return None
+        return {
+            "action": "import_pack",
+            "url": pack_url,
+            "title": str((params.get("title") or [""])[0]).strip(),
+            "pack_id": str((params.get("pack_id") or [""])[0]).strip(),
+        }
+
+    return None
+
+
+def parse_question_id(uri: str) -> str | None:
+    """从 tiyouju:// URI 中解析题目 ID。"""
+    action = parse_protocol_action(uri)
+    if action and action.get("action") == "question":
+        return str(action.get("q") or "").strip() or None
     return None
 
 
@@ -89,12 +132,17 @@ def deep_link_paths() -> list[Path]:
     return [folder / DEEP_LINK_NAME for folder in _runtime_dirs()]
 
 
-def queue_deep_link(question_id: str | None) -> None:
-    """把要定位的题目写进 runtime，供已打开的 Eagle 页消费。"""
-    qid = str(question_id or "").strip()
-    if not qid:
-        return
-    payload = {"q": qid, "ts": time.time()}
+def queue_deep_link(payload_or_qid: str | dict | None) -> None:
+    """把要定位的题目或社区动作写进 runtime，供已打开的 Eagle 页消费。"""
+    if isinstance(payload_or_qid, dict):
+        payload = {**payload_or_qid, "ts": time.time()}
+        if not payload.get("q") and not payload.get("action"):
+            return
+    else:
+        qid = str(payload_or_qid or "").strip()
+        if not qid:
+            return
+        payload = {"q": qid, "ts": time.time()}
     text = json.dumps(payload, ensure_ascii=False)
     for folder in _runtime_dirs():
         try:
@@ -107,7 +155,7 @@ def queue_deep_link(question_id: str | None) -> None:
 def consume_deep_link() -> dict | None:
     """读取并删除深链文件；没有有效内容时返回 None。
 
-    源码版与安装版可能各写一份，这里一次性清掉所有副本，只返回最先读到的有效定位。
+    源码版与安装版可能各写一份，这里一次性清掉所有副本，只返回最先读到的有效定位或动作。
     """
     found: dict | None = None
     for path in deep_link_paths():
@@ -125,11 +173,80 @@ def consume_deep_link() -> dict | None:
             if not isinstance(payload, dict):
                 continue
             qid = str(payload.get("q") or "").strip()
+            action = str(payload.get("action") or "").strip()
             if qid:
                 found = {"q": qid, "ts": payload.get("ts")}
+            elif action in {"import_pack", "community_auth"}:
+                found = dict(payload)
         except (OSError, ValueError, TypeError) as exc:
             logger.debug("读取深链失败 (%s): %s", path, exc)
     return found
+
+
+def handle_community_auth(action: dict) -> bool:
+    """把 tiyouju://community-auth 的桌面令牌写入加密存储，并通知工作台刷新状态（不泄露 token）。"""
+    token = str(action.get("token") or "").strip()
+    if not token:
+        return False
+    try:
+        from . import credential_settings
+
+        store = credential_settings._load_store()
+    except Exception:
+        try:
+            import importlib.util
+
+            source = PROJECT_ROOT / "credential_store.py"
+            spec = importlib.util.spec_from_file_location("_question_bank_credential_store", source)
+            if spec is None or spec.loader is None:
+                return False
+            store = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(store)
+        except Exception:
+            return False
+
+    try:
+        saved = store.save_community_session(
+            token,
+            username=str(action.get("username") or ""),
+            display_name=str(action.get("display_name") or ""),
+            site=str(action.get("site") or ""),
+        )
+    except Exception as exc:
+        logger.warning("保存社区桌面授权失败: %s", exc)
+        return False
+
+    queue_deep_link(
+        {
+            "action": "community_auth",
+            "username": saved.get("username", ""),
+            "display_name": saved.get("display_name", ""),
+            "site": saved.get("site", ""),
+        }
+    )
+    return True
+
+
+def dispatch_protocol_action(uri: str) -> dict | None:
+    """解析并执行深链队列写入（含 community-auth 加密落盘），供启动器与协议入口共用。"""
+    action = parse_protocol_action(uri)
+    if not action:
+        return None
+    kind = action.get("action")
+    if kind == "question":
+        queue_deep_link(action["q"])
+    elif kind == "community_auth":
+        handle_community_auth(action)
+    elif kind == "import_pack":
+        queue_deep_link(
+            {
+                "action": "import_pack",
+                "url": action["url"],
+                "title": action.get("title", ""),
+                "pack_id": action.get("pack_id", ""),
+            }
+        )
+    return action
 
 
 def candidate_ports() -> list[int]:
@@ -310,14 +427,13 @@ def build_target_url(port: int, question_id: str | None) -> str:
 
 
 def handle_uri(uri: str, *, open_browser: bool = False) -> bool:
-    """解析 tiyouju:// URI：写入深链，确保服务在跑。
+    """解析 tiyouju:// URI：写入深链（或保存社区授权），确保服务在跑。
 
     默认不外开浏览器。正常回跳应由窗口启动器置前题有据；只有显式
     ``open_browser=True``（无窗口环境）才用 webbrowser 打开 /eagle?q=。
     """
-    question_id = parse_question_id(uri)
-    if question_id:
-        queue_deep_link(question_id)
+    action = dispatch_protocol_action(uri)
+    question_id = str(action.get("q") or "").strip() if action and action.get("action") == "question" else None
 
     port = ensure_server_running()
     if port is None:

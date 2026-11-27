@@ -163,3 +163,15 @@ CREATE TABLE IF NOT EXISTS rate_events (
   at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS rate_events_key_at ON rate_events(key, at);
+
+-- 桌面端直传授权令牌：只存 SHA-256 哈希，用户在社区网页登录后授权签发，可随时在「我的」吊销。
+CREATE TABLE IF NOT EXISTS desktop_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_hash TEXT NOT NULL UNIQUE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  label TEXT NOT NULL DEFAULT '题有据桌面端',
+  last_used_at TEXT,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS desktop_tokens_user ON desktop_tokens(user_id);

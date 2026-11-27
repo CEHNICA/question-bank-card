@@ -42,18 +42,15 @@ assert.doesNotMatch(html, /id="matchedCountJumpWrap"/);
 assert.doesNotMatch(html, /id="btnMatchedCountJump"/);
 assert.doesNotMatch(html, />\s*共\s*<strong id="matchedQuestionCount"/);
 
-// 3) 「全选」只留二字；勾选数改悬停提示，不常驻括号文案
+// 3) 「全选」只留勾选框；勾选数改悬停提示，不常驻汉字
 assert.match(html, /id="selectAllLabel"/);
-assert.match(html, /data-tip-title="已勾选 0 题"/);
-assert.match(html, /<span>全选<\/span>/);
+assert.match(html, /aria-label="全选"/);
+assert.doesNotMatch(html, /<span>全选<\/span>/);
 assert.doesNotMatch(html, /id="selectedCountText"/);
 assert.match(html, /function syncSelectAllCountTip\(/);
 
-// 4) 存视图窄屏只留图标
-assert.match(
-  html,
-  /<span class="hidden lg:inline">存视图<\/span>/,
-  "「存视图」在 <1024 只留图标（title 里有完整说明）"
-);
+// 4) 存视图只留图标，汉字在悬停提示里
+assert.match(html, /aria-label="存为智能视图"/);
+assert.doesNotMatch(html, /存视图<\/span>/);
 
 console.log("Eagle 顶栏窄屏不再压住「筛选」按钮：OK");

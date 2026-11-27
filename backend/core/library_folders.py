@@ -2002,3 +2002,68 @@ def undo_view(request):
         return JsonResponse(undo(payload.get("operation_id")))
     except FolderError as error:
         return _error(str(error), error.status)
+
+
+CLOUD_FOLDER_NAME = "来自云端"
+
+
+def assign_publications_to_cloud_folder(pub_ids: list[str], *, folder_name: str = CLOUD_FOLDER_NAME) -> dict:
+    """将云端下载/导入的题目默认归入顶级自定义文件夹「来自云端」（幂等创建或复用）。"""
+    clean_ids = _resolve_publication_ids(pub_ids)
+    target_name = str(folder_name or CLOUD_FOLDER_NAME).strip() or CLOUD_FOLDER_NAME
+    with _LOCK:
+        state = _load_unlocked()
+        user_folders = state["user_folders"]
+        target = next(
+            (
+                item
+                for item in user_folders
+                if item.get("parentId") is None and str(item.get("name") or "").strip() == target_name
+            ),
+            None,
+        )
+        created = False
+        if target is None:
+            existing_ids = {str(item.get("id") or "") for item in user_folders}
+            folder_id = _gen_id("uf")
+            while folder_id in existing_ids:
+                folder_id = _gen_id("uf")
+            orders = [
+                int(item["sortOrder"])
+                for item in user_folders
+                if item.get("parentId") is None and item.get("sortOrder") is not None
+            ]
+            target = {
+                "id": folder_id,
+                "name": target_name,
+                "parentId": None,
+                "questionIds": [],
+                "createdAt": int(time.time() * 1000),
+                "sortOrder": (max(orders) + 1) if orders else len(user_folders),
+            }
+            user_folders.append(target)
+            created = True
+
+        existing_qids = [str(qid) for qid in (target.get("questionIds") or [])]
+        seen = set(existing_qids)
+        added_count = 0
+        for pid in clean_ids:
+            if pid not in seen:
+                seen.add(pid)
+                existing_qids.append(pid)
+                added_count += 1
+        target["questionIds"] = existing_qids
+
+        if created or added_count > 0:
+            state["revision"] = int(state.get("revision") or 0) + 1
+            state["updated_at"] = timezone.now().isoformat()
+            _save_unlocked(state)
+
+        return {
+            "folder_id": str(target.get("id") or ""),
+            "folder_name": target_name,
+            "created": created,
+            "added_count": added_count,
+            "total_count": len(existing_qids),
+            "revision": int(state.get("revision") or 0),
+        }

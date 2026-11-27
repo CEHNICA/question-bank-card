@@ -81,7 +81,7 @@ function packCard(pack) {
       ${pack.originality === "original" ? '<span class="absolute left-2 top-2 rounded-full bg-white/90 px-2 py-0.5 text-xs text-emerald-700">原创</span>' : ""}</div>
     <div class="flex flex-1 flex-col gap-1.5 p-3">
       <h3 class="line-clamp-2 text-sm font-medium text-slate-900 group-hover:text-emerald-700">${escapeHtml(pack.title)}</h3>
-      <div class="flex flex-wrap gap-1">${tags}</div>
+      <div class="flex flex-wrap gap-1">${tags}${pack.has_onenote_notes ? '<span class="chip bg-indigo-50 text-indigo-700">📝 OneNote思路</span>' : ""}</div>
       <div class="mt-auto flex items-center justify-between pt-1 text-xs text-slate-400">
         <span>${escapeHtml(pack.author_name || pack.author_username)}</span>
         <span>${pack.question_count} 题 · ${pack.downloads} 下载</span>
@@ -220,8 +220,12 @@ export async function packDetailView(id) {
     action = `<div class="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">${statusChip(pack.status)}
       <span class="ml-1">${pack.status === "pending" ? "管理员审核通过后才会公开。" : escapeHtml(pack.review_note || "")}</span></div>`;
   } else if (viewer.can_download) {
-    action = `<button class="btn btn-primary w-full py-2" id="downloadBtn">下载题包</button>
-      <p class="mt-2 text-xs text-slate-500">下载后在题有据桌面版「设置 → 数据备份与迁移 → 从备份合并」导入，只增不减，可撤销。</p>`;
+    action = `<button class="btn btn-primary w-full py-2" id="desktopImportBtn">⚡ 下载并导入到题有据</button>
+      <div class="mt-2 flex items-center justify-between text-xs text-slate-500">
+        <button type="button" class="text-emerald-700 hover:underline" id="downloadBtn">仅下载题包文件 (.zip)</button>
+        <span>只增不减 · 可撤销</span>
+      </div>
+      <p id="desktopImportHint" class="mt-2 hidden rounded-lg bg-emerald-50 p-2 text-xs text-emerald-800"></p>`;
   } else if (!state.user) {
     action = `<a class="btn btn-primary w-full py-2" href="#/login?next=${encodeURIComponent(location.hash)}">登录后${paid ? "购买" : "下载"}</a>`;
   } else {
@@ -238,6 +242,7 @@ export async function packDetailView(id) {
             ${pack.year ? `<span class="chip">${pack.year} 年</span>` : ""}
             ${pack.originality === "original" ? '<span class="chip bg-emerald-50 text-emerald-700">作者声明原创</span>' : '<span class="chip">整理汇编</span>'}
             ${pack.include_originals ? '<span class="chip bg-sky-50 text-sky-700">含原卷</span>' : '<span class="chip">不含原卷</span>'}
+            ${preview?.has_onenote_notes ? `<span class="chip bg-indigo-50 text-indigo-700">📝 含作者 OneNote 思路${preview.onenote_count ? `（${preview.onenote_count} 题）` : ""}</span>` : ""}
           </div>
           <h1 class="mt-2 text-xl font-semibold text-slate-900 sm:text-2xl">${escapeHtml(pack.title)}</h1>
           <div class="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-500">${avatar(pack.author_name)}
@@ -260,6 +265,13 @@ export async function packDetailView(id) {
             <span class="text-xs text-slate-400">只展示前 ${preview.samples.length} 道题的题干，预览不含答案与解析</span></div>
           <div class="mt-3 flex flex-wrap gap-1.5">${types}</div>
           <div class="mt-2">${preview.samples.map(sampleHtml).join("") || '<p class="py-4 text-sm text-slate-400">没有可预览的题目。</p>'}</div>
+          ${preview.onenote_preview ? `<div class="mt-4 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3">
+            <div class="flex items-center justify-between text-xs font-medium text-indigo-800 mb-2">
+              <span>📝 作者 OneNote 思考与做题步骤试看</span>
+              <span class="text-indigo-500">导入题有据桌面端后可在题目下方查看全部高清步骤</span>
+            </div>
+            <img src="${preview.onenote_preview}" alt="作者 OneNote 思路试看" class="max-h-72 rounded-lg border border-indigo-100 bg-white">
+          </div>` : ""}
         </section>`
             : ""
         }
@@ -292,6 +304,25 @@ export async function packDetailView(id) {
   document.getElementById("jumpActionBtn")?.addEventListener("click", () => {
     document.getElementById("packActionCard")?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
+  document.getElementById("desktopImportBtn")?.addEventListener("click", (event) =>
+    busy(event.currentTarget, async () => {
+      const result = await api(`/api/packs/${pack.id}/download`, { method: "POST", body: {} });
+      const dlUrl = new URL(result.url, location.origin).href;
+      const uri =
+        "tiyouju://import-pack?" +
+        new URLSearchParams({
+          url: dlUrl,
+          title: pack.title || "",
+          pack_id: pack.id || "",
+        }).toString();
+      const hint = document.getElementById("desktopImportHint");
+      if (hint) {
+        hint.classList.remove("hidden");
+        hint.textContent = "已发送至题有据桌面端，请在软件窗口内确认合并入库；若未安装或未响应，可点击下方「仅下载题包文件」。";
+      }
+      location.href = uri;
+    }),
+  );
   document.getElementById("downloadBtn")?.addEventListener("click", (event) =>
     busy(event.currentTarget, async () => {
       const result = await api(`/api/packs/${pack.id}/download`, { method: "POST", body: {} });

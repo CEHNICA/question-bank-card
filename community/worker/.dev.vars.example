@@ -2,3 +2,7 @@
 # Cloudflare 官方测试密钥：服务端校验永远通过。
 TURNSTILE_SECRET=1x0000000000000000000000000000000AA
 DOWNLOAD_SECRET=local-dev-only-change-me-0123456789abcdef
+# 如需在本机调试 123 云盘 WebDAV 存储，可将 wrangler.toml 中 PACK_STORAGE_MODE 设为 "webdav"
+# 并在本地 .dev.vars 或线上 `wrangler secret put` 填入（切勿提交到仓库）：
+# WEBDAV_USERNAME=你的WebDAV账号
+# WEBDAV_PASSWORD=你的WebDAV应用密码

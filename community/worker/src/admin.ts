@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppBindings } from "./env.ts";
-import { loadPack, maxTotalR2Bytes, activeR2Bytes, packBuyerCount, purgePackStorage } from "./packs.ts";
+import { activeStorageSummary, loadPack, maxTotalR2Bytes, activeR2Bytes, packBuyerCount, purgePackStorage } from "./packs.ts";
 import { fail, intParam, nowIso, readJson, requireAdmin, text } from "./util.ts";
 
 export const adminRoutes = new Hono<AppBindings>();
@@ -11,7 +11,8 @@ adminRoutes.use("*", async (c, next) => {
 });
 
 adminRoutes.get("/storage", async (c) => {
-  const usedBytes = await activeR2Bytes(c.env);
+  const summary = await activeStorageSummary(c.env);
+  const usedBytes = summary.r2_used_bytes;
   const maxBytes = maxTotalR2Bytes(c.env);
   const counts = await c.env.DB.prepare(
     `SELECT
@@ -26,7 +27,10 @@ adminRoutes.get("/storage", async (c) => {
      FROM packs`,
   ).first<Record<string, number | null>>();
   return c.json({
+    storage_mode: summary.storage_mode,
     used_bytes: usedBytes,
+    r2_used_bytes: usedBytes,
+    webdav_used_bytes: summary.webdav_used_bytes,
     max_total_bytes: maxBytes,
     active_packs: Number(counts?.active_packs ?? 0),
     uploading_packs: Number(counts?.uploading_packs ?? 0),
