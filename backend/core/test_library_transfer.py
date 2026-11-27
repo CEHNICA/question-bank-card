@@ -1474,3 +1474,56 @@ class CommunityAsyncUploadTaskTests(TransactionTestCase):
         )
         self.assertEqual(clear_res.status_code, 200)
         self.assertEqual(client.get("/api/backup/community-upload/tasks").json()["history"], [])
+
+    def test_community_http_helpers_set_custom_user_agent_and_parse_cloudflare_error(self):
+        import io
+        import urllib.error
+
+        from core import transfer_views
+
+        seen_headers: list[dict] = []
+
+        class _OkResp:
+            status = 200
+
+            def read(self):
+                return b'{"ok": true}'
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_a):
+                return False
+
+        def fake_urlopen(req, timeout=0):
+            seen_headers.append(dict(req.header_items()))
+            if "fail" in req.full_url:
+                raise urllib.error.HTTPError(
+                    req.full_url,
+                    403,
+                    "Forbidden",
+                    {},
+                    io.BytesIO(
+                        json.dumps(
+                            {
+                                "title": "Error 1010: Access denied",
+                                "detail": "The site owner has blocked access based on your browser's signature.",
+                            }
+                        ).encode("utf-8")
+                    ),
+                )
+            return _OkResp()
+
+        with unittest.mock.patch("core.transfer_views.urllib.request.urlopen", side_effect=fake_urlopen):
+            status_ok, body_ok = transfer_views._community_http_json(
+                "https://community.tiyouju.com/api/packs/init", token="tok", payload={"x": 1}
+            )
+            self.assertEqual(status_ok, 200)
+            self.assertTrue(body_ok["ok"])
+            status_err, body_err = transfer_views._community_http_json(
+                "https://community.tiyouju.com/api/fail", token="tok", payload={}
+            )
+            self.assertEqual(status_err, 403)
+            self.assertIn("browser's signature", body_err["error"])
+
+        self.assertTrue(all(h.get("User-agent", "").startswith("TiYouJu-Desktop/") for h in seen_headers), seen_headers)

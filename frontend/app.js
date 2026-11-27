@@ -1161,11 +1161,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return node;
   }
 
-  async function api(path, { method = "GET", body, form, signal } = {}) {
+  async function api(path, { method = "GET", body, form, headers, signal } = {}) {
     if (window.QBApi?.request) {
-      return window.QBApi.request(path, { method, body, form, signal });
+      return window.QBApi.request(path, { method, body, form, headers, signal });
     }
-    const options = { method, headers: {}, cache: "no-store" };
+    const options = { method, headers: Object.assign({}, headers || {}), cache: "no-store" };
     if (signal) options.signal = signal;
     if (method !== "GET") options.headers["X-QB-Request"] = "1";
     if (form) options.body = form;
@@ -6224,7 +6224,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         pollTimer = null;
       }
       while (true) {
-        const progress = await api("/api/update/progress");
+        const progress = await api("/api/update/progress", { headers: { "X-QB-Request": "1" } });
         syncProgress(progress);
         if (progress.status === "succeeded") return progress;
         if (progress.status === "failed") throw new Error(progress.error || "没有安装。");
@@ -6353,7 +6353,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }
     });
     void check(true);
-    void api("/api/update/progress").then((p) => {
+    void api("/api/update/progress", { headers: { "X-QB-Request": "1" } }).then((p) => {
       if (p && p.active) {
         install.hidden = false;
         syncProgress(p);

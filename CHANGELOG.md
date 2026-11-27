@@ -3,6 +3,19 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.3.14
+
+**修复社区题包上传被 Cloudflare 拦截报错、经典页更新进度头及 SignPath 开源签名工作流接入**
+
+- **社区直传请求头与错误透传修复（`backend/core/transfer_views.py`、`backend/core/test_library_transfer.py`）**：
+  - 为社区登记题包（`/api/packs/init`）、同步账号角色（`/api/me`）、流式/直传上传（`PUT /api/packs/:id/bundle`）与社区题包下载统一加上 `User-Agent: TiYouJu-Desktop/<version>`，避免被 Cloudflare 边缘风控误判 `Error 1010` 返回 403；
+  - 统一提取 `_parse_community_error_body()` 解析非 `error` 键名（如 `detail` / `title` / `message`）与空响应体，真实错误原因不再被覆盖为泛化提示。
+- **经典页更新进度请求头修正（`frontend/app.js`）**：
+  - `api()` 透传自定义请求头并在轮询 `/api/update/progress` 时携带 `X-QB-Request: 1`，消除本地守卫 403 拦截。
+- **SignPath Foundation 开源签名策略与流水线接入（`CODE_SIGNING_POLICY.md`、`PRIVACY.md`、`packaging/build.ps1`、`.github/workflows/release.yml`）**：
+  - 新增开源代码签名策略与隐私说明文档，打包流水线按密钥开关自动支持先签名主体可执行文件再重新封包并签名安装器。
+
+
 ## 2.3.13
 
 **应用内更新 6 路并发加速、实时下载进度条、官网直达入口及小窗菜单滚动修复**

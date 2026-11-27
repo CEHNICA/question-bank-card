@@ -27,9 +27,11 @@ from django.views.decorators.csrf import csrf_exempt
 
 from . import credential_settings, library_transfer
 from .library_transfer import TransferError, UploadCancelledError
+from .version import APP_VERSION
 
 MAX_UPLOAD_BYTES = library_transfer.MAX_BUNDLE_BYTES
 DEFAULT_COMMUNITY_SITE = "https://community.tiyouju.com"
+_COMMUNITY_USER_AGENT = f"TiYouJu-Desktop/{APP_VERSION}"
 _COMMUNITY_ADMIN_STREAM_MAX_BYTES = 95 * 1024 * 1024
 _STAGED_LOCK = threading.Lock()
 _STAGED_PACKS: dict[str, dict[str, Any]] = {}
@@ -439,11 +441,31 @@ def _read_community_zip_metadata(zip_path: Path) -> tuple[dict, dict, str]:
     return manifest, preview, cover_b64
 
 
+def _parse_community_error_body(raw: str, status_code: int) -> dict:
+    try:
+        body = json.loads(raw) if raw else {}
+    except ValueError:
+        return {"error": raw.strip() or f"HTTP {status_code}"}
+    if not isinstance(body, dict):
+        return {"error": f"HTTP {status_code}"}
+    if not body.get("error"):
+        fallback = (
+            body.get("detail") or body.get("title") or body.get("message") or raw.strip() or f"HTTP {status_code}"
+        )
+        body["error"] = str(fallback)
+    return body
+
+
 def _community_http_json(
     url: str, *, token: str, method: str = "POST", payload: dict | None = None
 ) -> tuple[int, dict]:
     data = json.dumps(payload or {}, ensure_ascii=False).encode("utf-8") if payload is not None else None
-    headers = {"Authorization": f"Bearer {token}", "X-TYJ": "1", "Accept": "application/json"}
+    headers = {
+        "User-Agent": _COMMUNITY_USER_AGENT,
+        "Authorization": f"Bearer {token}",
+        "X-TYJ": "1",
+        "Accept": "application/json",
+    }
     if data is not None:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
@@ -453,11 +475,7 @@ def _community_http_json(
             return int(getattr(resp, "status", 200)), body if isinstance(body, dict) else {}
     except urllib.error.HTTPError as err:
         raw = err.read().decode("utf-8", errors="replace")
-        try:
-            body = json.loads(raw) if raw else {}
-        except ValueError:
-            body = {"error": raw or f"HTTP {err.code}"}
-        return int(err.code), body if isinstance(body, dict) else {"error": f"HTTP {err.code}"}
+        return int(err.code), _parse_community_error_body(raw, int(err.code))
 
 
 def _sync_community_session_role(site_url: str, session: dict[str, str], store) -> tuple[str, int | None]:
@@ -469,7 +487,12 @@ def _sync_community_session_role(site_url: str, session: dict[str, str], store) 
         return role, max_pack_bytes
     req = urllib.request.Request(
         f"{site_url}/api/me",
-        headers={"Authorization": f"Bearer {token}", "X-TYJ": "1", "Accept": "application/json"},
+        headers={
+            "User-Agent": _COMMUNITY_USER_AGENT,
+            "Authorization": f"Bearer {token}",
+            "X-TYJ": "1",
+            "Accept": "application/json",
+        },
         method="GET",
     )
     try:
@@ -507,6 +530,7 @@ def _community_http_put_file(
     if progress_cb is None and cancel_event is None:
         raw_bytes = file_path.read_bytes()
         headers = {
+            "User-Agent": _COMMUNITY_USER_AGENT,
             "Authorization": f"Bearer {token}",
             "X-TYJ": "1",
             "Content-Type": "application/zip",
@@ -520,11 +544,7 @@ def _community_http_put_file(
                 return int(getattr(resp, "status", 200)), body if isinstance(body, dict) else {}
         except urllib.error.HTTPError as err:
             raw = err.read().decode("utf-8", errors="replace")
-            try:
-                body = json.loads(raw) if raw else {}
-            except ValueError:
-                body = {"error": raw or f"HTTP {err.code}"}
-            return int(err.code), body if isinstance(body, dict) else {"error": f"HTTP {err.code}"}
+            return int(err.code), _parse_community_error_body(raw, int(err.code))
 
     parsed = urllib.parse.urlparse(url)
     host = parsed.hostname or ""
@@ -537,6 +557,7 @@ def _community_http_put_file(
     conn = conn_cls(host, port, timeout=180)
     try:
         conn.putrequest("PUT", target_path)
+        conn.putheader("User-Agent", _COMMUNITY_USER_AGENT)
         conn.putheader("Authorization", f"Bearer {token}")
         conn.putheader("X-TYJ", "1")
         conn.putheader("Content-Type", "application/zip")
@@ -562,11 +583,14 @@ def _community_http_put_file(
             raise UploadCancelledError("已取消上传。")
         resp = conn.getresponse()
         raw = resp.read().decode("utf-8", errors="replace")
+        status_code = int(resp.status)
+        if status_code >= 400:
+            return status_code, _parse_community_error_body(raw, status_code)
         try:
             body = json.loads(raw) if raw else {}
         except ValueError:
-            body = {"error": raw or f"HTTP {resp.status}"}
-        return int(resp.status), body if isinstance(body, dict) else {"error": f"HTTP {resp.status}"}
+            body = {"error": raw or f"HTTP {status_code}"}
+        return status_code, body if isinstance(body, dict) else {"error": f"HTTP {status_code}"}
     finally:
         try:
             conn.close()
@@ -1163,7 +1187,9 @@ def fetch_and_inspect_view(request):
     stage_dir = Path(tempfile.mkdtemp(prefix="tyj-stage-"))
     target = stage_dir / "community-pack.zip"
     try:
-        req = urllib.request.Request(dl_url, headers={"Accept": "application/zip, */*"}, method="GET")
+        req = urllib.request.Request(
+            dl_url, headers={"User-Agent": _COMMUNITY_USER_AGENT, "Accept": "application/zip, */*"}, method="GET"
+        )
         total = 0
         checked_magic = False
         with urllib.request.urlopen(req, timeout=90) as resp, open(target, "wb") as writer:
