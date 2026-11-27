@@ -19,7 +19,7 @@ assert.match(js, /function setCurrent\(id, \{ scroll = false, focus = false, hol
 assert.match(js, /if \(card && hold\) state\.followHold = true;/);
 assert.match(js, /card\.addEventListener\("focusin", \(\) => \{ if \(state\.current !== q\.id\) setCurrent\(q\.id, \{ hold: true \}\); \}\);/);
 assert.match(js, /window\.addEventListener\("wheel", releaseFollow, \{ passive: true \}\)/);
-assert.match(js, /return \(bar \? bar\.offsetHeight : 56\) \+/);
+assert.match(js, /return \(bar \? bar\.offsetHeight : 0\) \+/);
 // 阅读线几何仍给后续全屏/跳题用；只测纯函数，不再要求变暗样式入口。
 const band = { top: 100, bottom: 700 };
 assert.equal(readingLine({ ...band, scrollY: 2000, below: 2000 }), 300);

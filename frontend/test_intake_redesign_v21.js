@@ -119,7 +119,7 @@ test("2.1.0 前后端集成契约：三步条、分屏原卷、回收站安全�
     assert.match(indexHtml, new RegExp(`id="${id}"`), `index.html 缺少 #${id}`);
   }
   assert.match(appJs, /async function moveCurrentPaperToTrash\(\)/);
-  assert.match(appJs, /edit_solution=1/);
+  assert.match(appJs, /\/eagle\?q=\$\{encodeURIComponent\(q\.publication\.id\)\}/);
   assert.match(eagleHtml, /src="\/qb-api-client\.js"/);
   assert.match(eagleHtml, /edit_solution.*openSolutionEditorForId/s);
   const splitJs = fs.readFileSync(path.join(__dirname, "intake-split-canvas.js"), "utf8");

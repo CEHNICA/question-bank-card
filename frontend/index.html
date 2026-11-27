@@ -15,9 +15,9 @@
 <!-- 1.26.50：打开软件时试卷列表还在准备，这一行说明现在是什么状态。 -->
 <link rel="stylesheet" href="/startup-hint.css">
 <!-- 1.26.15：API 配置这一页的重新排版，单独一个文件，方便整页回退。 -->
-<link rel="stylesheet" href="/api-redesign.css?v=4">
+<link rel="stylesheet" href="/api-redesign.css?v=5">
 </head>
-<body>
+<body class="entry-page">
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V4m0 0-4 4m4-4 4 4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></symbol>
     <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M7.5 14h9"/></symbol>
@@ -43,33 +43,22 @@
     <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
   </svg>
 
-  <header class="topbar app-topbar review-topbar" data-no-drawer>
-    <!-- 左上仅留侧栏折叠开关与引擎状态；右上放题库工作台与设置。 -->
-    <div class="review-top-actions review-top-actions-start topbar-tools">
-      <span id="engineLine" class="engine-line" hidden></span>
-    </div>
-    <div class="entry-topbar-brand">
-      <img class="entry-topbar-logo" src="/favicon.png" width="20" height="20" alt="">
-      <span class="entry-topbar-name">题有据</span>
-      <span class="entry-topbar-tag">录入题目</span>
-      <span id="entryTopbarVersion" class="entry-topbar-version" hidden></span>
-    </div>
-    <div class="review-top-actions review-top-actions-end topbar-tools">
-      <nav class="topnav review-topnav" aria-label="页面">
-        <a id="reviewReturnLibrary" class="review-nav-primary" href="/eagle" title="打开题库工作台">
-          <svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>题库工作台
-        </a>
-      </nav>
-      <a id="settingsButton" class="review-settings-link" href="/settings"><svg class="icon" aria-hidden="true"><use href="#i-gear"/></svg>设置</a>
-    </div>
-  </header>
-
   <main id="settingsHome" class="settings-home" hidden>
-    <header class="settings-head">
-      <div><h1 id="settingsTitle" tabindex="-1">设置</h1><p class="settings-description" id="settingsPageLead">这些设置只影响这台电脑，不改题库里的题。</p></div>
-      <a id="settingsReturn" class="button quiet" href="/eagle">返回题库</a>
-    </header>
-    <section id="settingsDialog" class="settings-panel" aria-labelledby="settingsTitle">
+    <div class="settings-shell">
+      <header class="settings-head">
+        <div class="settings-head-main">
+          <span class="settings-head-icon" aria-hidden="true">⚙</span>
+          <div class="settings-head-copy">
+            <h1 id="settingsTitle" tabindex="-1">偏好与系统设置</h1>
+            <p class="settings-description" id="settingsPageLead">这些设置只影响这台电脑，不改题库里的题。</p>
+          </div>
+        </div>
+        <div class="settings-head-actions">
+          <a id="settingsReturn" class="button quiet" href="/eagle">返回题库</a>
+          <button id="settingsOverlayClose" class="settings-overlay-close" type="button" aria-label="关闭设置" hidden>✕</button>
+        </div>
+      </header>
+      <section id="settingsDialog" class="settings-panel" aria-labelledby="settingsTitle">
       <div class="settings-nav" role="tablist" aria-label="设置分区">
         <button type="button" role="tab" data-settings-tab="settingsGeneral" aria-selected="true">API 配置</button>
         <button type="button" role="tab" data-settings-tab="settingsDisplay" aria-selected="false">显示与导出</button>
@@ -146,7 +135,7 @@
               <p>为同一道题添加多个片段；翻到下一页后点“再加一块”。调整已有题时直接单击题框，拖边角改大小、拖题号标签移动；双击题框可回到对应审核卡。</p>
             </details>
             <details class="teaching-help"><summary>补充或修改答案</summary>
-              <p>题卡已入库后，右上可直接点「编答案/解析」直达 Eagle 题库工作台的统一答案编辑器；保存后用于出卷。需要 AI 帮忙时只勾选本次题目；生成失败可到“设置 → API 配置”检查答题服务。旧初稿保留在折叠历史中，主视图使用你保存的版本。</p>
+              <p>平时改题干或补写答案解析，直接点题卡上的「编辑」即可；题卡已入库后，也可点「在题库中看」到 Eagle 题库工作台里补充解析配图或查看版本历史。需要 AI 帮忙时只勾选本次题目；生成失败可到“设置 → API 配置”检查答题服务。</p>
             </details>
             <details class="teaching-help"><summary>读题一直没结果，或服务不可用</summary>
               <p>等待时可停止任务并打开“切题与校正”，原卷和已保存题目会保留。完成切题后，再由你选择 AI 识读或直接原图审核。</p>
@@ -175,6 +164,9 @@
                   <div><dt>处理记录</dt><dd>切题、页序或配图时遇到的情况，可在“试卷操作”中查看。</dd></div>
                 </dl>
               </details>
+            </details>
+            <details id="settingsAiConnect" class="teaching-help"><summary>连接 AI 助手（豆包 / WorkBuddy / MiniMax / MCP）</summary>
+              <div id="settingsAiConnectMount"></div>
             </details>
             <details class="teaching-help help-preferences"><summary>重新练习与提示设置</summary>
               <div class="settings-help-actions">
@@ -205,11 +197,21 @@
           </section>
         </div>
       </div>
-    </section>
+      </section>
+    </div>
   </main>
 
   <div class="layout">
     <aside class="sidebar" aria-label="试卷">
+      <div class="entry-sidebar-nav" data-no-drawer>
+        <nav class="topnav review-topnav" aria-label="页面">
+          <a id="reviewReturnLibrary" class="review-nav-primary" href="/eagle" title="打开题库工作台">
+            <svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>题库工作台
+          </a>
+        </nav>
+        <a id="settingsButton" class="review-settings-link" href="/settings"><svg class="icon" aria-hidden="true"><use href="#i-gear"/></svg>设置</a>
+      </div>
+      <span id="engineLine" class="engine-line" hidden></span>
       <div id="reviewTeachMount" class="teaching-dock"></div>
       <label id="dropZone" class="drop-zone" tabindex="-1">
         <input id="fileInput" class="visually-hidden" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.doc" multiple>
@@ -219,9 +221,9 @@
           <span>拖拽文件或 Ctrl+V 粘贴截图</span>
         </span>
       </label>
-      <label id="uploadCutOnlyWrap" class="side-cut-only" hidden title="上传 PDF 或照片走 MinerU 时仅切出题目范围并保留原图，不自动调用 AI 识读，省额度且可直接原图入库">
+      <label id="uploadCutOnlyWrap" class="side-cut-only" hidden title="上传后只按题切出原图卡片，不自动转文字；省额度，可以直接原图入库，之后也可以再转文字">
         <input id="uploadCutOnly" type="checkbox">
-        <span>MinerU 只切题（不自动识读）</span>
+        <span>只切图，不转文字</span>
       </label>
       <!-- uploadNote 留给脚本按需写入临时提示；默认不占位。 -->
       <p id="uploadNote" class="side-note side-note-quiet" hidden></p>
@@ -274,6 +276,7 @@
           <div class="empty-learning">
             <button id="emptyAutomaticGuide" class="button" type="button">自动切题入门</button>
             <button id="emptyLearn" class="button" type="button">手工练习 · 免密钥</button>
+            <button id="emptyConnectAi" class="button" type="button">接豆包 / WorkBuddy 帮录</button>
             <a class="button quiet" href="/eagle">先去题库看看 →</a>
           </div>
         </div>
@@ -303,6 +306,7 @@
                 <summary class="paper-menu-summary-sr" tabindex="-1">试卷操作</summary>
                 <div class="menu-panel paper-menu-panel" role="menu" aria-label="试卷操作">
                   <p id="settingsTaskStatus" class="menu-note paper-menu-status" hidden></p>
+                  <p class="paper-menu-group-label" aria-hidden="true">基础与切题</p>
                   <button id="settingsRename" class="link-button" type="button">修改名称</button>
                   <button id="settingsReparse" class="link-button" type="button" hidden title="MinerU 久久没有结果时用：不再等这一次，把文件重新上传给 MinerU">重新交给 MinerU 解析</button>
                   <button id="paperContinueAi" class="link-button" type="button" hidden>继续 AI 切题</button>
@@ -317,8 +321,10 @@
                   <button id="questionTrash" class="link-button" type="button"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg><span id="questionTrashLabel">题卡回收站</span></button>
                   <button id="approveAllGreen" class="link-button" type="button" hidden>批量通过可入库题目…</button>
                   <button id="publishCutImages" class="link-button" type="button" hidden>原图批量入库…</button>
+                  <hr class="menu-divider">
+                  <p class="paper-menu-group-label" aria-hidden="true">记录与归档</p>
                   <details class="paper-notes">
-                    <summary>处理记录（<span id="paperNotesCount">0</span>）</summary>
+                    <summary><span class="paper-notes-summary-label">处理记录</span><span id="paperNotesCount" class="paper-notes-badge">0</span></summary>
                     <ul id="settingsTaskNotes"></ul>
                   </details>
                   <hr class="menu-divider">
@@ -415,6 +421,11 @@
       <div>
         <h3 id="pageDialogTitle"></h3>
         <details id="pageCropHelp" class="page-crop-help"><summary>操作说明</summary><p id="pageDialogHint" class="hint"></p></details>
+      </div>
+      <div id="pageModeSwitch" class="page-mode-switch" role="group" aria-label="原卷编辑模式" hidden>
+        <button id="pageModeRegions" class="page-mode-tab" type="button" data-page-mode="regions" aria-pressed="false">📐 调整范围</button>
+        <button id="pageModeFigures" class="page-mode-tab" type="button" data-page-mode="figures" aria-pressed="false">🖼️ 管理配图</button>
+        <button id="pageModeRead" class="page-mode-tab" type="button" data-page-mode="read" aria-pressed="false">🔍 框选识读</button>
       </div>
       <div class="dialog-tools">
         <label id="numberField" class="number-field" hidden>题号 <input id="numberInput" type="number" min="1" max="999"></label>
@@ -589,7 +600,7 @@
       </label>
       <label id="photoCutOnlyOption" class="photo-cloud-toggle" hidden>
         <input id="photoCutOnly" type="checkbox">
-        <span>只切题不自动 AI 识读（直接原图入库）</span>
+        <span>只切图，不转文字（直接原图入库）</span>
       </label>
     </div>
     <ul id="photoList" class="photo-list"></ul>
@@ -896,6 +907,7 @@
   <script src="/static/library-ai-settings.js" defer></script>
   <script src="/static/export-settings.js" defer></script>
   <script src="/static/library-transfer.js" defer></script>
+  <script src="/static/assistant-connect.js" defer></script>
   <script src="/browser-interactions.js" defer></script>
   <script src="/shortcut-help.js" defer></script>
   <script src="/site-drawer.js" defer></script>

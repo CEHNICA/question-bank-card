@@ -94,14 +94,38 @@
       cursor: col-resize;
       touch-action: none;
       background: transparent;
+      outline: none;
     }
-    #inspectorResizeHandle:hover,
     #inspectorResizeHandle:focus-visible,
-    #rightInspectorPane.resizing #inspectorResizeHandle {
-      background: rgba(16, 185, 129, 0.35);
+    #sidebarResizeHandle:focus-visible {
+      outline: none;
+    }
+    #inspectorResizeHandle::after,
+    #sidebarResizeHandle::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      width: 1px;
+      transform: translateX(-50%);
+      background: transparent;
+      transition: background-color .14s ease, width .14s ease;
+      pointer-events: none;
+    }
+    #inspectorResizeHandle:hover::after,
+    #inspectorResizeHandle:focus-visible::after,
+    #sidebarResizeHandle:hover::after,
+    #sidebarResizeHandle:focus-visible::after {
+      background: rgba(148, 163, 184, 0.55);
+    }
+    #rightInspectorPane.resizing #inspectorResizeHandle::after,
+    #leftFolderSidebar.resizing #sidebarResizeHandle::after {
+      width: 2px;
+      background: rgba(100, 116, 139, 0.72);
     }
     #rightInspectorPane.collapsed #inspectorResizeHandle { display: none; }
-    /* 左侧导航：默认可拖右边调宽。默认收成当前这种窄栏：左 180、右 240，仍可再拖宽。 */
+    /* 左侧导航：默认可拖右边调宽，默认左 180、右 240，且两边均可继续拖窄。 */
     #leftFolderSidebar {
       --sidebar-width: 180px;
       position: relative;
@@ -121,11 +145,7 @@
       cursor: col-resize;
       touch-action: none;
       background: transparent;
-    }
-    #sidebarResizeHandle:hover,
-    #sidebarResizeHandle:focus-visible,
-    #leftFolderSidebar.resizing #sidebarResizeHandle {
-      background: rgba(16, 185, 129, 0.35);
+      outline: none;
     }
     #leftFolderSidebar.collapsed #sidebarResizeHandle { display: none; }
     @media (max-width: 1100px) {
@@ -2691,7 +2711,7 @@
         <span id="inspectorBadge" class="hidden"></span>
       </div>
 
-      <div id="inspectorBody" class="flex-1 overflow-y-auto px-4 pt-3 pb-4 space-y-4 text-xs">
+      <div id="inspectorBody" class="flex-1 overflow-y-auto px-3 pt-3 pb-4 space-y-4 text-xs">
         
         <!-- 0. 题目可选元信息：安静轻行，不写成「每题必填表单」 -->
         <div id="inspectorEagleTopMeta" class="space-y-0.5 pb-3 mb-1 border-b border-slate-100">
@@ -2771,7 +2791,7 @@
             <span class="text-xs font-semibold text-slate-800">题库工作台</span>
           </div>
           <p class="text-[11px] text-slate-500 leading-relaxed">点选左侧文件夹浏览试题，或在列表中点击题目以查看标签、出处原卷与 OneNote 刷题记录。</p>
-          <div class="flex items-center gap-1.5 pt-1">
+          <div class="flex flex-wrap items-center gap-1.5 pt-1">
             <button type="button" onclick="openShortcutsModal()" class="flex-1 py-1.5 px-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-[11px] font-medium text-slate-700 cursor-pointer transition-colors">快捷键指南</button>
             <button type="button" onclick="openEaglePreferencesModal('general')" class="flex-1 py-1.5 px-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-[11px] font-medium text-slate-700 cursor-pointer transition-colors">偏好设置</button>
           </div>
@@ -3220,10 +3240,20 @@
         <button type="button" onclick="openShortcutsModal(); hideEagleAppMainMenu();" class="eagle-menu-dual-btn" title="查看快捷键 (?)">
           <span>⌨️</span><span>快捷键</span>
         </button>
-        <button type="button" onclick="openEagleHelpModal(); hideEagleAppMainMenu();" class="eagle-menu-dual-btn">
-          <span>📖</span><span>使用指南</span>
+        <button type="button" onclick="openEaglePreferencesModal('help'); hideEagleAppMainMenu();" class="eagle-menu-dual-btn" title="接入豆包 / WorkBuddy / MiniMax / MCP">
+          <span>🤖</span><span>接 AI 助手</span>
         </button>
       </div>
+      <button type="button" onclick="openEagleHelpModal(); hideEagleAppMainMenu();" class="eagle-menu-footer-link" title="查看工作台详细使用指南">
+        <span class="flex items-center gap-2 min-w-0">
+          <span class="text-sm shrink-0">📖</span>
+          <span class="flex flex-col min-w-0">
+            <span class="eagle-menu-footer-title">工作台使用指南</span>
+            <span class="eagle-menu-footer-sub">切题 · 标签 · OneNote · 组卷</span>
+          </span>
+        </span>
+        <span class="text-xs text-slate-400">›</span>
+      </button>
       <button type="button" onclick="openEaglePreferencesModal('general'); hideEagleAppMainMenu();" class="eagle-menu-footer-link" title="API 密钥、导出位置、数据备份、帮助与关于 (Ctrl+,)">
         <span class="flex items-center gap-2 min-w-0">
           <span class="text-sm shrink-0">⚙</span>
@@ -3658,6 +3688,7 @@
             <div id="eaglePrefTransferMount"></div>
           </div>
           <div id="eaglePrefPaneHelp" data-pref-pane="help" class="hidden space-y-4">
+            <div id="eaglePrefAiConnectMount"></div>
             <section class="settings-section">
               <h3>常用入口与快捷键</h3>
               <p class="settings-footnote">工作台内高频操作可直接用键盘完成；进入录入界面按 Ctrl+I，打开偏好设置按 Ctrl+,。</p>
@@ -3932,7 +3963,7 @@
   </div>
 
   <!-- ================= 2. 所属试卷原卷扫描件核验模态框 (Original Paper Lightbox) ================= -->
-  <div id="originalPaperModal" class="hidden fixed inset-0 z-[10006] flex items-center justify-center bg-slate-900/75 backdrop-blur-xs p-4 select-none" onclick="closeOriginalPaperModal()">
+  <div id="originalPaperModal" class="hidden fixed inset-0 z-[10006] flex items-center justify-center bg-slate-900/75 backdrop-blur-xs p-4 select-none" onclick="if (!opState.recropActive) closeOriginalPaperModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[92vh] flex flex-col overflow-hidden border border-slate-200" onclick="event.stopPropagation()">
       <!-- 弹窗顶栏 -->
       <div class="op-head flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50 shrink-0">
@@ -5841,13 +5872,16 @@
       await loadRealData();
       const urlParams = new URLSearchParams(window.location.search);
       const targetQid = urlParams.get('q');
+      const rawReturnTo = urlParams.get('return_to') || '';
+      const safeReturnTo = /^\/(?!\/)/.test(rawReturnTo) ? rawReturnTo : '';
       if (targetQid) {
         const located = locateQuestionById(targetQid);
         if (located && urlParams.get('edit_solution') === '1') {
           const cleanedUrl = new URL(window.location.href);
           cleanedUrl.searchParams.delete('edit_solution');
+          cleanedUrl.searchParams.delete('return_to');
           window.history.replaceState(null, '', cleanedUrl.toString());
-          requestAnimationFrame(() => openSolutionEditorForId(targetQid));
+          requestAnimationFrame(() => openSolutionEditorForId(targetQid, { returnTo: safeReturnTo }));
         }
       }
       startDeepLinkPolling();
@@ -8005,6 +8039,11 @@
           window.LibraryTransfer.mount(trHost);
           eaglePrefsMounted.transfer = true;
         }
+      } else if (tab === 'help') {
+        const aiHost = document.getElementById('eaglePrefAiConnectMount');
+        if (aiHost && window.AssistantConnect && typeof window.AssistantConnect.mount === 'function') {
+          void window.AssistantConnect.mount(aiHost);
+        }
       } else if (tab === 'about') {
         void loadEaglePrefAbout();
       }
@@ -8075,7 +8114,7 @@
       if (eaglePrefsMounted.about) return;
       eaglePrefsMounted.about = true;
       try {
-        const uResp = await fetch(`${API_BASE}/api/update/status`, {
+        const uResp = await fetch(`${API_BASE}/api/update`, {
           cache: 'no-store',
           headers: { 'X-QB-Request': '1' }
         });
@@ -12931,15 +12970,24 @@
       if (errNotice) errNotice.remove();
       const img = document.getElementById('opPaperImg');
       if (img) img.style.display = 'block';
+      const backEditor = opState.returnToEditor;
+      opState.returnToEditor = null;
+      if (backEditor && backEditor.qid) {
+        requestAnimationFrame(() => openSolutionEditorForId(backEditor.qid, {
+          focusField: backEditor.focusField || 'answer',
+          returnTo: backEditor.returnTo || ''
+        }));
+      }
     }
 
-    function openOriginalRecropModal(qid) {
+    function openOriginalRecropModal(qid, options = {}) {
       const targetId = qid || currentActiveQuestionId || (filteredQuestions[0] && filteredQuestions[0].id);
       const q = targetId ? questionsData.find(item => String(item.id) === String(targetId)) : null;
       if (!q || !q.documentId) {
         showToast('当前试题暂无关联原卷扫描页，无法重框', 'error');
         return;
       }
+      opState.returnToEditor = options?.returnToEditor || null;
       const pageIdx = Number.isInteger(q.sourcePageIdx)
         ? q.sourcePageIdx
         : (q.sourcePage && q.sourcePage > 0 ? q.sourcePage - 1 : 0);
@@ -13830,7 +13878,10 @@
     function openSolutionEditorForId(qid, options = {}) {
       if (!qid) return;
       if (typeof window.openSolutionEditor === 'function') {
-        window.openSolutionEditor([qid], { focusField: options.focusField || 'answer' });
+        window.openSolutionEditor([qid], {
+          focusField: options.focusField || 'answer',
+          returnTo: options.returnTo || ''
+        });
       } else {
         showToast('统一编辑工作台脚本尚未就绪，请稍后再试', 'error');
       }
@@ -15039,11 +15090,11 @@
     // 默认窄栏，和现在拖出来的样子一致：左 180、右 240。拖过以后以本机保存的宽度为准。
     const INSPECTOR_WIDTH_STORAGE_KEY = 'eagle_inspector_width_px';
     const INSPECTOR_WIDTH_DEFAULT = 240;
-    const INSPECTOR_WIDTH_MIN = 240;
+    const INSPECTOR_WIDTH_MIN = 180;
     const INSPECTOR_WIDTH_MAX = 560;
     const SIDEBAR_WIDTH_STORAGE_KEY = 'eagle_sidebar_width_px';
     const SIDEBAR_WIDTH_DEFAULT = 180;
-    const SIDEBAR_WIDTH_MIN = 180;
+    const SIDEBAR_WIDTH_MIN = 150;
     const SIDEBAR_WIDTH_MAX = 420;
 
     function clampInspectorWidth(px) {
@@ -24567,6 +24618,7 @@
   <script src="/static/api-settings.js" defer></script>
   <script src="/static/export-settings.js" defer></script>
   <script src="/static/library-transfer.js" defer></script>
+  <script src="/static/assistant-connect.js" defer></script>
   <script src="/browser-interactions.js" defer></script>
 </body>
 </html>

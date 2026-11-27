@@ -7,6 +7,7 @@ import os
 import stat
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -320,6 +321,8 @@ class SetupAgentsTests(unittest.TestCase):
         (self.home / ".trae-cn").mkdir()
         (self.home / ".qwen").mkdir()
         (self.home / ".codebuddy").mkdir()
+        (self.home / ".workbuddy").mkdir()
+        (self.home / ".minimax").mkdir()
         (self.home / ".kimi").mkdir()
         (self.home / ".qoder").mkdir()
         (self.home / ".lingma").mkdir()
@@ -333,6 +336,8 @@ class SetupAgentsTests(unittest.TestCase):
             "trae_cn",
             "qwen_code",
             "codebuddy",
+            "workbuddy",
+            "minimax",
             "kimi",
             "qoder",
             "lingma",
@@ -348,10 +353,14 @@ class SetupAgentsTests(unittest.TestCase):
         cli_exe.write_bytes(b"cli")
         appdata = self.root / "appdata_roaming"
         (appdata / "Trae CN" / "User").mkdir(parents=True)
+        (appdata / "MiniMax Agent").mkdir(parents=True)
         (appdata / "Claude").mkdir(parents=True)
         (self.home / ".cursor").mkdir()
         (self.home / ".qwen").mkdir()
         (self.home / ".codebuddy").mkdir()
+        (self.home / ".codebuddy" / ".mcp.json").write_text("{}", encoding="utf-8")
+        (self.home / ".workbuddy").mkdir()
+        (self.home / ".minimax").mkdir()
         (self.home / ".claude.json").write_text('{"other": 1}', encoding="utf-8")
 
         trae_cfg = appdata / "Trae CN" / "User" / "mcp.json"
@@ -361,7 +370,18 @@ class SetupAgentsTests(unittest.TestCase):
         bad_cfg.write_text("{not valid json", encoding="utf-8")
 
         targets = dict(setup.discover_mcp_config_targets(home=self.home, appdata=appdata))
-        for client_id in ("cursor", "trae_cn", "claude_desktop", "claude_code", "qwen_code", "codebuddy"):
+        for client_id in (
+            "cursor",
+            "trae_cn",
+            "claude_desktop",
+            "claude_code",
+            "qwen_code",
+            "codebuddy",
+            "codebuddy_dot",
+            "workbuddy",
+            "minimax",
+            "minimax_agent",
+        ):
             self.assertIn(client_id, targets)
         self.assertNotIn("trae", targets)
         self.assertNotIn("kimi", targets)
@@ -374,8 +394,19 @@ class SetupAgentsTests(unittest.TestCase):
             resources=self.source,
             update_path=False,
         )
+        self.assertTrue(first["skill_zip"]["verified"])
+        zip_path = Path(first["skill_zip"]["path"])
+        self.assertTrue(zip_path.is_file())
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            names = set(zf.namelist())
+            self.assertIn("tiyouju/SKILL.md", names)
+            self.assertIn("tiyouju/references/commands.md", names)
         mcp_map = {item["client"]: item for item in first["mcp"]}
         self.assertEqual(mcp_map["trae_cn"]["status"], "configured")
+        self.assertEqual(mcp_map["workbuddy"]["status"], "configured")
+        self.assertEqual(mcp_map["codebuddy_dot"]["status"], "configured")
+        self.assertEqual(mcp_map["minimax"]["status"], "configured")
+        self.assertEqual(mcp_map["minimax_agent"]["status"], "configured")
         self.assertTrue(mcp_map["trae_cn"]["verified"])
         self.assertEqual(mcp_map["claude_code"]["status"], "configured")
         self.assertEqual(mcp_map["codebuddy"]["status"], "skipped_invalid_json")

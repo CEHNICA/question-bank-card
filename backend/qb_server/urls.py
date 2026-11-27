@@ -3,6 +3,7 @@ from django.urls import path
 from core import (
     api_key_reveal,
     app_update,
+    assistant_connect,
     export_preferences,
     library_browse,
     library_clipboard,
@@ -85,6 +86,9 @@ urlpatterns = [
     path("static/library-ai-settings.js", views.library_ai_script),
     path("static/export-settings.js", views.export_settings_script),
     path("static/library-transfer.js", views.library_transfer_script),
+    path(
+        "static/assistant-connect.js", views._frontend("assistant-connect.js", "application/javascript; charset=utf-8")
+    ),
     path("styles.css", views.styles),
     path("api-redesign.css", views.api_redesign_styles),
     path("library.css", views.library_styles),
@@ -265,4 +269,8 @@ urlpatterns = [
     path("api/update/settings", app_update.update_settings_view),
     path("api/update/check", app_update.update_check_view),
     path("api/update/install", app_update.update_install_view),
+    path("api/assistant/connect", assistant_connect.connect_status_view),
+    path("api/assistant/connect/setup", assistant_connect.connect_setup_view),
+    path("api/assistant/connect/open-skill-zip", assistant_connect.open_skill_zip_view),
+    path("api/assistant/connect/skill-zip", assistant_connect.download_skill_zip_view),
 ]

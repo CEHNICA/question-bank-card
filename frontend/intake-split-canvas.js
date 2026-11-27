@@ -180,7 +180,17 @@
         const label = toggle.querySelector(".tool-label");
         if (label) label.textContent = open ? "收起原卷" : "对照原卷";
       }
-      if (render && open) renderCanvas();
+      if (render && open) {
+        renderCanvas();
+        if (typeof requestAnimationFrame === "function") {
+          requestAnimationFrame(() => {
+            const sheetImg = $("splitCanvasStage")?.querySelector?.(".split-canvas-image");
+            if (sheetImg && typeof sheetImg.decode === "function") {
+              void sheetImg.decode().catch(() => {});
+            }
+          });
+        }
+      }
     }
 
     function setPage(nextPage, { syncRender = true } = {}) {
@@ -286,6 +296,8 @@
       const img = el("img", "split-canvas-image");
       img.alt = `${paper.name || "原卷"} 第 ${pos + 1} 页`;
       const ver = paper.pages_version ? `?v=${encodeURIComponent(paper.pages_version)}` : "";
+      img.loading = "eager";
+      img.decoding = "sync";
       img.src = `/api/papers/${paper.id}/pages/${pageIdx}/preview${ver}`;
       img.draggable = false;
       sheet.append(img);

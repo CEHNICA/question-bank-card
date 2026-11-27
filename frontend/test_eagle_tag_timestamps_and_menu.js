@@ -84,7 +84,15 @@ test("Eagle UI places exclude-used controls inside #filterPillsPanel and keeps t
   assert.ok(scriptSrc.includes("eagle_inspector_width_px"), "inspector width must persist");
   assert.ok(scriptSrc.includes("eagle_sidebar_width_px"), "sidebar width must persist");
   assert.match(scriptSrc, /INSPECTOR_WIDTH_DEFAULT = 240/, "right default is the narrow property column");
+  assert.match(scriptSrc, /INSPECTOR_WIDTH_MIN = 180/, "right sidebar can be dragged narrower below 240px");
   assert.match(scriptSrc, /SIDEBAR_WIDTH_DEFAULT = 180/, "left default is the narrow folder column");
+  assert.match(scriptSrc, /SIDEBAR_WIDTH_MIN = 150/, "left sidebar can also be dragged narrower");
+  assert.match(eagleHtml, /#inspectorResizeHandle::after,\s*#sidebarResizeHandle::after/, "resize handles render a thin hairline via ::after");
+  assert.doesNotMatch(
+    eagleHtml,
+    /#(?:inspector|sidebar)ResizeHandle:hover[\s\S]{0,160}rgba\(16,\s*185,\s*129,\s*0\.35\)/,
+    "resize handles must not show 6px green light-beam fills"
+  );
   assert.match(eagleHtml, /--inspector-width/, "inspector width uses CSS variable");
   assert.match(eagleHtml, /--sidebar-width/, "sidebar width uses CSS variable");
 

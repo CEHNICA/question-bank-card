@@ -22,13 +22,13 @@ test("工作台版本号只在 ≡ 主菜单显示，左下角脚标已隐藏", 
   assert.doesNotMatch(html, /eagle-q-tag-wiggle/, "悬停不再用抖动动画");
 });
 
-test("录入首页顶栏品牌区随 /api/status 显示版本号", () => {
+test("录入首页已移除顶部通栏，版本号改由设置页与工作台主菜单展示", () => {
   const indexHtml = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
   const stylesCss = fs.readFileSync(path.join(ROOT, "styles.css"), "utf8");
   const appJs = fs.readFileSync(path.join(ROOT, "app.js"), "utf8");
 
-  assert.match(indexHtml, /id="entryTopbarVersion"/);
-  assert.match(stylesCss, /\.entry-topbar-version\s*\{/);
-  assert.match(appJs, /document\.getElementById\("entryTopbarVersion"\)/);
-  assert.match(appJs, /topVersion\.textContent = `v\$\{s\.app_version\}`/);
+  assert.doesNotMatch(indexHtml, /<header\s+class="topbar/);
+  assert.doesNotMatch(indexHtml, /id="entryTopbarVersion"/);
+  assert.match(stylesCss, /body\.entry-page\s*\{\s*--topbar-h:\s*0px;/);
+  assert.match(appJs, /aboutVersion/);
 });

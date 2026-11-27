@@ -742,10 +742,22 @@
       sourceRecropBtn.type = "button";
       sourceRecropBtn.title = "如果原图少裁了一部分，直接打开原卷画新框并重新识读";
       sourceRecropBtn.addEventListener("click", () => {
+        if (typeof openOptions.onRecrop === "function") {
+          const currentRecord = record;
+          void close({ stayInPlace: true }).then((closed) => {
+            if (closed) openOptions.onRecrop(currentRecord);
+          });
+          return;
+        }
         if (!record?.id || typeof root.openOriginalRecropModal !== "function") return;
         const targetId = String(record.id);
-        void close().then(() => {
-          root.openOriginalRecropModal(targetId);
+        const returnToEditor = {
+          qid: targetId,
+          focusField: openOptions.focusField || "answer",
+          returnTo: openOptions.returnTo || ""
+        };
+        void close({ stayInPlace: true }).then((closed) => {
+          if (closed) root.openOriginalRecropModal(targetId, { returnToEditor });
         });
       });
       sourceHead.append(sourceLabel, sourceRecropBtn);
@@ -1155,6 +1167,8 @@
 
       controls = {
         barObj,
+        backBtn: barObj.backButton || barObj.bar?.querySelector?.(".editor-bar-back") || null,
+        sourceRecropBtn,
         typeSelect,
         unknownTypeOption,
         sourcePane,
@@ -1774,6 +1788,18 @@
       if (startIdx < 0) startIdx = 0;
 
       returnFocus = root.document?.activeElement || null;
+      const hasReturnTo = typeof openOptions.returnTo === "string" && /^\/(?!\/)/.test(openOptions.returnTo);
+      const customBackLabel = typeof openOptions.backLabel === "string" ? openOptions.backLabel.trim() : "";
+      if (controls?.backBtn) {
+        controls.backBtn.textContent = customBackLabel || (hasReturnTo ? "← 返回录题" : "← 返回");
+        controls.backBtn.title = (customBackLabel || hasReturnTo)
+          ? "返回录题界面；有未保存修改会先确认（Esc）"
+          : "返回题库列表；有未保存修改会先确认（Esc）";
+      }
+      if (controls?.sourceRecropBtn) {
+        controls.sourceRecropBtn.hidden = !(typeof openOptions.onRecrop === "function"
+          || typeof root.openOriginalRecropModal === "function");
+      }
       if (!dialog.open) dialog.showModal?.();
       await loadQuestionAt(startIdx, options.focusField || "stem");
     }
@@ -1808,17 +1834,24 @@
       });
     }
 
-    async function close() {
-      if (closing || !dialog?.open) return;
+    async function close(options = {}) {
+      if (closing || !dialog?.open) return false;
       closing = true;
       const session = epoch;
       const confirmed = await confirmLeaveIfDirty();
-      if (session !== epoch) return;
+      if (session !== epoch) return false;
       if (!confirmed) {
         closing = false;
-        return;
+        return false;
       }
+      const returnTo = (!options?.stayInPlace && typeof openOptions.returnTo === "string" && /^\/(?!\/)/.test(openOptions.returnTo))
+        ? openOptions.returnTo
+        : "";
       forceClose();
+      if (returnTo && root.location) {
+        root.location.href = returnTo;
+      }
+      return true;
     }
 
     return Object.freeze({

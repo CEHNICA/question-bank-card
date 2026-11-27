@@ -56,7 +56,7 @@
         <a href="#" class="brand">
           <img src="assets/app-icon.png?v=2" alt="题有据图标" />
           <span class="brand-name">题有据</span>
-          <span class="version-badge" id="versionBadge">v2.3.10</span>
+          <span class="version-badge" id="versionBadge">v2.3.11</span>
         </a>
         <nav class="nav" aria-label="主导航">
           <a href="#highlights">核心卖点</a>
@@ -125,7 +125,7 @@
               </a>
             </div>
             <p class="release-meta" id="releaseMeta">
-              当前最新：<strong>v2.3.10</strong> · 点击即可直接下载安装包，自动同步 GitHub 最新正式版
+              当前最新：<strong>v2.3.11</strong> · 点击即可直接下载安装包，自动同步 GitHub 最新正式版
             </p>
             <div class="hero-quick-links">
               <a id="downloadPortableBtn" href="/download/portable">免安装便携版 (.zip)</a>
@@ -306,6 +306,93 @@
                   <code>read_onenote_note</code>
                 </div>
               </article>
+            </div>
+          </div>
+
+          <div class="agent-connect-box" id="agentConnect">
+            <div class="agent-connect-header">
+              <div>
+                <span class="spotlight-kicker">ZERO-FRICTION SETUP · 一键接入</span>
+                <h3>3 步接入你的 AI 助手，不会写代码也能 1 分钟用上</h3>
+                <p>安装题有据时已自动探测常见助手目录；也可以直接下载技能包拖入，或一键复制标准配置。</p>
+              </div>
+              <div class="connect-tabs" role="tablist" aria-label="选择你的 AI 助手">
+                <button type="button" class="connect-tab is-active" role="tab" aria-selected="true" data-connect-tab="doubao">豆包电脑版</button>
+                <button type="button" class="connect-tab" role="tab" aria-selected="false" data-connect-tab="workbuddy">腾讯 WorkBuddy</button>
+                <button type="button" class="connect-tab" role="tab" aria-selected="false" data-connect-tab="minimax">MiniMax Agent</button>
+                <button type="button" class="connect-tab" role="tab" aria-selected="false" data-connect-tab="mcp">Trae / Cursor / MCP</button>
+              </div>
+            </div>
+
+            <div class="agent-connect-grid">
+              <div class="connect-guide-col">
+                <ol class="connect-steps" id="webConnectSteps">
+                  <li>
+                    <strong>1. 下载或打开技能包 tiyouju-skill.zip</strong>
+                    <span>安装软件后已在本地自动生成压缩包，也可点右侧按钮直接下载。</span>
+                  </li>
+                  <li>
+                    <strong>2. 拖进豆包电脑版「上传技能」</strong>
+                    <span>打开「技能·连接器·伙伴 → 我的技能 → 新建 → 上传技能」，把压缩包拖进去。</span>
+                  </li>
+                  <li>
+                    <strong>3. 发一句开场指令就开始工作</strong>
+                    <span>复制下方开场指令发给豆包，即可自动查库、核对试卷与总结 OneNote 笔记。</span>
+                  </li>
+                </ol>
+
+                <div class="connect-code-box">
+                  <div class="connect-code-bar">
+                    <span id="webConnectCodeLabel">给 AI 的一句话开场指令（点右侧直接复制）</span>
+                    <button type="button" class="copy-btn" id="webConnectCopyCode">一键复制</button>
+                  </div>
+                  <pre><code id="webConnectCodeBody">我的电脑已经安装了题有据。请先运行 tiyouju skill 读取当前版本的操作指南，接下来帮我查题库、核对试卷和总结 OneNote 笔记。</code></pre>
+                </div>
+              </div>
+
+              <div class="connect-action-col">
+                <div class="connect-action-card">
+                  <h4>零配置直连包 &amp; 常用指令</h4>
+                  <p>支持豆包电脑版 / WorkBuddy / MiniMax 桌面版拖入导入，以及标准 MCP 一键粘贴。</p>
+                  <div class="connect-primary-actions">
+                    <a class="btn btn-primary" id="webConnectDownloadSkillBtn" href="/download/skill">
+                      下载技能包 tiyouju-skill.zip
+                    </a>
+                    <button type="button" class="btn btn-secondary" id="webConnectCopyIntro">
+                      一键复制 AI 开场指令
+                    </button>
+                  </div>
+                  <div class="connect-prompts-wrap">
+                    <span class="connect-prompts-title">接好后点一下就能试的提问：</span>
+                    <div class="connect-prompt-pills">
+                      <button
+                        type="button"
+                        class="connect-prompt-pill"
+                        data-copy-prompt="帮我看看第 4 题题干和原卷有没有抄错，顺便说说这道题的易错点。"
+                      >
+                        核对第 4 题错漏 + 易错点
+                      </button>
+                      <button
+                        type="button"
+                        class="connect-prompt-pill"
+                        data-copy-prompt="只读获取 Q-c65f1f5f 关联的 OneNote 笔记，总结我的解题卡点并提复习建议。"
+                      >
+                        总结 OneNote 手写笔记
+                      </button>
+                      <button
+                        type="button"
+                        class="connect-prompt-pill"
+                        data-copy-prompt="从题库挑 10 道函数或导数题组一份周测卷，避开最近 30 天用过的题。"
+                      >
+                        防撞车挑 10 道题组卷
+                      </button>
+                    </div>
+                  </div>
+                  <p class="connect-trust-note">
+                    安全边界：仅连接本机题有据，绝不读取 API 密钥，不擅自删题或篡改已入库题面。
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -550,7 +637,7 @@
           <div class="download-grid">
             <div class="download-card">
               <h3>图形安装版 &amp; 便携版</h3>
-              <p>推荐日常教研电脑下载安装版（带桌面快捷方式、自动配置 PATH 并注册 <code>tiyouju</code> Skill）；受限电脑可选免安装便携版。</p>
+              <p>推荐日常教研电脑下载安装版（自动配置 PATH、同步主流 AI Agent 技能与 MCP，并生成豆包/WorkBuddy/MiniMax 拖入用技能包）；受限电脑可选免安装便携版。</p>
               <div class="download-actions">
                 <a class="btn btn-primary" id="downloadInstallerCardBtn" href="/download/installer">
                   下载安装版 (TiYouJu-Setup.exe)

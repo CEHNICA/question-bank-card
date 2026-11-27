@@ -3,6 +3,218 @@
    统一 API 配置与设置页视觉规范（与 api-settings.js 的 .api-unified-root 配套）
    ========================================================================== */
 
+/* — 统一成题库工作台双栏设置外壳（与 /eagle #eaglePreferencesModal 一致） — */
+.api-setup-entry { display: none; }
+
+.settings-shell {
+  border-radius: 16px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  box-shadow: 0 24px 60px -15px rgba(15, 23, 42, 0.14);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-shell .settings-head,
+.settings-home .settings-shell .settings-head {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  margin: 0 !important;
+  padding: 12px 20px !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  background: #ffffff !important;
+  flex-shrink: 0;
+}
+
+.settings-head-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settings-head-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #047857;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.settings-head-copy {
+  min-width: 0;
+}
+
+.settings-home .settings-shell .settings-head h1 {
+  font-size: 14.5px !important;
+  font-weight: 700 !important;
+  color: #0f172a !important;
+  margin: 0 !important;
+  line-height: 1.3 !important;
+  letter-spacing: 0 !important;
+}
+
+.settings-home .settings-head .settings-description {
+  font-size: 11.5px;
+  color: #64748b;
+  margin: 1px 0 0;
+  line-height: 1.4;
+}
+
+.settings-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.settings-overlay-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 0;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 15px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.settings-overlay-close:hover {
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.settings-overlay-close[hidden] {
+  display: none;
+}
+
+#settingsDialog.settings-panel {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 540px;
+}
+
+#settingsDialog .settings-nav {
+  width: 192px !important;
+  flex-shrink: 0 !important;
+  padding: 12px 10px !important;
+  background: #f8fafc !important;
+  border: 0 !important;
+  border-right: 1px solid #e2e8f0 !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  flex-wrap: nowrap !important;
+  gap: 3px !important;
+  overflow-y: auto;
+}
+
+#settingsDialog .settings-nav [data-settings-tab] {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  width: 100% !important;
+  padding: 8px 10px !important;
+  border-radius: 9px !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  color: #475569 !important;
+  font-size: 12.5px !important;
+  font-weight: 500 !important;
+  text-align: left !important;
+  cursor: pointer !important;
+  box-shadow: none !important;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+#settingsDialog .settings-nav [data-settings-tab]::before {
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+#settingsDialog .settings-nav [data-settings-tab="settingsGeneral"]::before { content: "🔑"; }
+#settingsDialog .settings-nav [data-settings-tab="settingsDisplay"]::before { content: "🎨"; }
+#settingsDialog .settings-nav [data-settings-tab="settingsTransfer"]::before { content: "💾"; }
+#settingsDialog .settings-nav [data-settings-tab="settingsReview"]::before { content: "📖"; }
+#settingsDialog .settings-nav [data-settings-tab="settingsAbout"]::before { content: "ℹ️"; }
+
+#settingsDialog .settings-nav [data-settings-tab]:hover {
+  background-color: rgba(226, 232, 240, 0.55) !important;
+  color: #0f172a !important;
+}
+
+#settingsDialog .settings-nav [data-settings-tab][aria-selected="true"] {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  color: #047857 !important;
+  font-weight: 650 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05) !important;
+}
+
+#settingsDialog .settings-scroll {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 18px 22px 26px;
+  background: #ffffff;
+}
+
+/* — 录题页（/）页内居中弹窗模式 — */
+#settingsHome.is-modal-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 80 !important;
+  width: 100vw !important;
+  max-width: none !important;
+  height: 100vh !important;
+  margin: 0 !important;
+  padding: 16px !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: rgba(15, 23, 42, 0.55) !important;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+#settingsHome.is-modal-overlay[hidden] {
+  display: none !important;
+}
+
+#settingsHome.is-modal-overlay .settings-shell {
+  width: min(980px, 95vw);
+  height: min(86vh, 760px);
+  box-shadow: 0 24px 60px -15px rgba(15, 23, 42, 0.28);
+}
+
+#settingsHome.is-modal-overlay #settingsDialog.settings-panel {
+  min-height: 0;
+}
+
+#settingsHome.is-modal-overlay #settingsReturn {
+  display: none;
+}
+
+body.settings-overlay-open {
+  overflow: hidden;
+}
+
 /* — 设置页五区共用的卡片：一套视觉语言 — */
 .settings-page .settings-section {
   border-radius: 14px; border-color: var(--line);
@@ -366,6 +578,27 @@
 
 /* 窄屏适配：单列流式排布，防止表单及输入框横向撑出屏幕 */
 @media (max-width: 760px) {
+  #settingsDialog.settings-panel {
+    flex-direction: column;
+    min-height: 0;
+  }
+  #settingsDialog .settings-nav {
+    width: 100% !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    border-right: 0 !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    padding: 8px 10px !important;
+  }
+  #settingsDialog .settings-nav [data-settings-tab] {
+    width: auto !important;
+    flex: none !important;
+    white-space: nowrap;
+  }
+  #settingsDialog .settings-scroll {
+    padding: 14px 14px 22px;
+  }
   .settings-credential-host,
   .api-unified-root {
     min-width: 0;
@@ -395,4 +628,182 @@
   .api-unified-root .credential-connection-actions {
     flex-wrap: wrap;
   }
+}
+
+/* ---------------------------------------------------------------- AI 助手接入引导卡片 */
+.ai-connect-card {
+  display: grid;
+  gap: 12px;
+}
+
+.ai-connect-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 14px;
+}
+
+.ai-connect-head h3 {
+  margin: 0;
+}
+
+.ai-connect-lead {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #5b6574;
+}
+
+.ai-connect-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ai-connect-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.ai-connect-badge.is-ok {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.ai-connect-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+
+.ai-connect-tab {
+  min-height: 30px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.ai-connect-tab[aria-selected="true"] {
+  background: #ffffff;
+  color: #047857;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.ai-connect-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.ai-connect-steps {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 7px;
+}
+
+.ai-connect-steps li {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #334155;
+}
+
+.ai-connect-steps li strong {
+  display: block;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.ai-connect-code {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #d1fae5;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow-x: auto;
+  max-height: 180px;
+}
+
+.ai-connect-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-connect-actions .button.is-copied,
+.ai-connect-chip.is-copied {
+  border-color: #10b981;
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.ai-connect-status {
+  margin: 0;
+  min-height: 1.2em;
+  font-size: 12px;
+  color: #047857;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ai-connect-examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding-top: 6px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.ai-connect-examples-title {
+  font-size: 12px;
+  color: #475569;
+  font-weight: 600;
+}
+
+.ai-connect-example-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ai-connect-chip {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ai-connect-chip:hover {
+  border-color: #10b981;
+  color: #047857;
 }

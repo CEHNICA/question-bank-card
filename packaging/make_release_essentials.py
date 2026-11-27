@@ -53,6 +53,10 @@ def main() -> None:
     common.archive(output / f"third-party-licenses-{VERSION}.zip",
                    [(path.relative_to(licenses).as_posix(), path) for path in sorted(licenses.rglob("*")) if path.is_file()],
                    "THIRD_PARTY_LICENSES/")
+    skill_root = ROOT / "skills" / "tiyouju"
+    common.archive(output / "tiyouju-skill.zip",
+                   [(path.relative_to(skill_root).as_posix(), path) for path in sorted(skill_root.rglob("*.md")) if path.is_file()],
+                   "tiyouju/")
     for source, name in [
         (ROOT / "docs" / f"release-notes-v{VERSION}.md", f"release-notes-v{VERSION}.md"),
         (bundle / "CORRESPONDING_SOURCE.txt", "CORRESPONDING_SOURCE.txt"),

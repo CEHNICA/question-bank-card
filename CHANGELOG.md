@@ -3,6 +3,24 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.3.11
+
+**录题界面视觉重塑、设置与原卷窗统一，以及国内 AI 助手（豆包 / WorkBuddy / MiniMax）一键接入**
+
+- **国内 AI Agent 探测、一键技能包与双向协同引导（`assistant_setup.py`、`tiyouju_cli.py`、`backend/core/assistant_connect.py`、`frontend/assistant-connect.js`、`skills/tiyouju/`、`website/`）**：
+  - 扩展 `setup-agents` 与 `mcp-config`，支持 **腾讯 WorkBuddy（`.workbuddy`）、MiniMax Agent（`.minimax` / `MiniMax Agent`）** 及 **CodeBuddy（`.mcp.json`）** 自动发现与注册；新增 `tiyouju skill-pack` 与打包产出的现成拖入式 `tiyouju-skill.zip`，方便豆包电脑版「上传技能」及各类桌面 Agent 直接导入；
+  - 新增本机 HTTP 接口 `/api/assistant/connect`、`/setup`、`/open-skill-zip`、`/skill-zip` 及跨页复用的「连接 AI 助手」3 步交互卡片（豆包 / WorkBuddy / MiniMax / MCP 页签、一键复制接入提示与指令、0 密钥直用与 MinerU 切图+助手核对两档协作说明），同步更新官网交互式 3 步接入展示区与 `/download/skill` 下载入口。
+- **录题界面整体视觉重塑与交互统一（`frontend/index.html`、`frontend/styles.css`、`frontend/api-redesign.css`、`frontend/app.js`、`frontend/intake-split-canvas.js`、`frontend/api-settings.js`）**：
+  - 移除冗余整行顶栏并在左侧边栏顶部提供紧凑「题库工作台 / 设置」入口；将顶部步骤条收拢为轻量行内面包屑，恢复桌面端筛选工具栏文字标签并严格区分激活状态；
+  - 打开左侧「对照原卷」分屏画布时自动隐藏题卡内重复原图、释放完整宽度并对齐单行底栏操作，同时修复关闭后再开分屏时原卷图片首帧空白的重绘问题；
+  - 录题页点「设置」改为直接弹出与题库工作台一致的居中双栏弹窗（去掉多余三步进度条、保留右上角 `✕`/`Esc` 关闭与未保存改动保护），看图读题选项直接明示「交给 AI 助手（豆包 / WorkBuddy / MiniMax · 或原图审核）」；
+  - 「试卷操作」菜单升级为带线性图标的分栏现代浮层；简化「只切图，不转文字」文案；合并重复「编答案/解析」入口，只保留唯一「编辑」与「在题库中看」；
+  - 重设计录题原卷编辑窗（`#pageDialog`），顶部新增 `调整范围 ｜ 管理配图 ｜ 框选识读` 一键互切分段条与现代画布控制条。
+- **题库工作台体验打磨（`frontend/eagle/index.html`、`frontend/eagle-solution-editor.js`、`frontend/library-unified-editor.js`）**：
+  - 将左右侧栏拖拽分隔线由 6px 绿色光柱改为 1px/2px 柔和中性细线，并下调左右栏最小可拖宽度（左侧 `150px`、右侧 `180px`）；
+  - 修复工作台「关于」页更新开关对接 `/api/update`；「重框/重识」弹窗进入画框态后防误点外部关闭，点 `✕` 关闭后自动退回对应编辑窗口。
+
+
 ## 2.3.10
 
 **国际与国内 AI Agent 技能/MCP 全自动接入，以及右下角软件更新悬浮弹窗**

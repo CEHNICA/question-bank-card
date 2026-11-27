@@ -837,15 +837,244 @@ img {
   gap: 8px;
 }
 
-.scenario-cmds code {
-  padding: 4px 9px;
-  border-radius: 7px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.035);
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: 11.5px;
-  color: var(--muted);
-}
+  .scenario-cmds code {
+    padding: 4px 9px;
+    border-radius: 7px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.035);
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+
+  /* ---------- AI 助手 3 步接入交互卡片 ---------- */
+  .agent-connect-box {
+    margin-top: 28px;
+    padding: 26px;
+    border-radius: var(--radius-lg);
+    border: 1px solid rgba(52, 211, 153, 0.24);
+    background: linear-gradient(155deg, rgba(16, 185, 129, 0.07), rgba(14, 19, 27, 0.94) 55%);
+    box-shadow: 0 24px 60px -36px rgba(16, 185, 129, 0.32);
+  }
+
+  .agent-connect-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 22px;
+  }
+
+  .agent-connect-header h3 {
+    margin: 8px 0 6px;
+    font-size: clamp(19px, 2.2vw, 24px);
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .agent-connect-header p {
+    margin: 0;
+    font-size: 14px;
+    color: var(--text-secondary);
+  }
+
+  .connect-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 5px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: rgba(7, 10, 13, 0.72);
+  }
+
+  .connect-tab {
+    padding: 7px 14px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.16s ease, color 0.16s ease;
+  }
+
+  .connect-tab:hover {
+    color: var(--text);
+  }
+
+  .connect-tab.is-active {
+    background: rgba(16, 185, 129, 0.18);
+    color: #ecfdf5;
+    box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.45);
+  }
+
+  .agent-connect-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.9fr);
+    gap: 18px;
+    align-items: stretch;
+  }
+
+  .connect-guide-col {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .connect-steps {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 10px;
+  }
+
+  .connect-steps li {
+    padding: 13px 15px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--line);
+    background: rgba(7, 10, 13, 0.55);
+  }
+
+  .connect-steps li strong {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .connect-steps li span {
+    display: block;
+    font-size: 13px;
+    line-height: 1.58;
+    color: var(--text-secondary);
+  }
+
+  .connect-code-box {
+    margin-top: auto;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--line);
+    background: #06090c;
+    overflow: hidden;
+  }
+
+  .connect-code-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.02);
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .connect-code-box pre {
+    margin: 0;
+    padding: 12px 14px;
+    overflow-x: auto;
+  }
+
+  .connect-code-box code {
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: #bbf7d0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .connect-action-card {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 20px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--line);
+    background: rgba(7, 10, 13, 0.68);
+  }
+
+  .connect-action-card h4 {
+    margin: 0;
+    font-size: 16.5px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .connect-action-card > p {
+    margin: 0;
+    font-size: 13.5px;
+    line-height: 1.58;
+    color: var(--text-secondary);
+  }
+
+  .connect-primary-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .connect-primary-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .connect-prompts-wrap {
+    display: grid;
+    gap: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--line);
+  }
+
+  .connect-prompts-title {
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  .connect-prompt-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  .connect-prompt-pill {
+    padding: 6px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease;
+  }
+
+  .connect-prompt-pill:hover {
+    border-color: rgba(52, 211, 153, 0.5);
+    color: var(--text);
+  }
+
+  .connect-prompt-pill.is-copied,
+  .copy-btn.is-copied,
+  .btn.is-copied {
+    border-color: var(--emerald-bright);
+    color: #bbf7d0;
+    background: rgba(16, 185, 129, 0.18);
+  }
+
+  .connect-trust-note {
+    margin-top: auto !important;
+    font-size: 12px !important;
+    color: var(--muted) !important;
+  }
 
 /* ---------- 02 真实界面一览 ---------- */
 .gallery-tabs {
@@ -1522,6 +1751,31 @@ img {
 
   .agent-scenario-card {
     padding: 18px 16px;
+  }
+
+  .agent-connect-box {
+    padding: 18px 15px;
+  }
+
+  .connect-tabs {
+    width: 100%;
+    border-radius: 14px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .connect-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .agent-connect-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .connect-code-bar {
+    flex-wrap: wrap;
   }
 
   .gallery-tabs {

@@ -12,7 +12,8 @@ describe("录入题目页（/）重设计契约检查", () => {
     assert.doesNotMatch(html, /id="entrySidebarToggle"/);
     assert.doesNotMatch(html, /id="focusToggle"/);
     assert.doesNotMatch(html, /id="settingsFocus"/);
-    assert.match(html, /class="review-top-actions review-top-actions-end[\s\S]*?id="reviewReturnLibrary"[\s\S]*?id="settingsButton"/);
+    assert.doesNotMatch(html, /<header\s+class="topbar/);
+    assert.match(html, /class="entry-sidebar-nav"[\s\S]*?id="reviewReturnLibrary"[\s\S]*?id="settingsButton"/);
     assert.match(html, /id="entryChapterNav"[^>]*hidden/);
     assert.match(html, /id="entryChapterToggle"/);
     assert.match(html, /id="entryChapterList"/);

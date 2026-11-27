@@ -11,7 +11,7 @@ description: 安装和操作题有据 Windows 本机软件，把数学试卷、�
 tiyouju skill
 ```
 
-该命令会输出与当前已安装版本完全一致的操作手册、配置命令和内容组织流程（以 `[tiyouju:skill] end of guide` 结尾）。如果用户发来了题目定位码（如 `Q-c65f1f5f` 或 `[题有据题目 ...]`），直接运行 `tiyouju locate <位置文本>` 即可立即定位题目原文、原卷图片与标签数据。安装器已自动将 `tiyouju` 目录加入用户 `PATH`，并把本技能与 stdio MCP 配置自动探测写入本机主流国际与国内 AI Agent（包含 Trae 国际/国内版 `.trae-cn`、Cursor、Claude、Codex、Antigravity、Qwen Code、Qoder、通义灵码、CodeBuddy、Kimi、iFlow、OpenClaw 等）；若当前终端尚未刷新环境变量或需接入 Cherry Studio / Chatbox 等客户端，可运行 `tiyouju mcp-config` 复制标准配置或执行 `tiyouju setup-agents` 补齐链接。
+该命令会输出与当前已安装版本完全一致的操作手册、配置命令和内容组织流程（以 `[tiyouju:skill] end of guide` 结尾）。如果用户发来了题目定位码（如 `Q-c65f1f5f` 或 `[题有据题目 ...]`），直接运行 `tiyouju locate <位置文本>` 即可立即定位题目原文、原卷图片与标签数据。安装器已自动将 `tiyouju` 目录加入用户 `PATH`，并把本技能与 stdio MCP 配置自动探测写入本机主流国际与国内 AI Agent（包含 **WorkBuddy** `.workbuddy`、**MiniMax Agent** `.minimax` / `MiniMax Agent`、**Trae** 国际/国内版 `.trae-cn`、Cursor、Claude、Codex、Antigravity、Qwen Code、Qoder、通义灵码、CodeBuddy、Kimi、iFlow、OpenClaw 等），同时自动生成现成的拖入式技能包 `%LOCALAPPDATA%\QuestionBankCard\skills\tiyouju-skill.zip`（适用于 **豆包电脑版**「上传技能」、WorkBuddy、MiniMax 桌面版）；若需手动复制 MCP JSON 或单独导出技能包，可运行 `tiyouju mcp-config`、`tiyouju skill-pack` 或 `tiyouju setup-agents`。
 
 ## 外部助手接管与教辅结构提取
 
@@ -96,6 +96,10 @@ tiyouju publish latest
 题目任务结束时报告总题数、修改内容、待用户处理的题和原因、入库数。邀请用户继续发题；若识读服务未恢复，明确说可先核对已有题卡，恢复后再处理新资料。
 
 ## 自主探查与直录切题（Agent-First）
+
+先运行 `tiyouju status --json` 判断当前环境适合哪种协作方式：
+- **扫描卷 / 拍照卷 / 多配图试卷且已配置 MinerU（并获用户明确云授权）**：优先使用 MinerU 自动整卷切题并抠出高清配图（`--parse-mode mineru` 或 `--scan-only`），再由当前助手校对公式、绑定配图与补充解析。
+- **未配置 MinerU（0 密钥模式）或电子文字卷**：文字 PDF/Word 由本机直接切题；需要助手直接切框录题时按下方网格看图直录，若遇多几何图扫描卷可提示用户在「API 配置」补填 MinerU 以提升抠图精度。
 
 当遇到复杂教辅（如多栏、跨页、含思路/拓展讲解的书籍）、内置序号切题规则不适用的新题型，或当前环境未配置看图读题 API 时，外部助手可直接接管**切题与录题**全流程：
 

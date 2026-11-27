@@ -1393,8 +1393,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     return needsCheck(q) || needsGeneralReview(q);
   }
 
-  function anyDialogOpen() {
+  function nativeDialogOpen() {
     return [...document.querySelectorAll("dialog")].some((dialog) => dialog.open);
+  }
+
+  function anyDialogOpen() {
+    return nativeDialogOpen()
+      || Boolean(document.getElementById("settingsHome")?.classList.contains("is-modal-overlay"));
   }
 
   // ---------------------------------------------------------------- 配置与试卷列表
@@ -2971,7 +2976,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   function viewTop() {
     // 全屏时顶栏收起，高度是 0，不能当成没取到。
     const bar = document.querySelector(".topbar");
-    return (bar ? bar.offsetHeight : 56) + ($("toolbar")?.offsetHeight || 0);
+    return (bar ? bar.offsetHeight : 0) + ($("toolbar")?.offsetHeight || 0);
   }
 
   function onScreen(card) {
@@ -4807,10 +4812,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (q.publication?.id) {
       actions.append(button("在题库中看", "", () => {
         window.location.href = `/eagle?q=${encodeURIComponent(q.publication.id)}`;
-      }, "到题库工作台里找到这道题，看它的标签、答案和入库版本"));
-      actions.append(button("编答案/解析", "quiet", () => {
-        window.location.href = `/eagle?q=${encodeURIComponent(q.publication.id)}&edit_solution=1`;
-      }, "去题库工作台打开统一答案解析编辑器，编写标准答案与解析"));
+      }, "到题库工作台里找到这道题，看它的标签、版本化答案解析和入库记录"));
     }
     const more = el("details", "more");
     const summary = el("summary", "", "更多");
@@ -5935,6 +5937,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (lead) lead.textContent = SETTINGS_AREA_LEADS[id] || SETTINGS_AREA_LEADS.settingsGeneral;
     if (id === "settingsDisplay") void window.ExportSettings?.refresh?.();
     if (id === "settingsTransfer") void window.LibraryTransfer?.refresh?.();
+    if (id === "settingsReview") void window.AssistantConnect?.mount?.($("settingsAiConnectMount"));
     const scroller = document.querySelector("#settingsDialog .settings-scroll");
     if (scroller) scroller.scrollTop = 0;
     if (window.location.pathname === "/settings" && updateHash) {
@@ -5967,9 +5970,10 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   document.querySelectorAll("[data-settings-tab]").forEach((tab, index, tabs) => {
     tab.addEventListener("click", () => showSettingsTab(tab.dataset.settingsTab));
     tab.addEventListener("keydown", (event) => {
-      if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
       event.preventDefault();
-      const next = tabs[(index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length];
+      const step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : -1;
+      const next = tabs[(index + step + tabs.length) % tabs.length];
       showSettingsTab(next.dataset.settingsTab);
       next.focus();
     });
@@ -6039,8 +6043,69 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     requestAnimationFrame(() => { if (!anyDialogOpen()) $("settingsTitle").focus({ preventScroll: true }); });
   }
 
+  let settingsOverlayOpen = false;
+  function openSettingsOverlay({ tab = "settingsGeneral", focusAiConnect = false } = {}) {
+    const home = $("settingsHome");
+    if (!home) return;
+    settingsOverlayOpen = true;
+    home.classList.add("is-modal-overlay");
+    home.hidden = false;
+    if ($("settingsOverlayClose")) $("settingsOverlayClose").hidden = false;
+    document.body.classList.add("settings-overlay-open");
+    void loadFeatureSwitches();
+    $("settingsLens").checked = state.lens;
+    $("settingsAutoExpand").checked = state.autoExpand;
+    const targetTab = focusAiConnect ? "settingsReview" : tab;
+    showSettingsTab(targetTab, { updateHash: false });
+    void loadStatus();
+    void showCredentialInline();
+    if (focusAiConnect) {
+      const aiDetails = $("settingsAiConnect");
+      if (aiDetails) {
+        aiDetails.open = true;
+        void window.AssistantConnect?.mount?.($("settingsAiConnectMount"));
+        requestAnimationFrame(() => {
+          if (typeof aiDetails.scrollIntoView === "function") aiDetails.scrollIntoView({ block: "nearest" });
+        });
+      }
+    }
+    requestAnimationFrame(() => {
+      if (!nativeDialogOpen()) $("settingsTitle")?.focus({ preventScroll: true });
+    });
+  }
+
+  async function closeSettingsOverlay() {
+    if (!settingsOverlayOpen) return true;
+    const allowed = await prepareSettingsLeave();
+    if (!allowed) return false;
+    const home = $("settingsHome");
+    if (home) {
+      home.hidden = true;
+      home.classList.remove("is-modal-overlay");
+    }
+    if ($("settingsOverlayClose")) $("settingsOverlayClose").hidden = true;
+    document.body.classList.remove("settings-overlay-open");
+    settingsOverlayOpen = false;
+    return true;
+  }
+
   $("settingsButton").addEventListener("click", (event) => {
-    if (window.location.pathname === "/settings") { event.preventDefault(); openSettings(); }
+    event.preventDefault();
+    if (window.location.pathname === "/settings") {
+      openSettings();
+    } else {
+      openSettingsOverlay();
+    }
+  });
+  $("settingsOverlayClose")?.addEventListener("click", () => { void closeSettingsOverlay(); });
+  document.addEventListener("keydown", (event) => {
+    if (settingsOverlayOpen && event.key === "Escape" && !nativeDialogOpen()) {
+      event.preventDefault();
+      void closeSettingsOverlay();
+    }
+  });
+  $("emptyConnectAi")?.addEventListener("click", () => {
+    openSettingsOverlay({ tab: "settingsReview", focusAiConnect: true });
   });
   document.addEventListener("api-config-saved", () => { void loadFeatureSwitches(); void loadStatus(); });
   document.addEventListener("library-ai-settings-saved", () => { void loadFeatureSwitches(); });
@@ -6136,7 +6201,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
           showSettingsTab("settingsAbout");
           openSettings();
         } else {
-          void leaveFor("/settings#about");
+          openSettingsOverlay({ tab: "settingsAbout" });
         }
       });
     }
@@ -6183,6 +6248,11 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     });
     $("updateCheckButton").addEventListener("click", () => check(false));
     install.addEventListener("click", () => { void runInstall(); });
+    $("settingsAiConnect")?.addEventListener("toggle", (event) => {
+      if (event.currentTarget.open) {
+        void window.AssistantConnect?.mount?.($("settingsAiConnectMount"));
+      }
+    });
     void check(true);
   }
 
@@ -7356,6 +7426,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
     renderPageTabs();
     renderStage();
+    if (typeof syncPageModeTabs === "function") syncPageModeTabs();
     $("pageDialog").showModal();
     trackCropDraft();
     requestPageZoom();
@@ -7365,6 +7436,30 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("groupSelect").addEventListener("change", () => {
     if (dialog.mode !== "new" || dialog.saving) return;
     $("numberInput").value = QBManualCrop.nextCropNumber(state.questions, 1, $("groupSelect").value || null) ?? "";
+  });
+
+  function syncPageModeTabs() {
+    const switcher = $("pageModeSwitch");
+    if (!switcher) return;
+    const canSwitch = Boolean(dialog.question) && ["regions", "figures", "read"].includes(dialog.mode);
+    switcher.hidden = !canSwitch;
+    if (!canSwitch) return;
+    const figsBtn = $("pageModeFigures");
+    if (figsBtn) figsBtn.hidden = dialog.question?.body_mode === "source_image";
+    switcher.querySelectorAll("[data-page-mode]").forEach((btn) => {
+      const active = btn.dataset.pageMode === dialog.mode;
+      btn.setAttribute("aria-pressed", String(active));
+      btn.classList.toggle("is-active", active);
+    });
+  }
+
+  $("pageModeSwitch")?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-page-mode]");
+    if (!btn) return;
+    const targetMode = btn.dataset.pageMode;
+    if (!targetMode || targetMode === dialog.mode || !dialog.question || dialog.saving || dialog.closing) return;
+    const q = questionById(dialog.question.id) || dialog.question;
+    openPageDialog(targetMode, q, { page: dialog.page });
   });
 
   function applyPageZoom() {
@@ -9626,7 +9721,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   const toolbar = $("toolbar");
   const syncScroll = () => {
     toTop.hidden = window.scrollY < 400;
-    const top = document.querySelector(".topbar")?.offsetHeight || 56;
+    const top = document.querySelector(".topbar")?.offsetHeight || 0;
     toolbar.classList.toggle("stuck", toolbar.getBoundingClientRect().top <= top + 1 && window.scrollY > 0);
   };
   window.addEventListener("scroll", syncScroll, { passive: true });
@@ -9956,6 +10051,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       return;
     }
     if (!(await discardEdits())) return;
+    if (!(await closeSettingsOverlay())) return;
     closeSettingsThen(() => {});
     if ($("welcomeDialog").open) finishWelcome();
     const previous = !reset && task === "basic" ? readTeachingProgress() : null;

@@ -584,8 +584,8 @@
       draft.reading.primary = "assistant";
       renderContent();
     });
-    const assistantSpan = createEl("span", "", "暂不配置");
-    assistantSpan.append(createEl("small", "", "原图审核或 AI 助手"), createEl("em", "provider-option-state", "不用密钥"));
+    const assistantSpan = createEl("span", "", "交给 AI 助手");
+    assistantSpan.append(createEl("small", "", "豆包 / WorkBuddy / MiniMax · 或原图审核"), createEl("em", "provider-option-state", "不用密钥"));
     assistantLabel.append(assistantRadio, assistantSpan);
     fieldset.append(assistantLabel);
     card.append(fieldset);

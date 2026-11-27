@@ -84,6 +84,7 @@ function buildFromVersion(version, publishedAt = "", extraAssets = [], notes = "
   const installScript =
     pickAsset(merged, (name) => name === "install.ps1", clean) ||
     pickAsset([{ name: "install.ps1", size: 0 }], () => true, clean);
+  const skillPack = pickAsset(merged, (name) => name === "tiyouju-skill.zip", clean);
   const cleanNotes = String(notes || "").trim().slice(0, RELEASE_NOTES_LIMIT);
   return {
     tag,
@@ -97,6 +98,7 @@ function buildFromVersion(version, publishedAt = "", extraAssets = [], notes = "
     portable,
     checksums,
     install_script: installScript,
+    skill_pack: skillPack,
   };
 }
 
@@ -179,6 +181,7 @@ async function handleDownload(request, ctx, target) {
     portable: { asset: release.portable, disposition: "attachment", contentType: "application/octet-stream" },
     checksums: { asset: release.checksums, disposition: "inline", contentType: "text/plain; charset=utf-8" },
     install_script: { asset: release.install_script, disposition: "inline", contentType: "text/plain; charset=utf-8" },
+    skill_pack: { asset: release.skill_pack, disposition: "attachment", contentType: "application/zip" },
   };
   const entry = assetMap[target];
   if (!entry?.asset?.url) {
@@ -263,6 +266,9 @@ export default {
           checksums: release.checksums
             ? { name: release.checksums.name, path: "/download/SHA256SUMS.txt" }
             : null,
+          skill_pack: release.skill_pack
+            ? { name: release.skill_pack.name, size: release.skill_pack.size, path: "/download/skill" }
+            : null,
         });
       } catch {
         return jsonResponse({ error: "暂时无法读取最新版本信息，请稍后重试。" }, 503, 0);
@@ -274,6 +280,7 @@ export default {
       if (pathname === "/download/portable") return handleDownload(request, ctx, "portable");
       if (pathname === "/download/SHA256SUMS.txt") return handleDownload(request, ctx, "checksums");
       if (pathname === "/download/install.ps1") return handleDownload(request, ctx, "install_script");
+      if (pathname === "/download/skill") return handleDownload(request, ctx, "skill_pack");
     }
 
     return env.ASSETS.fetch(request);

@@ -23,7 +23,7 @@ test("Eagle workspace renders a floating update popup with one-click install and
   assert.match(html, /function showEagleUpdatePopup\(data\)/);
   assert.match(html, /function applyOfficialUpdateState\(data/);
   assert.match(html, /\/api\/update\/install/);
-  assert.match(html, /\/api\/update\/status/);
+  assert.match(html, /\/api\/update`/);
   assert.match(html, /\/api\/update\/settings/);
   assert.doesNotMatch(html, /eaglePrefAutoUpdate[\s\S]{0,600}api\/settings\/features/);
 });

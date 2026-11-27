@@ -1059,19 +1059,29 @@ class TiyoujuOfflineTests(SimpleTestCase):
                 "tiyouju usage",
                 "tiyouju drafts",
                 "tiyouju mcp-config",
+                "tiyouju skill-pack",
             ):
                 self.assertIn(token, skill_out)
 
             with tempfile.TemporaryDirectory() as home_tmp:
                 home_dir = Path(home_tmp)
                 (home_dir / ".qwen").mkdir()
+                (home_dir / ".workbuddy").mkdir()
+                (home_dir / ".minimax").mkdir()
                 code_mc, mc_data = run_json("mcp-config", "--command-name", "--home", str(home_dir))
                 self.assertEqual(code_mc, 0)
                 self.assertEqual(
                     mc_data["mcp_servers"]["mcpServers"]["tiyouju"], {"command": "tiyouju", "args": ["mcp"]}
                 )
-                self.assertEqual({item["client"] for item in mc_data["clients"]}, {"qwen_code"})
+                self.assertEqual({item["client"] for item in mc_data["clients"]}, {"qwen_code", "workbuddy", "minimax"})
 
                 code_mc_txt, mc_txt, _ = run("mcp-config", "--command-name", "--home", str(home_dir))
                 self.assertEqual(code_mc_txt, 0)
                 self.assertIn("codex mcp add tiyouju", mc_txt)
+                self.assertIn("WorkBuddy", mc_txt)
+                self.assertIn("豆包", mc_txt)
+
+                code_sp, sp_data = run_json("skill-pack", "--out", f"{home_tmp}/")
+                self.assertEqual(code_sp, 0)
+                self.assertTrue(sp_data["verified"])
+                self.assertTrue(Path(sp_data["path"]).is_file())

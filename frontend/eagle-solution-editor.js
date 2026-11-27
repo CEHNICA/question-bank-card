@@ -7,7 +7,7 @@
 (function () {
   "use strict";
 
-  const ASSET_VER = "20261124a";
+  const ASSET_VER = "20261127a";
   const ASSETS = [
     {
       kind: "css",
@@ -265,7 +265,8 @@
         scope: "library",
         allowQuestionEdit: true,
         focus: item.id,
-        focusField: options.focusField || "stem"
+        focusField: options.focusField || "stem",
+        returnTo: options.returnTo || ""
       });
     } catch (error) {
       notify(error?.message || "打开统一编辑工作台失败", "error");

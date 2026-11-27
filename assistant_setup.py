@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import uuid
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -435,6 +436,58 @@ def canonical_skill_dir(data_root: Path | None = None) -> Path:
     return root / "skills" / "tiyouju"
 
 
+def canonical_skill_zip(data_root: Path | None = None) -> Path:
+    """返回可直接拖入豆包电脑版 / WorkBuddy / MiniMax Agent 导入的技能压缩包路径。"""
+    return canonical_skill_dir(data_root).parent / "tiyouju-skill.zip"
+
+
+def build_skill_zip(source: Path, destination: Path) -> dict:
+    """将附带技能打成顶层含 tiyouju/ 目录的标准 ZIP（适用于图形客户端拖入导入）。"""
+    source = _safe_path(source)
+    destination = _safe_path(destination)
+    _resource_manifest(source)
+    files: list[tuple[str, Path]] = []
+    for current, _dirs, filenames in os.walk(source, followlinks=False):
+        base = Path(current)
+        if "__pycache__" in base.parts:
+            continue
+        for name in sorted(filenames):
+            if name == ".DS_Store":
+                continue
+            item = _safe_path(base / name)
+            if not item.is_file():
+                continue
+            arcname = f"tiyouju/{item.relative_to(source).as_posix()}"
+            files.append((arcname, item))
+    files.sort(key=lambda pair: pair[0])
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    _safe_path(destination.parent)
+    tmp_path = destination.parent / f".tiyouju-skill-zip-{uuid.uuid4().hex}.tmp"
+    try:
+        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+            for arcname, file_path in files:
+                info = zipfile.ZipInfo(arcname, date_time=(2026, 1, 1, 0, 0, 0))
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.external_attr = 0o100644 << 16
+                zf.writestr(info, file_path.read_bytes())
+        with zipfile.ZipFile(tmp_path, "r") as check_zf:
+            if "tiyouju/SKILL.md" not in check_zf.namelist() or check_zf.testzip() is not None:
+                raise SetupError("生成技能压缩包后校验失败。")
+        os.replace(tmp_path, destination)
+    except OSError as error:
+        raise SetupError(f"生成技能压缩包失败：{error}") from error
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+    return {
+        "status": "packed",
+        "path": str(destination),
+        "file_count": len(files),
+        "size": destination.stat().st_size,
+        "verified": True,
+    }
+
+
 def discover_agent_skill_parents(home: Path | None = None) -> list[tuple[str, Path]]:
     """按主流国际与国内 AI Agent 约定探测当前用户的技能父目录。"""
     user_home = Path.home() if home is None else Path(home)
@@ -453,6 +506,8 @@ def discover_agent_skill_parents(home: Path | None = None) -> list[tuple[str, Pa
         ("qoder", user_home / ".qoder" / "skills", (user_home / ".qoder").is_dir()),
         ("lingma", user_home / ".lingma" / "skills", (user_home / ".lingma").is_dir()),
         ("codebuddy", user_home / ".codebuddy" / "skills", (user_home / ".codebuddy").is_dir()),
+        ("workbuddy", user_home / ".workbuddy" / "skills", (user_home / ".workbuddy").is_dir()),
+        ("minimax", user_home / ".minimax" / "skills", (user_home / ".minimax").is_dir()),
         ("kimi", user_home / ".kimi" / "skills", (user_home / ".kimi").is_dir()),
         ("iflow", user_home / ".iflow" / "skills", (user_home / ".iflow").is_dir()),
         ("openclaw", user_home / ".openclaw" / "skills", (user_home / ".openclaw").is_dir()),
@@ -466,6 +521,11 @@ def discover_agent_skill_parents(home: Path | None = None) -> list[tuple[str, Pa
             codex_home = Path(raw_codex)
             if codex_home.is_absolute() and codex_home.is_dir():
                 candidates.append(("codex_home", codex_home / "skills", True))
+        raw_minimax = os.environ.get("MINIMAX_DATA_DIR", "").strip()
+        if raw_minimax:
+            minimax_dir = Path(raw_minimax)
+            if minimax_dir.is_absolute() and minimax_dir.is_dir():
+                candidates.append(("minimax_data_dir", minimax_dir / "skills", True))
     found: list[tuple[str, Path]] = []
     seen: set[str] = set()
     for agent_id, parent, active in candidates:
@@ -727,10 +787,20 @@ def discover_mcp_config_targets(home: Path | None = None, appdata: Path | None =
         ("qoder", user_home / ".qoder" / "mcp.json", (user_home / ".qoder").is_dir()),
         ("lingma", user_home / ".lingma" / "mcp.json", (user_home / ".lingma").is_dir()),
         ("codebuddy", user_home / ".codebuddy" / "mcp.json", (user_home / ".codebuddy").is_dir()),
+        ("codebuddy_dot", user_home / ".codebuddy" / ".mcp.json", (user_home / ".codebuddy" / ".mcp.json").is_file()),
+        ("workbuddy", user_home / ".workbuddy" / "mcp.json", (user_home / ".workbuddy").is_dir()),
+        ("minimax", user_home / ".minimax" / "mcp.json", (user_home / ".minimax").is_dir()),
+        ("minimax_agent", roaming / "MiniMax Agent" / "mcp.json", (roaming / "MiniMax Agent").is_dir()),
         ("kimi", user_home / ".kimi" / "mcp.json", (user_home / ".kimi").is_dir()),
         ("openclaw", user_home / ".openclaw" / "mcp.json", (user_home / ".openclaw").is_dir()),
         ("iflow", user_home / ".iflow" / "settings.json", (user_home / ".iflow").is_dir()),
     ]
+    if home is None:
+        raw_minimax = os.environ.get("MINIMAX_DATA_DIR", "").strip()
+        if raw_minimax:
+            minimax_dir = Path(raw_minimax)
+            if minimax_dir.is_absolute() and minimax_dir.is_dir():
+                candidates.append(("minimax_data_dir", minimax_dir / "mcp.json", True))
     found: list[tuple[str, Path]] = []
     seen: set[str] = set()
     for client_id, config_path, active in candidates:
@@ -875,18 +945,25 @@ def inspect_mcp_config(
         "entry": entry,
         "mcp_servers": {"mcpServers": {"tiyouju": entry}},
         "codex_command": f'codex mcp add tiyouju -- "{command}" mcp',
+        "skill_zip": str(canonical_skill_zip()),
         "clients": clients,
     }
 
 
 def format_mcp_config_report(result: dict) -> str:
     snippet = json.dumps(result.get("mcp_servers") or {}, ensure_ascii=False, indent=2)
+    skill_zip = str(result.get("skill_zip") or "")
     lines = [
-        "题有据 MCP 标准配置（适用于 Cherry Studio / Chatbox / Trae / Cursor / Claude / Qwen / CodeBuddy / Kimi 等）：",
+        "题有据 MCP 标准配置（适用于 WorkBuddy / MiniMax Agent / Cherry Studio / Chatbox / Trae / Cursor / Claude / Qwen / Kimi 等）：",
         snippet,
         "",
         "Codex CLI 一行接入：",
         str(result.get("codex_command") or ""),
+        "",
+        "桌面端极简接入提示：",
+        "- 腾讯 WorkBuddy：自动写入 ~/.workbuddy/mcp.json 后，在「连接器管理」点一次「信任并启用」；也可直接导入技能包。",
+        f"- 豆包电脑版：进入「技能·连接器·伙伴 → 我的技能 → 新建 → 上传技能」，直接拖入 {skill_zip or 'tiyouju-skill.zip'}。",
+        f"- MiniMax Agent 桌面版：在 Expert Agents / 导入 Skill 中直接拖入 {skill_zip or 'tiyouju-skill.zip'}，或在 MCP 设置填入上方 JSON。",
     ]
     clients = result.get("clients") or []
     lines.append("")
@@ -910,10 +987,15 @@ def setup_agents(
     register_mcp: bool = True,
     replace: bool = False,
 ) -> dict:
-    """仿照 egolite 的安装接入方式：同步规范技能、链接至全平台 AI Agent、注册 MCP 并配置用户 PATH。"""
+    """仿照 egolite 的安装接入方式：同步规范技能、链接至全平台 AI Agent、打包技能 ZIP、注册 MCP 并配置用户 PATH。"""
     source = resources or bundled_skill()
     canonical = canonical_skill_dir(data_root)
     canonical_result = sync_canonical_skill(source, canonical)
+    zip_target = canonical_skill_zip(data_root)
+    try:
+        skill_zip_result = build_skill_zip(canonical, zip_target)
+    except (SetupError, OSError) as error:
+        skill_zip_result = {"status": "error", "path": str(zip_target), "verified": False, "error": str(error)}
     agent_results: list[dict] = []
     for agent_id, parent in discover_agent_skill_parents(home):
         try:
@@ -950,6 +1032,7 @@ def setup_agents(
         path_result = ensure_user_path(Path(app).parent)
     return {
         "canonical": canonical_result,
+        "skill_zip": skill_zip_result,
         "agents": agent_results,
         "mcp": mcp_results,
         "path": path_result,
@@ -959,6 +1042,9 @@ def setup_agents(
 def format_setup_agents_report(result: dict) -> str:
     canonical = result.get("canonical") or {}
     lines = [f"规范技能目录：{canonical.get('path', '')}（{canonical.get('status', '')}）"]
+    skill_zip = result.get("skill_zip") or {}
+    if skill_zip.get("path"):
+        lines.append(f"技能压缩包：{skill_zip.get('path')}（{skill_zip.get('status', '')}，可用于豆包/WorkBuddy/MiniMax 直接拖入导入）")
     for item in result.get("agents") or []:
         lines.append(f"- {item.get('agent')}: {item.get('status')} -> {item.get('target')}")
     mcp_items = result.get("mcp") or []

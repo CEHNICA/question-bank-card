@@ -600,6 +600,23 @@ def cmd_mcp_config(_client, args) -> dict:
         raise CliError(str(error), EXIT_NEEDS_USER) from error
 
 
+def cmd_skill_pack(_client, args) -> dict:
+    """导出可直接拖入豆包电脑版、WorkBuddy 或 MiniMax Agent 的 tiyouju-skill.zip。"""
+    raw_out = getattr(args, "out", None)
+    if raw_out:
+        out_text = str(raw_out).strip()
+        target = Path(out_text).expanduser()
+        if not target.is_absolute():
+            target = (Path.cwd() / target).resolve()
+        dest = target / "tiyouju-skill.zip" if out_text.endswith(("/", "\\")) or target.is_dir() else target
+    else:
+        dest = setup.canonical_skill_zip()
+    try:
+        return setup.build_skill_zip(setup.bundled_skill(), dest)
+    except (setup.SetupError, OSError) as error:
+        raise CliError(str(error), EXIT_NEEDS_USER) from error
+
+
 def cmd_skill(_client, _args) -> dict:
     """输出与当前安装版本完全匹配的 AI Agent 接管指南（对应 ego-browser skill）。"""
     app = app_executable()
@@ -616,8 +633,9 @@ def cmd_skill(_client, _args) -> dict:
         "- `tiyouju start`：启动题有据本机服务并就绪（退出码 `2` 表示应用未启动）。",
         "- `tiyouju config --reader <engine> --checker <checker>`：查看或调整读题与复核引擎（不碰密钥；更改前先与用户确认）。",
         "- `tiyouju features`：查看或明确启用/关闭标签候选题、参考答案等开关。",
-        "- `tiyouju setup-agents`：把技能、MCP 服务自动配置到本机主流国际与国内 AI Agent，并将命令目录加入用户 PATH。",
-        "- `tiyouju mcp-config`：输出标准 MCP JSON 配置与 Codex 一行接入命令，查看本机各客户端接入状态。",
+        "- `tiyouju setup-agents`：把技能、MCP 服务自动配置到本机主流国际与国内 AI Agent（含 WorkBuddy、MiniMax、Trae CN 等），并配置 PATH 与技能压缩包。",
+        "- `tiyouju mcp-config`：输出标准 MCP JSON 配置与 Codex 一行接入命令，附豆包/WorkBuddy/MiniMax 接入指引并检测本机状态。",
+        "- `tiyouju skill-pack [--out 路径或目录]`：生成可直接拖入豆包电脑版 / WorkBuddy / MiniMax Agent 导入的 `tiyouju-skill.zip`。",
         "",
         "## 2. 录入试卷与自主探索切题",
         "- `tiyouju papers --json`：列出所有待处理或已导入的试卷与资料。",
@@ -684,6 +702,20 @@ def show_setup_agents(result: dict) -> str:
 
 def show_mcp_config(result: dict) -> str:
     return setup.format_mcp_config_report(result)
+
+
+def show_skill_pack(result: dict) -> str:
+    path = str(result.get("path") or "")
+    count = int(result.get("file_count") or 0)
+    size = int(result.get("size") or 0)
+    return "\n".join(
+        [
+            f"已生成技能压缩包：{path}（{count} 个文件，{size} 字节）",
+            "适用导入方式：",
+            "- 豆包电脑版：「技能·连接器·伙伴 → 我的技能 → 新建 → 上传技能」，直接拖入此 ZIP。",
+            "- WorkBuddy / MiniMax Agent：在技能导入面板直接拖入此 ZIP。",
+        ]
+    )
 
 
 def paper_summary(item: dict) -> dict:
@@ -2785,6 +2817,7 @@ SHOWERS = {
     "skill": show_skill,
     "setup-agents": show_setup_agents,
     "mcp-config": show_mcp_config,
+    "skill-pack": show_skill_pack,
 }
 
 
@@ -3537,6 +3570,12 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_cfg.add_argument("--command-name", action="store_true", help="使用简洁命令名 tiyouju 而不是完整 EXE 路径")
     mcp_cfg.add_argument("--home", help="指定用户主目录（默认当前用户目录）")
     mcp_cfg.add_argument("--appdata", help="指定 Roaming AppData 目录（默认当前用户 APPDATA）")
+    pack = sub.add_parser(
+        "skill-pack",
+        parents=[common],
+        help="生成可直接拖入豆包电脑版 / WorkBuddy / MiniMax Agent 导入的 tiyouju-skill.zip",
+    )
+    pack.add_argument("--out", help="输出文件路径或目标目录（默认软件数据目录下的 skills/tiyouju-skill.zip）")
     sub.add_parser("papers", parents=[common], help="列出试卷")
 
     upload = sub.add_parser("upload", parents=[common], help="上传 PDF、Word，或几张照片合成一份")
@@ -3904,6 +3943,7 @@ COMMANDS = {
     "assistant-setup": cmd_assistant_setup,
     "setup-agents": cmd_setup_agents,
     "mcp-config": cmd_mcp_config,
+    "skill-pack": cmd_skill_pack,
     "skill": cmd_skill,
     "features": cmd_features, "enrich": cmd_enrich,
     "claim": cmd_claim, "release": cmd_release, "propose": cmd_propose,
@@ -3932,7 +3972,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     # This command inspects the installed files even when the app is stopped.
     # Do not instantiate a client or look up a runtime service for it.
-    offline_commands = {"assistant-setup", "setup-agents", "mcp-config", "skill"}
+    offline_commands = {"assistant-setup", "setup-agents", "mcp-config", "skill-pack", "skill"}
     client = None if args.command in offline_commands else Client(
         agent=" ".join(str(args.agent).split())[:40] or DEFAULT_AGENT)
     if args.command == "mcp":
