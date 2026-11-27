@@ -14,11 +14,13 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from django.conf import settings
 from django.http import HttpRequest, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
@@ -1121,6 +1123,132 @@ def build_onenote_timeline() -> dict[str, Any]:
     return {"ok": True, "days": days, "total_attempts": len(events), "total_questions": len(questions_seen)}
 
 
+def _parse_optional_uuid(raw: str | None) -> str | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        return str(uuid.UUID(text))
+    except (ValueError, TypeError):
+        return None
+
+
+def list_linked_notes(*, limit: int = 50, paper_id: str | None = None, query: str = "") -> dict[str, Any]:
+    """只读列出已关联 OneNote 笔记的正式入库题目，供 AI Agent 浏览与按需阅读。"""
+    clamped_limit = max(1, min(100, int(limit)))
+    qs = PublishedQuestion.objects.filter(status=PublishedQuestion.Status.PUBLISHED).only(
+        "id", "paper_id", "source_filename", "number", "question_type", "content", "extras", "published_at"
+    )
+    clean_paper_id = _parse_optional_uuid(paper_id)
+    if paper_id and not clean_paper_id:
+        raise OneNoteError("指定的试卷/教材编号格式不正确。")
+    if clean_paper_id:
+        qs = qs.filter(paper_id=clean_paper_id)
+
+    keyword = str(query or "").strip().lower()
+    matched: list[tuple[str, dict[str, Any]]] = []
+    for pub in qs:
+        extras = pub.extras if isinstance(pub.extras, dict) else {}
+        onenote = extras.get("onenote")
+        if not isinstance(onenote, dict) or (not onenote.get("page_id") and not onenote.get("url")):
+            continue
+        pid = str(pub.pk)
+        short_id = f"Q-{pid.replace('-', '')[:8].lower()}"
+        content = pub.content if isinstance(pub.content, dict) else {}
+        stem = str(content.get("stem") or "").strip()
+        stem_preview = re.sub(r"\s+", " ", stem)[:120]
+        source_name = _display_source_name(pub.source_filename or content.get("source_filename") or "")
+        section = str(content.get("section") or "").strip()
+        page_title = str(onenote.get("title") or "").strip()
+        notebook_name = str(onenote.get("notebook_name") or "").strip()
+        section_name = str(onenote.get("section_name") or "").strip()
+
+        if keyword:
+            haystack = "\n".join((short_id, source_name, stem, section, page_title, notebook_name, section_name)).lower()
+            if keyword not in haystack:
+                continue
+
+        updated_at = str(onenote.get("updated_at") or "")
+        published_iso = pub.published_at.isoformat() if pub.published_at else ""
+        sort_key = updated_at or published_iso
+        attempts = onenote.get("attempts") if isinstance(onenote.get("attempts"), list) else []
+        matched.append(
+            (
+                sort_key,
+                {
+                    "publication_id": pid,
+                    "short_id": short_id,
+                    "paper_id": str(pub.paper_id) if pub.paper_id else "",
+                    "source_filename": source_name,
+                    "number": pub.number,
+                    "question_type": pub.question_type,
+                    "section": section,
+                    "stem_preview": stem_preview,
+                    "attempt_count": len(attempts),
+                    "onenote": {
+                        "page_id": str(onenote.get("page_id") or ""),
+                        "title": page_title,
+                        "url": str(onenote.get("url") or ""),
+                        "notebook_name": str(onenote.get("notebook_name") or ""),
+                        "section_name": str(onenote.get("section_name") or ""),
+                        "updated_at": updated_at,
+                    },
+                },
+            )
+        )
+
+    matched.sort(key=lambda pair: pair[0], reverse=True)
+    items = [entry for _, entry in matched[:clamped_limit]]
+    return {"ok": True, "total": len(matched), "items": items}
+
+
+def read_page_note(publication: PublishedQuestion, *, include_images: bool = True, max_pages: int = 3) -> dict[str, Any]:
+    """严格只读提取题目关联的 OneNote 页面文字块与可选手写墨迹截图，绝不改动原笔记。"""
+    extras = publication.extras if isinstance(publication.extras, dict) else {}
+    record = extras.get("onenote")
+    if not isinstance(record, dict) or not str(record.get("page_id") or "").strip():
+        raise OneNoteError("该题目尚未关联 OneNote 笔记。")
+
+    page_id = str(record["page_id"]).strip()
+    page_data = call_bridge("page", id=page_id, timeout_seconds=20)
+    if not isinstance(page_data, dict):
+        raise OneNoteError("未能读取到有效的 OneNote 页面内容。")
+
+    blocks = [str(b) for b in (page_data.get("blocks") or []) if str(b).strip()]
+    title = str(page_data.get("title") or record.get("title") or "").strip()
+    text = str(page_data.get("text") or "").strip()
+
+    image_paths: list[str] = []
+    image_warning = ""
+    if include_images:
+        clamped_pages = max(1, min(5, int(max_pages)))
+        cache_dir = Path(settings.DATA_ROOT) / "cache" / "onenote_read" / str(publication.pk)
+        try:
+            exported = export_page_step_images(page_id, cache_dir, max_pages=clamped_pages)
+            image_paths = [str(p) for p in exported if p.is_file()]
+        except Exception as exc:
+            logger.warning("Failed to export OneNote read images for %s: %s", publication.pk, exc)
+            image_warning = str(exc)
+
+    pid = str(publication.pk)
+    content = publication.content if isinstance(publication.content, dict) else {}
+    stem = str(content.get("stem") or "").strip()
+    return {
+        "ok": True,
+        "publication_id": pid,
+        "short_id": f"Q-{pid.replace('-', '')[:8].lower()}",
+        "source_filename": _display_source_name(publication.source_filename or ""),
+        "number": publication.number,
+        "stem_preview": re.sub(r"\s+", " ", stem)[:160],
+        "onenote": record,
+        "title": title,
+        "text": text,
+        "blocks": blocks,
+        "image_paths": image_paths,
+        "image_warning": image_warning,
+    }
+
+
 # ---------------- API Views ----------------
 
 
@@ -1193,6 +1321,46 @@ def onenote_timeline_view(request: HttpRequest) -> JsonResponse:
     if request.method != "GET":
         return HttpResponseNotAllowed(["GET"])
     return JsonResponse(build_onenote_timeline())
+
+
+@csrf_exempt
+def onenote_notes_list_view(request: HttpRequest) -> JsonResponse:
+    """GET /api/library/onenote/notes: 只读列出已关联 OneNote 的入库题目，便于 Agent 检索。"""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    raw_limit = request.GET.get("limit") or "50"
+    try:
+        limit = int(raw_limit)
+    except ValueError:
+        return JsonResponse({"ok": False, "error": "limit 参数必须为整数"}, status=400)
+    paper_id = str(request.GET.get("document") or "").strip() or None
+    query = str(request.GET.get("q") or "").strip()
+    try:
+        return JsonResponse(list_linked_notes(limit=limit, paper_id=paper_id, query=query))
+    except OneNoteError as err:
+        return JsonResponse({"ok": False, "error": str(err)}, status=400)
+
+
+@csrf_exempt
+def onenote_read_view(request: HttpRequest, publication_id: str) -> JsonResponse:
+    """GET /api/library/<publication_id>/onenote/read: 只读提取关联 OneNote 页的文字与手写墨迹图。"""
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    publication = get_object_or_404(PublishedQuestion, pk=publication_id)
+    raw_images = str(request.GET.get("images") or "1").strip().lower()
+    include_images = raw_images not in {"0", "false", "no", "off"}
+    raw_max_pages = request.GET.get("max_pages") or "3"
+    try:
+        max_pages = int(raw_max_pages)
+    except ValueError:
+        return JsonResponse({"ok": False, "error": "max_pages 参数必须为整数"}, status=400)
+    try:
+        return JsonResponse(read_page_note(publication, include_images=include_images, max_pages=max_pages))
+    except OneNoteError as err:
+        return JsonResponse({"ok": False, "error": str(err)}, status=400)
+    except Exception as exc:
+        logger.exception("Unexpected error reading OneNote page for %s", publication_id)
+        return JsonResponse({"ok": False, "error": f"读取 OneNote 页面异常: {exc}"}, status=500)
 
 
 @csrf_exempt

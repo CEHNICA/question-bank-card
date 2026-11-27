@@ -49,7 +49,10 @@
 | `unapprove <试卷> <题号>` | 撤销 AI 打的勾。人工通过的不能撤 |
 | `reread <试卷> <题号> [--force]` | 让软件的读题模型重读一道题 |
 | `publish <试卷>` | 把通过的题入库，并列出还没通过、没入库的题 |
-| `library [关键词…] [--paper P] [--type T] [--review human\|ai] [--answer yes\|no] [--tag 知识点] [--limit N]` | 在正式题库里搜题。关键词也能搜题源和知识点 |
+| `library [关键词…] [--paper P] [--type T] [--review human\|ai] [--answer yes\|no] [--tag 知识点] [--limit N]` | 在正式题库里搜题（可按试卷、题型、题源和知识点汇总特点） |
+| `locate <Q-xxxxxxxx \| UUID \| 定位文本>` | 通过短码或复制定位文本秒级调出已入库题干、答案、标签与本机原卷图 |
+| `onenote list [--paper P] [--q 关键词] [--limit N]` | 只读列出已关联 OneNote 笔记的正式题目 |
+| `onenote read <ref…> [--no-images] [--max-pages N]` | 严格只读提取关联 OneNote 页面的文字块与手写墨迹截图，供总结笔记和提建议 |
 | `features [--enable knowledge_tags ai_answer] [--disable ...]` | 不加选项只读查看开关；明确要求生成后仅打开所需项，不自动发起模型请求 |
 | `enrich tasks [--ids 入库UUID…] [--limit 1–50]` | 只读列出待当前助手处理的任务，默认最多50个；不开功能、不调用云API |
 | `enrich auto [--tags on\|off] [--answer on\|off]` | 默认只读；`tags` 为兼容参数，当前版本始终不启用入库自动贴标。答案自动排队只在用户明确授权后设置，不开功能、不改 API、不扫旧题 |
@@ -244,7 +247,8 @@ tiyouju folders undo --json
 - `fix_card(paper, card, stem, options, type, answer, analysis, origin, section)`：`options` 里值为空字符串，表示删掉这个选项；`section` 设置章节小节目录
 - `set_figures(paper, card, use | keep | none)`
 - `approve_cards(paper, cards | green)`、`unapprove_card(paper, card)`、`reread_card(paper, card)`
-- `publish_paper(paper)`、`search_library(keywords, review, limit)`
+- `publish_paper(paper)`、`search_library(keywords, paper, type, review, answer, tag, limit)`、`locate_question(ref)`
+- `list_onenote_notes(paper, q, limit)`、`read_onenote_note(ref, include_images=true, max_pages=3)`：严格只读提取关联 OneNote 页面的文字与手写墨迹截图，用来复盘思路并提出建议
 - `configure_features(enable, disable)`：不传选项只看开关；按明确生成需求启用所需的 `knowledge_tags`、`ai_answer`
 - `configure_enrichment_auto(tags, answer)`：不传只看现状；当前 tags 保持关闭，标签只主动请求；答案自动排队仅在明确授权后设置，不暗自开功能、改模型或处理旧题。
 - `list_enrichment_tasks(ids, limit≤50)`、`prepare_enrichment(publication_id, kinds, agent)`：准备后当前助手自己看图、选标签或解题

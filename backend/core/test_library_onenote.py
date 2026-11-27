@@ -548,3 +548,65 @@ class OneNoteLinkTests(TestCase):
                 # 原本 ~1250x1667 的白纸页应被自动裁剪到只比黑框略大（远小于整页高 1667）
                 self.assertLess(cropped.width, 600)
                 self.assertLess(cropped.height, 450)
+
+    @patch("core.library_onenote.export_page_step_images")
+    @patch("core.library_onenote.call_bridge")
+    def test_list_linked_notes_and_read_page_note_are_read_only(self, mock_call, mock_export):
+        """OneNote 只读列表与读取接口应返回文字块、手写图路径并在导出图片失败时优雅降级。"""
+        with tempfile.TemporaryDirectory() as tmp_root:
+            img_path = Path(tmp_root) / "cache" / "onenote_read" / str(self.item.id) / "onenote-step-1.png"
+            img_path.parent.mkdir(parents=True, exist_ok=True)
+            img_path.write_bytes(_sample_png_bytes(300, 120))
+            mock_export.return_value = [img_path]
+            mock_call.return_value = {
+                "id": "{page-ro}",
+                "title": "2026-11-27 10:00:00",
+                "text": "构造函数求导：f'(x) > 0",
+                "blocks": ["构造函数求导：f'(x) > 0", "答案选 B"],
+            }
+
+            # 未关联时读笔记返回 400
+            empty_resp = self.client.get(f"/api/library/{self.item.id}/onenote/read")
+            self.assertEqual(empty_resp.status_code, 400)
+
+            self.item.extras = {
+                "onenote": {
+                    "page_id": "{page-ro}",
+                    "url": "onenote:https://d.docs.live.net/fake/page-ro",
+                    "title": "2026-11-27 10:00:00",
+                    "notebook_name": "高三数学",
+                    "section_name": "导数压轴",
+                }
+            }
+            self.item.save(update_fields=["extras"])
+
+            list_resp = self.client.get("/api/library/onenote/notes?q=导数")
+            self.assertEqual(list_resp.status_code, 200)
+            list_body = list_resp.json()
+            self.assertTrue(list_body["ok"])
+            self.assertEqual(list_body["total"], 1)
+            self.assertEqual(list_body["items"][0]["onenote"]["notebook_name"], "高三数学")
+
+            bad_doc_resp = self.client.get("/api/library/onenote/notes?document=not-a-uuid")
+            self.assertEqual(bad_doc_resp.status_code, 400)
+
+            with self.settings(DATA_ROOT=Path(tmp_root)):
+                read_resp = self.client.get(f"/api/library/{self.item.id}/onenote/read?max_pages=2")
+            self.assertEqual(read_resp.status_code, 200)
+            read_body = read_resp.json()
+            self.assertTrue(read_body["ok"])
+            self.assertIn("构造函数求导", read_body["text"])
+            self.assertEqual(len(read_body["blocks"]), 2)
+            self.assertEqual(read_body["image_paths"], [str(img_path)])
+            self.assertEqual(read_body["image_warning"], "")
+
+            # 图片导出失败时仍保留文字结果并附 image_warning
+            mock_export.side_effect = library_onenote.OneNoteError("未安装桌面版 OneNote")
+            with self.settings(DATA_ROOT=Path(tmp_root)):
+                fallback_resp = self.client.get(f"/api/library/{self.item.id}/onenote/read")
+            self.assertEqual(fallback_resp.status_code, 200)
+            fallback_body = fallback_resp.json()
+            self.assertTrue(fallback_body["ok"])
+            self.assertIn("构造函数求导", fallback_body["text"])
+            self.assertEqual(fallback_body["image_paths"], [])
+            self.assertIn("未安装桌面版 OneNote", fallback_body["image_warning"])

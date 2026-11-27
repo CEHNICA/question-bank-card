@@ -646,3 +646,82 @@ class TiyoujuOfflineTests(SimpleTestCase):
             self.assertIn("Q-c65f1f5f", out)
             self.assertIn("已知集合", out)
             self.assertIn("集合的运算", out)
+
+    def test_onenote_cli_and_mcp_read_tools(self):
+        pub_uuid = "c65f1f5f-0d23-4291-a72d-246d5b2eabc1"
+        fake = mock.Mock()
+
+        def fake_get(path, **_kwargs):
+            if path.startswith("/api/papers"):
+                return {"papers": [{"id": "11111111-1111-1111-1111-111111111111", "name": "高三一模.pdf", "filename": "高三一模.pdf", "created_at": "2026-11-27T08:00:00Z"}]}
+            if path.startswith("/api/library/locate"):
+                return {
+                    "publication": {
+                        "id": pub_uuid,
+                        "short_id": "Q-c65f1f5f",
+                        "question_type": "single_choice",
+                        "version": 1,
+                        "content": {"stem": "已知函数 $f(x)$"},
+                        "extras": {"onenote": {"page_id": "{p1}", "title": "导数笔记"}},
+                    },
+                    "locator": {"short_id": "Q-c65f1f5f", "copy_text": "[题有据题目 Q-c65f1f5f]"},
+                    "local_images": ["C:/tmp/crop.png"],
+                }
+            if path.startswith("/api/library/onenote/notes"):
+                return {
+                    "ok": True,
+                    "total": 1,
+                    "items": [
+                        {
+                            "publication_id": pub_uuid,
+                            "short_id": "Q-c65f1f5f",
+                            "source_filename": "高三一模",
+                            "number": 12,
+                            "stem_preview": "已知函数 f(x)",
+                            "onenote": {"title": "导数笔记", "notebook_name": "数学", "section_name": "导数"},
+                        }
+                    ],
+                }
+            if path.startswith(f"/api/library/{pub_uuid}/onenote/read"):
+                return {
+                    "ok": True,
+                    "publication_id": pub_uuid,
+                    "short_id": "Q-c65f1f5f",
+                    "source_filename": "高三一模",
+                    "number": 12,
+                    "title": "导数笔记",
+                    "stem_preview": "已知函数 f(x)",
+                    "text": "思路：先求导再分类讨论",
+                    "blocks": ["思路：先求导再分类讨论"],
+                    "image_paths": ["C:/tmp/step-1.png"],
+                    "image_warning": "",
+                }
+            if path.startswith("/api/library?"):
+                return {"total": 1, "items": [{"id": pub_uuid, "source_filename": "高三一模.pdf", "number": 12, "question_type": "single_choice", "version": 1, "content": {"stem": "已知函数"}}]}
+            raise AssertionError(f"unexpected path: {path}")
+
+        fake.get.side_effect = fake_get
+        with mock.patch.object(cli, "Client", return_value=fake):
+            code, out, _err = run("onenote", "list", "--paper", "高三一模", "--q", "导数")
+            self.assertEqual(code, 0)
+            self.assertIn("Q-c65f1f5f", out)
+            self.assertIn("导数笔记", out)
+
+            code2, out2, _err2 = run("onenote", "read", "Q-c65f1f5f")
+            self.assertEqual(code2, 0)
+            self.assertIn("先求导再分类讨论", out2)
+            self.assertIn("step-1.png", out2)
+
+            loc_res, loc_imgs = cli.mcp_call(fake, "locate_question", {"ref": "Q-c65f1f5f"})
+            self.assertEqual(loc_res["publication"]["id"], pub_uuid)
+            self.assertEqual(loc_imgs, ["C:/tmp/crop.png"])
+
+            lib_res, _ = cli.mcp_call(fake, "search_library", {"paper": "高三一模", "type": "single_choice"})
+            self.assertEqual(lib_res["total"], 1)
+
+            on_list_res, _ = cli.mcp_call(fake, "list_onenote_notes", {"q": "导数"})
+            self.assertEqual(on_list_res["total"], 1)
+
+            on_read_res, on_imgs = cli.mcp_call(fake, "read_onenote_note", {"ref": "Q-c65f1f5f"})
+            self.assertIn("先求导再分类讨论", on_read_res["text"])
+            self.assertEqual(on_imgs, ["C:/tmp/step-1.png"])

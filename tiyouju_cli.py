@@ -1238,6 +1238,65 @@ def show_locate(result: dict) -> str:
         lines.append(f"当前标签：{'、'.join(tags)}")
     for img in result.get("local_images") or []:
         lines.append(f"本机原图：{img}")
+    extras = pub.get("extras") or {}
+    onenote = extras.get("onenote") if isinstance(extras, dict) else None
+    if isinstance(onenote, dict) and (onenote.get("page_id") or onenote.get("url")):
+        sid = locator.get("short_id") or f"Q-{str(pub.get('id') or '').replace('-', '')[:8].lower()}"
+        lines.append(f"OneNote 笔记：已关联（{onenote.get('title') or '答题页'}），可运行 tiyouju onenote read {sid}")
+    return "\n".join(lines)
+
+
+def cmd_onenote(client: Client, args) -> dict:
+    """只读查看或读取与题目关联的 OneNote 笔记内容与手写步骤图。"""
+    action = getattr(args, "onenote_command", None)
+    if action == "list":
+        query: dict[str, str] = {"limit": str(max(1, min(100, int(getattr(args, "limit", 50) or 50))))}
+        paper_ref = str(getattr(args, "paper", None) or "").strip()
+        if paper_ref:
+            query["document"] = find_paper(client, paper_ref)["id"]
+        q = str(getattr(args, "q", None) or "").strip()
+        if q:
+            query["q"] = q
+        return client.get("/api/library/onenote/notes?" + urllib.parse.urlencode(query))
+    if action == "read":
+        raw_ref = " ".join(getattr(args, "ref", None) or []).strip()
+        pub_id = resolve_publication_id(client, raw_ref)
+        include_images = not bool(getattr(args, "no_images", False))
+        max_pages = max(1, min(5, int(getattr(args, "max_pages", 3) or 3)))
+        qs = urllib.parse.urlencode({
+            "images": "1" if include_images else "0",
+            "max_pages": str(max_pages),
+        })
+        return client.get(f"/api/library/{pub_id}/onenote/read?{qs}", timeout=60)
+    raise CliError("请使用 onenote list 或 onenote read")
+
+
+def show_onenote(result: dict) -> str:
+    if "items" in result:
+        items = result.get("items") or []
+        lines = [f"共找到 {result.get('total', len(items))} 道已关联 OneNote 的题目" + (f"（显示前 {len(items)} 条）：" if items else "。")]
+        for item in items:
+            sid = item.get("short_id") or ""
+            on = item.get("onenote") or {}
+            note_title = on.get("title") or "答题页"
+            nb = on.get("notebook_name") or ""
+            sec = on.get("section_name") or ""
+            loc = f" · {nb}/{sec}" if nb or sec else ""
+            lines.append(f"  [{sid}] {item.get('source_filename')} 第 {item.get('number')} 题 → 「{note_title}」{loc}")
+            if item.get("stem_preview"):
+                lines.append(f"      {item['stem_preview']}")
+        return "\n".join(lines)
+    lines = [
+        f"OneNote 笔记：{result.get('title') or '(无标题)'}  （关联题目 {result.get('short_id')} · {result.get('source_filename')} 第 {result.get('number')} 题）",
+    ]
+    if result.get("stem_preview"):
+        lines.append(f"题干摘要：{result['stem_preview']}")
+    text = str(result.get("text") or "").strip()
+    lines.append("笔记文字：\n" + text if text else "笔记文字：（当前页以手写墨迹/图片为主，无纯文本）")
+    for img in result.get("image_paths") or []:
+        lines.append(f"手写步骤图：{img}")
+    if result.get("image_warning"):
+        lines.append(f"截图提示：{result['image_warning']}")
     return "\n".join(lines)
 
 
@@ -2374,6 +2433,7 @@ SHOWERS = {
     "unapprove": show_unapprove, "reread": show_reread,
     "library": show_library,
     "locate": show_locate,
+    "onenote": show_onenote,
     "backup": show_backup,
     "folders": show_folders,
     "solutions": show_solutions,
@@ -2406,7 +2466,9 @@ MCP_INSTRUCTIONS = (
     "严禁用 propose_question_change 批量灌整本答案书：批量写入标准答案书/官方解析必须使用 import_solutions（直接写入版本化解析层、不打回黄卡、默认保护已有解析且支持 undo_solutions 整批撤销）。"
     "但整理文件夹（list_folders / manage_folder / apply_folder_tree / set_question_sections / update_paper_folder / manage_tag_groups）直接生效并支持撤销。"
     "批量干活先 claim_work 领一批（每道活带到期时间，助手没了活会自己回到池子里），干不完 release_work 交回。"
-    "where_is_the_teacher 告诉你老师此刻在哪、你刚提的有没有被否决。"
+    "where_is_the_teacher 告诉你老师此刻在哪、你刚提的有没有被否决。\n"
+    "共研题目与复习复盘（严格只读）：locate_question 可按 Q-xxxxxxxx 短码/UUID 秒级调出题干与原卷截图；search_library 支持按 paper/type 统计分析题库与试卷特点；"
+    "list_onenote_notes 与 read_onenote_note 可只读获取题目关联 OneNote 页的文字及手写墨迹图，用来总结思路和给复习建议。"
 )
 
 
@@ -2460,12 +2522,28 @@ MCP_TOOLS = [
     ("unapprove_card", "撤销自己（AI）打的勾。人工通过的不能撤。", _schema({"paper": PAPER, "card": CARD}, ["paper", "card"])),
     ("reread_card", "让题有据的读题模型重读一道题。", _schema({"paper": PAPER, "card": CARD}, ["paper", "card"])),
     ("publish_paper", "把已通过的题入库（AI 通过的题在题库里标着“AI 审核”）。", _schema({"paper": PAPER}, ["paper"])),
-    ("search_library", "在正式题库里搜题（可按题源、知识点、有无答案找）。", _schema({
-        "keywords": {"type": "string"}, "review": {"type": "string", "enum": ["human", "ai"]},
+    ("search_library", "在正式题库里搜题（可按试卷、题型、题源、知识点、有无答案筛选，用于总结题库与试卷特点）。", _schema({
+        "keywords": {"type": "string"},
+        "paper": PAPER,
+        "type": {"type": "string", "enum": list(TYPES)},
+        "review": {"type": "string", "enum": ["human", "ai"]},
         "answer": {"type": "string", "enum": ["yes", "no"], "description": "yes 只要有答案的，no 只要原卷没答案的"},
         "tag": {"type": "string", "description": "知识点标签（设置里打开“知识点标签”后才有）"},
         "limit": {"type": "integer", "minimum": 1, "maximum": 100},
     })),
+    ("locate_question", "通过题目短码（如 Q-xxxxxxxx）、UUID 或整段定位文本秒查一道已入库题，并返回题干、标签与本机原卷/配图。", _schema({
+        "ref": {"type": "string", "description": "Q-xxxxxxxx 短码、UUID 或粘贴的位置文本"},
+    }, ["ref"])),
+    ("list_onenote_notes", "只读列出已关联 OneNote 笔记的入库题目（可按试卷或关键词筛选）。", _schema({
+        "paper": PAPER,
+        "q": {"type": "string", "description": "按题目或笔记标题关键词过滤"},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+    })),
+    ("read_onenote_note", "严格只读提取指定题目所关联的 OneNote 页面文字块与手写墨迹截图，供 AI 总结笔记与提建议。", _schema({
+        "ref": {"type": "string", "description": "Q-xxxxxxxx 短码、UUID 或完整定位文本"},
+        "include_images": {"type": "boolean", "description": "是否同时导出裁边后的手写步骤截图（默认 true）"},
+        "max_pages": {"type": "integer", "minimum": 1, "maximum": 5, "description": "最多导出前几页截图（默认 3）"},
+    }, ["ref"])),
     ("configure_features", "只读查看标签/参考答案开关，或按用户明确生成需求启用/关闭。默认关闭；不配置API、不生成内容。", _schema({
         "enable": {"type": "array", "items": {"type": "string", "enum": list(ENRICH_FEATURES)}},
         "disable": {"type": "array", "items": {"type": "string", "enum": list(ENRICH_FEATURES)}},
@@ -2711,9 +2789,22 @@ def mcp_call(client: Client, name: str, arguments: dict) -> tuple[dict | list, l
     if name == "publish_paper":
         return cmd_publish(client, _ns(paper=a.get("paper", ""))), []
     if name == "search_library":
-        return cmd_library(client, _ns(keywords=str(a.get("keywords") or "").split(), paper=None, type=None,
-                                       review=a.get("review"), answer=a.get("answer"), tag=a.get("tag"),
-                                       limit=int(a.get("limit") or 20))), []
+        return cmd_library(client, _ns(keywords=str(a.get("keywords") or "").split(), paper=a.get("paper"),
+                                       type=a.get("type"), review=a.get("review"), answer=a.get("answer"),
+                                       tag=a.get("tag"), limit=int(a.get("limit") or 20))), []
+    if name == "locate_question":
+        result = cmd_locate(client, _ns(ref=[str(a.get("ref") or "")]))
+        paths = [str(p) for p in (result.get("local_images") or []) if p]
+        return result, paths
+    if name == "list_onenote_notes":
+        return cmd_onenote(client, _ns(onenote_command="list", paper=a.get("paper"), q=a.get("q"),
+                                       limit=int(a.get("limit") or 50))), []
+    if name == "read_onenote_note":
+        include_images = True if a.get("include_images") is None else bool(a.get("include_images"))
+        result = cmd_onenote(client, _ns(onenote_command="read", ref=[str(a.get("ref") or "")],
+                                         no_images=not include_images, max_pages=int(a.get("max_pages") or 3)))
+        paths = [str(p) for p in (result.get("image_paths") or []) if p]
+        return result, paths
     if name == "configure_features":
         return cmd_features(client, _ns(enable=a.get("enable"), disable=a.get("disable"))), []
     if name == "list_enrichment_tasks":
@@ -3135,6 +3226,16 @@ def build_parser() -> argparse.ArgumentParser:
     library.add_argument("--limit", type=int, default=20)
     locate = sub.add_parser("locate", parents=[common], help="通过题目身份证短码（如 Q-xxxxxxxx）、UUID 或定位文本秒查一道题")
     locate.add_argument("ref", nargs="+", help="Q-xxxxxxxx、UUID 或整段复制的定位文本")
+    on_p = sub.add_parser("onenote", parents=[common], help="只读查看或读取与题目关联的 OneNote 笔记（用于总结复盘）")
+    on_sub = on_p.add_subparsers(dest="onenote_command", required=True, metavar="动作")
+    on_list = on_sub.add_parser("list", parents=[common], help="列出已关联 OneNote 笔记的正式题目")
+    on_list.add_argument("--paper", help="按试卷/教材编号、latest 或名称片段筛选")
+    on_list.add_argument("--q", help="按题干或笔记标题关键词过滤")
+    on_list.add_argument("--limit", type=int, default=50, help="最多返回几条（1–100）")
+    on_read = on_sub.add_parser("read", parents=[common], help="只读读取指定题目关联 OneNote 页面的文字与手写墨迹截图")
+    on_read.add_argument("ref", nargs="+", help="Q-xxxxxxxx、UUID 或完整定位文本")
+    on_read.add_argument("--no-images", action="store_true", help="只提取笔记文字，不渲染手写步骤图")
+    on_read.add_argument("--max-pages", type=int, default=3, help="最多导出前几页手写图（1–5，默认 3）")
 
     feature_parser = sub.add_parser("features", parents=[common], help="查看或明确启用/关闭标签与参考答案（默认关闭）")
     feature_parser.add_argument("--enable", nargs="+", choices=ENRICH_FEATURES, help="按用户明确生成需求启用")
@@ -3290,6 +3391,7 @@ COMMANDS = {
     "cards": cmd_cards, "show": cmd_show, "fix": cmd_fix, "figures": cmd_figures, "approve": cmd_approve,
     "unapprove": cmd_unapprove, "reread": cmd_reread, "publish": cmd_publish, "library": cmd_library,
     "locate": cmd_locate,
+    "onenote": cmd_onenote,
     "assistant-setup": cmd_assistant_setup,
     "setup-agents": cmd_setup_agents,
     "skill": cmd_skill,

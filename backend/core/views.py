@@ -3997,15 +3997,18 @@ def library_locate(request):
     content = publication.content or {}
     local_images: list[str] = []
     if pub_dir.is_dir():
+        crop_path = pub_dir / "crop.png"
+        if crop_path.is_file():
+            local_images.append(str(crop_path))
         for entry in content.get("question_images") or []:
             if isinstance(entry, dict) and entry.get("file"):
                 p = pub_dir / str(entry["file"])
-                if p.is_file():
+                if p.is_file() and str(p) not in local_images:
                     local_images.append(str(p))
         for entry in content.get("figures") or []:
             if isinstance(entry, dict) and entry.get("file"):
                 p = pub_dir / str(entry["file"])
-                if p.is_file():
+                if p.is_file() and str(p) not in local_images:
                     local_images.append(str(p))
     return JsonResponse(
         {

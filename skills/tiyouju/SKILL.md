@@ -145,6 +145,14 @@ tiyouju publish latest
 
 命令与参数细节见 [references/commands.md](references/commands.md#整理题库文件夹)。
 
+## 和 AI 共研题目与复盘 OneNote 笔记（严格只读）
+
+用户可以通过 CLI 或 MCP 直接让当前助手配合查题、讨论、总结规律与复盘手写笔记：
+
+1. **核对单题与探讨思路**：未入库题使用 `tiyouju show <paper> <card>`（MCP `show_card`）；已入库题只要用户贴来 `Q-xxxxxxxx` 短码、UUID 或复制定位文本，运行 `tiyouju locate <ref>`（MCP `locate_question`）即可秒级调出题干、答案、标签、原卷截图和配图，核查是否有误或一起讨论解法。
+2. **直读题库与试卷库总结规律**：结合 `tiyouju papers`（MCP `list_papers`）、`tiyouju cards`（MCP `list_cards`）、`tiyouju library --paper <p> --type <t>`（MCP `search_library` 已支持 `paper`/`type`）及 `tiyouju folders list`（MCP `list_folders`），批量读取试卷与专题特点、总结高频考点与题型分布。
+3. **只读读取 OneNote 笔记提建议**：运行 `tiyouju onenote list [--paper <p>] [--q 关键词]`（MCP `list_onenote_notes`）查看关联笔记列表，再用 `tiyouju onenote read <ref>`（MCP `read_onenote_note`）只读提取该页 OneNote 的文字块与手写墨迹截图，帮助用户总结做题思路、指出疏漏或给出复习建议（**绝不修改或覆写用户 OneNote 原笔记**）。
+
 ## 不能运行命令时
 
 支持电脑操作的助手可使用软件界面，但界面打勾记为**人工通过**，只有用户明确同意才这样操作。不支持本机命令或电脑操作的助手应说明限制，提供用户可执行的步骤，不声称替用户安装成功。
