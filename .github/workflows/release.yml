@@ -64,6 +64,104 @@ jobs:
         run: |
           powershell -NoProfile -File packaging/build.ps1 -Version '${{ steps.version.outputs.version }}'
 
+      - name: Check SignPath configuration
+        id: signpath
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORG_ID: ${{ secrets.SIGNPATH_ORG_ID }}
+          SIGNPATH_PROJECT_VAR: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_PROJECT_SEC: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_POLICY_VAR: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          SIGNPATH_POLICY_SEC: ${{ secrets.SIGNPATH_POLICY_SLUG }}
+        shell: pwsh
+        run: |
+          $enabled = [bool]($env:SIGNPATH_API_TOKEN -and $env:SIGNPATH_ORG_ID)
+          $projectSlug = @($env:SIGNPATH_PROJECT_SEC, $env:SIGNPATH_PROJECT_VAR, 'question-bank-card') | Where-Object { $_ } | Select-Object -First 1
+          $policySlug = @($env:SIGNPATH_POLICY_SEC, $env:SIGNPATH_POLICY_VAR, 'release-signing') | Where-Object { $_ } | Select-Object -First 1
+          "enabled=$($enabled.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "project_slug=$projectSlug" >> $env:GITHUB_OUTPUT
+          "policy_slug=$policySlug" >> $env:GITHUB_OUTPUT
+          if ($enabled) { Write-Host "SignPath 代码签名已启用 ($projectSlug / $policySlug)" }
+          else { Write-Host "SignPath 凭据尚未配置，跳过代码签名步骤" }
+
+      - name: Stage unsigned app executables for SignPath
+        if: steps.signpath.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $stage = "packaging/dist/unsigned-app-exes"
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Copy-Item "packaging/dist/QuestionBankCard/QuestionBankCard.exe" -Destination $stage -Force
+          Copy-Item "packaging/dist/QuestionBankCard/tiyouju.exe" -Destination $stage -Force
+
+      - name: Upload unsigned app executables
+        id: upload-unsigned-app
+        if: steps.signpath.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-app-exes-${{ steps.version.outputs.version }}
+          path: packaging/dist/unsigned-app-exes/*.exe
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Sign app executables with SignPath
+        if: steps.signpath.outputs.enabled == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORG_ID }}
+          project-slug: ${{ steps.signpath.outputs.project_slug }}
+          signing-policy-slug: ${{ steps.signpath.outputs.policy_slug }}
+          github-artifact-id: ${{ steps.upload-unsigned-app.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: packaging/dist/signed-app-exes
+
+      - name: Rebuild installer with signed app executables
+        if: steps.signpath.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          foreach ($exeName in @('QuestionBankCard.exe', 'tiyouju.exe')) {
+            $signed = Get-ChildItem "packaging/dist/signed-app-exes" -Recurse -Filter $exeName -File | Select-Object -First 1
+            if (-not $signed) { throw "未找到签名后的 $exeName" }
+            $sig = Get-AuthenticodeSignature -LiteralPath $signed.FullName
+            if ($sig.Status -ne 'Valid') { throw "$exeName 签名校验未通过: $($sig.Status)" }
+            Copy-Item -LiteralPath $signed.FullName -Destination "packaging/dist/QuestionBankCard/$exeName" -Force
+          }
+          powershell -NoProfile -File packaging/build.ps1 -Version '${{ steps.version.outputs.version }}' -InstallerOnly
+
+      - name: Upload unsigned installer
+        id: upload-unsigned-installer
+        if: steps.signpath.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer-${{ steps.version.outputs.version }}
+          path: packaging/dist/installer/TiYouJu-Setup-${{ steps.version.outputs.version }}.exe
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Sign installer with SignPath
+        if: steps.signpath.outputs.enabled == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORG_ID }}
+          project-slug: ${{ steps.signpath.outputs.project_slug }}
+          signing-policy-slug: ${{ steps.signpath.outputs.policy_slug }}
+          github-artifact-id: ${{ steps.upload-unsigned-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: packaging/dist/signed-installer
+
+      - name: Apply signed installer before checksums
+        if: steps.signpath.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $targetName = "TiYouJu-Setup-$version.exe"
+          $signed = Get-ChildItem "packaging/dist/signed-installer" -Recurse -Filter $targetName -File | Select-Object -First 1
+          if (-not $signed) { throw "未找到签名后的 $targetName" }
+          $sig = Get-AuthenticodeSignature -LiteralPath $signed.FullName
+          if ($sig.Status -ne 'Valid') { throw "$targetName 签名校验未通过: $($sig.Status)" }
+          Copy-Item -LiteralPath $signed.FullName -Destination "packaging/dist/installer/$targetName" -Force
+
       - name: Assemble the public assets
         run: python packaging/make_release_essentials.py ${{ steps.version.outputs.version }}
 

@@ -1,10 +1,11 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+(\.\d+){0,2}$')]
     [string]$Version = '1.3.0',
 
     [switch]$SkipInstaller,
-    [switch]$SkipDependencyInstall
+    [switch]$SkipDependencyInstall,
+    [switch]$InstallerOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -198,71 +199,79 @@ if ($declaredVersion -ne $Version) {
     throw "backend/core/version.py says APP_VERSION = '$declaredVersion' but this build is '$Version'. Update backend/core/version.py to '$Version' and commit it first."
 }
 
-Write-Host "[1/6] Preparing isolated Python 3.12 build environment..."
-New-BuildVirtualEnvironment
-Invoke-Native -FilePath $BuildPython -ArgumentList @('-c', 'import sys;sys.exit(not(sys.version_info[:2]==(3,12)and sys.maxsize>2**32))')
+if (-not $InstallerOnly) {
+    Write-Host "[1/6] Preparing isolated Python 3.12 build environment..."
+    New-BuildVirtualEnvironment
+    Invoke-Native -FilePath $BuildPython -ArgumentList @('-c', 'import sys;sys.exit(not(sys.version_info[:2]==(3,12)and sys.maxsize>2**32))')
 
-$env:PYTHONUTF8 = '1'
-$env:PYTHONIOENCODING = 'utf-8'
-$env:PIP_DISABLE_PIP_VERSION_CHECK = '1'
+    $env:PYTHONUTF8 = '1'
+    $env:PYTHONIOENCODING = 'utf-8'
+    $env:PIP_DISABLE_PIP_VERSION_CHECK = '1'
 
-if (-not $SkipDependencyInstall) {
-    Write-Host "[2/6] Installing pinned build and runtime dependencies..."
-    Invoke-Native -FilePath $BuildPython -ArgumentList @('-m', 'pip', 'install', '--only-binary=:all:', '--requirement', $BuildRequirements)
-    # proxy_tools 在 PyPI 上只有源码包。先在本地打成 wheel，后面的 --only-binary 才能装上。
-    $Wheelhouse = Join-Path $BuildRoot 'wheels'
-    New-Item -ItemType Directory -Path $Wheelhouse -Force | Out-Null
-    Invoke-Native -FilePath $BuildPython -ArgumentList @('-m', 'pip', 'wheel', '--wheel-dir', $Wheelhouse, 'proxy_tools==0.1.0')
-    Invoke-Native -FilePath $BuildPython -ArgumentList @('-m', 'pip', 'install', '--only-binary=:all:', '--find-links', $Wheelhouse, '--requirement', $ApplicationRequirements)
+    if (-not $SkipDependencyInstall) {
+        Write-Host "[2/6] Installing pinned build and runtime dependencies..."
+        Invoke-Native -FilePath $BuildPython -ArgumentList @('-m', 'pip', 'install', '--only-binary=:all:', '--requirement', $BuildRequirements)
+        # proxy_tools 在 PyPI 上只有源码包。先在本地打成 wheel，后面的 --only-binary 才能装上。
+        $Wheelhouse = Join-Path $BuildRoot 'wheels'
+        New-Item -ItemType Directory -Path $Wheelhouse -Force | Out-Null
+        Invoke-Native -FilePath $BuildPython -ArgumentList @('-m', 'pip', 'wheel', '--wheel-dir', $Wheelhouse, 'proxy_tools==0.1.0')
+        Invoke-Native -FilePath $BuildPython -ArgumentList @('-m', 'pip', 'install', '--only-binary=:all:', '--find-links', $Wheelhouse, '--requirement', $ApplicationRequirements)
+    }
+    else {
+        Write-Host "[2/6] Skipping dependency installation."
+    }
+
+    Write-Host "[3/6] Building the PyInstaller onedir application..."
+    Write-VersionResource
+    Remove-BuildDirectory -Path $PyInstallerWork
+    Remove-BuildDirectory -Path $BundleRoot
+    New-Item -ItemType Directory -Path $DistRoot -Force | Out-Null
+    $env:QB_BUILD_VERSION = $Version
+    Invoke-Native -FilePath $BuildPython -ArgumentList @(
+        '-m', 'PyInstaller',
+        '--noconfirm',
+        '--clean',
+        '--distpath', $DistRoot,
+        '--workpath', $PyInstallerWork,
+        $SpecFile
+    )
+
+    Copy-Item -LiteralPath (Join-Path $PackagingRoot 'INSTALLATION-NOTICE.txt') -Destination $BundleRoot -Force
+    Copy-Item -LiteralPath (Join-Path $PackagingRoot 'THIRD_PARTY_NOTICES.txt') -Destination $BundleRoot -Force
+    Copy-Item -LiteralPath $ProjectLicense -Destination $BundleRoot -Force
+    Copy-Item -LiteralPath $ThirdPartyLicenses -Destination $BundleRoot -Recurse -Force
+    $strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
+    $correspondingSourceTemplate = Join-Path $PackagingRoot 'CORRESPONDING_SOURCE.template.txt'
+    $correspondingSource = $strictUtf8.GetString(
+        [System.IO.File]::ReadAllBytes($correspondingSourceTemplate)
+    ).Replace('{{VERSION}}', $Version)
+    $correspondingSourcePath = Join-Path $BundleRoot 'CORRESPONDING_SOURCE.txt'
+    [System.IO.File]::WriteAllText($correspondingSourcePath, $correspondingSource, $strictUtf8)
+    $writtenCorrespondingSource = $strictUtf8.GetString(
+        [System.IO.File]::ReadAllBytes($correspondingSourcePath)
+    )
+    if ($writtenCorrespondingSource -ne $correspondingSource -or
+            $writtenCorrespondingSource -notmatch [regex]::Escape("releases/tag/v${Version}") -or
+            $writtenCorrespondingSource -notmatch [regex]::Escape("question-bank-card-${Version}-source.zip")) {
+        throw 'CORRESPONDING_SOURCE.txt failed its UTF-8 or version-substitution check.'
+    }
+
+    # The command line for AI assistants must start and report this version.
+    $cliExe = Join-Path $BundleRoot 'tiyouju.exe'
+    $cliVersion = (& $cliExe --version) -join ''
+    if ($LASTEXITCODE -ne 0 -or $cliVersion.Trim() -ne "tiyouju $Version") {
+        throw "tiyouju.exe --version reported '$cliVersion' instead of 'tiyouju $Version'."
+    }
+
+    Write-Host "[4/6] Auditing the bundle for private data and runtime files..."
+    Invoke-Native -FilePath $BuildPython -ArgumentList @($AuditScript, '--bundle', $BundleRoot)
 }
 else {
-    Write-Host "[2/6] Skipping dependency installation."
+    Write-Host "[1-4/6] InstallerOnly: reusing existing bundle at $BundleRoot"
+    if (-not (Test-Path -LiteralPath (Join-Path $BundleRoot 'QuestionBankCard.exe') -PathType Leaf)) {
+        throw "Missing bundle executable at $BundleRoot"
+    }
 }
-
-Write-Host "[3/6] Building the PyInstaller onedir application..."
-Write-VersionResource
-Remove-BuildDirectory -Path $PyInstallerWork
-Remove-BuildDirectory -Path $BundleRoot
-New-Item -ItemType Directory -Path $DistRoot -Force | Out-Null
-$env:QB_BUILD_VERSION = $Version
-Invoke-Native -FilePath $BuildPython -ArgumentList @(
-    '-m', 'PyInstaller',
-    '--noconfirm',
-    '--clean',
-    '--distpath', $DistRoot,
-    '--workpath', $PyInstallerWork,
-    $SpecFile
-)
-
-Copy-Item -LiteralPath (Join-Path $PackagingRoot 'INSTALLATION-NOTICE.txt') -Destination $BundleRoot -Force
-Copy-Item -LiteralPath (Join-Path $PackagingRoot 'THIRD_PARTY_NOTICES.txt') -Destination $BundleRoot -Force
-Copy-Item -LiteralPath $ProjectLicense -Destination $BundleRoot -Force
-Copy-Item -LiteralPath $ThirdPartyLicenses -Destination $BundleRoot -Recurse -Force
-$strictUtf8 = [System.Text.UTF8Encoding]::new($false, $true)
-$correspondingSourceTemplate = Join-Path $PackagingRoot 'CORRESPONDING_SOURCE.template.txt'
-$correspondingSource = $strictUtf8.GetString(
-    [System.IO.File]::ReadAllBytes($correspondingSourceTemplate)
-).Replace('{{VERSION}}', $Version)
-$correspondingSourcePath = Join-Path $BundleRoot 'CORRESPONDING_SOURCE.txt'
-[System.IO.File]::WriteAllText($correspondingSourcePath, $correspondingSource, $strictUtf8)
-$writtenCorrespondingSource = $strictUtf8.GetString(
-    [System.IO.File]::ReadAllBytes($correspondingSourcePath)
-)
-if ($writtenCorrespondingSource -ne $correspondingSource -or
-        $writtenCorrespondingSource -notmatch [regex]::Escape("releases/tag/v${Version}") -or
-        $writtenCorrespondingSource -notmatch [regex]::Escape("question-bank-card-${Version}-source.zip")) {
-    throw 'CORRESPONDING_SOURCE.txt failed its UTF-8 or version-substitution check.'
-}
-
-# The command line for AI assistants must start and report this version.
-$cliExe = Join-Path $BundleRoot 'tiyouju.exe'
-$cliVersion = (& $cliExe --version) -join ''
-if ($LASTEXITCODE -ne 0 -or $cliVersion.Trim() -ne "tiyouju $Version") {
-    throw "tiyouju.exe --version reported '$cliVersion' instead of 'tiyouju $Version'."
-}
-
-Write-Host "[4/6] Auditing the bundle for private data and runtime files..."
-Invoke-Native -FilePath $BuildPython -ArgumentList @($AuditScript, '--bundle', $BundleRoot)
 
 if ($SkipInstaller) {
     Write-Host "[5/6] Inno Setup skipped."

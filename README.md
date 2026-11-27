@@ -217,7 +217,14 @@ irm https://github.com/CEHNICA/question-bank-card/releases/latest/download/insta
 
 ## 反馈、贡献与许可
 
-- [提交问题或功能建议](https://github.com/CEHNICA/question-bank-card/issues) · [参与贡献](CONTRIBUTING.md) · [报告安全问题](SECURITY.md)
+- [提交问题或功能建议](https://github.com/CEHNICA/question-bank-card/issues) · [参与贡献](CONTRIBUTING.md) · [报告安全问题](SECURITY.md) · [隐私政策 (Privacy Policy)](PRIVACY.md)
 - 开源协议：[AGPL-3.0-only 许可证](LICENSE) · [第三方组件与字体许可说明](packaging/THIRD_PARTY_NOTICES.txt)
+
+## Code signing policy
+
+Free code signing provided by SignPath.io, certificate by SignPath Foundation.
+
+- 本项目的 Windows 可执行文件与安装包构建与签名策略见 [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md) 与 [PRIVACY.md](PRIVACY.md)。
+- 签名产物仅通过公开仓库的 GitHub Actions 在官方托管环境（`windows-latest`）中构建并触发；在完成证书签发接入前，若浏览器下载安装包遇到 Windows SmartScreen 提示，可点「更多信息 → 仍要运行」或使用 PowerShell 安装脚本配合 `SHA256SUMS.txt` 校验安装。
 
 > 提交公开 Issue 或讨论时，请勿附带真实学生姓名/手写个人隐私信息、本地题库 `.sqlite3`、运行日志或任何 API 密钥。
