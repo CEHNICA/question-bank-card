@@ -18,6 +18,7 @@ import urllib.request
 import uuid
 import zipfile
 from pathlib import Path
+from typing import Any
 
 from django.http import HttpResponseNotAllowed, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -28,7 +29,7 @@ from .library_transfer import TransferError
 MAX_UPLOAD_BYTES = library_transfer.MAX_BUNDLE_BYTES
 DEFAULT_COMMUNITY_SITE = "https://community.tiyouju.com"
 _STAGED_LOCK = threading.Lock()
-_STAGED_PACKS: dict[str, dict[str, object]] = {}
+_STAGED_PACKS: dict[str, dict[str, Any]] = {}
 _STAGED_TTL_SECONDS = 1800.0
 _MAX_STAGED_ITEMS = 8
 
@@ -328,13 +329,15 @@ def _cleanup_expired_staged_locked(now: float | None = None) -> None:
     expired = [k for k, v in _STAGED_PACKS.items() if (current - float(v.get("created_at") or 0)) > _STAGED_TTL_SECONDS]
     for key in expired:
         entry = _STAGED_PACKS.pop(key, None)
-        if entry and isinstance(entry.get("dir"), Path):
-            shutil.rmtree(entry["dir"], ignore_errors=True)
+        stage_dir = entry.get("dir") if entry else None
+        if isinstance(stage_dir, Path):
+            shutil.rmtree(stage_dir, ignore_errors=True)
     while len(_STAGED_PACKS) >= _MAX_STAGED_ITEMS:
         oldest_key = min(_STAGED_PACKS, key=lambda k: float(_STAGED_PACKS[k].get("created_at") or 0))
         entry = _STAGED_PACKS.pop(oldest_key, None)
-        if entry and isinstance(entry.get("dir"), Path):
-            shutil.rmtree(entry["dir"], ignore_errors=True)
+        stage_dir = entry.get("dir") if entry else None
+        if isinstance(stage_dir, Path):
+            shutil.rmtree(stage_dir, ignore_errors=True)
 
 
 def _validate_pack_download_url(raw_url: str) -> str:

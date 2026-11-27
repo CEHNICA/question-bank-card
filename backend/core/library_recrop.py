@@ -247,7 +247,7 @@ def ocr_preview(publication_id, payload: dict) -> dict:
                 preview_data_url,
                 publication.number,
                 with_figures=with_figures,
-                source_kind=question.source_kind or Question.SourceKind.UNKNOWN,
+                source_kind=str(question.source_kind or Question.SourceKind.UNKNOWN),
             )
     except readers.ReaderQuotaExhausted as error:
         raise RecropError(str(error) or "看图读题服务额度已用尽", 429) from error

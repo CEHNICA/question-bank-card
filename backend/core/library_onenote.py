@@ -866,7 +866,8 @@ def start_attempt(publication: PublishedQuestion) -> dict[str, Any]:
     insert_x = round(max_x + SAFE_HORIZONTAL_GAP_PT, 1) if max_x > 0 else DEFAULT_OUTLINE_X_PT
     insert_y = DEFAULT_OUTLINE_Y_PT
 
-    prev_attempts = existing.get("attempts") if isinstance(existing.get("attempts"), list) else []
+    raw_attempts = existing.get("attempts")
+    prev_attempts: list[Any] = raw_attempts if isinstance(raw_attempts, list) else []
     max_num = max((int(a.get("attempt") or 0) for a in prev_attempts if isinstance(a, dict)), default=1)
     next_num = max(2, max_num + 1) if prev_attempts or existing.get("page_id") else 1
 
@@ -1032,7 +1033,7 @@ def export_page_step_images(
             matrix = pymupdf.Matrix(150 / 72.0, 150 / 72.0)
             for idx in range(total):
                 pix = doc[idx].get_pixmap(matrix=matrix, alpha=False)
-                pil_img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                pil_img = Image.frombytes("RGB", (int(pix.width), int(pix.height)), pix.samples)
                 png_bytes = _crop_and_compress_onenote_page(pil_img, max_long_side=max_long_side)
                 target = dest_dir / f"onenote-step-{idx + 1}.png"
                 target.write_bytes(png_bytes)
