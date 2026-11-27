@@ -1063,7 +1063,8 @@ def build_onenote_timeline() -> dict[str, Any]:
         stem_preview = re.sub(r"\s+", " ", stem)[:120]
         source_name = _display_source_name(pub.source_filename or content.get("source_filename") or "")
         section = str(content.get("section") or "").strip()
-        attempts = onenote.get("attempts") if isinstance(onenote.get("attempts"), list) else []
+        raw_attempts = onenote.get("attempts")
+        attempts: list[Any] = raw_attempts if isinstance(raw_attempts, list) else []
 
         if attempts:
             for item in attempts:
@@ -1173,7 +1174,8 @@ def list_linked_notes(*, limit: int = 50, paper_id: str | None = None, query: st
         updated_at = str(onenote.get("updated_at") or "")
         published_iso = pub.published_at.isoformat() if pub.published_at else ""
         sort_key = updated_at or published_iso
-        attempts = onenote.get("attempts") if isinstance(onenote.get("attempts"), list) else []
+        raw_attempts = onenote.get("attempts")
+        attempts: list[Any] = raw_attempts if isinstance(raw_attempts, list) else []
         matched.append(
             (
                 sort_key,
