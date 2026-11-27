@@ -44,7 +44,15 @@ def _response_for(url: str, latest: str, installer: bytes, checksum: str, final_
     path = urlparse(url).path
     final = final_url or url
     if path == "/api/latest-release":
-        body = json.dumps({"version": latest, "published_at": "2026-11-26"}).encode()
+        body = json.dumps(
+            {
+                "version": latest,
+                "published_at": "2026-11-26",
+                "release_url": "https://github.com/CEHNICA/question-bank-card/releases/tag/v9.9.9",
+                "notes": "## 更新亮点\n1. 新增右下角悬浮更新弹窗。",
+                "highlights": ["新增右下角悬浮更新弹窗", "自动接入国内 AI Agent", 123, "  "],
+            }
+        ).encode()
     elif path == "/download/SHA256SUMS.txt":
         body = f"{checksum} *TiYouJu-Setup-{latest}.exe\n".encode()
     elif path == "/download/installer":
@@ -83,6 +91,10 @@ class OfficialUpdateTests(SimpleTestCase):
         self.assertTrue(info["update_available"])
         self.assertEqual(info["latest"], "9.9.9")
         self.assertTrue(info["auto_check"])
+        self.assertEqual(info["highlights"], ["新增右下角悬浮更新弹窗", "自动接入国内 AI Agent"])
+        self.assertIn("悬浮更新弹窗", info["notes"])
+        self.assertEqual(info["release_url"], "https://github.com/CEHNICA/question-bank-card/releases/tag/v9.9.9")
+        self.assertEqual(app_update._safe_release_url("https://evil.example/payload"), "https://tiyouju.com/")
 
     def test_auto_check_can_be_turned_off_and_skips_the_network(self):
         app_update.set_auto_check(False)

@@ -1058,5 +1058,20 @@ class TiyoujuOfflineTests(SimpleTestCase):
                 "tiyouju onenote read",
                 "tiyouju usage",
                 "tiyouju drafts",
+                "tiyouju mcp-config",
             ):
                 self.assertIn(token, skill_out)
+
+            with tempfile.TemporaryDirectory() as home_tmp:
+                home_dir = Path(home_tmp)
+                (home_dir / ".qwen").mkdir()
+                code_mc, mc_data = run_json("mcp-config", "--command-name", "--home", str(home_dir))
+                self.assertEqual(code_mc, 0)
+                self.assertEqual(
+                    mc_data["mcp_servers"]["mcpServers"]["tiyouju"], {"command": "tiyouju", "args": ["mcp"]}
+                )
+                self.assertEqual({item["client"] for item in mc_data["clients"]}, {"qwen_code"})
+
+                code_mc_txt, mc_txt, _ = run("mcp-config", "--command-name", "--home", str(home_dir))
+                self.assertEqual(code_mc_txt, 0)
+                self.assertIn("codex mcp add tiyouju", mc_txt)

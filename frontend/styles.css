@@ -4272,4 +4272,123 @@ kbd {
   font-weight: 600;
 }
 
+/* ---------------------------------------------------------------- 右下角版本更新悬浮卡片 */
+.update-float-card {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 9500;
+  width: min(372px, calc(100vw - 24px));
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 20px 44px -12px rgba(15, 23, 42, 0.22), 0 4px 12px rgba(16, 185, 129, 0.12);
+  display: grid;
+  gap: 10px;
+  animation: updateFloatIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.update-float-card[hidden] {
+  display: none;
+}
+@keyframes updateFloatIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.update-float-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.update-float-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.update-float-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.update-float-ver {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+.update-float-close {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #64748b;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.update-float-close:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+.update-float-sub {
+  margin: 0;
+  font-size: 12.5px;
+  color: #475569;
+  line-height: 1.5;
+}
+.update-float-list {
+  margin: 0;
+  padding: 10px 12px 10px 26px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  font-size: 12px;
+  color: #334155;
+  line-height: 1.6;
+  max-height: 148px;
+  overflow-y: auto;
+  display: grid;
+  gap: 4px;
+}
+.update-float-list[hidden] {
+  display: none;
+}
+.update-float-status {
+  margin: 0;
+  font-size: 12px;
+  color: #047857;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.update-float-status.is-error {
+  color: #b91c1c;
+}
+.update-float-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 2px;
+}
+.update-float-actions .button {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12.5px;
+}
+.update-float-actions .button.quiet {
+  margin-left: auto;
+  color: #64748b;
+}
+@media (max-width: 540px) {
+  .update-float-card { right: 12px; bottom: 12px; padding: 14px; }
+}
+
 

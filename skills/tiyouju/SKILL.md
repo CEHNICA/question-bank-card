@@ -11,7 +11,7 @@ description: 安装和操作题有据 Windows 本机软件，把数学试卷、�
 tiyouju skill
 ```
 
-该命令会输出与当前已安装版本完全一致的操作手册、配置命令和内容组织流程（以 `[tiyouju:skill] end of guide` 结尾）。如果用户发来了题目定位码（如 `Q-c65f1f5f` 或 `[题有据题目 ...]`），直接运行 `tiyouju locate <位置文本>` 即可立即定位题目原文、原卷图片与标签数据。安装器已自动将 `tiyouju` 目录加入用户 `PATH`，并将本技能链接到本机各 AI Agent 的技能目录；若当前终端是安装前打开的、尚未刷新 `PATH`，可用 `"%LOCALAPPDATA%\Programs\QuestionBankCard\tiyouju.exe"` 或先运行 `tiyouju setup-agents` 补齐链接。
+该命令会输出与当前已安装版本完全一致的操作手册、配置命令和内容组织流程（以 `[tiyouju:skill] end of guide` 结尾）。如果用户发来了题目定位码（如 `Q-c65f1f5f` 或 `[题有据题目 ...]`），直接运行 `tiyouju locate <位置文本>` 即可立即定位题目原文、原卷图片与标签数据。安装器已自动将 `tiyouju` 目录加入用户 `PATH`，并把本技能与 stdio MCP 配置自动探测写入本机主流国际与国内 AI Agent（包含 Trae 国际/国内版 `.trae-cn`、Cursor、Claude、Codex、Antigravity、Qwen Code、Qoder、通义灵码、CodeBuddy、Kimi、iFlow、OpenClaw 等）；若当前终端尚未刷新环境变量或需接入 Cherry Studio / Chatbox 等客户端，可运行 `tiyouju mcp-config` 复制标准配置或执行 `tiyouju setup-agents` 补齐链接。
 
 ## 外部助手接管与教辅结构提取
 

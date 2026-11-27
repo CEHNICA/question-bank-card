@@ -571,16 +571,31 @@ def cmd_assistant_setup(_client, args) -> dict:
 
 
 def cmd_setup_agents(_client, args) -> dict:
-    """自动将题有据技能与命令行接入本机主流 AI Agent（参考 egolite 配置方式）。"""
+    """自动将题有据技能、MCP 配置与命令行接入本机主流国际与国内 AI Agent。"""
     try:
         result = setup.setup_agents(
             app_executable(),
             home=Path(args.home) if getattr(args, "home", None) else None,
+            appdata=Path(args.appdata) if getattr(args, "appdata", None) else None,
             update_path=not getattr(args, "no_path", False),
+            register_mcp=not getattr(args, "no_mcp", False),
             replace=bool(getattr(args, "replace", False)),
         )
         result["quiet"] = bool(getattr(args, "quiet", False))
         return result
+    except (setup.SetupError, OSError) as error:
+        raise CliError(str(error), EXIT_NEEDS_USER) from error
+
+
+def cmd_mcp_config(_client, args) -> dict:
+    """输出标准 MCP JSON 配置，并检查本机已安装的国际与国内客户端接入状态。"""
+    try:
+        return setup.inspect_mcp_config(
+            app_executable(),
+            home=Path(args.home) if getattr(args, "home", None) else None,
+            appdata=Path(args.appdata) if getattr(args, "appdata", None) else None,
+            prefer_command_name=bool(getattr(args, "command_name", False)),
+        )
     except (setup.SetupError, OSError) as error:
         raise CliError(str(error), EXIT_NEEDS_USER) from error
 
@@ -601,7 +616,8 @@ def cmd_skill(_client, _args) -> dict:
         "- `tiyouju start`：启动题有据本机服务并就绪（退出码 `2` 表示应用未启动）。",
         "- `tiyouju config --reader <engine> --checker <checker>`：查看或调整读题与复核引擎（不碰密钥；更改前先与用户确认）。",
         "- `tiyouju features`：查看或明确启用/关闭标签候选题、参考答案等开关。",
-        "- `tiyouju setup-agents`：把技能重新同步并链接到所有本地 AI Agent 目录，并将命令目录加入用户 PATH。",
+        "- `tiyouju setup-agents`：把技能、MCP 服务自动配置到本机主流国际与国内 AI Agent，并将命令目录加入用户 PATH。",
+        "- `tiyouju mcp-config`：输出标准 MCP JSON 配置与 Codex 一行接入命令，查看本机各客户端接入状态。",
         "",
         "## 2. 录入试卷与自主探索切题",
         "- `tiyouju papers --json`：列出所有待处理或已导入的试卷与资料。",
@@ -664,6 +680,10 @@ def show_setup_agents(result: dict) -> str:
     if result.get("quiet"):
         return ""
     return setup.format_setup_agents_report(result)
+
+
+def show_mcp_config(result: dict) -> str:
+    return setup.format_mcp_config_report(result)
 
 
 def paper_summary(item: dict) -> dict:
@@ -2764,6 +2784,7 @@ SHOWERS = {
     "workbench": show_workbench,
     "skill": show_skill,
     "setup-agents": show_setup_agents,
+    "mcp-config": show_mcp_config,
 }
 
 
@@ -3505,11 +3526,17 @@ def build_parser() -> argparse.ArgumentParser:
     finish.add_argument("--replace-skill", action="store_true", help="明确同意替换不同内容的技能，先保留恢复备份")
     finish.add_argument("--desktop", choices=["show", "hide"], help="使用者选择后显示或隐藏题有据自己的桌面图标")
     sub.add_parser("skill", parents=[common], help="输出与当前安装版一致的 AI Agent 接管指南")
-    agents = sub.add_parser("setup-agents", parents=[common], help="自动同步技能到本机主流 AI Agent 并配置用户 PATH")
+    agents = sub.add_parser("setup-agents", parents=[common], help="自动同步技能、MCP 到本机国际与国内 AI Agent 并配置 PATH")
     agents.add_argument("--home", help="指定用户主目录（默认当前用户目录）")
-    agents.add_argument("--no-path", action="store_true", help="只同步与链接技能，不修改用户 PATH")
-    agents.add_argument("--replace", action="store_true", help="替换已存在的自定义 tiyouju 技能（保留备份）")
+    agents.add_argument("--appdata", help="指定 Roaming AppData 目录（默认当前用户 APPDATA）")
+    agents.add_argument("--no-path", action="store_true", help="只同步技能与 MCP，不修改用户 PATH")
+    agents.add_argument("--no-mcp", action="store_true", help="只同步技能与 PATH，不写入客户端 MCP 配置")
+    agents.add_argument("--replace", action="store_true", help="替换已存在的自定义 tiyouju 技能或同名 MCP 项（保留备份）")
     agents.add_argument("--quiet", action="store_true", help="静默执行，安装器调用时隐藏文本输出")
+    mcp_cfg = sub.add_parser("mcp-config", parents=[common], help="输出标准 MCP JSON 配置并检测本机客户端接入状态")
+    mcp_cfg.add_argument("--command-name", action="store_true", help="使用简洁命令名 tiyouju 而不是完整 EXE 路径")
+    mcp_cfg.add_argument("--home", help="指定用户主目录（默认当前用户目录）")
+    mcp_cfg.add_argument("--appdata", help="指定 Roaming AppData 目录（默认当前用户 APPDATA）")
     sub.add_parser("papers", parents=[common], help="列出试卷")
 
     upload = sub.add_parser("upload", parents=[common], help="上传 PDF、Word，或几张照片合成一份")
@@ -3876,6 +3903,7 @@ COMMANDS = {
     "onenote": cmd_onenote,
     "assistant-setup": cmd_assistant_setup,
     "setup-agents": cmd_setup_agents,
+    "mcp-config": cmd_mcp_config,
     "skill": cmd_skill,
     "features": cmd_features, "enrich": cmd_enrich,
     "claim": cmd_claim, "release": cmd_release, "propose": cmd_propose,
@@ -3904,7 +3932,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     # This command inspects the installed files even when the app is stopped.
     # Do not instantiate a client or look up a runtime service for it.
-    offline_commands = {"assistant-setup", "setup-agents", "skill"}
+    offline_commands = {"assistant-setup", "setup-agents", "mcp-config", "skill"}
     client = None if args.command in offline_commands else Client(
         agent=" ".join(str(args.agent).split())[:40] or DEFAULT_AGENT)
     if args.command == "mcp":

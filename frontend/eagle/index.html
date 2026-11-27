@@ -2067,6 +2067,166 @@
         border-top: 1px solid #e2e8f0;
       }
     }
+    /* 右下角软件更新悬浮窗 */
+    .eagle-update-popup {
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      z-index: 9500;
+      width: min(376px, calc(100vw - 24px));
+      padding: 16px 18px;
+      border-radius: 14px;
+      border: 1px solid rgba(16, 185, 129, 0.28);
+      background: #ffffff;
+      color: #0f172a;
+      box-shadow: 0 20px 44px -12px rgba(15, 23, 42, 0.22), 0 4px 12px rgba(16, 185, 129, 0.14);
+      display: grid;
+      gap: 10px;
+      animation: eagleUpdateFloatIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .eagle-update-popup.hidden {
+      display: none;
+    }
+    @keyframes eagleUpdateFloatIn {
+      from { opacity: 0; transform: translateY(12px) scale(0.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .eagle-update-popup-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .eagle-update-popup-badges {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .eagle-update-popup-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #ecfdf5;
+      color: #047857;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    .eagle-update-popup-ver {
+      font-size: 15px;
+      font-weight: 700;
+      color: #0f172a;
+    }
+    .eagle-update-popup-close {
+      width: 26px;
+      height: 26px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: #64748b;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .eagle-update-popup-close:hover {
+      background: #f1f5f9;
+      color: #0f172a;
+    }
+    .eagle-update-popup-sub {
+      margin: 0;
+      font-size: 12.5px;
+      color: #475569;
+      line-height: 1.5;
+    }
+    .eagle-update-popup-list {
+      margin: 0;
+      padding: 10px 12px 10px 26px;
+      border-radius: 10px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      font-size: 12px;
+      color: #334155;
+      line-height: 1.6;
+      max-height: 150px;
+      overflow-y: auto;
+      display: grid;
+      gap: 4px;
+    }
+    .eagle-update-popup-list.hidden {
+      display: none;
+    }
+    .eagle-update-popup-status {
+      margin: 0;
+      font-size: 12px;
+      font-weight: 600;
+      color: #047857;
+      line-height: 1.5;
+    }
+    .eagle-update-popup-status.hidden {
+      display: none;
+    }
+    .eagle-update-popup-status.is-error {
+      color: #b91c1c;
+    }
+    .eagle-update-popup-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding-top: 2px;
+    }
+    .eagle-update-popup-btn-primary {
+      min-height: 32px;
+      padding: 0 14px;
+      border: 0;
+      border-radius: 8px;
+      background: #047857;
+      color: #ffffff;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.14s ease;
+    }
+    .eagle-update-popup-btn-primary:hover:not(:disabled) {
+      background: #065f46;
+    }
+    .eagle-update-popup-btn-primary:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+    .eagle-update-popup-btn-secondary {
+      min-height: 32px;
+      padding: 0 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #334155;
+      font-size: 12.5px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .eagle-update-popup-btn-secondary:hover {
+      background: #f8fafc;
+    }
+    .eagle-update-popup-btn-link {
+      margin-left: auto;
+      min-height: 32px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: #64748b;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .eagle-update-popup-btn-link:hover {
+      background: #f1f5f9;
+      color: #0f172a;
+    }
+    @media (max-width: 540px) {
+      .eagle-update-popup { right: 12px; bottom: 12px; padding: 14px; }
+    }
   </style>
   <script>
     // 尽早套上上次的界面缩放，避免先出小字再猛跳一下。
@@ -3073,12 +3233,37 @@
           </span>
         </span>
         <span class="flex items-center gap-1.5 shrink-0">
-          <span id="eagleMenuVersionPill" class="hidden text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-500"></span>
+          <span id="eagleMenuVersionPill" class="hidden text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-500" onclick="handleEagleVersionPillClick(event)"></span>
           <span class="text-xs text-slate-400">›</span>
         </span>
       </button>
     </div>
   </div>
+
+  <!-- ================= 右下角官方版本更新悬浮弹窗 ================= -->
+  <aside
+    id="eagleUpdatePopup"
+    class="eagle-update-popup hidden"
+    role="dialog"
+    aria-labelledby="eagleUpdatePopupTitle"
+    aria-live="polite"
+  >
+    <div class="eagle-update-popup-head">
+      <div class="eagle-update-popup-badges">
+        <span class="eagle-update-popup-pill">发现新版本</span>
+        <strong id="eagleUpdatePopupTitle" class="eagle-update-popup-ver">v--</strong>
+      </div>
+      <button id="eagleUpdatePopupClose" class="eagle-update-popup-close" type="button" aria-label="关闭更新提示">×</button>
+    </div>
+    <p id="eagleUpdatePopupSub" class="eagle-update-popup-sub">发现新版本，安装前将先备份本地题库。</p>
+    <ul id="eagleUpdatePopupHighlights" class="eagle-update-popup-list hidden"></ul>
+    <p id="eagleUpdatePopupStatus" class="eagle-update-popup-status hidden"></p>
+    <div class="eagle-update-popup-actions">
+      <button id="eagleUpdatePopupInstall" class="eagle-update-popup-btn-primary" type="button">立即更新</button>
+      <button id="eagleUpdatePopupLater" class="eagle-update-popup-btn-secondary" type="button">稍后提醒</button>
+      <button id="eagleUpdatePopupAbout" class="eagle-update-popup-btn-link" type="button">设置</button>
+    </div>
+  </aside>
 
   <!-- ================= 图片大图预览灯箱 (Lightbox) ================= -->
   <div 
@@ -5150,6 +5335,147 @@
       }
     }
 
+    let latestOfficialUpdateInfo = null;
+    let eagleUpdatePopupBound = false;
+
+    function updateDismissKey(latest) {
+      return `tiyouju-update-dismissed:${String(latest || '').trim()}`;
+    }
+
+    function isUpdateDismissed(latest) {
+      if (!latest) return false;
+      try {
+        return sessionStorage.getItem(updateDismissKey(latest)) === '1';
+      } catch {
+        return false;
+      }
+    }
+
+    function dismissUpdatePopup(latest) {
+      if (!latest) return;
+      try {
+        sessionStorage.setItem(updateDismissKey(latest), '1');
+      } catch (_) {}
+    }
+
+    function setEagleUpdatePopupStatus(text, isError = false) {
+      const statusEl = document.getElementById('eagleUpdatePopupStatus');
+      if (!statusEl) return;
+      statusEl.textContent = text || '';
+      statusEl.classList.toggle('hidden', !text);
+      statusEl.classList.toggle('is-error', Boolean(isError));
+    }
+
+    async function triggerOfficialUpdateInstall({ onProgress, onError } = {}) {
+      try {
+        const r = await fetch(`${API_BASE}/api/update/install`, {
+          method: 'POST',
+          headers: { 'X-QB-Request': '1' }
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || d.error) {
+          throw new Error(d.error || d.message || '安装未能启动');
+        }
+        const msg = `正在安装 ${d.version || ''}。软件会先关闭，题库已自动备份，完成后将重新打开。`;
+        if (onProgress) onProgress(msg, d);
+        return d;
+      } catch (err) {
+        const msg = (err && err.message) ? err.message : '安装请求失败，可从官网 tiyouju.com 下载安装包。';
+        if (onError) onError(msg);
+        throw err;
+      }
+    }
+
+    function bindEagleUpdatePopupControls() {
+      if (eagleUpdatePopupBound) return;
+      const popup = document.getElementById('eagleUpdatePopup');
+      if (!popup) return;
+      eagleUpdatePopupBound = true;
+      const installBtn = document.getElementById('eagleUpdatePopupInstall');
+      const laterBtn = document.getElementById('eagleUpdatePopupLater');
+      const closeBtn = document.getElementById('eagleUpdatePopupClose');
+      const aboutBtn = document.getElementById('eagleUpdatePopupAbout');
+      const dismiss = () => {
+        if (latestOfficialUpdateInfo?.latest) dismissUpdatePopup(latestOfficialUpdateInfo.latest);
+        popup.classList.add('hidden');
+      };
+      if (laterBtn) laterBtn.addEventListener('click', dismiss);
+      if (closeBtn) closeBtn.addEventListener('click', dismiss);
+      if (aboutBtn) {
+        aboutBtn.addEventListener('click', () => {
+          popup.classList.add('hidden');
+          openEaglePreferencesModal('about');
+        });
+      }
+      if (installBtn) {
+        installBtn.addEventListener('click', async () => {
+          installBtn.disabled = true;
+          setEagleUpdatePopupStatus('正在从官网 tiyouju.com 下载并校验安装包…', false);
+          try {
+            await triggerOfficialUpdateInstall({
+              onProgress: (msg) => setEagleUpdatePopupStatus(msg, false),
+              onError: (msg) => {
+                setEagleUpdatePopupStatus(msg, true);
+                installBtn.disabled = false;
+              }
+            });
+          } catch (_) {}
+        });
+      }
+    }
+
+    function showEagleUpdatePopup(data) {
+      const popup = document.getElementById('eagleUpdatePopup');
+      if (!popup || !data || !data.update_available) return;
+      bindEagleUpdatePopupControls();
+      const titleEl = document.getElementById('eagleUpdatePopupTitle');
+      const subEl = document.getElementById('eagleUpdatePopupSub');
+      const listEl = document.getElementById('eagleUpdatePopupHighlights');
+      const installBtn = document.getElementById('eagleUpdatePopupInstall');
+      if (titleEl) titleEl.textContent = `v${data.latest}`;
+      if (subEl) subEl.textContent = `当前版本 v${data.current} → 官网最新版 v${data.latest}`;
+      if (listEl) {
+        listEl.textContent = '';
+        const items = Array.isArray(data.highlights) && data.highlights.length
+          ? data.highlights.slice(0, 3)
+          : ['安装前将自动备份本地题库并核对 SHA-256 校验值，装完自动重开。'];
+        items.forEach((item) => {
+          const li = document.createElement('li');
+          li.textContent = String(item);
+          listEl.appendChild(li);
+        });
+        listEl.classList.remove('hidden');
+      }
+      if (installBtn) installBtn.disabled = false;
+      setEagleUpdatePopupStatus('', false);
+      popup.classList.remove('hidden');
+    }
+
+    function handleEagleVersionPillClick(event) {
+      if (!latestOfficialUpdateInfo || !latestOfficialUpdateInfo.update_available) return;
+      event.stopPropagation();
+      hideEagleAppMainMenu();
+      showEagleUpdatePopup(latestOfficialUpdateInfo);
+    }
+    window.handleEagleVersionPillClick = handleEagleVersionPillClick;
+
+    function applyOfficialUpdateState(data, { allowPopup = true } = {}) {
+      if (!data || !data.update_available) return;
+      latestOfficialUpdateInfo = data;
+      const pill = document.getElementById('eagleMenuVersionPill');
+      if (pill) {
+        pill.textContent = `v${data.current} · 可更新到 ${data.latest}`;
+        pill.className = 'text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200';
+      }
+      const aboutStatus = document.getElementById('eaglePrefUpdateStatus');
+      const aboutInstall = document.getElementById('eaglePrefUpdateInstallBtn');
+      if (aboutStatus) aboutStatus.textContent = `官网已有新版本 ${data.latest}（当前 ${data.current}）。`;
+      if (aboutInstall) aboutInstall.classList.remove('hidden');
+      if (allowPopup && !isUpdateDismissed(data.latest)) {
+        showEagleUpdatePopup(data);
+      }
+    }
+
     async function noticeOfficialUpdate() {
       try {
         const resp = await fetch('/api/update/check?auto=1', {
@@ -5158,10 +5484,7 @@
         });
         if (!resp.ok) return;
         const data = await resp.json();
-        if (!data.update_available) return;
-        const pill = document.getElementById('eagleMenuVersionPill');
-        if (pill) pill.textContent = `v${data.current} · 可更新到 ${data.latest}`;
-        showToast(`官网有新版本 ${data.latest}。打开设置 → 关于，点「下载并安装」。`, 'success');
+        applyOfficialUpdateState(data, { allowPopup: true });
       } catch (_) {}
     }
 
@@ -7745,21 +8068,28 @@
           if (verEl && st.app_version) verEl.textContent = `题有据 ${st.app_version}`;
         }
       } catch (_) {}
+      if (latestOfficialUpdateInfo && latestOfficialUpdateInfo.update_available) {
+        if (statusEl) statusEl.textContent = `官网已有新版本 ${latestOfficialUpdateInfo.latest}（当前 ${latestOfficialUpdateInfo.current}）。`;
+        if (installBtn) installBtn.classList.remove('hidden');
+      }
       if (eaglePrefsMounted.about) return;
       eaglePrefsMounted.about = true;
       try {
-        const fResp = await fetch(`${API_BASE}/api/settings/features`, { cache: 'no-store' });
-        if (fResp.ok && autoBox) {
-          const fData = await fResp.json();
-          autoBox.checked = Boolean(fData.auto_check_update !== false);
+        const uResp = await fetch(`${API_BASE}/api/update/status`, {
+          cache: 'no-store',
+          headers: { 'X-QB-Request': '1' }
+        });
+        if (uResp.ok && autoBox) {
+          const uData = await uResp.json();
+          autoBox.checked = uData.auto_check !== false;
         }
       } catch (_) {}
       if (autoBox) {
         autoBox.addEventListener('change', () => {
-          void fetch(`${API_BASE}/api/settings/features`, {
-            method: 'PATCH',
+          void fetch(`${API_BASE}/api/update/settings`, {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
-            body: JSON.stringify({ auto_check_update: autoBox.checked })
+            body: JSON.stringify({ auto_check: autoBox.checked })
           }).catch(() => {});
         });
       }
@@ -7771,8 +8101,7 @@
             const r = await fetch(`${API_BASE}/api/update/check`, { method: 'POST', headers: { 'X-QB-Request': '1' } });
             const d = await r.json().catch(() => ({}));
             if (d.update_available) {
-              if (statusEl) statusEl.textContent = `官网已有新版本 ${d.latest}（当前 ${d.current}）。`;
-              if (installBtn) installBtn.classList.remove('hidden');
+              applyOfficialUpdateState(d, { allowPopup: false });
             } else {
               if (statusEl) statusEl.textContent = `当前版本 ${d.current || ''} 已是最新。`;
             }
@@ -7786,16 +8115,16 @@
       if (installBtn) {
         installBtn.addEventListener('click', async () => {
           installBtn.disabled = true;
-          if (statusEl) statusEl.textContent = '正在下载更新并先备份题库，完成后会自动重开软件…';
+          if (statusEl) statusEl.textContent = '正在从官网下载更新并先备份题库，完成后会自动重开软件…';
           try {
-            const r = await fetch(`${API_BASE}/api/update/install`, { method: 'POST', headers: { 'X-QB-Request': '1' } });
-            const d = await r.json().catch(() => ({}));
-            if (statusEl) statusEl.textContent = d.message || (r.ok ? '更新已就绪，请稍候…' : '安装未能启动');
-          } catch (_) {
-            if (statusEl) statusEl.textContent = '安装请求失败，可从官网下载安装包手动覆盖。';
-          } finally {
-            installBtn.disabled = false;
-          }
+            await triggerOfficialUpdateInstall({
+              onProgress: (msg) => { if (statusEl) statusEl.textContent = msg; },
+              onError: (msg) => {
+                if (statusEl) statusEl.textContent = msg;
+                installBtn.disabled = false;
+              }
+            });
+          } catch (_) {}
         });
       }
     }

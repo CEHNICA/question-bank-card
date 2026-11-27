@@ -3,6 +3,19 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.3.10
+
+**国际与国内 AI Agent 技能/MCP 全自动接入，以及右下角软件更新悬浮弹窗**
+
+- **全平台（含国内 Agent）技能探测与 MCP 自动注册（`assistant_setup.py`、`tiyouju_cli.py`、`skills/tiyouju/`）**：
+  - 安装器自动执行的 `tiyouju setup-agents` 除原有目录外，新增自动探测并链接 **Trae 国内版（`.trae-cn`）、Qwen Code（`.qwen`）、Qoder（`.qoder`）、通义灵码（`.lingma`）、CodeBuddy（`.codebuddy`）、Kimi（`.kimi`）、iFlow（`.iflow`）、OpenClaw（`.openclaw`）、Cline、Roo Code、Kilo Code** 及 `CODEX_HOME`（仅在对应客户端目录已存在时写入）；
+  - 安全自动将 `tiyouju` stdio MCP 写入上述主流客户端的标准 JSON 配置文件（含 `~/.cursor/mcp.json`、`%APPDATA%\Trae CN\User\mcp.json`、`Claude\claude_desktop_config.json`、`~/.claude.json` 等，格式异常或已有同名自定义项默认跳过保护，加 `--replace` 时自动备份再更新）；
+  - 新增离线命令 `tiyouju mcp-config`（支持 `--command-name`、`--json`），方便 Cherry Studio / Chatbox 等客户端一键复制标准 `mcpServers` 配置或 Codex CLI 一行接入命令，并查看本机各客户端接入状态。
+- **右下角官方版本更新悬浮弹窗（`frontend/eagle/index.html`、`frontend/index.html`、`frontend/app.js`、`backend/core/app_update.py`、`website/worker.js`）**：
+  - 检测到 `tiyouju.com` 有新版本时，工作台与录题页右下角主动弹出悬浮更新卡片，展示当前与最新版本号、本次更新亮点摘要（由 `tiyouju.com/api/latest-release` 透传随版本附带的发布说明），并提供「**立即更新**」「稍后提醒」（本次会话不重复打扰）与「设置」快捷入口；
+  - 同步修复 Eagle 工作台「偏好设置 → 关于」中“自动检查更新”开关对接 `/api/update/status` 与 `/api/update/settings`，主菜单版本徽标点击可随时唤起更新卡片。
+
+
 ## 2.3.9
 
 **CLI / Skill / MCP 协同全面升级：OneNote 笔记只读总结、全景统计、重题扫描与防撞车智慧组卷**

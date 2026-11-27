@@ -51,8 +51,12 @@ class AssistantSetupTests(unittest.TestCase):
         self.shortcuts = FileShortcuts()
 
     def run_setup(self, **changes):
-        options = dict(resources=self.source, desktop_path=self.desktop, shortcuts=self.shortcuts,
-                       version_reader=lambda _app: "1.10.14")
+        options = {
+            "resources": self.source,
+            "desktop_path": self.desktop,
+            "shortcuts": self.shortcuts,
+            "version_reader": lambda _app: "1.10.14",
+        }
         options.update(changes)
         return setup.assistant_setup(self.app, **options)
 
@@ -313,13 +317,121 @@ class SetupAgentsTests(unittest.TestCase):
     def test_discovers_only_present_agent_homes_plus_universal_agents(self):
         (self.home / ".claude").mkdir()
         (self.home / ".gemini" / "antigravity").mkdir(parents=True)
+        (self.home / ".trae-cn").mkdir()
+        (self.home / ".qwen").mkdir()
+        (self.home / ".codebuddy").mkdir()
+        (self.home / ".kimi").mkdir()
+        (self.home / ".qoder").mkdir()
+        (self.home / ".lingma").mkdir()
+        (self.home / ".openclaw").mkdir()
         discovered = dict(setup.discover_agent_skill_parents(self.home))
-        self.assertIn("universal_agents", discovered)
-        self.assertIn("claude_code", discovered)
-        self.assertIn("antigravity", discovered)
-        self.assertIn("gemini_config", discovered)
+        for expected in (
+            "universal_agents",
+            "claude_code",
+            "antigravity",
+            "gemini_config",
+            "trae_cn",
+            "qwen_code",
+            "codebuddy",
+            "kimi",
+            "qoder",
+            "lingma",
+            "openclaw",
+        ):
+            self.assertIn(expected, discovered)
         self.assertNotIn("codex", discovered)
         self.assertNotIn("cursor", discovered)
+        self.assertNotIn("iflow", discovered)
+
+    def test_discovers_and_registers_mcp_configs_for_domestic_and_global_agents(self):
+        cli_exe = self.app.parent / "tiyouju.exe"
+        cli_exe.write_bytes(b"cli")
+        appdata = self.root / "appdata_roaming"
+        (appdata / "Trae CN" / "User").mkdir(parents=True)
+        (appdata / "Claude").mkdir(parents=True)
+        (self.home / ".cursor").mkdir()
+        (self.home / ".qwen").mkdir()
+        (self.home / ".codebuddy").mkdir()
+        (self.home / ".claude.json").write_text('{"other": 1}', encoding="utf-8")
+
+        trae_cfg = appdata / "Trae CN" / "User" / "mcp.json"
+        trae_cfg.write_text('{"mcpServers": {"other_tool": {"command": "node"}}}', encoding="utf-8")
+
+        bad_cfg = self.home / ".codebuddy" / "mcp.json"
+        bad_cfg.write_text("{not valid json", encoding="utf-8")
+
+        targets = dict(setup.discover_mcp_config_targets(home=self.home, appdata=appdata))
+        for client_id in ("cursor", "trae_cn", "claude_desktop", "claude_code", "qwen_code", "codebuddy"):
+            self.assertIn(client_id, targets)
+        self.assertNotIn("trae", targets)
+        self.assertNotIn("kimi", targets)
+
+        first = setup.setup_agents(
+            self.app,
+            data_root=self.data_root,
+            home=self.home,
+            appdata=appdata,
+            resources=self.source,
+            update_path=False,
+        )
+        mcp_map = {item["client"]: item for item in first["mcp"]}
+        self.assertEqual(mcp_map["trae_cn"]["status"], "configured")
+        self.assertTrue(mcp_map["trae_cn"]["verified"])
+        self.assertEqual(mcp_map["claude_code"]["status"], "configured")
+        self.assertEqual(mcp_map["codebuddy"]["status"], "skipped_invalid_json")
+        self.assertEqual(bad_cfg.read_text(encoding="utf-8"), "{not valid json")
+
+        trae_saved = json.loads(trae_cfg.read_text(encoding="utf-8"))
+        self.assertIn("other_tool", trae_saved["mcpServers"])
+        self.assertEqual(trae_saved["mcpServers"]["tiyouju"], {"command": str(cli_exe), "args": ["mcp"]})
+
+        # Custom conflicting entry is preserved unless replace=True
+        cursor_cfg = self.home / ".cursor" / "mcp.json"
+        cursor_cfg.write_text(
+            json.dumps({"mcpServers": {"tiyouju": {"command": "python", "args": ["custom.py"]}}}),
+            encoding="utf-8",
+        )
+        second = setup.setup_agents(
+            self.app,
+            data_root=self.data_root,
+            home=self.home,
+            appdata=appdata,
+            resources=self.source,
+            update_path=False,
+        )
+        second_map = {item["client"]: item for item in second["mcp"]}
+        self.assertEqual(second_map["trae_cn"]["status"], "already_configured")
+        self.assertEqual(second_map["cursor"]["status"], "skipped_custom")
+
+        replaced = setup.setup_agents(
+            self.app,
+            data_root=self.data_root,
+            home=self.home,
+            appdata=appdata,
+            resources=self.source,
+            update_path=False,
+            replace=True,
+        )
+        replaced_map = {item["client"]: item for item in replaced["mcp"]}
+        self.assertEqual(replaced_map["cursor"]["status"], "updated")
+        self.assertTrue(Path(replaced_map["cursor"]["backup"]).is_file())
+
+        inspected = setup.inspect_mcp_config(self.app, home=self.home, appdata=appdata)
+        client_statuses = {item["client"]: item["status"] for item in inspected["clients"]}
+        self.assertEqual(client_statuses["cursor"], "configured")
+        self.assertEqual(client_statuses["codebuddy"], "invalid_json")
+        self.assertIn("codex mcp add tiyouju", inspected["codex_command"])
+
+        no_mcp = setup.setup_agents(
+            self.app,
+            data_root=self.data_root,
+            home=self.home,
+            appdata=appdata,
+            resources=self.source,
+            update_path=False,
+            register_mcp=False,
+        )
+        self.assertEqual(no_mcp["mcp"], [])
 
     def test_setup_agents_links_skills_idempotently_and_preserves_custom_skill(self):
         (self.home / ".claude").mkdir()

@@ -6049,7 +6049,98 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const toggle = $("settingsAutoUpdate");
     const line = $("updateStatusLine");
     const install = $("updateInstallButton");
+    const floatCard = $("updateFloatCard");
+    const floatTitle = $("updateFloatTitle");
+    const floatSub = $("updateFloatSub");
+    const floatList = $("updateFloatHighlights");
+    const floatStatus = $("updateFloatStatus");
+    const floatInstall = $("updateFloatInstall");
+    const floatLater = $("updateFloatLater");
+    const floatClose = $("updateFloatClose");
+    const floatAbout = $("updateFloatAbout");
     if (!toggle || !line || !install) return;
+
+    let currentLatest = "";
+    const dismissKey = (ver) => `tiyouju-update-dismissed:${String(ver || "").trim()}`;
+    const isDismissed = (ver) => {
+      if (!ver) return false;
+      try {
+        return sessionStorage.getItem(dismissKey(ver)) === "1";
+      } catch {
+        return false;
+      }
+    };
+    const markDismissed = (ver) => {
+      if (!ver) return;
+      try {
+        sessionStorage.setItem(dismissKey(ver), "1");
+      } catch {}
+    };
+    const setFloatStatus = (text, isError = false) => {
+      if (!floatStatus) return;
+      floatStatus.textContent = text || "";
+      floatStatus.hidden = !text;
+      floatStatus.classList.toggle("is-error", Boolean(isError));
+    };
+    const showFloatPopup = (data) => {
+      if (!floatCard || !data || !data.update_available || isDismissed(data.latest)) return;
+      currentLatest = String(data.latest || "").trim();
+      if (floatTitle) floatTitle.textContent = `v${currentLatest}`;
+      if (floatSub) floatSub.textContent = `当前版本 v${data.current} → 官网最新版 v${currentLatest}`;
+      if (floatList) {
+        floatList.textContent = "";
+        const items = Array.isArray(data.highlights) && data.highlights.length
+          ? data.highlights.slice(0, 3)
+          : ["安装前将自动备份本地题库并核对 SHA-256 校验值，装完自动重开。"];
+        items.forEach((item) => {
+          const li = document.createElement("li");
+          li.textContent = String(item);
+          floatList.appendChild(li);
+        });
+        floatList.hidden = false;
+      }
+      if (floatInstall) floatInstall.disabled = false;
+      setFloatStatus("", false);
+      floatCard.hidden = false;
+    };
+    const hideFloatPopup = () => {
+      if (currentLatest) markDismissed(currentLatest);
+      if (floatCard) floatCard.hidden = true;
+    };
+    const runInstall = async () => {
+      install.disabled = true;
+      if (floatInstall) floatInstall.disabled = true;
+      line.textContent = "正在从 tiyouju.com 下载并核对安装包…";
+      setFloatStatus("正在从官网 tiyouju.com 下载并校验安装包…", false);
+      try {
+        const result = await api("/api/update/install", { method: "POST" });
+        const msg = `正在安装 ${result.version}。软件会先关掉，题库已备份，装完后重新打开。`;
+        line.textContent = msg;
+        setFloatStatus(msg, false);
+      } catch (error) {
+        const errMsg = error.message || "没有安装。";
+        line.textContent = errMsg;
+        setFloatStatus(errMsg, true);
+        install.disabled = false;
+        if (floatInstall) floatInstall.disabled = false;
+      }
+    };
+
+    if (floatLater) floatLater.addEventListener("click", hideFloatPopup);
+    if (floatClose) floatClose.addEventListener("click", hideFloatPopup);
+    if (floatInstall) floatInstall.addEventListener("click", () => { void runInstall(); });
+    if (floatAbout) {
+      floatAbout.addEventListener("click", () => {
+        if (floatCard) floatCard.hidden = true;
+        if (window.location.pathname === "/settings") {
+          showSettingsTab("settingsAbout");
+          openSettings();
+        } else {
+          void leaveFor("/settings#about");
+        }
+      });
+    }
+
     const paint = (data) => {
       toggle.checked = data.auto_check !== false;
       if (data.error) {
@@ -6065,12 +6156,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       if (data.update_available) {
         line.textContent = `官网 tiyouju.com 有新版本 ${data.latest}，当前是 ${data.current}。`;
         install.hidden = false;
+        showFloatPopup(data);
         return;
       }
       line.textContent = data.latest
         ? `已经是官网最新版本 ${data.current}。`
         : "打开软件后会向 tiyouju.com 询问新版本。";
       install.hidden = true;
+      if (floatCard) floatCard.hidden = true;
     };
     const check = async (auto) => {
       line.textContent = "正在询问 tiyouju.com…";
@@ -6089,17 +6182,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }
     });
     $("updateCheckButton").addEventListener("click", () => check(false));
-    install.addEventListener("click", async () => {
-      install.disabled = true;
-      line.textContent = "正在从 tiyouju.com 下载并核对安装包…";
-      try {
-        const result = await api("/api/update/install", { method: "POST" });
-        line.textContent = `正在安装 ${result.version}。软件会先关掉，题库已备份，装完后重新打开。`;
-      } catch (error) {
-        line.textContent = error.message || "没有安装。";
-        install.disabled = false;
-      }
-    });
+    install.addEventListener("click", () => { void runInstall(); });
     void check(true);
   }
 

@@ -1,8 +1,54 @@
 const GITHUB_REPO = "CEHNICA/question-bank-card";
 const LATEST_RELEASE_PAGE = `https://github.com/${GITHUB_REPO}/releases/latest`;
 const LATEST_MANIFEST_URL = `https://github.com/${GITHUB_REPO}/releases/latest/download/manifest.json`;
-const CACHE_KEY_URL = "https://tiyouju.com/__cache/github-latest-release-v2";
+const CACHE_KEY_URL = "https://tiyouju.com/__cache/github-latest-release-v3";
 const CACHE_TTL_SECONDS = 300;
+const RELEASE_NOTES_LIMIT = 4000;
+
+function extractHighlights(markdown) {
+  if (!markdown) return [];
+  const items = [];
+  let inHighlights = false;
+  for (const rawLine of String(markdown).split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (/^###\s+/.test(line)) {
+      inHighlights = !/验证范围/.test(line);
+      continue;
+    }
+    if (!inHighlights && items.length === 0 && !/^(?:\d+\.|[-*])\s+/.test(line)) {
+      continue;
+    }
+    const bullet = /^(?:\d+\.|[-*])\s+(.+)$/.exec(line);
+    if (!bullet) continue;
+    const cleaned = bullet[1]
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/[`*]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!cleaned || cleaned.length < 4) continue;
+    items.push(cleaned.length > 110 ? `${cleaned.slice(0, 108)}…` : cleaned);
+    if (items.length >= 4) break;
+  }
+  return items;
+}
+
+async function fetchReleaseNotes(version) {
+  const clean = String(version || "").replace(/^v/, "").trim();
+  if (!clean) return "";
+  const url = `https://github.com/${GITHUB_REPO}/releases/download/v${clean}/release-notes-v${clean}.md`;
+  try {
+    const res = await fetch(url, {
+      redirect: "follow",
+      headers: { "User-Agent": "tiyouju-site" },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) return "";
+    const text = await res.text();
+    return text.trim().slice(0, RELEASE_NOTES_LIMIT);
+  } catch {
+    return "";
+  }
+}
 
 function pickAsset(assets, matcher, version) {
   const item = assets.find((asset) => asset && typeof asset.name === "string" && matcher(asset.name));
@@ -20,7 +66,7 @@ function pickAsset(assets, matcher, version) {
   };
 }
 
-function buildFromVersion(version, publishedAt = "", extraAssets = []) {
+function buildFromVersion(version, publishedAt = "", extraAssets = [], notes = "") {
   const clean = String(version || "").replace(/^v/, "");
   const tag = `v${clean}`;
   const defaults = [
@@ -38,12 +84,15 @@ function buildFromVersion(version, publishedAt = "", extraAssets = []) {
   const installScript =
     pickAsset(merged, (name) => name === "install.ps1", clean) ||
     pickAsset([{ name: "install.ps1", size: 0 }], () => true, clean);
+  const cleanNotes = String(notes || "").trim().slice(0, RELEASE_NOTES_LIMIT);
   return {
     tag,
     version: clean,
     name: `题有据 ${clean}`,
     published_at: publishedAt,
     release_url: `https://github.com/${GITHUB_REPO}/releases/tag/${tag}`,
+    notes: cleanNotes,
+    highlights: extractHighlights(cleanNotes),
     installer,
     portable,
     checksums,
@@ -62,7 +111,8 @@ async function fetchLatestReleaseUncached() {
     if (manifest && typeof manifest.version === "string" && manifest.version) {
       const publishedAt = manifestRes.headers.get("last-modified") || "";
       const assets = Array.isArray(manifest.assets) ? manifest.assets : [];
-      return buildFromVersion(manifest.version, publishedAt, assets);
+      const notes = await fetchReleaseNotes(manifest.version);
+      return buildFromVersion(manifest.version, publishedAt, assets, notes);
     }
   }
 
@@ -75,7 +125,8 @@ async function fetchLatestReleaseUncached() {
   const location = headRes.headers.get("location") || "";
   const match = /\/releases\/tag\/(v?[\d.]+)\s*$/.exec(location);
   if (match) {
-    return buildFromVersion(match[1]);
+    const notes = await fetchReleaseNotes(match[1]);
+    return buildFromVersion(match[1], "", [], notes);
   }
 
   throw new Error(`Unable to resolve latest release (manifest=${manifestRes.status}, head=${headRes.status})`);
@@ -201,6 +252,8 @@ export default {
           name: release.name,
           published_at: release.published_at,
           release_url: release.release_url,
+          notes: release.notes || "",
+          highlights: Array.isArray(release.highlights) ? release.highlights : [],
           installer: release.installer
             ? { name: release.installer.name, size: release.installer.size, path: "/download/installer" }
             : null,

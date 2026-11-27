@@ -436,7 +436,7 @@ def canonical_skill_dir(data_root: Path | None = None) -> Path:
 
 
 def discover_agent_skill_parents(home: Path | None = None) -> list[tuple[str, Path]]:
-    """按主流 AI Agent 约定探测当前用户的技能父目录（参考 egolite 配置方式）。"""
+    """按主流国际与国内 AI Agent 约定探测当前用户的技能父目录。"""
     user_home = Path.home() if home is None else Path(home)
     candidates: list[tuple[str, Path, bool]] = [
         ("universal_agents", user_home / ".agents" / "skills", True),
@@ -446,9 +446,26 @@ def discover_agent_skill_parents(home: Path | None = None) -> list[tuple[str, Pa
         ("codex", user_home / ".codex" / "skills", (user_home / ".codex").is_dir()),
         ("cursor", user_home / ".cursor" / "skills", (user_home / ".cursor").is_dir()),
         ("trae", user_home / ".trae" / "skills", (user_home / ".trae").is_dir()),
+        ("trae_cn", user_home / ".trae-cn" / "skills", (user_home / ".trae-cn").is_dir()),
         ("windsurf", user_home / ".codeium" / "windsurf" / "skills", (user_home / ".codeium" / "windsurf").is_dir()),
         ("opencode", user_home / ".config" / "opencode" / "skills", (user_home / ".config" / "opencode").is_dir()),
+        ("qwen_code", user_home / ".qwen" / "skills", (user_home / ".qwen").is_dir()),
+        ("qoder", user_home / ".qoder" / "skills", (user_home / ".qoder").is_dir()),
+        ("lingma", user_home / ".lingma" / "skills", (user_home / ".lingma").is_dir()),
+        ("codebuddy", user_home / ".codebuddy" / "skills", (user_home / ".codebuddy").is_dir()),
+        ("kimi", user_home / ".kimi" / "skills", (user_home / ".kimi").is_dir()),
+        ("iflow", user_home / ".iflow" / "skills", (user_home / ".iflow").is_dir()),
+        ("openclaw", user_home / ".openclaw" / "skills", (user_home / ".openclaw").is_dir()),
+        ("cline", user_home / ".cline" / "skills", (user_home / ".cline").is_dir()),
+        ("roo_code", user_home / ".roo" / "skills", (user_home / ".roo").is_dir()),
+        ("kilocode", user_home / ".kilocode" / "skills", (user_home / ".kilocode").is_dir()),
     ]
+    if home is None:
+        raw_codex = os.environ.get("CODEX_HOME", "").strip()
+        if raw_codex:
+            codex_home = Path(raw_codex)
+            if codex_home.is_absolute() and codex_home.is_dir():
+                candidates.append(("codex_home", codex_home / "skills", True))
     found: list[tuple[str, Path]] = []
     seen: set[str] = set()
     for agent_id, parent, active in candidates:
@@ -662,16 +679,238 @@ def ensure_user_path(
     return {"status": "added", "dir": target, "changed": True}
 
 
+def mcp_server_entry(app: Path | None, *, prefer_command_name: bool = False) -> dict[str, object]:
+    """生成标准的 stdio MCP 服务配置项。"""
+    command = "tiyouju"
+    if not prefer_command_name and app is not None:
+        cli = Path(app).parent / "tiyouju.exe"
+        if cli.is_file():
+            command = str(cli)
+    return {"command": command, "args": ["mcp"]}
+
+
+def _resolve_appdata(home: Path | None = None, appdata: Path | None = None) -> Path:
+    if appdata is not None:
+        return Path(appdata)
+    if home is not None:
+        return Path(home) / "AppData" / "Roaming"
+    env_appdata = os.environ.get("APPDATA", "").strip()
+    return Path(env_appdata) if env_appdata else Path.home() / "AppData" / "Roaming"
+
+
+def discover_mcp_config_targets(home: Path | None = None, appdata: Path | None = None) -> list[tuple[str, Path]]:
+    """探测本机已安装的国际与国内 AI 客户端 MCP JSON 配置文件路径。"""
+    user_home = Path.home() if home is None else Path(home)
+    roaming = _resolve_appdata(home, appdata)
+    candidates: list[tuple[str, Path, bool]] = [
+        ("cursor", user_home / ".cursor" / "mcp.json", (user_home / ".cursor").is_dir()),
+        ("trae_cn", roaming / "Trae CN" / "User" / "mcp.json", (roaming / "Trae CN" / "User").is_dir()),
+        ("trae", roaming / "Trae" / "User" / "mcp.json", (roaming / "Trae" / "User").is_dir()),
+        (
+            "windsurf",
+            user_home / ".codeium" / "windsurf" / "mcp_config.json",
+            (user_home / ".codeium" / "windsurf").is_dir(),
+        ),
+        (
+            "claude_desktop",
+            roaming / "Claude" / "claude_desktop_config.json",
+            (roaming / "Claude").is_dir(),
+        ),
+        ("claude_code", user_home / ".claude.json", (user_home / ".claude.json").is_file()),
+        (
+            "antigravity",
+            user_home / ".gemini" / "antigravity" / "mcp_config.json",
+            (user_home / ".gemini" / "antigravity").is_dir(),
+        ),
+        ("gemini_cli", user_home / ".gemini" / "settings.json", (user_home / ".gemini").is_dir()),
+        ("qwen_code", user_home / ".qwen" / "settings.json", (user_home / ".qwen").is_dir()),
+        ("qoder", user_home / ".qoder" / "mcp.json", (user_home / ".qoder").is_dir()),
+        ("lingma", user_home / ".lingma" / "mcp.json", (user_home / ".lingma").is_dir()),
+        ("codebuddy", user_home / ".codebuddy" / "mcp.json", (user_home / ".codebuddy").is_dir()),
+        ("kimi", user_home / ".kimi" / "mcp.json", (user_home / ".kimi").is_dir()),
+        ("openclaw", user_home / ".openclaw" / "mcp.json", (user_home / ".openclaw").is_dir()),
+        ("iflow", user_home / ".iflow" / "settings.json", (user_home / ".iflow").is_dir()),
+    ]
+    found: list[tuple[str, Path]] = []
+    seen: set[str] = set()
+    for client_id, config_path, active in candidates:
+        if not active:
+            continue
+        key = os.path.normcase(str(config_path))
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append((client_id, config_path))
+    return found
+
+
+def _is_tiyouju_mcp_entry(entry: object) -> bool:
+    if not isinstance(entry, dict) or not set(entry.keys()) <= {"command", "args"}:
+        return False
+    if entry.get("args") != ["mcp"]:
+        return False
+    command = str(entry.get("command") or "").strip()
+    return Path(command).name.lower() in {"tiyouju", "tiyouju.exe"}
+
+
+def _read_mcp_json_state(config_path: Path) -> tuple[str, dict | None]:
+    if not config_path.exists():
+        return "missing", {}
+    raw = config_path.read_text(encoding="utf-8-sig")
+    if not raw.strip():
+        return "empty", {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return "invalid_json", None
+    if not isinstance(data, dict):
+        return "invalid_json", None
+    if "mcpServers" in data and not isinstance(data["mcpServers"], dict):
+        return "invalid_json", None
+    return "ok", data
+
+
+def register_mcp_config(
+    client_id: str,
+    config_path: Path,
+    entry: dict[str, object],
+    *,
+    replace: bool = False,
+) -> dict:
+    """将题有据 stdio MCP 服务安全写入客户端配置文件，不破坏已有配置。"""
+    config_path = _safe_path(config_path)
+    state, data = _read_mcp_json_state(config_path)
+    if state == "invalid_json" or data is None:
+        return {
+            "client": client_id,
+            "status": "skipped_invalid_json",
+            "path": str(config_path),
+            "backup": None,
+            "changed": False,
+            "verified": False,
+        }
+    servers = data.setdefault("mcpServers", {})
+    existing = servers.get("tiyouju")
+    if existing == entry:
+        return {
+            "client": client_id,
+            "status": "already_configured",
+            "path": str(config_path),
+            "backup": None,
+            "changed": False,
+            "verified": True,
+        }
+    if existing is not None and not _is_tiyouju_mcp_entry(existing) and not replace:
+        return {
+            "client": client_id,
+            "status": "skipped_custom",
+            "path": str(config_path),
+            "backup": None,
+            "changed": False,
+            "verified": False,
+        }
+    backup: Path | None = None
+    if existing is not None and not _is_tiyouju_mcp_entry(existing) and replace and config_path.is_file():
+        backup = Path(f"{_unique_path(config_path.parent, f'{config_path.stem}.tiyouju-backup-')}.json")
+        shutil.copy2(config_path, backup)
+    servers["tiyouju"] = dict(entry)
+    rendered = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = config_path.parent / f".tiyouju-mcp-tmp-{uuid.uuid4().hex}.json"
+    try:
+        tmp_path.write_text(rendered, encoding="utf-8")
+        os.replace(tmp_path, config_path)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+    verified = False
+    try:
+        check_data = json.loads(config_path.read_text(encoding="utf-8-sig"))
+        verified = isinstance(check_data, dict) and check_data.get("mcpServers", {}).get("tiyouju") == entry
+    except (OSError, json.JSONDecodeError, AttributeError):
+        verified = False
+    return {
+        "client": client_id,
+        "status": "updated" if existing is not None else "configured",
+        "path": str(config_path),
+        "backup": str(backup) if backup else None,
+        "changed": True,
+        "verified": verified,
+    }
+
+
+def inspect_mcp_config(
+    app: Path | None,
+    *,
+    home: Path | None = None,
+    appdata: Path | None = None,
+    prefer_command_name: bool = False,
+) -> dict:
+    """只读返回标准 MCP 配置片段与本机已探测客户端的接入状态。"""
+    entry = mcp_server_entry(app, prefer_command_name=prefer_command_name)
+    command = str(entry["command"])
+    clients: list[dict[str, str]] = []
+    for client_id, config_path in discover_mcp_config_targets(home=home, appdata=appdata):
+        status = "not_configured"
+        try:
+            _safe_path(config_path)
+            state, data = _read_mcp_json_state(config_path)
+            if state == "invalid_json" or data is None:
+                status = "invalid_json"
+            else:
+                servers = data.get("mcpServers") if isinstance(data.get("mcpServers"), dict) else {}
+                existing = servers.get("tiyouju")
+                if existing == entry:
+                    status = "configured"
+                elif existing is not None and _is_tiyouju_mcp_entry(existing):
+                    status = "needs_update"
+                elif existing is not None:
+                    status = "custom"
+        except (SetupError, OSError):
+            status = "error"
+        clients.append({"client": client_id, "path": str(config_path), "status": status})
+    return {
+        "command": command,
+        "args": ["mcp"],
+        "entry": entry,
+        "mcp_servers": {"mcpServers": {"tiyouju": entry}},
+        "codex_command": f'codex mcp add tiyouju -- "{command}" mcp',
+        "clients": clients,
+    }
+
+
+def format_mcp_config_report(result: dict) -> str:
+    snippet = json.dumps(result.get("mcp_servers") or {}, ensure_ascii=False, indent=2)
+    lines = [
+        "题有据 MCP 标准配置（适用于 Cherry Studio / Chatbox / Trae / Cursor / Claude / Qwen / CodeBuddy / Kimi 等）：",
+        snippet,
+        "",
+        "Codex CLI 一行接入：",
+        str(result.get("codex_command") or ""),
+    ]
+    clients = result.get("clients") or []
+    lines.append("")
+    if clients:
+        lines.append("本机已探测到的 MCP 客户端配置文件：")
+        for item in clients:
+            lines.append(f"- {item.get('client')}: {item.get('status')} -> {item.get('path')}")
+    else:
+        lines.append("未探测到已有客户端目录；可将上方 JSON 直接粘贴到客户端的 MCP 设置中。")
+    return "\n".join(lines)
+
+
 def setup_agents(
     app: Path | None,
     *,
     data_root: Path | None = None,
     home: Path | None = None,
+    appdata: Path | None = None,
     resources: Path | None = None,
     update_path: bool = True,
+    register_mcp: bool = True,
     replace: bool = False,
 ) -> dict:
-    """仿照 egolite 的安装接入方式：同步规范技能、链接至全平台 AI Agent、配置用户 PATH。"""
+    """仿照 egolite 的安装接入方式：同步规范技能、链接至全平台 AI Agent、注册 MCP 并配置用户 PATH。"""
     source = resources or bundled_skill()
     canonical = canonical_skill_dir(data_root)
     canonical_result = sync_canonical_skill(source, canonical)
@@ -689,12 +928,30 @@ def setup_agents(
                     "error": str(error),
                 }
             )
+    mcp_results: list[dict] = []
+    if register_mcp:
+        entry = mcp_server_entry(app)
+        for client_id, config_path in discover_mcp_config_targets(home=home, appdata=appdata):
+            try:
+                mcp_results.append(register_mcp_config(client_id, config_path, entry, replace=replace))
+            except (SetupError, OSError) as error:
+                mcp_results.append(
+                    {
+                        "client": client_id,
+                        "status": "error",
+                        "path": str(config_path),
+                        "changed": False,
+                        "verified": False,
+                        "error": str(error),
+                    }
+                )
     path_result: dict = {"status": "skipped", "changed": False}
     if update_path and app is not None and Path(app).is_file():
         path_result = ensure_user_path(Path(app).parent)
     return {
         "canonical": canonical_result,
         "agents": agent_results,
+        "mcp": mcp_results,
         "path": path_result,
     }
 
@@ -704,6 +961,13 @@ def format_setup_agents_report(result: dict) -> str:
     lines = [f"规范技能目录：{canonical.get('path', '')}（{canonical.get('status', '')}）"]
     for item in result.get("agents") or []:
         lines.append(f"- {item.get('agent')}: {item.get('status')} -> {item.get('target')}")
+    mcp_items = result.get("mcp") or []
+    if mcp_items:
+        lines.append("MCP 配置：")
+        for item in mcp_items:
+            lines.append(f"- {item.get('client')}: {item.get('status')} -> {item.get('path')}")
+    else:
+        lines.append("MCP 配置：未检测到已安装的受支持客户端（可用 tiyouju mcp-config 复制通用配置）")
     path_info = result.get("path") or {}
     lines.append(f"用户 PATH：{path_info.get('status')} ({path_info.get('dir', '-')})")
     return "\n".join(lines)

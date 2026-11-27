@@ -26,6 +26,7 @@ from django.views.decorators.csrf import csrf_exempt
 from .version import APP_VERSION
 
 OFFICIAL_HOSTS = frozenset({"tiyouju.com", "www.tiyouju.com"})
+OFFICIAL_RELEASE_HOSTS = frozenset({"tiyouju.com", "www.tiyouju.com", "github.com"})
 LATEST_URL = "https://tiyouju.com/api/latest-release"
 INSTALLER_URL = "https://tiyouju.com/download/installer"
 CHECKSUM_URL = "https://tiyouju.com/download/SHA256SUMS.txt"
@@ -88,6 +89,19 @@ def _read_official(url: str, timeout: float, limit: int) -> bytes:
     return body
 
 
+def _safe_release_url(raw: object) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return "https://tiyouju.com/"
+    parsed = urllib.parse.urlparse(text)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or host not in OFFICIAL_RELEASE_HOSTS:
+        return "https://tiyouju.com/"
+    if host == "github.com" and not parsed.path.startswith("/CEHNICA/question-bank-card/"):
+        return "https://tiyouju.com/"
+    return text
+
+
 def describe_latest() -> dict:
     try:
         payload = json.loads(_read_official(LATEST_URL, 20, 100_000).decode("utf-8"))
@@ -98,12 +112,22 @@ def describe_latest() -> dict:
     latest = str(payload.get("version") or "").strip()
     latest_key = version_key(latest)
     current_key = version_key(APP_VERSION)
+    notes = str(payload.get("notes") or "").strip()[:4000]
+    raw_highlights = payload.get("highlights")
+    highlights: list[str] = (
+        [str(item).strip()[:160] for item in raw_highlights if isinstance(item, str) and str(item).strip()][:5]
+        if isinstance(raw_highlights, list)
+        else []
+    )
     return {
         "current": APP_VERSION,
         "latest": latest,
         "update_available": latest_key > current_key,
         "published_at": str(payload.get("published_at") or ""),
         "auto_check": auto_check_enabled(),
+        "notes": notes,
+        "highlights": highlights,
+        "release_url": _safe_release_url(payload.get("release_url")),
     }
 
 
@@ -179,7 +203,15 @@ def _guard(request: HttpRequest):
 
 
 def _snapshot() -> dict:
-    return {"current": APP_VERSION, "auto_check": auto_check_enabled(), "latest": "", "update_available": False}
+    return {
+        "current": APP_VERSION,
+        "auto_check": auto_check_enabled(),
+        "latest": "",
+        "update_available": False,
+        "notes": "",
+        "highlights": [],
+        "release_url": "https://tiyouju.com/",
+    }
 
 
 @csrf_exempt

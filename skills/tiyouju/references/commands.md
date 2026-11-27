@@ -32,6 +32,8 @@
 | `status` | 题有据是否在运行、版本、密钥是否填好、上传条件是否满足、有多少试卷。缺密钥时列出缺哪个、去哪里申请；不检测云服务当前是否可用 |
 | `config [--reader R] [--checker C] [--minimax-plan P]` | 看或改读题方式（不碰密钥，改之前取得使用者选择）。R：`assistant`（AI 助手读题，处理新原卷仍需 MinerU）、`modelscope`、`minimax`、`siliconflow`。C：`auto` 或同上的服务名。P：`auto`、`plus`、`max`、`ultra`、`payg`。不加参数只显示现状；第三方额度和费用以当前账户规则为准 |
 | `assistant-setup [--skill-dir 绝对skills父目录] [--replace-skill] [--desktop show\|hide]` | **1.10.14 起支持，先检查安装版 `--help`**。默认只读核实安装并列出技能/图标选择；用户明确选择后才安装配套技能或显示/隐藏本软件桌面图标。技能覆盖须获明确同意，`--replace-skill` 保留备份 |
+| `setup-agents [--home 目录] [--appdata 目录] [--no-path] [--no-mcp] [--replace]` | 一键同步技能到主流国际与国内 AI Agent（含 `.trae-cn`、`.qwen`、`.qoder`、`.lingma`、`.codebuddy`、`.kimi`、`.openclaw` 等），自动注册 `tiyouju` stdio MCP 并写入用户 `PATH` |
+| `mcp-config [--command-name]` | 离线输出标准 `mcpServers` JSON 配置与 Codex 一行接入命令（便于 Cherry Studio / Chatbox 等手动接入），并检测本机客户端 MCP 配置状态 |
 | `start [--timeout 90]` | 打开题有据，等它就绪 |
 | `papers` | 列出试卷：编号、名字、状态、题数、通过数、入库数 |
 | `upload 文件… [--book] [--parse-mode auto\|manual\|native\|mineru] [--allow-cloud] [--cut-only] [--scan-only] [--wait] [--timeout 秒]` | 默认 `auto` 本地优先。加 `--scan-only` 时仅解析原页与版面块（`blocks`），跳过自动切题与 `NEEDS_GROUPING` 停在 `READY`，便于外部助手自主切题；`--cut-only` 只切题不调用内置看图识读 |
