@@ -108,7 +108,7 @@ def main() -> int:
                 light = page.evaluate(
                     """() => {
                         const bad = [];
-                        for (const sel of ['.feature-card', '.download-card', '.workflow-card', '.shot-frame']) {
+                        for (const sel of ['.feature-card', '.download-card', '.spotlight-card', '.shot-frame']) {
                             for (const el of document.querySelectorAll(sel)) {
                                 const bg = getComputedStyle(el).backgroundColor;
                                 if (bg === 'rgb(251, 248, 241)' || bg === 'rgb(255, 252, 246)') {
@@ -124,7 +124,7 @@ def main() -> int:
                 hidden_cards = page.evaluate(
                     """() => {
                         const bad = [];
-                        for (const sel of ['.metrics-strip', '.workflow-card', '.feature-card', '.download-card', '.community-banner']) {
+                        for (const sel of ['.metrics-strip', '.spotlight-card', '.feature-card', '.download-card', '.community-banner']) {
                             for (const el of document.querySelectorAll(sel)) {
                                 if (Number(getComputedStyle(el).opacity) < 0.99) {
                                     bad.push(sel);
@@ -135,6 +135,16 @@ def main() -> int:
                     }"""
                 )
                 check(not hidden_cards, f"全页卡片直接可见无 opacity:0 空白 {hidden_cards if hidden_cards else ''}")
+
+                spotlights_count = page.locator(".spotlight-card").count()
+                check(spotlights_count == 3, f"三大核心卖点卡片齐全 (实际 {spotlights_count})")
+
+                broken_imgs = page.evaluate(
+                    """() => Array.from(document.images)
+                        .filter(img => img.getAttribute('src') && (!img.complete || img.naturalWidth === 0))
+                        .map(img => img.getAttribute('src'))"""
+                )
+                check(not broken_imgs, f"页面全部图片加载完整 {broken_imgs if broken_imgs else ''}")
 
                 check(page.locator(".shot-toolbar").count() == 1, "首屏工具栏条存在")
                 check(page.locator(".shot-status").count() == 1, "首屏状态栏存在")
