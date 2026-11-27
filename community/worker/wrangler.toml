@@ -37,7 +37,7 @@ MAX_TOTAL_R2_MB = "8500"
 MAX_DAILY_UPLOADS_PER_USER = "5"
 # 题包存储模式：默认 "r2"；如需将 .zip 题包存入 123 云盘 WebDAV（封面仍留 R2），设为 "webdav"
 # 并通过 `npx wrangler secret put WEBDAV_USERNAME` 和 `WEBDAV_PASSWORD` 配置账号与应用密码。
-PACK_STORAGE_MODE = "r2"
+PACK_STORAGE_MODE = "webdav"
 WEBDAV_BASE_URL = "https://webdav.123pan.cn/webdav"
 WEBDAV_DIR = "tiyouju-packs"
 
