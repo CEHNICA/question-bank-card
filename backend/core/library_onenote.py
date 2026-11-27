@@ -1164,7 +1164,9 @@ def list_linked_notes(*, limit: int = 50, paper_id: str | None = None, query: st
         section_name = str(onenote.get("section_name") or "").strip()
 
         if keyword:
-            haystack = "\n".join((short_id, source_name, stem, section, page_title, notebook_name, section_name)).lower()
+            haystack = "\n".join(
+                (short_id, source_name, stem, section, page_title, notebook_name, section_name)
+            ).lower()
             if keyword not in haystack:
                 continue
 
@@ -1202,7 +1204,9 @@ def list_linked_notes(*, limit: int = 50, paper_id: str | None = None, query: st
     return {"ok": True, "total": len(matched), "items": items}
 
 
-def read_page_note(publication: PublishedQuestion, *, include_images: bool = True, max_pages: int = 3) -> dict[str, Any]:
+def read_page_note(
+    publication: PublishedQuestion, *, include_images: bool = True, max_pages: int = 3
+) -> dict[str, Any]:
     """严格只读提取题目关联的 OneNote 页面文字块与可选手写墨迹截图，绝不改动原笔记。"""
     extras = publication.extras if isinstance(publication.extras, dict) else {}
     record = extras.get("onenote")

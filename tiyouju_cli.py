@@ -30,7 +30,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 if not getattr(sys, "frozen", False):
@@ -123,7 +123,8 @@ class Client:
             ) from error
 
     def get(self, path: str, timeout: float = 30) -> dict:
-        with self._open(urllib.request.Request(self.url + path), timeout) as response:
+        request = urllib.request.Request(self.url + path, headers={"X-QB-Request": "1"})
+        with self._open(request, timeout) as response:
             return json.loads(response.read().decode("utf-8"))
 
     def get_bytes(self, path: str, timeout: float = 60) -> bytes:
@@ -133,6 +134,14 @@ class Client:
     def post(self, path: str, body: dict | None = None, timeout: float = 60) -> dict:
         data = json.dumps(body or {}, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(self.url + path, data=data, method="POST", headers={
+            "Content-Type": "application/json", "X-QB-Request": "1",
+        })
+        with self._open(request, timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def put(self, path: str, body: dict | None = None, timeout: float = 60) -> dict:
+        data = json.dumps(body or {}, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(self.url + path, data=data, method="PUT", headers={
             "Content-Type": "application/json", "X-QB-Request": "1",
         })
         with self._open(request, timeout) as response:
@@ -151,14 +160,14 @@ class Client:
         parts: list[bytes] = []
         for name, value in fields.items():
             parts.append(
-                f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode("utf-8"))
+                f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode())
         for path in files:
             kind = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
             quoted = urllib.parse.quote(path.name)
             head = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; '
                     f'filename="{quoted}"; filename*=UTF-8\'\'{quoted}\r\nContent-Type: {kind}\r\n\r\n')
-            parts.append(head.encode("utf-8") + path.read_bytes() + b"\r\n")
-        parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+            parts.append(head.encode() + path.read_bytes() + b"\r\n")
+        parts.append(f"--{boundary}--\r\n".encode())
         request = urllib.request.Request(self.url + "/api/papers", data=b"".join(parts), method="POST", headers={
             "Content-Type": f"multipart/form-data; boundary={boundary}", "X-QB-Request": "1",
         })
@@ -607,27 +616,38 @@ def cmd_skill(_client, _args) -> dict:
         "- `tiyouju figures <paper> <n> --use <idx>`：指定或更新题卡配图。",
         "- `tiyouju approve <paper> <n>` / `tiyouju publish <paper>`：核对无误后标记 AI 通过并发布入库。",
         "",
-        "## 3. 组织题库内容与整理文件夹",
+        "## 3. 读库、共研、查重与统计（只读不篡改原题）",
+        "- `tiyouju stats [--paper P] [--json]`：统计全库或指定试卷的题型、审核、答案、标签与 OneNote 关联全景。",
+        "- `tiyouju library [关键词] [--paper P] [--type T] [--sort recent|source|number|display] [--offset N] [--exclude-used-days D] [--has-analysis] [--untagged] [--json]`：分面检索与翻页读取正式题库。",
+        "- `tiyouju locate <Q-xxxxxxxx | UUID | 定位文本> [--json]`：秒级调出完整题干、标签与本机原卷图。",
+        "- `tiyouju detail <Q-xxxxxxxx | UUID | 定位文本> [--json]`：读取单题完整版本历史、一题多源证据、已保存答案与解析版本及原卷图。",
+        "- `tiyouju tags [--kind knowledge|method] [--json]`：只读查看当前用户的知识点与解题方法标签树（含题目计数）。",
+        "- `tiyouju dedup scan [--json]`：只读扫描潜在重题簇、相似变式建议与已有变式题组（绝不自动合并删除）。",
+        "- `tiyouju variants bind <ref1> <ref2> [...]` / `unbind <ref>`：把多道同类题绑定为可互换变式题组，或解除一道题的绑定（可随时互逆操作）。",
+        "- `tiyouju whereami --json`：确认老师当前正在题库工作台查看/编辑哪道题，避免冲突。",
+        "",
+        "## 4. OneNote 深度协同（读笔记 + 跳转/建页，不删不覆盖）",
+        "- `tiyouju onenote list [--paper P] [--q 关键词] [--json]`：列出已关联 OneNote 笔记的题目。",
+        "- `tiyouju onenote read <ref...> [--no-images] [--max-pages N]`：严格只读提取题目关联 OneNote 页的文字块与裁边手写步骤图，用于 AI 总结与建议。",
+        "- `tiyouju onenote open <ref...>`：唤起桌面版 OneNote 并跳到本题笔记页（方便老师当场手写或核对）。",
+        "- `tiyouju onenote create <ref...>`：为尚未关联的题目在 OneNote 新建专属答题页并双向绑定。",
+        "",
+        "## 5. 整理文件夹、答案解析与智能组卷草稿",
         "- `tiyouju folders list --json`：查看「我的文件夹」、试卷夹、教材章节树、智能文件夹、排序及标签个人分组。",
         "- `tiyouju folders create/rename/move/delete/add/remove/sort/reorder`：直接建夹建子夹（最多 8 层）、把试卷/教材移入任意主题夹或根目录、手动排同级顺序（可撤销）。",
         "- `tiyouju folders apply-tree --file tree.json [--root book:<id>] [--dry-run]`：一次性原子提交整本书或整棵目录树（支持最多 8 层、空目录、嵌套资料、可选 `--sync-sections` 同步 `section`、单步 `undo` 撤销）。",
-        "- `tiyouju folders custom-tree <paper> <on|off>`：为教材开启/关闭纯数据驱动自定义目录接管（关闭前端硬编码页码表与正则猜章节）。",
-        "- `tiyouju folders set-section`：批量整理已入库教材/教辅的章节与小节路径（直接生效且可撤销）。",
-        "- `tiyouju folders paper <paper> [--name 名称] [--type exam|book]`：重命名试卷/教材或切换「试卷 ↔ 教材」。",
-        "- `tiyouju folders tag-group ...`：整理标签管理里的个人分组及分组内标签。",
-        "- `tiyouju folders undo`：撤销最近一次文件夹或章节整理操作。",
-        "- `tiyouju locate <定位码或位置文本> [--json]`：支持 `Q-xxxxxxxx`、UUID 或用户复制的一整段题目定位文本，秒查完整题干、标签与本机原图。",
-        "- `tiyouju library [关键词] --json`：按题干、标签、题型检索正式题库内容（每条均带 `short_id`）。",
-        "- `tiyouju whereami --json`：确认老师当前正在题库工作台查看/编辑哪道题，避免冲突。",
-        "- `tiyouju claim` / `tiyouju release` / `tiyouju workbench`：领取和查看助手工作台任务（支持 `workbench --clear` 批量清空提案）。",
-        "- `tiyouju solutions import --file <json> --dry-run`：批量将标准答案书/官方解析写入解析层（不动源题卡、不清通过勾、默认不覆盖已有解析；先干跑抽查，确认客观/填空题填好 `answer` 后再写入；支持 `tiyouju solutions undo` 整批撤销）。",
+        "- `tiyouju folders custom-tree <paper> <on|off>` / `set-section` / `paper` / `tag-group` / `undo`：数据驱动书本目录与章节整理。",
+        "- `tiyouju claim` / `release` / `workbench`：领取和查看助手工作台任务（支持 `workbench --clear` 批量清空提案）。",
+        "- `tiyouju solutions import --file <json> --dry-run`：批量将标准答案书/官方解析写入解析层（不动源题卡、不清通过勾、支持 `undo` 整批撤销）。",
         "- `tiyouju propose <publication_id> ...`：仅限单题题面勘误交成提案（等老师采纳；严禁用 `propose` 批量灌整本答案书）。",
         "- `tiyouju enrich tasks` / `prepare` / `submit`：按任务领取原图并交回标签候选或参考答案初稿。",
+        "- `tiyouju usage [--limit N] [--json]`：只读查看近期组卷使用记录，出新卷时避开近期已用题防止撞车。",
+        "- `tiyouju drafts list|show|create|update`：查看或保存组卷草稿（传入题目短码/UUID 与 A4/A3 排版参数，自动防撞车后直接在软件里打印导出）。",
         "- `tiyouju backup [--dest DIR]`：打包备份题库或指定试卷/文件夹。",
         "",
-        "## 4. 关键安全规则与退出码",
+        "## 6. 关键安全规则与退出码",
         "- 绝不索要、读取或输出真实 API 密钥；缺密钥请引导用户自己在「设置 → API 配置」填写。",
-        "- 已入库题目严禁直接篡改，一律走 `tiyouju propose` 提案；不做无人值守自动通过入库。",
+        "- 已入库题目严禁直接篡改，一律走 `tiyouju propose` 提案；不做无人值守自动通过入库，绝不替用户删题、删草稿或改写 OneNote 已有笔记。",
         "- 退出码：`0` 成功，`1` 执行错误，`2` 应用未启动（先运行 `tiyouju start`），`3` 需用户处理（停下并说明具体原因）。",
         "- 如客户端只能使用 stdio MCP，可配置命令 `tiyouju mcp`；支持本机命令行时优先使用 `tiyouju` CLI。",
         "",
@@ -885,14 +905,14 @@ def card_detail(client: Client, paper_ref: str, card_ref: str, out: str | None =
             marked.write_bytes(client.get_bytes(f"/api/questions/{question['id']}/crop?marks=1"))
             result["images"]["candidates"] = str(marked)
         figures = []
-        for index, figure in enumerate(question.get("figures") or []):
+        for index, _figure in enumerate(question.get("figures") or []):
             target = folder / f"{tag}-figure{index + 1}.png"
             target.write_bytes(client.get_bytes(f"/api/questions/{question['id']}/figures/{index}"))
             figures.append(str(target))
         result["images"]["figures"] = figures
         if question.get("body_mode") == "source_image":
             fragments = []
-            for index, fragment in enumerate(question.get("question_images") or []):
+            for index, _fragment in enumerate(question.get("question_images") or []):
                 target = folder / f"{tag}-question{index + 1}.png"
                 target.write_bytes(client.get_bytes(f"/api/questions/{question['id']}/question-images/{index}"))
                 fragments.append(str(target))
@@ -1152,6 +1172,10 @@ def show_publish(result: dict) -> str:
 
 def cmd_library(client: Client, args) -> dict:
     query = {"limit": str(args.limit)}
+    if getattr(args, "offset", None):
+        query["offset"] = str(max(0, int(args.offset)))
+    if getattr(args, "sort", None):
+        query["sort"] = str(args.sort)
     if args.keywords:
         query["q"] = " ".join(args.keywords)
     if args.paper:
@@ -1164,6 +1188,12 @@ def cmd_library(client: Client, args) -> dict:
         query["answer"] = args.answer
     if getattr(args, "tag", None):
         query["tag"] = args.tag
+    if getattr(args, "has_analysis", False):
+        query["has_analysis"] = "yes"
+    if getattr(args, "untagged", False):
+        query["untagged_knowledge"] = "1"
+    if getattr(args, "exclude_used_days", None):
+        query["exclude_used_days"] = str(max(1, int(args.exclude_used_days)))
     result = client.get("/api/library?" + urllib.parse.urlencode(query))
     items = [{
         "id": item["id"], "short_id": item.get("short_id") or f"Q-{str(item['id']).replace('-', '')[:8].lower()}",
@@ -1178,7 +1208,13 @@ def cmd_library(client: Client, args) -> dict:
         "tags": item.get("tags") or [],
         "subquestions": item.get("subquestions") or 0,
     } for item in result.get("items", [])]
-    return {"total": result.get("total", 0), "items": items}
+    return {
+        "total": result.get("total", 0),
+        "offset": result.get("offset", 0),
+        "has_more": bool(result.get("has_more")),
+        "next_offset": result.get("next_offset"),
+        "items": items,
+    }
 
 
 def show_library(result: dict) -> str:
@@ -1268,10 +1304,27 @@ def cmd_onenote(client: Client, args) -> dict:
             "max_pages": str(max_pages),
         })
         return client.get(f"/api/library/{pub_id}/onenote/read?{qs}", timeout=60)
-    raise CliError("请使用 onenote list 或 onenote read")
+    if action == "open":
+        raw_ref = " ".join(getattr(args, "ref", None) or []).strip()
+        pub_id = resolve_publication_id(client, raw_ref)
+        resp = client.post(f"/api/library/{pub_id}/onenote/open?wait=1", {}, timeout=30)
+        return {"action": "open", "publication_id": pub_id, **resp}
+    if action == "create":
+        raw_ref = " ".join(getattr(args, "ref", None) or []).strip()
+        pub_id = resolve_publication_id(client, raw_ref)
+        resp = client.post(f"/api/library/{pub_id}/onenote/create", {}, timeout=30)
+        return {"action": "create", "publication_id": pub_id, **resp}
+    raise CliError("请使用 onenote list、read、open 或 create")
 
 
 def show_onenote(result: dict) -> str:
+    if result.get("action") in {"open", "create"}:
+        on = result.get("onenote") or {}
+        verb = "已在桌面版 OneNote 中打开" if result["action"] == "open" else "已在 OneNote 创建并绑定笔记页"
+        nb = on.get("notebook_name") or ""
+        sec = on.get("section_name") or ""
+        loc = f"（{nb}/{sec}）" if (nb or sec) else ""
+        return f"{verb}：{on.get('title') or result.get('publication_id')}{loc}"
     if "items" in result:
         items = result.get("items") or []
         lines = [f"共找到 {result.get('total', len(items))} 道已关联 OneNote 的题目" + (f"（显示前 {len(items)} 条）：" if items else "。")]
@@ -1298,6 +1351,270 @@ def show_onenote(result: dict) -> str:
     if result.get("image_warning"):
         lines.append(f"截图提示：{result['image_warning']}")
     return "\n".join(lines)
+
+
+def cmd_stats(client: Client, args) -> dict:
+    """只读统计全库或指定试卷的题型、审核、答案、标签与 OneNote 关联全景。"""
+    query: dict[str, str] = {"limit": "1"}
+    on_query: dict[str, str] = {"limit": "1"}
+    paper_info = None
+    paper_ref = str(getattr(args, "paper", None) or "").strip()
+    if paper_ref:
+        paper_info = find_paper(client, paper_ref)
+        query["document"] = paper_info["id"]
+        on_query["document"] = paper_info["id"]
+    lib = client.get("/api/library?" + urllib.parse.urlencode(query))
+    notes = client.get("/api/library/onenote/notes?" + urllib.parse.urlencode(on_query))
+    usage = client.get("/api/library/usage")
+    drafts = client.get("/api/library/drafts")
+    return {
+        "paper": paper_summary(paper_info) if paper_info else None,
+        "total_questions": int(lib.get("total") or 0),
+        "facets": lib.get("facets") or {},
+        "presence": lib.get("presence") or {},
+        "tag_work": lib.get("tag_work") or {},
+        "onenote_linked_total": int(notes.get("total") or 0),
+        "usage_batches_total": int(usage.get("total") or len(usage.get("batches") or [])),
+        "drafts_total": int(drafts.get("total") or len(drafts.get("drafts") or [])),
+    }
+
+
+def show_stats(result: dict) -> str:
+    scope = f"资料《{result['paper']['name']}》" if result.get("paper") else "正式题库全局"
+    facets = result.get("facets") or {}
+    lines = [
+        f"{scope}全景统计：共 {result.get('total_questions', 0)} 道已入库题目",
+        f"  OneNote 已关联笔记：{result.get('onenote_linked_total', 0)} 道 | 出卷使用记录：{result.get('usage_batches_total', 0)} 批 | 组卷草稿：{result.get('drafts_total', 0)} 份",
+    ]
+    by_type = facets.get("type") or {}
+    if by_type:
+        type_str = "、".join(f"{TYPES.get(k, k)} {v}" for k, v in by_type.items() if v)
+        if type_str:
+            lines.append(f"  题型分布：{type_str}")
+    by_review = facets.get("review") or {}
+    if by_review:
+        lines.append(f"  审核来源：人工 {by_review.get('human', 0)} / AI {by_review.get('ai', 0)}")
+    by_ans = facets.get("answer") or {}
+    if by_ans:
+        lines.append(f"  答案情况：有答案/解析 {by_ans.get('yes', 0)} / 暂缺 {by_ans.get('no', 0)}")
+    return "\n".join(lines)
+
+
+def cmd_detail(client: Client, args) -> dict:
+    """读取已入库题目的完整详情：定位信息、版本历史、一题多源证据、已保存答案解析及本机原图。"""
+    raw_ref = " ".join(getattr(args, "ref", None) or []).strip()
+    if not raw_ref:
+        raise CliError("请给出题目编号（Q-xxxxxxxx）、UUID 或定位文本")
+    located = client.get("/api/library/locate?" + urllib.parse.urlencode({"ref": raw_ref}))
+    pub = located.get("publication") or {}
+    pub_id = str(pub.get("id") or "").strip()
+    if not pub_id:
+        raise CliError(f"未能定位到题目：{raw_ref}")
+    detail = client.get(f"/api/library/{pub_id}")
+    sol = client.get(f"/api/library/{pub_id}/solution")
+    return {
+        "publication": detail.get("publication") or pub,
+        "locator": located.get("locator") or pub.get("locator") or {},
+        "local_images": located.get("local_images") or [],
+        "history": detail.get("history") or [],
+        "versions": detail.get("versions") or [],
+        "sources": detail.get("sources") or [],
+        "solution": sol.get("solution"),
+        "previous_solution": sol.get("previous_solution"),
+    }
+
+
+def show_detail(result: dict) -> str:
+    pub = result.get("publication") or {}
+    locator = result.get("locator") or {}
+    content = pub.get("content") or {}
+    sid = locator.get("short_id") or f"Q-{str(pub.get('id') or '').replace('-', '')[:8].lower()}"
+    lines = [
+        f"[{sid}] {pub.get('source_filename') or ''} 第 {pub.get('number')} 题 · v{pub.get('version', 1)} · {TYPES.get(pub.get('question_type'), pub.get('question_type') or '')}",
+        f"题干：{content.get('stem') or '(无文字题干)'}",
+    ]
+    options = content.get("options") or {}
+    for key in OPTION_KEYS:
+        if str(options.get(key) or "").strip():
+            lines.append(f"  {key}. {options[key]}")
+    sol = result.get("solution") or {}
+    ans = sol.get("answer") or content.get("answer") or ""
+    ana = sol.get("analysis") or content.get("analysis") or ""
+    if ans:
+        lines.append(f"当前答案：{ans}")
+    if ana:
+        lines.append(f"当前解析：{first_line(str(ana), 140)}")
+    tags = [t.get("name") for t in (pub.get("tags") or []) if isinstance(t, dict) and t.get("name")]
+    if tags:
+        lines.append(f"已贴标签：{'、'.join(tags)}")
+    sources = result.get("sources") or []
+    history = result.get("history") or []
+    lines.append(f"溯源与版本：{len(sources)} 份原卷证据 · 共 {len(history)} 个版本")
+    for img in result.get("local_images") or []:
+        lines.append(f"本机原图：{img}")
+    return "\n".join(lines)
+
+
+def cmd_tags(client: Client, args) -> dict:
+    """只读查看当前用户的知识点与解题方法标签目录（绝不修改目录结构）。"""
+    data = client.get("/api/library/tags")
+    kind = str(getattr(args, "kind", None) or "").strip()
+    tags = list(data.get("tags") or [])
+    if kind:
+        tags = [t for t in tags if t.get("kind") == kind]
+    return {
+        "kind": kind or "all",
+        "total": len(tags),
+        "published_questions": data.get("published_questions", 0),
+        "tagged_questions": data.get("tagged_questions", 0),
+        "questions_pending_review": data.get("questions_pending_review", 0),
+        "tags": tags,
+    }
+
+
+def show_tags(result: dict) -> str:
+    tags = result.get("tags") or []
+    lines = [
+        f"标签目录（筛选：{result.get('kind', 'all')}）：共 {result.get('total', len(tags))} 个标签 "
+        f"| 全库 {result.get('published_questions', 0)} 题，已贴标 {result.get('tagged_questions', 0)} 题",
+    ]
+    for t in tags[:40]:
+        kind_label = "方法" if t.get("kind") == "method" else "知识点"
+        lines.append(f"  [{kind_label}] {t.get('name')}（直接 {t.get('count', 0)} / 含子级 {t.get('subtree_count', 0)} 题）")
+    if len(tags) > 40:
+        lines.append(f"  ……还有 {len(tags) - 40} 个标签（加 --json 查看完整目录）")
+    return "\n".join(lines)
+
+
+def cmd_usage(client: Client, args) -> dict:
+    """只读查看近期组卷/打印用题记录，防止新组卷与近期周测/考试撞车。"""
+    data = client.get("/api/library/usage")
+    limit = max(1, min(100, int(getattr(args, "limit", 20) or 20)))
+    batches = list(data.get("batches") or [])[:limit]
+    return {"total": int(data.get("total") or len(data.get("batches") or [])), "batches": batches}
+
+
+def show_usage(result: dict) -> str:
+    batches = result.get("batches") or []
+    lines = [f"共 {result.get('total', len(batches))} 条近期组卷记录" + (f"（显示前 {len(batches)} 条）：" if batches else "。")]
+    for b in batches:
+        lines.append(f"  [{b.get('id', '')[:8]}] 《{b.get('title')}》 · {len(b.get('ids') or [])} 题 · {b.get('paper_spec', 'a4')} · {str(b.get('created_at') or '')[:10]}")
+    return "\n".join(lines)
+
+
+def _draft_print_options(args, existing: dict | None = None) -> dict:
+    opts = dict(existing or {})
+    if getattr(args, "paper_spec", None):
+        opts["paper_spec"] = args.paper_spec
+    if getattr(args, "document", None):
+        opts["document"] = args.document
+    if getattr(args, "scoring", None) is True:
+        opts["scoring_enabled"] = True
+    elif getattr(args, "scoring", None) is False:
+        opts["scoring_enabled"] = False
+    return opts
+
+
+def cmd_drafts(client: Client, args) -> dict:
+    """查看或保存组卷草稿（严禁通过 CLI/MCP 删除草稿）。"""
+    action = getattr(args, "drafts_command", None) or "list"
+    if action == "list":
+        return client.get("/api/library/drafts")
+    if action == "show":
+        return client.get(f"/api/library/drafts/{args.draft_id}")
+    if action == "create":
+        file_path = getattr(args, "file", None)
+        if file_path:
+            payload = json.loads(Path(file_path).expanduser().read_text(encoding="utf-8-sig"))
+            if not isinstance(payload, dict):
+                raise CliError("草稿 JSON 文件必须是对象")
+            return client.post("/api/library/drafts", payload)
+        raw_qids = list(getattr(args, "questions", None) or [])
+        if not raw_qids:
+            raise CliError("请用 --questions 指定至少一道题目（短码或 UUID），或用 --file 传草稿 JSON")
+        resolved_ids = [resolve_publication_id(client, ref) for ref in raw_qids]
+        title = str(getattr(args, "title", None) or "").strip()
+        if not title:
+            raise CliError("请用 --title 指定试卷草稿标题")
+        body: dict = {"title": title, "ids": resolved_ids}
+        opts = _draft_print_options(args)
+        if opts:
+            body["print_options"] = opts
+        return client.post("/api/library/drafts", body)
+    if action == "update":
+        cur_resp = client.get(f"/api/library/drafts/{args.draft_id}")
+        cur = cur_resp.get("draft") or {}
+        if not cur:
+            raise CliError(f"找不到组卷草稿 {args.draft_id}")
+        raw_qids = getattr(args, "questions", None)
+        ids = [resolve_publication_id(client, ref) for ref in raw_qids] if raw_qids else list(cur.get("ids") or [])
+        title = str(getattr(args, "title", None) or cur.get("title") or "").strip()
+        opts = _draft_print_options(args, cur.get("print_options") or {})
+        body = {
+            "title": title,
+            "ids": ids,
+            "print_options": opts,
+            "revision": cur.get("revision"),
+        }
+        return client.put(f"/api/library/drafts/{cur['id']}", body)
+    raise CliError("请使用 drafts list、show、create 或 update")
+
+
+def show_drafts(result: dict) -> str:
+    if "draft" in result:
+        d = result["draft"]
+        opts = d.get("print_options") or {}
+        return (
+            f"组卷草稿：[{d.get('id')}] 《{d.get('title')}》（v{d.get('revision', 1)}）\n"
+            f"  题数：{len(d.get('ids') or [])} 道 · 版式：{opts.get('paper_spec', 'a4')} · 卷种：{opts.get('document', 'questions')} · 赋分：{'开' if opts.get('scoring_enabled') else '关'}"
+        )
+    drafts = result.get("drafts") or []
+    lines = [f"共 {result.get('total', len(drafts))} 份组卷草稿："]
+    for d in drafts:
+        lines.append(f"  [{d.get('id', '')[:8]}] 《{d.get('title')}》 · {len(d.get('ids') or [])} 题 · 更新于 {str(d.get('updated_at') or '')[:16]}")
+    return "\n".join(lines)
+
+
+def cmd_dedup(client: Client, _args) -> dict:
+    """只读扫描潜在重题簇、相似变式建议与已有变式题组（绝不自动合并或删题）。"""
+    return client.get("/api/library/dedup/scan", timeout=60)
+
+
+def show_dedup(result: dict) -> str:
+    dups = result.get("duplicate_groups") or []
+    sugg = result.get("variant_suggestions") or []
+    groups = result.get("variant_groups") or []
+    lines = [f"重题与变式扫描：疑似重题簇 {len(dups)} 组 · 变式建议 {len(sugg)} 对 · 已建变式组 {len(groups)} 组"]
+    for g in dups[:10]:
+        items = g.get("items") or []
+        sids = "、".join(it.get("short_id") or it.get("id", "")[:8] for it in items)
+        lines.append(f"  [重题 {g.get('score', 0):.0%}] {sids}")
+    for s in sugg[:10]:
+        a, b = s.get("a") or {}, s.get("b") or {}
+        lines.append(f"  [建议变式 {s.get('score', 0):.0%}] {a.get('short_id', '')} ↔ {b.get('short_id', '')}")
+    return "\n".join(lines)
+
+
+def cmd_variants(client: Client, args) -> dict:
+    """将多道入库题目绑定为可互换变式题组，或解除某道题的绑定（均可在软件或 CLI 互逆还原）。"""
+    action = getattr(args, "variants_command", None)
+    if action == "bind":
+        refs = list(getattr(args, "questions", None) or [])
+        if len(refs) < 2:
+            raise CliError("绑定变式题至少需要指定 2 道题")
+        pub_ids = [resolve_publication_id(client, ref) for ref in refs]
+        return client.post("/api/library/variants/bind", {"publication_ids": pub_ids})
+    if action == "unbind":
+        pub_id = resolve_publication_id(client, getattr(args, "question", ""))
+        return client.post("/api/library/variants/unbind", {"publication_id": pub_id})
+    raise CliError("请使用 variants bind 或 variants unbind")
+
+
+def show_variants(result: dict) -> str:
+    if result.get("variant_group_id") and result.get("items"):
+        sids = "、".join(it.get("short_id") or it.get("id", "")[:8] for it in result["items"])
+        return f"已绑定变式题组 {result['variant_group_id']}：{sids}"
+    return "已完成变式题组操作。"
 
 
 ENRICH_FEATURES = ("knowledge_tags", "ai_answer", "auto_tag_background")
@@ -2434,6 +2751,13 @@ SHOWERS = {
     "library": show_library,
     "locate": show_locate,
     "onenote": show_onenote,
+    "stats": show_stats,
+    "detail": show_detail,
+    "tags": show_tags,
+    "usage": show_usage,
+    "drafts": show_drafts,
+    "dedup": show_dedup,
+    "variants": show_variants,
     "backup": show_backup,
     "folders": show_folders,
     "solutions": show_solutions,
@@ -2467,8 +2791,10 @@ MCP_INSTRUCTIONS = (
     "但整理文件夹（list_folders / manage_folder / apply_folder_tree / set_question_sections / update_paper_folder / manage_tag_groups）直接生效并支持撤销。"
     "批量干活先 claim_work 领一批（每道活带到期时间，助手没了活会自己回到池子里），干不完 release_work 交回。"
     "where_is_the_teacher 告诉你老师此刻在哪、你刚提的有没有被否决。\n"
-    "共研题目与复习复盘（严格只读）：locate_question 可按 Q-xxxxxxxx 短码/UUID 秒级调出题干与原卷截图；search_library 支持按 paper/type 统计分析题库与试卷特点；"
-    "list_onenote_notes 与 read_onenote_note 可只读获取题目关联 OneNote 页的文字及手写墨迹图，用来总结思路和给复习建议。"
+    "共研题目、统计分析与智慧组卷：library_stats 统计全景；locate_question / get_question_detail 按 Q-xxxxxxxx 秒查单题完整详情与原卷截图；search_library 支持翻页、排序、排除近期已用题及缺答案解析筛选；"
+    "list_tags 只读查看标签目录；scan_duplicates 只读扫描重题簇（不自动合并），bind_variants / unbind_variant 管理变式题组；"
+    "list_onenote_notes / read_onenote_note / open_onenote_note / create_onenote_note 完整串联 OneNote 笔记读写与跳转；"
+    "list_exam_usage 查看用题防撞车记录，list_drafts / get_draft / save_draft 自动保存组卷草稿，create_backup 打包备份。"
 )
 
 
@@ -2500,8 +2826,9 @@ MCP_TOOLS = [
     ("wait_paper", "等一份试卷读完（最多等 timeout 秒，没读完可以再调一次）。", _schema({
         "paper": PAPER, "timeout": {"type": "integer", "minimum": 5, "maximum": 600},
     }, ["paper"])),
-    ("list_cards", "列出一份试卷的题卡和疑点。filter：todo 需逐题核对、green 识读完成未通过、approved、ai、human、all。",
-     _schema({"paper": PAPER, "filter": {"type": "string", "enum": list(FILTERS)}}, ["paper"])),
+    ("list_cards", "列出一份试卷的题卡和疑点。filter：todo 需逐题核对、green 识读完成未通过、approved、ai、human、all；summary=true 时只返回汇总统计。",
+     _schema({"paper": PAPER, "filter": {"type": "string", "enum": list(FILTERS)},
+              "summary": {"type": "boolean", "description": "是否仅返回状态与疑点统计"}}, ["paper"])),
     ("show_card", "看一道题：读出的文字、疑点、识读记录，以及原卷截图（有候选图时另给一张标了 图1、图2… 的截图）和配图。",
      _schema({"paper": PAPER, "card": CARD}, ["paper", "card"])),
     ("fix_card", "改一道题的文字。只传要改的字段；公式用 $...$ 包住的 LaTeX；表格用 Markdown。", _schema({
@@ -2522,18 +2849,39 @@ MCP_TOOLS = [
     ("unapprove_card", "撤销自己（AI）打的勾。人工通过的不能撤。", _schema({"paper": PAPER, "card": CARD}, ["paper", "card"])),
     ("reread_card", "让题有据的读题模型重读一道题。", _schema({"paper": PAPER, "card": CARD}, ["paper", "card"])),
     ("publish_paper", "把已通过的题入库（AI 通过的题在题库里标着“AI 审核”）。", _schema({"paper": PAPER}, ["paper"])),
-    ("search_library", "在正式题库里搜题（可按试卷、题型、题源、知识点、有无答案筛选，用于总结题库与试卷特点）。", _schema({
+    ("search_library", "在正式题库里搜题（支持试卷、题型、标签、分页、排序及排除近期已用题，用于分析特点和选题组卷）。", _schema({
         "keywords": {"type": "string"},
         "paper": PAPER,
         "type": {"type": "string", "enum": list(TYPES)},
         "review": {"type": "string", "enum": ["human", "ai"]},
         "answer": {"type": "string", "enum": ["yes", "no"], "description": "yes 只要有答案的，no 只要原卷没答案的"},
         "tag": {"type": "string", "description": "知识点标签（设置里打开“知识点标签”后才有）"},
+        "sort": {"type": "string", "enum": ["recent", "source", "number", "display"], "description": "排序方式"},
+        "offset": {"type": "integer", "minimum": 0, "description": "分页偏移量"},
+        "exclude_used_days": {"type": "integer", "minimum": 1, "description": "排除最近 N 天内已在组卷中出现过的题目"},
+        "has_analysis": {"type": "boolean", "description": "true 只要有参考答案或解析的题目"},
+        "untagged": {"type": "boolean", "description": "true 只要尚未贴知识点标签的题目"},
         "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+    })),
+    ("library_stats", "只读统计全库或指定试卷的题型、审核、答案、OneNote 笔记及草稿全景概览。", _schema({
+        "paper": PAPER,
     })),
     ("locate_question", "通过题目短码（如 Q-xxxxxxxx）、UUID 或整段定位文本秒查一道已入库题，并返回题干、标签与本机原卷/配图。", _schema({
         "ref": {"type": "string", "description": "Q-xxxxxxxx 短码、UUID 或粘贴的位置文本"},
     }, ["ref"])),
+    ("get_question_detail", "获取已入库题目的完整详情：版本历史、一题多源证据、已保存答案解析与本机原卷图。", _schema({
+        "ref": {"type": "string", "description": "Q-xxxxxxxx 短码、UUID 或粘贴的位置文本"},
+    }, ["ref"])),
+    ("list_tags", "只读查看用户当前的知识点与解题方法标签目录树（含题目计数，绝不修改目录）。", _schema({
+        "kind": {"type": "string", "enum": ["knowledge", "method"], "description": "筛选知识标签或方法标签"},
+    })),
+    ("scan_duplicates", "只读扫描潜在重题簇、相似变式建议与已有变式题组（不自动合并或删题）。", _schema({})),
+    ("bind_variants", "将多道同类题目绑定为可互换变式题组（至少 2 道，支持短码或 UUID）。", _schema({
+        "question_ids": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+    }, ["question_ids"])),
+    ("unbind_variant", "将一道题从所属变式题组解绑。", _schema({
+        "question_id": {"type": "string", "description": "Q-xxxxxxxx 短码或 UUID"},
+    }, ["question_id"])),
     ("list_onenote_notes", "只读列出已关联 OneNote 笔记的入库题目（可按试卷或关键词筛选）。", _schema({
         "paper": PAPER,
         "q": {"type": "string", "description": "按题目或笔记标题关键词过滤"},
@@ -2544,6 +2892,30 @@ MCP_TOOLS = [
         "include_images": {"type": "boolean", "description": "是否同时导出裁边后的手写步骤截图（默认 true）"},
         "max_pages": {"type": "integer", "minimum": 1, "maximum": 5, "description": "最多导出前几页截图（默认 3）"},
     }, ["ref"])),
+    ("open_onenote_note", "唤起桌面版 OneNote 并跳到指定题目的笔记页（方便老师直接手写）。", _schema({
+        "ref": {"type": "string", "description": "Q-xxxxxxxx 短码、UUID 或定位文本"},
+    }, ["ref"])),
+    ("create_onenote_note", "为尚未关联笔记的题目在桌面版 OneNote 中新建专属答题页并双向绑定。", _schema({
+        "ref": {"type": "string", "description": "Q-xxxxxxxx 短码、UUID 或定位文本"},
+    }, ["ref"])),
+    ("list_exam_usage", "只读查看近期组卷出题使用记录，出新卷时避开近期已用题。", _schema({
+        "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+    })),
+    ("list_drafts", "只读列出已保存的组卷草稿。", _schema({})),
+    ("get_draft", "读取指定组卷草稿的详细题目顺序与打印排版设置。", _schema({
+        "draft_id": {"type": "string"},
+    }, ["draft_id"])),
+    ("save_draft", "新建或更新一份组卷草稿（传入 title 与 question_ids 列表，支持 Q-xxxxxxxx 短码；传 draft_id 为更新，不删已有草稿）。", _schema({
+        "draft_id": {"type": "string", "description": "可选：传则更新该草稿"},
+        "title": {"type": "string", "description": "试卷草稿标题"},
+        "question_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "入库题目短码或 UUID 列表"},
+        "print_options": {"type": "object", "description": "可选：paper_spec(a4/a3_2col)、document(questions/answers/combined)、scoring_enabled 等"},
+    }, ["question_ids"])),
+    ("create_backup", "按用户要求打包备份题库或指定试卷/文件夹到本地目标目录。", _schema({
+        "dest": {"type": "string", "description": "备份包保存的本机绝对目录"},
+        "papers": {"type": "array", "items": {"type": "string"}, "description": "可选：只备份指定的试卷 UUID 列表"},
+        "folders": {"type": "array", "items": {"type": "string"}, "description": "可选：只备份指定的标签或目录 UUID 列表"},
+    }, ["dest"])),
     ("configure_features", "只读查看标签/参考答案开关，或按用户明确生成需求启用/关闭。默认关闭；不配置API、不生成内容。", _schema({
         "enable": {"type": "array", "items": {"type": "string", "enum": list(ENRICH_FEATURES)}},
         "disable": {"type": "array", "items": {"type": "string", "enum": list(ENRICH_FEATURES)}},
@@ -2762,7 +3134,8 @@ def mcp_call(client: Client, name: str, arguments: dict) -> tuple[dict | list, l
     if name == "wait_paper":
         return wait_for(client, find_paper(client, a.get("paper", "")), min(600, int(a.get("timeout") or 300)), quiet=True), []
     if name == "list_cards":
-        return cmd_cards(client, _ns(paper=a.get("paper", ""), filter=a.get("filter") or "all")), []
+        return cmd_cards(client, _ns(paper=a.get("paper", ""), filter=a.get("filter") or "all",
+                                     summary=bool(a.get("summary")))), []
     if name == "show_card":
         result = card_detail(client, a.get("paper", ""), a.get("card", ""))
         images = result.get("images") or {}
@@ -2789,13 +3162,32 @@ def mcp_call(client: Client, name: str, arguments: dict) -> tuple[dict | list, l
     if name == "publish_paper":
         return cmd_publish(client, _ns(paper=a.get("paper", ""))), []
     if name == "search_library":
-        return cmd_library(client, _ns(keywords=str(a.get("keywords") or "").split(), paper=a.get("paper"),
-                                       type=a.get("type"), review=a.get("review"), answer=a.get("answer"),
-                                       tag=a.get("tag"), limit=int(a.get("limit") or 20))), []
+        return cmd_library(client, _ns(
+            keywords=str(a.get("keywords") or "").split(), paper=a.get("paper"),
+            type=a.get("type"), review=a.get("review"), answer=a.get("answer"),
+            tag=a.get("tag"), limit=int(a.get("limit") or 20),
+            offset=a.get("offset"), sort=a.get("sort"),
+            exclude_used_days=a.get("exclude_used_days"),
+            has_analysis=bool(a.get("has_analysis")), untagged=bool(a.get("untagged")),
+        )), []
+    if name == "library_stats":
+        return cmd_stats(client, _ns(paper=a.get("paper"))), []
     if name == "locate_question":
         result = cmd_locate(client, _ns(ref=[str(a.get("ref") or "")]))
         paths = [str(p) for p in (result.get("local_images") or []) if p]
         return result, paths
+    if name == "get_question_detail":
+        result = cmd_detail(client, _ns(ref=[str(a.get("ref") or "")]))
+        paths = [str(p) for p in (result.get("local_images") or []) if p]
+        return result, paths
+    if name == "list_tags":
+        return cmd_tags(client, _ns(kind=a.get("kind"))), []
+    if name == "scan_duplicates":
+        return cmd_dedup(client, _ns()), []
+    if name == "bind_variants":
+        return cmd_variants(client, _ns(variants_command="bind", questions=list(a.get("question_ids") or []))), []
+    if name == "unbind_variant":
+        return cmd_variants(client, _ns(variants_command="unbind", question=str(a.get("question_id") or ""))), []
     if name == "list_onenote_notes":
         return cmd_onenote(client, _ns(onenote_command="list", paper=a.get("paper"), q=a.get("q"),
                                        limit=int(a.get("limit") or 50))), []
@@ -2805,6 +3197,42 @@ def mcp_call(client: Client, name: str, arguments: dict) -> tuple[dict | list, l
                                          no_images=not include_images, max_pages=int(a.get("max_pages") or 3)))
         paths = [str(p) for p in (result.get("image_paths") or []) if p]
         return result, paths
+    if name == "open_onenote_note":
+        return cmd_onenote(client, _ns(onenote_command="open", ref=[str(a.get("ref") or "")])), []
+    if name == "create_onenote_note":
+        return cmd_onenote(client, _ns(onenote_command="create", ref=[str(a.get("ref") or "")])), []
+    if name == "list_exam_usage":
+        return cmd_usage(client, _ns(limit=int(a.get("limit") or 20))), []
+    if name == "list_drafts":
+        return cmd_drafts(client, _ns(drafts_command="list")), []
+    if name == "get_draft":
+        return cmd_drafts(client, _ns(drafts_command="show", draft_id=str(a.get("draft_id") or ""))), []
+    if name == "save_draft":
+        draft_id = str(a.get("draft_id") or "").strip()
+        qids = [resolve_publication_id(client, str(ref)) for ref in (a.get("question_ids") or [])]
+        if not qids:
+            raise CliError("请提供 question_ids")
+        print_opts = a.get("print_options") if isinstance(a.get("print_options"), dict) else None
+        if draft_id:
+            cur = client.get(f"/api/library/drafts/{draft_id}").get("draft") or {}
+            if not cur:
+                raise CliError(f"找不到组卷草稿 {draft_id}")
+            merged_opts = {**(cur.get("print_options") or {}), **(print_opts or {})}
+            return client.put(f"/api/library/drafts/{cur['id']}", {
+                "title": str(a.get("title") or cur.get("title") or "").strip(),
+                "ids": qids,
+                "print_options": merged_opts,
+                "revision": cur.get("revision"),
+            }), []
+        title = str(a.get("title") or "").strip()
+        if not title:
+            raise CliError("新建组卷草稿需要提供 title")
+        payload = {"title": title, "ids": qids}
+        if print_opts:
+            payload["print_options"] = print_opts
+        return client.post("/api/library/drafts", payload), []
+    if name == "create_backup":
+        return cmd_backup(client, _ns(dest=a.get("dest"), papers=a.get("papers"), folders=a.get("folders"))), []
     if name == "configure_features":
         return cmd_features(client, _ns(enable=a.get("enable"), disable=a.get("disable"))), []
     if name == "list_enrichment_tasks":
@@ -3223,10 +3651,53 @@ def build_parser() -> argparse.ArgumentParser:
     library.add_argument("--review", choices=["human", "ai"])
     library.add_argument("--answer", choices=["yes", "no"], help="yes 只要有答案的，no 只要原卷没答案的")
     library.add_argument("--tag", help="知识点标签（设置里打开“知识点标签”后才有）")
+    library.add_argument("--sort", choices=["recent", "source", "number", "display"], help="排序方式")
+    library.add_argument("--offset", type=int, default=0, help="分页偏移量")
+    library.add_argument("--exclude-used-days", type=int, help="排除最近 N 天内已组卷使用过的题目")
+    library.add_argument("--has-analysis", action="store_true", help="只要包含参考答案或解析的题目")
+    library.add_argument("--untagged", action="store_true", help="只要尚未贴知识点标签的题目")
     library.add_argument("--limit", type=int, default=20)
+    stats_p = sub.add_parser("stats", parents=[common], help="只读统计全库或指定试卷的题型、审核、答案与 OneNote 全景")
+    stats_p.add_argument("--paper", help="可选：只统计某一份试卷或教材")
     locate = sub.add_parser("locate", parents=[common], help="通过题目身份证短码（如 Q-xxxxxxxx）、UUID 或定位文本秒查一道题")
     locate.add_argument("ref", nargs="+", help="Q-xxxxxxxx、UUID 或整段复制的定位文本")
-    on_p = sub.add_parser("onenote", parents=[common], help="只读查看或读取与题目关联的 OneNote 笔记（用于总结复盘）")
+    detail_p = sub.add_parser("detail", parents=[common], help="读取单题完整版本历史、多源证据、已保存答案解析与本机原图")
+    detail_p.add_argument("ref", nargs="+", help="Q-xxxxxxxx、UUID 或完整定位文本")
+    tags_p = sub.add_parser("tags", parents=[common], help="只读查看当前用户的知识点与方法标签目录")
+    tags_p.add_argument("--kind", choices=["knowledge", "method"], help="筛选知识点或方法标签")
+    usage_p = sub.add_parser("usage", parents=[common], help="只读查看近期组卷出题记录（防撞车）")
+    usage_p.add_argument("--limit", type=int, default=20)
+    drafts_p = sub.add_parser("drafts", parents=[common], help="查看、创建或更新组卷草稿（不提供删除草稿命令）")
+    drafts_sub = drafts_p.add_subparsers(dest="drafts_command", metavar="动作")
+    drafts_sub.add_parser("list", parents=[common], help="列出已保存的组卷草稿")
+    d_show = drafts_sub.add_parser("show", parents=[common], help="查看指定组卷草稿详情")
+    d_show.add_argument("draft_id")
+    d_create = drafts_sub.add_parser("create", parents=[common], help="新建一份组卷草稿")
+    d_create.add_argument("--title", help="试卷草稿标题")
+    d_create.add_argument("--questions", nargs="+", help="入库题目短码或 UUID 列表")
+    d_create.add_argument("--paper-spec", choices=["a4", "a3_2col"], help="纸张版式")
+    d_create.add_argument("--document", choices=["questions", "answers", "combined"], help="输出卷种")
+    d_create.add_argument("--scoring", dest="scoring", action="store_true", default=None, help="开启分节赋分")
+    d_create.add_argument("--no-scoring", dest="scoring", action="store_false", help="关闭分节赋分")
+    d_create.add_argument("--file", help="从自定义 JSON 文件读取完整草稿载荷")
+    d_update = drafts_sub.add_parser("update", parents=[common], help="更新已有组卷草稿")
+    d_update.add_argument("draft_id")
+    d_update.add_argument("--title", help="新标题")
+    d_update.add_argument("--questions", nargs="+", help="新的入库题目短码或 UUID 列表")
+    d_update.add_argument("--paper-spec", choices=["a4", "a3_2col"], help="纸张版式")
+    d_update.add_argument("--document", choices=["questions", "answers", "combined"], help="输出卷种")
+    d_update.add_argument("--scoring", dest="scoring", action="store_true", default=None, help="开启分节赋分")
+    d_update.add_argument("--no-scoring", dest="scoring", action="store_false", help="关闭分节赋分")
+    dedup_p = sub.add_parser("dedup", parents=[common], help="只读扫描潜在重题簇与变式建议（不自动合并删除）")
+    dedup_sub = dedup_p.add_subparsers(dest="dedup_command", required=True, metavar="动作")
+    dedup_sub.add_parser("scan", parents=[common], help="执行全库相似度扫描")
+    var_p = sub.add_parser("variants", parents=[common], help="绑定或解除可互换变式题组（可互逆还原）")
+    var_sub = var_p.add_subparsers(dest="variants_command", required=True, metavar="动作")
+    v_bind = var_sub.add_parser("bind", parents=[common], help="将 2 道及以上题目绑定为变式题组")
+    v_bind.add_argument("questions", nargs="+", help="Q-xxxxxxxx 短码或 UUID")
+    v_unbind = var_sub.add_parser("unbind", parents=[common], help="解除一道题的变式题组绑定")
+    v_unbind.add_argument("question", help="Q-xxxxxxxx 短码或 UUID")
+    on_p = sub.add_parser("onenote", parents=[common], help="读取或跳转与题目关联的 OneNote 笔记（严格只读内容，不删改已有笔记）")
     on_sub = on_p.add_subparsers(dest="onenote_command", required=True, metavar="动作")
     on_list = on_sub.add_parser("list", parents=[common], help="列出已关联 OneNote 笔记的正式题目")
     on_list.add_argument("--paper", help="按试卷/教材编号、latest 或名称片段筛选")
@@ -3236,6 +3707,10 @@ def build_parser() -> argparse.ArgumentParser:
     on_read.add_argument("ref", nargs="+", help="Q-xxxxxxxx、UUID 或完整定位文本")
     on_read.add_argument("--no-images", action="store_true", help="只提取笔记文字，不渲染手写步骤图")
     on_read.add_argument("--max-pages", type=int, default=3, help="最多导出前几页手写图（1–5，默认 3）")
+    on_open = on_sub.add_parser("open", parents=[common], help="唤起桌面版 OneNote 并跳转到本题笔记页")
+    on_open.add_argument("ref", nargs="+", help="Q-xxxxxxxx、UUID 或完整定位文本")
+    on_create = on_sub.add_parser("create", parents=[common], help="为尚未关联笔记的题目新建 OneNote 答题页并绑定")
+    on_create.add_argument("ref", nargs="+", help="Q-xxxxxxxx、UUID 或完整定位文本")
 
     feature_parser = sub.add_parser("features", parents=[common], help="查看或明确启用/关闭标签与参考答案（默认关闭）")
     feature_parser.add_argument("--enable", nargs="+", choices=ENRICH_FEATURES, help="按用户明确生成需求启用")
@@ -3390,7 +3865,14 @@ COMMANDS = {
     "pages": cmd_pages, "blocks": cmd_blocks, "cut": cmd_cut, "layout": cmd_layout, "read-cuts": cmd_read_cuts,
     "cards": cmd_cards, "show": cmd_show, "fix": cmd_fix, "figures": cmd_figures, "approve": cmd_approve,
     "unapprove": cmd_unapprove, "reread": cmd_reread, "publish": cmd_publish, "library": cmd_library,
+    "stats": cmd_stats,
     "locate": cmd_locate,
+    "detail": cmd_detail,
+    "tags": cmd_tags,
+    "usage": cmd_usage,
+    "drafts": cmd_drafts,
+    "dedup": cmd_dedup,
+    "variants": cmd_variants,
     "onenote": cmd_onenote,
     "assistant-setup": cmd_assistant_setup,
     "setup-agents": cmd_setup_agents,

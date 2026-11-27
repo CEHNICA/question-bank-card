@@ -653,7 +653,16 @@ class TiyoujuOfflineTests(SimpleTestCase):
 
         def fake_get(path, **_kwargs):
             if path.startswith("/api/papers"):
-                return {"papers": [{"id": "11111111-1111-1111-1111-111111111111", "name": "高三一模.pdf", "filename": "高三一模.pdf", "created_at": "2026-11-27T08:00:00Z"}]}
+                return {
+                    "papers": [
+                        {
+                            "id": "11111111-1111-1111-1111-111111111111",
+                            "name": "高三一模.pdf",
+                            "filename": "高三一模.pdf",
+                            "created_at": "2026-11-27T08:00:00Z",
+                        }
+                    ]
+                }
             if path.startswith("/api/library/locate"):
                 return {
                     "publication": {
@@ -697,7 +706,19 @@ class TiyoujuOfflineTests(SimpleTestCase):
                     "image_warning": "",
                 }
             if path.startswith("/api/library?"):
-                return {"total": 1, "items": [{"id": pub_uuid, "source_filename": "高三一模.pdf", "number": 12, "question_type": "single_choice", "version": 1, "content": {"stem": "已知函数"}}]}
+                return {
+                    "total": 1,
+                    "items": [
+                        {
+                            "id": pub_uuid,
+                            "source_filename": "高三一模.pdf",
+                            "number": 12,
+                            "question_type": "single_choice",
+                            "version": 1,
+                            "content": {"stem": "已知函数"},
+                        }
+                    ],
+                }
             raise AssertionError(f"unexpected path: {path}")
 
         fake.get.side_effect = fake_get
@@ -725,3 +746,317 @@ class TiyoujuOfflineTests(SimpleTestCase):
             on_read_res, on_imgs = cli.mcp_call(fake, "read_onenote_note", {"ref": "Q-c65f1f5f"})
             self.assertIn("先求导再分类讨论", on_read_res["text"])
             self.assertEqual(on_imgs, ["C:/tmp/step-1.png"])
+
+    def test_expanded_cli_mcp_analytics_drafts_dedup_variants_and_onenote_actions(self):
+        from urllib.parse import parse_qs, urlparse
+
+        pub_a = "c65f1f5f-0d23-4291-a72d-246d5b2eabc1"
+        pub_b = "d75f1f5f-0d23-4291-a72d-246d5b2eabc2"
+        draft_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+        fake = mock.Mock()
+        seen_gets = []
+        seen_posts = []
+        seen_puts = []
+
+        def fake_get(path, **_kwargs):
+            seen_gets.append(path)
+            if path.startswith("/api/papers"):
+                return {
+                    "papers": [
+                        {
+                            "id": "11111111-1111-1111-1111-111111111111",
+                            "name": "高三一模.pdf",
+                            "filename": "高三一模.pdf",
+                            "created_at": "2026-11-27T08:00:00Z",
+                        }
+                    ]
+                }
+            if path.startswith("/api/library/locate"):
+                ref = parse_qs(urlparse(path).query).get("ref", [""])[0]
+                pid = pub_b if "d75f" in ref else pub_a
+                sid = "Q-d75f1f5f" if pid == pub_b else "Q-c65f1f5f"
+                return {
+                    "publication": {
+                        "id": pid,
+                        "short_id": sid,
+                        "question_type": "single_choice",
+                        "version": 2,
+                        "content": {"stem": "函数题"},
+                    },
+                    "locator": {"short_id": sid},
+                    "local_images": [f"C:/tmp/{sid}-crop.png"],
+                }
+            if path.startswith("/api/library/tags"):
+                return {
+                    "published_questions": 20,
+                    "tagged_questions": 15,
+                    "questions_pending_review": 2,
+                    "tags": [
+                        {"id": "t1", "name": "导数", "kind": "knowledge", "count": 8, "subtree_count": 12},
+                        {"id": "t2", "name": "分类讨论", "kind": "method", "count": 5, "subtree_count": 5},
+                    ],
+                }
+            if path.startswith("/api/library/usage"):
+                return {
+                    "total": 1,
+                    "batches": [
+                        {
+                            "id": "u1",
+                            "title": "周测一",
+                            "ids": [pub_a],
+                            "paper_spec": "a4",
+                            "created_at": "2026-11-26T10:00:00Z",
+                        }
+                    ],
+                }
+            if path == "/api/library/drafts":
+                return {
+                    "total": 1,
+                    "drafts": [
+                        {
+                            "id": draft_id,
+                            "title": "周测草稿",
+                            "ids": [pub_a],
+                            "revision": 2,
+                            "updated_at": "2026-11-27T09:00:00Z",
+                            "print_options": {
+                                "paper_spec": "a3_2col",
+                                "document": "questions",
+                                "scoring_enabled": True,
+                            },
+                        }
+                    ],
+                }
+            if path == f"/api/library/drafts/{draft_id}":
+                return {
+                    "draft": {
+                        "id": draft_id,
+                        "title": "周测草稿",
+                        "ids": [pub_a],
+                        "revision": 2,
+                        "print_options": {"paper_spec": "a3_2col", "document": "questions", "scoring_enabled": True},
+                    }
+                }
+            if path.startswith("/api/library/dedup/scan"):
+                return {
+                    "duplicate_groups": [
+                        {
+                            "score": 0.96,
+                            "items": [{"id": pub_a, "short_id": "Q-c65f1f5f"}, {"id": pub_b, "short_id": "Q-d75f1f5f"}],
+                        }
+                    ],
+                    "variant_suggestions": [
+                        {"score": 0.82, "a": {"short_id": "Q-c65f1f5f"}, "b": {"short_id": "Q-d75f1f5f"}}
+                    ],
+                    "variant_groups": [],
+                }
+            if path == f"/api/library/{pub_a}":
+                return {
+                    "publication": {
+                        "id": pub_a,
+                        "source_filename": "高三一模.pdf",
+                        "number": 4,
+                        "version": 2,
+                        "question_type": "single_choice",
+                        "content": {"stem": "函数题"},
+                    },
+                    "history": [{"id": pub_a, "version": 2}, {"id": "old", "version": 1}],
+                    "versions": [{"id": "old", "version": 1}],
+                    "sources": [{"paper_id": "p1"}],
+                }
+            if path == f"/api/library/{pub_a}/solution":
+                return {"solution": {"answer": "B", "analysis": "求导即可"}, "previous_solution": None}
+            if path.startswith("/api/library/onenote/notes"):
+                return {"ok": True, "total": 3, "items": []}
+            if path.startswith("/api/library?"):
+                return {
+                    "total": 20,
+                    "offset": 10,
+                    "has_more": True,
+                    "next_offset": 20,
+                    "facets": {
+                        "type": {"single_choice": 12},
+                        "review": {"human": 18, "ai": 2},
+                        "answer": {"yes": 15, "no": 5},
+                    },
+                    "presence": {},
+                    "tag_work": {},
+                    "items": [
+                        {
+                            "id": pub_a,
+                            "source_filename": "高三一模.pdf",
+                            "number": 4,
+                            "question_type": "single_choice",
+                            "version": 2,
+                            "content": {"stem": "函数题"},
+                        }
+                    ],
+                }
+            raise AssertionError(f"unexpected GET: {path}")
+
+        def fake_post(path, body=None, **_kwargs):
+            seen_posts.append((path, body))
+            if path == "/api/library/drafts":
+                return {
+                    "draft": {
+                        "id": draft_id,
+                        "title": body["title"],
+                        "ids": body["ids"],
+                        "revision": 1,
+                        "print_options": body.get("print_options") or {},
+                    }
+                }
+            if path == "/api/library/variants/bind":
+                return {"variant_group_id": "vg1", "items": [{"short_id": "Q-c65f1f5f"}, {"short_id": "Q-d75f1f5f"}]}
+            if path == "/api/library/variants/unbind":
+                return {"ok": True}
+            if path.endswith("/onenote/open?wait=1"):
+                return {
+                    "ok": True,
+                    "opened": True,
+                    "onenote": {"title": "导数笔记", "notebook_name": "数学", "section_name": "导数"},
+                }
+            if path.endswith("/onenote/create"):
+                return {"ok": True, "onenote": {"title": "新建页", "notebook_name": "数学", "section_name": "导数"}}
+            if path == "/api/backup/export":
+                return {"name": "backup.zip", "size": 2048}
+            raise AssertionError(f"unexpected POST: {path}")
+
+        def fake_put(path, body=None, **_kwargs):
+            seen_puts.append((path, body))
+            return {
+                "draft": {
+                    "id": draft_id,
+                    "title": body["title"],
+                    "ids": body["ids"],
+                    "revision": 3,
+                    "print_options": body.get("print_options") or {},
+                }
+            }
+
+        fake.get.side_effect = fake_get
+        fake.post.side_effect = fake_post
+        fake.put.side_effect = fake_put
+        with mock.patch.object(cli, "Client", return_value=fake), tempfile.TemporaryDirectory() as tmp_dir:
+            # 1) library extended filters + skill guide check
+            code_lib, lib_json = run_json(
+                "library",
+                "--paper",
+                "高三一模",
+                "--sort",
+                "number",
+                "--offset",
+                "10",
+                "--exclude-used-days",
+                "7",
+                "--has-analysis",
+                "--untagged",
+            )
+            self.assertEqual(code_lib, 0)
+            self.assertTrue(lib_json["has_more"])
+            self.assertIn("exclude_used_days=7", seen_gets[-1])
+            self.assertIn("has_analysis=yes", seen_gets[-1])
+            self.assertIn("untagged_knowledge=1", seen_gets[-1])
+
+            # 2) stats, detail, tags, usage, dedup
+            code_st, out_st, _ = run("stats", "--paper", "高三一模")
+            self.assertEqual(code_st, 0)
+            self.assertIn("共 20 道已入库题目", out_st)
+            self.assertIn("OneNote 已关联笔记：3 道", out_st)
+
+            code_det, out_det, _ = run("detail", "Q-c65f1f5f")
+            self.assertEqual(code_det, 0)
+            self.assertIn("求导即可", out_det)
+            self.assertIn("共 2 个版本", out_det)
+
+            code_tags, out_tags, _ = run("tags", "--kind", "method")
+            self.assertEqual(code_tags, 0)
+            self.assertIn("分类讨论", out_tags)
+            self.assertNotIn("导数（直接", out_tags)
+
+            code_usg, out_usg, _ = run("usage")
+            self.assertEqual(code_usg, 0)
+            self.assertIn("周测一", out_usg)
+
+            code_dup, out_dup, _ = run("dedup", "scan")
+            self.assertEqual(code_dup, 0)
+            self.assertIn("疑似重题簇 1 组", out_dup)
+
+            # 3) drafts create / update + variants bind / unbind + onenote open / create
+            code_dc, out_dc, _ = run(
+                "drafts",
+                "create",
+                "--title",
+                "新周测",
+                "--questions",
+                "Q-c65f1f5f",
+                "Q-d75f1f5f",
+                "--paper-spec",
+                "a3_2col",
+                "--scoring",
+            )
+            self.assertEqual(code_dc, 0)
+            self.assertIn("新周测", out_dc)
+            self.assertEqual(seen_posts[-1][1]["ids"], [pub_a, pub_b])
+
+            code_du, _ = run_json("drafts", "update", draft_id, "--title", "修订周测", "--no-scoring")
+            self.assertEqual(code_du, 0)
+            self.assertEqual(seen_puts[-1][1]["revision"], 2)
+            self.assertFalse(seen_puts[-1][1]["print_options"]["scoring_enabled"])
+
+            code_vb, out_vb, _ = run("variants", "bind", "Q-c65f1f5f", "Q-d75f1f5f")
+            self.assertEqual(code_vb, 0)
+            self.assertIn("vg1", out_vb)
+
+            code_vu, _ = run_json("variants", "unbind", "Q-c65f1f5f")
+            self.assertEqual(code_vu, 0)
+
+            code_oo, out_oo, _ = run("onenote", "open", "Q-c65f1f5f")
+            self.assertEqual(code_oo, 0)
+            self.assertIn("已在桌面版 OneNote 中打开", out_oo)
+
+            code_oc, out_oc, _ = run("onenote", "create", "Q-c65f1f5f")
+            self.assertEqual(code_oc, 0)
+            self.assertIn("创建并绑定笔记页：新建页（数学/导数）", out_oc)
+
+            # 4) All new MCP tools dispatch cleanly
+            det_res, det_imgs = cli.mcp_call(fake, "get_question_detail", {"ref": "Q-c65f1f5f"})
+            self.assertEqual(det_res["solution"]["answer"], "B")
+            self.assertEqual(det_imgs, ["C:/tmp/Q-c65f1f5f-crop.png"])
+            self.assertEqual(cli.mcp_call(fake, "library_stats", {})[0]["total_questions"], 20)
+            self.assertEqual(cli.mcp_call(fake, "list_tags", {"kind": "knowledge"})[0]["total"], 1)
+            self.assertEqual(cli.mcp_call(fake, "scan_duplicates", {})[0]["duplicate_groups"][0]["score"], 0.96)
+            self.assertEqual(
+                cli.mcp_call(fake, "bind_variants", {"question_ids": ["Q-c65f1f5f", "Q-d75f1f5f"]})[0][
+                    "variant_group_id"
+                ],
+                "vg1",
+            )
+            self.assertTrue(cli.mcp_call(fake, "unbind_variant", {"question_id": "Q-c65f1f5f"})[0]["ok"])
+            self.assertTrue(cli.mcp_call(fake, "open_onenote_note", {"ref": "Q-c65f1f5f"})[0]["opened"])
+            self.assertTrue(cli.mcp_call(fake, "create_onenote_note", {"ref": "Q-c65f1f5f"})[0]["ok"])
+            self.assertEqual(cli.mcp_call(fake, "list_exam_usage", {})[0]["total"], 1)
+            self.assertEqual(cli.mcp_call(fake, "list_drafts", {})[0]["total"], 1)
+            self.assertEqual(cli.mcp_call(fake, "get_draft", {"draft_id": draft_id})[0]["draft"]["id"], draft_id)
+            self.assertEqual(
+                cli.mcp_call(fake, "save_draft", {"title": "AI 卷", "question_ids": ["Q-c65f1f5f"]})[0]["draft"][
+                    "title"
+                ],
+                "AI 卷",
+            )
+            self.assertEqual(cli.mcp_call(fake, "create_backup", {"dest": tmp_dir})[0]["name"], "backup.zip")
+
+        with mock.patch.object(cli, "Client", side_effect=AssertionError("offline command")):
+            code_sk, skill_out, _ = run("skill")
+            self.assertEqual(code_sk, 0)
+            for token in (
+                "tiyouju stats",
+                "tiyouju detail",
+                "tiyouju tags",
+                "tiyouju dedup scan",
+                "tiyouju variants bind",
+                "tiyouju onenote read",
+                "tiyouju usage",
+                "tiyouju drafts",
+            ):
+                self.assertIn(token, skill_out)

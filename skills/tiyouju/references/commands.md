@@ -49,10 +49,18 @@
 | `unapprove <试卷> <题号>` | 撤销 AI 打的勾。人工通过的不能撤 |
 | `reread <试卷> <题号> [--force]` | 让软件的读题模型重读一道题 |
 | `publish <试卷>` | 把通过的题入库，并列出还没通过、没入库的题 |
-| `library [关键词…] [--paper P] [--type T] [--review human\|ai] [--answer yes\|no] [--tag 知识点] [--limit N]` | 在正式题库里搜题（可按试卷、题型、题源和知识点汇总特点） |
+| `library [关键词…] [--paper P] [--type T] [--review human\|ai] [--answer yes\|no] [--tag 知识点] [--sort S] [--offset N] [--exclude-used-days D] [--has-analysis] [--untagged] [--limit N]` | 在正式题库里分面搜题、翻页、排除近期已用题或查缺答案/未贴标题目 |
+| `stats [--paper P]` | 只读统计全库或指定试卷的题型、审核、答案、OneNote 笔记与草稿全景 |
 | `locate <Q-xxxxxxxx \| UUID \| 定位文本>` | 通过短码或复制定位文本秒级调出已入库题干、答案、标签与本机原卷图 |
+| `detail <Q-xxxxxxxx \| UUID \| 定位文本>` | 读取单题完整版本历史、一题多源证据、已保存答案解析与本机原卷图 |
+| `tags [--kind knowledge\|method]` | 只读查看当前用户的知识点与解题方法标签树（含题目计数） |
+| `dedup scan` | 只读扫描潜在重题簇、相似变式建议与已有变式题组（不自动合并或删题） |
+| `variants <bind \| unbind> …` | 绑定 2 道及以上同类题为变式题组，或解除一道题的绑定 |
+| `usage [--limit N]` | 只读查看近期组卷出题记录（防撞车） |
+| `drafts <list \| show \| create \| update> …` | 查看或保存组卷草稿（支持传 `Q-xxxxxxxx` 与 A4/A3 参数，不提供删草稿命令） |
 | `onenote list [--paper P] [--q 关键词] [--limit N]` | 只读列出已关联 OneNote 笔记的正式题目 |
 | `onenote read <ref…> [--no-images] [--max-pages N]` | 严格只读提取关联 OneNote 页面的文字块与手写墨迹截图，供总结笔记和提建议 |
+| `onenote open <ref…>` / `onenote create <ref…>` | 在桌面版 OneNote 打开本题笔记页，或为尚未绑定的题目新建答题页并关联 |
 | `features [--enable knowledge_tags ai_answer] [--disable ...]` | 不加选项只读查看开关；明确要求生成后仅打开所需项，不自动发起模型请求 |
 | `enrich tasks [--ids 入库UUID…] [--limit 1–50]` | 只读列出待当前助手处理的任务，默认最多50个；不开功能、不调用云API |
 | `enrich auto [--tags on\|off] [--answer on\|off]` | 默认只读；`tags` 为兼容参数，当前版本始终不启用入库自动贴标。答案自动排队只在用户明确授权后设置，不开功能、不改 API、不扫旧题 |
@@ -243,12 +251,14 @@ tiyouju folders undo --json
 - `cut_questions(paper, questions, replace_scope="none", ...)`：助手批量切题，双轨支持直接录入文字或保留原图；严格保护已通过/已入库/已编辑题卡，支持撤销。
 - `edit_question_layout(paper, action="regions"|"renumber"|"split"|"merge"|"undo", ...)`：微调原卷范围、改号、拆合或撤销布局/批量切题操作。
 - `read_cut_questions(paper, cards, wait=false)`：把原图题卡提交给软件内置看图模型进行识读。
-- `list_cards(paper, filter)`、`show_card(paper, card)`：返回文字，以及原卷截图（有候选图时是编号截图）和配图
+- `list_cards(paper, filter, summary)`、`show_card(paper, card)`：返回文字，以及原卷截图（有候选图时是编号截图）和配图；`summary=true` 只返回统计摘要
 - `fix_card(paper, card, stem, options, type, answer, analysis, origin, section)`：`options` 里值为空字符串，表示删掉这个选项；`section` 设置章节小节目录
 - `set_figures(paper, card, use | keep | none)`
 - `approve_cards(paper, cards | green)`、`unapprove_card(paper, card)`、`reread_card(paper, card)`
-- `publish_paper(paper)`、`search_library(keywords, paper, type, review, answer, tag, limit)`、`locate_question(ref)`
-- `list_onenote_notes(paper, q, limit)`、`read_onenote_note(ref, include_images=true, max_pages=3)`：严格只读提取关联 OneNote 页面的文字与手写墨迹截图，用来复盘思路并提出建议
+- `publish_paper(paper)`、`library_stats(paper)`、`search_library(keywords, paper, type, review, answer, tag, sort, offset, exclude_used_days, has_analysis, untagged, limit)`
+- `locate_question(ref)`、`get_question_detail(ref)`、`list_tags(kind)`、`scan_duplicates()`、`bind_variants(question_ids)`、`unbind_variant(question_id)`
+- `list_onenote_notes(paper, q, limit)`、`read_onenote_note(ref, include_images=true, max_pages=3)`、`open_onenote_note(ref)`、`create_onenote_note(ref)`：完整覆盖 OneNote 笔记只读总结与跳页/建页（不删不改原笔记）
+- `list_exam_usage(limit)`、`list_drafts()`、`get_draft(draft_id)`、`save_draft(title, question_ids, draft_id, print_options)`、`create_backup(dest, papers, folders)`
 - `configure_features(enable, disable)`：不传选项只看开关；按明确生成需求启用所需的 `knowledge_tags`、`ai_answer`
 - `configure_enrichment_auto(tags, answer)`：不传只看现状；当前 tags 保持关闭，标签只主动请求；答案自动排队仅在明确授权后设置，不暗自开功能、改模型或处理旧题。
 - `list_enrichment_tasks(ids, limit≤50)`、`prepare_enrichment(publication_id, kinds, agent)`：准备后当前助手自己看图、选标签或解题

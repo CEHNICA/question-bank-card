@@ -3,6 +3,18 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.3.9
+
+**CLI / Skill / MCP 协同全面升级：OneNote 笔记只读总结、全景统计、重题扫描与防撞车智慧组卷**
+
+- **OneNote 笔记只读提取与快速协同（`backend/core/library_onenote.py`、`tiyouju_cli.py`）**：新增 `GET /api/library/onenote/notes` 与 `GET /api/library/<id>/onenote/read` 严格只读接口，CLI 开放 `tiyouju onenote list/read/open/create`，MCP 开放 `list_onenote_notes` / `read_onenote_note` / `open_onenote_note` / `create_onenote_note`，支持提取文本块与裁边压缩手写墨迹图供 AI 总结思路、指出疏漏与给复习建议。
+- **读库统计、单题详情、标签目录、重题扫描与组卷草稿（`tiyouju_cli.py`、`skills/tiyouju/`）**：
+  - 新增 `stats`（`library_stats`）、`detail`（`get_question_detail`）、`tags`（`list_tags`）、`usage`（`list_exam_usage`）、`drafts list/show/create/update`（`list_drafts`/`get_draft`/`save_draft`）、`dedup scan`（`scan_duplicates`）及 `variants bind/unbind`（`bind_variants`/`unbind_variant`）；
+  - 扩展 `library` / `search_library` 分页（`offset`）、`sort`、`exclude_used_days`、`has_analysis`、`untagged`；MCP 补全 `locate_question`、`list_cards(summary)` 与 `create_backup`，并同步更新 `tiyouju skill` 离线指南与技能手册。
+  - 修复 `/api/library/locate` 返回 `local_images` 时遗漏 `crop.png` 原卷主图的问题，确保 Agent 定位入库题时可直接看原卷截图。
+- **社区存储与官网升级（`community/`、`website/`）**：社区采用 R2 热层 + 123 云盘 WebDAV 定时冷归档分层，冷读 `stream.tee()` 流式返回同时带 `FixedLengthStream` 异步回温；官网升级深色曜石翡翠主题并突出 AI-Native Skill/MCP、OneNote 联动、杂卷抽卡与 4 大 Agent 日常场景。
+
+
 ## 2.3.8
 
 **原卷重框重识、社区多范围压缩上传、OneNote 思路随包分享与「来自云端」自动归类**

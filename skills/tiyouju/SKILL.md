@@ -145,13 +145,15 @@ tiyouju publish latest
 
 命令与参数细节见 [references/commands.md](references/commands.md#整理题库文件夹)。
 
-## 和 AI 共研题目与复盘 OneNote 笔记（严格只读）
+## 和 AI 共研题目、统计查重、组卷与复盘 OneNote 笔记
 
-用户可以通过 CLI 或 MCP 直接让当前助手配合查题、讨论、总结规律与复盘手写笔记：
+用户可以通过 CLI 或 MCP 直接让当前助手配合查题、讨论、总结规律、防撞车组卷与复盘手写笔记：
 
-1. **核对单题与探讨思路**：未入库题使用 `tiyouju show <paper> <card>`（MCP `show_card`）；已入库题只要用户贴来 `Q-xxxxxxxx` 短码、UUID 或复制定位文本，运行 `tiyouju locate <ref>`（MCP `locate_question`）即可秒级调出题干、答案、标签、原卷截图和配图，核查是否有误或一起讨论解法。
-2. **直读题库与试卷库总结规律**：结合 `tiyouju papers`（MCP `list_papers`）、`tiyouju cards`（MCP `list_cards`）、`tiyouju library --paper <p> --type <t>`（MCP `search_library` 已支持 `paper`/`type`）及 `tiyouju folders list`（MCP `list_folders`），批量读取试卷与专题特点、总结高频考点与题型分布。
-3. **只读读取 OneNote 笔记提建议**：运行 `tiyouju onenote list [--paper <p>] [--q 关键词]`（MCP `list_onenote_notes`）查看关联笔记列表，再用 `tiyouju onenote read <ref>`（MCP `read_onenote_note`）只读提取该页 OneNote 的文字块与手写墨迹截图，帮助用户总结做题思路、指出疏漏或给出复习建议（**绝不修改或覆写用户 OneNote 原笔记**）。
+1. **全景统计与单题共研**：`tiyouju stats [--paper <p>]`（MCP `library_stats`）统计全库或单份资料的题型/审核/答案/OneNote 分布；未入库题用 `tiyouju show <paper> <card>`（MCP `show_card`）；已入库题支持直接粘贴 `Q-xxxxxxxx` 短码、UUID 或定位文本，用 `tiyouju locate <ref>`（MCP `locate_question`）秒查题干与原卷图，或用 `tiyouju detail <ref>`（MCP `get_question_detail`）一次查看版本历史、一题多源证据、已保存答案解析与原卷图。
+2. **直读题库、标签树与防撞车选题**：结合 `tiyouju papers`（`list_papers`）、`tiyouju cards [--summary]`（`list_cards`）、`tiyouju tags`（`list_tags` 只读查看标签目录）、`tiyouju library --paper <p> --type <t> --sort ... --offset ... --exclude-used-days <d> --has-analysis --untagged`（MCP `search_library`）以及 `tiyouju usage`（`list_exam_usage` 查看近期用题记录），批量分析试卷命题特点并筛选不撞车的好题。
+3. **重题只读扫描与变式题组**：用 `tiyouju dedup scan`（MCP `scan_duplicates`）只读发现相似/重复题簇与变式建议（**绝不自动合并或删题**），并用 `tiyouju variants bind/unbind`（`bind_variants`/`unbind_variant`）管理可互换变式题组。
+4. **智慧组卷草稿与备份**：用 `tiyouju drafts list|show|create|update`（MCP `list_drafts`/`get_draft`/`save_draft`）把选好的题目列表（支持 `Q-xxxxxxxx`）和 A4/A3 双栏排版参数直接保存成组卷草稿（**绝不删除已有草稿**），供用户打开预览一键打印导出；用 `tiyouju backup`（`create_backup`）按需备份。
+5. **OneNote 深度协同（严格只读内容，不改已有笔记）**：运行 `tiyouju onenote list [--paper <p>] [--q 关键词]`（`list_onenote_notes`）查看关联笔记，再用 `tiyouju onenote read <ref>`（`read_onenote_note`）提取文字块与手写墨迹截图为老师总结思路和提复习建议；需要老师当场手写或新开一页时，可用 `tiyouju onenote open <ref>`（`open_onenote_note`）或 `tiyouju onenote create <ref>`（`create_onenote_note`）。
 
 ## 不能运行命令时
 
