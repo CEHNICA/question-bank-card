@@ -1,6 +1,14 @@
 import { Hono } from "hono";
 import type { AppBindings } from "./env.ts";
-import { activeStorageSummary, loadPack, maxTotalR2Bytes, activeR2Bytes, packBuyerCount, purgePackStorage } from "./packs.ts";
+import {
+  activeStorageSummary,
+  loadPack,
+  maxTotalR2Bytes,
+  packBuyerCount,
+  purgePackStorage,
+  runColdArchival,
+} from "./packs.ts";
+import { probeWebDav } from "./storage.ts";
 import { fail, intParam, nowIso, readJson, requireAdmin, text } from "./util.ts";
 
 export const adminRoutes = new Hono<AppBindings>();
@@ -31,12 +39,31 @@ adminRoutes.get("/storage", async (c) => {
     used_bytes: usedBytes,
     r2_used_bytes: usedBytes,
     webdav_used_bytes: summary.webdav_used_bytes,
+    r2_hot_target_bytes: summary.r2_hot_target_bytes,
+    hot_packs: summary.hot_packs,
+    cold_only_packs: summary.cold_only_packs,
+    archive_errors: summary.archive_errors,
     max_total_bytes: maxBytes,
     active_packs: Number(counts?.active_packs ?? 0),
     uploading_packs: Number(counts?.uploading_packs ?? 0),
     recoverable_packs: Number(counts?.recoverable_packs ?? 0),
     recoverable_bytes: Number(counts?.recoverable_bytes ?? 0),
   });
+});
+
+adminRoutes.post("/storage/sync", async (c) => {
+  const body: Record<string, unknown> = await readJson(c).catch(() => ({}));
+  const probe = await probeWebDav(c.env);
+  const probeOnly = Boolean(body.probe_only);
+  const archival =
+    probeOnly || !probe.ok
+      ? { attempted: 0, archived: 0, failed: 0, errors: [] }
+      : await runColdArchival(c.env, {
+          forceAll: Boolean(body.force),
+          limit: intParam(body.limit, 3, 1, 10),
+        });
+  const storage = await activeStorageSummary(c.env);
+  return c.json({ ok: probe.ok && archival.failed === 0, probe, archival, storage }, probe.ok ? 200 : 502);
 });
 
 adminRoutes.get("/packs", async (c) => {

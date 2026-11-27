@@ -478,3 +478,129 @@ test("preview retains OneNote badge fields when has_onenote_notes is enabled", a
   assert.equal(detail.data.preview.onenote_count, 3);
   assert.equal(detail.data.preview.onenote_preview, "data:image/png;base64,iVBORw0KGgo=");
 });
+
+test("hybrid mode uploads to R2 hot tier, archives cold packs via HEAD-verified WebDAV, rewarms on read and cleans both", async () => {
+  const davStore = new Map<string, Uint8Array>();
+  const methodsSeen: string[] = [];
+  let forceHeadMismatch = false;
+  const fakeDavFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method || "GET").toUpperCase();
+    methodsSeen.push(`${method} ${url}`);
+    if (method === "MKCOL") {
+      assert.ok(url.endsWith("/"), `MKCOL 必须带末尾斜杠: ${url}`);
+      return new Response("", { status: 201 });
+    }
+    if (method === "PROPFIND") {
+      return new Response("", { status: 207 });
+    }
+    if (method === "PUT") {
+      const buf = new Uint8Array(await new Response(init?.body as BodyInit).arrayBuffer());
+      davStore.set(url, buf);
+      return new Response("", { status: 201 });
+    }
+    if (method === "HEAD") {
+      const hit = davStore.get(url);
+      if (!hit) return new Response("", { status: 404 });
+      const reportedLen = forceHeadMismatch ? hit.byteLength + 17 : hit.byteLength;
+      return new Response("", { status: 200, headers: { "Content-Length": String(reportedLen) } });
+    }
+    if (method === "GET") {
+      const hit = davStore.get(url);
+      return hit ? new Response(hit.slice(), { status: 200 }) : new Response("not found", { status: 404 });
+    }
+    if (method === "DELETE") {
+      davStore.delete(url);
+      return new Response("", { status: 204 });
+    }
+    return new Response("", { status: 405 });
+  }) as typeof fetch;
+
+  const env = makeEnv({
+    PACK_STORAGE_MODE: "hybrid",
+    WEBDAV_BASE_URL: "https://webdav.123pan.cn/webdav",
+    WEBDAV_DIR: "tiyouju-packs",
+    WEBDAV_USERNAME: "demo-user",
+    WEBDAV_PASSWORD: "demo-password",
+    COLD_ARCHIVE_AGE_DAYS: "7",
+    R2_HOT_TARGET_MB: "5500",
+    ARCHIVE_BATCH_SIZE: "2",
+    WEBDAV_FETCH: fakeDavFetch,
+  });
+  const author = new Client(env);
+  await author.register("hyb_author");
+  const admin = new Client(env);
+  await admin.register("hyb_admin");
+  promoteAdmin(env, "hyb_admin");
+
+  const zip = makePackZip({ cover: true });
+  const up = await author.json("POST", "/api/packs", packForm(zip, { title: "（虚构）冷热分层包" }));
+  assert.equal(up.status, 201);
+  const id = up.data.id as string;
+
+  // 前台上传全落 R2 热层，零 WebDAV 请求
+  assert.ok(env.PACKS.objects.has(`packs/${id}.zip`));
+  assert.equal(methodsSeen.length, 0);
+  await admin.json("POST", `/api/admin/packs/${id}/review`, { action: "approve" });
+
+  // 当 HEAD 核验大小不一致时，绝不能删掉 R2 热副本，且要记下 archive_error
+  forceHeadMismatch = true;
+  const oldIso = new Date(Date.now() - 10 * 86400 * 1000).toISOString();
+  env.DB.db.prepare("UPDATE packs SET created_at = ?, last_downloaded_at = NULL WHERE id = ?").run(oldIso, id);
+  const failedCron = await runMaintenance(env, Date.now());
+  assert.equal(failedCron.cold_archived, 0);
+  assert.equal(failedCron.cold_archive_failed, 1);
+  assert.ok(env.PACKS.objects.has(`packs/${id}.zip`), "核验失败必须保留 R2 源文件");
+  const errRow = env.DB.db.prepare("SELECT r2_cached, archive_error FROM packs WHERE id = ?").get(id) as Record<string, unknown>;
+  assert.equal(errRow.r2_cached, 1);
+  assert.match(String(errRow.archive_error || ""), /大小不一致/);
+
+  // 恢复正常 HEAD 核验后，管理员触发探活与归档
+  forceHeadMismatch = false;
+  const syncRes = await admin.json("POST", "/api/admin/storage/sync", { force: false, limit: 3 });
+  assert.equal(syncRes.status, 200, JSON.stringify(syncRes.data));
+  assert.equal(syncRes.data.probe.ok, true);
+  assert.equal(syncRes.data.archival.archived, 1);
+  assert.equal(env.PACKS.objects.has(`packs/${id}.zip`), false, "归档核验通过后应释放 R2 热副本");
+  const expectedDavUrl = `https://webdav.123pan.cn/webdav/tiyouju-packs/packs/${id}.zip`;
+  assert.ok(davStore.has(expectedDavUrl));
+
+  // 冷包首次下载从 WebDAV 拉回并自动回热到 R2
+  const dlLink = await author.json("POST", `/api/packs/${id}/download`, {});
+  const dlResp = await new Client(env).request("GET", dlLink.data.url);
+  assert.equal(dlResp.status, 200);
+  const dlBytes = new Uint8Array(await dlResp.arrayBuffer());
+  assert.deepEqual(dlBytes, zip);
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.ok(env.PACKS.objects.has(`packs/${id}.zip`), "冷包下载后应自动回热写回 R2");
+  const rewarmRow = env.DB.db.prepare("SELECT r2_cached, last_downloaded_at FROM packs WHERE id = ?").get(id) as Record<string, unknown>;
+  assert.equal(rewarmRow.r2_cached, 1);
+  assert.ok(rewarmRow.last_downloaded_at);
+
+  // 删除时应同时清理 R2 缓存、123 冷库和封面
+  const del = await author.json("DELETE", `/api/packs/${id}`, {});
+  assert.equal(del.status, 200);
+  assert.equal(env.PACKS.objects.has(`packs/${id}.zip`), false);
+  assert.equal(env.PACKS.objects.has(`covers/${id}.png`), false);
+  assert.equal(davStore.has(expectedDavUrl), false);
+});
+
+test("ordinary users hit MAX_PENDING_PER_USER cap while admins bypass it", async () => {
+  const env = makeEnv({ MAX_PENDING_PER_USER: "2", MAX_DAILY_UPLOADS_PER_USER: "10" });
+  const regular = new Client(env);
+  await regular.register("pending_reg");
+  const admin = new Client(env);
+  await admin.register("pending_adm");
+  promoteAdmin(env, "pending_adm");
+
+  const zip = makePackZip();
+  assert.equal((await regular.json("POST", "/api/packs", packForm(zip, { title: "（虚构）待审1" }))).status, 201);
+  assert.equal((await regular.json("POST", "/api/packs", packForm(zip, { title: "（虚构）待审2" }))).status, 201);
+  const blocked = await regular.json("POST", "/api/packs", packForm(zip, { title: "（虚构）待审3" }));
+  assert.equal(blocked.status, 429);
+  assert.match(blocked.data.error, /排队审核/);
+
+  for (let i = 1; i <= 3; i += 1) {
+    assert.equal((await admin.json("POST", "/api/packs", packForm(zip, { title: `（虚构）管理员待审${i}` }))).status, 201);
+  }
+});

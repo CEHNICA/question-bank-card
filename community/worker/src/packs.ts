@@ -18,7 +18,19 @@ import {
   timingSafeEqual,
 } from "./util.ts";
 import { assertCanSell, authorPayment, parsePriceYuan } from "./sales.ts";
-import { WEBDAV_PREFIX, deleteStoredObjects, getPackStream, isWebDavMode, packStorageKey, putPackObject } from "./storage.ts";
+import {
+  WEBDAV_PREFIX,
+  archiveR2ObjectToWebDav,
+  deleteStoredObjects,
+  getPackStream,
+  hasWebDavCredentials,
+  isHybridMode,
+  isWebDavKey,
+  isWebDavMode,
+  packStorageKey,
+  putPackObject,
+  storageMode,
+} from "./storage.ts";
 
 export const MANIFEST_NAME = "题有据备份.json";
 export const DATABASE_NAME = "题库.sqlite3";
@@ -29,8 +41,12 @@ const ONENOTE_PREVIEW_MAX_CHARS = 180_000;
 const DOWNLOAD_TTL_MS = 5 * 60 * 1000;
 const DIRECT_MULTIPART_MAX_BYTES = 20 * 1024 * 1024;
 const DEFAULT_MAX_TOTAL_R2_MB = 8500;
+const DEFAULT_R2_HOT_TARGET_MB = 5500;
+const DEFAULT_COLD_ARCHIVE_AGE_DAYS = 7;
+const DEFAULT_ARCHIVE_BATCH_SIZE = 3;
 const DEFAULT_USER_STORAGE_QUOTA_MB = 500;
 const DEFAULT_DAILY_UPLOADS_PER_USER = 5;
+const DEFAULT_MAX_PENDING_PER_USER = 5;
 export const STAGES = ["小学", "初中", "高中", "大学", "其他"];
 
 type PackRow = {
@@ -42,8 +58,13 @@ type PackRow = {
   originality: string;
   include_originals: number;
   r2_key: string;
+  cold_key: string | null;
   cover_key: string | null;
   r2_purged_at: string | null;
+  r2_cached: number;
+  last_downloaded_at: string | null;
+  archived_at: string | null;
+  archive_error: string;
   size: number;
 };
 
@@ -191,9 +212,29 @@ function maxDailyUploads(env: Env): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_DAILY_UPLOADS_PER_USER;
 }
 
+function r2HotTargetBytes(env: Env): number {
+  const mb = Number(env.R2_HOT_TARGET_MB || DEFAULT_R2_HOT_TARGET_MB);
+  return (Number.isFinite(mb) && mb > 0 ? mb : DEFAULT_R2_HOT_TARGET_MB) * 1024 * 1024;
+}
+
+function coldArchiveAgeDays(env: Env): number {
+  const days = Number(env.COLD_ARCHIVE_AGE_DAYS ?? DEFAULT_COLD_ARCHIVE_AGE_DAYS);
+  return Number.isFinite(days) && days >= 0 ? days : DEFAULT_COLD_ARCHIVE_AGE_DAYS;
+}
+
+function archiveBatchSize(env: Env): number {
+  const n = Number(env.ARCHIVE_BATCH_SIZE || DEFAULT_ARCHIVE_BATCH_SIZE);
+  return Number.isFinite(n) && n >= 1 ? Math.min(20, Math.floor(n)) : DEFAULT_ARCHIVE_BATCH_SIZE;
+}
+
+function maxPendingPerUser(env: Env): number {
+  const n = Number(env.MAX_PENDING_PER_USER || DEFAULT_MAX_PENDING_PER_USER);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_MAX_PENDING_PER_USER;
+}
+
 export async function activeR2Bytes(env: Env): Promise<number> {
   const row = await env.DB.prepare(
-    "SELECT COALESCE(SUM(size), 0) AS total FROM packs WHERE r2_purged_at IS NULL AND r2_key NOT LIKE ?",
+    "SELECT COALESCE(SUM(size), 0) AS total FROM packs WHERE r2_purged_at IS NULL AND r2_cached = 1 AND r2_key NOT LIKE ?",
   )
     .bind(`${WEBDAV_PREFIX}%`)
     .first<{ total: number }>();
@@ -202,9 +243,9 @@ export async function activeR2Bytes(env: Env): Promise<number> {
 
 export async function activeWebDavBytes(env: Env): Promise<number> {
   const row = await env.DB.prepare(
-    "SELECT COALESCE(SUM(size), 0) AS total FROM packs WHERE r2_purged_at IS NULL AND r2_key LIKE ?",
+    "SELECT COALESCE(SUM(size), 0) AS total FROM packs WHERE r2_purged_at IS NULL AND (cold_key LIKE ? OR r2_key LIKE ?)",
   )
-    .bind(`${WEBDAV_PREFIX}%`)
+    .bind(`${WEBDAV_PREFIX}%`, `${WEBDAV_PREFIX}%`)
     .first<{ total: number }>();
   return Number(row?.total ?? 0);
 }
@@ -217,12 +258,27 @@ export async function activeUserBytes(env: Env, userId: number): Promise<number>
 }
 
 export async function activeStorageSummary(env: Env) {
-  const [r2Bytes, webdavBytes] = await Promise.all([activeR2Bytes(env), activeWebDavBytes(env)]);
+  const [r2Bytes, webdavBytes, counts] = await Promise.all([
+    activeR2Bytes(env),
+    activeWebDavBytes(env),
+    env.DB.prepare(
+      `SELECT
+         SUM(CASE WHEN r2_purged_at IS NULL AND r2_cached = 1 THEN 1 ELSE 0 END) AS hot_packs,
+         SUM(CASE WHEN r2_purged_at IS NULL AND cold_key IS NOT NULL AND r2_cached = 0 THEN 1 ELSE 0 END) AS cold_only_packs,
+         SUM(CASE WHEN r2_purged_at IS NULL AND archive_error != '' THEN 1 ELSE 0 END) AS archive_errors
+       FROM packs`,
+    ).first<Record<string, number | null>>(),
+  ]);
+  const mode = storageMode(env);
   return {
-    storage_mode: isWebDavMode(env) ? "webdav" : "r2",
-    used_bytes: isWebDavMode(env) ? webdavBytes : r2Bytes,
+    storage_mode: mode,
+    used_bytes: mode === "webdav" ? webdavBytes : r2Bytes,
     r2_used_bytes: r2Bytes,
     webdav_used_bytes: webdavBytes,
+    r2_hot_target_bytes: r2HotTargetBytes(env),
+    hot_packs: Number(counts?.hot_packs ?? 0),
+    cold_only_packs: Number(counts?.cold_only_packs ?? 0),
+    archive_errors: Number(counts?.archive_errors ?? 0),
   };
 }
 
@@ -235,59 +291,132 @@ export async function packBuyerCount(env: Env, packId: string): Promise<number> 
 
 export async function purgePackStorage(
   env: Env,
-  pack: Pick<PackRow, "id" | "r2_key" | "cover_key" | "r2_purged_at">,
+  pack: Pick<PackRow, "id" | "r2_key" | "cold_key" | "cover_key" | "r2_purged_at">,
   options: { nextStatus?: string; note?: string } = {},
 ): Promise<void> {
-  await deleteStoredObjects(env, [pack.r2_key, pack.cover_key]);
+  await deleteStoredObjects(env, [pack.r2_key, pack.cold_key, pack.cover_key]);
   const now = nowIso();
   if (options.nextStatus) {
     await env.DB.prepare(
-      "UPDATE packs SET status = ?, review_note = COALESCE(?, review_note), cover_key = NULL, r2_purged_at = ?, size = 0, updated_at = ? WHERE id = ?",
+      "UPDATE packs SET status = ?, review_note = COALESCE(?, review_note), cover_key = NULL, cold_key = NULL, r2_cached = 0, archive_error = '', r2_purged_at = ?, size = 0, updated_at = ? WHERE id = ?",
     )
       .bind(options.nextStatus, options.note ?? null, now, now, pack.id)
       .run();
   } else {
     await env.DB.prepare(
-      "UPDATE packs SET cover_key = NULL, r2_purged_at = ?, size = 0, updated_at = ? WHERE id = ?",
+      "UPDATE packs SET cover_key = NULL, cold_key = NULL, r2_cached = 0, archive_error = '', r2_purged_at = ?, size = 0, updated_at = ? WHERE id = ?",
     )
       .bind(now, now, pack.id)
       .run();
   }
 }
 
+export async function runColdArchival(
+  env: Env,
+  options: { nowMs?: number; forceAll?: boolean; limit?: number } = {},
+): Promise<{ attempted: number; archived: number; failed: number; errors: string[] }> {
+  if (!isHybridMode(env) || !hasWebDavCredentials(env)) {
+    return { attempted: 0, archived: 0, failed: 0, errors: [] };
+  }
+  const nowMs = options.nowMs ?? Date.now();
+  const forceAll = Boolean(options.forceAll);
+  const limit = Math.max(1, Math.min(20, options.limit ?? archiveBatchSize(env)));
+  let hotBytes = await activeR2Bytes(env);
+  const targetBytes = r2HotTargetBytes(env);
+  const cutoffIso = new Date(nowMs - coldArchiveAgeDays(env) * 86400 * 1000).toISOString();
+
+  const rows = await env.DB.prepare(
+    `SELECT id, r2_key, size, last_downloaded_at, created_at
+       FROM packs
+      WHERE status = 'approved' AND r2_cached = 1 AND r2_purged_at IS NULL AND r2_key NOT LIKE ?
+      ORDER BY COALESCE(last_downloaded_at, created_at) ASC, downloads ASC
+      LIMIT ?`,
+  )
+    .bind(`${WEBDAV_PREFIX}%`, limit * 3)
+    .all<{ id: string; r2_key: string; size: number; last_downloaded_at: string | null; created_at: string }>();
+
+  let attempted = 0;
+  let archived = 0;
+  let failed = 0;
+  const errors: string[] = [];
+
+  for (const row of rows.results ?? []) {
+    if (attempted >= limit) break;
+    const lastTouch = row.last_downloaded_at || row.created_at;
+    const stale = lastTouch < cutoffIso;
+    const overTarget = hotBytes > targetBytes;
+    if (!forceAll && !stale && !overTarget) continue;
+
+    attempted += 1;
+    try {
+      const { coldKey } = await archiveR2ObjectToWebDav(env, row.id, row.r2_key, Number(row.size || 0));
+      const now = nowIso();
+      await env.DB.prepare(
+        "UPDATE packs SET cold_key = ?, archived_at = ?, archive_error = '', r2_cached = 0, updated_at = ? WHERE id = ?",
+      )
+        .bind(coldKey, now, now, row.id)
+        .run();
+      await deleteStoredObjects(env, [row.r2_key]).catch(() => null);
+      hotBytes = Math.max(0, hotBytes - Number(row.size || 0));
+      archived += 1;
+    } catch (error) {
+      failed += 1;
+      const msg = (error instanceof Error ? error.message : "归档失败").slice(0, 200);
+      errors.push(`${row.id}: ${msg}`);
+      await env.DB.prepare("UPDATE packs SET archive_error = ?, updated_at = ? WHERE id = ?")
+        .bind(msg, nowIso(), row.id)
+        .run()
+        .catch(() => null);
+      if (error instanceof HttpError && (error.status === 401 || error.status === 403 || error.status === 503)) {
+        break;
+      }
+    }
+  }
+  return { attempted, archived, failed, errors };
+}
+
 export async function runPackMaintenance(env: Env, nowMs = Date.now()): Promise<{
   abandoned_uploading: number;
   purged_rejected: number;
+  cold_archived: number;
+  cold_archive_failed: number;
 }> {
   const uploadingCutoff = new Date(nowMs - 2 * 3600 * 1000).toISOString();
   const abandoned = await env.DB.prepare(
-    "SELECT id, r2_key, cover_key FROM packs WHERE status = 'uploading' AND created_at < ? LIMIT 100",
+    "SELECT id, r2_key, cold_key, cover_key FROM packs WHERE status = 'uploading' AND created_at < ? LIMIT 100",
   )
     .bind(uploadingCutoff)
-    .all<{ id: string; r2_key: string; cover_key: string | null }>();
+    .all<{ id: string; r2_key: string; cold_key: string | null; cover_key: string | null }>();
   let abandonedCount = 0;
   for (const row of abandoned.results ?? []) {
-    await deleteStoredObjects(env, [row.r2_key, row.cover_key]).catch(() => null);
+    await deleteStoredObjects(env, [row.r2_key, row.cold_key, row.cover_key]).catch(() => null);
     await env.DB.prepare("DELETE FROM packs WHERE id = ? AND status = 'uploading'").bind(row.id).run();
     abandonedCount += 1;
   }
 
   const rejectedCutoff = new Date(nowMs - 7 * 86400 * 1000).toISOString();
   const staleRejected = await env.DB.prepare(
-    `SELECT p.id, p.r2_key, p.cover_key, p.r2_purged_at
+    `SELECT p.id, p.r2_key, p.cold_key, p.cover_key, p.r2_purged_at
        FROM packs p
       WHERE p.status = 'rejected' AND p.r2_purged_at IS NULL AND p.updated_at < ?
         AND NOT EXISTS (SELECT 1 FROM entitlements e WHERE e.pack_id = p.id)
       LIMIT 100`,
   )
     .bind(rejectedCutoff)
-    .all<Pick<PackRow, "id" | "r2_key" | "cover_key" | "r2_purged_at">>();
+    .all<Pick<PackRow, "id" | "r2_key" | "cold_key" | "cover_key" | "r2_purged_at">>();
   let purgedCount = 0;
   for (const row of staleRejected.results ?? []) {
     await purgePackStorage(env, row);
     purgedCount += 1;
   }
-  return { abandoned_uploading: abandonedCount, purged_rejected: purgedCount };
+
+  const archival = await runColdArchival(env, { nowMs });
+  return {
+    abandoned_uploading: abandonedCount,
+    purged_rejected: purgedCount,
+    cold_archived: archival.archived,
+    cold_archive_failed: archival.failed,
+  };
 }
 
 function uploadRateKey(userId: number): string {
@@ -299,6 +428,13 @@ async function assertUploadAllowed(env: Env, user: SessionUser, incomingBytes: n
   if (!isAdmin) {
     if (await rateLimited(env, uploadRateKey(user.id), maxDailyUploads(env), 24 * 3600 * 1000)) {
       fail(429, `普通用户每天最多上传 ${maxDailyUploads(env)} 个题包，明天再试。`);
+    }
+    const pendingRow = await env.DB.prepare("SELECT COUNT(*) AS n FROM packs WHERE author_id = ? AND status = 'pending'")
+      .bind(user.id)
+      .first<{ n: number }>();
+    const pendingLimit = maxPendingPerUser(env);
+    if (Number(pendingRow?.n ?? 0) >= pendingLimit) {
+      fail(429, `你有 ${pendingLimit} 个待审题包正在排队审核，等管理员处理后再继续上传。`);
     }
     const userUsed = await activeUserBytes(env, user.id);
     const userQuota = maxUserQuotaBytes(env);
@@ -312,7 +448,7 @@ async function assertUploadAllowed(env: Env, user: SessionUser, incomingBytes: n
     const used = await activeR2Bytes(env);
     const limit = maxTotalR2Bytes(env);
     if (used + incomingBytes > limit) {
-      fail(507, "社区免费存储空间已接近上限，请稍后再试或联系管理员清理无效文件。");
+      fail(507, "社区 R2 热层空间已接近上限，请稍后再试或联系管理员清理无效文件。");
     }
   } else if (env.MAX_TOTAL_WEBDAV_MB) {
     const webdavMb = Number(env.MAX_TOTAL_WEBDAV_MB);
@@ -428,7 +564,8 @@ function decodeCoverBase64(raw: unknown): ParsedPack["cover"] {
 export async function loadPack(env: Env, id: string): Promise<PackRow | null> {
   return (
     (await env.DB.prepare(
-      `SELECT id, author_id, title, status, price_cents, originality, include_originals, r2_key, cover_key, r2_purged_at, size
+      `SELECT id, author_id, title, status, price_cents, originality, include_originals,
+              r2_key, cold_key, cover_key, r2_purged_at, r2_cached, last_downloaded_at, archived_at, archive_error, size
          FROM packs WHERE id = ?`,
     )
       .bind(id)
@@ -813,7 +950,7 @@ packRoutes.get("/packs/:id", async (c) => {
         .bind(user.id, row.id)
         .first()) ?? null;
   }
-  const { preview_json: previewJson, r2_key: _r2, rights_confirmed_at: _rights, ...rest } = row;
+  const { preview_json: previewJson, r2_key: _r2, cold_key: _cold, rights_confirmed_at: _rights, ...rest } = row;
   return c.json({
     pack: {
       ...rest,
@@ -871,15 +1008,69 @@ packRoutes.get("/dl/:token", async (c) => {
   const pack = await loadPack(c.env, packId);
   if (!pack || pack.status === "taken_down") fail(404, "这份题包已经下架了。");
   if (pack.r2_purged_at) fail(410, "这份题包文件已被清理。");
-  const stream = await getPackStream(c.env, pack.r2_key);
-  if (!stream) fail(404, "题包文件找不到了，请联系作者。");
-  await c.env.DB.prepare("UPDATE packs SET downloads = downloads + 1 WHERE id = ?").bind(pack.id).run();
+
+  let responseStream: ReadableStream<Uint8Array> | null = null;
+  if (pack.r2_cached !== 0 && !isWebDavKey(pack.r2_key)) {
+    const r2Obj = await c.env.PACKS.get(pack.r2_key);
+    if (r2Obj?.body) {
+      responseStream = r2Obj.body as unknown as ReadableStream<Uint8Array>;
+    }
+  }
+
+  if (!responseStream) {
+    const fallbackKey = pack.cold_key || (isWebDavKey(pack.r2_key) ? pack.r2_key : pack.r2_key);
+    const coldStream = await getPackStream(c.env, fallbackKey);
+    if (!coldStream) fail(404, "题包文件找不到了，请联系作者。");
+
+    if (isHybridMode(c.env) && !isWebDavKey(pack.r2_key)) {
+      const usedHot = await activeR2Bytes(c.env);
+      if (usedHot + pack.size < maxTotalR2Bytes(c.env) * 0.9) {
+        const [clientStream, rewarmStream] = coldStream.tee();
+        responseStream = clientStream;
+        const FixedStream = (
+          globalThis as { FixedLengthStream?: new (len: number) => TransformStream<Uint8Array, Uint8Array> }
+        ).FixedLengthStream;
+        const r2RewarmBody =
+          typeof FixedStream === "function" && pack.size > 0
+            ? rewarmStream.pipeThrough(new FixedStream(pack.size))
+            : rewarmStream;
+        const rewarmTask = putPackObject(
+          c.env,
+          pack.r2_key,
+          r2RewarmBody as unknown as ReadableStream<Uint8Array>,
+          pack.size,
+          pack.author_id,
+        )
+          .then(() =>
+            c.env.DB.prepare("UPDATE packs SET r2_cached = 1, updated_at = ? WHERE id = ?")
+              .bind(nowIso(), pack.id)
+              .run(),
+          )
+          .catch(() => null);
+        try {
+          c.executionCtx.waitUntil(rewarmTask);
+        } catch {
+          await rewarmTask;
+        }
+      } else {
+        responseStream = coldStream;
+      }
+    } else {
+      responseStream = coldStream;
+    }
+  }
+
+  const now = nowIso();
+  await c.env.DB.prepare("UPDATE packs SET downloads = downloads + 1, last_downloaded_at = ? WHERE id = ?")
+    .bind(now, pack.id)
+    .run();
   const safeName = `${pack.title.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "_").slice(0, 60) || "题包"}.zip`;
-  return new Response(stream as unknown as ReadableStream, {
+  return new Response(responseStream as unknown as ReadableStream, {
     headers: {
       "Content-Type": "application/zip",
       "Content-Disposition": `attachment; filename="tiyouju-pack.zip"; filename*=UTF-8''${encodeURIComponent(safeName)}`,
       "Cache-Control": "private, no-store",
+      ...(pack.size > 0 ? { "Content-Length": String(pack.size) } : {}),
     },
   });
 });

@@ -13,6 +13,10 @@ export type Env = {
   MAX_PACK_MB?: string;
   MAX_TOTAL_R2_MB?: string;
   MAX_TOTAL_WEBDAV_MB?: string;
+  R2_HOT_TARGET_MB?: string;
+  COLD_ARCHIVE_AGE_DAYS?: string;
+  ARCHIVE_BATCH_SIZE?: string;
+  MAX_PENDING_PER_USER?: string;
   USER_STORAGE_QUOTA_MB?: string;
   MAX_DAILY_UPLOADS_PER_USER?: string;
   PACK_STORAGE_MODE?: string;

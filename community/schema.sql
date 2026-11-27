@@ -42,6 +42,11 @@ CREATE TABLE IF NOT EXISTS packs (
   r2_key TEXT NOT NULL,
   cover_key TEXT,
   r2_purged_at TEXT,
+  cold_key TEXT,
+  r2_cached INTEGER NOT NULL DEFAULT 1,
+  last_downloaded_at TEXT,
+  archived_at TEXT,
+  archive_error TEXT NOT NULL DEFAULT '',
   size INTEGER NOT NULL DEFAULT 0,
   question_count INTEGER NOT NULL DEFAULT 0,
   paper_count INTEGER NOT NULL DEFAULT 0,
@@ -57,6 +62,7 @@ CREATE TABLE IF NOT EXISTS packs (
 CREATE INDEX IF NOT EXISTS packs_status_created ON packs(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS packs_author ON packs(author_id);
 CREATE INDEX IF NOT EXISTS packs_r2_active ON packs(r2_purged_at, status, created_at);
+CREATE INDEX IF NOT EXISTS packs_hot_lru ON packs(r2_cached, r2_purged_at, status, last_downloaded_at, created_at);
 
 -- 预览由桌面版导出时生成（community-preview.json），网站只存清洗后的副本，不解析 sqlite。
 CREATE TABLE IF NOT EXISTS pack_previews (
