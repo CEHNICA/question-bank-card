@@ -22,6 +22,13 @@ test("社区上传弹窗支持关闭二选一提示、后台浮动进度条与�
   assert.match(html, /\/api\/backup\/community-upload\/tasks/);
 });
 
+test("主菜单在缩小窗口或缩放界面时动态计算 maxHeight 避免底部被遮挡无法滚动到底", () => {
+  assert.match(html, /function positionEagleAppMainMenu\(/);
+  assert.doesNotMatch(html, /id="eagleAppMainMenu"[^>]*max-h-\[84vh\]/);
+  assert.match(html, /overscroll-behavior:\s*contain/);
+  assert.match(html, /has-update-pill/, "有新版本时更新徽标应换到独立底行，避免把左侧标题挤成竖排");
+});
+
 test("题库大文件夹性能关键路径已走缓存与单遍索引优化", () => {
   assert.match(html, /function readUserFoldersCached\(/);
   assert.match(html, /function readDocFolderOverridesCached\(/);

@@ -188,11 +188,26 @@
               <li><strong>个人信息</strong>不会被预先擦掉：姓名、手写、批改痕迹都还在图上。请先确认你有权处理这些资料。</li>
             </ul>
             <div class="about-row"><span>版本</span><strong id="aboutVersion">题有据</strong></div>
+            <div class="about-row"><span>官网</span><strong><a href="https://tiyouju.com/" target="_blank" rel="noopener noreferrer">https://tiyouju.com/</a></strong></div>
             <label class="settings-switch"><span><strong>自动检查更新</strong><small>打开软件后向官网 tiyouju.com 询问有没有新版本。点「下载并安装」才会更新，安装前先备份题库。</small></span><input id="settingsAutoUpdate" type="checkbox" role="switch" checked></label>
             <p id="updateStatusLine" class="side-note"></p>
+            <div id="updateAboutProgress" class="update-progress-box" aria-live="polite" hidden>
+              <div class="update-progress-head">
+                <span id="updateAboutProgressStage">正在准备下载…</span>
+                <strong id="updateAboutProgressPct">0%</strong>
+              </div>
+              <div class="update-progress-track">
+                <div id="updateAboutProgressFill" class="update-progress-fill"></div>
+              </div>
+              <div class="update-progress-meta">
+                <span id="updateAboutProgressBytes">0 MB / -- MB</span>
+                <span id="updateAboutProgressSpeed">连接官网中…</span>
+              </div>
+            </div>
             <button type="button" class="button" id="updateCheckButton">检查更新</button>
             <button type="button" class="button" id="updateInstallButton" hidden>下载并安装</button>
             <div class="about-row"><span>许可证</span><strong>AGPL-3.0</strong></div>
+            <a class="button" href="https://tiyouju.com/" target="_blank" rel="noopener noreferrer">前往官网</a>
             <a class="button" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer">查看源代码</a>
           </section>
         </div>
@@ -891,9 +906,23 @@
     <p id="updateFloatSub" class="update-float-sub">发现新版本，安装前将先备份本地题库。</p>
     <ul id="updateFloatHighlights" class="update-float-list" hidden></ul>
     <p id="updateFloatStatus" class="update-float-status" hidden></p>
+    <div id="updateFloatProgress" class="update-progress-box" aria-live="polite" hidden>
+      <div class="update-progress-head">
+        <span id="updateFloatProgressStage">正在准备下载…</span>
+        <strong id="updateFloatProgressPct">0%</strong>
+      </div>
+      <div class="update-progress-track">
+        <div id="updateFloatProgressFill" class="update-progress-fill"></div>
+      </div>
+      <div class="update-progress-meta">
+        <span id="updateFloatProgressBytes">0 MB / -- MB</span>
+        <span id="updateFloatProgressSpeed">连接官网中…</span>
+      </div>
+    </div>
     <div class="update-float-actions">
       <button id="updateFloatInstall" class="button primary" type="button">立即更新</button>
       <button id="updateFloatLater" class="button" type="button">稍后提醒</button>
+      <a class="button quiet" href="https://tiyouju.com/" target="_blank" rel="noopener noreferrer" style="margin-left:0;text-decoration:none;" title="https://tiyouju.com/">官网 tiyouju.com</a>
       <button id="updateFloatAbout" class="button quiet" type="button">设置</button>
     </div>
   </aside>

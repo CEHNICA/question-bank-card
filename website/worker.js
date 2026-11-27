@@ -372,40 +372,79 @@ async function handleDownload(request, env, ctx, target) {
   // 1) R2 边缘直吐（无回源延迟、全速带宽 + 原生 Range 断点续传/多线程分片）
   if (env?.RELEASES) {
     try {
-      const meta = await env.RELEASES.head(r2Key);
-      if (meta && meta.size > 0) {
-        const parsedRange = parseByteRange(rangeHeader, meta.size);
-        if (parsedRange?.invalid) {
-          return new Response(null, {
-            status: 416,
-            headers: { "Content-Range": `bytes */${meta.size}` },
-          });
-        }
-        const headers = new Headers({
-          "Content-Type": entry.contentType,
-          "Accept-Ranges": "bytes",
-          "Content-Disposition": `${entry.disposition}; filename="${entry.asset.name}"`,
-          "Cache-Control": `public, max-age=${BINARY_CACHE_TTL_SECONDS}`,
-          "X-TiYouJu-Cache": "r2-hit",
-        });
-        if (meta.httpEtag) headers.set("ETag", meta.httpEtag);
+      const headers = new Headers({
+        "Content-Type": entry.contentType,
+        "Accept-Ranges": "bytes",
+        "Content-Disposition": `${entry.disposition}; filename="${entry.asset.name}"`,
+        "Cache-Control": `public, max-age=${BINARY_CACHE_TTL_SECONDS}`,
+        "X-TiYouJu-Cache": "r2-hit",
+      });
 
-        if (isHead) {
+      if (isHead) {
+        const meta = await env.RELEASES.head(r2Key);
+        if (meta && meta.size > 0) {
+          if (meta.httpEtag) headers.set("ETag", meta.httpEtag);
           headers.set("Content-Length", String(meta.size));
           return new Response(null, { status: 200, headers });
         }
-
-        const r2Obj = parsedRange
-          ? await env.RELEASES.get(r2Key, { range: { offset: parsedRange.offset, length: parsedRange.length } })
-          : await env.RELEASES.get(r2Key);
-        if (r2Obj) {
-          if (parsedRange) {
-            headers.set("Content-Length", String(parsedRange.length));
-            headers.set("Content-Range", `bytes ${parsedRange.start}-${parsedRange.end}/${meta.size}`);
+      } else if (!rangeHeader) {
+        const edgeCache = typeof caches !== "undefined" ? caches.default : null;
+        const edgeCacheReq = edgeCache
+          ? new Request(`https://tiyouju.com/__r2_edge/${encodeURIComponent(r2Key)}`)
+          : null;
+        if (edgeCache && edgeCacheReq) {
+          const hit = await edgeCache.match(edgeCacheReq).catch(() => null);
+          if (hit) {
+            const hitHeaders = new Headers(hit.headers);
+            hitHeaders.set("X-TiYouJu-Cache", "edge-hit");
+            return new Response(hit.body, { status: 200, headers: hitHeaders });
+          }
+        }
+        const r2Obj = await env.RELEASES.get(r2Key);
+        if (r2Obj && r2Obj.size > 0) {
+          if (r2Obj.httpEtag) headers.set("ETag", r2Obj.httpEtag);
+          headers.set("Content-Length", String(r2Obj.size));
+          const resp = new Response(r2Obj.body, { status: 200, headers });
+          if (edgeCache && edgeCacheReq && ctx?.waitUntil) {
+            ctx.waitUntil(edgeCache.put(edgeCacheReq, resp.clone()).catch(() => {}));
+          }
+          return resp;
+        }
+      } else {
+        let totalSize = Number(entry.asset.size) || 0;
+        let parsedRange = totalSize > 0 ? parseByteRange(rangeHeader, totalSize) : null;
+        if (!parsedRange) {
+          const meta = await env.RELEASES.head(r2Key);
+          if (meta && meta.size > 0) {
+            totalSize = meta.size;
+            parsedRange = parseByteRange(rangeHeader, totalSize);
+          }
+        }
+        if (parsedRange?.invalid) {
+          return new Response(null, {
+            status: 416,
+            headers: { "Content-Range": `bytes */${totalSize}` },
+          });
+        }
+        if (parsedRange) {
+          const r2Obj = await env.RELEASES.get(r2Key, {
+            range: { offset: parsedRange.offset, length: parsedRange.length },
+          });
+          if (r2Obj && r2Obj.size > 0) {
+            const actualTotal = r2Obj.size;
+            if (parsedRange.start >= actualTotal) {
+              return new Response(null, {
+                status: 416,
+                headers: { "Content-Range": `bytes */${actualTotal}` },
+              });
+            }
+            const actualEnd = Math.min(parsedRange.end, actualTotal - 1);
+            const actualLen = actualEnd - parsedRange.start + 1;
+            if (r2Obj.httpEtag) headers.set("ETag", r2Obj.httpEtag);
+            headers.set("Content-Length", String(actualLen));
+            headers.set("Content-Range", `bytes ${parsedRange.start}-${actualEnd}/${actualTotal}`);
             return new Response(r2Obj.body, { status: 206, headers });
           }
-          headers.set("Content-Length", String(meta.size));
-          return new Response(r2Obj.body, { status: 200, headers });
         }
       }
     } catch {

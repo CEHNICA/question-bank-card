@@ -4387,6 +4387,63 @@ kbd {
   margin-left: auto;
   color: #64748b;
 }
+.update-progress-box {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  margin: 8px 0;
+}
+.update-progress-box[hidden] {
+  display: none;
+}
+.update-progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+}
+.update-progress-head strong {
+  color: #047857;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.update-progress-track {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+.update-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #10b981, #047857);
+  transition: width 0.2s ease;
+}
+.update-progress-fill.is-indeterminate {
+  width: 38% !important;
+  animation: updateProgressIndeterminate 1.25s ease-in-out infinite;
+}
+@keyframes updateProgressIndeterminate {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(300%); }
+}
+.update-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
 @media (max-width: 540px) {
   .update-float-card { right: 12px; bottom: 12px; padding: 14px; }
 }

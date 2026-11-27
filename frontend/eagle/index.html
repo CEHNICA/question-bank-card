@@ -1403,7 +1403,8 @@
       width: 272px;
       max-height: calc(100vh - 54px);
       overflow-y: auto;
-      padding: 8px;
+      overscroll-behavior: contain;
+      padding: 8px 8px 12px 8px;
       border-radius: 14px;
       border: 1px solid rgba(203, 213, 225, 0.85);
       background: rgba(255, 255, 255, 0.94);
@@ -1600,7 +1601,8 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 8px;
+      flex-wrap: wrap;
+      gap: 6px 8px;
       padding: 7px 10px;
       border-radius: 10px;
       background: #f8fafc;
@@ -1621,11 +1623,19 @@
       font-size: 12.5px;
       line-height: 1.25;
       color: #0f172a;
+      white-space: nowrap;
     }
     #eagleAppMainMenu .eagle-menu-footer-sub {
       font-size: 11px !important;
       line-height: 1.25;
       color: #64748b;
+      margin-top: 2px;
+      white-space: nowrap;
+    }
+    #eagleAppMainMenu .eagle-menu-footer-link.has-update-pill .eagle-menu-footer-meta {
+      width: 100%;
+      padding-left: 22px;
+      justify-content: space-between;
       margin-top: 2px;
     }
 
@@ -1950,6 +1960,9 @@
       border: 1px solid var(--line);
       font-size: 12.5px;
     }
+    #eaglePreferencesModal .about-row + .about-row {
+      margin-top: 8px;
+    }
     @media (max-width: 720px) {
       #eaglePreferencesModal .eagle-pref-main {
         flex-direction: column;
@@ -2259,6 +2272,62 @@
     .eagle-update-popup-btn-link:hover {
       background: #f1f5f9;
       color: #0f172a;
+    }
+    .eagle-update-progress {
+      display: grid;
+      gap: 6px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+    }
+    .eagle-update-progress.hidden {
+      display: none;
+    }
+    .eagle-update-progress-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #0f172a;
+    }
+    .eagle-update-progress-head strong {
+      color: #047857;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .eagle-update-progress-track {
+      width: 100%;
+      height: 8px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      overflow: hidden;
+    }
+    .eagle-update-progress-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #10b981, #047857);
+      transition: width 0.2s ease;
+    }
+    .eagle-update-progress-fill.is-indeterminate {
+      width: 38% !important;
+      animation: eagleUpdateIndeterminate 1.25s ease-in-out infinite;
+    }
+    @keyframes eagleUpdateIndeterminate {
+      0% { transform: translateX(-110%); }
+      100% { transform: translateX(300%); }
+    }
+    .eagle-update-progress-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 11px;
+      color: #64748b;
+      font-variant-numeric: tabular-nums;
     }
     @media (max-width: 540px) {
       .eagle-update-popup { right: 12px; bottom: 12px; padding: 14px; }
@@ -3183,7 +3252,7 @@
   <!-- ================= Eagle 左上角 ≡ 应用主菜单：录入主入口 / 专题视图 / 题库管理 / 视图与界面 / 设置 ================= -->
   <div
     id="eagleAppMainMenu"
-    class="eagle-chrome eagle-menu-panel hidden fixed left-3 top-[92px] z-[9998] max-h-[84vh] overflow-y-auto backdrop-blur-md select-none"
+    class="eagle-chrome eagle-menu-panel hidden fixed left-3 top-[92px] z-[9998] overflow-y-auto overscroll-contain backdrop-blur-md select-none"
     onclick="event.stopPropagation()"
   >
     <!-- 1. 顶部主要动作入口 -->
@@ -3332,8 +3401,8 @@
             <span class="eagle-menu-footer-sub">API · 导出 · 备份 · 帮助</span>
           </span>
         </span>
-        <span class="flex items-center gap-1.5 shrink-0">
-          <span id="eagleMenuVersionPill" class="hidden text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-500" onclick="handleEagleVersionPillClick(event)"></span>
+        <span class="eagle-menu-footer-meta flex items-center gap-1.5 shrink-0">
+          <span id="eagleMenuVersionPill" class="hidden text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 whitespace-nowrap" onclick="handleEagleVersionPillClick(event)"></span>
           <span class="text-xs text-slate-400">›</span>
         </span>
       </button>
@@ -3358,9 +3427,23 @@
     <p id="eagleUpdatePopupSub" class="eagle-update-popup-sub">发现新版本，安装前将先备份本地题库。</p>
     <ul id="eagleUpdatePopupHighlights" class="eagle-update-popup-list hidden"></ul>
     <p id="eagleUpdatePopupStatus" class="eagle-update-popup-status hidden"></p>
+    <div id="eagleUpdatePopupProgress" class="eagle-update-progress hidden" aria-live="polite">
+      <div class="eagle-update-progress-head">
+        <span id="eagleUpdatePopupProgressStage">正在准备下载…</span>
+        <strong id="eagleUpdatePopupProgressPct">0%</strong>
+      </div>
+      <div class="eagle-update-progress-track">
+        <div id="eagleUpdatePopupProgressFill" class="eagle-update-progress-fill"></div>
+      </div>
+      <div class="eagle-update-progress-meta">
+        <span id="eagleUpdatePopupProgressBytes">0 MB / -- MB</span>
+        <span id="eagleUpdatePopupProgressSpeed">连接官网中…</span>
+      </div>
+    </div>
     <div class="eagle-update-popup-actions">
       <button id="eagleUpdatePopupInstall" class="eagle-update-popup-btn-primary" type="button">立即更新</button>
       <button id="eagleUpdatePopupLater" class="eagle-update-popup-btn-secondary" type="button">稍后提醒</button>
+      <a class="eagle-update-popup-btn-link" href="https://tiyouju.com/" target="_blank" rel="noopener noreferrer" style="margin-left:0;text-decoration:none;display:inline-flex;align-items:center;" title="https://tiyouju.com/">官网 tiyouju.com</a>
       <button id="eagleUpdatePopupAbout" class="eagle-update-popup-btn-link" type="button">设置</button>
     </div>
   </aside>
@@ -3773,14 +3856,29 @@
             <section class="settings-section">
               <h3>隐私、版本与源码</h3>
               <div class="about-row"><span>版本</span><strong id="eaglePrefAboutVersion">题有据</strong></div>
+              <div class="about-row"><span>官网</span><a href="https://tiyouju.com/" target="_blank" rel="noopener noreferrer" class="font-semibold text-emerald-700 hover:underline">https://tiyouju.com/</a></div>
               <label class="settings-switch">
                 <span><strong>自动检查更新</strong><small>打开软件后向官网 tiyouju.com 询问有没有新版本，安装前先备份题库。</small></span>
                 <input id="eaglePrefAutoUpdate" type="checkbox" role="switch" checked>
               </label>
               <p id="eaglePrefUpdateStatus" class="settings-footnote"></p>
+              <div id="eaglePrefUpdateProgress" class="eagle-update-progress hidden" aria-live="polite" style="margin: 10px 0;">
+                <div class="eagle-update-progress-head">
+                  <span id="eaglePrefUpdateProgressStage">正在准备下载…</span>
+                  <strong id="eaglePrefUpdateProgressPct">0%</strong>
+                </div>
+                <div class="eagle-update-progress-track">
+                  <div id="eaglePrefUpdateProgressFill" class="eagle-update-progress-fill"></div>
+                </div>
+                <div class="eagle-update-progress-meta">
+                  <span id="eaglePrefUpdateProgressBytes">0 MB / -- MB</span>
+                  <span id="eaglePrefUpdateProgressSpeed">连接官网中…</span>
+                </div>
+              </div>
               <div class="settings-form-actions">
                 <button type="button" class="button" id="eaglePrefUpdateCheckBtn">检查更新</button>
                 <button type="button" class="button primary hidden" id="eaglePrefUpdateInstallBtn">下载并安装</button>
+                <a class="button" href="https://tiyouju.com/" target="_blank" rel="noopener noreferrer">前往官网</a>
                 <a class="button" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer">查看源代码</a>
               </div>
             </section>
@@ -4537,6 +4635,12 @@
         localStorage.setItem(EAGLE_UI_SCALE_KEY, String(next));
       } catch (_) { /* ignore */ }
       syncEagleUiScaleControls(next);
+      if (typeof positionEagleAppMainMenu === 'function') {
+        const appMenuEl = document.getElementById('eagleAppMainMenu');
+        if (appMenuEl && !appMenuEl.classList.contains('hidden')) {
+          positionEagleAppMainMenu();
+        }
+      }
       if (toast && typeof showToast === 'function') {
         showToast(`界面大小 ${Math.round(next * 100)}%`, 'info');
       }
@@ -5535,6 +5639,132 @@
       } catch (_) {}
     }
 
+    let eagleUpdatePollTimer = null;
+
+    function formatUpdateBytes(bytes) {
+      const n = Number(bytes) || 0;
+      if (n <= 0) return '0 MB';
+      if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+      return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
+    function formatUpdateSpeed(bps) {
+      const n = Number(bps) || 0;
+      if (n <= 0) return '测速中…';
+      if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(2)} MB/s`;
+      return `${(n / 1024).toFixed(0)} KB/s`;
+    }
+
+    function formatUpdateEta(seconds) {
+      const s = Number(seconds);
+      if (!Number.isFinite(s) || s <= 0) return '';
+      if (s < 60) return ` · 约剩 ${Math.ceil(s)} 秒`;
+      const m = Math.floor(s / 60);
+      const rem = Math.ceil(s % 60);
+      return ` · 约剩 ${m} 分 ${rem} 秒`;
+    }
+
+    function applyUpdateProgressCard(prefix, progress) {
+      const box = document.getElementById(`${prefix}Progress`);
+      const stageEl = document.getElementById(`${prefix}ProgressStage`);
+      const pctEl = document.getElementById(`${prefix}ProgressPct`);
+      const fillEl = document.getElementById(`${prefix}ProgressFill`);
+      const bytesEl = document.getElementById(`${prefix}ProgressBytes`);
+      const speedEl = document.getElementById(`${prefix}ProgressSpeed`);
+      if (!box) return;
+      if (!progress || progress.status === 'idle' || progress.status === 'failed') {
+        box.classList.add('hidden');
+        if (fillEl) fillEl.classList.remove('is-indeterminate');
+        return;
+      }
+      box.classList.remove('hidden');
+      const status = String(progress.status || '');
+      const total = Number(progress.bytes_total) || 0;
+      const done = Number(progress.bytes_downloaded) || 0;
+      const pct = Number(progress.percent) || 0;
+      const indeterminate = status === 'preparing' || (status === 'downloading' && total <= 0);
+      if (stageEl) stageEl.textContent = progress.stage_label || '正在从官网下载更新…';
+      if (pctEl) pctEl.textContent = indeterminate ? '准备中' : `${pct.toFixed(total > 0 && pct < 100 ? 1 : 0)}%`;
+      if (fillEl) {
+        fillEl.classList.toggle('is-indeterminate', indeterminate);
+        fillEl.style.width = indeterminate ? '38%' : `${Math.max(0, Math.min(100, pct))}%`;
+      }
+      if (bytesEl) {
+        bytesEl.textContent = total > 0
+          ? `${formatUpdateBytes(done)} / ${formatUpdateBytes(total)}`
+          : (done > 0 ? `已下载 ${formatUpdateBytes(done)}` : '正在连接 tiyouju.com…');
+      }
+      if (speedEl) {
+        if (status === 'verifying') speedEl.textContent = '正在校验 SHA-256…';
+        else if (status === 'backing_up') speedEl.textContent = '正在备份题库…';
+        else if (status === 'launching' || status === 'succeeded') speedEl.textContent = '即将启动安装程序';
+        else speedEl.textContent = `${formatUpdateSpeed(progress.speed_bps)}${formatUpdateEta(progress.eta_seconds)}`;
+      }
+    }
+
+    function syncEagleUpdateProgressUI(progress) {
+      applyUpdateProgressCard('eagleUpdatePopup', progress);
+      applyUpdateProgressCard('eaglePrefUpdate', progress);
+      const popupBtn = document.getElementById('eagleUpdatePopupInstall');
+      const aboutBtn = document.getElementById('eaglePrefUpdateInstallBtn');
+      const popupStatus = document.getElementById('eagleUpdatePopupStatus');
+      const aboutStatus = document.getElementById('eaglePrefUpdateStatus');
+      const active = Boolean(progress && progress.active);
+      if (popupBtn) popupBtn.disabled = active;
+      if (aboutBtn) aboutBtn.disabled = active;
+      if (progress && progress.status === 'failed') {
+        const err = progress.error || '更新未能完成，请重试。';
+        if (popupStatus) setEagleUpdatePopupStatus(err, true);
+        if (aboutStatus) aboutStatus.textContent = err;
+        if (popupBtn) popupBtn.disabled = false;
+        if (aboutBtn) aboutBtn.disabled = false;
+      } else if (progress && progress.status === 'succeeded') {
+        const msg = progress.stage_label || `正在安装 ${progress.version || ''}。软件会先关闭，题库已备份，完成后将重新打开。`;
+        if (popupStatus) setEagleUpdatePopupStatus(msg, false);
+        if (aboutStatus) aboutStatus.textContent = msg;
+      } else if (active) {
+        if (popupStatus) setEagleUpdatePopupStatus('', false);
+        if (aboutStatus) aboutStatus.textContent = progress.stage_label || '正在下载并安装官网更新…';
+      }
+    }
+
+    async function pollEagleUpdateProgress({ onProgress, onError } = {}) {
+      if (eagleUpdatePollTimer) {
+        clearTimeout(eagleUpdatePollTimer);
+        eagleUpdatePollTimer = null;
+      }
+      while (true) {
+        let p;
+        try {
+          const pr = await fetch(`${API_BASE}/api/update/progress`, {
+            cache: 'no-store',
+            headers: { 'X-QB-Request': '1' }
+          });
+          p = await pr.json().catch(() => ({}));
+          if (!pr.ok) throw new Error(p.error || '无法读取下载进度');
+        } catch (err) {
+          const msg = (err && err.message) ? err.message : '读取下载进度失败';
+          if (onError) onError(msg);
+          throw err;
+        }
+        syncEagleUpdateProgressUI(p);
+        if (p.status === 'succeeded') {
+          const msg = p.stage_label || `正在安装 ${p.version || ''}。软件会先关闭，题库已自动备份，完成后将重新打开。`;
+          if (onProgress) onProgress(msg, p);
+          return p;
+        }
+        if (p.status === 'failed') {
+          const msg = p.error || '安装未能启动';
+          if (onError) onError(msg);
+          throw new Error(msg);
+        }
+        if (!p.active && p.status === 'idle') {
+          return p;
+        }
+        await new Promise((resolve) => { eagleUpdatePollTimer = setTimeout(resolve, 250); });
+      }
+    }
+
     function setEagleUpdatePopupStatus(text, isError = false) {
       const statusEl = document.getElementById('eagleUpdatePopupStatus');
       if (!statusEl) return;
@@ -5545,6 +5775,18 @@
 
     async function triggerOfficialUpdateInstall({ onProgress, onError } = {}) {
       try {
+        const startResp = await fetch(`${API_BASE}/api/update/install/start`, {
+          method: 'POST',
+          headers: { 'X-QB-Request': '1' }
+        });
+        if (startResp.status !== 404) {
+          const started = await startResp.json().catch(() => ({}));
+          if (!startResp.ok || started.error) {
+            throw new Error(started.error || started.message || '安装未能启动');
+          }
+          syncEagleUpdateProgressUI(started);
+          return await pollEagleUpdateProgress({ onProgress, onError });
+        }
         const r = await fetch(`${API_BASE}/api/update/install`, {
           method: 'POST',
           headers: { 'X-QB-Request': '1' }
@@ -5587,7 +5829,7 @@
       if (installBtn) {
         installBtn.addEventListener('click', async () => {
           installBtn.disabled = true;
-          setEagleUpdatePopupStatus('正在从官网 tiyouju.com 下载并校验安装包…', false);
+          setEagleUpdatePopupStatus('', false);
           try {
             await triggerOfficialUpdateInstall({
               onProgress: (msg) => setEagleUpdatePopupStatus(msg, false),
@@ -5642,7 +5884,8 @@
       const pill = document.getElementById('eagleMenuVersionPill');
       if (pill) {
         pill.textContent = `v${data.current} · 可更新到 ${data.latest}`;
-        pill.className = 'text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200';
+        pill.className = 'text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap';
+        pill.closest('.eagle-menu-footer-link')?.classList.add('has-update-pill');
       }
       const aboutStatus = document.getElementById('eaglePrefUpdateStatus');
       const aboutInstall = document.getElementById('eaglePrefUpdateInstallBtn');
@@ -8683,6 +8926,20 @@
         if (statusEl) statusEl.textContent = `官网已有新版本 ${latestOfficialUpdateInfo.latest}（当前 ${latestOfficialUpdateInfo.current}）。`;
         if (installBtn) installBtn.classList.remove('hidden');
       }
+      try {
+        const pResp = await fetch(`${API_BASE}/api/update/progress`, {
+          cache: 'no-store',
+          headers: { 'X-QB-Request': '1' }
+        });
+        if (pResp.ok) {
+          const p = await pResp.json().catch(() => null);
+          if (p && p.active) {
+            if (installBtn) installBtn.classList.remove('hidden');
+            syncEagleUpdateProgressUI(p);
+            void pollEagleUpdateProgress().catch(() => {});
+          }
+        }
+      } catch (_) {}
       if (eaglePrefsMounted.about) return;
       eaglePrefsMounted.about = true;
       try {
@@ -8726,7 +8983,7 @@
       if (installBtn) {
         installBtn.addEventListener('click', async () => {
           installBtn.disabled = true;
-          if (statusEl) statusEl.textContent = '正在从官网下载更新并先备份题库，完成后会自动重开软件…';
+          if (statusEl) statusEl.textContent = '正在准备从官网下载更新并备份题库…';
           try {
             await triggerOfficialUpdateInstall({
               onProgress: (msg) => { if (statusEl) statusEl.textContent = msg; },
@@ -9522,6 +9779,61 @@
       }
     }
 
+    let _lastEagleMenuAnchorId = '';
+
+    function positionEagleAppMainMenu(anchorEl) {
+      const menu = document.getElementById('eagleAppMainMenu');
+      if (!menu || !menu.style) return;
+      const vpW = window.innerWidth || (document.documentElement && document.documentElement.clientWidth) || 1280;
+      const vpH = window.innerHeight || (document.documentElement && document.documentElement.clientHeight) || 720;
+
+      let anchor = anchorEl;
+      if (!anchor || (typeof anchor.getBoundingClientRect === 'function' && anchor.getBoundingClientRect().width === 0)) {
+        const preferredId = _lastEagleMenuAnchorId;
+        const c1 = preferredId ? document.getElementById(preferredId) : null;
+        const c2 = document.getElementById('btnCollapsedAppMenu');
+        const c3 = document.getElementById('btnEagleAppMenu');
+        anchor = [c1, c2, c3].find(el => el && el.getBoundingClientRect && el.getBoundingClientRect().width > 0) || c3 || c2;
+      }
+
+      const rawZoom = Number((typeof readEagleUiScale === 'function' ? readEagleUiScale() : 1) || 1);
+      const scaleGuess = (Number.isFinite(rawZoom) && rawZoom > 0) ? rawZoom : 1;
+      const rect = (anchor && typeof anchor.getBoundingClientRect === 'function') ? anchor.getBoundingClientRect() : null;
+      if (anchor && anchor.id) _lastEagleMenuAnchorId = anchor.id;
+
+      menu.style.maxHeight = `${Math.max(160, Math.floor(vpH / scaleGuess - 24))}px`;
+      const measuredScale = (menu.offsetWidth > 0 && typeof menu.getBoundingClientRect === 'function')
+        ? (menu.getBoundingClientRect().width / menu.offsetWidth || scaleGuess)
+        : scaleGuess;
+      const scale = (Number.isFinite(measuredScale) && measuredScale > 0.2) ? measuredScale : scaleGuess;
+
+      let topVisual = 56 * scale;
+      let leftVisual = 8;
+      if (rect && (rect.width > 0 || rect.height > 0)) {
+        topVisual = rect.bottom + 6;
+        leftVisual = rect.left;
+      }
+      const maxLeftCss = Math.max(8, Math.floor((vpW / scale) - (menu.offsetWidth || 272) - 8));
+      const leftCss = Math.max(8, Math.min(Math.round(leftVisual / scale), maxLeftCss));
+      const maxTopCss = Math.max(8, Math.floor((vpH / scale) - 160));
+      const topCss = Math.max(8, Math.min(Math.round(topVisual / scale), maxTopCss));
+      menu.style.left = `${leftCss}px`;
+      menu.style.top = `${topCss}px`;
+
+      const actualTop = typeof menu.getBoundingClientRect === 'function' ? menu.getBoundingClientRect().top : (topCss * scale);
+      const availVisual = Math.max(120, vpH - actualTop - 10);
+      menu.style.maxHeight = `${Math.max(120, Math.floor(availVisual / scale))}px`;
+    }
+
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('resize', () => {
+        const menu = document.getElementById('eagleAppMainMenu');
+        if (menu && !menu.classList.contains('hidden')) {
+          positionEagleAppMainMenu();
+        }
+      });
+    }
+
     function toggleEagleAppMainMenu(e) {
       if (e) {
         e.preventDefault();
@@ -9534,13 +9846,11 @@
       if (willOpen) {
         updateEagleAppMainMenuCounts();
         const anchor = (e && e.currentTarget) || document.getElementById('btnEagleAppMenu');
-        if (anchor && typeof anchor.getBoundingClientRect === 'function' && menu.style) {
-          const rect = anchor.getBoundingClientRect();
-          menu.style.left = `${Math.max(8, Math.round(rect.left))}px`;
-          menu.style.top = `${Math.round(rect.bottom + 6)}px`;
-        }
+        menu.classList.remove('hidden');
+        positionEagleAppMainMenu(anchor);
+      } else {
+        menu.classList.add('hidden');
       }
-      menu.classList.toggle('hidden');
     }
 
     function hideEagleAppMainMenu() {

@@ -273,6 +273,8 @@ urlpatterns = [
     path("api/update/settings", app_update.update_settings_view),
     path("api/update/check", app_update.update_check_view),
     path("api/update/install", app_update.update_install_view),
+    path("api/update/install/start", app_update.update_install_start_view),
+    path("api/update/progress", app_update.update_progress_view),
     path("api/assistant/connect", assistant_connect.connect_status_view),
     path("api/assistant/connect/setup", assistant_connect.connect_setup_view),
     path("api/assistant/connect/open-skill-zip", assistant_connect.open_skill_zip_view),

@@ -3,6 +3,21 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.3.13
+
+**应用内更新 6 路并发加速、实时下载进度条、官网直达入口及小窗菜单滚动修复**
+
+- **应用内更新多线程分片加速与实时进度条（`backend/core/app_update.py`、`backend/qb_server/urls.py`、`frontend/eagle/index.html`、`frontend/index.html`、`frontend/styles.css`、`frontend/app.js`、`website/worker.js`）**：
+  - 安装包下载改为首段嗅探 + 6 路 HTTP `Range` 并发分片下载（2 MB 分片 + 自动重试 + 仅限 `tiyouju.com` 校验与 `SHA-256` 整包核对），实测官网下载速度提升至 4+ MB/s；服务器不支持分片时无缝回退单流下载；
+  - 新增异步更新任务与进度接口 `/api/update/install/start`、`/api/update/progress`，工作台与经典页的更新浮窗和「关于与更新」同步显示百分比进度条、已下载/总大小、实时网速与预计剩余时间；
+  - 官网 Worker 已知文件大小的 `Range` 请求跳过多余 `RELEASES.head()` 预检，非分片请求接入 `caches.default` 边缘缓存。
+- **「关于与更新」与更新浮窗附上官网地址（`frontend/eagle/index.html`、`frontend/index.html`）**：
+  - 在工作台与经典设置页的「关于与更新」区域新增官网键值行与「前往官网」按钮（`https://tiyouju.com/`），并在右下角更新浮窗底部操作栏附带直达官网链接。
+- **小窗口主菜单滚动与更新角标排版修复（`frontend/eagle/index.html`）**：
+  - 按按钮底边到视口底部的实际可用高度动态计算 `#eagleAppMainMenu` 的 `maxHeight` 并开启 `overscroll-behavior: contain`，修复窗口缩小或调大缩放比例时菜单底部设置入口被截断无法滚到底的问题；
+  - 底部设置按钮 `.eagle-menu-footer-link.has-update-pill` 在窄宽状态下允许更新角标自然折行，避免左侧「偏好与系统设置」文字被压成竖排单字。
+
+
 ## 2.3.12
 
 **大文件夹流畅切换、社区大包进度与上传记录、OneNote 静默读取、磁盘空间止血及启动弹窗修复**

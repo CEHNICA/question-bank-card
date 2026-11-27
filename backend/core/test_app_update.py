@@ -2,7 +2,9 @@
 
 import hashlib
 import json
+import re
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -15,9 +17,11 @@ from core.version import APP_VERSION
 
 
 class _Body:
-    def __init__(self, payload: bytes, url: str):
+    def __init__(self, payload: bytes, url: str, status: int = 200, headers: dict | None = None):
         self.payload = payload
         self.url = url
+        self.status = status
+        self.headers = headers or {}
         self.offset = 0
 
     def geturl(self):
@@ -145,6 +149,61 @@ class OfficialUpdateTests(SimpleTestCase):
             with self.assertRaises(app_update.UpdateError) as caught:
                 app_update.describe_latest()
         self.assertIn("tiyouju.com", str(caught.exception))
+
+    def test_parallel_range_download_and_async_progress_endpoints(self):
+        installer = bytes((i % 251) for i in range(150_000))
+        digest = hashlib.sha256(installer).hexdigest()
+        seen_ranges: list[str] = []
+
+        def ranged_open(request, timeout):
+            path = urlparse(request.full_url).path
+            if path != "/download/installer":
+                return _response_for(request.full_url, "9.9.9", installer, digest)
+            range_hdr = request.headers.get("Range") or ""
+            seen_ranges.append(range_hdr)
+            match = re.match(r"^bytes=(\d+)-(\d+)$", range_hdr)
+            self.assertIsNotNone(match)
+            start = int(match.group(1))
+            end = min(len(installer) - 1, int(match.group(2)))
+            slice_bytes = installer[start : end + 1]
+            return _Body(
+                slice_bytes,
+                request.full_url,
+                status=206,
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{len(installer)}",
+                    "Content-Length": str(len(slice_bytes)),
+                },
+            )
+
+        with (
+            patch.dict(app_update.os.environ, {"TEMP": str(self.root), "TMP": str(self.root)}),
+            patch.object(app_update, "_DOWNLOAD_CHUNK_BYTES", 32_768),
+            patch.object(app_update, "_READ_BLOCK_BYTES", 8_192),
+            patch.object(app_update.urllib.request, "urlopen", side_effect=ranged_open),
+            patch.object(app_update.subprocess, "Popen") as launched,
+            patch.object(app_update.os, "name", "nt"),
+        ):
+            start_resp = self.client.post("/api/update/install/start", HTTP_X_QB_REQUEST="1")
+            self.assertEqual(start_resp.status_code, 200)
+            self.assertTrue(start_resp.json()["ok"])
+            progress = {}
+            for _ in range(100):
+                p_resp = self.client.get("/api/update/progress", HTTP_X_QB_REQUEST="1")
+                self.assertEqual(p_resp.status_code, 200)
+                progress = p_resp.json()
+                if not progress["active"] and progress["status"] in {"succeeded", "failed"}:
+                    break
+                time.sleep(0.02)
+
+        self.assertEqual(progress["status"], "succeeded", progress)
+        self.assertEqual(progress["percent"], 100.0)
+        self.assertEqual(progress["bytes_downloaded"], len(installer))
+        self.assertEqual(progress["bytes_total"], len(installer))
+        self.assertGreater(len(seen_ranges), 1)
+        launched.assert_called_once()
+        written_exe = self.root / "TiYouJu-Setup-9.9.9.exe"
+        self.assertEqual(written_exe.read_bytes(), installer)
 
 
 if __name__ == "__main__":

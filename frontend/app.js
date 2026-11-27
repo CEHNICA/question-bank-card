@@ -6141,6 +6141,97 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         sessionStorage.setItem(dismissKey(ver), "1");
       } catch {}
     };
+    let pollTimer = null;
+    const formatBytes = (bytes) => {
+      const n = Number(bytes) || 0;
+      if (n <= 0) return "0 MB";
+      if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+      return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+    };
+    const formatSpeed = (bps) => {
+      const n = Number(bps) || 0;
+      if (n <= 0) return "测速中…";
+      if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(2)} MB/s`;
+      return `${(n / 1024).toFixed(0)} KB/s`;
+    };
+    const formatEta = (sec) => {
+      const s = Number(sec);
+      if (!Number.isFinite(s) || s <= 0) return "";
+      if (s < 60) return ` · 约剩 ${Math.ceil(s)} 秒`;
+      return ` · 约剩 ${Math.floor(s / 60)} 分 ${Math.ceil(s % 60)} 秒`;
+    };
+    const renderProgressBox = (prefix, progress) => {
+      const box = $(`${prefix}Progress`);
+      if (!box) return;
+      const fill = $(`${prefix}ProgressFill`);
+      if (!progress || progress.status === "idle" || progress.status === "failed") {
+        box.hidden = true;
+        if (fill) fill.classList.remove("is-indeterminate");
+        return;
+      }
+      box.hidden = false;
+      const status = String(progress.status || "");
+      const total = Number(progress.bytes_total) || 0;
+      const done = Number(progress.bytes_downloaded) || 0;
+      const pct = Number(progress.percent) || 0;
+      const indeterminate = status === "preparing" || (status === "downloading" && total <= 0);
+      const stage = $(`${prefix}ProgressStage`);
+      const pctEl = $(`${prefix}ProgressPct`);
+      const bytesEl = $(`${prefix}ProgressBytes`);
+      const speedEl = $(`${prefix}ProgressSpeed`);
+      if (stage) stage.textContent = progress.stage_label || "正在从官网下载更新…";
+      if (pctEl) pctEl.textContent = indeterminate ? "准备中" : `${pct.toFixed(total > 0 && pct < 100 ? 1 : 0)}%`;
+      if (fill) {
+        fill.classList.toggle("is-indeterminate", indeterminate);
+        fill.style.width = indeterminate ? "38%" : `${Math.max(0, Math.min(100, pct))}%`;
+      }
+      if (bytesEl) {
+        bytesEl.textContent = total > 0
+          ? `${formatBytes(done)} / ${formatBytes(total)}`
+          : (done > 0 ? `已下载 ${formatBytes(done)}` : "正在连接 tiyouju.com…");
+      }
+      if (speedEl) {
+        if (status === "verifying") speedEl.textContent = "正在校验 SHA-256…";
+        else if (status === "backing_up") speedEl.textContent = "正在备份题库…";
+        else if (status === "launching" || status === "succeeded") speedEl.textContent = "即将启动安装程序";
+        else speedEl.textContent = `${formatSpeed(progress.speed_bps)}${formatEta(progress.eta_seconds)}`;
+      }
+    };
+    const syncProgress = (progress) => {
+      renderProgressBox("updateAbout", progress);
+      renderProgressBox("updateFloat", progress);
+      const active = Boolean(progress && progress.active);
+      install.disabled = active;
+      if (floatInstall) floatInstall.disabled = active;
+      if (progress && progress.status === "failed") {
+        const errMsg = progress.error || "没有安装。";
+        line.textContent = errMsg;
+        setFloatStatus(errMsg, true);
+        install.disabled = false;
+        if (floatInstall) floatInstall.disabled = false;
+      } else if (progress && progress.status === "succeeded") {
+        const msg = progress.stage_label || `正在安装 ${progress.version || ""}。软件会先关掉，题库已备份，装完后重新打开。`;
+        line.textContent = msg;
+        setFloatStatus(msg, false);
+      } else if (active) {
+        line.textContent = progress.stage_label || "正在下载并安装官网更新…";
+        setFloatStatus("", false);
+      }
+    };
+    const pollProgress = async () => {
+      if (pollTimer) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+      while (true) {
+        const progress = await api("/api/update/progress");
+        syncProgress(progress);
+        if (progress.status === "succeeded") return progress;
+        if (progress.status === "failed") throw new Error(progress.error || "没有安装。");
+        if (!progress.active && progress.status === "idle") return progress;
+        await new Promise((resolve) => { pollTimer = setTimeout(resolve, 250); });
+      }
+    };
     const setFloatStatus = (text, isError = false) => {
       if (!floatStatus) return;
       floatStatus.textContent = text || "";
@@ -6175,9 +6266,17 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     const runInstall = async () => {
       install.disabled = true;
       if (floatInstall) floatInstall.disabled = true;
-      line.textContent = "正在从 tiyouju.com 下载并核对安装包…";
-      setFloatStatus("正在从官网 tiyouju.com 下载并校验安装包…", false);
+      line.textContent = "正在准备从 tiyouju.com 下载安装包…";
+      setFloatStatus("", false);
       try {
+        try {
+          const started = await api("/api/update/install/start", { method: "POST" });
+          syncProgress(started);
+          await pollProgress();
+          return;
+        } catch (startErr) {
+          if (startErr && startErr.status !== 404) throw startErr;
+        }
         const result = await api("/api/update/install", { method: "POST" });
         const msg = `正在安装 ${result.version}。软件会先关掉，题库已备份，装完后重新打开。`;
         line.textContent = msg;
@@ -6254,6 +6353,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }
     });
     void check(true);
+    void api("/api/update/progress").then((p) => {
+      if (p && p.active) {
+        install.hidden = false;
+        syncProgress(p);
+        return pollProgress();
+      }
+    }).catch(() => {});
   }
 
   $("settingsAutoExpand").addEventListener("change", (event) => {
