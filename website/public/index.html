@@ -9,7 +9,7 @@
     />
     <title>题有据 TiYouJu — 杂乱试卷一秒成卡 · AI-Native 本地数学题库</title>
     <link rel="icon" type="image/png" href="assets/app-icon.png?v=2" />
-    <link rel="stylesheet" href="styles.css?v=5" />
+    <link rel="stylesheet" href="styles.css?v=6" />
 
     <!-- 规范链接：主域为准，www 视为同一页的镜像 -->
     <link rel="canonical" href="https://tiyouju.com/" />
@@ -258,6 +258,55 @@
                 <span class="media-zoom-pill">点击放大看原卷实拍</span>
               </button>
             </article>
+          </div>
+
+          <div class="agent-scenarios">
+            <div class="agent-scenarios-head">
+              <h3>把题有据接进你的 AI Agent 后，日常还能这样一起用</h3>
+              <p>不只用来录题，更是一套通过 Skill 与 MCP 让 AI 真正读懂你的题库与手写笔记的教研工作流。</p>
+            </div>
+            <div class="agent-scenarios-grid">
+              <article class="agent-scenario-card">
+                <p class="scenario-prompt">“帮我看看第 4 题题干和原卷有没有抄错，你觉得这道题易错点在哪？”</p>
+                <h4>核对题面错漏，顺便问 AI 看法</h4>
+                <p>AI 同步对照原卷截图与识别文字帮你查出符号漏缺，同时结合题型和知识点点评难度、易错陷阱与讲评切入点。</p>
+                <div class="scenario-cmds">
+                  <code>tiyouju show</code>
+                  <code>locate_question</code>
+                </div>
+              </article>
+
+              <article class="agent-scenario-card">
+                <p class="scenario-prompt">“看看这道题 Q-c65f1f5f，帮我拆解两种不同解法，再配一道变式题。”</p>
+                <h4>复制题目 ID，随时共探一题多解</h4>
+                <p>在题库里一键复制短码 <code>Q-xxxxxxxx</code> 发给 Agent，秒级调出完整题面、配图、原卷截图和参考解析，随时围绕这一题深入推演。</p>
+                <div class="scenario-cmds">
+                  <code>Q-xxxxxxxx</code>
+                  <code>tiyouju locate</code>
+                </div>
+              </article>
+
+              <article class="agent-scenario-card">
+                <p class="scenario-prompt">“读取我高三一模以来的数学试卷库，总结最近高频考点与命题特点。”</p>
+                <h4>直读题库与试卷库，总结命题特点</h4>
+                <p>让 Agent 通过底层命令直接检索整份试卷或专题文件夹，自动汇总高频考点分布、题型比例、有答案情况与近期出题走向。</p>
+                <div class="scenario-cmds">
+                  <code>search_library</code>
+                  <code>papers</code>
+                  <code>folders</code>
+                </div>
+              </article>
+
+              <article class="agent-scenario-card">
+                <p class="scenario-prompt">“只读获取 Q-c65f1f5f 关联的 OneNote 笔记，看看我卡在哪并提些建议。”</p>
+                <h4>只读 OneNote 笔记，复盘思路提建议</h4>
+                <p>严格只读提取题目所绑定 OneNote 页的文本块与裁边后的手写墨迹图，让 AI 看懂你的板书与草稿，总结错因并给出针对性复习建议。</p>
+                <div class="scenario-cmds">
+                  <code>tiyouju onenote read</code>
+                  <code>read_onenote_note</code>
+                </div>
+              </article>
+            </div>
           </div>
         </div>
       </section>

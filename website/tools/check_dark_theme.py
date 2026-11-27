@@ -124,7 +124,7 @@ def main() -> int:
                 hidden_cards = page.evaluate(
                     """() => {
                         const bad = [];
-                        for (const sel of ['.metrics-strip', '.spotlight-card', '.feature-card', '.download-card', '.community-banner']) {
+                        for (const sel of ['.metrics-strip', '.spotlight-card', '.agent-scenario-card', '.feature-card', '.download-card', '.community-banner']) {
                             for (const el of document.querySelectorAll(sel)) {
                                 if (Number(getComputedStyle(el).opacity) < 0.99) {
                                     bad.push(sel);
@@ -138,6 +138,9 @@ def main() -> int:
 
                 spotlights_count = page.locator(".spotlight-card").count()
                 check(spotlights_count == 3, f"三大核心卖点卡片齐全 (实际 {spotlights_count})")
+
+                scenarios_count = page.locator(".agent-scenario-card").count()
+                check(scenarios_count == 4, f"四大 Agent 协同场景卡片齐全 (实际 {scenarios_count})")
 
                 broken_imgs = page.evaluate(
                     """() => Array.from(document.images)
