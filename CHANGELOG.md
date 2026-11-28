@@ -3,11 +3,15 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
-## 未发布
+## 2.3.21
 
-**标签搜索框在没输入时不再弹出一串无关标签**
+**录入页入口留在原位、文件夹用键盘改名、上传遮罩盖住顶栏、空标签框不再乱弹**
 
-- **空输入不展开联想（`frontend/eagle/index.html`、`frontend/test_eagle_tag_suggest.js`）**：点开「搜索或创建标签」时，空查询会按拼音把目录最前面的十几条倒出来（倍长中线、比例尺与相似比等），和当前题无关。现在没输入就不展开列表；输入之后仍按名字、别名和拼音联想，目录里没有的名字仍可以新建。
+- 说明见 [2.3.21 更新说明](docs/release-notes-v2.3.21.md)。
+- **录入页侧栏（`frontend/index.html`、`frontend/styles.css`、`frontend/test_entry_redesign.js`）**：滚动条改到按钮下面，试卷一多时「题库工作台」和「设置」仍留在原位。
+- **文件夹（`frontend/eagle/index.html`、`frontend/test_eagle_folder_keyboard.js`）**：改名改为 Enter 或 F2，双击改为连同下级一起收起。键盘选文件夹不再把焦点交给题目。
+- **上传记录遮罩（`frontend/eagle/index.html`、`frontend/test_eagle_upload_and_folder_perf.js`）**：灰色遮罩盖住顶栏，不再在上面留一条白。
+- **标签搜索（`frontend/eagle/index.html`、`frontend/test_eagle_tag_suggest.js`）**：没输入时不展开列表，不再按拼音倒出目录最前面的无关标签。输入之后仍可搜索或新建。
 
 
 ## 2.3.20
