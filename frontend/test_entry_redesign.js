@@ -14,6 +14,9 @@ describe("录入题目页（/）重设计契约检查", () => {
     assert.doesNotMatch(html, /id="settingsFocus"/);
     assert.doesNotMatch(html, /<header\s+class="topbar/);
     assert.match(html, /class="entry-sidebar-nav"[\s\S]*?id="reviewReturnLibrary"[\s\S]*?id="settingsButton"/);
+    assert.match(html, /id="settingsButton"[\s\S]*?<\/div>\s*<div class="sidebar-scroll">/, "题库工作台和设置留在侧栏滚动区外面");
+    assert.match(css, /body\.entry-page \.sidebar\s*\{[\s\S]*?overflow:\s*hidden;/);
+    assert.match(css, /body\.entry-page \.sidebar-scroll\s*\{[\s\S]*?overflow-y:\s*auto;/);
     assert.match(html, /id="entryChapterNav"[^>]*hidden/);
     assert.match(html, /id="entryChapterToggle"/);
     assert.match(html, /id="entryChapterList"/);
