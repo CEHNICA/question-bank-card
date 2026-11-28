@@ -234,6 +234,31 @@ class OfficialUpdateTests(SimpleTestCase):
         self.assertIn("/AUTOSTART=1", cmd)
         self.assertNotIn("/VERYSILENT", cmd)
 
+    def test_breakaway_denied_keeps_app_open_and_reports_manual_installer(self):
+        installer = b"cached-official-installer-9.9.9"
+        digest = hashlib.sha256(installer).hexdigest()
+        cached_file = self.root / "TiYouJu-Setup-9.9.9.exe"
+        cached_file.write_bytes(installer)
+
+        def fake_open(request, timeout):
+            return _response_for(request.full_url, "9.9.9", installer, digest)
+
+        with (
+            patch.dict(app_update.os.environ, {"TEMP": str(self.root), "TMP": str(self.root)}),
+            patch.object(app_update.urllib.request, "urlopen", side_effect=fake_open),
+            patch.object(app_update.subprocess, "Popen", side_effect=PermissionError("breakaway denied")) as launched,
+            patch.object(app_update.os, "name", "nt"),
+        ):
+            with self.assertRaisesMessage(app_update.UpdateError, str(cached_file)):
+                app_update.install_latest()
+
+        launched.assert_called_once()  # 不能回退到仍属于旧 Job 的进程。
+        self.assertTrue(cached_file.is_file())
+        progress = app_update.get_install_progress()
+        self.assertEqual(progress["status"], "failed")
+        self.assertIn("软件将保持打开", progress["error"])
+        self.assertIn("手动运行", progress["error"])
+
 
 if __name__ == "__main__":
     unittest.main()
