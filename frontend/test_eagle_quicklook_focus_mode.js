@@ -270,4 +270,21 @@ test("快速审题：指针移开后压暗只留题干", async (t) => {
       "eagle/index.html 主内联脚本应无语法错误"
     );
   });
+
+  await t.test("11. 题干字号放大到 17px，解析 15px", () => {
+    // 弹窗加宽到 1200px 后，15px 的题干在宽屏上偏小。
+    assert.ok(
+      /#quickLookModal \.ql-question-body \{[^}]*font-size: 17px;/.test(html),
+      "题干字号应为 17px"
+    );
+    assert.ok(
+      /#quickLookModal \.ql-sol-content \{[^}]*font-size: 15px;/.test(html),
+      "解析区字号应为 15px（与题干拉开一级层次）"
+    );
+    // 行高保持不变：公式多的题靠行高呼吸，字号一加就容易挤成一坨
+    assert.ok(
+      /#quickLookModal \.ql-question-body \{[^}]*line-height: 1\.85;/.test(html),
+      "题干行高应保持 1.85"
+    );
+  });
 });
