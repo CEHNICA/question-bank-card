@@ -17992,6 +17992,8 @@
     //   1) 输入即联想：中文名 / 别名 / 全拼 / 首字母都能命中；
     //   2) Enter 贴标：优先精确匹配，否则取当前高亮项；
     //   3) 目录里没有的名字可以直接新建（新建完立刻贴到当前题上）。
+    // 没输入时不展开列表。空查询会按拼音把目录最前面十几条倒出来
+    // （倍长中线、比例尺与相似比…），和当前题无关。
 
     const TAG_SUGGEST_MAX = 12;
     let tagSuggestMatches = [];
@@ -18043,24 +18045,20 @@
       return true;
     }
 
-    /** 计算联想结果：先精确名匹配，再按命中位置和常用度排。 */
+    /** 计算联想结果：先精确名匹配，再按命中位置和常用度排。没输入则不给候选。 */
     function computeTagSuggestions(query) {
       const q = (query || '').trim().toLowerCase();
       const existing = currentQuestionTagIds();
+      if (!q) return [];
       const pool = tagCatalogue.filter(t => t.active !== false && !tagIsUnusedCustom(t));
       const scored = [];
       pool.forEach(tag => {
         const name = String(tag.name || '').toLowerCase();
-        if (q && name === q) {
+        if (name === q) {
           scored.push({ tag, rank: 0 });
           return;
         }
-        if (q && !matchTagByQuery(tag, q)) return;
-        if (!q) {
-          // 空查询：只给收藏 + 用得多的，别把 300 多个标签全倒出来。
-          scored.push({ tag, rank: (tag.favorite ? 0 : 2) + (tag.count ? 1 : 0) });
-          return;
-        }
+        if (!matchTagByQuery(tag, q)) return;
         scored.push({ tag, rank: 1 });
       });
       scored.sort((a, b) => {
@@ -18086,16 +18084,17 @@
 
       if (!tagSuggestMatches.length) {
         const trimmed = (query || '').trim();
-        if (trimmed) {
-          // 目录里没有这个名字 → 给一条「新建」出口，否则老师只能干瞪眼。
-          box.innerHTML = `
-            <button type="button" class="w-full text-left px-2 py-1.5 rounded text-xs text-slate-600 hover:bg-emerald-50 hover:text-emerald-800 flex items-center justify-between gap-2 cursor-pointer" data-tag-create="${escapeHtml(trimmed)}">
-              <span>＋ 新建标签「${escapeHtml(trimmed)}」</span>
-              <span class="text-[10px] text-slate-400">回车建并贴上</span>
-            </button>`;
-        } else {
-          box.innerHTML = `<div class="px-2 py-1.5 text-[11px] text-slate-400">没有可用标签</div>`;
+        if (!trimmed) {
+          box.innerHTML = '';
+          box.classList.add('hidden');
+          return;
         }
+        // 目录里没有这个名字 → 给一条「新建」出口，否则老师只能干瞪眼。
+        box.innerHTML = `
+          <button type="button" class="w-full text-left px-2 py-1.5 rounded text-xs text-slate-600 hover:bg-emerald-50 hover:text-emerald-800 flex items-center justify-between gap-2 cursor-pointer" data-tag-create="${escapeHtml(trimmed)}">
+            <span>＋ 新建标签「${escapeHtml(trimmed)}」</span>
+            <span class="text-[10px] text-slate-400">回车建并贴上</span>
+          </button>`;
         box.classList.remove('hidden');
         return;
       }
