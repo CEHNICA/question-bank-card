@@ -411,6 +411,28 @@ if __name__ == "__main__":
 
 
 class AgentDocsTests(unittest.TestCase):
+    def test_frozen_and_release_skill_selection_is_complete_and_excludes_private_files(self):
+        import importlib.util
+
+        location = Path(__file__).resolve().parent / "packaging" / "skill_resources.py"
+        spec = importlib.util.spec_from_file_location("qb_skill_resources", location)
+        resource = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(resource)
+        skill = Path(__file__).resolve().parent / "skills" / "tiyouju"
+        selected = {path.relative_to(skill).as_posix() for path in resource.skill_files(skill)}
+        expected = {path.relative_to(skill).as_posix() for path in skill.rglob("*") if path.is_file()}
+        self.assertEqual(selected, expected)
+        with tempfile.TemporaryDirectory() as folder:
+            fake = Path(folder)
+            for name in expected:
+                path = fake / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"public fixture")
+            (fake / ".env").write_text("fictional private config")
+            (fake / "private.json").write_text("fictional private data")
+            actual = {path.relative_to(fake).as_posix() for path in resource.skill_files(fake)}
+            self.assertEqual(actual, expected)
+
     """What an AI assistant reads to install and drive the app stays true."""
 
     root = Path(__file__).resolve().parent

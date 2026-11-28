@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from skill_resources import skill_files
 import subprocess
 import sys
 from pathlib import Path
@@ -55,7 +56,7 @@ def main() -> None:
                    "THIRD_PARTY_LICENSES/")
     skill_root = ROOT / "skills" / "tiyouju"
     common.archive(output / "tiyouju-skill.zip",
-                   [(path.relative_to(skill_root).as_posix(), path) for path in sorted(skill_root.rglob("*.md")) if path.is_file()],
+                   [(path.relative_to(skill_root).as_posix(), path) for path in skill_files(skill_root)],
                    "tiyouju/")
     for source, name in [
         (ROOT / "docs" / f"release-notes-v{VERSION}.md", f"release-notes-v{VERSION}.md"),
