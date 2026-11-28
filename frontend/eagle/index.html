@@ -745,21 +745,66 @@
     #quickLookModal.ql-backdrop:not(:has(.ql-panel:hover)) {
       background-color: rgb(15 23 42 / 0.88);
     }
-    /* 非题干区淡出 + 降亮度（降亮度加在这里，题干不受牵连） */
+    /* 移开 → 只剩题目：面板与阅读区的底色一起透明，
+       弹窗壳消失，题干卡片（.ql-stem，白底）浮在深色遮罩上，
+       四周与遮罩同色 —— 只有题目那块是亮的。 */
+    #quickLookModal.is-idle .ql-panel,
+    #quickLookModal.ql-backdrop:not(:has(.ql-panel:hover)) .ql-panel {
+      background-color: transparent;
+      border-color: transparent;
+      box-shadow: none;
+    }
+    /* 阅读区改成竖排居中：题名行撤掉后，题干卡片落在视口正中 */
+    #quickLookModal.is-idle #qlReadingPane,
+    #quickLookModal.ql-backdrop:not(:has(.ql-panel:hover)) #qlReadingPane {
+      background-color: transparent;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    /* 题名行：移开时完全撤出布局（只藏不撤会留一条空白，
+       题干卡片就贴不到正中） */
+    #quickLookModal.is-idle #qlReadingPane > .ql-chrome,
+    #quickLookModal.ql-backdrop:not(:has(.ql-panel:hover))
+      #qlReadingPane
+      > .ql-chrome {
+      display: none;
+    }
+    /* 非题干区淡出 + 降亮度（降亮度加在这里，题干不受牵连）。
+       解析区用 display:none 而不是 opacity:0 —— 只藏不撤会留下占位空隙，
+       题干卡片下方拖一条看不见的壳。 */
     #quickLookModal.is-idle .ql-chrome,
-    #quickLookModal:not(:has(.ql-panel:hover)) .ql-chrome,
+    #quickLookModal:not(:has(.ql-panel:hover)) .ql-chrome {
+      opacity: 0;
+      filter: blur(1px) brightness(0.7);
+    }
     #quickLookModal.is-idle #qlAnalysisContainer,
     #quickLookModal:not(:has(.ql-panel:hover)) #qlAnalysisContainer {
-      opacity: 0.06;
-      filter: blur(1px) brightness(0.7);
+      display: none;
     }
     /* 触屏没有 hover：永远全亮，绝不压暗（仓库同款先例见 .qc-evidence-btn） */
     @media (hover: none) {
       #quickLookModal.ql-backdrop {
         background-color: rgb(15 23 42 / 0.7) !important;
       }
-      #quickLookModal .ql-chrome,
+      #quickLookModal .ql-panel {
+        background-color: #ffffff !important;
+        border-color: rgb(226 232 240) !important;
+        box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25) !important;
+      }
+      #quickLookModal #qlReadingPane {
+        background-color: rgb(248 250 252 / 0.45) !important;
+        display: block !important;
+      }
+      #quickLookModal #qlReadingPane > .ql-chrome {
+        display: flex !important;
+      }
+      #quickLookModal .ql-chrome {
+        opacity: 1 !important;
+        filter: none !important;
+      }
       #quickLookModal #qlAnalysisContainer {
+        display: block !important;
         opacity: 1 !important;
         filter: none !important;
       }
@@ -4234,7 +4279,7 @@
         </div>
 
         <!-- 题干与选项排版卡片 -->
-        <section class="bg-white rounded-xl border border-slate-200/80 p-5 sm:p-6 shadow-2xs">
+        <section class="ql-stem bg-white rounded-xl border border-slate-200/80 p-5 sm:p-6 shadow-2xs">
           <div id="qlContentContainer" class="ql-question-body text-slate-900 font-serif">
             <!-- 动态注入题目与选项 -->
           </div>

@@ -46,12 +46,45 @@ test("快速审题：指针移开后压暗只留题干", async (t) => {
 
   await t.test("2. 存在 is-idle 压暗规则，同时淡出 opacity 与 filter", () => {
     assert.ok(
-      /#quickLookModal\.is-idle \.ql-chrome[^{]*\{[^}]*opacity: 0\.06;[^}]*\}/.test(html),
-      "is-idle 时非题干区应淡出到近乎不可见"
+      /#quickLookModal\.is-idle \.ql-chrome[^{]*\{[^}]*opacity: 0;[^}]*\}/.test(html),
+      "is-idle 时非题干区应完全淡出"
     );
     assert.ok(
       /#quickLookModal\.is-idle \.ql-chrome[^{]*\{[^}]*filter: blur\(1px\) brightness\(0\.7\);[^}]*\}/.test(html),
       "is-idle 时非题干区应轻微模糊并降亮度"
+    );
+  });
+
+  await t.test("2c. 移开时弹窗壳整体消失：面板与阅读区底色透明", () => {
+    // 「只有题目显示，其余跟四周黑色一致」= 弹窗壳的白底要一起没，
+    // 只剩题干卡片（.ql-stem）那块白纸浮在深色遮罩上。
+    assert.ok(
+      /#quickLookModal\.is-idle \.ql-panel[^{]*\{[^}]*background-color: transparent;[^}]*\}/.test(html),
+      "移开时面板底色应透明（白底消失，与四周一致）"
+    );
+    assert.ok(
+      /#quickLookModal\.is-idle #qlReadingPane[^{]*\{[^}]*background-color: transparent;[^}]*\}/.test(html),
+      "移开时阅读区底色应透明"
+    );
+    // 解析区必须撤出布局：只藏不撤会留下占位空隙，题干卡片下方拖一条看不见的壳
+    assert.ok(
+      /#quickLookModal\.is-idle #qlAnalysisContainer[^{]*\{[^}]*display: none;[^}]*\}/.test(html),
+      "移开时解析区应 display:none 撤出布局（只淡出会留空隙）"
+    );
+    // 题名行同理：撤掉后题干卡片才能居中
+    assert.ok(
+      /#quickLookModal\.is-idle #qlReadingPane > \.ql-chrome[^{]*\{[^}]*display: none;[^}]*\}/.test(html),
+      "移开时题名行应 display:none 撤出布局"
+    );
+    // 居中：阅读区改竖排 + 居中对齐
+    assert.ok(
+      /#quickLookModal\.is-idle #qlReadingPane[^{]*\{[^}]*justify-content: center;[^}]*\}/.test(html),
+      "移开时题干卡片应在视口垂直居中"
+    );
+    // 题干卡片必须有独立钩子，才能与弹窗壳区分开
+    assert.ok(
+      /class="ql-stem bg-white rounded-xl/.test(html),
+      "题干卡片应有 ql-stem 钩子（唯一保留白底的那块）"
     );
   });
 
@@ -111,10 +144,14 @@ test("快速审题：指针移开后压暗只留题干", async (t) => {
         !block.includes("qlContentContainer"),
         `淡出规则不应命中题干容器：${block.slice(0, 80)}`
       );
+      assert.ok(
+        !block.includes("ql-stem"),
+        `淡出规则不应命中题干卡片：${block.slice(0, 80)}`
+      );
     }
     assert.ok(
       /#quickLookModal\.is-idle #qlAnalysisContainer/.test(html),
-      "答案与解析区属于「非题干」，应一并淡出"
+      "答案与解析区属于「非题干」，应一并撤掉"
     );
   });
 
@@ -152,15 +189,17 @@ test("快速审题：指针移开后压暗只留题干", async (t) => {
     for (;;) {
       const at = html.indexOf("@media (hover: none)", from);
       if (at < 0) break;
-      hoverNoneBlocks.push(html.slice(at, at + 600));
+      hoverNoneBlocks.push(html.slice(at, at + 1400));
       from = at + 1;
     }
     assert.ok(hoverNoneBlocks.length > 0, "应有 @media (hover: none) 媒体查询");
     // 面板不再挂滤镜，这里找的是覆盖 ql-chrome 的块（另有覆盖 ql-backdrop 的规则）
-    const block = hoverNoneBlocks.find((b) => b.includes("#quickLookModal .ql-chrome"));
+    const block = hoverNoneBlocks.find(
+      (b) => b.includes("#quickLookModal .ql-chrome") || b.includes("#quickLookModal #qlReadingPane")
+    );
     assert.ok(
       block,
-      "应有覆盖 #quickLookModal .ql-chrome 的 hover:none 块"
+      "应有覆盖 #quickLookModal .ql-chrome / #qlReadingPane 的 hover:none 块"
     );
     assert.ok(
       /opacity: 1 !important/.test(block),
@@ -173,6 +212,19 @@ test("快速审题：指针移开后压暗只留题干", async (t) => {
     assert.ok(
       /#quickLookModal\.ql-backdrop/.test(block),
       "hover:none 时遮罩应回到原来的不透明度"
+    );
+    // 弹窗壳必须恢复：否则手机上是一片黑
+    assert.ok(
+      /#quickLookModal \.ql-panel \{[^}]*background-color: #ffffff !important;/.test(block),
+      "hover:none 时面板白底必须恢复"
+    );
+    assert.ok(
+      /#quickLookModal #qlReadingPane \{[^}]*display: block !important;/.test(block),
+      "hover:none 时阅读区必须恢复常规布局"
+    );
+    assert.ok(
+      /#quickLookModal #qlAnalysisContainer \{[^}]*display: block !important;/.test(block),
+      "hover:none 时解析区必须恢复显示"
     );
   });
 
