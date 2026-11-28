@@ -2,6 +2,9 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const { create } = require("./qb-update.js");
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
 const newer = { update_available: true, current: "2.3.19", latest: "9.9.9" };
 const ready = { status: "ready", active: false, can_install: true, version: "9.9.9" };
 function harness(request, confirm = async () => true) {
@@ -88,4 +91,30 @@ test("取消必须调用后台取消接口；安装开始后不能取消", async
   await h.controller.cancel();
   assert.equal(h.calls.length, 1);
   assert.equal(h.state().cancelVisible, false);
+});
+
+test("下载失败快照恢复重试；安装失败保留已校验安装包", async () => {
+  const h = harness(async () => ({ status: "failed", active: false, error: "下载校验失败" }));
+  h.controller.updateLatest(newer);
+  h.controller.sync({ status: "downloading", active: true });
+  await h.controller.refresh();
+  assert.equal(h.state().disabled, false);
+  assert.equal(h.state().label, "下载更新");
+  assert.equal(h.state().message, "下载校验失败");
+  h.controller.sync({ status: "failed", active: false, can_install: true, error: "安装未启动" });
+  assert.equal(h.state().disabled, false);
+  assert.equal(h.state().label, "安装更新");
+});
+
+test("Eagle 请求层把失败进度交给控制器，而不是当成进度读取失败", async () => {
+  const html = fs.readFileSync(path.join(__dirname, "eagle/index.html"), "utf8");
+  const source = html.match(/    function getEagleUpdateController\([\s\S]*?\n    \}/)[0];
+  let config;
+  const failed = { status: "failed", active: false, error: "校验失败" };
+  const c = vm.createContext({ API_BASE: "", QBUpdate: { create(options) { config = options; return {}; } },
+    document: { getElementById() { return null; } }, fetch: async () => ({ ok: true, json: async () => failed }) });
+  vm.runInContext("let eagleUpdateController=null; let latestOfficialUpdateInfo=null;\n" + source + "\ngetEagleUpdateController();", c);
+  assert.equal((await config.request("/api/update/progress")).status, "failed");
+  c.fetch = async () => ({ ok: false, json: async () => ({ error: "官网连接失败" }) });
+  await assert.rejects(config.request("/api/update/check"), /官网连接失败/);
 });

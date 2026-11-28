@@ -5911,7 +5911,7 @@
             ...(options.body ? { body: JSON.stringify(options.body) } : {})
           });
           const data = await resp.json().catch(() => ({}));
-          if (!resp.ok || data.error) {
+          if (!resp.ok || (data.error && path !== '/api/update/progress')) {
             if (path.startsWith('/api/update/check')) latestOfficialUpdateInfo = null;
             throw new Error(data.error || '更新服务暂不可用，请稍后重试。');
           }
