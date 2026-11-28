@@ -1,5 +1,5 @@
 "use strict";
-// 点过文件夹后，上下键更换文件夹，Enter 把焦点交给题目。
+// 点过文件夹后，上下键更换文件夹，Enter 或 F2 重命名。
 // Ctrl+左右不参与文件夹移动。
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -87,7 +87,7 @@ function makeRow(nodeId) {
 }
 
 describe("文件夹键盘导航", () => {
-  it("点过文件夹后，上下键直接换成相邻文件夹，Enter 转到题目", () => {
+  it("点过文件夹后，上下键直接换成相邻文件夹，Enter 重命名当前文件夹", () => {
     const parent = makeRow("parent");
     const child = makeRow("child");
     const nav = loadNav([parent, child]);
@@ -108,17 +108,15 @@ describe("文件夹键盘导航", () => {
     assert.equal(child.classList.contains("ftree-kbd-cursor"), true);
     assert.equal(nav.questionMoves, 0);
 
+    const renamed = [];
+    nav.beginInlineTreeRename = (id) => renamed.push(id);
     const entered = nav.handleFolderKeyboardEvent({
       key: "Enter",
       preventDefault() {},
     });
     assert.equal(entered, true);
-    assert.equal(nav.folderTreeState.activeId, "child");
-    assert.equal(nav.questionMoves, 1);
-    assert.equal(nav.handleFolderKeyboardEvent({
-      key: "ArrowDown",
-      preventDefault() {},
-    }), false);
+    assert.deepEqual(renamed, ["child"]);
+    assert.equal(nav.questionMoves, 0);
   });
 
   it("Ctrl+左回到上一题，Ctrl+右回到刚才那道题，不跟着文件夹走丢", () => {
@@ -174,7 +172,7 @@ describe("文件夹键盘导航", () => {
     }), false);
   });
 
-  it("页面只保留上下键换文件夹和 Enter 转到题目", () => {
+  it("页面保留上下键换文件夹，Enter 和 F2 都重命名", () => {
     const keydownAt = html.indexOf("document.addEventListener('keydown'");
     const handleAt = html.indexOf("if (handleFolderKeyboardEvent(e)) return;", keydownAt);
     const questionAt = html.indexOf("navigateQuestionFocus(1)", handleAt);
@@ -188,7 +186,53 @@ describe("文件夹键盘导航", () => {
     assert.match(html, /Ctrl \+ ←/);
     assert.match(html, /Ctrl \+ →/);
     assert.match(html, /tabindex="-1" data-folder-enterable="1"/);
-    assert.match(html, /点过文件夹后，上下键更换文件夹，Enter 转到题目/);
+    assert.match(html, /点过文件夹后，上下键更换文件夹，Enter 或 F2 重命名/);
     assert.match(html, /armFolderKeyboardIfTreeEvent\(/);
+  });
+
+  it("文件夹按 F2 改名，双击只收起自己和全部子文件夹", () => {
+    assert.match(html, /ondblclick="event\.stopPropagation\(\); collapseFolderBranch\(/);
+    assert.doesNotMatch(html, /ondblclick="event\.stopPropagation\(\); beginInlineTreeRename\(/);
+    assert.doesNotMatch(html, /重命名此入库项目 \(或双击\)/);
+    assert.doesNotMatch(html, /ondblclick="startRenamePaper/);
+    assert.doesNotMatch(html, /function enterFolderKeyboardCursor\(/);
+    assert.match(html, /请在左侧文件夹上按 F2，或右键选择重命名/);
+
+    const parent = makeRow("parent");
+    const nav = loadNav([parent]);
+    parent.owner = nav.document;
+    nav.folderNodeRegistry.set("parent", { id: "parent", type: "userfolder" });
+    nav.folderTreeState.activeId = "parent";
+    nav.armFolderKeyboardIfTreeEvent({ type: "click", target: parent });
+    const renamed = [];
+    nav.beginInlineTreeRename = (id) => renamed.push(id);
+    let prevented = false;
+    assert.equal(nav.handleFolderKeyboardEvent({
+      key: "F2",
+      preventDefault() { prevented = true; },
+    }), true);
+    assert.equal(prevented, true);
+    assert.deepEqual(renamed, ["parent"]);
+
+    const start = html.indexOf("function collapseFolderBranch(");
+    const end = html.indexOf("function toggleFolderNode(", start);
+    const sandbox = {
+      folderNodeRegistry: new Map(),
+      folderTreeState: { expanded: new Set(["parent", "child", "grand"]) },
+      writes: 0,
+      renders: 0,
+      writeExpandedFolderNodes() { sandbox.writes += 1; },
+      renderFolderTree() { sandbox.renders += 1; },
+    };
+    const child = { id: "child", children: [{ id: "grand", children: [] }] };
+    sandbox.folderNodeRegistry.set("parent", { id: "parent", children: [child] });
+    vm.runInNewContext(html.slice(start, end), sandbox);
+    sandbox.collapseFolderBranch("parent");
+    assert.equal(sandbox.folderTreeState.expanded.has("parent"), false);
+    assert.equal(sandbox.folderTreeState.expanded.has("child"), false);
+    assert.equal(sandbox.folderTreeState.expanded.has("grand"), false);
+    assert.equal(sandbox.writes, 1);
+    sandbox.collapseFolderBranch("parent");
+    assert.equal(sandbox.writes, 1, "已经收起时不再重画整棵树");
   });
 });

@@ -4526,7 +4526,7 @@
           </div>
         </div>
         <div class="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-          <span>点过文件夹后，上下键更换文件夹，Enter 转到题目；Del 移入回收站，Esc 关闭弹窗。</span>
+          <span>点过文件夹后，上下键更换文件夹，Enter 或 F2 重命名；双击收起该文件夹及其全部子文件夹。Del 移入回收站，Esc 关闭弹窗。</span>
           <button type="button" onclick="closeShortcutsModal(); openEagleHelpModal();" class="text-emerald-700 hover:underline font-medium cursor-pointer">打开工作台使用指南 →</button>
         </div>
       </div>
@@ -7774,7 +7774,7 @@
         menuHtml += treeMenuHeader('项目: ' + escapeHtml(targetPaper.name));
         menuHtml += '<div class="space-y-0.5">';
         menuHtml += treeMenuItem('☁️', '上传到资源社区…', `openCommunityPublishModal('${escapeInlineJsArg(targetPaper.id)}'); hideEagleContextMenu();`);
-        menuHtml += treeMenuItem('✏️', '重命名此入库项目 (或双击)', `startRenamePaper('${targetPaper.id}'); hideEagleContextMenu();`);
+        menuHtml += treeMenuItem('✏️', '重命名此入库项目 (F2)', `startRenamePaper('${targetPaper.id}'); hideEagleContextMenu();`);
         menuHtml += treeMenuItem('📄', '查看原卷扫描核验件', `openOriginalPaperModal('${targetPaper.id}', 0, '${escapeHtml(targetPaper.name)}'); hideEagleContextMenu();`);
         menuHtml += folderDescendantMenu(parentKey);
         menuHtml += moreFlyout;
@@ -11056,8 +11056,7 @@
                 ? 'bg-emerald-50 text-emerald-900 font-semibold ring-1 ring-emerald-500/20 shadow-2xs' 
                 : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }"
-            title="${escapeHtml(p.name)} (${p.total} 题 · 入库时间: ${p.createdStr} · 右键操作或双击重命名)"
-            ondblclick="startRenamePaper('${p.id}', event)"
+            title="${escapeHtml(p.name)} (${p.total} 题 · 入库时间: ${p.createdStr} · 右键或按 F2 重命名)"
             oncontextmenu="handlePaperItemContextMenu(event, '${p.id}')"
           >
             <div class="flex items-center gap-1.5 truncate flex-1 min-w-0" id="paper_title_box_${p.id}">
@@ -11100,7 +11099,7 @@
       // 旧列表标题节点兜底
       const titleEl = document.getElementById(`paper_title_${paperId}`);
       if (!titleEl) {
-        showToast('请在左侧文件夹树中双击或右键重命名', 'info');
+        showToast('请在左侧文件夹上按 F2，或右键选择重命名', 'info');
         return;
       }
       beginInlineTreeRename(nodeId);
@@ -21913,7 +21912,7 @@
         ' oncontextmenu="handleFolderTreeContextMenu(event, \'' + safeNodeId + '\')">' +
         '<div class="flex items-center gap-1 min-w-0 cursor-pointer flex-1" onclick="applyFolderNode(\'' + safeNodeId + '\')"' +
         ((node.type === 'paper' || node.type === 'book' || node.type === 'userfolder' || node.type === 'custom' || node.type === 'tag')
-          ? ' ondblclick="event.stopPropagation(); beginInlineTreeRename(\'' + safeNodeId + '\')"'
+          ? ' ondblclick="event.stopPropagation(); collapseFolderBranch(\'' + safeNodeId + '\')"'
           : '') +
         '>' +
         arrow +
@@ -21981,6 +21980,25 @@
         container.scrollTop = (container.scrollTop || 0) + delta;
       }
       return true;
+    }
+
+    function collapseFolderBranch(nodeId) {
+      const root = folderNodeRegistry.get(nodeId);
+      if (!root) return;
+      const seen = new Set();
+      const stack = [root];
+      let changed = false;
+      while (stack.length) {
+        const node = stack.pop();
+        if (!node || seen.has(node.id)) continue;
+        seen.add(node.id);
+        if (folderTreeState.expanded.delete(node.id)) changed = true;
+        const kids = node.children || [];
+        for (let i = 0; i < kids.length; i += 1) stack.push(kids[i]);
+      }
+      if (!changed) return;
+      writeExpandedFolderNodes();
+      renderFolderTree();
     }
 
     function toggleFolderNode(nodeId) {
@@ -22862,14 +22880,6 @@
       applyFolderNode(nextId);
     }
 
-    function enterFolderKeyboardCursor() {
-      const id = folderKeyboardCursorId || (folderTreeState && folderTreeState.activeId);
-      if (!id || !folderNodeIsEnterable(folderNodeRegistry.get(id))) return;
-      if (!folderTreeState || folderTreeState.activeId !== id) applyFolderNode(id);
-      blurFolderKeyboard();
-      if (typeof navigateQuestionFocus === 'function') navigateQuestionFocus(0);
-    }
-
     const questionVisitHistory = { back: [], forward: [] };
     let questionVisitLock = false;
 
@@ -22941,9 +22951,11 @@
           moveFolderKeyboardCursor(e.key === 'ArrowDown' ? 1 : -1);
           return true;
         }
-        if (e.key === 'Enter') {
+        if (e.key === 'Enter' || e.key === 'F2') {
+          const id = folderKeyboardCursorId || (folderTreeState && folderTreeState.activeId);
+          if (!id) return false;
           if (typeof e.preventDefault === 'function') e.preventDefault();
-          enterFolderKeyboardCursor();
+          beginInlineTreeRename(id);
           return true;
         }
         if (e.key === 'j' || e.key === 'J' || e.key === 'k' || e.key === 'K') {
