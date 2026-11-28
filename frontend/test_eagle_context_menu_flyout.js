@@ -35,7 +35,8 @@ test("Eagle 右键菜单：标签文案与飞出分组", async (t) => {
     assert.match(labels, /展开全部子文件夹/);
     const ctx = bodyOf(html, "function handleFolderTreeContextMenu");
     assert.ok(ctx, "应有 handleFolderTreeContextMenu");
-    assert.match(ctx, /treeExpandCollapseLabels/);
+    assert.match(ctx, /folderDescendantMenu/);
+    assert.match(bodyOf(html, "function folderDescendantMenu"), /treeExpandCollapseLabels/);
     assert.doesNotMatch(
       ctx,
       /sectionKind === 'tags'[\s\S]{0,400}展开全部子文件夹/,

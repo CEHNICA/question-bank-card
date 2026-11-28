@@ -40,10 +40,14 @@ _DOWNLOAD_CHUNK_BYTES = 2 * 1024 * 1024
 _READ_BLOCK_BYTES = 64 * 1024
 _CHUNK_MAX_RETRIES = 3
 _INSTALL_LOCK = threading.Lock()
+_CANCEL_DOWNLOAD = threading.Event()
+# 只由持有 _INSTALL_LOCK 的任务改写；安装确认不接收浏览器传入的文件路径。
+_READY_INSTALLER: tuple[Path, str, str] | None = None
+_INSTALLING = False
 _PROGRESS_LOCK = threading.Lock()
 _VERSION_PART = re.compile(r"^\d+$")
 _CONTENT_RANGE_RE = re.compile(r"^bytes\s+(\d+)-(\d+)/(\d+)$", re.IGNORECASE)
-_ACTIVE_STATUSES = frozenset({"preparing", "downloading", "verifying", "backing_up", "launching"})
+_ACTIVE_STATUSES = frozenset({"preparing", "downloading", "verifying", "cancelling", "backing_up", "launching"})
 
 
 class _ProgressState(TypedDict):
@@ -74,6 +78,15 @@ _SPEED_SAMPLES: deque[tuple[float, int]] = deque(maxlen=64)
 
 class UpdateError(Exception):
     """更新没做成。消息可以给用户看，不含下载内容。"""
+
+
+class DownloadCancelled(UpdateError):
+    """用户取消，不作为下载失败显示。"""
+
+
+def _check_download_cancelled() -> None:
+    if _CANCEL_DOWNLOAD.is_set():
+        raise DownloadCancelled("下载已取消，未启动安装。")
 
 
 def _preference_path() -> Path:
@@ -196,6 +209,8 @@ _START_LOCK = threading.Lock()
 
 
 def _reset_progress(*, status: str = "preparing", stage_label: str = "", version: str = "") -> None:
+    if _CANCEL_DOWNLOAD.is_set() and not _INSTALLING and status == "preparing":
+        status, stage_label = "cancelling", "正在取消下载，等待当前连接结束…"
     now = time.monotonic()
     with _PROGRESS_LOCK:
         _PROGRESS_STATE.update(
@@ -246,9 +261,15 @@ def _set_progress(
     now = time.monotonic()
     with _PROGRESS_LOCK:
         if status is not None:
-            _PROGRESS_STATE["status"] = status
+            _PROGRESS_STATE["status"] = (
+                "cancelling"
+                if _CANCEL_DOWNLOAD.is_set() and status in {"preparing", "downloading", "verifying"} and not _INSTALLING
+                else status
+            )
         if stage_label is not None:
-            _PROGRESS_STATE["stage_label"] = stage_label
+            _PROGRESS_STATE["stage_label"] = (
+                "正在取消下载，等待当前连接结束…" if _PROGRESS_STATE["status"] == "cancelling" else stage_label
+            )
         if version is not None:
             _PROGRESS_STATE["version"] = version
         if bytes_total is not None:
@@ -278,7 +299,7 @@ def get_install_progress() -> dict:
         total = _PROGRESS_STATE["bytes_total"]
         done = _PROGRESS_STATE["bytes_downloaded"]
         status = _PROGRESS_STATE["status"] or "idle"
-        if status in {"verifying", "backing_up", "launching", "succeeded"}:
+        if status in {"verifying", "ready", "backing_up", "launching", "succeeded"}:
             percent = 100.0
         elif total > 0:
             percent = round(min(100.0, (done / total) * 100.0), 1)
@@ -295,6 +316,8 @@ def get_install_progress() -> dict:
             "speed_bps": round(_PROGRESS_STATE["speed_bps"]),
             "eta_seconds": _PROGRESS_STATE["eta_seconds"],
             "error": _PROGRESS_STATE["error"],
+            "can_install": _READY_INSTALLER is not None and status in {"ready", "failed"},
+            "installing": _INSTALLING,
         }
 
 
@@ -309,6 +332,7 @@ def _header_value(headers, name: str) -> str:
 
 
 def _download_installer(part_path: Path, expected_checksum: str) -> None:
+    _check_download_cancelled()
     part_path.parent.mkdir(parents=True, exist_ok=True)
     with _official_response(INSTALLER_URL, 30, headers={"Range": f"bytes=0-{_DOWNLOAD_CHUNK_BYTES - 1}"}) as first_resp:
         first_headers = getattr(first_resp, "headers", None)
@@ -335,7 +359,9 @@ def _download_installer(part_path: Path, expected_checksum: str) -> None:
                 written = 0
                 try:
                     while written < expected_len:
+                        _check_download_cancelled()
                         block = resp.read(min(_READ_BLOCK_BYTES, expected_len - written))
+                        _check_download_cancelled()
                         if not block:
                             break
                         with write_lock:
@@ -355,6 +381,7 @@ def _download_installer(part_path: Path, expected_checksum: str) -> None:
                 expected_len = end - start + 1
                 last_exc: Exception | None = None
                 for attempt in range(_CHUNK_MAX_RETRIES):
+                    _check_download_cancelled()
                     try:
                         with _official_response(
                             INSTALLER_URL, 30, headers={"Range": f"bytes={start}-{end}"}
@@ -368,7 +395,7 @@ def _download_installer(part_path: Path, expected_checksum: str) -> None:
                     except Exception as exc:
                         last_exc = exc
                         if attempt + 1 < _CHUNK_MAX_RETRIES:
-                            time.sleep(0.4 * (attempt + 1))
+                            _CANCEL_DOWNLOAD.wait(0.4 * (attempt + 1))
                 raise UpdateError("从官网下载安装包超时或中断，请检查网络后重试。") from last_exc
 
             remaining_ranges = [
@@ -400,7 +427,9 @@ def _download_installer(part_path: Path, expected_checksum: str) -> None:
             size = 0
             with part_path.open("wb") as handle:
                 while True:
+                    _check_download_cancelled()
                     chunk = first_resp.read(_READ_BLOCK_BYTES)
+                    _check_download_cancelled()
                     if not chunk:
                         break
                     size += len(chunk)
@@ -409,6 +438,7 @@ def _download_installer(part_path: Path, expected_checksum: str) -> None:
                     handle.write(chunk)
                     _add_progress_bytes(len(chunk), total or size)
 
+    _check_download_cancelled()
     _set_progress(status="verifying", stage_label="下载完成，正在核对官网 SHA-256 校验值…")
     if _file_sha256(part_path) != expected_checksum:
         part_path.unlink(missing_ok=True)
@@ -419,6 +449,8 @@ def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as verify_handle:
         while True:
+            if not _INSTALLING:
+                _check_download_cancelled()
             block = verify_handle.read(1024 * 1024)
             if not block:
                 break
@@ -441,17 +473,24 @@ def _launch_detached_installer(args: list[str]) -> subprocess.Popen:
         raise UpdateError(f"无法独立启动安装程序，软件将保持打开。请退出软件后手动运行安装包：{args[0]}") from exc
 
 
-def install_latest() -> dict:
-    if not _INSTALL_LOCK.acquire(blocking=False):
+def install_latest(*, download_only: bool = False, lock_owned: bool = False) -> dict:
+    global _READY_INSTALLER, _INSTALLING
+    if not lock_owned and not _INSTALL_LOCK.acquire(blocking=False):
         raise UpdateError("已经在下载更新。")
+    if not lock_owned:
+        _CANCEL_DOWNLOAD.clear()
+        _INSTALLING = False
     part_path: Path | None = None
     try:
+        _READY_INSTALLER = None
         _reset_progress(status="preparing", stage_label="正在向官网确认版本与校验信息…")
         info = describe_latest()
+        _check_download_cancelled()
         if not info["update_available"]:
             raise UpdateError(f"已经是官网最新版本 {info['current']}。")
         _set_progress(version=info["latest"], stage_label="正在获取官网安装包校验码…")
         checksums = _checksum_for_installer(_read_official(CHECKSUM_URL, 20, 100_000).decode("utf-8", "replace"))
+        _check_download_cancelled()
         temp_dir = Path(os.environ.get("TEMP") or os.environ.get("TMP") or ".")
         destination = temp_dir / f"TiYouJu-Setup-{info['latest']}.exe"
         part_path = temp_dir / f"TiYouJu-Setup-{info['latest']}.exe.part"
@@ -471,56 +510,125 @@ def install_latest() -> dict:
                 destination.unlink(missing_ok=True)
         if not reused_cached:
             _download_installer(part_path, checksums)
+            _check_download_cancelled()
             os.replace(part_path, destination)
             part_path = None
-        _set_progress(status="backing_up", stage_label="校验通过，正在备份本地题库…")
-        _backup_database()
-        if os.name != "nt":
-            raise UpdateError("自动安装只支持 Windows。")
-        _set_progress(status="launching", stage_label="题库已备份，正在启动安装程序…")
-        _launch_detached_installer(
-            [
-                str(destination),
-                "/SILENT",
-                "/SUPPRESSMSGBOXES",
-                "/NORESTART",
-                "/CLOSEAPPLICATIONS",
-                "/MERGETASKS=!desktopicon",
-                "/AUTOSTART=1",
-            ]
-        )
-        _set_progress(status="succeeded", stage_label=f"正在安装 {info['latest']}，软件即将关掉并在装完后自动重开。")
+        with _START_LOCK:
+            _check_download_cancelled()
+            _READY_INSTALLER = (destination, checksums, info["latest"])
+            _set_progress(
+                status="ready", stage_label=f"{info['latest']} 已下载并通过校验。点击「安装更新」后再确认安装。"
+            )
+        if not download_only:
+            _install_ready()
         return {"ok": True, "version": info["latest"]}
+    except DownloadCancelled:
+        _set_progress(status="cancelled", stage_label="下载已取消，未启动安装。", error="")
+        return {"ok": True, "cancelled": True}
     except UpdateError as exc:
+        if _CANCEL_DOWNLOAD.is_set() and not _INSTALLING:
+            _set_progress(status="cancelled", stage_label="下载已取消，未启动安装。", error="")
+            return {"ok": True, "cancelled": True}
         _set_progress(status="failed", stage_label="更新未完成", error=str(exc))
         raise
     except Exception as exc:
+        if _CANCEL_DOWNLOAD.is_set() and not _INSTALLING:
+            _set_progress(status="cancelled", stage_label="下载已取消，未启动安装。", error="")
+            return {"ok": True, "cancelled": True}
         _set_progress(status="failed", stage_label="更新未完成", error="下载安装过程中出现错误，请重试。")
         raise UpdateError("下载安装过程中出现错误，请重试。") from exc
     finally:
-        if part_path is not None:
-            part_path.unlink(missing_ok=True)
-        _INSTALL_LOCK.release()
+        try:
+            if part_path is not None:
+                part_path.unlink(missing_ok=True)
+        finally:
+            _INSTALLING = False
+            _INSTALL_LOCK.release()
 
 
-def start_install_background() -> dict:
+def _install_ready() -> None:
+    global _INSTALLING, _READY_INSTALLER
+    if _READY_INSTALLER is None:
+        raise UpdateError("请先下载并校验更新，再确认安装。")
+    destination, checksum, version = _READY_INSTALLER
+    _INSTALLING = True
+    _set_progress(status="verifying", stage_label="正在重新校验已下载的安装包…")
+    if not destination.is_file() or _file_sha256(destination) != checksum:
+        _READY_INSTALLER = None
+        raise UpdateError("已下载的安装包不存在或已变更，请重新下载。")
+    if os.name != "nt":
+        raise UpdateError("自动安装只支持 Windows。")
+    _set_progress(status="backing_up", stage_label="正在备份本地题库，请稍候…")
+    _backup_database()
+    _set_progress(status="launching", stage_label="题库已备份，正在启动安装程序…")
+    _launch_detached_installer(
+        [
+            str(destination),
+            "/SILENT",
+            "/SUPPRESSMSGBOXES",
+            "/NORESTART",
+            "/CLOSEAPPLICATIONS",
+            "/MERGETASKS=!desktopicon",
+            "/AUTOSTART=1",
+        ]
+    )
+    _set_progress(status="succeeded", stage_label=f"正在安装 {version}，软件即将关掉并在装完后自动重开。")
+
+
+def start_install_background(*, download_only: bool = False, confirmed: bool = False) -> dict:
+    global _INSTALLING
     with _START_LOCK:
-        if _INSTALL_LOCK.locked():
+        if not _INSTALL_LOCK.acquire(blocking=False):
             return {"ok": True, "already_running": True, **get_install_progress()}
-        _reset_progress(status="preparing", stage_label="正在向官网确认版本与校验信息…")
-        ready = threading.Event()
+        if confirmed and _READY_INSTALLER is None:
+            _INSTALL_LOCK.release()
+            raise UpdateError("请先下载并校验更新，再确认安装。")
+        _CANCEL_DOWNLOAD.clear()
+        _INSTALLING = confirmed
+        if confirmed and _READY_INSTALLER is not None:
+            _set_progress(
+                status="verifying", stage_label="正在重新校验已下载的安装包…", version=_READY_INSTALLER[2], error=""
+            )
+        else:
+            _reset_progress(status="preparing", stage_label="正在向官网确认版本与校验信息…")
 
         def _worker() -> None:
-            ready.set()
-            try:
-                install_latest()
-            except UpdateError:
-                pass
+            global _INSTALLING
+            if confirmed:
+                try:
+                    _install_ready()
+                except Exception as exc:
+                    _set_progress(
+                        status="failed",
+                        stage_label="安装未完成",
+                        error=str(exc) if isinstance(exc, UpdateError) else "安装未能启动，请重试。",
+                    )
+                finally:
+                    _INSTALLING = False
+                    _INSTALL_LOCK.release()
+            else:
+                try:
+                    install_latest(download_only=download_only, lock_owned=True)
+                except UpdateError:
+                    pass
 
         thread = threading.Thread(target=_worker, name="tiyouju-app-update", daemon=True)
-        thread.start()
-        ready.wait(timeout=0.5)
+        try:
+            thread.start()
+        except Exception:
+            _INSTALLING = False
+            _INSTALL_LOCK.release()
+            raise
         return {"ok": True, "started": True, **get_install_progress()}
+
+
+def cancel_download() -> dict:
+    with _START_LOCK:
+        progress = get_install_progress()
+        if progress["status"] in {"preparing", "downloading", "verifying", "cancelling"} and not progress["installing"]:
+            _CANCEL_DOWNLOAD.set()
+            _set_progress(status="cancelling", stage_label="正在取消下载，等待当前连接结束…")
+        return get_install_progress()
 
 
 def _guard(request: HttpRequest):
@@ -608,6 +716,42 @@ def update_install_start_view(request: HttpRequest):
     if refused:
         return refused
     return JsonResponse(start_install_background())
+
+
+@csrf_exempt
+def update_download_start_view(request: HttpRequest):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    refused = _guard(request)
+    if refused:
+        return refused
+    return JsonResponse(start_install_background(download_only=True))
+
+
+@csrf_exempt
+def update_download_cancel_view(request: HttpRequest):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    refused = _guard(request)
+    if refused:
+        return refused
+    return JsonResponse(cancel_download())
+
+
+@csrf_exempt
+def update_install_confirm_view(request: HttpRequest):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    refused = _guard(request)
+    if refused:
+        return refused
+    try:
+        payload = json.loads(request.body or b"{}")
+        if not isinstance(payload, dict) or payload.get("confirmed") is not True:
+            raise UpdateError("请先确认关闭软件并安装更新。")
+        return JsonResponse(start_install_background(confirmed=True))
+    except (ValueError, UpdateError) as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
 
 
 @csrf_exempt

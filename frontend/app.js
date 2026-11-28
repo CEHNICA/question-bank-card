@@ -6141,7 +6141,6 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         sessionStorage.setItem(dismissKey(ver), "1");
       } catch {}
     };
-    let pollTimer = null;
     const formatBytes = (bytes) => {
       const n = Number(bytes) || 0;
       if (n <= 0) return "0 MB";
@@ -6164,7 +6163,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       const box = $(`${prefix}Progress`);
       if (!box) return;
       const fill = $(`${prefix}ProgressFill`);
-      if (!progress || progress.status === "idle" || progress.status === "failed") {
+      if (!progress || ["idle", "failed", "cancelled"].includes(progress.status)) {
         box.hidden = true;
         if (fill) fill.classList.remove("is-indeterminate");
         return;
@@ -6191,45 +6190,12 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
           : (done > 0 ? `已下载 ${formatBytes(done)}` : "正在连接 tiyouju.com…");
       }
       if (speedEl) {
-        if (status === "verifying") speedEl.textContent = "正在校验 SHA-256…";
+        if (status === "ready") speedEl.textContent = "校验通过，等待确认安装";
+        else if (status === "cancelling") speedEl.textContent = "正在停止下载…";
+        else if (status === "verifying") speedEl.textContent = "正在校验 SHA-256…";
         else if (status === "backing_up") speedEl.textContent = "正在备份题库…";
         else if (status === "launching" || status === "succeeded") speedEl.textContent = "即将启动安装程序";
         else speedEl.textContent = `${formatSpeed(progress.speed_bps)}${formatEta(progress.eta_seconds)}`;
-      }
-    };
-    const syncProgress = (progress) => {
-      renderProgressBox("updateAbout", progress);
-      renderProgressBox("updateFloat", progress);
-      const active = Boolean(progress && progress.active);
-      install.disabled = active;
-      if (floatInstall) floatInstall.disabled = active;
-      if (progress && progress.status === "failed") {
-        const errMsg = progress.error || "没有安装。";
-        line.textContent = errMsg;
-        setFloatStatus(errMsg, true);
-        install.disabled = false;
-        if (floatInstall) floatInstall.disabled = false;
-      } else if (progress && progress.status === "succeeded") {
-        const msg = progress.stage_label || `正在安装 ${progress.version || ""}。软件会先关掉，题库已备份，装完后重新打开。`;
-        line.textContent = msg;
-        setFloatStatus(msg, false);
-      } else if (active) {
-        line.textContent = progress.stage_label || "正在下载并安装官网更新…";
-        setFloatStatus("", false);
-      }
-    };
-    const pollProgress = async () => {
-      if (pollTimer) {
-        clearTimeout(pollTimer);
-        pollTimer = null;
-      }
-      while (true) {
-        const progress = await api("/api/update/progress", { headers: { "X-QB-Request": "1" } });
-        syncProgress(progress);
-        if (progress.status === "succeeded") return progress;
-        if (progress.status === "failed") throw new Error(progress.error || "没有安装。");
-        if (!progress.active && progress.status === "idle") return progress;
-        await new Promise((resolve) => { pollTimer = setTimeout(resolve, 250); });
       }
     };
     const setFloatStatus = (text, isError = false) => {
@@ -6255,40 +6221,48 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         });
         floatList.hidden = false;
       }
-      if (floatInstall) floatInstall.disabled = false;
-      setFloatStatus("", false);
+      controller.updateLatest(data);
       floatCard.hidden = false;
     };
     const hideFloatPopup = () => {
       if (currentLatest) markDismissed(currentLatest);
       if (floatCard) floatCard.hidden = true;
     };
-    const runInstall = async () => {
-      install.disabled = true;
-      if (floatInstall) floatInstall.disabled = true;
-      line.textContent = "正在准备从 tiyouju.com 下载安装包…";
-      setFloatStatus("", false);
-      try {
-        try {
-          const started = await api("/api/update/install/start", { method: "POST" });
-          syncProgress(started);
-          await pollProgress();
-          return;
-        } catch (startErr) {
-          if (startErr && startErr.status !== 404) throw startErr;
+    const controller = window.QBUpdate.create({
+      request: async (path, options = {}) => {
+        const data = await api(path, { ...options, headers: { "X-QB-Request": "1" } });
+        if (path.startsWith("/api/update/check")) {
+          toggle.checked = data.auto_check !== false;
+          if (data.update_available) showFloatPopup(data);
         }
-        const result = await api("/api/update/install", { method: "POST" });
-        const msg = `正在安装 ${result.version}。软件会先关掉，题库已备份，装完后重新打开。`;
-        line.textContent = msg;
-        setFloatStatus(msg, false);
-      } catch (error) {
-        const errMsg = error.message || "没有安装。";
-        line.textContent = errMsg;
-        setFloatStatus(errMsg, true);
-        install.disabled = false;
-        if (floatInstall) floatInstall.disabled = false;
+        return data;
+      },
+      confirmInstall: (version) => confirmDialog({ title: `安装更新 ${version || ""}？`,
+        text: "请先保存正在编辑的内容。题库将自动备份，软件会关闭，安装完成后重新打开。",
+        ok: "关闭软件并安装", cancel: "稍后安装", focusCancel: true }),
+      onChange: (state) => {
+        renderProgressBox("updateAbout", state.progress);
+        renderProgressBox("updateFloat", state.progress);
+        for (const btn of [install, floatInstall]) {
+          if (!btn) continue;
+          btn.disabled = state.disabled; btn.textContent = state.label; btn.hidden = !state.visible;
+        }
+        for (const id of ["updateCancelButton", "updateFloatCancel"]) {
+          const btn = $(id);
+          if (!btn) continue;
+          btn.hidden = !state.cancelVisible; btn.disabled = state.cancelDisabled;
+          btn.textContent = state.progress.status === "cancelling" ? "正在取消…" : "取消下载";
+        }
+        $("updateCheckButton").disabled = state.checkDisabled;
+        $("updateCheckButton").textContent = state.checking ? "正在检查…" : "检查更新";
+        line.textContent = state.message;
+        setFloatStatus(state.message, state.error);
       }
-    };
+    });
+    const runInstall = () => controller.start();
+    for (const id of ["updateCancelButton", "updateFloatCancel"]) {
+      $(id)?.addEventListener("click", () => { void controller.cancel(); });
+    }
 
     if (floatLater) floatLater.addEventListener("click", hideFloatPopup);
     if (floatClose) floatClose.addEventListener("click", hideFloatPopup);
@@ -6305,42 +6279,13 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       });
     }
 
-    const paint = (data) => {
-      toggle.checked = data.auto_check !== false;
-      if (data.error) {
-        line.textContent = data.error;
-        install.hidden = true;
-        return;
-      }
-      if (data.skipped) {
-        line.textContent = "已关闭自动检查。需要时再点「检查更新」。";
-        install.hidden = true;
-        return;
-      }
-      if (data.update_available) {
-        line.textContent = `官网 tiyouju.com 有新版本 ${data.latest}，当前是 ${data.current}。`;
-        install.hidden = false;
-        showFloatPopup(data);
-        return;
-      }
-      line.textContent = data.latest
-        ? `已经是官网最新版本 ${data.current}。`
-        : "打开软件后会向 tiyouju.com 询问新版本。";
-      install.hidden = true;
-      if (floatCard) floatCard.hidden = true;
-    };
     const check = async (auto) => {
-      line.textContent = "正在询问 tiyouju.com…";
-      try {
-        const response = await api(`/api/update/check${auto ? "?auto=1" : ""}`, { method: "POST" });
-        paint(response);
-      } catch (error) {
-        paint({ error: error.message || "连不上 tiyouju.com。", auto_check: toggle.checked });
-      }
+      await controller.check(auto);
     };
     toggle.addEventListener("change", async () => {
       try {
-        paint(await api("/api/update/settings", { method: "POST", body: { auto_check: toggle.checked } }));
+        const data = await api("/api/update/settings", { method: "POST", body: { auto_check: toggle.checked } });
+        toggle.checked = data.auto_check !== false;
       } catch (error) {
         line.textContent = error.message || "没能保存这个开关。";
       }
@@ -6353,13 +6298,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       }
     });
     void check(true);
-    void api("/api/update/progress", { headers: { "X-QB-Request": "1" } }).then((p) => {
-      if (p && p.active) {
-        install.hidden = false;
-        syncProgress(p);
-        return pollProgress();
-      }
-    }).catch(() => {});
+    void controller.refresh().catch(() => {});
   }
 
   $("settingsAutoExpand").addEventListener("change", (event) => {
