@@ -7,7 +7,7 @@
 (function () {
   "use strict";
 
-  const ASSET_VER = "20261127a";
+  const ASSET_VER = "20261128-solution-save";
   const ASSETS = [
     {
       kind: "css",
@@ -264,6 +264,7 @@
       await ensureEditor().open(list, {
         scope: "library",
         allowQuestionEdit: true,
+        closeAfterSave: true,
         focus: item.id,
         focusField: options.focusField || "stem",
         returnTo: options.returnTo || ""

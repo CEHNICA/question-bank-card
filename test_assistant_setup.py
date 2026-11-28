@@ -526,5 +526,24 @@ class SetupAgentsTests(unittest.TestCase):
         self.assertEqual(len(broadcasts), 1)
 
 
+class BundledOneNoteReviewTests(unittest.TestCase):
+    def test_review_resources_survive_install_sync_and_zip_export(self):
+        source = Path(__file__).resolve().parent / "skills" / "tiyouju"
+        resources = [f"references/onenote-review/{name}" for name in ("SKILL.md", "windows-access.md", "mathml.md")]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            installed = setup.install_skill(source, root / "assistant")
+            canonical = root / "canonical" / "tiyouju"
+            setup.sync_canonical_skill(source, canonical)
+            archive = root / "tiyouju-skill.zip"
+            setup.build_skill_zip(canonical, archive)
+            with zipfile.ZipFile(archive) as zipped:
+                for name in resources:
+                    original = (source / name).read_bytes()
+                    self.assertEqual((Path(installed["target"]) / name).read_bytes(), original)
+                    self.assertEqual((canonical / name).read_bytes(), original)
+                    self.assertEqual(zipped.read("tiyouju/" + name), original)
+
+
 if __name__ == "__main__":
     unittest.main()

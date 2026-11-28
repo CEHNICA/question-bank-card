@@ -67,7 +67,7 @@ describe("录题界面设置弹窗统一与交互细节契约", () => {
     assert.match(appJs, /button\("在题库中看"/);
     assert.match(eagleHtml, /opState\.returnToEditor\s*=/);
     assert.match(eagleHtml, /openSolutionEditorForId\(backEditor\.qid/);
-    assert.match(solEditorJs, /const ASSET_VER = "20261127a"/);
+    assert.match(solEditorJs, /const ASSET_VER = "20261128-solution-save"/);
     assert.match(solEditorJs, /returnTo:\s*options\.returnTo \|\| ""/);
     assert.match(unifiedEditorJs, /typeof openOptions\.onRecrop === "function"/);
     assert.match(unifiedEditorJs, /close\(\{\s*stayInPlace:\s*true\s*\}\)/);

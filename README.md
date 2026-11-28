@@ -222,9 +222,10 @@ irm https://github.com/CEHNICA/question-bank-card/releases/latest/download/insta
 
 ## Code signing policy
 
-Free code signing provided by SignPath.io, certificate by SignPath Foundation.
+当前公开的 2.3.16 安装包尚未数字签名。仓库已预留 SignPath 接口，但配置接口不等于已获得签名证书。
 
 - 本项目的 Windows 可执行文件与安装包构建与签名策略见 [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md) 与 [PRIVACY.md](PRIVACY.md)。
-- 签名产物仅通过公开仓库的 GitHub Actions 在官方托管环境（`windows-latest`）中构建并触发；在完成证书签发接入前，若浏览器下载安装包遇到 Windows SmartScreen 提示，可点「更多信息 → 仍要运行」或使用 PowerShell 安装脚本配合 `SHA256SUMS.txt` 校验安装。
+- 后续正式发布必须先配置签名服务，并验证主程序、命令行程序和安装包的签名与时间戳；缺配置或验证失败时停止发布。接入步骤见签名策略。
+- SHA-256 只能核对下载文件是否与发布文件一致，不能证明发布者身份，也不能代替数字签名。SmartScreen 还会检查文件和发布者信誉，数字签名不保证新版本立即免提示；请勿关闭系统防护作为安装方案。
 
 > 提交公开 Issue 或讨论时，请勿附带真实学生姓名/手写个人隐私信息、本地题库 `.sqlite3`、运行日志或任何 API 密钥。

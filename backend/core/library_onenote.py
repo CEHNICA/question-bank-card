@@ -211,7 +211,18 @@ def resolve_target_section() -> tuple[str, str, str, str]:
     data = call_bridge("list")
     notebooks = data.get("notebooks") or []
     if not notebooks:
-        raise OneNoteError("未检测到已打开的 OneNote 笔记本，请先在 OneNote 中打开或创建一个笔记本。")
+        # COM 能启动时主窗口与笔记本可能仍在加载，不能把第一次空结果当作最终状态。
+        if _ensure_desktop_window():
+            for _ in range(2):
+                time.sleep(0.35)
+                notebooks = call_bridge("list").get("notebooks") or []
+                if notebooks:
+                    break
+        if not notebooks:
+            raise OneNoteError(
+                "桌面版 OneNote 尚未返回可用笔记本。请打开桌面版 OneNote（网页端不支持此操作），"
+                "打开或创建一个笔记本及普通分区，等待加载后重试。阅读下载题包的笔记请点「作者笔记」，无需打开 OneNote。"
+            )
 
     target_nb = None
     # 策略 1: 专用笔记本
@@ -770,16 +781,13 @@ def compute_page_right_edge(page_xml: str) -> float:
     except ET.ParseError:
         return 0.0
 
+    namespace = root.tag.partition("}")[0].lstrip("{")
     container_tags = {
-        f"{{{ONE_NS}}}Outline",
-        f"{{{ONE_NS}}}InkDrawing",
-        f"{{{ONE_NS}}}Image",
-        f"{{{ONE_NS}}}InsertedFile",
-        f"{{{ONE_NS}}}MediaFile",
+        f"{{{namespace}}}{tag}" for tag in ("Outline", "InkDrawing", "Image", "InsertedFile", "MediaFile")
     }
-    pos_tag = f"{{{ONE_NS}}}Position"
-    size_tag = f"{{{ONE_NS}}}Size"
-    ink_tag = f"{{{ONE_NS}}}InkDrawing"
+    pos_tag = f"{{{namespace}}}Position"
+    size_tag = f"{{{namespace}}}Size"
+    ink_tag = f"{{{namespace}}}InkDrawing"
 
     max_x = 0.0
     for elem in root.iter():
@@ -923,9 +931,11 @@ def create_or_sync_page(publication: PublishedQuestion) -> dict[str, Any]:
 
 
 def start_attempt(publication: PublishedQuestion) -> dict[str, Any]:
-    """发起新的一刷（首次则建页记第 1 刷；已有页则在当前最右侧安全区插入并对象级聚焦）。"""
+    """发起新的一刷并保存关联；已有页的精确定位由视图在保存完成后执行。"""
     existing = (publication.extras or {}).get("onenote") or {}
     if not isinstance(existing, dict) or not str(existing.get("page_id") or "").strip():
+        if isinstance(existing, dict) and existing.get("url"):
+            raise OneNoteError("当前笔记关联缺少页面标识，无法新增重做区。可先打开原笔记保留内容，再重新关联页面。")
         return create_or_sync_page(publication)
 
     page_id = str(existing["page_id"]).strip()
@@ -933,6 +943,14 @@ def start_attempt(publication: PublishedQuestion) -> dict[str, Any]:
     page_xml = str((page_data or {}).get("xml") or "")
     if not page_xml:
         raise OneNoteError("未在 OneNote 中找到该题原页面；如需新建，请先取消当前关联后重试。")
+    try:
+        root = ET.fromstring(page_xml)
+    except ET.ParseError as exc:
+        raise OneNoteError("OneNote 返回的页面内容无效，未写入重做区。请稍后重试。") from exc
+    if root.tag not in {
+        f"{{http://schemas.microsoft.com/office/onenote/{year}/onenote}}Page" for year in (2007, 2010, 2013)
+    }:
+        raise OneNoteError("无法识别 OneNote 页面格式，未写入重做区。")
 
     max_x = compute_page_right_edge(page_xml)
     insert_x = round(max_x + SAFE_HORIZONTAL_GAP_PT, 1) if max_x > 0 else DEFAULT_OUTLINE_X_PT
@@ -950,12 +968,14 @@ def start_attempt(publication: PublishedQuestion) -> dict[str, Any]:
     outline_xml = build_attempt_outline_xml(publication, png, x=insert_x, y=insert_y, header_label=attempt_label)
 
     append_res = call_bridge(
-        "append_outline", timeout_seconds=40, pageId=page_id, outlineXml=outline_xml, marker=created_hm
+        "append_outline", timeout_seconds=40, pageId=page_id, outlineXml=outline_xml, marker=attempt_label
     )
 
     outline_id = str((append_res or {}).get("outlineId") or "").strip()
     focus_object_id = str((append_res or {}).get("focusObjectId") or outline_id).strip()
-    object_url = str((append_res or {}).get("objectUrl") or existing.get("url") or "").strip()
+    if not outline_id or not focus_object_id:
+        raise OneNoteError("OneNote 已接收写入，但未确认新增区域。请先打开原笔记检查，勿重复点击「＋」。")
+    object_url = str((append_res or {}).get("objectUrl") or "").strip()
 
     attempt_entry = {
         "attempt": next_num,
@@ -989,6 +1009,8 @@ def _refine_open(page_id: str | None, url: str | None, *, object_id: str | None 
                 nav_kwargs["objectId"] = str(object_id)
             data = call_bridge("navigate", **nav_kwargs)
             navigated = bool(data.get("navigated", True)) if isinstance(data, dict) else True
+            if object_id and isinstance(data, dict):
+                navigated = navigated and bool(data.get("object_navigated", navigated))
             if isinstance(data, dict):
                 focused = bool(data.get("focused"))
                 has_window = bool(data.get("has_window", focused))
@@ -1016,19 +1038,25 @@ def open_page(publication: PublishedQuestion, *, wait: bool = False, object_id: 
     page_id = record.get("page_id")
     url = record.get("url")
     target_object_id = str(object_id or "").strip() or None
+    outline_id = None
     if target_object_id:
+        # An ordinary page URL cannot recover a failed jump to a specific attempt.
+        url = None
         for attempt in record.get("attempts") or []:
             if isinstance(attempt, dict) and (
                 attempt.get("focus_object_id") == target_object_id or attempt.get("outline_id") == target_object_id
             ):
                 if attempt.get("object_url"):
                     url = attempt.get("object_url")
+                outline_id = str(attempt.get("outline_id") or "").strip() or None
                 break
     if not page_id and not url:
         raise OneNoteError("无法定位到该页面，链接或页面标识已丢失。")
 
     if wait:
         ok = _refine_open(page_id, url, object_id=target_object_id) if target_object_id else _refine_open(page_id, url)
+        if not ok and outline_id and outline_id != target_object_id:
+            ok = _refine_open(page_id, url, object_id=outline_id)
         if not ok:
             raise OneNoteError("未能唤起 OneNote，请确认桌面版 OneNote 已启动并打开对应笔记本。")
         return {"ok": True, "opened": True, "focused": True, "onenote": record, "deferred": False}
@@ -1074,7 +1102,13 @@ def _crop_and_compress_onenote_page(img, *, max_long_side: int = 1280, pad_px: i
 
 
 def export_page_step_images(
-    page_id: str, dest_dir: Path, *, max_pages: int = 3, max_long_side: int = 1280, silent: bool = True
+    page_id: str,
+    dest_dir: Path,
+    *,
+    max_pages: int = 3,
+    max_long_side: int = 1280,
+    silent: bool = True,
+    require_complete: bool = False,
 ) -> list[Path]:
     """将关联的 OneNote 页面导出为裁边压缩后的步骤 PNG 列表（默认静默导出，不抢占前台窗口）。"""
     clean_page_id = str(page_id or "").strip()
@@ -1108,6 +1142,8 @@ def export_page_step_images(
 
         out_paths: list[Path] = []
         with pymupdf.open(str(pdf_path)) as doc:
+            if require_complete and len(doc) > max(1, int(max_pages)):
+                raise OneNoteError(f"这份笔记超过 {max_pages} 页，无法完整附带；请先在 OneNote 中拆分笔记后再分享。")
             total = min(len(doc), max(1, int(max_pages)))
             matrix = pymupdf.Matrix(150 / 72.0, 150 / 72.0)
             for idx in range(total):
@@ -1335,6 +1371,27 @@ def read_page_note(
 # ---------------- API Views ----------------
 
 
+def shared_notes_view(request: HttpRequest, publication_id: str) -> JsonResponse:
+    """随题包保存的只读笔记，不依赖作者账户、原页面链接或本机 OneNote。"""
+    from . import library_solutions
+    from .models import LibrarySolution
+
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    publication = get_object_or_404(PublishedQuestion, pk=publication_id)
+    ids = (publication.extras or {}).get("shared_onenote_solution_ids") or []
+    notes = []
+    for raw_id in ids:
+        try:
+            row = LibrarySolution.objects.filter(pk=uuid.UUID(str(raw_id)), publication=publication).first()
+            if row is None:
+                return JsonResponse({"error": "作者笔记版本缺失，请重新下载包含笔记的题包。"}, status=409)
+            notes.append(library_solutions.solution_json(row))
+        except (ValueError, library_solutions.SolutionError) as exc:
+            return JsonResponse({"error": f"作者笔记附件不完整，请重新下载题包：{exc}"}, status=409)
+    return JsonResponse({"notes": notes})
+
+
 @csrf_exempt
 def onenote_create_view(request: HttpRequest, publication_id: str) -> JsonResponse:
     """POST /api/library/<publication_id>/onenote/create: 为题目在 OneNote 创建答题页并关联。"""
@@ -1382,8 +1439,19 @@ def onenote_attempt_view(request: HttpRequest, publication_id: str) -> JsonRespo
 
     publication = get_object_or_404(PublishedQuestion, pk=publication_id)
     try:
+        previous = (publication.extras or {}).get("onenote") or {}
+        had_page = isinstance(previous, dict) and bool(previous.get("page_id"))
         record = start_attempt(publication)
-        return JsonResponse({"ok": True, "onenote": record})
+        attempts = record.get("attempts") or []
+        latest = attempts[-1] if attempts else {}
+        warning = ""
+        if had_page:
+            try:
+                open_page(publication, wait=True, object_id=latest.get("focus_object_id"))
+            except Exception:
+                logger.warning("OneNote 重做区已保存但定位失败 publication=%s", publication_id, exc_info=True)
+                warning = "重做区已新增，但未能定位。请打开原笔记并向右查看；无需再次点击「＋」。"
+        return JsonResponse({"ok": True, "onenote": record, "warning": warning})
     except OneNoteError as err:
         return JsonResponse({"ok": False, "error": str(err)}, status=400)
     except Exception as exc:

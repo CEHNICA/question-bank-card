@@ -79,6 +79,13 @@ export type CleanPreview = {
   has_onenote_notes?: boolean;
   onenote_count?: number;
   onenote_preview?: string;
+  single_question?: {
+    question_images: string[];
+    figures: string[];
+    onenote_pages: string[];
+    images_omitted: number;
+    notes_locked?: boolean;
+  };
 };
 
 type ParsedPack = {
@@ -140,7 +147,33 @@ export function cleanPreview(raw: unknown): CleanPreview {
       cleaned.onenote_preview = rawOneNotePreview;
     }
   }
+  if (cleaned.counts.questions === 1 && cleaned.samples.length === 1 && source.single_question && typeof source.single_question === "object") {
+    const single = source.single_question as Record<string, unknown>;
+    let remaining = 1_200_000;
+    const images = (value: unknown, limit: number): string[] => {
+      const accepted: string[] = [];
+      for (const item of (Array.isArray(value) ? value : []).slice(0, limit)) {
+        if (typeof item !== "string" || item.length > 360_000 || item.length > remaining) continue;
+        if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(item)) continue;
+        accepted.push(item);
+        remaining -= item.length;
+      }
+      return accepted;
+    };
+    cleaned.single_question = {
+      question_images: images(single.question_images, 12),
+      figures: images(single.figures, 12),
+      onenote_pages: cleaned.has_onenote_notes ? images(single.onenote_pages, 12) : [],
+      images_omitted: num(single.images_omitted),
+    };
+  }
   return cleaned;
+}
+
+/** 付费单题的完整手写解答仍随购买权限提供，公开预览不泄露全部笔记。 */
+export function previewForViewer(preview: CleanPreview | null, showNotes: boolean): CleanPreview | null {
+  if (!preview?.single_question || showNotes) return preview;
+  return { ...preview, single_question: { ...preview.single_question, onenote_pages: [], notes_locked: Boolean(preview.has_onenote_notes) } };
 }
 
 /** 认出这是题有据桌面版「导出社区题包」打出来的 zip，并取出预览和封面。 */
@@ -976,7 +1009,7 @@ packRoutes.get("/packs/:id", async (c) => {
       review_note: manage ? row.review_note : undefined,
       reviewed_by: undefined,
     },
-    preview: previewJson ? JSON.parse(String(previewJson)) : null,
+    preview: previewForViewer(previewJson ? JSON.parse(String(previewJson)) : null, !paid || owned),
     viewer: {
       can_manage: manage,
       owned,

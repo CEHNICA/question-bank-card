@@ -135,10 +135,14 @@
       controls.barObj.nextButton.disabled = loading || saving || uploading || currentIndex >= items.length - 1;
 
       const adoptAi = aiUntouched && (!record.hasSavedSolution || dirty);
-      controls.barObj.saveButton.textContent = adoptAi ? "采纳并保存" : "保存";
+      controls.barObj.saveButton.textContent = openOptions.closeAfterSave
+        ? (adoptAi ? "采纳保存并返回" : "保存并返回")
+        : (adoptAi ? "采纳并保存" : "保存");
       controls.barObj.saveButton.title = adoptAi
         ? "当前答案与解析为 AI 参考初稿；点击后保存并正式入库（Ctrl+Enter / Ctrl+S）"
-        : "保存当前修改到题库，保留历史版本（Ctrl+Enter / Ctrl+S · Esc 返回）";
+        : (openOptions.closeAfterSave
+          ? "保存成功后返回题库并刷新题卡；保存失败保留当前编辑内容（Ctrl+Enter / Ctrl+S）"
+          : "保存当前修改到题库，保留历史版本（Ctrl+Enter / Ctrl+S · Esc 返回）");
     }
 
     function syncAiFieldBadges() {
@@ -204,12 +208,14 @@
     function updateStatusLine(customText = "", isError = false) {
       if (!controls || !record) return;
       controls.statusLine.classList?.toggle("is-error", Boolean(isError));
+      controls.statusLine.setAttribute("role", isError ? "alert" : "status");
       if (customText) {
         controls.statusLine.textContent = customText;
+        if (isError) controls.statusLine.scrollIntoView?.({ block: "nearest" });
         return;
       }
       const parts = [];
-      parts.push(isDirty() ? "有未保存修改" : "已载入题库版本");
+      parts.push(isDirty() ? "有未保存修改" : record.hasSavedSolution ? "已保存正式解析" : "尚未保存为正式解析");
       if (record.solutionError) {
         parts.push(`解析读取异常：${record.solutionError}`);
       } else if (S.hasContent(record.solutionValue)) {
@@ -1540,10 +1546,17 @@
 
       const qChanged = questionChanged();
       const sChanged = solutionChanged();
+      // 将参考内容转为正式解析本身就是一次保存，不要求用户先改一个字。
       const adoptAiInitial = isAiUntouched() && !record.hasSavedSolution && S.hasContent(record.solutionValue);
-      const needSaveSolution = sChanged || adoptAiInitial;
+      const adoptReference = !qChanged && !record.hasSavedSolution && S.hasContent(record.solutionValue);
+      const needSaveSolution = sChanged || adoptAiInitial || adoptReference;
 
       if (!qChanged && !needSaveSolution) {
+        if (openOptions.closeAfterSave && record.hasSavedSolution) {
+          forceClose();
+          notify("正式解析已保存，没有新的修改。", "success");
+          return;
+        }
         notify("没有新的修改，已保持原题库内容。");
         return;
       }
@@ -1594,6 +1607,15 @@
       let latestPublication = targetRecord.publication || null;
       let nextBaseRevision = targetRecord.base;
       let savedSolution = targetRecord.item.solution || null;
+      let refreshFailed = false;
+      const notifyHost = async (meta) => {
+        try {
+          await onSaved?.(targetRecord.item, savedSolution, meta);
+        } catch (error) {
+          refreshFailed = true;
+          console.warn("保存已成功，但题卡刷新失败", error);
+        }
+      };
 
       saving = true;
       pendingSaves.add(previousId);
@@ -1674,7 +1696,7 @@
 
           // 如果接下来不存解析，现在即刻同步给宿主列表（避免后续步骤若不触发则未通知宿主）
           if (!needSaveSolution) {
-            onSaved?.(targetRecord.item, savedSolution, {
+            await notifyHost({
               sync: true,
               scope: openOptions.scope || "library",
               scopeContext: openOptions.scopeContext ?? null,
@@ -1697,6 +1719,9 @@
             solPayload,
             { keepAfterClose: true }
           );
+          if (!solRes.solution || typeof solRes.solution.id !== "string" || !solRes.solution.id) {
+            throw new Error("服务器未确认解析已保存，请保留编辑内容后重试。");
+          }
           savedSolution = solRes.solution;
           targetRecord.item.solution = savedSolution;
           targetRecord.item.solution_revision = savedSolution.id;
@@ -1711,7 +1736,7 @@
           targetRecord.base = solRes.base_revision ?? savedSolution.id;
           targetRecord.history.unshift(savedSolution);
 
-          onSaved?.(targetRecord.item, savedSolution, {
+          await notifyHost({
             sync: true,
             scope: openOptions.scope || "library",
             scopeContext: openOptions.scopeContext ?? null,
@@ -1726,18 +1751,22 @@
           notify(`已确认${itemLabel(targetRecord.item)}保存成功。`, "success");
           return;
         }
-        applyRecordToControls(openOptions.focusField || "stem", { focus: false });
         const msg = qChanged && needSaveSolution
           ? "题目与答案解析均已保存到题库，旧版已保留"
           : qChanged
             ? "题目修改已保存到题库，旧版已保留"
             : "答案解析已保存到题库";
-        updateStatusLine(msg);
-        notify(msg, "success");
+        if (openOptions.closeAfterSave) {
+          forceClose();
+        } else {
+          applyRecordToControls(openOptions.focusField || "stem", { focus: false });
+          updateStatusLine(msg);
+        }
+        notify(refreshFailed ? `${msg}。题卡刷新失败，请重新打开查看。` : msg, refreshFailed ? "info" : "success");
       } catch (error) {
         if (qChanged && activeId !== previousId) {
           // 题干已经先一步更新成功并迁出新 ID，先刷新宿主以免外部仍拿着旧 ID
-          onSaved?.(targetRecord.item, savedSolution, {
+          await notifyHost({
             sync: true,
             scope: openOptions.scope || "library",
             scopeContext: openOptions.scopeContext ?? null,

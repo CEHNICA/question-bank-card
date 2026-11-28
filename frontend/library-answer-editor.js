@@ -10,6 +10,7 @@
     let pollTimer = null, previewTimer = null, pollAgain = false, jobs = new Map(), returnFocus, requestedIds = new Set(), watchedSince = 0, queueNote = "";
 let lastField = "analysis", positionFrame = 0, positionArmed = false;
     let apiSettings = null, checkingApi = false, apiSettingsError = "";
+    let closeAfterSave = false;
     const requests = new Map(), pendingSaves = new Set(), MAX_WATCH = 10 * 60 * 1000;
     const jobsPending = new Set(["queued", "pending", "running", "waiting"]);
   // 时间戳显示：坏的就说“时间未知”，不把 "Invalid Date" 甩给老师。
@@ -323,6 +324,7 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
       apiSettings = null; checkingApi = false; apiSettingsError = "";
       loading = saving = uploading = queueing = cancelling = polling = closing = pollAgain = false;
       items = supplied.map(item => ({ ...item })); scope = options.scope || "paper"; scopeContext = options.scopeContext ?? null;
+      closeAfterSave = Boolean(options.closeAfterSave);
       // 1.25.38：只打开一道题时，不再摆一排「选哪几题」的控件 —— 题号带、
       // 「勾选缺解析的题」和「AI 补充所选题」都是批量用的，单题时只会让人误会。
       singleMode = items.length <= 1;
@@ -527,6 +529,7 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
     }
     function updateEditStatus() {
       if (!current) return;
+      controls.status.setAttribute("role", "status");
       paintAiFieldHint();
       const quality = S.hasContent(current.value) ? (current.value.analysis.trim() || current.value.figures.length ? "" : " · 只有结果，建议补详细解析") : " · 尚未补齐答案解析";
       const pending = pendingSaves.has(current.item.id) ? " · 上一笔保存仍在核对，可继续编辑" : "";
@@ -542,7 +545,9 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
       const aiUntouched = (current.ai_fields || []).length > 0
         && String(current.initialAi?.answer || "") === String(current.value.answer || "")
         && String(current.initialAi?.analysis || "") === String(current.value.analysis || "");
-      controls.save.textContent = aiUntouched ? "采纳并保存" : "保存";
+      controls.save.textContent = closeAfterSave
+        ? (aiUntouched ? "采纳保存并返回" : "保存并返回")
+        : (aiUntouched ? "采纳并保存" : "保存");
       controls.save.title = aiUntouched
         ? "当前答案与解析就是初版的 AI 参考答案；点这一下后正式入库。"
         : (scope === "library" ? "保存后，出卷和题库都用这一版" : "把编辑区里的当前文字保存为本题的解析。");
@@ -592,6 +597,7 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
       saving = true; pendingSaves.add(record.item.id); setBusy(); controls.status.textContent = "正在保存答案解析…";
       try {
         const body = await post(endpoint(record.item), { ...value, base_revision: record.base ?? null, sync_library: sync }, { keepAfterClose: true });
+        if (!body.solution || typeof body.solution.id !== "string" || !body.solution.id) throw new Error("服务器未确认解析已保存，请保留编辑内容后重试。");
         record.item.solution = body.solution; record.item.solution_revision = body.solution.id; record.value = S.editable(body.solution); record.saved = record.loaded = S.signature(record.value); record.dirty = false; record.hasSavedSolution = true; record.ai_fields = []; record.ai_stale = false; record.initialAi = {};
         if (jobDraftState({ status: "done", result: record.suggestion }, record) === "saved") record.suggestion = null;
         record.base = body.base_revision ?? (sync ? body.solution.id : record.base);
@@ -599,12 +605,31 @@ let lastField = "analysis", positionFrame = 0, positionArmed = false;
         // 刚存的这版就是当前生效的解析，之前「待核对」的那份不再另搁一边了。
         record.setAside = null;
         record.item.solution_needs_review = false;
-        onSaved(record.item, body.solution, { sync, scope: savedScope, scopeContext: savedContext });
+        let refreshFailed = false;
+        try {
+          await onSaved(record.item, body.solution, { sync, scope: savedScope, scopeContext: savedContext });
+        } catch (error) {
+          refreshFailed = true;
+          console.warn("解析已保存，但题卡刷新失败", error);
+        }
         if (requestToken !== token || !dialog.open || current !== record) { notify(`返回后已确认${itemLabel(record.item)}的答案解析保存成功。`); return; }
         const item = items.find(item => item.id === record.item.id);
         if (item) { item.solution = body.solution; item.solution_revision = body.solution.id; item.solution_needs_review = false; }
         renderFields(); renderList(); showJobSummary(); controls.status.textContent = sync ? "已保存到题库，原卷答案解析保留。" : "已保存，用于当前组卷。保存组卷草稿后，下次可继续。";
-      } catch (error) { if (requestToken === token && dialog.open) controls.status.textContent = error.message; notify(requestEpoch === epoch ? error.message : `${itemLabel(record.item)}的保存尚未确认：${error.message} 下次打开后请核对已保存版本。`, "error"); }
+        if (closeAfterSave) {
+          saving = false; pendingSaves.delete(record.item.id);
+          await closeEditor();
+        }
+        const message = sync ? "正式解析已保存到题库。" : "答案解析已保存到当前组卷。";
+        notify(refreshFailed ? `${message}题卡刷新失败，请重新打开查看。` : message, refreshFailed ? "info" : "success");
+      } catch (error) {
+        if (requestToken === token && dialog.open) {
+          controls.status.textContent = error.message;
+          controls.status.setAttribute("role", "alert");
+          controls.status.scrollIntoView?.({ block: "nearest" });
+        }
+        notify(requestEpoch === epoch ? error.message : `${itemLabel(record.item)}的保存尚未确认：${error.message} 下次打开后请核对已保存版本。`, "error");
+      }
       finally { pendingSaves.delete(record.item.id); if (requestEpoch === epoch) saving = false; if (dialog.open) { setBusy(); if (requestEpoch !== epoch && current?.item.id === record.item.id) updateEditStatus(); } }
     }
     async function uploadFiles(files) {

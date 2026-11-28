@@ -5332,7 +5332,9 @@ $("selectedViewCount").textContent = String(state.basket.length);
         deferAnswerRefresh(scope === "paper" ? scopeContext : null, sync, item.id);
         // 一次只编一道：保存后停在本题，不再自动跳下一道缺解析。
       } });
-    return answerEditor.open(items, { ...options, scopeContext: { token: printState.token, draftId: state.draft?.id || null } });
+    return answerEditor.open(items, { ...options,
+      closeAfterSave: options.closeAfterSave ?? (options.scope === "library" && items.length === 1),
+      scopeContext: { token: printState.token, draftId: state.draft?.id || null } });
   }
 
   function printAnswerRow(number, item, inline = false) {

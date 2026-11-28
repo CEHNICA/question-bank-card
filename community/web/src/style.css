@@ -98,3 +98,70 @@ body {
   overflow-x: auto;
   overflow-y: hidden;
 }
+
+/* 单题阅读卡：题面与随题手写思路沿同一条阅读线展开。 */
+.single-question-share {
+  --single-ink: #172d46;
+  --single-line: #dce5ed;
+  overflow: hidden;
+  min-width: 0;
+  border: 1px solid var(--single-line);
+  border-radius: 18px;
+  background: #fff;
+  color: var(--single-ink);
+  box-shadow: 0 8px 28px #172d4608;
+}
+.single-share-title {
+  font-family: "Noto Serif SC", "Source Han Serif SC", "Songti SC", SimSun, serif;
+  line-height: 1.55;
+}
+.single-share-head, .single-share-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 28px;
+  font-size: 12px;
+  color: #607187;
+}
+.single-share-head { border-bottom: 1px solid var(--single-line); background: #f2f6fa; }
+.single-share-kicker { color: #0e786f; font-weight: 700; letter-spacing: .12em; }
+.single-share-problem { padding: 30px 32px 24px; }
+.single-share-problem h2 { margin-bottom: 18px; font-size: 13px; font-weight: 700; color: #607187; }
+.single-share-stem { font-size: 17px; line-height: 2; overflow-wrap: anywhere; }
+.single-share-stem .katex { font-size: 1.1em; }
+.single-share-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; margin-top: 22px; }
+.single-share-options li { display: flex; gap: 10px; min-width: 0; line-height: 1.8; overflow-wrap: anywhere; }
+.single-share-options li > div { min-width: 0; }
+.single-option-key { flex-shrink: 0; color: #0e786f; font-weight: 700; }
+.single-body-image, .single-figure-image { margin: 22px auto 0; max-width: 100%; }
+.single-body-image img, .single-figure-image img { display: block; max-width: 100%; height: auto; margin: auto; }
+.single-figure-image img { max-height: 440px; object-fit: contain; }
+.single-question-share figcaption { margin-top: 8px; text-align: center; color: #607187; font-size: 11px; }
+.single-share-source { margin-top: 26px; padding-top: 14px; border-top: 1px solid #edf1f5; font-size: 12px; color: #607187; overflow-wrap: anywhere; }
+.single-share-notes { padding: 24px 28px 28px; background: #f7f5fa; border-top: 1px solid #e6dfee; }
+.single-notes-heading { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; }
+.single-notes-mark { display: grid; place-items: center; width: 38px; height: 38px; flex-shrink: 0; border: 1px solid #d9cfe7; border-radius: 10px; color: #7256a8; font-size: 26px; background: #fff; }
+.single-notes-heading h2 { font-size: 15px; font-weight: 700; color: #51406c; }
+.single-notes-heading p { margin-top: 4px; font-size: 12px; color: #7a6c8e; }
+.single-note-page { margin: 18px 0 0; }
+.single-note-page img { display: block; width: 100%; height: auto; border: 1px solid #e6dfee; border-radius: 6px; background: #fff; }
+.single-notes-locked { padding: 16px; border: 1px dashed #d9cfe7; border-radius: 8px; line-height: 1.8; font-size: 13px; color: #7256a8; }
+.single-share-muted { color: #607187; line-height: 1.8; font-size: 13px; }
+.single-share-limit { padding: 16px 28px; }
+.single-share-footer { border-top: 1px solid var(--single-line); }
+.single-question-share button:focus-visible { outline: 3px solid #0e786f; outline-offset: 3px; }
+.single-image-zoom { display: block; width: 100%; cursor: zoom-in; border: 0; background: transparent; }
+.single-share-image-dialog { width: min(96vw, 1280px); max-height: 94dvh; margin: auto; padding: 16px; border: 1px solid #dce5ed; border-radius: 14px; background: #fff; }
+.single-share-image-dialog::backdrop { background: #172d46b8; }
+.single-share-image-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; font-size: 12px; color: #607187; }
+.single-share-image-scroll { max-height: calc(94dvh - 90px); overflow: auto; }
+.single-share-image-scroll img { display: block; width: auto; max-width: none; margin: auto; }
+@media (max-width: 600px) {
+  .single-share-problem { padding: 24px 20px; }
+  .single-share-head, .single-share-footer { padding: 14px 20px; }
+  .single-share-notes { padding: 22px 16px; }
+  .single-share-stem { font-size: 16px; }
+  .single-share-options { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+}

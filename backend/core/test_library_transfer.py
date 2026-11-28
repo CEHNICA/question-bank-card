@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import os
@@ -1180,7 +1181,7 @@ class CommunityDirectTransferTests(TransferFixture):
         self.assertEqual(len(cloud_folders[0]["questionIds"]), 1)
 
     def test_community_pack_scoped_publications_compresses_images_and_embeds_onenote(self):
-        """验证单题/精选题目导出精确裁剪、自动压缩大图不改原图、以及附带 OneNote 步骤入解析。"""
+        """单题范围精确，冻结原图字节不变，仅压缩网页预览，并完整附带 OneNote。"""
         from PIL import Image, ImageDraw
 
         from core import library_onenote
@@ -1210,7 +1211,7 @@ class CommunityDirectTransferTests(TransferFixture):
             content_hash="e" * 64,
             extras={"onenote": {"page_id": "{page-share-1}", "title": "手写笔记"}},
         )
-        PublishedQuestion.objects.create(
+        pub2 = PublishedQuestion.objects.create(
             question=q2,
             paper=paper,
             source_filename=paper.filename,
@@ -1227,7 +1228,7 @@ class CommunityDirectTransferTests(TransferFixture):
             content_hash="f" * 64,
         )
 
-        # 给 pub1 放一张 2400x1800 的大图，验证社区打包时会缩放到 <= 1280px 且不动本机原图
+        # 冻结图必须保持校验字节，网页预览单独缩放，不动本机或包内的正式原图。
         fig_dir = self.data / "library" / str(pub1.pk) / "figures"
         fig_dir.mkdir(parents=True, exist_ok=True)
         big_path = fig_dir / "figure-1.png"
@@ -1236,15 +1237,33 @@ class CommunityDirectTransferTests(TransferFixture):
         draw.line([(100, 100), (2300, 1700)], fill=(0, 0, 0), width=8)
         big_img.save(big_path, format="PNG")
         orig_size = big_path.stat().st_size
+        pub1.content["figures"] = [
+            {"file": "figures/figure-1.png", "url": f"/api/library/{pub1.pk}/figures/figure-1.png"}
+        ]
+        pub1.save(update_fields=["content"])
+
+        # 母资料里的其他题、OCR 缓存与其他笔记，不能跟着单题一起打包。
+        parent_assets = self.data / str(paper.pk)
+        parent_assets.mkdir(parents=True)
+        (parent_assets / "all-questions.json").write_text("（虚构）母目录全部题目", encoding="utf-8")
+        (parent_assets / "neighbor.png").write_bytes(big_path.read_bytes())
+        other_assets = self.data / "library" / str(pub2.pk)
+        other_assets.mkdir(parents=True)
+        (other_assets / "neighbor.png").write_bytes(big_path.read_bytes())
+        Block.objects.create(paper=paper, seq=1, page_idx=0, type="text", text="（虚构）未分享的原文", bbox=[])
 
         def fake_step_export(page_id, dest_dir, **_kwargs):
             self.assertEqual(page_id, "{page-share-1}")
+            self.assertTrue(_kwargs["require_complete"])
             dest_dir.mkdir(parents=True, exist_ok=True)
-            step = dest_dir / "onenote-step-1.png"
-            step_im = Image.new("RGB", (320, 200), (255, 255, 255))
-            ImageDraw.Draw(step_im).text((20, 20), "Step 1", fill=(0, 0, 0))
-            step_im.save(step, format="PNG")
-            return [step]
+            steps = []
+            for index in range(4):
+                step = dest_dir / f"onenote-step-{index + 1}.png"
+                step_im = Image.new("RGB", (320, 200), (255, 255, 255))
+                ImageDraw.Draw(step_im).text((20, 20), f"Step {index + 1}", fill=(0, 0, 0))
+                step_im.save(step, format="PNG")
+                steps.append(step)
+            return steps
 
         out_dir = self.work / "comm_selection"
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -1263,12 +1282,21 @@ class CommunityDirectTransferTests(TransferFixture):
         bundle = Path(res["file"])
         with zipfile.ZipFile(bundle) as zf:
             names = set(zf.namelist())
+            self.assertFalse(any(n.startswith(f"{library_transfer.ORIGINALS}/{paper.pk}/") for n in names))
+            self.assertFalse(any(str(pub2.pk) in n for n in names))
+            self.assertNotIn("（虚构）未选陪跑题".encode(), zf.read(library_transfer.DATABASE_NAME))
+            self.assertNotIn("（虚构）未分享的原文".encode(), zf.read(library_transfer.DATABASE_NAME))
             preview = json.loads(zf.read(library_transfer.COMMUNITY_PREVIEW_NAME).decode("utf-8"))
             self.assertTrue(preview["has_onenote_notes"])
             self.assertEqual(preview["onenote_count"], 1)
+            self.assertEqual(len(preview["single_question"]["figures"]), 1)
+            self.assertEqual(len(preview["single_question"]["onenote_pages"]), 4)
+            self.assertEqual(preview["single_question"]["images_omitted"], 0)
             self.assertTrue(str(preview.get("onenote_preview") or "").startswith("data:image/png;base64,"))
             packed_fig = zf.read(f"{library_transfer.ORIGINALS}/library/{pub1.pk}/figures/figure-1.png")
-            with Image.open(io.BytesIO(packed_fig)) as packed_im:
+            self.assertEqual(packed_fig, big_path.read_bytes())
+            preview_image = base64.b64decode(preview["single_question"]["figures"][0].split(",", 1)[1])
+            with Image.open(io.BytesIO(preview_image)) as packed_im:
                 self.assertLessEqual(max(packed_im.size), 1280)
             self.assertTrue(
                 any(
@@ -1284,10 +1312,127 @@ class CommunityDirectTransferTests(TransferFixture):
         try:
             stems = {row[0] for row in snap.execute("SELECT stem FROM core_question").fetchall()}
             self.assertEqual(stems, {"（虚构）精选分享题"})
+            self.assertEqual(snap.execute("SELECT COUNT(*) FROM core_block").fetchone()[0], 0)
             sol_count = snap.execute("SELECT COUNT(*) FROM core_librarysolution").fetchone()[0]
             self.assertGreaterEqual(sol_count, 1)
         finally:
             snap.close()
+
+        # 分享只改临时快照，源题和本机笔记关联不变。
+        pub1.refresh_from_db()
+        self.assertIn("onenote", pub1.extras)
+        self.assertEqual(LibrarySolution.objects.filter(publication=pub1).count(), 0)
+
+        from core import library, library_solutions
+
+        # 目标电脑已有同题和自己的解析，但入库编号不同；导入不能再丢作者笔记。
+        old_id = pub1.pk
+        PublishedQuestion.objects.filter(pk=old_id).delete()
+        pub1.pk = uuid.uuid4()
+        pub1.extras = {"onenote": {"page_id": "{recipient-own-page}"}}
+        pub1.save(force_insert=True)
+        own = LibrarySolution.objects.create(
+            publication=pub1,
+            fingerprint=library.generation_fingerprint(pub1.content, pub1.pk),
+            answer="本机答案",
+            analysis="（虚构）本机解析",
+        )
+        pub1.extras["solution_id"] = str(own.pk)
+        pub1.save(update_fields=["extras"])
+        before_extras = dict(pub1.extras)
+        library_transfer.merge_bundle(bundle)
+        pub1.refresh_from_db()
+        self.assertEqual(pub1.extras["solution_id"], str(own.pk))
+        self.assertEqual(pub1.extras["onenote"], before_extras["onenote"])
+        self.assertEqual(len(pub1.extras["shared_onenote_solution_ids"]), 1)
+        notes = self.client.get(f"/api/library/{pub1.pk}/onenote/shared").json()["notes"]
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(len(notes[0]["figures"]), 4)
+        self.assertEqual(LibrarySolution.objects.filter(publication=pub1).count(), 2)
+        for figure in notes[0]["figures"]:
+            spec, raw = library_solutions._asset(pub1.pk, figure["id"])
+            self.assertEqual(spec["publication_id"], str(pub1.pk))
+            self.assertTrue(raw.startswith(b"\x89PNG"))
+            self.assertEqual(self.client.get(figure["url"]).status_code, 200)
+        library_transfer.undo_last_merge()
+        pub1.refresh_from_db()
+        self.assertEqual(pub1.extras, before_extras)
+        self.assertEqual(LibrarySolution.objects.filter(publication=pub1).count(), 1)
+        library_transfer.merge_bundle(bundle)
+        library_transfer.merge_bundle(bundle)
+        self.assertEqual(LibrarySolution.objects.filter(publication=pub1).count(), 2)
+
+        # 在隔离测试库模拟另一台空白电脑：导入后仍只有一道题、四张笔记。
+        PublishedQuestion.objects.all().delete()
+        Question.objects.all().delete()
+        Paper.objects.all().delete()
+        imported_data = self.work / "single-import"
+        with override_settings(DATA_ROOT=imported_data):
+            library_transfer.merge_bundle(bundle)
+            self.assertEqual(Question.objects.count(), 1)
+            self.assertEqual(PublishedQuestion.objects.count(), 1)
+            self.assertEqual(len(LibrarySolution.objects.get().figures), 4)
+            self.assertEqual(len(list((imported_data / "library-solutions").rglob("*.png"))), 4)
+            item = PublishedQuestion.objects.get()
+            self.assertIsNotNone(library.publication_json(item, include_tag_details=False)["solution"])
+            self.assertEqual(
+                len(self.client.get(f"/api/library/{item.pk}/onenote/shared").json()["notes"][0]["figures"]), 4
+            )
+
+    def test_failed_note_export_stops_instead_of_silently_dropping_notes(self):
+        pub = self._publish_sample()
+        pub.extras = {"onenote": {"page_id": "{fictional-page}"}}
+        pub.save(update_fields=["extras"])
+        with unittest.mock.patch("core.library_onenote.export_page_step_images", side_effect=RuntimeError("offline")):
+            with self.assertRaisesRegex(library_transfer.TransferError, "停止分享"):
+                library_transfer.export_community_pack(self.work, publication_ids=[str(pub.pk)], include_onenote=True)
+        pub.refresh_from_db()
+        self.assertEqual(pub.extras["onenote"]["page_id"], "{fictional-page}")
+
+    def test_single_question_request_never_falls_back_to_parent_paper(self):
+        from core.transfer_views import _parse_community_upload_payload
+
+        base = {"share_kind": "question", "title": "（虚构）单题", "rights_confirmed": True}
+        for scope in (
+            {"paper_ids": [str(self.paper.pk)]},
+            {"publication_ids": [str(uuid.uuid4()), str(uuid.uuid4())]},
+            {"publication_ids": [], "paper_ids": [str(self.paper.pk)]},
+        ):
+            params, error = _parse_community_upload_payload({**base, **scope})
+            self.assertIsNone(params)
+            self.assertEqual(error.status_code, 400)
+        params, error = _parse_community_upload_payload(
+            {
+                "title": "（虚构）单题",
+                "rights_confirmed": True,
+                "publication_ids": [],
+                "paper_ids": [str(self.paper.pk)],
+            }
+        )
+        self.assertIsNone(params)
+        self.assertEqual(error.status_code, 400)
+
+    def test_unavailable_selection_does_not_export_a_partial_or_parent_pack(self):
+        pub = self._publish_sample()
+        with self.assertRaisesRegex(library_transfer.TransferError, "部分所选题目已失效"):
+            library_transfer.export_community_pack(self.work, publication_ids=[str(pub.pk), str(uuid.uuid4())])
+
+    def test_single_share_stops_when_requested_onenote_export_fails(self):
+        from core import library_onenote
+
+        pub = self._publish_sample()
+        pub.extras = {"onenote": {"page_id": "{fictional-failed-page}"}}
+        pub.save(update_fields=["extras"])
+        with (
+            unittest.mock.patch.object(
+                library_onenote, "export_page_step_images", side_effect=library_onenote.OneNoteError("导出失败")
+            ),
+            self.assertRaisesRegex(library_transfer.TransferError, "停止分享"),
+        ):
+            library_transfer.export_community_pack(self.work, publication_ids=[str(pub.pk)], include_onenote=True)
+        self.assertEqual(list(self.work.glob("*.zip")), [])
+        pub.refresh_from_db()
+        self.assertIn("onenote", pub.extras)
 
     def test_unlimited_community_export_for_admin(self):
         pub1 = self._publish_sample()

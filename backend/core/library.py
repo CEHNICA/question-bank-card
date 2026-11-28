@@ -1217,6 +1217,7 @@ def publication_json(
         "tags": tags_of(publication.extras),
         "ai_answer": extras_dict.get("ai_answer"),
         "onenote": extras_dict.get("onenote"),
+        "shared_onenote_solution_ids": extras_dict.get("shared_onenote_solution_ids") or [],
         "evidence_sources": _normalized_evidence_sources(publication.pk, extras_dict),
         "variant_group_id": variant_group_id,
         "variant_peers": variant_peers,

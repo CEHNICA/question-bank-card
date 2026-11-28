@@ -615,6 +615,13 @@ def _parse_community_upload_payload(payload: dict) -> tuple[dict | None, JsonRes
         and all(isinstance(x, str) and x.strip() for x in raw_publication_ids)
         else None
     )
+    if (raw_paper_ids is not None and paper_ids is None) or (
+        raw_publication_ids is not None and publication_ids is None
+    ):
+        return None, _error("所选上传范围无效，请重新选择题目或资料；不会自动改用另一种范围。")
+    share_kind = str(payload.get("share_kind") or "")
+    if share_kind == "question" and (raw_paper_ids is not None or not publication_ids or len(publication_ids) != 1):
+        return None, _error("单题分享必须且只能选择一道题目，不能按所属试卷或文件夹打包。")
     if bool(paper_ids) == bool(publication_ids):
         return None, _error("请指定要上传的试卷/教材，或选定要上传的题目与文件夹。")
 
@@ -638,6 +645,7 @@ def _parse_community_upload_payload(payload: dict) -> tuple[dict | None, JsonRes
         tags_text = str(raw_tags or "").strip()
 
     return {
+        "share_kind": share_kind,
         "paper_ids": paper_ids,
         "publication_ids": publication_ids,
         "include_originals": include_originals,

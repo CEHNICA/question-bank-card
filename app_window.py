@@ -1084,17 +1084,17 @@ class _OwnWindowApi:
 
     def bind(self, window) -> None:
         self._window = window
+        self._fullscreen = bool(getattr(window, "fullscreen", False))
 
     def is_fullscreen(self) -> bool:
-        if self._window is not None:
-            return bool(getattr(self._window, "fullscreen", self._fullscreen))
         return self._fullscreen
 
     def toggle_fullscreen(self) -> bool:
         if self._window is None:
             return self._fullscreen
         self._window.toggle_fullscreen()
-        self._fullscreen = bool(getattr(self._window, "fullscreen", not self._fullscreen))
+        # pywebview.fullscreen 仅为创建参数，WinForms 切换后不会更新它。
+        self._fullscreen = not self._fullscreen
         return self._fullscreen
 
 
@@ -1159,6 +1159,8 @@ def run_own_window(url: str) -> None:
     """
     import webview
 
+    from exit_dialog import ExitConfirmation
+
     icon = ASSETS / "app.ico"
     work_w, work_h = _work_area_logical_size()
     init_w = min(1440, max(960, work_w - 32))
@@ -1177,6 +1179,7 @@ def run_own_window(url: str) -> None:
         js_api=window_api,
     )
     window_api.bind(window)
+    window.events.closing += ExitConfirmation(window)
 
     def _ensure_front_after_start() -> None:
         # Splash 销毁后 Windows 可能把焦点还给桌面/上一扇窗口，等 WebView2 首帧就绪后再复核一次。
