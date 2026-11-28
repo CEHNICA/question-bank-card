@@ -1084,17 +1084,17 @@ class _OwnWindowApi:
 
     def bind(self, window) -> None:
         self._window = window
+        self._fullscreen = bool(getattr(window, "fullscreen", False))
 
     def is_fullscreen(self) -> bool:
-        if self._window is not None:
-            return bool(getattr(self._window, "fullscreen", self._fullscreen))
         return self._fullscreen
 
     def toggle_fullscreen(self) -> bool:
         if self._window is None:
             return self._fullscreen
         self._window.toggle_fullscreen()
-        self._fullscreen = bool(getattr(self._window, "fullscreen", not self._fullscreen))
+        # pywebview.fullscreen 仅为创建参数，WinForms 切换后不会更新它。
+        self._fullscreen = not self._fullscreen
         return self._fullscreen
 
 

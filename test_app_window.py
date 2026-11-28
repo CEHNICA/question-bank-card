@@ -39,6 +39,40 @@ def _record(slot, sequence):
     return value
 
 
+class OwnWindowFullscreenTests(unittest.TestCase):
+    def test_fullscreen_state_tracks_toggles_when_creation_option_stays_false(self):
+        # pywebview 的 fullscreen 是创建参数；WinForms 切换时不更新它。
+        window = SimpleNamespace(fullscreen=False, toggle_fullscreen=Mock())
+        api = app_window._OwnWindowApi()
+        api.bind(window)
+
+        for expected in (True, False, True, False):
+            self.assertEqual(api.toggle_fullscreen(), expected)
+            self.assertEqual(api.is_fullscreen(), expected)
+            self.assertFalse(window.fullscreen)
+        self.assertEqual(window.toggle_fullscreen.call_count, 4)
+
+    def test_initially_fullscreen_window_exits_then_enters(self):
+        window = SimpleNamespace(fullscreen=True, toggle_fullscreen=Mock())
+        api = app_window._OwnWindowApi()
+        api.bind(window)
+
+        self.assertTrue(api.is_fullscreen())
+        self.assertFalse(api.toggle_fullscreen())
+        self.assertFalse(api.is_fullscreen())
+        self.assertTrue(api.toggle_fullscreen())
+        self.assertTrue(api.is_fullscreen())
+
+    def test_failed_toggle_keeps_previous_state(self):
+        window = SimpleNamespace(fullscreen=False, toggle_fullscreen=Mock(side_effect=RuntimeError("切换失败")))
+        api = app_window._OwnWindowApi()
+        api.bind(window)
+
+        with self.assertRaisesRegex(RuntimeError, "切换失败"):
+            api.toggle_fullscreen()
+        self.assertFalse(api.is_fullscreen())
+
+
 class CredentialTests(unittest.TestCase):
     def setUp(self):
         patcher = patch.dict(os.environ, {"MINERU_TOKEN": "", "MINIMAX_API_KEY": ""})
