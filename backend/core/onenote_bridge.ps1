@@ -968,10 +968,13 @@ try {
       }
       $targetId = [string]$params.id
       $objectId = if ($params.objectId) { [string]$params.objectId } else { '' }
+      $objectNavigated = $false
       if ($objectId) {
         try {
           [void]$one.NavigateTo($targetId, $objectId)
+          $objectNavigated = $true
         } catch {
+          # Showing the page is useful, but it is not a successful object jump.
           [void]$one.NavigateTo($targetId)
         }
       } else {
@@ -984,7 +987,7 @@ try {
         try { $focused = [bool](Show-OneNoteForeground) } catch { $focused = $false }
       }
       $hasWindow = Has-VisibleOneNoteFrame
-      $data = [ordered]@{ id = $targetId; objectId = $objectId; navigated = $true; focused = $focused; has_window = $hasWindow }
+      $data = [ordered]@{ id = $targetId; objectId = $objectId; navigated = $true; object_navigated = $objectNavigated; focused = $focused; has_window = $hasWindow }
     }
 
     'hyperlink' {
@@ -995,9 +998,6 @@ try {
     }
 
     'append_outline' {
-      if (-not (Has-VisibleOneNoteFrame)) {
-        [void](Ensure-OneNoteWindow -TimeoutSeconds 9)
-      }
       $targetPageId = [string]$params.pageId
       $rawOutlineXml = [string]$params.outlineXml
       $marker = if ($params.marker) { [string]$params.marker } else { '' }
@@ -1011,8 +1011,14 @@ try {
       $doc.PreserveWhitespace = $true
       $doc.LoadXml($beforeXml)
       $ns = New-Object System.Xml.XmlNamespaceManager($doc.NameTable)
-      $ns.AddNamespace('one', $ONE_NS)
       $page = $doc.DocumentElement
+      $pageNs = $page.NamespaceURI
+      if ($page.LocalName -ne 'Page' -or $pageNs -notin @(
+        'http://schemas.microsoft.com/office/onenote/2007/onenote',
+        'http://schemas.microsoft.com/office/onenote/2010/onenote',
+        'http://schemas.microsoft.com/office/onenote/2013/onenote'
+      )) { throw 'Unsupported OneNote page XML; nothing was appended.' }
+      $ns.AddNamespace('one', $pageNs)
 
       $beforeIds = New-Object 'System.Collections.Generic.HashSet[string]'
       foreach ($ol in $page.SelectNodes('./one:Outline', $ns)) {
@@ -1022,32 +1028,33 @@ try {
 
       $fragDoc = New-Object System.Xml.XmlDocument
       $fragDoc.PreserveWhitespace = $true
-      $fragDoc.LoadXml($rawOutlineXml)
+      # GetPageContent may return an older schema. Mixing namespaces makes
+      # Outline/Position invisible to OneNote or puts the new attempt over the old one.
+      $fragDoc.LoadXml($rawOutlineXml.Replace($ONE_NS, $pageNs))
       $importedOutline = $doc.ImportNode($fragDoc.DocumentElement, $true)
       [void]$page.AppendChild($importedOutline)
 
       [void]$one.UpdatePageContent($doc.OuterXml)
 
-      $afterXml = Get-PageContent $one $targetPageId
-      $afterDoc = New-Object System.Xml.XmlDocument
-      $afterDoc.PreserveWhitespace = $true
-      $afterDoc.LoadXml($afterXml)
-      $afterNs = New-Object System.Xml.XmlNamespaceManager($afterDoc.NameTable)
-      $afterNs.AddNamespace('one', $ONE_NS)
-
       $newOutline = $null
-      $lastCandidate = $null
-      foreach ($ol in $afterDoc.DocumentElement.SelectNodes('./one:Outline', $afterNs)) {
-        $oid = $ol.GetAttribute('objectID')
-        if ($oid -and -not $beforeIds.Contains($oid)) {
-          $lastCandidate = $ol
-          if ($marker -and $ol.OuterXml.Contains($marker)) {
+      # Wait for the assigned object ID, never append a second time on readback delay.
+      for ($readAttempt = 0; $readAttempt -lt 4 -and -not $newOutline; $readAttempt++) {
+        if ($readAttempt -gt 0) { Start-Sleep -Milliseconds 180 }
+        $afterXml = Get-PageContent $one $targetPageId
+        $afterDoc = New-Object System.Xml.XmlDocument
+        $afterDoc.PreserveWhitespace = $true
+        $afterDoc.LoadXml($afterXml)
+        $afterNs = New-Object System.Xml.XmlNamespaceManager($afterDoc.NameTable)
+        $afterNs.AddNamespace('one', $afterDoc.DocumentElement.NamespaceURI)
+        foreach ($ol in $afterDoc.DocumentElement.SelectNodes('./one:Outline', $afterNs)) {
+          $oid = $ol.GetAttribute('objectID')
+          if ($oid -and -not $beforeIds.Contains($oid) -and
+            (-not $marker -or $ol.InnerText.Contains($marker))) {
             $newOutline = $ol
             break
           }
         }
       }
-      if (-not $newOutline) { $newOutline = $lastCandidate }
 
       $newOutlineId = if ($newOutline) { [string]$newOutline.GetAttribute('objectID') } else { '' }
       $focusObjectId = $newOutlineId
@@ -1060,35 +1067,21 @@ try {
       }
 
       $objLink = $null
-      try {
-        [void]$one.GetHyperlinkToObject($targetPageId, $newOutlineId, [ref]$objLink)
-      } catch {
-        $objLink = ''
-      }
-
-      $navTarget = if ($focusObjectId) { $focusObjectId } else { $newOutlineId }
-      if ($navTarget) {
+      if ($newOutlineId) {
         try {
-          [void]$one.NavigateTo($targetPageId, $navTarget)
+          [void]$one.GetHyperlinkToObject($targetPageId, $newOutlineId, [ref]$objLink)
         } catch {
-          try { [void]$one.NavigateTo($targetPageId) } catch {}
+          $objLink = ''
         }
-      } else {
-        try { [void]$one.NavigateTo($targetPageId) } catch {}
       }
-
-      $focused = $false
-      try { $focused = [bool](Show-OneNoteForeground) } catch { $focused = $false }
-      $hasWindow = Has-VisibleOneNoteFrame
-
+      # Save the association before navigating. A focus failure must not cause
+      # the caller to retry the write and create a duplicate attempt.
       $data = [ordered]@{
         id = $targetPageId
         outlineId = $newOutlineId
         focusObjectId = $focusObjectId
         objectUrl = [string]$objLink
-        navigated = $true
-        focused = $focused
-        has_window = $hasWindow
+        appended = [bool]$newOutlineId
       }
     }
 

@@ -7868,7 +7868,11 @@
         refreshOneNoteFilterAndCounts();
         const attempts = (data.onenote && Array.isArray(data.onenote.attempts)) ? data.onenote.attempts : [];
         const latest = attempts[attempts.length - 1];
-        showToast(latest && latest.label ? `已在右侧空白区追加「${latest.label}」` : '已在 OneNote 中打开', 'success');
+        if (data.warning) {
+          showToast(data.warning, 'info');
+        } else {
+          showToast(latest && latest.label ? `已新增并打开「${latest.label}」重做区` : '已创建并打开 OneNote 笔记', 'success');
+        }
       } catch (err) {
         showToast('写入 OneNote 笔记异常: ' + err.message, 'error');
       } finally {
