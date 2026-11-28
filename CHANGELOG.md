@@ -3,7 +3,11 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
-## 未发布
+## 2.3.20
+
+**更新分步安装、子文件夹右键收起、快速审题不再闪一下、切换原卷模式时整页留在右栏**
+
+- 说明见 [2.3.20 更新说明](docs/release-notes-v2.3.20.md)。
 
 **按空格打开快速审题时，顶栏和底栏不再闪一下**
 
