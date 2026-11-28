@@ -32,6 +32,11 @@ const escapeStart = js.indexOf("function escapeHtml(");
 const escapeEnd = js.indexOf("\n    function ", escapeStart + 10);
 const escapeBody = js.slice(escapeStart, escapeEnd);
 
+const formatStemStart = js.indexOf("function formatEagleStemBlocksHtml(");
+const formatStemEnd = js.indexOf("\n    function ", formatStemStart + 10);
+assert.ok(formatStemStart > 0 && formatStemEnd > formatStemStart, "formatEagleStemBlocksHtml 必须存在");
+const formatStemBody = js.slice(formatStemStart, formatStemEnd);
+
 const cleanStart = js.indexOf("function getCleanInlineStem(");
 const cleanEnd = js.indexOf("\n    function ", cleanStart + 10);
 assert.ok(cleanStart > 0 && cleanEnd > cleanStart, "getCleanInlineStem 必须存在");
@@ -51,7 +56,7 @@ const scope = {
   renderAdaptiveOptionsHtml: () => "",
   buildPendingTagSuggestions: () => [],
 };
-vm.runInNewContext(escapeBody + "\n" + cleanBody + "\n" + inlineBody + "\n" + convertBody, scope);
+vm.runInNewContext(escapeBody + "\n" + formatStemBody + "\n" + cleanBody + "\n" + inlineBody + "\n" + convertBody, scope);
 assert.equal(typeof scope.convertLibraryListItem, "function");
 assert.equal(typeof scope.inlineStemPreview, "function");
 

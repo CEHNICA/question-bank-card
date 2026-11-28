@@ -3,6 +3,16 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.3.16
+
+**修复工作台题卡跨行显示公式与 LaTeX 表格被拆行导致 KaTeX 无法渲染的问题**
+
+- **题卡跨行显示公式与表格块整块保留渲染（`frontend/eagle/index.html`、`frontend/test_eagle_bug_fixes.js`、`frontend/test_eagle_source_image.js`）**：
+  - 提取共享格式化函数 `formatEagleStemBlocksHtml(rawStem)`，统一替换 `convertPaperQuestionToItem`、`convertLibraryListItem` 和 `buildEagleCardContentHtml` 三处按 `\n` 拆行的题干拼接逻辑；
+  - 先将跨行 `$$...$$`、`\[...\]` 及未外包定界符的 KaTeX 数学/表格环境（如 `\begin{array}...\end{array}`、`\begin{cases}...\end{cases}` 等）保留在单个 `<div class="eagle-stem-math ... overflow-x-auto">` 容器内再交给 KaTeX 排版，防止首尾定界符落入不同 `<p>` 导致原文露出，同时支持宽表格在题卡内横向滚动；
+  - 补充 `vendor/katex/katex.min.js` 真实渲染回归测试覆盖跨行 `\begin{array}` 与裸 `\begin{cases}` 场景。
+
+
 ## 2.3.15
 
 **修复应用内自动更新无法弹出安装与重复下载、OneNote 一次带图建页加速、窗口工作区防任务栏遮挡及 `F11` 全屏快捷键**

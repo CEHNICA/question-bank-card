@@ -188,4 +188,60 @@ test('Eagle 7大核心Bug修复综合验证套件', async (t) => {
     assert.ok(openSlice.includes('/onenote/open?wait=1'), 'openOneNotePage 应同步等待唤醒结束再关闭等待条');
     assert.ok(openSlice.includes('hideOneNoteBusy(token)'), 'openOneNotePage 必须在 finally 中收起等待条');
   });
+
+  await t.test('跨行 $$ \\begin{array}...\\end{array} $$ 与裸数学环境必须整块保留给 KaTeX 渲染', () => {
+    const vm = require('node:vm');
+    const katex = require(path.join(__dirname, 'vendor/katex/katex.min.js'));
+    assert.ok(content.includes('function formatEagleStemBlocksHtml(rawStem)'), '应定义共享题干块格式化函数 formatEagleStemBlocksHtml');
+
+    ['convertPaperQuestionToItem', 'convertLibraryListItem', 'buildEagleCardContentHtml'].forEach((fnName) => {
+      const fnStart = content.indexOf(`function ${fnName}(`);
+      assert.ok(fnStart > 0, `应定义 ${fnName}`);
+      const fnSlice = content.slice(fnStart, fnStart + 2500);
+      assert.ok(fnSlice.includes('formatEagleStemBlocksHtml('), `${fnName} 应调用共享 formatEagleStemBlocksHtml`);
+      assert.ok(!/rawStem[\s\S]{0,40}\.split\(['"]\\n['"]\)/.test(fnSlice), `${fnName} 不应再按行拆分 rawStem 破坏跨行公式`);
+    });
+
+    const escMatch = content.match(/function escapeHtml\(str\)[\s\S]*?\n {4}\}/);
+    const fmtMatch = content.match(/function formatEagleStemBlocksHtml\(rawStem\)[\s\S]*?\n {4}\}/);
+    assert.ok(escMatch && fmtMatch, '应能提取 escapeHtml 与 formatEagleStemBlocksHtml 源码');
+    const sandbox = {};
+    vm.runInNewContext(`${escMatch[0]}\n${fmtMatch[0]}`, sandbox);
+
+    const arrayStem = [
+      '下表是拉力 $F$（单位：$\\mathrm{N}$）与弹簧伸长长度 $x$（单位：$\\mathrm{cm}$）的相关数据：',
+      '$$',
+      '\\begin{array}{|c|c|c|c|c|c|}',
+      '\\hline',
+      'F & 1 & 2 & 3 & 4 & 5 \\\\',
+      '\\hline',
+      'x & 14.2 & 28.8 & 41.3 & 57.5 & 70.2 \\\\',
+      '\\hline',
+      '\\end{array}',
+      '$$',
+      '描点画出弹簧伸长长度随拉力变化的图象。',
+    ].join('\n');
+
+    const renderedHtml = sandbox.formatEagleStemBlocksHtml(arrayStem);
+    const mathDivs = [...renderedHtml.matchAll(/<div class="eagle-stem-math[^"]*overflow-x-auto[^"]*">([\s\S]*?)<\/div>/g)];
+    assert.equal(mathDivs.length, 1, '跨行 $$...$$ 表格必须保留在同一个 .eagle-stem-math 块内');
+    assert.equal((renderedHtml.match(/<p /g) || []).length, 2, '表格前后的两行普通文本应各自保持 <p>');
+
+    const unescapedLatex = mathDivs[0][1]
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#039;/g, "'")
+      .replace(/^\$\$|\$\$$/g, '')
+      .trim();
+    const katexHtml = katex.renderToString(unescapedLatex, { displayMode: true, throwOnError: true });
+    assert.ok(katexHtml.includes('katex-display') && katexHtml.includes('arraycolsep'), '真实 KaTeX 应成功把整块 array 渲染为数学表格');
+
+    const bareCasesHtml = sandbox.formatEagleStemBlocksHtml('解方程组：\n\\begin{cases}\nx + y = 3 \\\\\nx - y = 1\n\\end{cases}');
+    const bareMatch = bareCasesHtml.match(/<div class="eagle-stem-math[^"]*">([\s\S]*?)<\/div>/);
+    assert.ok(bareMatch && bareMatch[1].startsWith('$$') && bareMatch[1].endsWith('$$'), '未外包定界符的跨行 cases 环境也应自动包裹成 $$...$$ 整块');
+    const bareTex = bareMatch[1].replace(/^\$\$|\$\$$/g, '').trim();
+    assert.ok(katex.renderToString(bareTex, { displayMode: true, throwOnError: true }).includes('katex-display'));
+  });
 });

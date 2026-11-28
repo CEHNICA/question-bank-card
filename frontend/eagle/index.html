@@ -706,7 +706,8 @@
     #quickLookModal .ql-sol-content img:hover { box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12); }
     #quickLookModal .ql-sol-content { font-size: 13.5px; line-height: 1.78; color: #1e293b; white-space: pre-wrap; overflow-wrap: anywhere; }
     .eagle-analysis-body { white-space: pre-line; overflow-wrap: anywhere; }
-    #quickLookModal .katex-display { margin: 0.45rem 0; overflow-x: auto; overflow-y: hidden; }
+    #quickLookModal .katex-display,
+    .eagle-stem-math .katex-display { margin: 0.45rem 0; overflow-x: auto; overflow-y: hidden; }
 
     /* ---- 右侧属性顶栏：名字/备注/链接收成「可选轻行」，别像三张表单 ---- */
     .inspector-meta-quiet {
@@ -5406,6 +5407,49 @@
         .replace(/'/g, '&#039;');
     }
 
+    /**
+     * 将题干按段落切分为 HTML，同时保留跨行显示公式/表格块（$$...$$、\[...\]、裸 \begin{array}...\end{array}），
+     * 避免按 \n 拆成多个 <p> 后导致 KaTeX auto-render 无法跨节点匹配定界符。
+     */
+    function formatEagleStemBlocksHtml(rawStem) {
+      const normalized = String(rawStem || '').replace(/\r\n?/g, '\n');
+      if (!normalized.trim()) return '';
+
+      const pClass = 'font-serif leading-relaxed mb-2 text-slate-800 text-sm sm:text-base';
+      const mathBlockClass = `eagle-stem-math ${pClass} overflow-x-auto`;
+      const pushTextLines = (chunk, out) => {
+        if (!chunk) return;
+        chunk.split('\n').forEach((line) => {
+          if (line.trim()) {
+            out.push(`<p class="${pClass}">${escapeHtml(line)}</p>`);
+          }
+        });
+      };
+
+      const tokenRe = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|(?<!\\)\$[^$\n]+\$|\\\([^\n]*?\\\)|\\begin\{(array|cases|rcases|aligned|align\*?|alignedat|gather\*?|gathered|matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|smallmatrix|split|multline\*?)\}[\s\S]*?\\end\{\2\})/g;
+      const htmlParts = [];
+      let cursor = 0;
+      let match;
+
+      while ((match = tokenRe.exec(normalized)) !== null) {
+        const token = match[0];
+        const isBareEnv = Boolean(match[2]);
+        const isMultilineDisplay = token.includes('\n') && (token.startsWith('$$') || token.startsWith('\\['));
+        if (!isBareEnv && !isMultilineDisplay) {
+          continue;
+        }
+        const before = normalized.slice(cursor, match.index);
+        // 避免把行尾反斜杠或半开定界符拆开；若前置切片只含空白则直接略过
+        pushTextLines(before, htmlParts);
+        const mathSource = isBareEnv ? `$$\n${token}\n$$` : token;
+        htmlParts.push(`<div class="${mathBlockClass}">${escapeHtml(mathSource)}</div>`);
+        cursor = match.index + token.length;
+      }
+
+      pushTextLines(normalized.slice(cursor), htmlParts);
+      return htmlParts.join('');
+    }
+
     /* ===== SANITIZER-BLOCK-START ===== */
     /*
      * 内容净化：题干 / 解析里混进来的 HTML 不能变成可执行内容。
@@ -6544,11 +6588,7 @@
 
       const qImages = Array.isArray(pq.question_images) ? pq.question_images : [];
 
-      let formattedStem = rawStem
-        .split('\n')
-        .filter(p => p.trim())
-        .map(p => `<p class="font-serif leading-relaxed mb-2 text-slate-800 text-sm sm:text-base">${escapeHtml(p)}</p>`)
-        .join('');
+      let formattedStem = formatEagleStemBlocksHtml(rawStem);
 
       // 若为纯图片裁片题，无文字识别则回退展现高分辨率原裁片
       if (!formattedStem.trim() && qImages.length > 0) {
@@ -6709,11 +6749,7 @@
         if (['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].includes(slot)) optionFiguresMap[slot] = f;
         else stemFigures.push(f);
       });
-      let formattedStem = rawStem
-        .split('\n')
-        .filter(p => p.trim())
-        .map(p => `<p class="font-serif leading-relaxed mb-2 text-slate-800 text-sm sm:text-base">${escapeHtml(p)}</p>`)
-        .join('');
+      let formattedStem = formatEagleStemBlocksHtml(rawStem);
       if (stemFigures.length > 0) {
         formattedStem += stemFigures.map(f => {
           const imgUrl = (f.url && f.url.startsWith('/') && API_BASE) ? (API_BASE + f.url) : (f.url || f.file || '');
@@ -16057,11 +16093,7 @@
         if (['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].includes(slot)) optionFiguresMap[slot] = f;
         else stemFigures.push(f);
       });
-      let formattedStem = String(rawStem || '')
-        .split('\n')
-        .filter(p => p.trim())
-        .map(p => `<p class="font-serif leading-relaxed mb-2 text-slate-800 text-sm sm:text-base">${escapeHtml(p)}</p>`)
-        .join('');
+      let formattedStem = formatEagleStemBlocksHtml(String(rawStem || ''));
       if (q?.isSourceImage && Array.isArray(rawQuestionImages) && rawQuestionImages.length > 0) {
         formattedStem += rawQuestionImages.map((img, idx) => {
           const imgUrl = (img.url && img.url.startsWith('/') && API_BASE) ? (API_BASE + img.url) : (img.url || '');
