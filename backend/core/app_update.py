@@ -426,18 +426,19 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _launch_detached_installer(args: list[str]) -> None:
+def _launch_detached_installer(args: list[str]) -> subprocess.Popen:
     if os.name != "nt":
-        subprocess.Popen(args, close_fds=True)
-        return
+        return subprocess.Popen(args, close_fds=True)
     base_flags = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(
         subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
     )
     breakaway = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
     try:
-        subprocess.Popen(args, close_fds=True, creationflags=base_flags | breakaway)
-    except PermissionError:
-        subprocess.Popen(args, close_fds=True, creationflags=base_flags)
+        return subprocess.Popen(args, close_fds=True, creationflags=base_flags | breakaway)
+    except OSError as exc:
+        # 去掉 BREAKAWAY 重试会让安装器继续属于旧程序的 Job：它结束旧程序
+        # 时也会被杀掉。保留旧程序和已校验的安装包，交给用户手动运行。
+        raise UpdateError(f"无法独立启动安装程序，软件将保持打开。请退出软件后手动运行安装包：{args[0]}") from exc
 
 
 def install_latest() -> dict:

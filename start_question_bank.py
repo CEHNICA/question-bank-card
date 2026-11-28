@@ -279,7 +279,9 @@ class ChildJob:
         if not self.handle:
             raise ctypes.WinError(ctypes.get_last_error())
         limits = _ExtendedLimit()
-        limits.BasicLimitInformation.LimitFlags = 0x2000  # KILL_ON_JOB_CLOSE
+        # 普通后台进程仍随窗口退出而清理；更新安装器显式申请 BREAKAWAY
+        # 时必须能脱离，否则它结束旧窗口后也会被这个 Job 一起结束。
+        limits.BasicLimitInformation.LimitFlags = 0x2000 | 0x800  # KILL_ON_JOB_CLOSE | BREAKAWAY_OK
         if not kernel.SetInformationJobObject(self.handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
             error = ctypes.WinError(ctypes.get_last_error())
             self.close()
