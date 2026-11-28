@@ -1159,6 +1159,8 @@ def run_own_window(url: str) -> None:
     """
     import webview
 
+    from exit_dialog import ExitConfirmation
+
     icon = ASSETS / "app.ico"
     work_w, work_h = _work_area_logical_size()
     init_w = min(1440, max(960, work_w - 32))
@@ -1177,6 +1179,7 @@ def run_own_window(url: str) -> None:
         js_api=window_api,
     )
     window_api.bind(window)
+    window.events.closing += ExitConfirmation(window)
 
     def _ensure_front_after_start() -> None:
         # Splash 销毁后 Windows 可能把焦点还给桌面/上一扇窗口，等 WebView2 首帧就绪后再复核一次。

@@ -17,6 +17,7 @@ from unittest.mock import Mock, patch
 
 import app_window
 import create_shortcut
+import exit_dialog
 
 
 class DirectSplash:
@@ -493,7 +494,12 @@ class MainFlowTests(unittest.TestCase):
                 return self
 
         class FakeWindow:
-            events = types.SimpleNamespace(shown=Shown())
+            class Closing:
+                def __iadd__(self, handler):
+                    created["closing"] = handler
+                    return self
+
+            events = types.SimpleNamespace(shown=Shown(), closing=Closing())
 
         def create_window(title, url, **kwargs):
             created["title"] = title
@@ -521,6 +527,10 @@ class MainFlowTests(unittest.TestCase):
         self.assertIs(created["start"]["private_mode"], False)
         self.assertEqual(created["start"]["storage_path"], tmp)
         self.assertTrue(callable(created["shown"]))
+        self.assertTrue(callable(created["closing"]))
+        with patch.object(exit_dialog, "confirm_exit", return_value=False) as confirm:
+            self.assertFalse(created["closing"]())
+            confirm.assert_called_once_with(None)
 
         api = created["window"]["js_api"]
         self.assertFalse(api.is_fullscreen())
