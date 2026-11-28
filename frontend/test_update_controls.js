@@ -108,7 +108,7 @@ test("下载失败快照恢复重试；安装失败保留已校验安装包", as
 
 test("Eagle 请求层把失败进度交给控制器，而不是当成进度读取失败", async () => {
   const html = fs.readFileSync(path.join(__dirname, "eagle/index.html"), "utf8");
-  const source = html.match(/    function getEagleUpdateController\([\s\S]*?\n    \}/)[0];
+  const source = html.match(/ {4}function getEagleUpdateController\([\s\S]*?\n {4}\}/)[0];
   let config;
   const failed = { status: "failed", active: false, error: "校验失败" };
   const c = vm.createContext({ API_BASE: "", QBUpdate: { create(options) { config = options; return {}; } },
