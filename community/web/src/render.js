@@ -51,19 +51,22 @@ export function renderMarkdown(markdown) {
   return html.replace(/KATEXSLOT(\d+)END/g, (_, index) => formulas[Number(index)] ?? "");
 }
 
+// 题型主键以题有据后端 core/qtypes.py 的 TYPE_LABELS 为准：题包导出时
+// publication.question_type 原样带出，社区这边只是照着翻成中文。
+// 漏一个键就会在页面上直接露出英文主键，所以这里必须跟后端保持全量一致。
 const TYPE_NAMES = {
   single_choice: "单选题",
   multiple_choice: "多选题",
   fill_blank: "填空题",
-  fill_in_blank: "填空题",
-  solution: "解答题",
-  short_answer: "解答题",
   true_false: "判断题",
+  free_response: "解答题",
+  unknown: "题型未定",
   other: "其他",
 };
 
 export function typeName(key) {
-  return TYPE_NAMES[key] || key || "其他";
+  // 认不出的键一律归到「其他」，绝不把英文主键直接甩到页面上。
+  return TYPE_NAMES[String(key ?? "")] || "其他";
 }
 
 export function timeAgo(iso) {

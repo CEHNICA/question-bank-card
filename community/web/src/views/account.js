@@ -29,7 +29,7 @@ async function authForm({ title, submitLabel, register }) {
   setView(`
     <div class="card mx-auto mt-6 max-w-sm p-6">
       <h1 class="text-lg font-semibold text-slate-900">${title}</h1>
-      <form id="authForm" class="mt-5 space-y-4">
+      <form id="authForm" class="mt-5 space-y-4" onsubmit="return false">
         <div><label class="label" for="username">用户名</label>
           <input class="input" id="username" name="username" autocomplete="username" required maxlength="20"></div>
         ${register ? `<div><label class="label" for="displayName">显示名（可选）</label>
@@ -47,13 +47,20 @@ async function authForm({ title, submitLabel, register }) {
         ${register ? '已经有账号？<a href="#/login" class="text-emerald-700">登录</a>' : '还没有账号？<a href="#/register" class="text-emerald-700">注册</a>'}
       </p>
     </div>`);
-  const captcha = await mountTurnstile(document.getElementById("turnstileBox")).catch((error) => {
-    document.getElementById("turnstileBox").textContent = error.message;
-    return { token: () => "", reset() {} };
-  });
   const form = document.getElementById("authForm");
+  const box = document.getElementById("turnstileBox");
+  let captcha = null;
+  let captchaError = "";
+
+  // 提交处理必须先挂上。人机验证脚本是第三方资源，慢或者被墙时它会一直挂着；
+  // 要是等它就绪再绑监听，这期间点「登录」会走浏览器原生提交 —— 密码会被拼进
+  // URL 查询串（进历史、进访问日志、进 Referer），页面还会刷新把输入清掉。
   form.addEventListener("submit", (event) => {
     event.preventDefault();
+    if (!captcha) {
+      toast(captchaError || "人机验证还没加载好，等一下再点。", "error");
+      return;
+    }
     const data = Object.fromEntries(new FormData(form));
     const payload = { ...data, agree_terms: Boolean(data.agree_terms), turnstile_token: captcha.token() };
     busy(form.querySelector("button[type=submit]"), async () => {
@@ -67,6 +74,13 @@ async function authForm({ title, submitLabel, register }) {
         captcha.reset();
       }
     });
+  });
+
+  box.textContent = "人机验证加载中…";
+  captcha = await mountTurnstile(box).catch((error) => {
+    captchaError = error.message;
+    box.textContent = error.message;
+    return null;
   });
 }
 

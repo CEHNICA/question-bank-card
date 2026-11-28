@@ -43,8 +43,18 @@ function loadTurnstileScript() {
       const script = document.createElement("script");
       script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
       script.async = true;
-      script.onload = () => resolve();
+      // 第三方脚本慢或者被墙时会一直挂着，不设上限的话整个登录流程永远等不到它。
+      const timer = setTimeout(() => {
+        script.remove();
+        turnstileLoading = null;
+        reject(new Error("人机验证加载超时，请检查网络后刷新。"));
+      }, 15000);
+      script.onload = () => {
+        clearTimeout(timer);
+        resolve();
+      };
       script.onerror = () => {
+        clearTimeout(timer);
         turnstileLoading = null;
         reject(new Error("人机验证加载失败，请检查网络后刷新。"));
       };
@@ -63,6 +73,10 @@ export async function mountTurnstile(container) {
     return { token: () => "", reset() {} };
   }
   await loadTurnstileScript();
+  if (!window.turnstile) {
+    container.textContent = "人机验证加载失败，请检查网络后刷新。";
+    return { token: () => "", reset() {} };
+  }
   widgetId = window.turnstile.render(container, {
     sitekey: state.config.turnstile_site_key,
     language: "zh-cn",
