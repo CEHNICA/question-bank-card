@@ -70,6 +70,7 @@ urlpatterns = [
     path("library-workspace.js", views.library_workspace_script),
     path("library-toc.js", views.library_toc_script),
     path("library-solutions.js", views.library_solutions_script),
+    path("shared-onenote.js", views._frontend("shared-onenote.js", "application/javascript; charset=utf-8")),
     path("library-answer-editor.js", views.library_answer_editor_script),
     path("library-answer-editor.css", views._frontend("library-answer-editor.css", "text/css; charset=utf-8")),
     path("qb-editor-helpers.js", views._frontend("qb-editor-helpers.js", "application/javascript; charset=utf-8")),
