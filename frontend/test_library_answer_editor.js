@@ -401,6 +401,13 @@ const settle = async () => { for (let index = 0; index < 10; index++) await Prom
   await byId("answerEditorAi").emit("click"); await settle();
   assert.equal(requests.filter(value => value.opts.method === "POST").length, missingPosts, "Generation rechecks a configuration that was cleared after the button appeared");
   await byText("关闭").emit("click"); paint(); paint(); await new Promise(resolve => setTimeout(resolve, 5));
+  figureFixture = null; aiFixture = null; jobResult = null; revision = null;
+  originFixture = { answer: "1", analysis: "（虚构）AI 初稿核对后的解析" };
+  await editor.open([original], { scope: "library", closeAfterSave: true }); await settle();
+  await byId("answerEditorSave").emit("click"); await settle();
+  assert.equal(editor.isOpen(), false, "旧版单题解析编辑器保存成功后同样关闭");
+  assert.equal(notices.at(-1)[1], "success");
+  originFixture = null;
   await runUnifiedWorkbenchTests();
   console.log("Answer editor: explicit selected AI, direct unsaved drafts, failure preservation, source protection, scope and repeated-save guards: OK");
 })().catch(error => { console.error(error); process.exitCode = 1; });
@@ -591,6 +598,8 @@ async function runUnifiedWorkbenchTests() {
   let allowConfirm = true;
   let recommendReply = { answer: "ABH", analysis: "AI 推导步骤", engine: "mock-model" };
   let failQReadOnce = false;
+  let referenceOnly = false, storedReference = null, failReferenceSave = false, badReferenceReply = false, throwHostRefresh = false;
+  let referenceSaveGate = null;
 
   const uRoot = {
     document: uDoc,
@@ -651,6 +660,10 @@ async function runUnifiedWorkbenchTests() {
         };
       }
       if (url === "/api/library/pub-u2/solution" && !opts.method) {
+        if (referenceOnly) return { ok: true, json: async () => ({
+          solution: storedReference, base_revision: storedReference?.id || null,
+          origin: { answer: "5", analysis: "直接代入" }, history: storedReference ? [storedReference] : []
+        }) };
         return {
           ok: true,
           json: async () => ({
@@ -699,7 +712,12 @@ async function runUnifiedWorkbenchTests() {
         };
       }
       if (opts.method === "POST" && url === "/api/library/pub-u2/solution") {
+        if (referenceSaveGate) await referenceSaveGate;
+        if (failReferenceSave) return { ok: false, json: async () => ({ error: "（虚构）保存失败，请重试" }) };
+        if (badReferenceReply) return { ok: true, json: async () => ({}) };
         const body = JSON.parse(opts.body);
+        if (referenceOnly) storedReference = { id: "sol-reference", publication_id: "pub-u2", answer: body.answer, analysis: body.analysis, figures: [] };
+        if (referenceOnly) return { ok: true, json: async () => ({ solution: storedReference, base_revision: storedReference.id }) };
         return {
           ok: true,
           json: async () => ({
@@ -733,7 +751,10 @@ async function runUnifiedWorkbenchTests() {
       confirms.push(cfg);
       return allowConfirm;
     },
-    onSaved: (...args) => savedEvents.push(args)
+    onSaved: (...args) => {
+      savedEvents.push(args);
+      if (throwHostRefresh) throw new Error("（虚构）题卡渲染失败");
+    }
   });
 
   const uSettle = async () => {
@@ -832,5 +853,72 @@ async function runUnifiedWorkbenchTests() {
   assert.equal(uDoc.activeElement, uByClass("editor-answer-input"), "focusField: 'answer' 时应聚焦答案框");
   await uEditor.close();
   await uSettle();
+  // 未改字的参考解析也必须能转成正式解析；收到保存结果后关闭，重新打开读取正式版本。
+  referenceOnly = true;
+  const beforeReference = reqs.filter(r => r.opts.method === "POST" && r.url.endsWith("/solution")).length;
+  await uEditor.open(items, { allowQuestionEdit: true, focus: "pub-u2", closeAfterSave: true });
+  await uSettle();
+  assert.equal(uByClass("editor-analysis-input").value, "直接代入", "参考解析原样载入，未改字");
+  assert.equal(uByClass("editor-bar-save").textContent, "保存并返回");
+  await uByClass("editor-bar-save").emit("click");
+  await uSettle();
+  assert.equal(reqs.filter(r => r.opts.method === "POST" && r.url.endsWith("/solution")).length, beforeReference + 1,
+    "未改字的参考解析必须真正 POST 为正式版本");
+  assert.equal(uEditor.isOpen(), false, "确认保存后关闭工作台，让成功提示和题卡可见");
+  assert.equal(toastLog.at(-1)[1], "success");
+  await uEditor.open(items, { allowQuestionEdit: true, focus: "pub-u2", closeAfterSave: true });
+  await uSettle();
+  assert.equal(uByClass("editor-analysis-input").value, "直接代入");
+  assert.ok(uDoc.body.textContent.includes("已保存正式解析"), "重新打开明确显示正式解析状态");
+  const beforeSavedAgain = reqs.filter(r => r.opts.method === "POST" && r.url.endsWith("/solution")).length;
+  await uByClass("editor-bar-save").emit("click");
+  await uSettle();
+  assert.equal(uEditor.isOpen(), false, "已正式保存且没有修改时也能返回");
+  assert.equal(reqs.filter(r => r.opts.method === "POST" && r.url.endsWith("/solution")).length, beforeSavedAgain,
+    "重复打开未修改时不重复生成版本");
+
+  await uEditor.open(items, { allowQuestionEdit: true, focus: "pub-u2", closeAfterSave: true });
+  await uSettle();
+  const failedInput = uByClass("editor-analysis-input");
+  failedInput.value = "（虚构）待重试的解析";
+  await failedInput.emit("input");
+  failReferenceSave = true;
+  await uByClass("editor-bar-save").emit("click");
+  await uSettle();
+  assert.equal(uEditor.isOpen(), true, "保存失败必须保留工作台");
+  assert.equal(failedInput.value, "（虚构）待重试的解析");
+  assert.equal(toastLog.at(-1)[1], "error");
+  failReferenceSave = false;
+
+  badReferenceReply = true;
+  await uByClass("editor-bar-save").emit("click");
+  await uSettle();
+  assert.equal(uEditor.isOpen(), true, "不完整的保存响应不能冒充保存成功");
+  assert.ok(toastLog.at(-1)[0].includes("未确认"));
+  badReferenceReply = false;
+
+  let releaseReference;
+  referenceSaveGate = new Promise(resolve => { releaseReference = resolve; });
+  await uByClass("editor-bar-save").emit("click");
+  await uSettle();
+  await uEditor.close();
+  await uEditor.open(items, { allowQuestionEdit: true, focus: "pub-u1", closeAfterSave: true });
+  await uSettle();
+  releaseReference(); referenceSaveGate = null;
+  await uSettle();
+  assert.equal(uEditor.isOpen(), true, "旧保存结果不能关闭后来打开的题目");
+  await uEditor.close();
+  await uEditor.open(items, { allowQuestionEdit: true, focus: "pub-u2", closeAfterSave: true });
+  await uSettle();
+  const refreshInput = uByClass("editor-analysis-input");
+  refreshInput.value = "（虚构）已保存但刷新失败";
+  await refreshInput.emit("input");
+  throwHostRefresh = true;
+  await uByClass("editor-bar-save").emit("click");
+  await uSettle();
+  assert.equal(uEditor.isOpen(), false);
+  assert.ok(toastLog.at(-1)[0].includes("已保存") && toastLog.at(-1)[0].includes("刷新失败"),
+    "保存已成功、仅刷新失败时不能谎报保存失败");
+  throwHostRefresh = false;
   console.log("Unified editor workbench tests (allowQuestionEdit: true): OK");
 }
