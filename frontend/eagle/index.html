@@ -709,6 +709,55 @@
     #quickLookModal .katex-display,
     .eagle-stem-math .katex-display { margin: 0.45rem 0; overflow-x: auto; overflow-y: hidden; }
 
+    /* ---- 快速审题：加宽 + 指针移开只留题干 ----
+       ① 加宽：920px → 1200px。
+          走自定义钩子而不是 max-w-[1200px]：tailwind.css 是预编译产物
+          （tailwindcss@3.4.17，见 frontend/tailwind.config.js 注释），
+          新增 utility class 不会进产物，样式会静默失效。
+          本 <style> 在 tailwind.css 之后，同权重后来居上，直接生效。
+       ② 指针移开 → 压暗：非题干区（头部 / 题名行 / 底部条 / 解析区）淡出到近乎不可见，
+          题干保持全亮可读，整体轻微降亮度 —— 「只剩题目」的阅读感。
+          不用 display:none：物理隐藏会让弹窗高度塌缩，题干位置跳一下。
+       ③ 判定锚在白色卡片（.ql-panel）而不是遮罩容器：
+          遮罩容器是 inset-0 铺满视口，用它判 :hover 的话，
+          指针停在遮罩上仍算「在界面上」，压暗永远不触发。
+       ④ 双保险：JS 切 .is-idle（主路径，可测） + :has() 兜底（JS 失效时仍能用）。
+       ⑤ 触屏（hover: none）永远全亮 —— 否则手机上开屏就是一片灰，像坏了。 */
+    #quickLookModal .ql-panel { max-width: 1200px; }
+    #quickLookModal .ql-panel,
+    #quickLookModal .ql-chrome { transition: opacity 0.18s ease, filter 0.18s ease; }
+    #quickLookModal.is-idle .ql-panel,
+    #quickLookModal:not(:has(.ql-panel:hover)) .ql-panel {
+      filter: brightness(0.88) saturate(0.92);
+    }
+    #quickLookModal.is-idle .ql-chrome,
+    #quickLookModal:not(:has(.ql-panel:hover)) .ql-chrome {
+      opacity: 0.06;
+      filter: blur(1px);
+    }
+    /* 答案与解析区也是「非题干」，一并淡出 */
+    #quickLookModal.is-idle #qlAnalysisContainer,
+    #quickLookModal:not(:has(.ql-panel:hover)) #qlAnalysisContainer {
+      opacity: 0.06;
+      filter: blur(1px);
+      transition: opacity 0.18s ease, filter 0.18s ease;
+    }
+    /* 触屏没有 hover：永远全亮，绝不压暗（仓库同款先例见 .qc-evidence-btn） */
+    @media (hover: none) {
+      #quickLookModal .ql-panel,
+      #quickLookModal .ql-chrome,
+      #quickLookModal #qlAnalysisContainer {
+        opacity: 1 !important;
+        filter: none !important;
+      }
+    }
+    /* 尊重系统的「减少动态效果」：压暗瞬时完成，不做过渡 */
+    @media (prefers-reduced-motion: reduce) {
+      #quickLookModal .ql-panel,
+      #quickLookModal .ql-chrome,
+      #quickLookModal #qlAnalysisContainer { transition: none !important; }
+    }
+
     /* ---- 右侧属性顶栏：名字/备注/链接收成「可选轻行」，别像三张表单 ---- */
     .inspector-meta-quiet {
       width: 100%;
@@ -4123,9 +4172,9 @@
 
   <!-- ================= 1. 空格快速审题模态框 (Eagle Spacebar Quick Look) ================= -->
   <div id="quickLookModal" class="hidden fixed inset-0 z-[10005] flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-3 sm:p-5" onclick="closeQuickLookModal()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-[920px] max-h-[92vh] flex flex-col overflow-hidden border border-slate-200" onclick="event.stopPropagation()">
+    <div class="ql-panel bg-white rounded-2xl shadow-2xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200" onclick="event.stopPropagation()">
       <!-- 头部：单行紧凑不换行，聚焦审题、切题与收录 -->
-      <div class="flex flex-wrap items-center justify-between gap-2.5 px-5 py-3 border-b border-slate-200/80 bg-slate-50/95 shrink-0">
+      <div class="ql-chrome flex flex-wrap items-center justify-between gap-2.5 px-5 py-3 border-b border-slate-200/80 bg-slate-50/95 shrink-0">
         <div class="flex items-center gap-2 min-w-0 flex-wrap">
           <span class="text-sm sm:text-base font-bold text-slate-900 whitespace-nowrap shrink-0" id="qlTitleBadge">第 1 题 · 快速审题</span>
           <span id="qlTypeBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200/80 font-semibold font-mono whitespace-nowrap shrink-0">单选题</span>
@@ -4155,7 +4204,7 @@
       <!-- 主体单栏极简阅读区 -->
       <div id="qlReadingPane" class="flex-1 min-h-0 overflow-y-auto bg-slate-50/45 p-5 sm:p-6 space-y-4">
         <!-- 题目标注 + 已确认知识点标签 -->
-        <div class="flex flex-wrap items-center justify-between gap-2.5 bg-white rounded-xl border border-slate-200/80 px-3.5 py-2 shadow-2xs">
+        <div class="ql-chrome flex flex-wrap items-center justify-between gap-2.5 bg-white rounded-xl border border-slate-200/80 px-3.5 py-2 shadow-2xs">
           <div class="flex items-center gap-2 flex-1 min-w-[200px]">
             <label for="qlNameInput" class="text-[11px] font-semibold text-slate-400 whitespace-nowrap shrink-0 select-none">题名</label>
             <input
@@ -4185,7 +4234,7 @@
       </div>
 
       <!-- 底部信息与快捷动作条 -->
-      <div class="px-5 py-2.5 bg-slate-50 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 shrink-0">
+      <div class="ql-chrome px-5 py-2.5 bg-slate-50 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 shrink-0">
         <div class="flex items-center gap-3 min-w-0 flex-1">
           <span id="qlSourceText" class="truncate">出处：...</span>
           <span class="hidden sm:inline text-[11px] text-slate-400 whitespace-nowrap shrink-0">Space/Esc 关闭 · ←→ 切题 · V 看解析</span>
@@ -14560,6 +14609,39 @@
 
     // ================= 空格快速审题 (Spacebar Quick Look) =================
     /**
+     * 安装「指针移开只留题干」的悬停监听。
+     *
+     * 判定锚在白色卡片（.ql-panel）而不是遮罩容器：遮罩容器是 inset-0 铺满视口，
+     * 用它判 :hover 的话指针停在遮罩上仍算「在界面上」，压暗永远不触发。
+     *
+     * 状态唯一真源 = 弹窗根节点的 .is-idle class，CSS 读它决定是否压暗；
+     * :has() 那条只是 JS 失效时的兜底，两边用「或」合并，任一命中即压暗。
+     *
+     * 触屏没有 hover：pointerType 不是 mouse 就直接不处理，
+     * 加上 CSS 里 @media (hover: none) 强制全亮，双保险。
+     */
+    function installQuickLookIdleHover() {
+      const modal = document.getElementById('quickLookModal');
+      const panel = modal?.querySelector('.ql-panel');
+      if (!modal || !panel) return;
+      if (modal.dataset.qlIdleHover === '1') return;
+      modal.dataset.qlIdleHover = '1';
+      const setIdle = (idle) => {
+        // 只认鼠标指针：触摸笔/手指的 enter/leave 语义不可靠
+        if (idle && !window.matchMedia('(hover: hover)').matches) return;
+        modal.classList.toggle('is-idle', idle);
+      };
+      panel.addEventListener('pointerenter', (e) => {
+        if (e.pointerType && e.pointerType !== 'mouse') return;
+        setIdle(false);
+      });
+      panel.addEventListener('pointerleave', (e) => {
+        if (e.pointerType && e.pointerType !== 'mouse') return;
+        setIdle(true);
+      });
+    }
+
+    /**
      * 打开快速审题弹窗并定位到指定题目
      * @param {string} qid 题目 ID
      */
@@ -14572,7 +14654,12 @@
       quickLookShowAnalysis = false;
       renderQuickLookModal();
       const modal = document.getElementById('quickLookModal');
-      if (modal) modal.classList.remove('hidden');
+      if (modal) {
+        // 上次关闭时若指针在弹窗外，压暗态会留在 DOM 上 —— 打开先清掉，保证全亮
+        modal.classList.remove('is-idle');
+        modal.classList.remove('hidden');
+      }
+      installQuickLookIdleHover();
       const pane = document.getElementById('qlReadingPane');
       if (pane) pane.scrollTop = 0;
     }
@@ -14581,7 +14668,11 @@
      * 关闭快速审题弹窗
      */
     function closeQuickLookModal() {
-      document.getElementById('quickLookModal')?.classList.add('hidden');
+      const modal = document.getElementById('quickLookModal');
+      if (!modal) return;
+      modal.classList.add('hidden');
+      // 清掉压暗态：否则下次打开时若指针仍在弹窗外，会带着「只剩题干」的残态
+      modal.classList.remove('is-idle');
     }
 
     /**
