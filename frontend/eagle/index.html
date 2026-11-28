@@ -675,6 +675,15 @@
     .qb-figure img { display: block; max-width: min(100%, 300px); max-height: 210px; object-fit: contain; border-radius: 4px; }
     .qb-option .qb-figure { grid-column: 2; }
     .qb-option .qb-figure img { max-height: 140px; }
+    /* 图片选项按题卡自身宽度排成四列/两列，小图不拉伸，原图由灯箱查看。 */
+    .eagle-image-options { container-type: inline-size; width: 100%; max-width: 820px; margin: 12px 0 8px; }
+    .eagle-image-options-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .eagle-image-option { min-width: 0; }
+    .eagle-option-image-frame { display: grid; place-items: center; width: 100%; padding: 6px; border: 1px solid #f1f5f9; border-radius: 4px; background: #f8fafc; cursor: zoom-in; }
+    .eagle-option-image-frame:focus-visible { outline: 2px solid #059669; outline-offset: 2px; }
+    .eagle-option-image { display: block; width: auto; height: auto; max-width: 100%; max-height: 112px; object-fit: contain; }
+    @container (max-width: 580px) { .eagle-image-options-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @container (max-width: 280px) { .eagle-image-options-grid { grid-template-columns: 1fr; } }
     .qb-figure-action { display: flex; justify-content: center; margin-top: 4px; font-size: 11px; color: #64748b; }
     .qb-question-images { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
     .qb-question-image { margin: 0; }
@@ -695,8 +704,11 @@
     .qb-subquestion-body { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
     .qb-analysis { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; color: #1e293b; }
 
-    /* ---- 快速审题模态框 (Quick Look) 排版与附图约束 ---- */
-    #quickLookModal .ql-question-body { font-size: 15px; line-height: 1.85; color: #0f172a; }
+    /* ---- 快速审题模态框 (Quick Look) 排版与附图约束 ----
+       题干字号 15px → 17px：弹窗加宽到 1200px 后，原来 15px 在宽屏上显得小、
+       要盯着看。解析区 13.5px → 15px，与题干拉开一级层次。
+       行高保持 1.85 不动 —— 公式多的时候靠行高呼吸，字号一加行高就得跟着调。 */
+    #quickLookModal .ql-question-body { font-size: 17px; line-height: 1.85; color: #0f172a; }
     #quickLookModal .ql-question-body .qb-figures { margin: 0.85rem 0; }
     #quickLookModal .ql-question-body .qb-fig,
     #quickLookModal .ql-fig-card { border: 1px solid #e2e8f0; border-radius: 0.5rem; padding: 0.35rem; background: #ffffff; max-width: 100%; }
@@ -704,10 +716,110 @@
     #quickLookModal .ql-sol-content img { max-height: 17rem; max-width: 100%; height: auto; border-radius: 0.375rem; cursor: zoom-in; transition: transform 0.15s ease, box-shadow 0.15s ease; }
     #quickLookModal .ql-question-body img:hover,
     #quickLookModal .ql-sol-content img:hover { box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12); }
-    #quickLookModal .ql-sol-content { font-size: 13.5px; line-height: 1.78; color: #1e293b; white-space: pre-wrap; overflow-wrap: anywhere; }
+    #quickLookModal .ql-sol-content { font-size: 15px; line-height: 1.78; color: #1e293b; white-space: pre-wrap; overflow-wrap: anywhere; }
     .eagle-analysis-body { white-space: pre-line; overflow-wrap: anywhere; }
     #quickLookModal .katex-display,
     .eagle-stem-math .katex-display { margin: 0.45rem 0; overflow-x: auto; overflow-y: hidden; }
+
+    /* ---- 快速审题：加宽 + 指针移开只留题干 ----
+       ① 加宽：920px → 1200px。
+          走自定义钩子而不是 max-w-[1200px]：tailwind.css 是预编译产物
+          （tailwindcss@3.4.17，见 frontend/tailwind.config.js 注释），
+          新增 utility class 不会进产物，样式会静默失效。
+          本 <style> 在 tailwind.css 之后，同权重后来居上，直接生效。
+       ② 指针移开 → 只留题目：非题干区（头部 / 题名行 / 底部条 / 解析区）淡出到近乎不可见。
+          不用 display:none：物理隐藏会让弹窗高度塌缩，题干位置跳一下。
+       ③ 题干绝对不能被压暗 —— 这是「仅仅显示题目」的前提。
+          踩过的坑：原先把 brightness(.88) 加在 .ql-panel 上，想让整卡沉下去，
+          但 CSS 滤镜没法让子元素反向提亮 → 题干跟着被压了 12%（实测暗度比 0.877），
+          唯一该亮的东西反而也暗了。
+          现在改成三条互不干扰的路：
+            · 题干区：不加任何 filter、不降 opacity —— 像素级零衰减。
+            · 弹窗壳：底色/边框/阴影全去掉，壳整个消失。
+            · 四周：遮罩保持原样（不刻意压黑），壳透明后透出的是
+              跟别处一样的画面 —— 只剩题干那块白纸浮着。
+       ④ 判定锚在白色卡片（.ql-panel）而不是遮罩容器：
+          遮罩容器是 inset-0 铺满视口，用它判 :hover 的话，
+          指针停在遮罩上仍算「在界面上」，压暗永远不触发。
+       ⑤ 双保险：JS 切 .is-idle（主路径，可测） + :has() 兜底（JS 失效时仍能用）。
+       ⑥ 触屏（hover: none）永远全亮 —— 否则手机上开屏就是一片灰，像坏了。 */
+    #quickLookModal .ql-panel { max-width: 1200px; }
+    /* 壳消失要有过渡，不然「壳没了」是硬切，看着像界面崩了 */
+    #quickLookModal .ql-panel {
+      transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+    }
+    #quickLookModal .ql-chrome,
+    #quickLookModal #qlAnalysisContainer { transition: opacity 0.18s ease, filter 0.18s ease; }
+    /* 移开 → 只剩题目：面板与阅读区的底色一起透明，
+       弹窗壳消失，题干卡片（.ql-stem，白底）浮在原地，
+       四周透出跟别处一样的画面 —— 不刻意压黑。
+       注意：这里**不加深遮罩**。遮罩保持原样（bg-slate-900/70），
+       壳透明后透出来的就是遮罩 + Eagle 界面，跟四周完全一致；
+       刻意加深反而会让弹窗那块比四周更黑，与「变成旁边的颜色」相悖。 */
+    #quickLookModal.is-idle .ql-panel,
+    #quickLookModal.ql-backdrop:not(:has(.ql-panel:hover)) .ql-panel {
+      background-color: transparent;
+      border-color: transparent;
+      box-shadow: none;
+    }
+    /* 阅读区改成竖排居中：题名行撤掉后，题干卡片落在视口正中 */
+    #quickLookModal.is-idle #qlReadingPane,
+    #quickLookModal.ql-backdrop:not(:has(.ql-panel:hover)) #qlReadingPane {
+      background-color: transparent;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    /* 题名行：移开时完全撤出布局（只藏不撤会留一条空白，
+       题干卡片就贴不到正中） */
+    #quickLookModal.is-idle #qlReadingPane > .ql-chrome,
+    #quickLookModal.ql-backdrop:not(:has(.ql-panel:hover))
+      #qlReadingPane
+      > .ql-chrome {
+      display: none;
+    }
+    /* 非题干区淡出 + 降亮度（降亮度加在这里，题干不受牵连）。
+       解析区用 display:none 而不是 opacity:0 —— 只藏不撤会留下占位空隙，
+       题干卡片下方拖一条看不见的壳。 */
+    #quickLookModal.is-idle .ql-chrome,
+    #quickLookModal:not(:has(.ql-panel:hover)) .ql-chrome {
+      opacity: 0;
+      filter: blur(1px) brightness(0.7);
+    }
+    #quickLookModal.is-idle #qlAnalysisContainer,
+    #quickLookModal:not(:has(.ql-panel:hover)) #qlAnalysisContainer {
+      display: none;
+    }
+    /* 触屏没有 hover：永远全亮，绝不压暗（仓库同款先例见 .qc-evidence-btn） */
+    @media (hover: none) {
+      #quickLookModal .ql-panel {
+        background-color: #ffffff !important;
+        border-color: rgb(226 232 240) !important;
+        box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25) !important;
+      }
+      #quickLookModal #qlReadingPane {
+        background-color: rgb(248 250 252 / 0.45) !important;
+        display: block !important;
+      }
+      #quickLookModal #qlReadingPane > .ql-chrome {
+        display: flex !important;
+      }
+      #quickLookModal .ql-chrome {
+        opacity: 1 !important;
+        filter: none !important;
+      }
+      #quickLookModal #qlAnalysisContainer {
+        display: block !important;
+        opacity: 1 !important;
+        filter: none !important;
+      }
+    }
+    /* 尊重系统的「减少动态效果」：压暗瞬时完成，不做过渡 */
+    @media (prefers-reduced-motion: reduce) {
+      #quickLookModal.ql-backdrop,
+      #quickLookModal .ql-chrome,
+      #quickLookModal #qlAnalysisContainer { transition: none !important; }
+    }
 
     /* ---- 右侧属性顶栏：名字/备注/链接收成「可选轻行」，别像三张表单 ---- */
     .inspector-meta-quiet {
@@ -4122,10 +4234,10 @@
 
 
   <!-- ================= 1. 空格快速审题模态框 (Eagle Spacebar Quick Look) ================= -->
-  <div id="quickLookModal" class="hidden fixed inset-0 z-[10005] flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-3 sm:p-5" onclick="closeQuickLookModal()">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-[920px] max-h-[92vh] flex flex-col overflow-hidden border border-slate-200" onclick="event.stopPropagation()">
+  <div id="quickLookModal" class="ql-backdrop hidden fixed inset-0 z-[10005] flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-3 sm:p-5" onclick="closeQuickLookModal()">
+    <div class="ql-panel bg-white rounded-2xl shadow-2xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-slate-200" onclick="event.stopPropagation()">
       <!-- 头部：单行紧凑不换行，聚焦审题、切题与收录 -->
-      <div class="flex flex-wrap items-center justify-between gap-2.5 px-5 py-3 border-b border-slate-200/80 bg-slate-50/95 shrink-0">
+      <div class="ql-chrome flex flex-wrap items-center justify-between gap-2.5 px-5 py-3 border-b border-slate-200/80 bg-slate-50/95 shrink-0">
         <div class="flex items-center gap-2 min-w-0 flex-wrap">
           <span class="text-sm sm:text-base font-bold text-slate-900 whitespace-nowrap shrink-0" id="qlTitleBadge">第 1 题 · 快速审题</span>
           <span id="qlTypeBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200/80 font-semibold font-mono whitespace-nowrap shrink-0">单选题</span>
@@ -4155,7 +4267,7 @@
       <!-- 主体单栏极简阅读区 -->
       <div id="qlReadingPane" class="flex-1 min-h-0 overflow-y-auto bg-slate-50/45 p-5 sm:p-6 space-y-4">
         <!-- 题目标注 + 已确认知识点标签 -->
-        <div class="flex flex-wrap items-center justify-between gap-2.5 bg-white rounded-xl border border-slate-200/80 px-3.5 py-2 shadow-2xs">
+        <div class="ql-chrome flex flex-wrap items-center justify-between gap-2.5 bg-white rounded-xl border border-slate-200/80 px-3.5 py-2 shadow-2xs">
           <div class="flex items-center gap-2 flex-1 min-w-[200px]">
             <label for="qlNameInput" class="text-[11px] font-semibold text-slate-400 whitespace-nowrap shrink-0 select-none">题名</label>
             <input
@@ -4172,7 +4284,7 @@
         </div>
 
         <!-- 题干与选项排版卡片 -->
-        <section class="bg-white rounded-xl border border-slate-200/80 p-5 sm:p-6 shadow-2xs">
+        <section class="ql-stem bg-white rounded-xl border border-slate-200/80 p-5 sm:p-6 shadow-2xs">
           <div id="qlContentContainer" class="ql-question-body text-slate-900 font-serif">
             <!-- 动态注入题目与选项 -->
           </div>
@@ -4185,7 +4297,7 @@
       </div>
 
       <!-- 底部信息与快捷动作条 -->
-      <div class="px-5 py-2.5 bg-slate-50 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 shrink-0">
+      <div class="ql-chrome px-5 py-2.5 bg-slate-50 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 shrink-0">
         <div class="flex items-center gap-3 min-w-0 flex-1">
           <span id="qlSourceText" class="truncate">出处：...</span>
           <span class="hidden sm:inline text-[11px] text-slate-400 whitespace-nowrap shrink-0">Space/Esc 关闭 · ←→ 切题 · V 看解析</span>
@@ -5414,6 +5526,24 @@
     function formatEagleStemBlocksHtml(rawStem) {
       const normalized = String(rawStem || '').replace(/\r\n?/g, '\n');
       if (!normalized.trim()) return '';
+
+      // 列表题卡也使用公共表格解析器，避免逐行包进 <p> 后把管道表打散。
+      const renderer = typeof window !== 'undefined' && window.QBRender;
+      const tables = renderer && (normalized.includes('|') || /<table/i.test(normalized))
+        ? renderer.findTables(normalized) : [];
+      if (tables.length) {
+        const blocks = [];
+        let from = 0;
+        tables.forEach((table) => {
+          blocks.push(formatEagleStemBlocksHtml(normalized.slice(from, table.start)));
+          const host = document.createElement('div');
+          renderer.renderTypeset(host, normalized.slice(table.start, table.end), { empty: '' });
+          blocks.push(host.innerHTML);
+          from = table.end;
+        });
+        blocks.push(formatEagleStemBlocksHtml(normalized.slice(from)));
+        return blocks.join('');
+      }
 
       const pClass = 'font-serif leading-relaxed mb-2 text-slate-800 text-sm sm:text-base';
       const mathBlockClass = `eagle-stem-math ${pClass} overflow-x-auto`;
@@ -7515,25 +7645,25 @@
           const imgUrl = fig ? ((fig.url && fig.url.startsWith('/') && API_BASE) ? (API_BASE + fig.url) : (fig.url || fig.file || '')) : '';
 
           return `
-            <div class="group/opt flex flex-col justify-between rounded-lg border border-slate-200/90 bg-white p-2.5 transition-all duration-150 hover:border-emerald-400 hover:shadow-xs">
+            <div class="eagle-image-option group/opt flex flex-col rounded-lg border border-slate-200/90 bg-white p-2.5 transition-all duration-150 hover:border-emerald-400 hover:shadow-xs">
               <div class="flex items-start gap-2 mb-1.5">
                 <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-100 text-slate-800 font-bold text-xs shrink-0 group-hover/opt:bg-emerald-100 group-hover/opt:text-emerald-800 transition-colors">${escapeHtml(k)}</span>
                 ${optText ? `<div class="text-xs text-slate-800 font-serif leading-relaxed flex-1">${escapeHtml(optText)}</div>` : ''}
               </div>
               ${imgUrl ? `
-                <div class="flex-1 flex items-center justify-center p-2 rounded bg-slate-50/70 border border-slate-100/80 min-h-[110px] overflow-hidden">
+                <button type="button" class="eagle-option-image-frame" data-eagle-option-preview aria-label="放大查看选项 ${escapeHtml(k)} 配图" title="点击放大查看原图">
                   <img 
-                    src="${imgUrl}" 
+                    src="${escapeHtml(imgUrl)}"
                     alt="选项 ${escapeHtml(k)} 配图" 
-                    class="max-h-36 max-w-full object-contain" 
+                    class="eagle-option-image"
                   />
-                </div>
+                </button>
               ` : ''}
             </div>
           `;
         }).join('');
 
-        return `<div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 mb-2">${optionCards}</div>`;
+        return `<div class="eagle-image-options"><div class="eagle-image-options-grid">${optionCards}</div></div>`;
       }
 
       // 情况 B: 纯文字与数学公式选项 -> 动态测算最大有效长度
@@ -14560,6 +14690,39 @@
 
     // ================= 空格快速审题 (Spacebar Quick Look) =================
     /**
+     * 安装「指针移开只留题干」的悬停监听。
+     *
+     * 判定锚在白色卡片（.ql-panel）而不是遮罩容器：遮罩容器是 inset-0 铺满视口，
+     * 用它判 :hover 的话指针停在遮罩上仍算「在界面上」，压暗永远不触发。
+     *
+     * 状态唯一真源 = 弹窗根节点的 .is-idle class，CSS 读它决定是否压暗；
+     * :has() 那条只是 JS 失效时的兜底，两边用「或」合并，任一命中即压暗。
+     *
+     * 触屏没有 hover：pointerType 不是 mouse 就直接不处理，
+     * 加上 CSS 里 @media (hover: none) 强制全亮，双保险。
+     */
+    function installQuickLookIdleHover() {
+      const modal = document.getElementById('quickLookModal');
+      const panel = modal?.querySelector('.ql-panel');
+      if (!modal || !panel) return;
+      if (modal.dataset.qlIdleHover === '1') return;
+      modal.dataset.qlIdleHover = '1';
+      const setIdle = (idle) => {
+        // 只认鼠标指针：触摸笔/手指的 enter/leave 语义不可靠
+        if (idle && !window.matchMedia('(hover: hover)').matches) return;
+        modal.classList.toggle('is-idle', idle);
+      };
+      panel.addEventListener('pointerenter', (e) => {
+        if (e.pointerType && e.pointerType !== 'mouse') return;
+        setIdle(false);
+      });
+      panel.addEventListener('pointerleave', (e) => {
+        if (e.pointerType && e.pointerType !== 'mouse') return;
+        setIdle(true);
+      });
+    }
+
+    /**
      * 打开快速审题弹窗并定位到指定题目
      * @param {string} qid 题目 ID
      */
@@ -14572,7 +14735,12 @@
       quickLookShowAnalysis = false;
       renderQuickLookModal();
       const modal = document.getElementById('quickLookModal');
-      if (modal) modal.classList.remove('hidden');
+      if (modal) {
+        // 上次关闭时若指针在弹窗外，压暗态会留在 DOM 上 —— 打开先清掉，保证全亮
+        modal.classList.remove('is-idle');
+        modal.classList.remove('hidden');
+      }
+      installQuickLookIdleHover();
       const pane = document.getElementById('qlReadingPane');
       if (pane) pane.scrollTop = 0;
     }
@@ -14581,7 +14749,11 @@
      * 关闭快速审题弹窗
      */
     function closeQuickLookModal() {
-      document.getElementById('quickLookModal')?.classList.add('hidden');
+      const modal = document.getElementById('quickLookModal');
+      if (!modal) return;
+      modal.classList.add('hidden');
+      // 清掉压暗态：否则下次打开时若指针仍在弹窗外，会带着「只剩题干」的残态
+      modal.classList.remove('is-idle');
     }
 
     /**
@@ -24875,6 +25047,15 @@
       if (titleEl) titleEl.innerText = title;
       modal.classList.remove('hidden');
     }
+
+    // 事件委托兼容列表虚拟挂载和内容净化；不把图片 URL 拼进内联脚本。
+    document.addEventListener('click', (event) => {
+      const button = event.target.closest && event.target.closest('[data-eagle-option-preview]');
+      const image = button && button.querySelector('img');
+      if (!image) return;
+      event.stopPropagation();
+      previewImageModal(image.currentSrc || image.src, image.alt);
+    }, true);
 
     function closeImageLightboxModal() {
       window.__lightboxImageUrl = '';

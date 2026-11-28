@@ -814,11 +814,39 @@
         index += 1;
         continue;
       }
+      const rowLines = [index];
+      const nextNonempty = (from) => {
+        while (from < lines.length && !lines[from].trim()) from += 1;
+        return from;
+      };
+      const isSeparator = (cells) => cells.some((cell) => cell.text) && cells.every((cell) => !cell.text || TABLE_SEPARATOR.test(cell.text));
+      const columns = tableRowCells(lines[index], starts[index]).length;
+      const separatorLine = nextNonempty(index + 1);
+      // 识读稿可能在每一行间插入空段落。只对有明确 Markdown 表头且列数
+      // 一致的表跨过空行，不把普通绝对值公式或两张独立表拼成一张。
+      const spaced = separatorLine < lines.length && isTableLine(lines[separatorLine]) && (() => {
+        const cells = tableRowCells(lines[separatorLine], starts[separatorLine]);
+        return cells.length === columns && isSeparator(cells);
+      })();
       let last = index;
-      while (last + 1 < lines.length && isTableLine(lines[last + 1])) last += 1;
+      while (last + 1 < lines.length) {
+        let next = last + 1;
+        if (!lines[next].trim()) {
+          if (!spaced) break;
+          next = nextNonempty(next);
+          if (next >= lines.length || !isTableLine(lines[next])) break;
+          if (tableRowCells(lines[next], starts[next]).length !== columns) break;
+          const after = nextNonempty(next + 1);
+          if (next !== separatorLine && after < lines.length && isTableLine(lines[after]) &&
+              isSeparator(tableRowCells(lines[after], starts[after]))) break;
+        }
+        if (!isTableLine(lines[next])) break;
+        rowLines.push(next);
+        last = next;
+      }
       if (last > index) {
-        let rows = lines.slice(index, last + 1).map((line, row) => tableRowCells(line, starts[index + row]));
-        const header = rows.length > 1 && rows[1].some((cell) => cell.text) && rows[1].every((cell) => !cell.text || TABLE_SEPARATOR.test(cell.text));
+        let rows = rowLines.map((line) => tableRowCells(lines[line], starts[line]));
+        const header = rows.length > 1 && isSeparator(rows[1]);
         if (header) rows = [rows[0], ...rows.slice(2)];
         found.push({ start: starts[index], end: starts[last] + lines[last].length, rows, header });
       }
