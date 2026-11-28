@@ -5106,6 +5106,20 @@ body.entry-page .sidebar {
   gap: 10px;
   border-right: 1px solid #e2e8f0;
   background: #ffffff;
+  /* 滚动条只出现在按钮下面。整栏一起滚时，试卷一多，
+     「题库工作台」和「设置」会跟着滚出屏幕。 */
+  overflow: hidden;
+}
+
+body.entry-page .sidebar-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 body.entry-page .entry-sidebar-nav {
