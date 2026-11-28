@@ -521,6 +521,26 @@ class TiyoujuCliTests(LiveServerTestCase):
 
 
 class TiyoujuOfflineTests(SimpleTestCase):
+    def test_onenote_review_skill_topic_is_complete_and_offline(self):
+        root = ROOT / "skills" / "tiyouju" / "references" / "onenote-review"
+        expected = "\n\n---\n\n".join(
+            (root / name).read_text(encoding="utf-8") for name in ("SKILL.md", "windows-access.md", "mathml.md")
+        )
+        with mock.patch.object(cli, "Client", side_effect=AssertionError("skill must stay offline")):
+            code, result = run_json("skill", "--topic", "onenote-review")
+        self.assertEqual(code, 0)
+        self.assertEqual(result["topic"], "onenote-review")
+        self.assertEqual(result["guide"], expected)
+
+    def test_onenote_review_skill_missing_resource_is_actionable(self):
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            mock.patch.object(cli.setup, "bundled_skill", return_value=Path(folder)),
+        ):
+            code, _text, err = run("skill", "--topic", "onenote-review")
+        self.assertEqual(code, cli.EXIT_NEEDS_USER)
+        self.assertIn("批改指南不完整", err)
+
     def test_assistant_setup_does_not_connect_to_the_app(self):
         report = {
             "software": {"installed": True, "version": "1.10.14", "version_verified": True},
