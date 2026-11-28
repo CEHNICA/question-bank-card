@@ -3,6 +3,13 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 未发布
+
+**按空格打开快速审题时，顶栏和底栏不再闪一下**
+
+- **快速审题打开的第一帧不再先藏起界面（`frontend/eagle/index.html`、`frontend/test_eagle_quicklook_focus_mode.js`）**：指针不在白色卡片上时会把顶栏、题名行和底栏淡出。按空格打开的瞬间，指针还没被算进刚出现的卡片，这条规则会先生效，大约 0.18 秒后再淡回来。悬停监听挂上之后只在指针真正离开卡片时才压暗；脚本没跑起来时，原来的兜底仍然有效。
+
+
 ## 2.3.16
 
 **修复工作台题卡跨行显示公式与 LaTeX 表格被拆行导致 KaTeX 无法渲染的问题**
