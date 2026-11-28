@@ -195,8 +195,12 @@ test("快速审题：指针移开后压暗只留题干", async (t) => {
 
   await t.test("4. :has() 兜底规则存在（JS 失效时仍能压暗）", () => {
     assert.ok(
-      /#quickLookModal:not\(:has\(\.ql-panel:hover\)\)/.test(html),
+      /#quickLookModal:not\(\.ql-idle-js\):not\(:has\(\.ql-panel:hover\)\)/.test(html),
       "应有 :has() 兜底规则，判定锚在白色卡片而非遮罩容器"
+    );
+    assert.ok(
+      !/#quickLookModal:not\(:has\(\.ql-panel:hover\)\)/.test(html),
+      ":has() 兜底必须先排除 .ql-idle-js，否则空格打开的第一帧会先藏掉顶栏再淡回来"
     );
   });
 
@@ -329,6 +333,10 @@ test("快速审题：指针移开后压暗只留题干", async (t) => {
       fnBody.includes("pointerType") && fnBody.includes("mouse"),
       "只认鼠标指针：触摸的 enter/leave 语义不可靠"
     );
+    assert.ok(
+      fnBody.includes("classList.add('ql-idle-js')"),
+      "挂上监听后应声明 JS 接管，让 :has() 兜底退出"
+    );
   });
 
   await t.test("8. 打开与关闭都会清掉 is-idle（不残留压暗态）", () => {
@@ -345,6 +353,12 @@ test("快速审题：指针移开后压暗只留题干", async (t) => {
     assert.ok(
       openBody.includes("installQuickLookIdleHover()"),
       "打开时应安装悬停监听"
+    );
+    const armAt = openBody.indexOf("installQuickLookIdleHover()");
+    const showAt = openBody.indexOf("classList.remove('hidden')");
+    assert.ok(
+      armAt > -1 && showAt > armAt,
+      "应先声明 JS 接管再显示弹窗，避免第一帧走 :has() 压暗"
     );
 
     const closeStart = mainScript.indexOf("function closeQuickLookModal");

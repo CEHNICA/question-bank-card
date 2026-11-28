@@ -742,6 +742,9 @@
           遮罩容器是 inset-0 铺满视口，用它判 :hover 的话，
           指针停在遮罩上仍算「在界面上」，压暗永远不触发。
        ⑤ 双保险：JS 切 .is-idle（主路径，可测） + :has() 兜底（JS 失效时仍能用）。
+          JS 挂上监听后给弹窗加上 .ql-idle-js，:has() 就不再参与。
+          否则按空格打开的第一帧，指针还没被算进刚出现的卡片，
+          :has() 会先把顶栏和底栏藏掉，0.18 秒的过渡再把它们淡回来，闪一下。
        ⑥ 触屏（hover: none）永远全亮 —— 否则手机上开屏就是一片灰，像坏了。 */
     #quickLookModal .ql-panel { max-width: 1200px; }
     /* 壳消失要有过渡，不然「壳没了」是硬切，看着像界面崩了 */
@@ -757,14 +760,14 @@
        壳透明后透出来的就是遮罩 + Eagle 界面，跟四周完全一致；
        刻意加深反而会让弹窗那块比四周更黑，与「变成旁边的颜色」相悖。 */
     #quickLookModal.is-idle .ql-panel,
-    #quickLookModal.ql-backdrop:not(:has(.ql-panel:hover)) .ql-panel {
+    #quickLookModal.ql-backdrop:not(.ql-idle-js):not(:has(.ql-panel:hover)) .ql-panel {
       background-color: transparent;
       border-color: transparent;
       box-shadow: none;
     }
     /* 阅读区改成竖排居中：题名行撤掉后，题干卡片落在视口正中 */
     #quickLookModal.is-idle #qlReadingPane,
-    #quickLookModal.ql-backdrop:not(:has(.ql-panel:hover)) #qlReadingPane {
+    #quickLookModal.ql-backdrop:not(.ql-idle-js):not(:has(.ql-panel:hover)) #qlReadingPane {
       background-color: transparent;
       display: flex;
       flex-direction: column;
@@ -773,7 +776,7 @@
     /* 题名行：移开时完全撤出布局（只藏不撤会留一条空白，
        题干卡片就贴不到正中） */
     #quickLookModal.is-idle #qlReadingPane > .ql-chrome,
-    #quickLookModal.ql-backdrop:not(:has(.ql-panel:hover))
+    #quickLookModal.ql-backdrop:not(.ql-idle-js):not(:has(.ql-panel:hover))
       #qlReadingPane
       > .ql-chrome {
       display: none;
@@ -782,12 +785,12 @@
        解析区用 display:none 而不是 opacity:0 —— 只藏不撤会留下占位空隙，
        题干卡片下方拖一条看不见的壳。 */
     #quickLookModal.is-idle .ql-chrome,
-    #quickLookModal:not(:has(.ql-panel:hover)) .ql-chrome {
+    #quickLookModal:not(.ql-idle-js):not(:has(.ql-panel:hover)) .ql-chrome {
       opacity: 0;
       filter: blur(1px) brightness(0.7);
     }
     #quickLookModal.is-idle #qlAnalysisContainer,
-    #quickLookModal:not(:has(.ql-panel:hover)) #qlAnalysisContainer {
+    #quickLookModal:not(.ql-idle-js):not(:has(.ql-panel:hover)) #qlAnalysisContainer {
       display: none;
     }
     /* 触屏没有 hover：永远全亮，绝不压暗（仓库同款先例见 .qc-evidence-btn） */
@@ -14695,8 +14698,9 @@
      * 判定锚在白色卡片（.ql-panel）而不是遮罩容器：遮罩容器是 inset-0 铺满视口，
      * 用它判 :hover 的话指针停在遮罩上仍算「在界面上」，压暗永远不触发。
      *
-     * 状态唯一真源 = 弹窗根节点的 .is-idle class，CSS 读它决定是否压暗；
-     * :has() 那条只是 JS 失效时的兜底，两边用「或」合并，任一命中即压暗。
+     * 状态唯一真源 = 弹窗根节点的 .is-idle class，CSS 读它决定是否压暗。
+     * 挂上监听时加上 .ql-idle-js，:has() 兜底只在 JS 没接管时生效，
+     * 避免打开的第一帧指针还没进卡片就把顶栏底栏藏掉。
      *
      * 触屏没有 hover：pointerType 不是 mouse 就直接不处理，
      * 加上 CSS 里 @media (hover: none) 强制全亮，双保险。
@@ -14705,6 +14709,9 @@
       const modal = document.getElementById('quickLookModal');
       const panel = modal?.querySelector('.ql-panel');
       if (!modal || !panel) return;
+      // JS 接管后 :has() 兜底退出。打开瞬间指针通常还不在刚出现的卡片上，
+      // 那条兜底会先藏掉顶栏和底栏，过渡结束才淡回来。
+      modal.classList.add('ql-idle-js');
       if (modal.dataset.qlIdleHover === '1') return;
       modal.dataset.qlIdleHover = '1';
       const setIdle = (idle) => {
@@ -14736,11 +14743,13 @@
       renderQuickLookModal();
       const modal = document.getElementById('quickLookModal');
       if (modal) {
+        // 先声明 JS 接管，再拿掉 hidden。顺序反了的话，显示的第一帧仍走 :has()
+        // 兜底，顶栏和底栏会先没掉再淡回来。
+        installQuickLookIdleHover();
         // 上次关闭时若指针在弹窗外，压暗态会留在 DOM 上 —— 打开先清掉，保证全亮
         modal.classList.remove('is-idle');
         modal.classList.remove('hidden');
       }
-      installQuickLookIdleHover();
       const pane = document.getElementById('qlReadingPane');
       if (pane) pane.scrollTop = 0;
     }
