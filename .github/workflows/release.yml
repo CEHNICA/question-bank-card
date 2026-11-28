@@ -21,7 +21,7 @@ jobs:
           python-version: "3.12"
       - uses: actions/setup-node@v7.0.0
         with:
-          node-version: "22"
+          node-version: "24"
 
       - name: Work out the version
         id: version
@@ -30,6 +30,18 @@ jobs:
           $version = '${{ github.ref_name }}'.TrimStart('v')
           "version=$version" >> $env:GITHUB_OUTPUT
           Write-Host "这个标签对应版本 $version"
+
+      - name: Check SignPath configuration
+        id: signpath
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORG_ID: ${{ secrets.SIGNPATH_ORG_ID }}
+          SIGNPATH_PROJECT_VAR: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_PROJECT_SEC: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_POLICY_VAR: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          SIGNPATH_POLICY_SEC: ${{ secrets.SIGNPATH_POLICY_SLUG }}
+        shell: pwsh
+        run: ./packaging/check_release_signing.ps1
 
       - name: Install Inno Setup 7
         shell: pwsh
@@ -55,37 +67,21 @@ jobs:
           python -m ruff format --check backend tools
           npm run lint
           python -m mypy --config-file pyproject.toml backend/core
-          python -m unittest test_launcher test_backup test_app_window test_credential_dialog test_packaging test_assistant_setup test_create_shortcut test_dev_script
+          python -m unittest test_launcher test_backup test_app_window test_exit_dialog test_credential_dialog test_packaging test_release_signing test_assistant_setup test_create_shortcut test_dev_script
           Push-Location backend; try { $env:QB_EXPORT_BROWSER_TEST = '1'; python manage.py test core } finally { Pop-Location }
           node --test frontend/test_*.js
+          node --test website/test_*.mjs
+          npm --prefix community ci --no-audit --no-fund
+          npm --prefix community run typecheck
+          npm --prefix community test
+          npm --prefix community run build
 
       - name: Build the installer and the portable folder
         shell: pwsh
         run: |
           powershell -NoProfile -File packaging/build.ps1 -Version '${{ steps.version.outputs.version }}'
 
-      - name: Check SignPath configuration
-        id: signpath
-        env:
-          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
-          SIGNPATH_ORG_ID: ${{ secrets.SIGNPATH_ORG_ID }}
-          SIGNPATH_PROJECT_VAR: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          SIGNPATH_PROJECT_SEC: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
-          SIGNPATH_POLICY_VAR: ${{ vars.SIGNPATH_POLICY_SLUG }}
-          SIGNPATH_POLICY_SEC: ${{ secrets.SIGNPATH_POLICY_SLUG }}
-        shell: pwsh
-        run: |
-          $enabled = [bool]($env:SIGNPATH_API_TOKEN -and $env:SIGNPATH_ORG_ID)
-          $projectSlug = @($env:SIGNPATH_PROJECT_SEC, $env:SIGNPATH_PROJECT_VAR, 'question-bank-card') | Where-Object { $_ } | Select-Object -First 1
-          $policySlug = @($env:SIGNPATH_POLICY_SEC, $env:SIGNPATH_POLICY_VAR, 'release-signing') | Where-Object { $_ } | Select-Object -First 1
-          "enabled=$($enabled.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
-          "project_slug=$projectSlug" >> $env:GITHUB_OUTPUT
-          "policy_slug=$policySlug" >> $env:GITHUB_OUTPUT
-          if ($enabled) { Write-Host "SignPath 代码签名已启用 ($projectSlug / $policySlug)" }
-          else { Write-Host "SignPath 凭据尚未配置，跳过代码签名步骤" }
-
       - name: Stage unsigned app executables for SignPath
-        if: steps.signpath.outputs.enabled == 'true'
         shell: pwsh
         run: |
           $stage = "packaging/dist/unsigned-app-exes"
@@ -95,7 +91,6 @@ jobs:
 
       - name: Upload unsigned app executables
         id: upload-unsigned-app
-        if: steps.signpath.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: unsigned-app-exes-${{ steps.version.outputs.version }}
@@ -104,7 +99,6 @@ jobs:
           retention-days: 1
 
       - name: Sign app executables with SignPath
-        if: steps.signpath.outputs.enabled == 'true'
         uses: signpath/github-action-submit-signing-request@v3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -116,7 +110,6 @@ jobs:
           output-artifact-directory: packaging/dist/signed-app-exes
 
       - name: Rebuild installer with signed app executables
-        if: steps.signpath.outputs.enabled == 'true'
         shell: pwsh
         run: |
           foreach ($exeName in @('QuestionBankCard.exe', 'tiyouju.exe')) {
@@ -130,7 +123,6 @@ jobs:
 
       - name: Upload unsigned installer
         id: upload-unsigned-installer
-        if: steps.signpath.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: unsigned-installer-${{ steps.version.outputs.version }}
@@ -139,7 +131,6 @@ jobs:
           retention-days: 1
 
       - name: Sign installer with SignPath
-        if: steps.signpath.outputs.enabled == 'true'
         uses: signpath/github-action-submit-signing-request@v3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -151,7 +142,6 @@ jobs:
           output-artifact-directory: packaging/dist/signed-installer
 
       - name: Apply signed installer before checksums
-        if: steps.signpath.outputs.enabled == 'true'
         shell: pwsh
         run: |
           $version = '${{ steps.version.outputs.version }}'
@@ -161,6 +151,13 @@ jobs:
           $sig = Get-AuthenticodeSignature -LiteralPath $signed.FullName
           if ($sig.Status -ne 'Valid') { throw "$targetName 签名校验未通过: $($sig.Status)" }
           Copy-Item -LiteralPath $signed.FullName -Destination "packaging/dist/installer/$targetName" -Force
+
+      - name: Verify all release signatures and timestamps
+        shell: pwsh
+        run: |
+          ./packaging/verify_release_signatures.ps1 `
+            -BundleRoot 'packaging/dist/QuestionBankCard' `
+            -InstallerPath 'packaging/dist/installer/TiYouJu-Setup-${{ steps.version.outputs.version }}.exe'
 
       - name: Assemble the public assets
         run: python packaging/make_release_essentials.py ${{ steps.version.outputs.version }}

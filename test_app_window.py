@@ -17,6 +17,7 @@ from unittest.mock import Mock, patch
 
 import app_window
 import create_shortcut
+import exit_dialog
 
 
 class DirectSplash:
@@ -37,6 +38,40 @@ def _record(slot, sequence):
     value = next(sequence, False)
     slot[0] = value
     return value
+
+
+class OwnWindowFullscreenTests(unittest.TestCase):
+    def test_fullscreen_state_tracks_toggles_when_creation_option_stays_false(self):
+        # pywebview 的 fullscreen 是创建参数；WinForms 切换时不更新它。
+        window = SimpleNamespace(fullscreen=False, toggle_fullscreen=Mock())
+        api = app_window._OwnWindowApi()
+        api.bind(window)
+
+        for expected in (True, False, True, False):
+            self.assertEqual(api.toggle_fullscreen(), expected)
+            self.assertEqual(api.is_fullscreen(), expected)
+            self.assertFalse(window.fullscreen)
+        self.assertEqual(window.toggle_fullscreen.call_count, 4)
+
+    def test_initially_fullscreen_window_exits_then_enters(self):
+        window = SimpleNamespace(fullscreen=True, toggle_fullscreen=Mock())
+        api = app_window._OwnWindowApi()
+        api.bind(window)
+
+        self.assertTrue(api.is_fullscreen())
+        self.assertFalse(api.toggle_fullscreen())
+        self.assertFalse(api.is_fullscreen())
+        self.assertTrue(api.toggle_fullscreen())
+        self.assertTrue(api.is_fullscreen())
+
+    def test_failed_toggle_keeps_previous_state(self):
+        window = SimpleNamespace(fullscreen=False, toggle_fullscreen=Mock(side_effect=RuntimeError("切换失败")))
+        api = app_window._OwnWindowApi()
+        api.bind(window)
+
+        with self.assertRaisesRegex(RuntimeError, "切换失败"):
+            api.toggle_fullscreen()
+        self.assertFalse(api.is_fullscreen())
 
 
 class CredentialTests(unittest.TestCase):
@@ -493,7 +528,12 @@ class MainFlowTests(unittest.TestCase):
                 return self
 
         class FakeWindow:
-            events = types.SimpleNamespace(shown=Shown())
+            class Closing:
+                def __iadd__(self, handler):
+                    created["closing"] = handler
+                    return self
+
+            events = types.SimpleNamespace(shown=Shown(), closing=Closing())
 
         def create_window(title, url, **kwargs):
             created["title"] = title
@@ -521,6 +561,10 @@ class MainFlowTests(unittest.TestCase):
         self.assertIs(created["start"]["private_mode"], False)
         self.assertEqual(created["start"]["storage_path"], tmp)
         self.assertTrue(callable(created["shown"]))
+        self.assertTrue(callable(created["closing"]))
+        with patch.object(exit_dialog, "confirm_exit", return_value=False) as confirm:
+            self.assertFalse(created["closing"]())
+            confirm.assert_called_once_with(None)
 
         api = created["window"]["js_api"]
         self.assertFalse(api.is_fullscreen())

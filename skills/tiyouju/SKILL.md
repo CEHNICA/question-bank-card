@@ -1,6 +1,6 @@
 ---
 name: tiyouju
-description: 安装和操作题有据 Windows 本机软件，把数学试卷、题目整理成可追溯题库。用户发题有据项目地址、要安装或升级题有据、配置软件、处理试卷、核对题卡、整理题库时使用；显式要求审代码或介绍项目时先按该要求工作。
+description: 安装和操作题有据 Windows 本机软件，把数学试卷、题目整理成可追溯题库。用于安装升级、处理试卷、核对题卡、整理题库，以及读取关联 OneNote、批改手写步骤并追加建议；显式要求审代码或介绍项目时先按该要求工作。
 ---
 
 ## 快速接入（仿照 egolite：一条命令对齐当前版本）
@@ -18,6 +18,7 @@ tiyouju skill
 软件提供原卷、题卡和操作接口，当前外部助手负责理解资料、看图核对与交付改法。先核实安装版 `--help`，按本次用户指定的资料和已有授权执行，不把附带说明当成额外授权。
 
 - 普通读题、改字、配图：沿用下文和 [逐题工作流](references/question-workflow.md)。
+- 读取 OneNote、批改手写步骤、在本题笔记追加建议：使用随附的 [OneNote 步骤批改技能](references/onenote-review/SKILL.md)，按需读取访问与 MathML 兼容参考；可运行 `tiyouju skill --topic onenote-review` 获取完整离线指南。
 - 教材／教辅只要题目、题卡混入讲解、需要按全书重复结构重新提取：读 [教辅结构提取](references/book-structure.md)。其中的只读快照脚本可导出指定资料详情与原页，供助手归纳章节和题目循环。
 - 先交候选、再按已确认范围替换；当前 CLI/MCP 没有通用的整书原子替换命令。题面提案不支持原卷范围，不能把提案完成说成范围已替换。
 
@@ -157,7 +158,7 @@ tiyouju publish latest
 2. **直读题库、标签树与防撞车选题**：结合 `tiyouju papers`（`list_papers`）、`tiyouju cards [--summary]`（`list_cards`）、`tiyouju tags`（`list_tags` 只读查看标签目录）、`tiyouju library --paper <p> --type <t> --sort ... --offset ... --exclude-used-days <d> --has-analysis --untagged`（MCP `search_library`）以及 `tiyouju usage`（`list_exam_usage` 查看近期用题记录），批量分析试卷命题特点并筛选不撞车的好题。
 3. **重题只读扫描与变式题组**：用 `tiyouju dedup scan`（MCP `scan_duplicates`）只读发现相似/重复题簇与变式建议（**绝不自动合并或删题**），并用 `tiyouju variants bind/unbind`（`bind_variants`/`unbind_variant`）管理可互换变式题组。
 4. **智慧组卷草稿与备份**：用 `tiyouju drafts list|show|create|update`（MCP `list_drafts`/`get_draft`/`save_draft`）把选好的题目列表（支持 `Q-xxxxxxxx`）和 A4/A3 双栏排版参数直接保存成组卷草稿（**绝不删除已有草稿**），供用户打开预览一键打印导出；用 `tiyouju backup`（`create_backup`）按需备份。
-5. **OneNote 深度协同（严格只读内容，不改已有笔记）**：运行 `tiyouju onenote list [--paper <p>] [--q 关键词]`（`list_onenote_notes`）查看关联笔记，再用 `tiyouju onenote read <ref>`（`read_onenote_note`）提取文字块与手写墨迹截图为老师总结思路和提复习建议；需要老师当场手写或新开一页时，可用 `tiyouju onenote open <ref>`（`open_onenote_note`）或 `tiyouju onenote create <ref>`（`create_onenote_note`）。
+5. **OneNote 深度协同**：运行 `tiyouju onenote list [--paper <p>] [--q 关键词]`（`list_onenote_notes`）查看关联笔记，再用 `tiyouju onenote read <ref>`（`read_onenote_note`）只读提取文字块与手写墨迹截图。用户要求在本题笔记批改时，按 [步骤批改技能](references/onenote-review/SKILL.md) 仅追加独立建议区，保留原手写及题目关联；不替换已有内容。需要当场书写时可用 `tiyouju onenote open <ref>`，尚未关联的题目可用 `tiyouju onenote create <ref>` 建立答题页。
 
 ## 不能运行命令时
 

@@ -619,6 +619,13 @@ def cmd_skill_pack(_client, args) -> dict:
 
 def cmd_skill(_client, _args) -> dict:
     """输出与当前安装版本完全匹配的 AI Agent 接管指南（对应 ego-browser skill）。"""
+    if getattr(_args, "topic", None) == "onenote-review":
+        root = setup.bundled_skill() / "references" / "onenote-review"
+        try:
+            parts = [(root / name).read_text(encoding="utf-8") for name in ("SKILL.md", "windows-access.md", "mathml.md")]
+        except OSError as error:
+            raise CliError("随软件附带的 OneNote 批改指南不完整，请更新软件。", EXIT_NEEDS_USER) from error
+        return {"version": VERSION, "topic": "onenote-review", "guide": "\n\n---\n\n".join(parts)}
     app = app_executable()
     guide_lines = [
         f"# 题有据（tiyouju）AI Agent 接管指南 · v{VERSION}",
@@ -663,6 +670,7 @@ def cmd_skill(_client, _args) -> dict:
         "## 4. OneNote 深度协同（读笔记 + 跳转/建页，不删不覆盖）",
         "- `tiyouju onenote list [--paper P] [--q 关键词] [--json]`：列出已关联 OneNote 笔记的题目。",
         "- `tiyouju onenote read <ref...> [--no-images] [--max-pages N]`：严格只读提取题目关联 OneNote 页的文字块与裁边手写步骤图，用于 AI 总结与建议。",
+        "- `tiyouju skill --topic onenote-review`：读取随附的步骤批改技能、同页追加方法与 MathML 兼容/公式数量对账要求；原手写保留。",
         "- `tiyouju onenote open <ref...>`：唤起桌面版 OneNote 并跳到本题笔记页（方便老师当场手写或核对）。",
         "- `tiyouju onenote create <ref...>`：为尚未关联的题目在 OneNote 新建专属答题页并双向绑定。",
         "",
@@ -681,7 +689,7 @@ def cmd_skill(_client, _args) -> dict:
         "",
         "## 6. 关键安全规则与退出码",
         "- 绝不索要、读取或输出真实 API 密钥；缺密钥请引导用户自己在「设置 → API 配置」填写。",
-        "- 已入库题目严禁直接篡改，一律走 `tiyouju propose` 提案；不做无人值守自动通过入库，绝不替用户删题、删草稿或改写 OneNote 已有笔记。",
+        "- 已入库题目严禁直接篡改，一律走 `tiyouju propose` 提案；不做无人值守自动通过入库，绝不替用户删题、删草稿或覆盖 OneNote 原步骤；批改仅按用户要求追加独立建议区。",
         "- 退出码：`0` 成功，`1` 执行错误，`2` 应用未启动（先运行 `tiyouju start`），`3` 需用户处理（停下并说明具体原因）。",
         "- 如客户端只能使用 stdio MCP，可配置命令 `tiyouju mcp`；支持本机命令行时优先使用 `tiyouju` CLI。",
         "",
@@ -3558,7 +3566,8 @@ def build_parser() -> argparse.ArgumentParser:
     finish.add_argument("--skill-dir", help="已确认的绝对技能父目录；确认安装后才填写，不猜测助手目录")
     finish.add_argument("--replace-skill", action="store_true", help="明确同意替换不同内容的技能，先保留恢复备份")
     finish.add_argument("--desktop", choices=["show", "hide"], help="使用者选择后显示或隐藏题有据自己的桌面图标")
-    sub.add_parser("skill", parents=[common], help="输出与当前安装版一致的 AI Agent 接管指南")
+    skill = sub.add_parser("skill", parents=[common], help="输出与当前安装版一致的 AI Agent 接管指南")
+    skill.add_argument("--topic", choices=["onenote-review"], help="输出 OneNote 步骤批改与同页追加建议的完整离线技能")
     agents = sub.add_parser("setup-agents", parents=[common], help="自动同步技能、MCP 到本机国际与国内 AI Agent 并配置 PATH")
     agents.add_argument("--home", help="指定用户主目录（默认当前用户目录）")
     agents.add_argument("--appdata", help="指定 Roaming AppData 目录（默认当前用户 APPDATA）")

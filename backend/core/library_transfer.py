@@ -424,6 +424,8 @@ def _resolve_export_publications(publication_ids: list[str] | None) -> dict:
         matched_pubs.extend(pub for pub in rows if not is_demo(pub.paper))
     if not matched_pubs:
         raise TransferError("所选范围内没有可分享的已入库正式题目（示例题不参与上传）。")
+    if {_uuid_text(pub.pk) for pub in matched_pubs} != set(ordered_ids):
+        raise TransferError("部分所选题目已失效，请重新选择；不会改为打包所属资料或只上传部分题目。")
 
     question_ids = {int(pub.question_id) for pub in matched_pubs if pub.question_id is not None}
     publication_hexes = {_uuid_hex(pub.pk) for pub in matched_pubs}
@@ -531,6 +533,9 @@ def _prune_snapshot_database(
         (*paper_params, "published"),
     )
     if keep_publication_hexes is not None:
+        # 精选题目已冻结正文和裁片。母资料的 OCR 块可能包含未选择的整卷题目。
+        if _table_exists(writer, BLOCK_TABLE):
+            writer.execute(f'DELETE FROM "{BLOCK_TABLE}"')
         writer.execute("CREATE TEMP TABLE IF NOT EXISTS _keep_publications (id TEXT PRIMARY KEY)")
         writer.execute("DELETE FROM _keep_publications")
         writer.executemany(
@@ -926,7 +931,7 @@ def _compress_community_image_bytes(
     return raw_bytes
 
 
-def _attach_onenote_steps_to_snapshot(snapshot: Path, work_dir: Path, *, max_pages_per_question: int = 3) -> dict:
+def _attach_onenote_steps_to_snapshot(snapshot: Path, work_dir: Path, *, max_pages_per_question: int = 12) -> dict:
     """在社区打包临时库中，导出并注入作者已关联的 OneNote 思考与做题步骤。"""
     from . import library, library_onenote
 
@@ -963,14 +968,18 @@ def _attach_onenote_steps_to_snapshot(snapshot: Path, work_dir: Path, *, max_pag
             pub_dir = staging_root / pub_text
             try:
                 step_paths = library_onenote.export_page_step_images(
-                    page_id, pub_dir, max_pages=max_pages_per_question, max_long_side=COMMUNITY_IMAGE_MAX_LONG_SIDE
+                    page_id,
+                    pub_dir,
+                    max_pages=max_pages_per_question,
+                    max_long_side=COMMUNITY_IMAGE_MAX_LONG_SIDE,
+                    require_complete=True,
                 )
-            except Exception:
-                skipped += 1
-                continue
+            except Exception as exc:
+                raise TransferError(
+                    "关联的 OneNote 笔记导出失败，已停止分享以免丢失笔记。请在桌面版 OneNote 中打开原笔记后重试。"
+                ) from exc
             if not step_paths:
-                skipped += 1
-                continue
+                raise TransferError("关联的 OneNote 笔记没有导出任何页面，已停止分享，请打开原笔记检查后重试。")
 
             try:
                 content = json.loads(raw_content) if isinstance(raw_content, str) and raw_content.strip() else {}
@@ -1065,6 +1074,7 @@ def _attach_onenote_steps_to_snapshot(snapshot: Path, work_dir: Path, *, max_pag
             )
             next_extras = dict(extras)
             next_extras["solution_id"] = _uuid_text(new_sol_hex)
+            next_extras["shared_onenote_solution_ids"] = [_uuid_text(new_sol_hex)]
             next_extras.pop("onenote", None)
             conn.execute(
                 f'UPDATE "{PUBLICATION_TABLE}" SET extras = ? WHERE id = ?',
@@ -1200,6 +1210,70 @@ def _community_preview(snapshot: Path, manifest: dict, *, include_originals: boo
         "samples": samples,
         "cover": None,
     }
+
+
+def _community_reading_image(path: Path, max_chars: int = 360_000) -> str | None:
+    """只在临时分享预览中缩放图像，输出经过解码的位图，不修改原文件。"""
+    from PIL import Image, ImageOps
+
+    try:
+        with Image.open(path) as source:
+            image = ImageOps.exif_transpose(source).convert("RGB")
+        for size in (1280, 1024, 800, 640):
+            scaled = image.copy()
+            scaled.thumbnail((size, size), Image.Resampling.LANCZOS)
+            output = io.BytesIO()
+            scaled.quantize(colors=128).save(output, format="PNG", optimize=True)
+            uri = "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")
+            if len(uri) <= max_chars:
+                return uri
+    except (OSError, ValueError, Image.DecompressionBombError):
+        pass
+    return None
+
+
+def _single_question_preview(snapshot: Path, sample: dict, onenote_meta: dict) -> dict:
+    """单题阅读页只引用该题冻结的正文、配图及本次明确附带的笔记。"""
+    publication_id = sample["_publication"]
+    folder = (data_root() / "library" / publication_id).resolve()
+    with contextlib_closing(sqlite3.connect(snapshot)) as conn:
+        row = conn.execute(
+            f'SELECT content FROM "{PUBLICATION_TABLE}" WHERE id = ?', (_uuid_hex(publication_id),)
+        ).fetchone()
+    try:
+        content = json.loads(row[0]) if row else {}
+    except (TypeError, json.JSONDecodeError):
+        content = {}
+    if not isinstance(content, dict):
+        content = {}
+    result: dict = {"question_images": [], "figures": [], "onenote_pages": [], "images_omitted": 0}
+    remaining = 1_200_000
+
+    def append_image(kind: str, path: Path) -> None:
+        nonlocal remaining
+        uri = _community_reading_image(path, max_chars=min(360_000, remaining)) if remaining > 1000 else None
+        if uri:
+            result[kind].append(uri)
+            remaining -= len(uri)
+        else:
+            result["images_omitted"] += 1
+
+    for kind in ("question_images", "figures"):
+        items = content.get(kind)
+        for item in (items if isinstance(items, list) else [])[:12]:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("file") or "").strip()
+            if not name:
+                continue
+            path = (folder / name).resolve()
+            if path.is_relative_to(folder) and path.is_file() and not path.is_symlink():
+                append_image(kind, path)
+    prefix = f"{ORIGINALS}/library-solutions/{publication_id}/"
+    for path, name in onenote_meta.get("files") or []:
+        if name.startswith(prefix) and path.suffix.lower() in COMMUNITY_IMAGE_SUFFIXES:
+            append_image("onenote_pages", path)
+    return result
 
 
 def _community_cover(preview: dict, root: Path, staging_dir: Path | None = None) -> tuple[str, Path] | None:
@@ -1358,6 +1432,11 @@ def _export_bundle(
                 )
                 counts_override = snapshot_info["counts"] if snapshot_info else None
                 allowed_publications = snapshot_info["publications"] if snapshot_info else set()
+                if (
+                    keep_publication_hexes is not None
+                    and {_uuid_hex(pid) for pid in allowed_publications} != keep_publication_hexes
+                ):
+                    raise TransferError("打包后的题目范围与选择不一致，已停止上传，没有扩大到母资料。")
                 paper_question_counts = snapshot_info.get("paper_question_counts") if snapshot_info else None
                 manifest = _manifest(
                     papers_list=selected_papers,
@@ -1367,6 +1446,9 @@ def _export_bundle(
                     folders_list=selected_folders,
                 )
                 allowed_papers = {_uuid_text(paper.pk) for paper in selected_papers}
+                if community is not None and keep_publication_hexes is not None:
+                    # 单题/精选分享仅取已冻结的题面与解析附件，不递归带走母资料目录。
+                    allowed_papers = set()
                 files_iter = _bundle_files(
                     data_root(), allowed_papers=allowed_papers, allowed_publications=allowed_publications
                 )
@@ -1395,12 +1477,25 @@ def _export_bundle(
                 if include_onenote:
                     _emit("onenote", 0, 1, "正在导出 OneNote 思考步骤…")
                     onenote_meta = _attach_onenote_steps_to_snapshot(snapshot, Path(work))
+                    if (
+                        keep_publication_hexes is not None
+                        and len(keep_publication_hexes) == 1
+                        and onenote_meta["skipped"]
+                    ):
+                        raise TransferError(
+                            "这道题的 OneNote 笔记未能完整导出，已停止分享。请检查笔记或拆分长笔记后重试，也可取消附带笔记。"
+                        )
                     _check_cancelled()
                 # 本机路径里有 Windows 用户名，发到网上之前抹掉；合并时会按本机重新指过去。
                 with contextlib_closing(sqlite3.connect(snapshot)) as scrub:
                     scrub.execute(f"UPDATE \"{PAPER_TABLE}\" SET source_path = '', render_path = '', zip_path = ''")
                     scrub.commit()
                 preview = _community_preview(snapshot, manifest, include_originals=include_originals)
+                if (
+                    keep_publication_hexes is not None
+                    and len(preview["samples"]) == preview["counts"]["questions"] == 1
+                ):
+                    preview["single_question"] = _single_question_preview(snapshot, preview["samples"][0], onenote_meta)
                 if onenote_meta["attached"] > 0:
                     preview["has_onenote_notes"] = True
                     preview["onenote_count"] = onenote_meta["attached"]
@@ -1444,7 +1539,10 @@ def _export_bundle(
                             raise TransferError(
                                 f"单个题包最多包含 {COMMUNITY_MAX_IMAGES} 张图片，请拆分成多个小包后再上传。"
                             )
-                        compressed = _compress_community_image_bytes(path.read_bytes(), path.suffix)
+                        # 冻结题面与解析图片有字节校验/指纹，二次压缩会让导入后的解析失效。
+                        compressed = path.read_bytes()
+                        if relative.parts[0] not in {"library", "library-solutions"}:
+                            compressed = _compress_community_image_bytes(compressed, path.suffix)
                         archive.writestr(arc_name, compressed)
                     else:
                         archive.write(path, arc_name)
@@ -1605,6 +1703,7 @@ class _Merge:
             "questions": [],
             "publications": [],
             "solutions": [],
+            "publication_extras": [],
             "tags": [],
             "groups": [],
             "relations": [],
@@ -1812,6 +1911,17 @@ class _Merge:
         solutions_by_publication: dict[str, list] = {}
         for solution in solutions:
             solutions_by_publication.setdefault(str(solution.get("publication_id")), []).append(solution)
+        # 已发布的旧题包也能显示作者笔记入口，无需重新连接作者的 OneNote 页面。
+        for publication in publications:
+            extras = json.loads(publication.get("extras") or "{}")
+            note_ids = [
+                _uuid_text(s["id"])
+                for s in solutions_by_publication.get(str(publication["id"]), [])
+                if "【作者 OneNote 思考与做题步骤】" in str(s.get("analysis") or "") and s.get("figures")
+            ]
+            if note_ids and not extras.get("shared_onenote_solution_ids"):
+                extras["shared_onenote_solution_ids"] = note_ids
+                publication["extras"] = json.dumps(extras, ensure_ascii=False)
         regions_by_question: dict[str, list] = {}
         for region in regions:
             regions_by_question.setdefault(str(region.get("question_id")), []).append(region)
@@ -2161,6 +2271,7 @@ class _Merge:
                     # 对方这个入库快照在本机是另一个编号（版本号一样、内容一样，
                     # 但两边各编各的号）—— 题上贴的标签要跟着本机那个走。
                     self.publication_map[str(publication["id"])] = str(local_snapshot["id"])
+                    self._merge_solutions(publication, local_snapshot, incoming_solutions)
                     continue
                 self._add_publication(
                     {**publication, "question_id": local["id"], "paper_id": local_paper_id}, solutions_by_publication
@@ -2205,6 +2316,48 @@ class _Merge:
             # 别把别章的题配过来。
             return self._question_row("paper_id=? AND group_id IS NULL AND number=?", (paper_id, number))
         return self._question_row("paper_id=? AND number=?", (paper_id, number))
+
+    def _merge_solutions(self, incoming_publication: dict, local: dict, solutions: list[dict]) -> None:
+        """已有题目也追加解析版本；本机选用的解析与 OneNote 关联保持不变。"""
+        local_id = str(local["id"])
+        for solution in solutions:
+            row = {**solution, "publication_id": local_id}
+            inserted = self._insert(SOLUTION_TABLE, row)
+            if inserted:
+                self.added["solutions"].append(inserted)
+                self.report["补进来的解析版本"] += 1
+        incoming_extras = json.loads(incoming_publication.get("extras") or "{}")
+        old = json.loads(local.get("extras") or "{}")
+        updated = dict(old)
+        note_ids = incoming_extras.get("shared_onenote_solution_ids") or []
+        # 兼容已经发布、还没写显式标记的旧题包。
+        note_ids = list(note_ids) + [
+            _uuid_text(s["id"]) for s in solutions if "【作者 OneNote 思考与做题步骤】" in str(s.get("analysis") or "")
+        ]
+        if note_ids:
+            valid_ids = {
+                _uuid_text(s["id"])
+                for s in solutions
+                if self.dry_run or self._local_exists(SOLUTION_TABLE, "id=? AND publication_id=?", (s["id"], local_id))
+            }
+            merged = list(
+                dict.fromkeys(
+                    [*(old.get("shared_onenote_solution_ids") or []), *[sid for sid in note_ids if sid in valid_ids]]
+                )
+            )
+            if merged:
+                updated["shared_onenote_solution_ids"] = merged
+        if not old.get("solution_id") and local.get("content_hash") == incoming_publication.get("content_hash"):
+            chosen = str(incoming_extras.get("solution_id") or "")
+            if chosen and any(_uuid_text(s["id"]) == chosen for s in solutions):
+                updated["solution_id"] = chosen
+        if updated != old and not self.dry_run:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    'UPDATE "core_publishedquestion" SET extras=? WHERE id=?',
+                    (json.dumps(updated, ensure_ascii=False), local_id),
+                )
+            self.added["publication_extras"].append({"id": local_id, "old": old, "new": updated})
 
     def _question_with_same_stem(self, paper_id: str, group_id, stem: str) -> dict | None:
         """本机有没有题干一样的这道题。
@@ -2267,11 +2420,11 @@ class _Merge:
             return None
         with connection.cursor() as cursor:
             cursor.execute(
-                'SELECT id, content_hash FROM "core_publishedquestion" WHERE question_id=? AND version=? LIMIT 1',
+                'SELECT id, content_hash, extras FROM "core_publishedquestion" WHERE question_id=? AND version=? LIMIT 1',
                 (question_id, version),
             )
             row = cursor.fetchone()
-        return {"id": str(row[0]), "content_hash": row[1]} if row else None
+        return {"id": str(row[0]), "content_hash": row[1], "extras": row[2]} if row else None
 
     def _local_solution_count(self, publication_id: str) -> int:
         with connection.cursor() as cursor:
@@ -2438,7 +2591,12 @@ class _Merge:
             target.parent.mkdir(parents=True, exist_ok=True)
             try:
                 with self.archive.open(name) as reader, open(target, "wb") as writer:
-                    shutil.copyfileobj(reader, writer)
+                    if PurePosixPath(relative).parts[0] == "library-solutions" and target.suffix == ".json":
+                        metadata = json.loads(reader.read())
+                        metadata["publication_id"] = PurePosixPath(target_relative).parts[1]
+                        writer.write(json.dumps(metadata, ensure_ascii=False).encode("utf-8"))
+                    else:
+                        shutil.copyfileobj(reader, writer)
             except (OSError, KeyError):
                 continue
         self.report["补回的文件"] = count
@@ -2581,6 +2739,30 @@ def undo_last_merge() -> dict:
         raise TransferError("这次合并的记录读不出来，没法撤销。") from None
     removed = {"questions": 0, "papers": 0, "solutions": 0, "tags": 0, "filled": 0}
     with transaction.atomic():
+        for item in record.get("publication_extras") or []:
+            with connection.cursor() as cursor:
+                row = cursor.execute('SELECT extras FROM "core_publishedquestion" WHERE id=?', (item["id"],)).fetchone()
+                if row is None:
+                    continue
+                current = json.loads(row[0] or "{}")
+                for key, value in item["new"].items():
+                    if key == "shared_onenote_solution_ids" and isinstance(current.get(key), list):
+                        added_ids = set(value) - set(item["old"].get(key) or [])
+                        remaining = [sid for sid in current[key] if sid not in added_ids]
+                        if remaining or key in item["old"]:
+                            current[key] = remaining
+                        else:
+                            current.pop(key, None)
+                        continue
+                    if current.get(key) == value and item["old"].get(key) != value:
+                        if key in item["old"]:
+                            current[key] = item["old"][key]
+                        else:
+                            current.pop(key, None)
+                cursor.execute(
+                    'UPDATE "core_publishedquestion" SET extras=? WHERE id=?',
+                    (json.dumps(current, ensure_ascii=False), item["id"]),
+                )
         # 先把"填进已有题里的答案"还原回去 —— 不然撤销撤不干净。
         for item in record.get("filled") or []:
             field = str(item.get("field") or "")
