@@ -310,7 +310,7 @@ function Convert-PageXml([string]$pageXml) {
   catch { return $res }
 
   $ns = New-Object System.Xml.XmlNamespaceManager($doc.NameTable)
-  $ns.AddNamespace('one', 'http://schemas.microsoft.com/office/onenote/2013/onenote')
+  $ns.AddNamespace('one', $doc.DocumentElement.NamespaceURI)
 
   # title lives in <one:Title><one:OE><one:T><![CDATA[html]]></one:T></one:OE></one:Title>
   $tnode = $doc.SelectSingleNode('//one:Title/one:OE/one:T', $ns)
@@ -386,7 +386,8 @@ function Get-HierarchyTree([string]$hierXml) {
   $doc = New-Object System.Xml.XmlDocument
   $doc.LoadXml($hierXml)
   $ns = New-Object System.Xml.XmlNamespaceManager($doc.NameTable)
-  $ns.AddNamespace('one', 'http://schemas.microsoft.com/office/onenote/2013/onenote')
+  # Read the schema actually returned by COM, including older Office registrations.
+  $ns.AddNamespace('one', $doc.DocumentElement.NamespaceURI)
 
   $notebooks = @()
   foreach ($nb in $doc.SelectNodes('/one:Notebooks/one:Notebook', $ns)) {

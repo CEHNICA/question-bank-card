@@ -3902,7 +3902,7 @@
     <div class="relative bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden" onclick="event.stopPropagation()">
       <div class="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-slate-50/90 shrink-0">
         <div class="min-w-0 pr-2">
-          <h3 class="text-sm font-bold text-slate-900">上传到题有据资源社区</h3>
+          <h3 id="commPubHeading" class="text-sm font-bold text-slate-900">上传到题有据资源社区</h3>
           <p id="commPubSourceLabel" class="text-[11px] text-slate-500 mt-0.5 truncate">自动打包并提交审核，无需手动选文件夹</p>
         </div>
         <div class="flex items-center gap-1.5 shrink-0">
@@ -3922,7 +3922,7 @@
           </div>
         </div>
         <div>
-          <label for="commPubTitle" class="block font-semibold text-slate-700 mb-1">题包标题</label>
+          <label id="commPubTitleLabel" for="commPubTitle" class="block font-semibold text-slate-700 mb-1">题包标题</label>
           <input id="commPubTitle" type="text" maxlength="80" class="w-full h-8 px-2.5 rounded-lg border border-slate-200 focus:border-emerald-500 outline-none" placeholder="例如：2026 届高一数学期中整理">
         </div>
         <div class="grid grid-cols-3 gap-2.5">
@@ -6846,6 +6846,7 @@
         variantPeers: Array.isArray(item.variant_peers) ? item.variant_peers : [],
         aiSuggestedTags: buildPendingTagSuggestions(tagSuggestion, parsedTags),
         onenote: item.onenote || (item.extras && item.extras.onenote) || null,
+        sharedOneNoteIds: item.shared_onenote_solution_ids || [],
         publishedAt: item.published_at || item.publishedAt || '',
         usageSummary,
         usageCount,
@@ -8201,6 +8202,10 @@
           showToast('先选择至少一道要上传的题目', 'error');
           return;
         }
+        if (mode === 'question' && publicationIds.length !== 1) {
+          showToast('单题分享只能选择一道题，请重新打开这道题的分享入口。', 'error');
+          return;
+        }
         resolved = {
           mode,
           paperId: '',
@@ -8219,8 +8224,12 @@
       if (!modal) return;
       const srcEl = document.getElementById('commPubSourceLabel');
       if (srcEl) srcEl.textContent = resolved.sourceLabel;
+      const headingEl = document.getElementById('commPubHeading');
+      if (headingEl) headingEl.textContent = resolved.mode === 'question' ? '分享这一道题' : '上传到题有据资源社区';
       const titleEl = document.getElementById('commPubTitle');
       if (titleEl) titleEl.value = resolved.defaultTitle;
+      const titleLabelEl = document.getElementById('commPubTitleLabel');
+      if (titleLabelEl) titleLabelEl.textContent = resolved.mode === 'question' ? '分享标题' : '题包标题';
       const tagsEl = document.getElementById('commPubTags');
       if (tagsEl) tagsEl.value = '';
       const descEl = document.getElementById('commPubDesc');
@@ -8246,7 +8255,7 @@
       if (oneNoteRow) oneNoteRow.classList.toggle('hidden', oneNoteCount === 0);
       if (oneNoteEl) oneNoteEl.checked = oneNoteCount > 0;
       if (oneNoteLabel) {
-        oneNoteLabel.textContent = `📝 附带我的 OneNote 思考与做题步骤（已关联 ${oneNoteCount} 题；导为步骤图附在题目下方，未启动将自动打开 OneNote）`;
+        oneNoteLabel.textContent = `📝 附带我的 OneNote 思考与做题步骤（已关联 ${oneNoteCount} 题；导为步骤图排在题目下方，分享页可点击放大）`;
       }
 
       const rightsEl = document.getElementById('commPubRights');
@@ -8666,6 +8675,10 @@
 
     async function submitCommunityPublish() {
       if (!communityPublishTarget) return;
+      if (communityPublishTarget.mode === 'question' && communityPublishTarget.publicationIds?.length !== 1) {
+        setCommPublishStatus('单题分享只能上传一道题，请重新选择。', 'error');
+        return;
+      }
       const title = (document.getElementById('commPubTitle')?.value || '').trim();
       const stage = (document.getElementById('commPubStage')?.value || '高中').trim();
       const subject = (document.getElementById('commPubSubject')?.value || '数学').trim();
@@ -8686,6 +8699,7 @@
 
       try {
         const reqPayload = {
+          share_kind: communityPublishTarget.mode === 'question' ? 'question' : 'collection',
           title,
           stage,
           subject,
@@ -9618,7 +9632,7 @@
             title="将此题（可选附带 OneNote 思考步骤）压缩打包并上传到资源社区"
           >
             <span class="text-sm">☁️</span>
-            <span>上传到社区…</span>
+            <span>分享这一道题…</span>
           </div>
           <div 
             data-ctx-item="1"
@@ -12212,6 +12226,8 @@
                 ${isAnalysisExpanded ? '收起解析' : '查看解析'}
               </button>
 
+              ${q.sharedOneNoteIds?.length ? `<button onclick="event.stopPropagation(); SharedOneNote.open('${q.id}', API_BASE)" class="px-2 py-1 text-violet-700 hover:bg-violet-50 rounded text-xs" title="阅读随题保存的笔记，无需打开 OneNote">作者笔记</button>` : ''}
+
               <button 
                 id="btn_basket_${q.id}"
                 onclick="event.stopPropagation(); toggleBasketItem('${q.id}')" 
@@ -12347,6 +12363,7 @@
             </div>
             ${savedSol.answer ? `<div class="font-semibold text-emerald-900 text-xs">【答案】${escapeHtml(savedSol.answer)}</div>` : ''}
             ${savedSol.analysis ? `<div class="eagle-analysis-body text-slate-800 leading-relaxed font-serif text-xs">${escapeHtml(String(savedSol.analysis).trim())}</div>` : ''}
+            ${typeof SharedOneNote !== 'undefined' ? SharedOneNote.figuresHtml(savedSol, API_BASE) : ''}
           </div>
         `;
       }
@@ -25898,6 +25915,7 @@
   <!-- 禁用非输入区域的浏览器原生上下文菜单，保留文本框的复制粘贴功能 -->
   <script src="/qb-editor-helpers.js" defer></script>
   <script src="/library-solutions.js" defer></script>
+  <script src="/shared-onenote.js" defer></script>
   <script src="/control-wording.js" defer></script>
   <script src="/library-unified-editor.js" defer></script>
   <script src="/library-answer-editor.js" defer></script>

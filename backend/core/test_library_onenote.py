@@ -377,6 +377,24 @@ class OneNoteLinkTests(TestCase):
         self.assertEqual(sec_id, "{sec-math}")
         self.assertEqual(sec_name, "数学试题")
 
+    @patch("core.library_onenote.time.sleep")
+    @patch("core.library_onenote._ensure_desktop_window", return_value=True)
+    @patch("core.library_onenote.call_bridge")
+    def test_empty_notebooks_retry_after_window_is_ready(self, bridge, ensure, _sleep):
+        bridge.side_effect = [
+            {"notebooks": []},
+            {"notebooks": [{"id": "{fake-nb}", "name": "题有据"}]},
+            {"xml": '<one:Notebook><one:Section name="试题" ID="{fake-sec}"/></one:Notebook>'},
+        ]
+        self.assertEqual(library_onenote.resolve_target_section()[:2], ("{fake-nb}", "{fake-sec}"))
+        ensure.assert_called_once()
+
+    @patch("core.library_onenote._ensure_desktop_window", return_value=False)
+    @patch("core.library_onenote.call_bridge", return_value={"notebooks": []})
+    def test_empty_notebooks_explains_desktop_requirement_and_shared_notes(self, _bridge, _ensure):
+        with self.assertRaisesRegex(library_onenote.OneNoteError, "作者笔记"):
+            library_onenote.resolve_target_section()
+
     @patch("core.library_onenote.subprocess.run")
     @patch("core.library_onenote.get_bridge_script")
     def test_call_bridge_uses_create_no_window_and_hidden_flags(self, mock_script, mock_run):
@@ -597,6 +615,30 @@ class OneNoteLinkTests(TestCase):
                 # 原本 ~1250x1667 的白纸页应被自动裁剪到只比黑框略大（远小于整页高 1667）
                 self.assertLess(cropped.width, 600)
                 self.assertLess(cropped.height, 450)
+
+    @patch("core.library_onenote.call_bridge")
+    def test_complete_note_export_never_silently_truncates_pages(self, mock_call):
+        import pymupdf
+
+        def fake_publish(_op, **params):
+            with pymupdf.open() as doc:
+                for _ in range(4):
+                    page = doc.new_page(width=120, height=160)
+                    page.draw_rect(pymupdf.Rect(10, 10, 80, 80), fill=(0, 0, 0))
+                doc.save(params["dest"])
+            return {"exists": True}
+
+        mock_call.side_effect = fake_publish
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(library_onenote.OneNoteError, "无法完整附带"):
+                library_onenote.export_page_step_images(
+                    "{fictional-page}", Path(tmp), max_pages=3, require_complete=True
+                )
+            self.assertEqual(list(Path(tmp).glob("*.png")), [])
+            paths = library_onenote.export_page_step_images(
+                "{fictional-page}", Path(tmp), max_pages=12, require_complete=True
+            )
+            self.assertEqual(len(paths), 4)
 
     @patch("core.library_onenote.export_page_step_images")
     @patch("core.library_onenote.call_bridge")

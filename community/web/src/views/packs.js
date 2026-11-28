@@ -3,6 +3,7 @@ import { api, state } from "../api.js";
 import { escapeHtml, megabytes, priceLabel, renderMarkdown, renderMathText, timeAgo, typeName, yuan } from "../render.js";
 import { avatar, busy, needLogin, queryParams, setView, toast } from "../ui.js";
 import { bindRedeemForm, statusChip } from "./account.js";
+import { bindSingleQuestionImages, singleQuestionHtml } from "../single-question.js";
 
 const COVER_PATTERN = /^community-cover\.(png|jpe?g|webp)$/;
 
@@ -202,6 +203,7 @@ export async function packDetailView(id) {
   const data = await api(`/api/packs/${id}`);
   const { pack, preview, viewer } = data;
   const paid = pack.price_cents > 0;
+  const single = pack.question_count === 1 && preview?.samples?.length === 1;
   const types = preview
     ? Object.entries(preview.question_types)
         .map(([key, n]) => `<span class="chip">${escapeHtml(typeName(key))} ${n}</span>`)
@@ -244,7 +246,7 @@ export async function packDetailView(id) {
             ${pack.include_originals ? '<span class="chip bg-sky-50 text-sky-700">含原卷</span>' : '<span class="chip">不含原卷</span>'}
             ${preview?.has_onenote_notes ? `<span class="chip bg-indigo-50 text-indigo-700">📝 含作者 OneNote 思路${preview.onenote_count ? `（${preview.onenote_count} 题）` : ""}</span>` : ""}
           </div>
-          <h1 class="mt-2 text-xl font-semibold text-slate-900 sm:text-2xl">${escapeHtml(pack.title)}</h1>
+          <h1 class="mt-2 text-xl font-semibold text-slate-900 sm:text-2xl ${single ? "single-share-title" : ""}">${escapeHtml(pack.title)}</h1>
           <div class="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-500">${avatar(pack.author_name)}
             <a href="#/u/${encodeURIComponent(pack.author_username)}" class="hover:text-emerald-700">${escapeHtml(pack.author_name)}</a>
             <span>· ${timeAgo(pack.created_at)}</span></div>
@@ -259,7 +261,7 @@ export async function packDetailView(id) {
           ${tags ? `<div class="mt-4 flex flex-wrap gap-1.5">${tags}</div>` : ""}
         </section>
         ${
-          preview
+          single ? singleQuestionHtml(preview) : preview
             ? `<section class="card p-4 sm:p-6">
           <div class="flex flex-wrap items-baseline justify-between gap-2"><h2 class="font-semibold">题目预览</h2>
             <span class="text-xs text-slate-400">只展示前 ${preview.samples.length} 道题的题干，预览不含答案与解析</span></div>
@@ -285,7 +287,7 @@ export async function packDetailView(id) {
       </div>
       <aside class="min-w-0 space-y-5">
         <section class="card p-4 sm:p-5" id="packActionCard">
-          ${pack.has_cover ? `<img src="/api/packs/${pack.id}/cover" alt="" class="mb-4 w-full rounded-lg border border-slate-100">` : ""}
+          ${pack.has_cover && !single ? `<img src="/api/packs/${pack.id}/cover" alt="" class="mb-4 w-full rounded-lg border border-slate-100">` : ""}
           <div class="text-2xl font-semibold ${paid ? "text-amber-600" : "text-emerald-600"}">${priceLabel(pack.price_cents)}</div>
           <dl class="mt-3 grid grid-cols-2 gap-y-1 text-sm text-slate-500">
             <dt>题目</dt><dd class="text-right text-slate-700">${pack.question_count} 道</dd>
@@ -321,6 +323,13 @@ export async function packDetailView(id) {
         hint.textContent = "已发送至题有据桌面端，请在软件窗口内确认合并入库；若未安装或未响应，可点击下方「仅下载题包文件」。";
       }
       location.href = uri;
+    }),
+  );
+  if (single) bindSingleQuestionImages();
+  document.getElementById("singleQuestionCopyLink")?.addEventListener("click", (event) =>
+    busy(event.currentTarget, async () => {
+      await navigator.clipboard.writeText(location.href);
+      toast("已复制这道题的分享链接。", "success");
     }),
   );
   document.getElementById("downloadBtn")?.addEventListener("click", (event) =>

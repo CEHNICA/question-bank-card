@@ -261,6 +261,7 @@ urlpatterns = [
     path("api/library/<uuid:publication_id>/restore", library_trash.restore_view),
     path("api/library/<uuid:publication_id>/purge", library_trash.purge_view),
     path("api/library/<uuid:publication_id>/onenote/create", library_onenote.onenote_create_view),
+    path("api/library/<uuid:publication_id>/onenote/shared", library_onenote.shared_notes_view),
     path("api/library/<uuid:publication_id>/onenote/prewarm", library_onenote.onenote_prewarm_view),
     path("api/library/<uuid:publication_id>/onenote/attempt", library_onenote.onenote_attempt_view),
     path("api/library/<uuid:publication_id>/onenote/open", library_onenote.onenote_open_view),

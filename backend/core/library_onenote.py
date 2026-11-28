@@ -211,7 +211,18 @@ def resolve_target_section() -> tuple[str, str, str, str]:
     data = call_bridge("list")
     notebooks = data.get("notebooks") or []
     if not notebooks:
-        raise OneNoteError("未检测到已打开的 OneNote 笔记本，请先在 OneNote 中打开或创建一个笔记本。")
+        # COM 能启动时主窗口与笔记本可能仍在加载，不能把第一次空结果当作最终状态。
+        if _ensure_desktop_window():
+            for _ in range(2):
+                time.sleep(0.35)
+                notebooks = call_bridge("list").get("notebooks") or []
+                if notebooks:
+                    break
+        if not notebooks:
+            raise OneNoteError(
+                "桌面版 OneNote 尚未返回可用笔记本。请打开桌面版 OneNote（网页端不支持此操作），"
+                "打开或创建一个笔记本及普通分区，等待加载后重试。阅读下载题包的笔记请点「作者笔记」，无需打开 OneNote。"
+            )
 
     target_nb = None
     # 策略 1: 专用笔记本
@@ -1074,7 +1085,13 @@ def _crop_and_compress_onenote_page(img, *, max_long_side: int = 1280, pad_px: i
 
 
 def export_page_step_images(
-    page_id: str, dest_dir: Path, *, max_pages: int = 3, max_long_side: int = 1280, silent: bool = True
+    page_id: str,
+    dest_dir: Path,
+    *,
+    max_pages: int = 3,
+    max_long_side: int = 1280,
+    silent: bool = True,
+    require_complete: bool = False,
 ) -> list[Path]:
     """将关联的 OneNote 页面导出为裁边压缩后的步骤 PNG 列表（默认静默导出，不抢占前台窗口）。"""
     clean_page_id = str(page_id or "").strip()
@@ -1108,6 +1125,8 @@ def export_page_step_images(
 
         out_paths: list[Path] = []
         with pymupdf.open(str(pdf_path)) as doc:
+            if require_complete and len(doc) > max(1, int(max_pages)):
+                raise OneNoteError(f"这份笔记超过 {max_pages} 页，无法完整附带；请先在 OneNote 中拆分笔记后再分享。")
             total = min(len(doc), max(1, int(max_pages)))
             matrix = pymupdf.Matrix(150 / 72.0, 150 / 72.0)
             for idx in range(total):
@@ -1333,6 +1352,27 @@ def read_page_note(
 
 
 # ---------------- API Views ----------------
+
+
+def shared_notes_view(request: HttpRequest, publication_id: str) -> JsonResponse:
+    """随题包保存的只读笔记，不依赖作者账户、原页面链接或本机 OneNote。"""
+    from . import library_solutions
+    from .models import LibrarySolution
+
+    if request.method != "GET":
+        return HttpResponseNotAllowed(["GET"])
+    publication = get_object_or_404(PublishedQuestion, pk=publication_id)
+    ids = (publication.extras or {}).get("shared_onenote_solution_ids") or []
+    notes = []
+    for raw_id in ids:
+        try:
+            row = LibrarySolution.objects.filter(pk=uuid.UUID(str(raw_id)), publication=publication).first()
+            if row is None:
+                return JsonResponse({"error": "作者笔记版本缺失，请重新下载包含笔记的题包。"}, status=409)
+            notes.append(library_solutions.solution_json(row))
+        except (ValueError, library_solutions.SolutionError) as exc:
+            return JsonResponse({"error": f"作者笔记附件不完整，请重新下载题包：{exc}"}, status=409)
+    return JsonResponse({"notes": notes})
 
 
 @csrf_exempt
