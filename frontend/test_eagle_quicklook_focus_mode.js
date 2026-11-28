@@ -1,12 +1,17 @@
 "use strict";
-// 快速审题弹窗：「指针移开 → 压暗，只留题干」。
+// 快速审题弹窗：「指针移开 → 弹窗壳整体消失，只剩题干」。
 //
 // 用户要的是：鼠标停在界面上时一切正常显示；鼠标移开这个界面后，
-// 除了题目，其余字面全部隐藏，并且把亮度降下来 —— 只是显示题目的感觉。
+// 除了题目，其余字面全部隐藏 —— 只是显示题目的感觉。
+//
+// 关键约束（都是踩过坑换来的）：
+//   · 题干必须像素级零衰减 → 祖先不能挂 CSS filter（滤镜没法让子元素反向提亮）。
+//   · 四周不能刻意压黑 → 遮罩保持原样，靠「弹窗壳透明」露出跟别处一样的画面。
+//   · 只藏不撤会留空隙 → 解析区与题名行用 display:none 撤出布局。
 //
 // 三档状态：
 //   指针在白色卡片内 → 全亮（徽标、题名、标签、解析区、底部按钮都在）
-//   指针移出卡片     → 非题干区淡出到近乎不可见 + 整体轻微降亮度，题干保持全亮可读
+//   指针移出卡片     → 弹窗壳消失（底色/边框/阴影全去），只剩题干白卡浮在原地
 //   触屏（hover:none）→ 永远全亮，否则手机上开屏就是一片灰，像坏了
 //
 // 判定必须锚在白色卡片（.ql-panel）而不是遮罩容器：
@@ -56,11 +61,11 @@ test("快速审题：指针移开后压暗只留题干", async (t) => {
   });
 
   await t.test("2c. 移开时弹窗壳整体消失：面板与阅读区底色透明", () => {
-    // 「只有题目显示，其余跟四周黑色一致」= 弹窗壳的白底要一起没，
-    // 只剩题干卡片（.ql-stem）那块白纸浮在深色遮罩上。
+    // 「只有题目显示，其余地方都是和四周黑色一致的」= 弹窗壳的白底要一起没，
+    // 只剩题干卡片（.ql-stem）那块白纸浮在原地，四周透出跟别处一样的画面。
     assert.ok(
       /#quickLookModal\.is-idle \.ql-panel[^{]*\{[^}]*background-color: transparent;[^}]*\}/.test(html),
-      "移开时面板底色应透明（白底消失，与四周一致）"
+      "移开时面板底色应透明（白底消失）"
     );
     assert.ok(
       /#quickLookModal\.is-idle #qlReadingPane[^{]*\{[^}]*background-color: transparent;[^}]*\}/.test(html),
@@ -88,10 +93,43 @@ test("快速审题：指针移开后压暗只留题干", async (t) => {
     );
   });
 
+  await t.test("2d. 不刻意压黑：遮罩保持原样", () => {
+    // 用户明确要求「不用刻意压黑，变成旁边的颜色就行」。
+    // 遮罩若被加深，整个视口会比平时更黑，与需求相悖。
+    // 判据和 2b 同理：一条规则的「宿主元素」是它的最后一段，
+    // 只有最后一段命中 .ql-backdrop 的才是「给遮罩本身改色」；
+    // 「#quickLookModal.ql-backdrop ... .ql-panel」命中的是面板，不是遮罩。
+    const cssRules = html.replace(/\/\*[\s\S]*?\*\//g, "");
+    const ruleBlocks = cssRules.match(/[^{}]+\{[^{}]*\}/g) || [];
+    for (const rule of ruleBlocks) {
+      const selector = rule.split("{")[0];
+      const body = rule.slice(selector.length);
+      for (const sel of selector.split(",").map((s) => s.trim())) {
+        const parts = sel.split(/[\s:>+~]+/).filter(Boolean);
+        const host = parts[parts.length - 1] || "";
+        if (host.includes(".ql-backdrop") && /background-color/.test(body)) {
+          assert.fail(
+            `遮罩不应被改色（会刻意压黑）：${sel} → ${body.trim()}`
+          );
+        }
+      }
+    }
+    assert.ok(
+      !/rgb\(15 23 42 \/ 0\.88\)/.test(cssRules),
+      "不应出现把遮罩加深到 0.88 的规则"
+    );
+    // 遮罩底色由 Eagle 原本的 bg-slate-900/70 决定，不被本 PR 改动
+    assert.ok(
+      !/background-color:[^;}]*rgb\(15 23 42 \/ 0\.88\)/.test(cssRules),
+      "移开态不应把遮罩压得更黑"
+    );
+  });
+
   await t.test("2b. 题干区不得挂任何滤镜 —— 题干像素必须零衰减", () => {
     // 踩过的坑：把 brightness 加在 .ql-panel 上想让整卡沉下去，
     // 但 CSS 滤镜没法让子元素反向提亮 → 题干跟着被压了 12%。
-    // 现在降亮度只加在非题干区，「画面沉下去」改由遮罩加深实现。
+    // 现在降亮度只加在非题干区，四周靠「弹窗壳透明」露出原画面，
+    // 不靠加深遮罩（遮罩一加深就是刻意压黑，与需求相悖）。
     // 扫规则前先剥掉 /* */ 注释，否则本文件的说明文字会被当成规则误伤。
     const cssRules = html.replace(/\/\*[\s\S]*?\*\//g, "");
     // 逐条规则切开看（跨规则匹配会把后面规则的 brightness 一并吞进来）
@@ -119,14 +157,14 @@ test("快速审题：指针移开后压暗只留题干", async (t) => {
       ruleBlocks.some((r) => r.includes(".ql-panel") && /max-width:\s*1200px/.test(r)),
       "应有给 .ql-panel 设 max-width: 1200px 的规则"
     );
-    // 压暗改为遮罩加深
+    // 移开态的面板必须完全透明：白壳消失，四周透出跟别处一样的画面
     assert.ok(
-      /#quickLookModal\.is-idle\.ql-backdrop[^{]*\{[^}]*background-color: rgb\(15 23 42 \/ 0\.88\);[^}]*\}/.test(html),
-      "is-idle 时遮罩应加深到 0.88（周围暗、题目亮）"
+      /#quickLookModal\.is-idle \.ql-panel[^{]*\{[^}]*background-color: transparent;[^}]*\}/.test(html),
+      "移开态面板应完全透明（弹窗壳消失）"
     );
     assert.ok(
-      /#quickLookModal\.ql-backdrop:not\(:has\(\.ql-panel:hover\)\)[^{]*\{[^}]*background-color/.test(html),
-      ":has() 兜底也应对遮罩加深生效"
+      /#quickLookModal\.is-idle \.ql-panel[^{]*\{[^}]*box-shadow: none;[^}]*\}/.test(html),
+      "移开态应去掉面板阴影（否则留下一个框）"
     );
   });
 
@@ -184,16 +222,31 @@ test("快速审题：指针移开后压暗只留题干", async (t) => {
   await t.test("5. 触屏（hover: none）强制全亮，不压暗", () => {
     // 仓库里已有一个 @media (hover: none) 块（.qc-evidence-btn），
     // 这里要定位到覆盖 ql-panel 的那个，别抓错块。
+    // 用花括号配对截块：固定长度窗口会把下一个 @media 块也吞进来
+    // （prefers-reduced-motion 块里有 #quickLookModal.ql-backdrop → 误判）。
     const hoverNoneBlocks = [];
     let from = 0;
     for (;;) {
       const at = html.indexOf("@media (hover: none)", from);
       if (at < 0) break;
-      hoverNoneBlocks.push(html.slice(at, at + 1400));
+      const open = html.indexOf("{", at);
+      let depth = 0;
+      let end = open;
+      for (let i = open; i < html.length; i++) {
+        if (html[i] === "{") depth++;
+        else if (html[i] === "}") {
+          depth--;
+          if (depth === 0) {
+            end = i + 1;
+            break;
+          }
+        }
+      }
+      hoverNoneBlocks.push(html.slice(at, end));
       from = at + 1;
     }
     assert.ok(hoverNoneBlocks.length > 0, "应有 @media (hover: none) 媒体查询");
-    // 面板不再挂滤镜，这里找的是覆盖 ql-chrome 的块（另有覆盖 ql-backdrop 的规则）
+    // 面板不再挂滤镜，这里找的是覆盖 ql-chrome / 阅读区的那个块
     const block = hoverNoneBlocks.find(
       (b) => b.includes("#quickLookModal .ql-chrome") || b.includes("#quickLookModal #qlReadingPane")
     );
@@ -209,14 +262,19 @@ test("快速审题：指针移开后压暗只留题干", async (t) => {
       /filter: none !important/.test(block),
       "hover:none 时必须去掉压暗滤镜"
     );
+    // 遮罩全程保持原样（不刻意压黑），触屏更不该改
     assert.ok(
-      /#quickLookModal\.ql-backdrop/.test(block),
-      "hover:none 时遮罩应回到原来的不透明度"
+      !/#quickLookModal\.ql-backdrop/.test(block),
+      "hover:none 时也不应改遮罩颜色（遮罩保持原样）"
     );
     // 弹窗壳必须恢复：否则手机上是一片黑
     assert.ok(
       /#quickLookModal \.ql-panel \{[^}]*background-color: #ffffff !important;/.test(block),
       "hover:none 时面板白底必须恢复"
+    );
+    assert.ok(
+      /#quickLookModal \.ql-panel \{[^}]*box-shadow:[^}]*!important;/.test(block),
+      "hover:none 时面板阴影必须恢复"
     );
     assert.ok(
       /#quickLookModal #qlReadingPane \{[^}]*display: block !important;/.test(block),

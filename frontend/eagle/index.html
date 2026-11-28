@@ -724,30 +724,29 @@
           踩过的坑：原先把 brightness(.88) 加在 .ql-panel 上，想让整卡沉下去，
           但 CSS 滤镜没法让子元素反向提亮 → 题干跟着被压了 12%（实测暗度比 0.877），
           唯一该亮的东西反而也暗了。
-          现在改成两条互不干扰的路：
+          现在改成三条互不干扰的路：
             · 题干区：不加任何 filter、不降 opacity —— 像素级零衰减。
-            · 「画面沉下去」：靠遮罩层加深（bg-slate-900/70 → /88）实现，
-              周围暗、题目亮，聚焦感更强，且不碰题目的任何一个像素。
+            · 弹窗壳：底色/边框/阴影全去掉，壳整个消失。
+            · 四周：遮罩保持原样（不刻意压黑），壳透明后透出的是
+              跟别处一样的画面 —— 只剩题干那块白纸浮着。
        ④ 判定锚在白色卡片（.ql-panel）而不是遮罩容器：
           遮罩容器是 inset-0 铺满视口，用它判 :hover 的话，
           指针停在遮罩上仍算「在界面上」，压暗永远不触发。
        ⑤ 双保险：JS 切 .is-idle（主路径，可测） + :has() 兜底（JS 失效时仍能用）。
        ⑥ 触屏（hover: none）永远全亮 —— 否则手机上开屏就是一片灰，像坏了。 */
     #quickLookModal .ql-panel { max-width: 1200px; }
+    /* 壳消失要有过渡，不然「壳没了」是硬切，看着像界面崩了 */
+    #quickLookModal .ql-panel {
+      transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+    }
     #quickLookModal .ql-chrome,
     #quickLookModal #qlAnalysisContainer { transition: opacity 0.18s ease, filter 0.18s ease; }
-    /* 遮罩加深：周围暗下去，题目不受影响。
-       注意：ql-backdrop 挂在 #quickLookModal 自身上（它既是遮罩又是容器），
-       不是它的子元素 —— 选择器必须写成 #quickLookModal.ql-backdrop，
-       写成后代选择器 #quickLookModal .ql-backdrop 会匹配不到任何东西。 */
-    #quickLookModal.ql-backdrop { transition: background-color 0.18s ease; }
-    #quickLookModal.is-idle.ql-backdrop,
-    #quickLookModal.ql-backdrop:not(:has(.ql-panel:hover)) {
-      background-color: rgb(15 23 42 / 0.88);
-    }
     /* 移开 → 只剩题目：面板与阅读区的底色一起透明，
-       弹窗壳消失，题干卡片（.ql-stem，白底）浮在深色遮罩上，
-       四周与遮罩同色 —— 只有题目那块是亮的。 */
+       弹窗壳消失，题干卡片（.ql-stem，白底）浮在原地，
+       四周透出跟别处一样的画面 —— 不刻意压黑。
+       注意：这里**不加深遮罩**。遮罩保持原样（bg-slate-900/70），
+       壳透明后透出来的就是遮罩 + Eagle 界面，跟四周完全一致；
+       刻意加深反而会让弹窗那块比四周更黑，与「变成旁边的颜色」相悖。 */
     #quickLookModal.is-idle .ql-panel,
     #quickLookModal.ql-backdrop:not(:has(.ql-panel:hover)) .ql-panel {
       background-color: transparent;
@@ -784,9 +783,6 @@
     }
     /* 触屏没有 hover：永远全亮，绝不压暗（仓库同款先例见 .qc-evidence-btn） */
     @media (hover: none) {
-      #quickLookModal.ql-backdrop {
-        background-color: rgb(15 23 42 / 0.7) !important;
-      }
       #quickLookModal .ql-panel {
         background-color: #ffffff !important;
         border-color: rgb(226 232 240) !important;
