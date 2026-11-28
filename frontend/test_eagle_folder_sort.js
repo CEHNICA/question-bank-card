@@ -144,6 +144,7 @@ function createSortHarness(initialState = {}) {
   };
 
   const snippets = [
+    fnBody("folderDescendantMenu"),
     `let currentPaperSort = localStorage.getItem('paper_sort_mode') || 'time_desc';`,
     `const FOLDER_SORT_MODES_STORAGE_KEY = 'folder_sort_modes_v1';`,
     `const VALID_FOLDER_SORT_MODES = new Set(['time_desc', 'time_asc', 'name', 'count_desc', 'manual']);`,

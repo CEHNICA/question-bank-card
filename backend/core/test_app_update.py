@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -68,6 +69,9 @@ def _response_for(url: str, latest: str, installer: bytes, checksum: str, final_
 
 class OfficialUpdateTests(SimpleTestCase):
     def setUp(self):
+        app_update._CANCEL_DOWNLOAD.clear()
+        app_update._READY_INSTALLER = None
+        app_update._reset_progress(status="idle")
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.database = self.root / "db.sqlite3"
@@ -258,6 +262,154 @@ class OfficialUpdateTests(SimpleTestCase):
         self.assertEqual(progress["status"], "failed")
         self.assertIn("软件将保持打开", progress["error"])
         self.assertIn("手动运行", progress["error"])
+
+    def wait_for_update(self):
+        for _ in range(250):
+            if not app_update._INSTALL_LOCK.locked():
+                return app_update.get_install_progress()
+            time.sleep(0.01)
+        self.fail("更新任务未结束")
+
+    def test_download_waits_for_explicit_confirmation_and_rechecks_file(self):
+        installer = b"download-without-install"
+        digest = hashlib.sha256(installer).hexdigest()
+        with (
+            patch.dict(app_update.os.environ, {"TEMP": str(self.root)}),
+            patch.object(
+                app_update.urllib.request,
+                "urlopen",
+                side_effect=lambda request, timeout: _response_for(request.full_url, "9.9.9", installer, digest),
+            ),
+            patch.object(app_update, "_launch_detached_installer") as launch,
+            patch.object(app_update, "_backup_database") as backup,
+        ):
+            self.client.post("/api/update/download/start", HTTP_X_QB_REQUEST="1")
+            progress = self.wait_for_update()
+            self.assertEqual(progress["status"], "ready")
+            self.assertEqual(progress["percent"], 100)
+            self.assertTrue(progress["can_install"])
+            launch.assert_not_called()
+            backup.assert_not_called()
+            self.assertEqual(self.client.post("/api/update/install/confirm", HTTP_X_QB_REQUEST="1").status_code, 400)
+            # 下载后被改写的文件不可安装，即使原来的校验通过了。
+            (self.root / "TiYouJu-Setup-9.9.9.exe").write_bytes(b"tampered")
+            result = self.client.post(
+                "/api/update/install/confirm",
+                data=json.dumps({"confirmed": True}),
+                content_type="application/json",
+                HTTP_X_QB_REQUEST="1",
+            )
+            self.assertEqual(result.status_code, 200)
+            progress = self.wait_for_update()
+            self.assertEqual(progress["status"], "failed")
+            self.assertFalse(progress["can_install"])
+            launch.assert_not_called()
+            backup.assert_not_called()
+
+    def test_confirmed_install_uses_verified_download_without_network(self):
+        installer = b"ready-for-confirmation"
+        digest = hashlib.sha256(installer).hexdigest()
+        destination = self.root / "ready.exe"
+        destination.write_bytes(installer)
+        app_update._READY_INSTALLER = (destination, digest, "9.9.9")
+        with (
+            patch.object(app_update, "_launch_detached_installer") as launch,
+            patch.object(app_update, "_backup_database") as backup,
+            patch.object(app_update.urllib.request, "urlopen") as network,
+            patch.object(app_update.os, "name", "nt"),
+        ):
+            result = self.client.post(
+                "/api/update/install/confirm",
+                data=json.dumps({"confirmed": True}),
+                content_type="application/json",
+                HTTP_X_QB_REQUEST="1",
+            )
+            self.assertEqual(result.status_code, 200)
+            progress = self.wait_for_update()
+        self.assertEqual(progress["status"], "succeeded")
+        backup.assert_called_once()
+        launch.assert_called_once()
+        self.assertEqual(launch.call_args.args[0][0], str(destination))
+        network.assert_not_called()
+
+    def test_cancel_download_cleans_partial_file_and_prevents_duplicate_worker(self):
+        self.cancel_download_case(ranged=False)
+
+    def test_cancel_parallel_ranges_stops_all_workers(self):
+        self.cancel_download_case(ranged=True)
+
+    def cancel_download_case(self, *, ranged):
+        entered = threading.Event()
+        release = threading.Event()
+        installer = b"cancel-this-download" * 10_000
+        digest = hashlib.sha256(installer).hexdigest()
+        reads = []
+
+        class BlockingBody(_Body):
+            def read(body_self, size=-1):
+                entered.set()
+                if not release.wait(3):
+                    raise TimeoutError("test response was not released")
+                reads.append(True)
+                return super().read(size)
+
+        def fake_open(request, timeout):
+            if urlparse(request.full_url).path != "/download/installer":
+                return _response_for(request.full_url, "9.9.9", installer, digest)
+            if ranged:
+                match = re.match(r"bytes=(\d+)-(\d+)", request.headers["Range"])
+                start, end = int(match[1]), min(int(match[2]), len(installer) - 1)
+                return BlockingBody(
+                    installer[start : end + 1],
+                    request.full_url,
+                    status=206,
+                    headers={"Content-Range": f"bytes {start}-{end}/{len(installer)}"},
+                )
+            return BlockingBody(installer, request.full_url)
+
+        with (
+            patch.dict(app_update.os.environ, {"TEMP": str(self.root)}),
+            patch.object(app_update.urllib.request, "urlopen", side_effect=fake_open),
+            patch.object(app_update, "_DOWNLOAD_CHUNK_BYTES", 32_768),
+            patch.object(app_update, "_launch_detached_installer") as launch,
+            patch.object(app_update, "_backup_database") as backup,
+        ):
+            try:
+                self.client.post("/api/update/download/start", HTTP_X_QB_REQUEST="1")
+                self.assertTrue(entered.wait(2))
+                again = self.client.post("/api/update/download/start", HTTP_X_QB_REQUEST="1").json()
+                self.assertTrue(again["already_running"])
+                cancelled = self.client.post("/api/update/download/cancel", HTTP_X_QB_REQUEST="1").json()
+                self.assertEqual(cancelled["status"], "cancelling")
+                self.assertTrue(cancelled["active"])
+            finally:
+                release.set()
+                progress = self.wait_for_update()
+            self.assertEqual(progress["status"], "cancelled")
+            self.assertFalse(progress["can_install"])
+            self.assertEqual(list(self.root.glob("*.part")), [])
+            self.assertFalse((self.root / "TiYouJu-Setup-9.9.9.exe").exists())
+            launch.assert_not_called()
+            backup.assert_not_called()
+
+    def test_new_update_routes_require_local_page_and_confirmation(self):
+        for route in ("download/start", "download/cancel", "install/confirm"):
+            self.assertEqual(self.client.get("/api/update/" + route).status_code, 405)
+            self.assertEqual(self.client.post("/api/update/" + route).status_code, 403)
+            self.assertEqual(
+                self.client.post("/api/update/" + route, HTTP_X_QB_REQUEST="1", REMOTE_ADDR="192.0.2.1").status_code,
+                403,
+            )
+        self.assertEqual(
+            self.client.post(
+                "/api/update/install/confirm",
+                data='{"confirmed":true}',
+                content_type="application/json",
+                HTTP_X_QB_REQUEST="1",
+            ).status_code,
+            400,
+        )
+        self.assertEqual(self.client.get("/qb-update.js").status_code, 200)
 
 
 if __name__ == "__main__":

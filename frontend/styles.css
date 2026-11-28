@@ -306,6 +306,7 @@ body.drawer-open { overflow: hidden; }
 .button.primary, .button.button-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
   box-shadow: 0 1px 1px rgba(20, 70, 60, .18); }
 .button.primary:hover:not(:disabled), .button.button-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+#updateInstallButton:disabled, #updateFloatInstall:disabled { background: #e2e8f0; border-color: #cbd5e1; color: #64748b; opacity: 1; }
 .button.small, .button.button-small { min-height: 28px; padding: 4px 10px; font-size: 12.5px; border-radius: 8px; }
 .button.quiet, .button.button-quiet { border-color: transparent; background: none; box-shadow: none; color: var(--ink-2); }
 .button.quiet:hover:not(:disabled), .button.button-quiet:hover:not(:disabled) { background: var(--bg-sunken); border-color: transparent; color: var(--ink); }

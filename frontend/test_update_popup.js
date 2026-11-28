@@ -4,8 +4,9 @@ const path = require("node:path");
 const { test } = require("node:test");
 
 const FRONTEND = path.resolve(__dirname);
+const update = fs.readFileSync(path.join(FRONTEND, "qb-update.js"), "utf8");
 
-test("Eagle workspace renders a floating update popup with one-click install and highlights", () => {
+test("Eagle workspace renders a floating update popup with separate download and confirmed install", () => {
   const html = fs.readFileSync(path.join(FRONTEND, "eagle", "index.html"), "utf8");
   for (const id of [
     "eagleUpdatePopup",
@@ -25,6 +26,8 @@ test("Eagle workspace renders a floating update popup with one-click install and
     "eagleUpdatePopupAbout",
     "eaglePrefUpdateProgress",
     "eaglePrefUpdateProgressFill",
+    "eaglePrefUpdateCancelBtn",
+    "eagleUpdatePopupCancel",
   ]) {
     assert.match(html, new RegExp(`id="${id}"`), `Missing #${id} in eagle/index.html`);
   }
@@ -32,9 +35,10 @@ test("Eagle workspace renders a floating update popup with one-click install and
   assert.match(html, /function applyOfficialUpdateState\(data/);
   assert.match(html, /function syncEagleUpdateProgressUI\(progress\)/);
   assert.match(html, /href="https:\/\/tiyouju\.com\/"/);
-  assert.match(html, /\/api\/update\/install\/start/);
-  assert.match(html, /\/api\/update\/progress/);
-  assert.match(html, /\/api\/update\/install/);
+  assert.match(html, /src="\/qb-update.js"/);
+  assert.match(update, /\/api\/update\/download\/start/);
+  assert.match(update, /\/api\/update\/install\/confirm/);
+  assert.doesNotMatch(update, /\/api\/update\/install\/start/);
   assert.match(html, /\/api\/update`/);
   assert.match(html, /\/api\/update\/settings/);
   assert.doesNotMatch(html, /eaglePrefAutoUpdate[\s\S]{0,600}api\/settings\/features/);
@@ -58,6 +62,8 @@ test("Main workspace & settings page render a matching floating update popup", (
     "updateFloatAbout",
     "updateAboutProgress",
     "updateAboutProgressFill",
+    "updateCancelButton",
+    "updateFloatCancel",
   ]) {
     assert.match(html, new RegExp(`id="${id}"`), `Missing #${id} in frontend/index.html`);
   }
@@ -66,7 +72,7 @@ test("Main workspace & settings page render a matching floating update popup", (
   assert.match(css, /\.update-progress-box\s*\{/);
   assert.match(js, /const showFloatPopup = \(data\) =>/);
   assert.match(js, /showFloatPopup\(data\);/);
-  assert.match(js, /\/api\/update\/install\/start/);
-  assert.match(js, /\/api\/update\/progress/);
+  assert.match(js, /window.QBUpdate.create/);
+  assert.match(update, /\/api\/update\/progress/);
   assert.match(js, /tiyouju-update-dismissed:/);
 });

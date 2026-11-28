@@ -1931,6 +1931,20 @@
       border-color: var(--accent);
       color: #ffffff;
     }
+    #eaglePrefUpdateInstallBtn:disabled,
+    #eagleUpdatePopupInstall:disabled {
+      background: #e2e8f0 !important;
+      border-color: #cbd5e1 !important;
+      color: #64748b !important;
+      opacity: 1 !important;
+      cursor: not-allowed;
+    }
+    #eaglePrefUpdateInstallBtn.hidden,
+    #eaglePrefUpdateCancelBtn.hidden,
+    #eagleUpdatePopupInstall.hidden,
+    #eagleUpdatePopupCancel.hidden {
+      display: none !important;
+    }
     #eaglePreferencesModal .button.primary:hover:not(:disabled),
     #eaglePreferencesModal .button.button-primary:hover:not(:disabled) {
       background: var(--accent-dark);
@@ -2334,6 +2348,7 @@
     }
     .eagle-update-popup-actions {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
       gap: 8px;
       padding-top: 2px;
@@ -3558,7 +3573,8 @@
       </div>
     </div>
     <div class="eagle-update-popup-actions">
-      <button id="eagleUpdatePopupInstall" class="eagle-update-popup-btn-primary" type="button">立即更新</button>
+      <button id="eagleUpdatePopupInstall" class="eagle-update-popup-btn-primary" type="button" disabled>下载更新</button>
+      <button id="eagleUpdatePopupCancel" class="eagle-update-popup-btn-secondary hidden" type="button">取消下载</button>
       <button id="eagleUpdatePopupLater" class="eagle-update-popup-btn-secondary" type="button">稍后提醒</button>
       <a class="eagle-update-popup-btn-link" href="https://tiyouju.com/" target="_blank" rel="noopener noreferrer" style="margin-left:0;text-decoration:none;display:inline-flex;align-items:center;" title="https://tiyouju.com/">官网 tiyouju.com</a>
       <button id="eagleUpdatePopupAbout" class="eagle-update-popup-btn-link" type="button">设置</button>
@@ -3994,7 +4010,8 @@
               </div>
               <div class="settings-form-actions">
                 <button type="button" class="button" id="eaglePrefUpdateCheckBtn">检查更新</button>
-                <button type="button" class="button primary hidden" id="eaglePrefUpdateInstallBtn">下载并安装</button>
+                <button type="button" class="button primary hidden" id="eaglePrefUpdateInstallBtn" disabled>下载更新</button>
+                <button type="button" class="button hidden" id="eaglePrefUpdateCancelBtn">取消下载</button>
                 <a class="button" href="https://tiyouju.com/" target="_blank" rel="noopener noreferrer">前往官网</a>
                 <a class="button" href="https://github.com/CEHNICA/question-bank-card" target="_blank" rel="noopener noreferrer">查看源代码</a>
               </div>
@@ -4581,6 +4598,7 @@
        qb-render.js 提供公式与表格分段，question-locator.js 提供章节名判定，
        exam-export.js 是真正的导出客户端（Word / PDF / 分卷 Word）。 -->
   <script src="/qb-render.js"></script>
+  <script src="/qb-update.js"></script>
   <script src="/question-locator.js"></script>
   <script src="/exam-export.js"></script>
   <script src="/eagle-virtual-list.js"></script>
@@ -5818,7 +5836,6 @@
       } catch (_) {}
     }
 
-    let eagleUpdatePollTimer = null;
 
     function formatUpdateBytes(bytes) {
       const n = Number(bytes) || 0;
@@ -5851,7 +5868,7 @@
       const bytesEl = document.getElementById(`${prefix}ProgressBytes`);
       const speedEl = document.getElementById(`${prefix}ProgressSpeed`);
       if (!box) return;
-      if (!progress || progress.status === 'idle' || progress.status === 'failed') {
+      if (!progress || ['idle', 'failed', 'cancelled'].includes(progress.status)) {
         box.classList.add('hidden');
         if (fillEl) fillEl.classList.remove('is-indeterminate');
         return;
@@ -5874,74 +5891,71 @@
           : (done > 0 ? `已下载 ${formatUpdateBytes(done)}` : '正在连接 tiyouju.com…');
       }
       if (speedEl) {
-        if (status === 'verifying') speedEl.textContent = '正在校验 SHA-256…';
+        if (status === 'ready') speedEl.textContent = '校验通过，等待确认安装';
+        else if (status === 'cancelling') speedEl.textContent = '正在停止下载…';
+        else if (status === 'verifying') speedEl.textContent = '正在校验 SHA-256…';
         else if (status === 'backing_up') speedEl.textContent = '正在备份题库…';
         else if (status === 'launching' || status === 'succeeded') speedEl.textContent = '即将启动安装程序';
         else speedEl.textContent = `${formatUpdateSpeed(progress.speed_bps)}${formatUpdateEta(progress.eta_seconds)}`;
       }
     }
 
-    function syncEagleUpdateProgressUI(progress) {
-      applyUpdateProgressCard('eagleUpdatePopup', progress);
-      applyUpdateProgressCard('eaglePrefUpdate', progress);
-      const popupBtn = document.getElementById('eagleUpdatePopupInstall');
-      const aboutBtn = document.getElementById('eaglePrefUpdateInstallBtn');
-      const popupStatus = document.getElementById('eagleUpdatePopupStatus');
-      const aboutStatus = document.getElementById('eaglePrefUpdateStatus');
-      const active = Boolean(progress && progress.active);
-      if (popupBtn) popupBtn.disabled = active;
-      if (aboutBtn) aboutBtn.disabled = active;
-      if (progress && progress.status === 'failed') {
-        const err = progress.error || '更新未能完成，请重试。';
-        if (popupStatus) setEagleUpdatePopupStatus(err, true);
-        if (aboutStatus) aboutStatus.textContent = err;
-        if (popupBtn) popupBtn.disabled = false;
-        if (aboutBtn) aboutBtn.disabled = false;
-      } else if (progress && progress.status === 'succeeded') {
-        const msg = progress.stage_label || `正在安装 ${progress.version || ''}。软件会先关闭，题库已备份，完成后将重新打开。`;
-        if (popupStatus) setEagleUpdatePopupStatus(msg, false);
-        if (aboutStatus) aboutStatus.textContent = msg;
-      } else if (active) {
-        if (popupStatus) setEagleUpdatePopupStatus('', false);
-        if (aboutStatus) aboutStatus.textContent = progress.stage_label || '正在下载并安装官网更新…';
+    let eagleUpdateController = null;
+    function getEagleUpdateController() {
+      if (eagleUpdateController) return eagleUpdateController;
+      eagleUpdateController = QBUpdate.create({
+        request: async (path, options = {}) => {
+          const resp = await fetch(`${API_BASE}${path}`, {
+            cache: 'no-store', ...options,
+            headers: { 'X-QB-Request': '1', 'Content-Type': 'application/json' },
+            ...(options.body ? { body: JSON.stringify(options.body) } : {})
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || data.error) {
+            if (path.startsWith('/api/update/check')) latestOfficialUpdateInfo = null;
+            throw new Error(data.error || '更新服务暂不可用，请稍后重试。');
+          }
+          if (path.startsWith('/api/update/check')) latestOfficialUpdateInfo = data;
+          return data;
+        },
+        confirmInstall: (version) => window.confirm(`安装更新 ${version || ''}？\n请先保存正在编辑的内容。题库将自动备份，软件会关闭，安装完成后重新打开。\n选择“取消”可稍后安装。`),
+        onChange: (state) => {
+          const p = state.progress;
+          applyUpdateProgressCard('eagleUpdatePopup', p);
+          applyUpdateProgressCard('eaglePrefUpdate', p);
+          for (const id of ['eagleUpdatePopupInstall', 'eaglePrefUpdateInstallBtn']) {
+            const btn = document.getElementById(id);
+            if (!btn) continue;
+            btn.textContent = state.label;
+            btn.disabled = state.disabled;
+            btn.classList.toggle('hidden', !state.visible);
+          }
+          for (const id of ['eagleUpdatePopupCancel', 'eaglePrefUpdateCancelBtn']) {
+            const btn = document.getElementById(id);
+            if (!btn) continue;
+            btn.classList.toggle('hidden', !state.cancelVisible);
+            btn.disabled = state.cancelDisabled;
+            btn.textContent = p.status === 'cancelling' ? '正在取消…' : '取消下载';
+          }
+          const checkBtn = document.getElementById('eaglePrefUpdateCheckBtn');
+          if (checkBtn) { checkBtn.disabled = state.checkDisabled; checkBtn.textContent = state.checking ? '正在检查…' : '检查更新'; }
+          const statusEl = document.getElementById('eaglePrefUpdateStatus');
+          if (statusEl) {
+            statusEl.textContent = p.active && !p.installing && !state.error ? '关闭此页不会取消下载；需要停止时请点“取消下载”。' : state.message;
+            statusEl.setAttribute('role', 'status');
+            statusEl.setAttribute('aria-live', 'polite');
+          }
+          setEagleUpdatePopupStatus(state.message, state.error);
+        }
+      });
+      for (const id of ['eagleUpdatePopupCancel', 'eaglePrefUpdateCancelBtn']) {
+        document.getElementById(id)?.addEventListener('click', () => { void eagleUpdateController.cancel(); });
       }
+      return eagleUpdateController;
     }
 
-    async function pollEagleUpdateProgress({ onProgress, onError } = {}) {
-      if (eagleUpdatePollTimer) {
-        clearTimeout(eagleUpdatePollTimer);
-        eagleUpdatePollTimer = null;
-      }
-      while (true) {
-        let p;
-        try {
-          const pr = await fetch(`${API_BASE}/api/update/progress`, {
-            cache: 'no-store',
-            headers: { 'X-QB-Request': '1' }
-          });
-          p = await pr.json().catch(() => ({}));
-          if (!pr.ok) throw new Error(p.error || '无法读取下载进度');
-        } catch (err) {
-          const msg = (err && err.message) ? err.message : '读取下载进度失败';
-          if (onError) onError(msg);
-          throw err;
-        }
-        syncEagleUpdateProgressUI(p);
-        if (p.status === 'succeeded') {
-          const msg = p.stage_label || `正在安装 ${p.version || ''}。软件会先关闭，题库已自动备份，完成后将重新打开。`;
-          if (onProgress) onProgress(msg, p);
-          return p;
-        }
-        if (p.status === 'failed') {
-          const msg = p.error || '安装未能启动';
-          if (onError) onError(msg);
-          throw new Error(msg);
-        }
-        if (!p.active && p.status === 'idle') {
-          return p;
-        }
-        await new Promise((resolve) => { eagleUpdatePollTimer = setTimeout(resolve, 250); });
-      }
+    function syncEagleUpdateProgressUI(progress) {
+      getEagleUpdateController().sync(progress);
     }
 
     function setEagleUpdatePopupStatus(text, isError = false) {
@@ -5952,36 +5966,8 @@
       statusEl.classList.toggle('is-error', Boolean(isError));
     }
 
-    async function triggerOfficialUpdateInstall({ onProgress, onError } = {}) {
-      try {
-        const startResp = await fetch(`${API_BASE}/api/update/install/start`, {
-          method: 'POST',
-          headers: { 'X-QB-Request': '1' }
-        });
-        if (startResp.status !== 404) {
-          const started = await startResp.json().catch(() => ({}));
-          if (!startResp.ok || started.error) {
-            throw new Error(started.error || started.message || '安装未能启动');
-          }
-          syncEagleUpdateProgressUI(started);
-          return await pollEagleUpdateProgress({ onProgress, onError });
-        }
-        const r = await fetch(`${API_BASE}/api/update/install`, {
-          method: 'POST',
-          headers: { 'X-QB-Request': '1' }
-        });
-        const d = await r.json().catch(() => ({}));
-        if (!r.ok || d.error) {
-          throw new Error(d.error || d.message || '安装未能启动');
-        }
-        const msg = `正在安装 ${d.version || ''}。软件会先关闭，题库已自动备份，完成后将重新打开。`;
-        if (onProgress) onProgress(msg, d);
-        return d;
-      } catch (err) {
-        const msg = (err && err.message) ? err.message : '安装请求失败，可从官网 tiyouju.com 下载安装包。';
-        if (onError) onError(msg);
-        throw err;
-      }
+    async function triggerOfficialUpdateInstall() {
+      await getEagleUpdateController().start();
     }
 
     function bindEagleUpdatePopupControls() {
@@ -6005,21 +5991,7 @@
           openEaglePreferencesModal('about');
         });
       }
-      if (installBtn) {
-        installBtn.addEventListener('click', async () => {
-          installBtn.disabled = true;
-          setEagleUpdatePopupStatus('', false);
-          try {
-            await triggerOfficialUpdateInstall({
-              onProgress: (msg) => setEagleUpdatePopupStatus(msg, false),
-              onError: (msg) => {
-                setEagleUpdatePopupStatus(msg, true);
-                installBtn.disabled = false;
-              }
-            });
-          } catch (_) {}
-        });
-      }
+      if (installBtn) installBtn.addEventListener('click', () => { void triggerOfficialUpdateInstall(); });
     }
 
     function showEagleUpdatePopup(data) {
@@ -6029,7 +6001,6 @@
       const titleEl = document.getElementById('eagleUpdatePopupTitle');
       const subEl = document.getElementById('eagleUpdatePopupSub');
       const listEl = document.getElementById('eagleUpdatePopupHighlights');
-      const installBtn = document.getElementById('eagleUpdatePopupInstall');
       if (titleEl) titleEl.textContent = `v${data.latest}`;
       if (subEl) subEl.textContent = `当前版本 v${data.current} → 官网最新版 v${data.latest}`;
       if (listEl) {
@@ -6044,8 +6015,7 @@
         });
         listEl.classList.remove('hidden');
       }
-      if (installBtn) installBtn.disabled = false;
-      setEagleUpdatePopupStatus('', false);
+      getEagleUpdateController().updateLatest(data);
       popup.classList.remove('hidden');
     }
 
@@ -6058,18 +6028,16 @@
     window.handleEagleVersionPillClick = handleEagleVersionPillClick;
 
     function applyOfficialUpdateState(data, { allowPopup = true } = {}) {
-      if (!data || !data.update_available) return;
+      if (!data) return;
       latestOfficialUpdateInfo = data;
+      getEagleUpdateController().updateLatest(data);
+      if (!data.update_available) return;
       const pill = document.getElementById('eagleMenuVersionPill');
       if (pill) {
         pill.textContent = `v${data.current} · 可更新到 ${data.latest}`;
         pill.className = 'text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap';
         pill.closest('.eagle-menu-footer-link')?.classList.add('has-update-pill');
       }
-      const aboutStatus = document.getElementById('eaglePrefUpdateStatus');
-      const aboutInstall = document.getElementById('eaglePrefUpdateInstallBtn');
-      if (aboutStatus) aboutStatus.textContent = `官网已有新版本 ${data.latest}（当前 ${data.current}）。`;
-      if (aboutInstall) aboutInstall.classList.remove('hidden');
       if (allowPopup && !isUpdateDismissed(data.latest)) {
         showEagleUpdatePopup(data);
       }
@@ -7805,6 +7773,7 @@
         menuHtml += treeMenuItem('☁️', '上传到资源社区…', `openCommunityPublishModal('${escapeInlineJsArg(targetPaper.id)}'); hideEagleContextMenu();`);
         menuHtml += treeMenuItem('✏️', '重命名此入库项目 (或双击)', `startRenamePaper('${targetPaper.id}'); hideEagleContextMenu();`);
         menuHtml += treeMenuItem('📄', '查看原卷扫描核验件', `openOriginalPaperModal('${targetPaper.id}', 0, '${escapeHtml(targetPaper.name)}'); hideEagleContextMenu();`);
+        menuHtml += folderDescendantMenu(parentKey);
         menuHtml += moreFlyout;
         menuHtml += treeMenuDivider();
         menuHtml += '<div data-ctx-item="1" onclick="confirmDeletePaper(\'' + targetPaper.id + '\'); hideEagleContextMenu();" class="flex items-center gap-2 px-2.5 py-1.5 rounded text-rose-600 hover:bg-rose-50 cursor-pointer transition-colors font-medium"><span class="shrink-0">🗑️</span><span class="truncate">删除（移入回收站）...</span></div>';
@@ -9133,24 +9102,10 @@
           if (verEl && st.app_version) verEl.textContent = `题有据 ${st.app_version}`;
         }
       } catch (_) {}
-      if (latestOfficialUpdateInfo && latestOfficialUpdateInfo.update_available) {
-        if (statusEl) statusEl.textContent = `官网已有新版本 ${latestOfficialUpdateInfo.latest}（当前 ${latestOfficialUpdateInfo.current}）。`;
-        if (installBtn) installBtn.classList.remove('hidden');
-      }
-      try {
-        const pResp = await fetch(`${API_BASE}/api/update/progress`, {
-          cache: 'no-store',
-          headers: { 'X-QB-Request': '1' }
-        });
-        if (pResp.ok) {
-          const p = await pResp.json().catch(() => null);
-          if (p && p.active) {
-            if (installBtn) installBtn.classList.remove('hidden');
-            syncEagleUpdateProgressUI(p);
-            void pollEagleUpdateProgress().catch(() => {});
-          }
-        }
-      } catch (_) {}
+      const controller = getEagleUpdateController();
+      if (latestOfficialUpdateInfo) controller.updateLatest(latestOfficialUpdateInfo);
+      try { await controller.refresh(); }
+      catch (_) { if (statusEl) statusEl.textContent = '暂时无法读取更新状态，重新打开此页可重试。'; }
       if (eaglePrefsMounted.about) return;
       eaglePrefsMounted.about = true;
       try {
@@ -9164,48 +9119,24 @@
         }
       } catch (_) {}
       if (autoBox) {
-        autoBox.addEventListener('change', () => {
-          void fetch(`${API_BASE}/api/update/settings`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
-            body: JSON.stringify({ auto_check: autoBox.checked })
-          }).catch(() => {});
-        });
-      }
-      if (checkBtn) {
-        checkBtn.addEventListener('click', async () => {
-          checkBtn.disabled = true;
-          if (statusEl) statusEl.textContent = '正在检查新版本…';
+        autoBox.addEventListener('change', async () => {
+          autoBox.disabled = true;
           try {
-            const r = await fetch(`${API_BASE}/api/update/check`, { method: 'POST', headers: { 'X-QB-Request': '1' } });
-            const d = await r.json().catch(() => ({}));
-            if (d.update_available) {
-              applyOfficialUpdateState(d, { allowPopup: false });
-            } else {
-              if (statusEl) statusEl.textContent = `当前版本 ${d.current || ''} 已是最新。`;
-            }
-          } catch (_) {
-            if (statusEl) statusEl.textContent = '这次没连上更新服务器，稍后再试。';
-          } finally {
-            checkBtn.disabled = false;
-          }
-        });
-      }
-      if (installBtn) {
-        installBtn.addEventListener('click', async () => {
-          installBtn.disabled = true;
-          if (statusEl) statusEl.textContent = '正在准备从官网下载更新并备份题库…';
-          try {
-            await triggerOfficialUpdateInstall({
-              onProgress: (msg) => { if (statusEl) statusEl.textContent = msg; },
-              onError: (msg) => {
-                if (statusEl) statusEl.textContent = msg;
-                installBtn.disabled = false;
-              }
+            const resp = await fetch(`${API_BASE}/api/update/settings`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-QB-Request': '1' },
+              body: JSON.stringify({ auto_check: autoBox.checked })
             });
-          } catch (_) {}
+            if (!resp.ok) throw new Error('保存失败');
+            autoBox.checked = (await resp.json()).auto_check !== false;
+          } catch (_) {
+            autoBox.checked = !autoBox.checked;
+            if (statusEl) statusEl.textContent = '自动检查设置保存失败，请重试。';
+          } finally { autoBox.disabled = false; }
         });
       }
+      if (checkBtn) checkBtn.addEventListener('click', () => { void controller.check(); });
+      if (installBtn) installBtn.addEventListener('click', () => { void triggerOfficialUpdateInstall(); });
     }
 
     function openEaglePreferencesModal(initialTab = 'general') {
@@ -9876,6 +9807,38 @@
       renderFolderTree();
       hideEagleContextMenu();
       showToast('已全部收起', 'success');
+    }
+
+    function setFolderDescendantsExpanded(nodeId, expand) {
+      const root = folderNodeRegistry.get(nodeId);
+      if (!root || !(root.children || []).length) return;
+      const seen = new Set([nodeId]);
+      const stack = [...root.children];
+      while (stack.length) {
+        const node = stack.pop();
+        if (!node || seen.has(node.id)) continue;
+        seen.add(node.id);
+        if (expand && (node.children || []).length) folderTreeState.expanded.add(node.id);
+        else if (!expand) folderTreeState.expanded.delete(node.id);
+        stack.push(...(node.children || []));
+      }
+      // 保留被右键的文件夹打开，只操作它下面的各级目录。
+      folderTreeState.expanded.add(root.id);
+      writeExpandedFolderNodes();
+      renderFolderTree();
+      hideEagleContextMenu();
+      showToast(expand ? '已展开全部子项' : '已收起全部子项', 'success');
+    }
+
+    function folderDescendantMenu(nodeId) {
+      const node = folderNodeRegistry.get(nodeId);
+      if (!node || !(node.children || []).length) return '';
+      const kind = node.type === 'tag' || node.sectionKind === 'tags' || node.id === 'group:knowledge' || node.id === 'group:method' ? 'tags'
+        : node.type === 'custom' || node.sectionKind === 'custom' ? 'custom' : 'folders';
+      const labels = treeExpandCollapseLabels(kind);
+      const safeId = escapeInlineJsArg(nodeId);
+      return treeMenuItem('📂', labels.expand, "setFolderDescendantsExpanded('" + safeId + "', true)")
+        + treeMenuItem('📁', labels.collapse, "setFolderDescendantsExpanded('" + safeId + "', false)");
     }
 
     function toggleExpandCollapseAllFolders() {
@@ -10856,9 +10819,6 @@
         html += treeMenuDivider();
         html += treeSortMenuBlock();
       } else if (node.type === 'section') {
-        const expandKind = node.sectionKind === 'tags' ? 'tags'
-          : (node.sectionKind === 'custom' ? 'custom' : 'folders');
-        const expandLabels = treeExpandCollapseLabels(expandKind);
         html += treeMenuHeader('分组：' + escapeHtml(node.label));
         html += '<div class="space-y-0.5">';
         if (node.sectionKind === 'folders') {
@@ -10869,8 +10829,6 @@
           html += treeMenuItem('\u{2795}', '新建顶级标签', 'promptCreateTreeTag(null, null)');
           html += treeMenuItem('\u{1F4CB}', '打开标签管理', 'openTagManagerModal(); hideEagleContextMenu();');
         }
-        html += treeMenuItem('\u{1F4C2}', expandLabels.expand, 'expandAllFolderNodes()');
-        html += treeMenuItem('\u{1F4C1}', expandLabels.collapse, 'collapseAllFolderNodes()');
         html += '</div>';
         if (node.sectionKind === 'folders' || node.sectionKind === 'papers' || node.sectionKind === 'books' || node.sectionKind === 'tags' || node.sectionKind === 'custom') {
           html += treeMenuDivider();
@@ -10886,8 +10844,6 @@
         html += treeMenuHeader('章节：' + escapeHtml(node.label));
         html += '<div class="space-y-0.5">';
         html += treeMenuItem('\u{1F441}', '查看此章节', "applyFolderNode('" + safeNodeArg + "'); hideEagleContextMenu();");
-        html += treeMenuItem('\u{1F4C2}', '展开全部子文件夹', 'expandAllFolderNodes()');
-        html += treeMenuItem('\u{1F4C1}', '收起全部子文件夹', 'collapseAllFolderNodes()');
         html += '</div>';
         html += treeMenuDivider();
         html += treeSortMenuBlock();
@@ -10901,7 +10857,6 @@
         html += treeSortMenuBlock();
       } else {
         const groupIsTags = node.id === 'group:knowledge' || node.id === 'group:method';
-        const expandLabels = treeExpandCollapseLabels(groupIsTags ? 'tags' : 'folders');
         html += treeMenuHeader((groupIsTags ? '标签分组：' : '文件夹：') + escapeHtml(node.label));
         html += '<div class="space-y-0.5">';
         if (node.id === 'group:papers' || node.id === 'group:books') {
@@ -10911,8 +10866,6 @@
           const kind = node.id === 'group:method' ? 'method' : 'knowledge';
           html += treeMenuItem('\u{2795}', '新建顶级' + (kind === 'method' ? '方法' : '知识点') + '标签', "promptCreateTreeTag(null, '" + kind + "')");
         }
-        html += treeMenuItem('\u{1F4C2}', expandLabels.expand, 'expandAllFolderNodes()');
-        html += treeMenuItem('\u{1F4C1}', expandLabels.collapse, 'collapseAllFolderNodes()');
         html += '</div>';
         if (node.id === 'group:papers' || node.id === 'group:books' || groupIsTags) {
           html += treeMenuDivider();
@@ -10921,6 +10874,7 @@
       }
 
       html += treeMenuDivider();
+      html += folderDescendantMenu(nodeId);
       html += treeMenuItem('\u{1F504}', '刷新项目数据', 'refreshPapersData(); hideEagleContextMenu();');
 
       menuEl.innerHTML = html;
