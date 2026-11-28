@@ -46,6 +46,38 @@ describe("标签联想", () => {
     assert.equal(sandbox.tagIsUnusedCustom({ id: "1", name: "平行", kind: "custom", count: 0 }), false);
   });
 
+  it("没输入时不列出标签，输入后才按名字联想", () => {
+    const sandbox = {
+      questionsData: [],
+      currentActiveQuestionId: null,
+      tagCatalogue: [
+        { id: "1", name: "倍长中线", kind: "method", active: true, count: 0 },
+        { id: "2", name: "比例尺与相似比", kind: "knowledge", active: true, count: 5, favorite: true },
+        { id: "3", name: "向量", kind: "knowledge", active: true, count: 9 },
+      ],
+    };
+    vm.runInNewContext(
+      "const TAG_SUGGEST_MAX = 12;\n" +
+        extractBetween("function currentQuestionTagIds", "function renderTagSuggestDropdown") +
+        "\nthis.computeTagSuggestions = computeTagSuggestions;",
+      sandbox
+    );
+    assert.equal(sandbox.computeTagSuggestions("").length, 0);
+    assert.equal(sandbox.computeTagSuggestions("   ").length, 0);
+    const typed = sandbox.computeTagSuggestions("比例");
+    assert.equal(typed.length, 1);
+    assert.equal(typed[0].id, "2");
+    const exact = sandbox.computeTagSuggestions("向量");
+    assert.equal(exact[0].id, "3");
+  });
+
+  it("空输入框不展开「没有可用标签」", () => {
+    const render = extractBetween("function renderTagSuggestDropdown", "function hideTagSuggestDropdown");
+    assert.doesNotMatch(render, /没有可用标签/);
+    assert.match(render, /if \(!trimmed\)/);
+    assert.match(render, /classList\.add\('hidden'\)/);
+  });
+
   it("点下拉时按标签编号贴，看题右栏不放置顶", () => {
     assert.match(html, /data-tag-id="/);
     assert.match(html, /pickTagSuggestTarget\(query, tagSuggestMatches, tagSuggestHighlight\)/);
