@@ -50,12 +50,50 @@ test("快速审题：指针移开后压暗只留题干", async (t) => {
       "is-idle 时非题干区应淡出到近乎不可见"
     );
     assert.ok(
-      /#quickLookModal\.is-idle \.ql-chrome[^{]*\{[^}]*filter: blur\(1px\);[^}]*\}/.test(html),
-      "is-idle 时非题干区应轻微模糊"
+      /#quickLookModal\.is-idle \.ql-chrome[^{]*\{[^}]*filter: blur\(1px\) brightness\(0\.7\);[^}]*\}/.test(html),
+      "is-idle 时非题干区应轻微模糊并降亮度"
+    );
+  });
+
+  await t.test("2b. 题干区不得挂任何滤镜 —— 题干像素必须零衰减", () => {
+    // 踩过的坑：把 brightness 加在 .ql-panel 上想让整卡沉下去，
+    // 但 CSS 滤镜没法让子元素反向提亮 → 题干跟着被压了 12%。
+    // 现在降亮度只加在非题干区，「画面沉下去」改由遮罩加深实现。
+    // 扫规则前先剥掉 /* */ 注释，否则本文件的说明文字会被当成规则误伤。
+    const cssRules = html.replace(/\/\*[\s\S]*?\*\//g, "");
+    // 逐条规则切开看（跨规则匹配会把后面规则的 brightness 一并吞进来）
+    const ruleBlocks = cssRules.match(/[^{}]+\{[^{}]*\}/g) || [];
+    for (const rule of ruleBlocks) {
+      const selector = rule.split("{")[0];
+      const body = rule.slice(selector.length);
+      // 只看「宿主元素」是不是面板本身：选择器最后一段（去掉伪类/状态后）
+      // 必须是 .ql-panel 才会命中面板。:has(.ql-panel:hover) 里出现
+      // .ql-panel 只是「面板内部有没有被 hover」，不等于给面板上滤镜。
+      const lastPart = selector
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.includes(".ql-panel"))
+        .map((s) => s.split(/[\s:>+~]+/).filter(Boolean).pop())
+        .filter(Boolean);
+      if (lastPart.some((part) => part === ".ql-panel")) {
+        assert.ok(
+          !/brightness/.test(body),
+          `直接命中面板的规则不应带 brightness（题干在面板内部）：${selector.trim()}`
+        );
+      }
+    }
+    assert.ok(
+      ruleBlocks.some((r) => r.includes(".ql-panel") && /max-width:\s*1200px/.test(r)),
+      "应有给 .ql-panel 设 max-width: 1200px 的规则"
+    );
+    // 压暗改为遮罩加深
+    assert.ok(
+      /#quickLookModal\.is-idle\.ql-backdrop[^{]*\{[^}]*background-color: rgb\(15 23 42 \/ 0\.88\);[^}]*\}/.test(html),
+      "is-idle 时遮罩应加深到 0.88（周围暗、题目亮）"
     );
     assert.ok(
-      /#quickLookModal\.is-idle \.ql-panel[^{]*\{[^}]*brightness\(0\.88\)[^}]*\}/.test(html),
-      "is-idle 时整体应降亮度"
+      /#quickLookModal\.ql-backdrop:not\(:has\(\.ql-panel:hover\)\)[^{]*\{[^}]*background-color/.test(html),
+      ":has() 兜底也应对遮罩加深生效"
     );
   });
 
@@ -87,6 +125,25 @@ test("快速审题：指针移开后压暗只留题干", async (t) => {
     );
   });
 
+  await t.test("4b. 遮罩 class 挂在 #quickLookModal 自身，选择器不能写成后代", () => {
+    // ql-backdrop 与 #quickLookModal 是同一个元素（它既是遮罩又是容器），
+    // 写成 #quickLookModal .ql-backdrop 会匹配不到任何东西 —— 静默失效。
+    assert.ok(
+      /id="quickLookModal" class="[^"]*\bql-backdrop\b/.test(html),
+      "ql-backdrop 应挂在 #quickLookModal 自身上"
+    );
+    assert.ok(
+      /#quickLookModal\.ql-backdrop/.test(html),
+      "遮罩规则应用 #quickLookModal.ql-backdrop（复合选择器），不是后代选择器"
+    );
+    // 只查真正的 CSS 规则（剥掉 /* */ 注释），否则会误伤本文档里举的反例
+    const cssRules = html.replace(/\/\*[\s\S]*?\*\//g, "");
+    assert.ok(
+      !/#quickLookModal \.ql-backdrop/.test(cssRules),
+      "不应出现 #quickLookModal .ql-backdrop 后代选择器（匹配不到，规则静默失效）"
+    );
+  });
+
   await t.test("5. 触屏（hover: none）强制全亮，不压暗", () => {
     // 仓库里已有一个 @media (hover: none) 块（.qc-evidence-btn），
     // 这里要定位到覆盖 ql-panel 的那个，别抓错块。
@@ -99,10 +156,11 @@ test("快速审题：指针移开后压暗只留题干", async (t) => {
       from = at + 1;
     }
     assert.ok(hoverNoneBlocks.length > 0, "应有 @media (hover: none) 媒体查询");
-    const block = hoverNoneBlocks.find((b) => b.includes("#quickLookModal .ql-panel"));
+    // 面板不再挂滤镜，这里找的是覆盖 ql-chrome 的块（另有覆盖 ql-backdrop 的规则）
+    const block = hoverNoneBlocks.find((b) => b.includes("#quickLookModal .ql-chrome"));
     assert.ok(
       block,
-      "应有覆盖 #quickLookModal .ql-panel 的 hover:none 块"
+      "应有覆盖 #quickLookModal .ql-chrome 的 hover:none 块"
     );
     assert.ok(
       /opacity: 1 !important/.test(block),
@@ -111,6 +169,10 @@ test("快速审题：指针移开后压暗只留题干", async (t) => {
     assert.ok(
       /filter: none !important/.test(block),
       "hover:none 时必须去掉压暗滤镜"
+    );
+    assert.ok(
+      /#quickLookModal\.ql-backdrop/.test(block),
+      "hover:none 时遮罩应回到原来的不透明度"
     );
   });
 
