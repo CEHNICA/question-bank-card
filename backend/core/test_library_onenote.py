@@ -54,12 +54,43 @@ class OneNoteLinkTests(TestCase):
 
     @patch("core.library_onenote._backfill_page_image")
     @patch("core.library_onenote.shell_open_onenote", return_value=True)
+    @patch("core.library_onenote._render_in_background")
     @patch("core.library_onenote.cached_question_image", return_value=None)
     @patch("core.library_onenote.call_bridge")
-    def test_create_or_sync_page_success(self, mock_call, _mock_cache, mock_shell, mock_backfill):
-        """建页热路径不渲染题面图：先文字页打开，图丢后台补。"""
+    def test_create_or_sync_page_success(self, mock_call, _mock_cache, mock_render, mock_shell, mock_backfill):
+        """渲染赶不上预算：先文字页打开，图丢后台补。"""
+        never_done = threading.Event()
+        mock_render.return_value = ({"png": None}, never_done)
         captured_params = {}
+        with patch.object(library_onenote, "IMAGE_WAIT_BUDGET_SECONDS", 0.01):
+            self._run_create_flow(mock_call, captured_params)
 
+        mock_shell.assert_called_once()
+        self.assertNotIn("<one:Image", captured_params.get("pageXml", ""))
+        self.assertNotIn("pageId", captured_params)
+        time.sleep(0.05)
+        mock_backfill.assert_called()
+
+    @patch("core.library_onenote._backfill_page_image")
+    @patch("core.library_onenote.shell_open_onenote", return_value=True)
+    @patch("core.library_onenote._render_in_background")
+    @patch("core.library_onenote.cached_question_image", return_value=None)
+    @patch("core.library_onenote.call_bridge")
+    def test_create_or_sync_page_waits_for_parallel_render_and_skips_backfill(
+        self, mock_call, _mock_cache, mock_render, _mock_shell, mock_backfill
+    ):
+        """渲染在预算内完成：一次带图建页，不再先出文字后补图。"""
+        done = threading.Event()
+        done.set()
+        mock_render.return_value = ({"png": _sample_png_bytes(400, 120)}, done)
+        captured_params = {}
+        self._run_create_flow(mock_call, captured_params)
+
+        self.assertIn("<one:Image", captured_params.get("pageXml", ""))
+        time.sleep(0.05)
+        mock_backfill.assert_not_called()
+
+    def _run_create_flow(self, mock_call, captured_params):
         def fake_call(op, **params):
             if op == "list":
                 return {"notebooks": [{"id": "{nb-1}", "name": "math", "sections": 1, "pages": 10}]}
@@ -75,15 +106,10 @@ class OneNoteLinkTests(TestCase):
         mock_call.side_effect = fake_call
 
         record = library_onenote.create_or_sync_page(self.item)
-        mock_shell.assert_called_once()
         self.assertEqual(record["page_id"], "{page-999}")
         self.assertRegex(record["title"], r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
         self.assertIn("onenote:", record["url"])
-        self.assertNotIn("<one:Image", captured_params.get("pageXml", ""))
         self.assertIn(f"tiyouju://question/{self.item.pk}", captured_params.get("pageXml", ""))
-        self.assertNotIn("pageId", captured_params)
-        time.sleep(0.05)
-        mock_backfill.assert_called()
 
         # 检查数据库是否正确持久化
         refreshed = PublishedQuestion.objects.get(pk=self.item.pk)
@@ -94,6 +120,27 @@ class OneNoteLinkTests(TestCase):
         json_data = library.publication_json(refreshed)
         self.assertIsNotNone(json_data["onenote"])
         self.assertEqual(json_data["onenote"]["page_id"], "{page-999}")
+
+    @patch("core.library_onenote._prewarm_in_background")
+    def test_prewarm_view_starts_background_render_only_for_unlinked_uncached_question(self, mock_prewarm):
+        url = f"/api/library/{self.item.pk}/onenote/prewarm"
+        with patch("core.library_onenote.cached_question_image", return_value=None):
+            res = self.client.post(url, HTTP_X_QB_REQUEST="1")
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json()["warming"])
+        time.sleep(0.05)
+        mock_prewarm.assert_called_once_with(str(self.item.pk))
+
+        with patch("core.library_onenote.cached_question_image", return_value=b"png"):
+            cached = self.client.post(url, HTTP_X_QB_REQUEST="1")
+        self.assertFalse(cached.json()["warming"])
+        self.assertEqual(cached.json()["reason"], "cached")
+
+        self.item.extras = {"onenote": {"page_id": "{p}", "url": "onenote:x"}}
+        self.item.save(update_fields=["extras"])
+        linked = self.client.post(url, HTTP_X_QB_REQUEST="1")
+        self.assertFalse(linked.json()["warming"])
+        self.assertEqual(linked.json()["reason"], "linked")
 
     @patch("core.library_onenote.open_page")
     @patch("core.library_onenote.shell_open_onenote", return_value=True)

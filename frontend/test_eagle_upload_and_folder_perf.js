@@ -24,9 +24,19 @@ test("社区上传弹窗支持关闭二选一提示、后台浮动进度条与�
 
 test("主菜单在缩小窗口或缩放界面时动态计算 maxHeight 避免底部被遮挡无法滚动到底", () => {
   assert.match(html, /function positionEagleAppMainMenu\(/);
+  assert.match(html, /function getVisibleViewportHeight\(/);
   assert.doesNotMatch(html, /id="eagleAppMainMenu"[^>]*max-h-\[84vh\]/);
   assert.match(html, /overscroll-behavior:\s*contain/);
   assert.match(html, /has-update-pill/, "有新版本时更新徽标应换到独立底行，避免把左侧标题挤成竖排");
+  assert.match(html, /id="eagleMenuFullscreenBtn"/, "主菜单应提供软件窗口全屏按钮");
+  assert.match(html, /e\.key === 'F11'/, "工作台支持 F11 切换软件窗口全屏");
+  assert.match(html, /function toggleAppFullscreen\(/);
+});
+
+test("选中未建页的题目时后台预渲染题面图，让 OneNote 一次带图建页", () => {
+  assert.match(html, /function scheduleOneNotePrewarm\(/);
+  assert.match(html, /\/onenote\/prewarm/);
+  assert.match(html, /if \(!hasNote\) scheduleOneNotePrewarm\(q\.id\)/);
 });
 
 test("题库大文件夹性能关键路径已走缓存与单遍索引优化", () => {

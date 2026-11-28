@@ -3,6 +3,21 @@
 这里记录源码改动；可下载安装包的版本以 [Releases](https://github.com/CEHNICA/question-bank-card/releases) 为准。
 
 
+## 2.3.15
+
+**修复应用内自动更新无法弹出安装与重复下载、OneNote 一次带图建页加速、窗口工作区防任务栏遮挡及 `F11` 全屏快捷键**
+
+- **应用内更新安装与复用修复（`packaging/installer.iss`、`backend/core/app_update.py`、`backend/core/test_app_update.py`、`test_packaging.py`）**：
+  - 移除安装包 `StopRunningAppProcesses()` 中误杀子进程树的 `/T` 参数，避免应用内拉起安装程序时把安装程序自己一并终止；新增 `IsMainAppRunning()` 与 `ShouldAutoRelaunch()`，装完后自动重开新版软件；
+  - 安装启动改用脱离父进程标志并传入 `/SILENT /AUTOSTART=1` 展示标准安装进度窗口；下载前优先校验 `%TEMP%\TiYouJu-Setup-<version>.exe` 的官网 SHA-256，命中一致即跳过重复下载。
+- **OneNote 一次带图建页与选中预渲染（`backend/core/library_onenote.py`、`backend/qb_server/urls.py`、`frontend/eagle/index.html`、`backend/core/test_library_onenote.py`）**：
+  - 首次建页将题面图渲染与 OneNote 分区准备并行执行（8 秒预算内直接一次带图建页，超时才后台补图）；
+  - 新增 `POST /api/library/<id>/onenote/prewarm` 接口，在工作台选中未建页题目停留 0.8 秒后后台悄悄预渲染题面图进缓存。
+- **窗口工作区防任务栏遮挡与 `F11` 软件全屏（`app_window.py`、`frontend/eagle/index.html`、`frontend/app.js`、`frontend/shortcut-help.js`、`test_app_window.py`、`frontend/test_eagle_upload_and_folder_perf.js`）**：
+  - 桌面端启动按 `SPI_GETWORKAREA` 与系统 DPI 计算可用工作区宽高并钳制窗口范围，主菜单定位 `positionEagleAppMainMenu()` 同步扣除越过系统任务栏的不可见高度，防止菜单底部「偏好与系统设置」被任务栏挡住；
+  - 新增桌面端 `_OwnWindowApi.toggle_fullscreen()` 与全局 **`F11`** 全屏快捷键及工作台 ≡ 主菜单全屏按钮，并在快捷键面板同步展示。
+
+
 ## 2.3.14
 
 **修复社区题包上传被 Cloudflare 拦截报错、经典页更新进度头及 SignPath 开源签名工作流接入**

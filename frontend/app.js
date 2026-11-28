@@ -10085,6 +10085,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
   $("tourSkip").addEventListener("click", endTour);
   window.addEventListener("resize", () => requestAnimationFrame(placeTour));
   window.addEventListener("scroll", () => requestAnimationFrame(placeTour), { passive: true });
+  // 全局软件窗口全屏快捷键 (F11)
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "F11" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
+      if (window.pywebview?.api?.toggle_fullscreen) {
+        event.preventDefault();
+        void window.pywebview.api.toggle_fullscreen();
+      }
+    }
+  });
   // While the tour is open its keys come first and the review shortcuts wait.
   document.addEventListener("keydown", (event) => {
     const tourNode = $("tour");

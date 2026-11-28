@@ -549,6 +549,10 @@ def render_question_image(publication: PublishedQuestion) -> bytes | None:
         logger.warning("OneNote 题面图渲染排队超时 %s", publication.pk)
         return None
     try:
+        # 排队期间别的线程（预热 / 复制）可能已经渲染完并落盘，拿到锁后先复查缓存。
+        cached_after_wait = cached_question_image(publication)
+        if cached_after_wait is not None:
+            return cached_after_wait
         png = clip._render_question_png(payload)
     except clip.ClipboardError as err:
         logger.warning("OneNote 题面图渲染失败 %s: %s", publication.pk, err)
@@ -561,6 +565,65 @@ def render_question_image(publication: PublishedQuestion) -> bytes | None:
     except OSError:
         pass
     return png
+
+
+# 首次建页时等题面图的最长时间：渲染与「找分区 / 起 COM」并行，赶得上就一次带图建页，赶不上再后台补。
+IMAGE_WAIT_BUDGET_SECONDS = 8.0
+
+
+def _render_in_background(publication: PublishedQuestion) -> tuple[dict[str, Any], threading.Event]:
+    """在后台线程渲染题面图；返回（结果槽, 完成信号）。渲染失败时结果槽里 png 为 None。"""
+    holder: dict[str, Any] = {"png": None}
+    done = threading.Event()
+
+    def _work() -> None:
+        try:
+            holder["png"] = render_question_image(publication)
+        except Exception:  # noqa: BLE001 - 渲染异常只退回文字页，不拖垮建页
+            logger.exception("OneNote 并行渲染题面图失败 %s", publication.pk)
+        finally:
+            done.set()
+            try:
+                from django.db import connections
+
+                connections.close_all()
+            except Exception:  # noqa: BLE001
+                pass
+
+    threading.Thread(target=_work, name=f"onenote-render-{publication.pk}", daemon=True).start()
+    return holder, done
+
+
+def prewarm_question_image(publication: PublishedQuestion) -> bool:
+    """题目被选中时提前把题面图渲染进缓存，之后「记笔记」建页就能一次带图。
+
+    已有缓存、原图题或渲染通道正忙时直接跳过（不排队、不抢资源）。
+    """
+    from . import library_clipboard as clip
+
+    if cached_question_image(publication) is not None or _source_image_png(publication) is not None:
+        return False
+    if not clip._render_lock.acquire(blocking=False):
+        return False
+    clip._render_lock.release()
+    return render_question_image(publication) is not None
+
+
+def _prewarm_in_background(publication_id: str) -> None:
+    try:
+        publication = PublishedQuestion.objects.get(pk=publication_id)
+        prewarm_question_image(publication)
+    except PublishedQuestion.DoesNotExist:
+        return
+    except Exception:  # noqa: BLE001 - 预热只是加速手段，失败不能影响任何操作
+        logger.exception("OneNote 题面图预热失败 %s", publication_id)
+    finally:
+        try:
+            from django.db import connections
+
+            connections.close_all()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _ensure_protocol_background() -> None:
@@ -772,7 +835,8 @@ def create_or_sync_page(publication: PublishedQuestion) -> dict[str, Any]:
     """在 OneNote 中为该题目创建答题页并尽快打开。
 
     已有关联则只打开，绝不 create_xml 覆盖原页（手写会没）。
-    首次建页：有缓存才同步塞图；否则先文字页打开，题面图后台补。
+    首次建页：有缓存才同步塞图；否则题面图与「找分区 / 建页准备」并行渲染，
+    赶得上（默认最多等 8 秒）就一次带图建页；赶不上才先开文字页、题面图后台补。
     """
     existing_onenote = (publication.extras or {}).get("onenote") or {}
     if isinstance(existing_onenote, dict):
@@ -785,14 +849,20 @@ def create_or_sync_page(publication: PublishedQuestion) -> dict[str, Any]:
             open_page(publication)
             return dict(existing_onenote)
 
+    # 只吃缓存 / 本地裁片；没有时在后台线程渲染，与下面的 COM 查分区并行，不再串行相加。
+    png = cached_question_image(publication) or _source_image_png(publication)
+    render_job = _render_in_background(publication) if png is None else None
+
     _nb_id, sec_id, nb_name, sec_name = resolve_target_section()
     title = _page_title(publication)
     created_iso, created_date, created_hm = _format_attempt_stamp()
 
     threading.Thread(target=_ensure_protocol_background, name="onenote-protocol-register", daemon=True).start()
 
-    # 只吃缓存，绝不在建页热路径里启动无头浏览器；原图题直接读取本地裁片秒传。
-    png = cached_question_image(publication) or _source_image_png(publication)
+    if render_job is not None:
+        holder, done = render_job
+        done.wait(timeout=IMAGE_WAIT_BUDGET_SECONDS)
+        png = holder.get("png")
     need_backfill = png is None
     page_xml = build_page_xml(publication, title, png)
 
@@ -1280,6 +1350,28 @@ def onenote_create_view(request: HttpRequest, publication_id: str) -> JsonRespon
     except Exception as exc:
         logger.exception("Unexpected error creating OneNote page for %s", publication_id)
         return JsonResponse({"ok": False, "error": f"创建 OneNote 页面异常: {exc}"}, status=500)
+
+
+@csrf_exempt
+def onenote_prewarm_view(request: HttpRequest, publication_id: str) -> JsonResponse:
+    """POST /api/library/<publication_id>/onenote/prewarm: 后台提前渲染题面图，让之后建页一次带图。"""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+
+    publication = get_object_or_404(PublishedQuestion, pk=publication_id)
+    extras = publication.extras or {}
+    existing = extras.get("onenote") if isinstance(extras, dict) else None
+    if isinstance(existing, dict) and (existing.get("page_id") or existing.get("url")):
+        return JsonResponse({"ok": True, "warming": False, "reason": "linked"})
+    if cached_question_image(publication) is not None:
+        return JsonResponse({"ok": True, "warming": False, "reason": "cached"})
+    threading.Thread(
+        target=_prewarm_in_background,
+        args=(str(publication.pk),),
+        name=f"onenote-prewarm-{publication.pk}",
+        daemon=True,
+    ).start()
+    return JsonResponse({"ok": True, "warming": True})
 
 
 @csrf_exempt

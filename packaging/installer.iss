@@ -105,15 +105,20 @@ Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"
 [Run]
 Filename: "{app}\tiyouju.exe"; Parameters: "setup-agents --quiet"; Flags: runhidden waituntilterminated; StatusMsg: "正在为本机 AI 助手配置题有据技能与命令行..."
 Filename: "{app}\{#MyAppExeName}"; Description: "启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait runasoriginaluser; Check: ShouldAutoRelaunch
 
 [Code]
+var
+  AppWasRunningBeforeSetup: Boolean;
+
 procedure StopRunningAppProcesses();
 var
   ResultCode: Integer;
 begin
+  { 不要加 /T：从应用内拉起安装程序时，/T 会把安装程序自己作为子进程一并杀掉。 }
   Exec(
     ExpandConstant('{sys}\taskkill.exe'),
-    '/F /T /IM {#MyAppExeName} /IM tiyouju.exe',
+    '/F /IM {#MyAppExeName} /IM tiyouju.exe',
     '',
     SW_HIDE,
     ewWaitUntilTerminated,
@@ -121,8 +126,29 @@ begin
   );
 end;
 
+function ShouldAutoRelaunch(): Boolean;
+begin
+  Result := (ExpandConstant('{param:AUTOSTART|0}') = '1') or (WizardSilent and AppWasRunningBeforeSetup);
+end;
+
+function IsMainAppRunning(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result :=
+    Exec(
+      ExpandConstant('{cmd}'),
+      '/C tasklist /NH /FI "IMAGENAME eq {#MyAppExeName}" | findstr /I "{#MyAppExeName}" >nul',
+      '',
+      SW_HIDE,
+      ewWaitUntilTerminated,
+      ResultCode
+    ) and (ResultCode = 0);
+end;
+
 function InitializeSetup(): Boolean;
 begin
+  AppWasRunningBeforeSetup := IsMainAppRunning();
   StopRunningAppProcesses();
   Result := True;
 end;

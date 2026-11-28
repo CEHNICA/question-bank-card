@@ -516,16 +516,31 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(created["title"], "题有据")
         self.assertEqual(created["url"], "http://127.0.0.1:9/eagle")
         self.assertTrue(created["window"]["text_select"])
+        self.assertIsNotNone(created["window"].get("js_api"))
         self.assertEqual(created["start"]["gui"], "edgechromium")
         self.assertIs(created["start"]["private_mode"], False)
         self.assertEqual(created["start"]["storage_path"], tmp)
         self.assertTrue(callable(created["shown"]))
 
+        api = created["window"]["js_api"]
+        self.assertFalse(api.is_fullscreen())
+        window_calls: list[str] = []
+
+        class _FakeFullscreenWindow:
+            fullscreen = False
+
+            def toggle_fullscreen(self):
+                self.fullscreen = not self.fullscreen
+                window_calls.append("toggle")
+
+        api.bind(_FakeFullscreenWindow())
+        self.assertTrue(api.toggle_fullscreen())
+        self.assertTrue(api.is_fullscreen())
+        self.assertFalse(api.toggle_fullscreen())
+        self.assertEqual(window_calls, ["toggle", "toggle"])
+
     def test_own_window_ignores_an_edge_page_with_the_same_title(self):
-        windows = {
-            11: ("题有据 · 题库工作台", 100),
-            22: ("题有据 · 题库工作台", 200),
-        }
+        windows = {11: ("题有据 · 题库工作台", 100), 22: ("题有据 · 题库工作台", 200)}
         names = {100: "msedge.exe", 200: "questionbankcard.exe"}
 
         class FakeUser32:

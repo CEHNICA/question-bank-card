@@ -205,6 +205,35 @@ class OfficialUpdateTests(SimpleTestCase):
         written_exe = self.root / "TiYouJu-Setup-9.9.9.exe"
         self.assertEqual(written_exe.read_bytes(), installer)
 
+    def test_cached_verified_installer_skips_redownload_and_launches_visible_autostart(self):
+        installer = b"cached-official-installer-9.9.9"
+        digest = hashlib.sha256(installer).hexdigest()
+        cached_file = self.root / "TiYouJu-Setup-9.9.9.exe"
+        cached_file.write_bytes(installer)
+        fetched_urls: list[str] = []
+
+        def fake_open(request, timeout):
+            fetched_urls.append(request.full_url)
+            if urlparse(request.full_url).path == "/download/installer":
+                raise AssertionError("Should not re-download installer when cached SHA-256 matches")
+            return _response_for(request.full_url, "9.9.9", installer, digest)
+
+        with (
+            patch.dict(app_update.os.environ, {"TEMP": str(self.root), "TMP": str(self.root)}),
+            patch.object(app_update.urllib.request, "urlopen", side_effect=fake_open),
+            patch.object(app_update.subprocess, "Popen") as launched,
+            patch.object(app_update.os, "name", "nt"),
+        ):
+            result = app_update.install_latest()
+
+        self.assertEqual(result["version"], "9.9.9")
+        self.assertNotIn(app_update.INSTALLER_URL, fetched_urls)
+        launched.assert_called_once()
+        cmd = launched.call_args.args[0]
+        self.assertIn("/SILENT", cmd)
+        self.assertIn("/AUTOSTART=1", cmd)
+        self.assertNotIn("/VERYSILENT", cmd)
+
 
 if __name__ == "__main__":
     unittest.main()

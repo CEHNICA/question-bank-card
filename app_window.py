@@ -63,6 +63,8 @@ def _resolve_app_version() -> str:
             return ""
     except Exception:  # noqa: BLE001 - 版本号只作启动展示，读取异常不能阻断启动
         return ""
+
+
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 CREATE_NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
 _ICON_HANDLE_CACHE: dict[tuple[str, int, int], tuple[int, int]] = {}
@@ -1073,6 +1075,83 @@ def _own_window_storage() -> Path:
     return folder
 
 
+class _OwnWindowApi:
+    """暴露给本进程 WebView2 页面的最小窗口控制接口（不含任何文件或系统命令权限）。"""
+
+    def __init__(self) -> None:
+        self._window = None
+        self._fullscreen = False
+
+    def bind(self, window) -> None:
+        self._window = window
+
+    def is_fullscreen(self) -> bool:
+        if self._window is not None:
+            return bool(getattr(self._window, "fullscreen", self._fullscreen))
+        return self._fullscreen
+
+    def toggle_fullscreen(self) -> bool:
+        if self._window is None:
+            return self._fullscreen
+        self._window.toggle_fullscreen()
+        self._fullscreen = bool(getattr(self._window, "fullscreen", not self._fullscreen))
+        return self._fullscreen
+
+
+def _work_area_logical_size() -> tuple[int, int]:
+    """返回主显示器去除任务栏后的可用逻辑宽高，拿不到时退回常见桌面尺寸。"""
+    if os.name != "nt":
+        return (1440, 900)
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        rect = wintypes.RECT()
+        if not user32.SystemParametersInfoW(48, 0, ctypes.byref(rect), 0):  # SPI_GETWORKAREA
+            return (1440, 900)
+        dpi = 96
+        get_dpi = getattr(user32, "GetDpiForSystem", None)
+        if callable(get_dpi):
+            dpi = int(get_dpi() or 96)
+        dpi = max(96, dpi)
+        width = max(640, int((rect.right - rect.left) * 96 / dpi))
+        height = max(480, int((rect.bottom - rect.top) * 96 / dpi))
+        return (width, height)
+    except Exception:  # noqa: BLE001 - 桌面工作区读取异常时退回默认窗口尺寸
+        return (1440, 900)
+
+
+def _clamp_own_window_to_work_area(user32, hwnd: int) -> None:
+    """若非最大化窗口底边越过任务栏，收进系统可用工作区内，避免菜单或底栏被遮挡。"""
+    if os.name != "nt" or not hwnd:
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        if getattr(user32, "IsZoomed", None) and user32.IsZoomed(hwnd):
+            return
+        work = wintypes.RECT()
+        win = wintypes.RECT()
+        if not user32.SystemParametersInfoW(48, 0, ctypes.byref(work), 0):
+            return
+        if not user32.GetWindowRect(hwnd, ctypes.byref(win)):
+            return
+        work_w = max(480, int(work.right - work.left))
+        work_h = max(360, int(work.bottom - work.top))
+        cur_w = int(win.right - win.left)
+        cur_h = int(win.bottom - win.top)
+        new_w = min(cur_w, work_w)
+        new_h = min(cur_h, work_h)
+        new_x = max(int(work.left), min(int(win.left), int(work.right) - new_w))
+        new_y = max(int(work.top), min(int(win.top), int(work.bottom) - new_h))
+        if (new_x, new_y, new_w, new_h) != (int(win.left), int(win.top), cur_w, cur_h):
+            user32.SetWindowPos(hwnd, 0, new_x, new_y, new_w, new_h, 0x0004 | 0x0010)  # NOZORDER | NOACTIVATE
+    except Exception:  # noqa: BLE001 - 坐标调整失败不阻断窗口展示
+        pass
+
+
 def run_own_window(url: str) -> None:
     """打开题有据自己的窗口，直到用户关掉它才返回。
 
@@ -1081,15 +1160,23 @@ def run_own_window(url: str) -> None:
     import webview
 
     icon = ASSETS / "app.ico"
+    work_w, work_h = _work_area_logical_size()
+    init_w = min(1440, max(960, work_w - 32))
+    init_h = min(900, max(640, work_h - 32))
+    min_w = min(1100, init_w)
+    min_h = min(720, init_h)
+    window_api = _OwnWindowApi()
     window = webview.create_window(
         APP_TITLE,
         url,
-        width=1440,
-        height=900,
-        min_size=(1100, 720),
+        width=init_w,
+        height=init_h,
+        min_size=(min_w, min_h),
         text_select=True,
         background_color="#F4F7FB",
+        js_api=window_api,
     )
+    window_api.bind(window)
 
     def _ensure_front_after_start() -> None:
         # Splash 销毁后 Windows 可能把焦点还给桌面/上一扇窗口，等 WebView2 首帧就绪后再复核一次。
@@ -1100,6 +1187,7 @@ def run_own_window(url: str) -> None:
         hwnd = _own_window_hwnd(user32)
         if not hwnd:
             return
+        _clamp_own_window_to_work_area(user32, hwnd)
         fg = 0
         with contextlib.suppress(Exception):
             fg = int(user32.GetForegroundWindow() or 0)
@@ -1121,6 +1209,7 @@ def run_own_window(url: str) -> None:
             apply_window_icon(user32, hwnd)
             with contextlib.suppress(Exception):
                 window.restore()
+            _clamp_own_window_to_work_area(user32, hwnd)
             _raise_own_window(user32, hwnd, pulse_topmost=True)
         threading.Thread(target=_ensure_front_after_start, daemon=True).start()
 

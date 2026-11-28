@@ -39,10 +39,7 @@ class BundleAuditTests(unittest.TestCase):
             certifi.write_text("-----BEGIN CERTIFICATE-----\npublic CA roots\n", encoding="utf-8")
             licenses = bundle / "THIRD_PARTY_LICENSES" / "example" / "LICENSE.txt"
             licenses.parent.mkdir(parents=True)
-            licenses.write_text(
-                "A license may document -----BEGIN PRIVATE KEY----- as plain text.",
-                encoding="utf-8",
-            )
+            licenses.write_text("A license may document -----BEGIN PRIVATE KEY----- as plain text.", encoding="utf-8")
             audit_bundle(bundle)
 
     def test_only_blank_docx_dependency_template_is_allowed(self):
@@ -86,10 +83,7 @@ class BundleAuditTests(unittest.TestCase):
                 path = bundle / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(b"private")
-            self.assertEqual(
-                set(find_forbidden_files(bundle)),
-                {item.replace("\\", "/") for item in forbidden},
-            )
+            self.assertEqual(set(find_forbidden_files(bundle)), {item.replace("\\", "/") for item in forbidden})
             with self.assertRaises(BundleAuditError) as caught:
                 audit_bundle(bundle)
             for relative in forbidden:
@@ -133,8 +127,7 @@ class BundleAuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             bundle = self.make_bundle(Path(tmp))
             (bundle / "_internal" / "frontend" / "app.js").write_text(
-                'headers.Authorization = "Bearer " + token; const api_key = settings.api_key;',
-                encoding="utf-8",
+                'headers.Authorization = "Bearer " + token; const api_key = settings.api_key;', encoding="utf-8"
             )
             audit_bundle(bundle)
 
@@ -169,7 +162,7 @@ class BundleAuditTests(unittest.TestCase):
         )
         self.assertIn("onenote_bridge.ps1", spec)
         build = (root / "packaging" / "build.ps1").read_text(encoding="utf-8")
-        self.assertIn("$cliVersion.Trim() -ne \"tiyouju $Version\"", build)
+        self.assertIn('$cliVersion.Trim() -ne "tiyouju $Version"', build)
         installer = (root / "packaging" / "installer.iss").read_text(encoding="utf-8")
         self.assertIn('Type: files; Name: "{app}\\tiyouju.exe"', installer)
 
@@ -208,13 +201,11 @@ class DistributionLicenseTests(unittest.TestCase):
     def test_build_and_installer_ship_license_materials(self):
         build = (self.ROOT / "packaging" / "build.ps1").read_text(encoding="utf-8")
         installer = (self.ROOT / "packaging" / "installer.iss").read_text(encoding="utf-8")
-        source_template = (self.ROOT / "packaging" / "CORRESPONDING_SOURCE.template.txt").read_text(
-            encoding="utf-8"
-        )
+        source_template = (self.ROOT / "packaging" / "CORRESPONDING_SOURCE.template.txt").read_text(encoding="utf-8")
         self.assertIn("$ThirdPartyLicenses", build)
         self.assertIn("Copy-Item -LiteralPath $ProjectLicense", build)
         self.assertIn("LicenseFile=..\\LICENSE", installer)
-        self.assertIn('{app}\\THIRD_PARTY_LICENSES', installer)
+        self.assertIn("{app}\\THIRD_PARTY_LICENSES", installer)
         self.assertIn("OutputBaseFilename=TiYouJu-Setup-", installer)
         self.assertIn("'SHA256SUMS.txt'", build)
         self.assertIn("[System.Text.UTF8Encoding]::new($false)", build)
@@ -247,6 +238,8 @@ class DistributionLicenseTests(unittest.TestCase):
         self.assertNotIn('Type: filesandordirs; Name: "{userprograms}\\{#MyLegacyAppName}"', installer)
         self.assertIn("CloseApplications=force", installer)
         self.assertIn("taskkill.exe", installer)
+        self.assertNotIn("/F /T /IM", installer)
+        self.assertIn("function ShouldAutoRelaunch", installer)
         self.assertIn("function PrepareToInstall", installer)
 
 
@@ -258,15 +251,14 @@ class Utf8ChildProcessTests(unittest.TestCase):
             backend = root / "backend"
             runtime = root / "runtime"
             backend.mkdir()
-            (backend / "manage.py").write_text(
-                "print('处理试卷：中文文件名.pdf', flush=True)\n",
-                encoding="utf-8",
-            )
+            (backend / "manage.py").write_text("print('处理试卷：中文文件名.pdf', flush=True)\n", encoding="utf-8")
             poisoned = dict(os.environ)
             poisoned.update({"PYTHONIOENCODING": "ascii", "PYTHONUTF8": "0"})
-            with patch.object(launcher, "PYTHON", Path(sys.executable)), \
-                    patch.object(launcher, "BACKEND", backend), \
-                    patch.object(launcher, "RUNTIME", runtime):
+            with (
+                patch.object(launcher, "PYTHON", Path(sys.executable)),
+                patch.object(launcher, "BACKEND", backend),
+                patch.object(launcher, "RUNTIME", runtime),
+            ):
                 process, stream = launcher._start(["ignored"], poisoned, "worker.log")
                 try:
                     self.assertEqual(process.wait(timeout=15), 0)
@@ -309,14 +301,14 @@ class Utf8ChildProcessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             log = Path(tmp) / "internal.log"
             environment = dict(os.environ)
-            environment.update({
-                "PYTHONIOENCODING": "ascii",
-                "PYTHONUTF8": "0",
-                "QB_INTERNAL_LOG": str(log),
-            })
+            environment.update({"PYTHONIOENCODING": "ascii", "PYTHONUTF8": "0", "QB_INTERNAL_LOG": str(log)})
             process = subprocess.Popen(
-                [str(pythonw), str(Path(__file__).resolve().parent / "app_launcher.pyw"),
-                 "--internal-role", "_utf8_probe"],
+                [
+                    str(pythonw),
+                    str(Path(__file__).resolve().parent / "app_launcher.pyw"),
+                    "--internal-role",
+                    "_utf8_probe",
+                ],
                 cwd=Path(__file__).resolve().parent,
                 env=environment,
                 stdin=subprocess.DEVNULL,
@@ -330,14 +322,16 @@ class Utf8ChildProcessTests(unittest.TestCase):
 
 class FrozenRuntimeTests(unittest.TestCase):
     def test_child_environment_is_utf8_data_scoped_and_secret_free_by_default(self):
-        environment = launcher._child_environment({
-            "Path": "kept",
-            "PYTHONIOENCODING": "ascii",
-            "PYTHONUTF8": "0",
-            "MINERU_TOKEN": "private",
-            "minimax_api_key": "also-private",
-            "SILICONFLOW_API_KEY": "third-private",
-        })
+        environment = launcher._child_environment(
+            {
+                "Path": "kept",
+                "PYTHONIOENCODING": "ascii",
+                "PYTHONUTF8": "0",
+                "MINERU_TOKEN": "private",
+                "minimax_api_key": "also-private",
+                "SILICONFLOW_API_KEY": "third-private",
+            }
+        )
         self.assertEqual(environment["Path"], "kept")
         self.assertEqual(environment["PYTHONIOENCODING"], "utf-8")
         self.assertEqual(environment["PYTHONUTF8"], "1")
@@ -369,18 +363,20 @@ class FrozenRuntimeTests(unittest.TestCase):
             executable = root / "installed" / "QuestionBankCard.exe"
             resources.mkdir(parents=True)
             local.mkdir()
-            code = "\n".join((
-                "import json, os, sys",
-                f"sys.frozen = True",
-                f"sys._MEIPASS = {str(resources)!r}",
-                f"sys.executable = {str(executable)!r}",
-                f"os.environ['LOCALAPPDATA'] = {str(local)!r}",
-                "os.environ.pop('QB_USER_ROOT', None)",
-                "import start_question_bank as item",
-                "print(json.dumps({name: str(getattr(item, name)) for name in "
-                "['RESOURCE_ROOT', 'PROGRAM_ROOT', 'BACKEND', 'FRONTEND', 'USER_ROOT', "
-                "'DATABASE', 'DATA_ROOT', 'RUNTIME', 'BACKUPS']}))",
-            ))
+            code = "\n".join(
+                (
+                    "import json, os, sys",
+                    f"sys.frozen = True",
+                    f"sys._MEIPASS = {str(resources)!r}",
+                    f"sys.executable = {str(executable)!r}",
+                    f"os.environ['LOCALAPPDATA'] = {str(local)!r}",
+                    "os.environ.pop('QB_USER_ROOT', None)",
+                    "import start_question_bank as item",
+                    "print(json.dumps({name: str(getattr(item, name)) for name in "
+                    "['RESOURCE_ROOT', 'PROGRAM_ROOT', 'BACKEND', 'FRONTEND', 'USER_ROOT', "
+                    "'DATABASE', 'DATA_ROOT', 'RUNTIME', 'BACKUPS']}))",
+                )
+            )
             completed = subprocess.run(
                 [sys.executable, "-c", code],
                 cwd=Path(__file__).resolve().parent,
@@ -401,7 +397,9 @@ class FrozenRuntimeTests(unittest.TestCase):
             self.assertEqual(paths["USER_ROOT"], expected_user)
             for name in ("DATABASE", "DATA_ROOT", "RUNTIME", "BACKUPS"):
                 self.assertTrue(paths[name].is_relative_to(expected_user), f"{name} escaped the user data root")
-                self.assertFalse(paths[name].is_relative_to(resources.resolve()), f"{name} leaked into install resources")
+                self.assertFalse(
+                    paths[name].is_relative_to(resources.resolve()), f"{name} leaked into install resources"
+                )
 
     def test_internal_runtime_rejects_unlisted_roles(self):
         with self.assertRaisesRegex(ValueError, "不支持的内部角色"):
@@ -488,12 +486,14 @@ class InstallerReceiptTests(unittest.TestCase):
             source = (
                 f'[assembly:System.Reflection.AssemblyFileVersion("{numeric}")]\n'
                 f'[assembly:System.Reflection.AssemblyInformationalVersion("{version}")]\n'
-                'public class InstallerStub { public static void Main() { '
+                "public class InstallerStub { public static void Main() { "
                 f'System.Console.WriteLine("tiyouju {version}"); }} }}'
             )
             command = (
-                "Add-Type -TypeDefinition '" + source.replace("'", "''")
-                + "' -OutputAssembly '" + str(target).replace("'", "''")
+                "Add-Type -TypeDefinition '"
+                + source.replace("'", "''")
+                + "' -OutputAssembly '"
+                + str(target).replace("'", "''")
                 + "' -OutputType ConsoleApplication"
             )
             compiled = cls.powershell(command)
@@ -510,8 +510,11 @@ class InstallerReceiptTests(unittest.TestCase):
         encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
         return subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            encoding="utf-8", errors="replace", timeout=45,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            encoding="utf-8",
+            errors="replace",
+            timeout=45,
         )
 
     def run_case(self, installed, release="1.10.14", cli="1.10.14"):

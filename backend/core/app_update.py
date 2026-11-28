@@ -410,16 +410,34 @@ def _download_installer(part_path: Path, expected_checksum: str) -> None:
                     _add_progress_bytes(len(chunk), total or size)
 
     _set_progress(status="verifying", stage_label="下载完成，正在核对官网 SHA-256 校验值…")
+    if _file_sha256(part_path) != expected_checksum:
+        part_path.unlink(missing_ok=True)
+        raise UpdateError("安装包校验没通过，没有安装。")
+
+
+def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
-    with part_path.open("rb") as verify_handle:
+    with path.open("rb") as verify_handle:
         while True:
             block = verify_handle.read(1024 * 1024)
             if not block:
                 break
             digest.update(block)
-    if digest.hexdigest() != expected_checksum:
-        part_path.unlink(missing_ok=True)
-        raise UpdateError("安装包校验没通过，没有安装。")
+    return digest.hexdigest()
+
+
+def _launch_detached_installer(args: list[str]) -> None:
+    if os.name != "nt":
+        subprocess.Popen(args, close_fds=True)
+        return
+    base_flags = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(
+        subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
+    )
+    breakaway = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
+    try:
+        subprocess.Popen(args, close_fds=True, creationflags=base_flags | breakaway)
+    except PermissionError:
+        subprocess.Popen(args, close_fds=True, creationflags=base_flags)
 
 
 def install_latest() -> dict:
@@ -436,24 +454,39 @@ def install_latest() -> dict:
         temp_dir = Path(os.environ.get("TEMP") or os.environ.get("TMP") or ".")
         destination = temp_dir / f"TiYouJu-Setup-{info['latest']}.exe"
         part_path = temp_dir / f"TiYouJu-Setup-{info['latest']}.exe.part"
-        _download_installer(part_path, checksums)
-        os.replace(part_path, destination)
-        part_path = None
+        reused_cached = False
+        if destination.is_file():
+            _set_progress(status="verifying", stage_label="本机已有同版本安装包，正在核对官网 SHA-256 校验值…")
+            if _file_sha256(destination) == checksums:
+                cached_size = int(destination.stat().st_size)
+                _set_progress(
+                    status="verifying",
+                    stage_label="本机已有校验通过的安装包，跳过重复下载。",
+                    bytes_downloaded=cached_size,
+                    bytes_total=cached_size,
+                )
+                reused_cached = True
+            else:
+                destination.unlink(missing_ok=True)
+        if not reused_cached:
+            _download_installer(part_path, checksums)
+            os.replace(part_path, destination)
+            part_path = None
         _set_progress(status="backing_up", stage_label="校验通过，正在备份本地题库…")
         _backup_database()
         if os.name != "nt":
             raise UpdateError("自动安装只支持 Windows。")
         _set_progress(status="launching", stage_label="题库已备份，正在启动安装程序…")
-        subprocess.Popen(
+        _launch_detached_installer(
             [
                 str(destination),
-                "/VERYSILENT",
+                "/SILENT",
                 "/SUPPRESSMSGBOXES",
                 "/NORESTART",
                 "/CLOSEAPPLICATIONS",
                 "/MERGETASKS=!desktopicon",
-            ],
-            close_fds=True,
+                "/AUTOSTART=1",
+            ]
         )
         _set_progress(status="succeeded", stage_label=f"正在安装 {info['latest']}，软件即将关掉并在装完后自动重开。")
         return {"ok": True, "version": info["latest"]}

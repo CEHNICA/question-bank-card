@@ -3371,6 +3371,10 @@
           <span>◨</span><span>显隐右栏</span>
         </button>
       </div>
+      <button id="eagleMenuFullscreenBtn" type="button" onclick="toggleAppFullscreen(); hideEagleAppMainMenu();" class="eagle-menu-item" title="切换软件窗口全屏 (F11)">
+        <span class="eagle-menu-item-left"><span class="eagle-menu-icon">⛶</span><span id="eagleMenuFullscreenLabel">全屏显示</span></span>
+        <span class="eagle-menu-pill">F11</span>
+      </button>
     </div>
 
     <!-- 5. 帮助与系统设置 -->
@@ -4376,6 +4380,7 @@
             <div class="flex items-center justify-between"><span>展开 / 收起筛选面板</span><kbd class="eagle-kbd">Ctrl + F</kbd></div>
             <div class="flex items-center justify-between"><span>显隐左栏 / 右栏</span><kbd class="eagle-kbd">Ctrl + [ / ]</kbd></div>
             <div class="flex items-center justify-between"><span>专注浏览（收起两侧栏）</span><kbd class="eagle-kbd">Tab</kbd></div>
+            <div class="flex items-center justify-between"><span>切换窗口全屏</span><kbd class="eagle-kbd">F11</kbd></div>
             <div class="flex items-center justify-between"><span>缩放界面 / 恢复 100%</span><kbd class="eagle-kbd">Ctrl + 滚轮 / 0</kbd></div>
           </div>
           <div class="rounded-xl border border-slate-200/80 bg-slate-50/60 p-3 space-y-2">
@@ -6325,6 +6330,27 @@
       return `${m}-${day}`;
     }
 
+    const oneNotePrewarmedIds = new Set();
+    let oneNotePrewarmTimer = null;
+
+    /**
+     * 选中一道还没建 OneNote 页的题时，停留片刻后在后台把题面图提前渲染进缓存，
+     * 这样点「记笔记」时能一次带图建页，不再先出文字、后补图片。
+     */
+    function scheduleOneNotePrewarm(qid) {
+      const id = String(qid || '');
+      if (!id || oneNotePrewarmedIds.has(id)) return;
+      clearTimeout(oneNotePrewarmTimer);
+      oneNotePrewarmTimer = setTimeout(() => {
+        if (String(currentActiveQuestionId || '') !== id || oneNotePrewarmedIds.has(id)) return;
+        oneNotePrewarmedIds.add(id);
+        fetch(`${API_BASE}/api/library/${encodeURIComponent(id)}/onenote/prewarm`, {
+          method: 'POST',
+          headers: { 'X-QB-Request': '1' }
+        }).catch(() => { oneNotePrewarmedIds.delete(id); });
+      }, 800);
+    }
+
     function renderInspectorOneNoteBox(q) {
       const box = document.getElementById('metaOneNoteBox');
       if (!box) return;
@@ -6335,6 +6361,7 @@
       }
       box.classList.remove('hidden');
       const hasNote = hasQuestionOneNote(q);
+      if (!hasNote) scheduleOneNotePrewarm(q.id);
       const noteTitle = (q.onenote && q.onenote.title) || '已关联笔记页';
       const attempts = (q.onenote && Array.isArray(q.onenote.attempts)) ? q.onenote.attempts : [];
       const busyHere = oneNoteBusyQid === String(q.id);
@@ -9781,11 +9808,38 @@
 
     let _lastEagleMenuAnchorId = '';
 
+    function getVisibleViewportHeight(vpH) {
+      let visibleVpH = vpH;
+      try {
+        const availH = Number(window.screen && window.screen.availHeight);
+        const availTop = Number((window.screen && window.screen.availTop) || 0);
+        const screenY = Number(window.screenY);
+        const outerH = Number(window.outerHeight);
+        if (
+          Number.isFinite(availH) &&
+          availH > 200 &&
+          Number.isFinite(screenY) &&
+          Number.isFinite(outerH) &&
+          outerH >= vpH
+        ) {
+          const chromeTop = Math.max(0, outerH - vpH - 8);
+          const vpTopOnScreen = screenY + chromeTop;
+          const workBottom = availTop + availH;
+          const workLimit = workBottom - vpTopOnScreen;
+          if (Number.isFinite(workLimit) && workLimit >= 180) {
+            visibleVpH = Math.min(vpH, workLimit);
+          }
+        }
+      } catch (_) {}
+      return visibleVpH;
+    }
+
     function positionEagleAppMainMenu(anchorEl) {
       const menu = document.getElementById('eagleAppMainMenu');
       if (!menu || !menu.style) return;
       const vpW = window.innerWidth || (document.documentElement && document.documentElement.clientWidth) || 1280;
       const vpH = window.innerHeight || (document.documentElement && document.documentElement.clientHeight) || 720;
+      const safeVpH = getVisibleViewportHeight(vpH);
 
       let anchor = anchorEl;
       if (!anchor || (typeof anchor.getBoundingClientRect === 'function' && anchor.getBoundingClientRect().width === 0)) {
@@ -9801,7 +9855,7 @@
       const rect = (anchor && typeof anchor.getBoundingClientRect === 'function') ? anchor.getBoundingClientRect() : null;
       if (anchor && anchor.id) _lastEagleMenuAnchorId = anchor.id;
 
-      menu.style.maxHeight = `${Math.max(160, Math.floor(vpH / scaleGuess - 24))}px`;
+      menu.style.maxHeight = `${Math.max(160, Math.floor(safeVpH / scaleGuess - 24))}px`;
       const measuredScale = (menu.offsetWidth > 0 && typeof menu.getBoundingClientRect === 'function')
         ? (menu.getBoundingClientRect().width / menu.offsetWidth || scaleGuess)
         : scaleGuess;
@@ -9815,22 +9869,64 @@
       }
       const maxLeftCss = Math.max(8, Math.floor((vpW / scale) - (menu.offsetWidth || 272) - 8));
       const leftCss = Math.max(8, Math.min(Math.round(leftVisual / scale), maxLeftCss));
-      const maxTopCss = Math.max(8, Math.floor((vpH / scale) - 160));
+      const maxTopCss = Math.max(8, Math.floor((safeVpH / scale) - 160));
       const topCss = Math.max(8, Math.min(Math.round(topVisual / scale), maxTopCss));
       menu.style.left = `${leftCss}px`;
       menu.style.top = `${topCss}px`;
 
       const actualTop = typeof menu.getBoundingClientRect === 'function' ? menu.getBoundingClientRect().top : (topCss * scale);
-      const availVisual = Math.max(120, vpH - actualTop - 10);
+      const availVisual = Math.max(120, safeVpH - actualTop - 16);
       menu.style.maxHeight = `${Math.max(120, Math.floor(availVisual / scale))}px`;
     }
 
+    async function syncEagleFullscreenLabel() {
+      const labelEl = document.getElementById('eagleMenuFullscreenLabel');
+      if (!labelEl) return;
+      let full = Boolean(document.fullscreenElement);
+      try {
+        if (window.pywebview?.api?.is_fullscreen) {
+          full = Boolean(await window.pywebview.api.is_fullscreen());
+        }
+      } catch (_) {}
+      labelEl.textContent = full ? '退出全屏' : '全屏显示';
+    }
+
+    async function toggleAppFullscreen() {
+      let full = false;
+      try {
+        if (window.pywebview?.api?.toggle_fullscreen) {
+          full = Boolean(await window.pywebview.api.toggle_fullscreen());
+          await syncEagleFullscreenLabel();
+          showToast(full ? '已进入全屏，再按 F11 退出' : '已退出全屏');
+          return full;
+        }
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+          full = false;
+        } else if (document.documentElement?.requestFullscreen) {
+          await document.documentElement.requestFullscreen();
+          full = true;
+        }
+        await syncEagleFullscreenLabel();
+        showToast(full ? '已进入全屏，再按 F11 退出' : '已退出全屏');
+      } catch (_) {
+        showToast('请按 F11 切换全屏显示');
+      }
+      return full;
+    }
+
     if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-      window.addEventListener('resize', () => {
+      const _repositionMenuIfOpen = () => {
         const menu = document.getElementById('eagleAppMainMenu');
         if (menu && !menu.classList.contains('hidden')) {
           positionEagleAppMainMenu();
         }
+      };
+      window.addEventListener('resize', _repositionMenuIfOpen);
+      window.addEventListener('focus', _repositionMenuIfOpen);
+      document.addEventListener('fullscreenchange', () => {
+        void syncEagleFullscreenLabel();
+        _repositionMenuIfOpen();
       });
     }
 
@@ -9845,6 +9941,7 @@
       const willOpen = menu.classList.contains('hidden');
       if (willOpen) {
         updateEagleAppMainMenuCounts();
+        void syncEagleFullscreenLabel();
         const anchor = (e && e.currentTarget) || document.getElementById('btnEagleAppMenu');
         menu.classList.remove('hidden');
         positionEagleAppMainMenu(anchor);
@@ -25322,6 +25419,12 @@
           closeCommunityPublishModal();
           closeCommunityImportModal();
           clearBatchSelection();
+          return;
+        }
+
+        if (e.key === 'F11' && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
+          e.preventDefault();
+          void toggleAppFullscreen();
           return;
         }
 
