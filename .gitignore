@@ -62,3 +62,6 @@ tools/dsh-portable/
 # website visual-check screenshots (local artifacts only)
 website/tools/_shots/
 
+# wrangler 本地状态（miniflare 缓存 / R2 模拟 / 观测日志），只在本机生成
+website/.wrangler/
+

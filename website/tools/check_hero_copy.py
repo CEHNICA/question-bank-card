@@ -24,6 +24,9 @@ INDEX = REPO_ROOT / "website" / "public" / "index.html"
 # 注意不要切 "." 和 "/"：「tiyouju.com」「Windows 10 / 11」这类必须保持完整。
 SPLIT_RE = re.compile(r"[，。、；：！？,;:!?（）()【】\[\]|·]+|\n+")
 
+# 版本号不是文案：每次发版都会变，混进文案对比里会让这把尺子误报「文案丢失」。
+VERSION_PHRASE_RE = re.compile(r"^v?\d+(?:\.\d+)+$")
+
 failures: list[str] = []
 
 
@@ -50,6 +53,11 @@ def phrases(text: str) -> list[str]:
     return out
 
 
+def is_version_phrase(phrase: str) -> bool:
+    """版本号（v2.3.16）随发版变化，不算文案增删。"""
+    return bool(VERSION_PHRASE_RE.match(phrase))
+
+
 def main() -> int:
     old_html = subprocess.run(
         ["git", "show", "HEAD:website/public/index.html"],
@@ -64,8 +72,8 @@ def main() -> int:
     old_text = plain_text(old_html)
     new_text = plain_text(new_html)
 
-    old_phrases = phrases(old_text)
-    new_phrases = phrases(new_text)
+    old_phrases = [p for p in phrases(old_text) if not is_version_phrase(p)]
+    new_phrases = [p for p in phrases(new_text) if not is_version_phrase(p)]
 
     missing = [p for p in old_phrases if p not in new_text]
     added = [p for p in new_phrases if p not in old_text]

@@ -1,3 +1,5 @@
+import { injectVersion } from "./lib/version.mjs";
+
 const GITHUB_REPO = "CEHNICA/question-bank-card";
 const LATEST_RELEASE_PAGE = `https://github.com/${GITHUB_REPO}/releases/latest`;
 const LATEST_MANIFEST_URL = `https://github.com/${GITHUB_REPO}/releases/latest/download/manifest.json`;
@@ -10,6 +12,12 @@ const R2_FRESH_MS = 120 * 1000;
 const BINARY_CACHE_TTL_SECONDS = 3600;
 const RELEASE_NOTES_LIMIT = 4000;
 const KEEP_R2_RELEASES = 3;
+// 首页由 worker 亲自吐出，好把真实最新版注入静态兜底位置。
+const HOMEPAGE_PATHS = new Set(["/", "/index.html"]);
+// 取版本号的等待上限：超时或失败就原样返回静态兜底，绝不拖慢首页。
+const VERSION_INJECT_TIMEOUT_MS = 1500;
+// 注入后的首页在边缘缓存的时长：版本号最多晚一分钟更新，但绝大多数请求不再打到 worker。
+const PAGE_CACHE_TTL_SECONDS = 60;
 
 function extractHighlights(markdown) {
   if (!markdown) return [];
@@ -518,6 +526,71 @@ async function handleDownload(request, env, ctx, target) {
   });
 }
 
+function withTimeout(promise, ms) {
+  let timer = null;
+  const guard = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, guard]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+// 首页由 worker 吐出：把 R2 里每 5 分钟刷新的真实最新版注入静态兜底位置。
+// 写死的版本号每次发版就过期，爬虫与不跑 JS 的分享卡片看到的必须是真版本。
+async function serveHomepage(request, env, ctx) {
+  const assetResponse = await env.ASSETS.fetch(request);
+  const contentType = assetResponse.headers.get("Content-Type") || "";
+  const encoding = (assetResponse.headers.get("Content-Encoding") || "").toLowerCase();
+  // 非 HTML / HEAD / 预压缩响应一律原样放行，不做注入。
+  if (request.method !== "GET" || !contentType.includes("text/html") || (encoding && encoding !== "identity")) {
+    return assetResponse;
+  }
+
+  let html = "";
+  try {
+    html = await assetResponse.text();
+  } catch {
+    return assetResponse;
+  }
+
+  const headers = new Headers(assetResponse.headers);
+  headers.delete("Content-Encoding");
+  headers.delete("ETag");
+
+  let patched = html;
+  let tag = "";
+  try {
+    const result = await withTimeout(getLatestRelease(ctx, env), VERSION_INJECT_TIMEOUT_MS);
+    const release = result?.release || result;
+    if (release?.tag) {
+      tag = release.tag;
+      patched = injectVersion(html, release.tag);
+    }
+  } catch {
+    // 取不到版本号就原样返回静态兜底 —— 版本号不值得让首页打不开。
+    patched = html;
+  }
+
+  if (tag) headers.set("X-TiYouJu-Version", tag);
+
+  const body = new TextEncoder().encode(patched);
+  const digest = await crypto.subtle.digest("SHA-256", body);
+  const etag = `W/"${Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")}"`;
+  headers.set("ETag", etag);
+  headers.set("Content-Length", String(body.byteLength));
+  headers.set("Cache-Control", `public, max-age=${PAGE_CACHE_TTL_SECONDS}`);
+
+  // 条件请求照常回 304，别让回头客每次都重下整页。
+  const ifNoneMatch = request.headers.get("If-None-Match");
+  if (ifNoneMatch && ifNoneMatch.split(",").some((token) => token.trim() === etag)) {
+    return new Response(null, { status: 304, headers });
+  }
+  return new Response(body, { status: assetResponse.status, headers });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -566,6 +639,10 @@ export default {
       if (pathname === "/download/SHA256SUMS.txt") return handleDownload(request, env, ctx, "checksums");
       if (pathname === "/download/install.ps1") return handleDownload(request, env, ctx, "install_script");
       if (pathname === "/download/skill") return handleDownload(request, env, ctx, "skill_pack");
+    }
+
+    if (request.method === "GET" && HOMEPAGE_PATHS.has(pathname)) {
+      return serveHomepage(request, env, ctx);
     }
 
     return env.ASSETS.fetch(request);
