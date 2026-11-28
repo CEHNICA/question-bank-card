@@ -2499,6 +2499,12 @@
       width: min(94vw, 680px);
       max-height: 85vh;
     }
+    /* 预编译 Tailwind 里没有 z-[10012] 到 z-[10016]。顶栏是 z-30，
+       遮罩没有更高的层就会盖不住它，顶上会剩一条白。 */
+    #eaglePreferencesModal { z-index: 10012; }
+    #communityPublishModal { z-index: 10014; }
+    #communityImportModal { z-index: 10015; }
+    #communityUploadCenterModal { z-index: 10016; }
   </style>
   <script>
     // 尽早套上上次的界面缩放，避免先出小字再猛跳一下。

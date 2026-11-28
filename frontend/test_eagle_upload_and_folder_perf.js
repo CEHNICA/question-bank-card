@@ -16,6 +16,7 @@ test("社区上传弹窗支持关闭二选一提示、后台浮动进度条与�
   assert.match(html, /id="commUploadToolbarLabel"/, "顶栏存在后台进度百分比标签");
   assert.match(html, /id="eagleUploadFloatingBar"/, "存在后台浮动进度条");
   assert.match(html, /id="communityUploadCenterModal"/, "存在上传进度与上传记录弹窗");
+  assert.match(html, /#communityUploadCenterModal\s*\{\s*z-index:\s*10016;/, "上传记录遮罩要盖住顶栏白条");
   assert.match(html, /id="menuBadgeUploadCount"/, "主菜单存在上传记录入口徽标");
 
   assert.match(html, /\/api\/backup\/community-upload\/start/);
