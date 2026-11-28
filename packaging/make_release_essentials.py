@@ -72,7 +72,7 @@ def main() -> None:
               for path in sorted(output.iterdir()) if path.is_file()]
     manifest = {
         "version": VERSION, "git_commit": commit, "artifact_type": "GitHub release",
-        "local_installation_performed": True,
+        "local_installation_performed": False,
         "source_file_count": len(sources), "portable_file_count": len(portable),
         "acceptance": [], "assets": assets,
     }
