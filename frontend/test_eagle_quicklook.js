@@ -36,7 +36,8 @@ test('quickLookModal 保留所有既有 ID 并采用单栏极简布局与不折�
     assert.ok(section.includes(`id="${id}"`), `quickLookModal 应保留节点 #${id}`);
   }
 
-  assert.ok(section.includes('max-w-[920px]'), 'quickLookModal 应采用适中的 920px 单栏阅读宽度');
+  assert.ok(section.includes('ql-panel'), 'quickLookModal 应保留 ql-panel 宽度钩子');
+  assert.ok(!section.includes('max-w-[920px]'), '旧的 920px utility class 应移除（宽度改由 ql-panel 钩子接管）');
   assert.ok(!section.includes('<aside'), '精简后应移除重复的右侧信息侧栏');
   assert.ok(section.includes('whitespace-nowrap shrink-0'), '顶栏与底栏按钮、徽标应禁止折行');
 
@@ -44,6 +45,25 @@ test('quickLookModal 保留所有既有 ID 并采用单栏极简布局与不折�
   assert.ok(
     html.includes('id="imageLightboxModal"') && html.includes('z-[10010]'),
     'imageLightboxModal 应具备高于 quickLookModal(10005) 的 z-index'
+  );
+});
+
+test('quickLookModal 加宽到 1200px 且走自定义钩子（不依赖预编译 utility class）', () => {
+  const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
+
+  // 宽度必须由自定义 CSS 钩子接管：tailwind.css 是预编译产物，
+  // max-w-[1200px] 不在里面，直接用会静默失效。
+  assert.ok(
+    /#quickLookModal \.ql-panel \{ max-width: 1200px; \}/.test(html),
+    '应有 #quickLookModal .ql-panel { max-width: 1200px } 自定义宽度规则'
+  );
+  assert.ok(
+    !/class="[^"]*\bmax-w-\[1200px\]/.test(html),
+    '不应在 class 里使用 max-w-[1200px] utility class（预编译产物里没有，会静默失效）'
+  );
+  assert.ok(
+    html.includes('max-h-[92vh]'),
+    '弹窗高度上限沿用原样，本次只改宽度'
   );
 });
 
