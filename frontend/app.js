@@ -7539,9 +7539,14 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
         if (dialog.session !== session || !$("pageDialog").open) return;
         dialog.zoomFrame = 0;
         if (mode && dialog.drag) return;
+        const surface = $("pageStage").querySelector(".stage-surface");
+        // 适页 / 适宽是让整页回到右栏里。居中用的大边距如果留着，
+        // 页会缩在右下角的空白里，切换模式后再点缩放尤其明显。
+        if (mode) clearLayoutCenterMargins(surface);
         if (mode) dialog.zoomMode = mode;
         applyPageZoom();
         if (mode) $("pageStage").scrollTo({ top: 0, left: 0 });
+        else if (surface && dialog.layoutFocus) centerLayoutFocus(surface);
       });
     });
     return true;
@@ -8192,7 +8197,7 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       dialog.imageReady = true;
       $("pageImageState").hidden = true;
       applyPageZoom();
-      if (dialog.layoutWorkspace) centerLayoutFocus(surface);
+      if (dialog.layoutWorkspace && $("pageDialog").open) centerLayoutFocus(surface);
     }, { once: true });
     image.addEventListener("error", () => {
       if (!currentImage()) return;
@@ -8396,26 +8401,46 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     }
   }
 
+  function clearLayoutCenterMargins(surface) {
+    dialog.layoutCenterMargins = false;
+    const node = surface || $("pageStage").querySelector(".stage-surface");
+    if (node) node.style.margin = "";
+  }
+
   function applyLayoutCenterMargins(surface) {
     const stage = $("pageStage");
+    if (!(stage.clientWidth > 40) || !(stage.clientHeight > 40)) return false;
     const vertical = Math.max(24, Math.round(stage.clientHeight * 0.46));
     const horizontal = Math.max(24, Math.round(stage.clientWidth * 0.46));
     surface.style.margin = `${vertical}px ${horizontal}px`;
+    return true;
   }
 
   function centerLayoutFocus(surface) {
     const focus = dialog.layoutFocus;
-    if (!focus || !dialog.layoutWorkspace) return;
+    if (!focus || !dialog.layoutWorkspace || !$("pageDialog").open || !surface?.isConnected) return;
     const stage = $("pageStage");
+    if (!(stage.clientWidth > 40) || !(stage.clientHeight > 40)) return;
+    const target = [...surface.querySelectorAll("[data-layout-source-question-id]")].find((node) =>
+      Number(node.dataset.layoutSourceQuestionId) === Number(focus.questionId)
+      && Number(node.dataset.layoutCoveragePiece) === Number(focus.index));
+    // 当前页没有这段题框时，不能先铺上半屏空白。否则滚动停在原点，
+    // 整页原卷会缩在右栏右下角。
+    if (!target) {
+      clearLayoutCenterMargins(surface);
+      dialog.layoutFocus = null;
+      return;
+    }
+    if (!applyLayoutCenterMargins(surface)) return;
     dialog.layoutCenterMargins = true;
-    applyLayoutCenterMargins(surface);
     requestAnimationFrame(() => {
       if (!surface.isConnected || !dialog.layoutWorkspace) return;
-      const target = [...surface.querySelectorAll("[data-layout-source-question-id]")].find((node) =>
-        Number(node.dataset.layoutSourceQuestionId) === Number(focus.questionId)
-        && Number(node.dataset.layoutCoveragePiece) === Number(focus.index));
-      if (!target) { dialog.layoutFocus = null; return; }
       const frame = target.getBoundingClientRect(), bounds = stage.getBoundingClientRect();
+      if (frame.width < 1 || frame.height < 1) {
+        clearLayoutCenterMargins(surface);
+        dialog.layoutFocus = null;
+        return;
+      }
       stage.scrollTo({
         left: Math.max(0, stage.scrollLeft + frame.left + frame.width / 2 - (bounds.left + stage.clientWidth / 2)),
         top: Math.max(0, stage.scrollTop + frame.top + frame.height / 2 - (bounds.top + stage.clientHeight / 2)),
